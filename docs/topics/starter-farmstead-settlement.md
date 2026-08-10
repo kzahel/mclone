@@ -6,12 +6,13 @@ Status: **vision and staged direction accepted 2026-07-21. Tacticals 208–210
 prove the standalone building loop, human-directed charm iteration, and first
 bounded building families; Tactical 214 externalizes them through the
 completed Structure Lab and adds a Lab-native coop. Tactical
-[`274`](../tactical/274-playable-intro-homestead.md) is paused at Human Review
-R1 as of 2026-08-10. Its first three slices landed orthogonal starter/plan
-identity, the first live status-owned and persisted cross-chunk structure
-canary, and a deterministic production-backed near-spawn scout. No farmstead
-blocks have been placed. Human selection of the showcase seed, site, and
-arrival direction now gates realized-plan persistence and materialization.
+[`274`](../tactical/274-playable-intro-homestead.md) passed Human Review R1 on
+2026-08-10. Seed `8675309`, its `full-v1` site at `(744,-376)`, and the
+east-facing arrival were accepted. Its first three slices landed orthogonal
+starter/plan identity, the first live status-owned and persisted cross-chunk
+structure canary, and a deterministic production-backed near-spawn scout. No
+farmstead blocks have been placed; Slice 3 must persist and reopen the accepted
+realized plan before grading begins.
 The existing original terrain and procedural horizon remain foundations;
 further speculative expansion is paused unless the playable opening exposes
 a concrete blocker.**
@@ -726,8 +727,8 @@ approved; do not reserve a block of numbers in advance.
 | `FS-02` | coherent farm block/material/collision kit | `ready` | fourteen original farmstead materials now cover cottage, barn, and coop presentation; glass and transform/collision-aware stairs/slabs are proven; doors, fences/gates, farmland, crops, and props remain | resume with the next composition-driven family after the terrain campaign or when an active terrain review needs it |
 | `FS-03` | template records, semantic roles, transforms, markers, bounds, and touched chunks | `proven` | Tactical 208 pure kernel tests and persisted cross-chunk lab receipts | extend only when a caller needs processors, codecs, alternate palettes, entities, or block data |
 | `FS-04` | true structure statuses, starts, references, pieces, clipping, and persistence | `foundation proven` | Tactical 274 Slice 1: opt-in wayside arch owns starts and touched-chunk references, persists pieces/bounds, clips placement per target, reopens from SQLite, and passes request-order/no-far-write gates | reuse the same lifecycle for the first accepted farmstead plan; general registries and vanilla families remain later work |
-| `FS-05` | starter-content overlay and realized-instance identity | `identity seam proven; plan pending R1` | Tactical 274 Slice 0 persists starter content and realized-plan identity orthogonally to base generation; legacy worlds decode unchanged | after R1, persist the selected plan before publishing or materializing it |
-| `FS-06` | site survey, scoring, grading, water fallback, reservation, and safe arrival | `Human Review R1` | Tactical 274 Slice 2 evaluates the fixed 4,096-candidate budget through exact Mclone metadata, stable full/compact scoring, native/Wasm/browser equality, a 16-seed corpus, and three reviewed maps | accept seed/site/arrival, reject the set, or request a tuning pass before materialization |
+| `FS-05` | starter-content overlay and realized-instance identity | `Slice 3 active` | Tactical 274 Slice 0 persists starter content and realized-plan identity orthogonally to base generation; R1 accepted seed `8675309` and site `(744,-376)` | persist and reopen the complete accepted plan before publishing or materializing it |
+| `FS-06` | site survey, scoring, grading, water fallback, reservation, and safe arrival | `R1 accepted` | Tactical 274 Slice 2 evaluates the fixed 4,096-candidate budget through exact Mclone metadata, stable full/compact scoring, native/Wasm/browser equality, a 16-seed corpus, and three reviewed maps; R1 accepted the recommended full-tier site | retain the accepted checksum through plan persistence, cache reset, and rescoring |
 | `FS-07` | first fixed farmhouse/barn/garden/pond/oak composition | `waiting on FS-04 through FS-06 in Tactical 274` | promoted cottage/barn families and a Lab-native coop are reusable; Tactical 274 bounds the first full and compact compositions | selected-site chunks render, persist, reopen, and retain player edits |
 | `FS-08` | resident and player marker realization | `waiting on FS-07 in Tactical 274` | cow/chicken persistence and player respawn are proven separately; Tactical 274 owns settlement marker idempotence and arrival | no duplicate residents and safe first arrival/respawn across reopen and partial materialization |
 | `FS-09` | cross-profile and topology adaptation | `deferred` | same engine contract accepted; first composition must land before breadth | Flat Grass, Small Island, Mclone, and explicit Overworld-overlay cases prove fit/fallback/rejection; admitted topology cases pass |

@@ -1,11 +1,10 @@
 # Tactical 274: Playable Intro Homestead
 
-Status: **paused at Human Review R1 on 2026-08-10. Slices 0–2 are complete:
-starter identity is orthogonal to base world generation, the first live
-status-owned cross-chunk structure canary is durable, and the bounded
-deterministic scout has produced review candidates. No farmstead blocks have
-been placed. Human acceptance of one showcase seed, site, and arrival
-direction is required before Slice 3 persists a realized plan.**
+Status: **Human Review R1 accepted seed `8675309`, the `full-v1` site anchored
+at `(744,-376)`, and its east-facing arrival on 2026-08-10. Slices 0–2 are
+complete and Slice 3 is active. No farmstead blocks have been placed; the
+accepted realized plan must be persisted and reopened before grading or
+materialization begins.**
 
 Topic:
 
@@ -360,6 +359,14 @@ terrain character while requiring substantially less earthwork and tree
 clearing than the other reviewed full-tier sites. R1 acceptance may choose
 another retained site or reject all three without changing the arbitrary-seed
 algorithm.
+
+**Human decision, 2026-08-10:** accepted seed `8675309`, selected anchor
+`(744,-376)`, `full-v1`, arrival `(696,63,-376)`, facing east, with selected
+checksum
+`127c1066b6994cfc5a056882511bd6e26addb455c9fa75298f523217e62d3c32`.
+Implementation may proceed through realized-plan persistence and the first
+graded-site milestone. This acceptance does not freeze the mutable scout or
+base Mclone generator for release compatibility.
 
 Validation at the gate:
 
