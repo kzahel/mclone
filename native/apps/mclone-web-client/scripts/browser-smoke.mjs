@@ -143,6 +143,11 @@ const homesteadScoutProbe = process.argv.includes("--homestead-scout-probe")
   || process.env.MCLONE_NATIVE_WEB_HOMESTEAD_SCOUT_PROBE === "1";
 const catalogUiProbe = process.argv.includes("--catalog-ui-probe")
   || process.env.MCLONE_NATIVE_WEB_CATALOG_UI_PROBE === "1";
+const catalogHomestead = process.argv.includes("--catalog-homestead")
+  || process.env.MCLONE_NATIVE_WEB_CATALOG_HOMESTEAD === "1";
+if (catalogHomestead && !catalogUiProbe) {
+  throw new Error("--catalog-homestead requires --catalog-ui-probe");
+}
 const assetPackUiProbe = process.argv.includes("--asset-pack-ui-probe")
   || process.env.MCLONE_NATIVE_WEB_ASSET_PACK_UI_PROBE === "1";
 const preparedFigureProbe = process.argv.includes("--prepared-figure-probe")
@@ -221,7 +226,9 @@ const screenshotPath = process.env.MCLONE_NATIVE_WEB_SMOKE_SCREENSHOT
     : indexedDbReloadProbe
     ? "/tmp/mclone-native-web-indexeddb-reload-probe.png"
     : catalogUiProbe
-    ? "/tmp/mclone-native-web-catalog-ui-probe.png"
+    ? catalogHomestead
+      ? "/tmp/mclone-native-web-homestead-catalog-ui-probe.png"
+      : "/tmp/mclone-native-web-catalog-ui-probe.png"
     : assetPackUiProbe
     ? "/tmp/mclone-native-web-asset-pack-ui-probe.png"
     : preparedFigureProbe
@@ -249,7 +256,9 @@ const canvasScreenshotPath = process.env.MCLONE_NATIVE_WEB_CANVAS_SCREENSHOT
     : indexedDbReloadProbe
     ? "/tmp/mclone-native-web-indexeddb-reload-probe-canvas.png"
     : catalogUiProbe
-    ? "/tmp/mclone-native-web-catalog-ui-probe-canvas.png"
+    ? catalogHomestead
+      ? "/tmp/mclone-native-web-homestead-catalog-ui-probe-canvas.png"
+      : "/tmp/mclone-native-web-catalog-ui-probe-canvas.png"
     : assetPackUiProbe
     ? "/tmp/mclone-native-web-asset-pack-ui-probe-canvas.png"
     : preparedFigureProbe
@@ -297,7 +306,12 @@ const auxiliarySplitProbeReportPath =
 const indexedDbReloadProbeReportPath = process.env.MCLONE_NATIVE_WEB_INDEXEDDB_RELOAD_PROBE_REPORT
   ?? "/tmp/mclone-native-web-indexeddb-reload-probe.json";
 const catalogUiProbeReportPath = process.env.MCLONE_NATIVE_WEB_CATALOG_UI_PROBE_REPORT
-  ?? "/tmp/mclone-native-web-catalog-ui-probe.json";
+  ?? (catalogHomestead
+    ? "/tmp/mclone-native-web-homestead-catalog-ui-probe.json"
+    : "/tmp/mclone-native-web-catalog-ui-probe.json");
+const homesteadCreateScreenshotPath = "/tmp/mclone-native-web-homestead-create.png";
+const homesteadPlayableScreenshotPath = "/tmp/mclone-native-web-homestead-playable.png";
+const homesteadEditScreenshotPath = "/tmp/mclone-native-web-homestead-edit.png";
 const assetPackUiProbeReportPath = process.env.MCLONE_NATIVE_WEB_ASSET_PACK_UI_PROBE_REPORT
   ?? "/tmp/mclone-native-web-asset-pack-ui-probe.json";
 const preparedFigureProbeReportPath = process.env.MCLONE_NATIVE_WEB_PREPARED_FIGURE_PROBE_REPORT
@@ -1422,7 +1436,7 @@ async function run() {
         return;
       }
       if (catalogUiProbe) {
-        const catalogUiProbeResult = await runCatalogUiProbe(page, canvas);
+        const catalogUiProbeResult = await runCatalogUiProbe(page, canvas, catalogHomestead);
         const result = await compactNativeUiState(page);
         let pageScreenshotCaptured = false;
         try {
@@ -1441,6 +1455,10 @@ async function run() {
           catalogUiProbeReportPath,
           appLoop,
           catalogUiProbe,
+          catalogHomestead,
+          homesteadCreateScreenshotPath: catalogHomestead ? homesteadCreateScreenshotPath : null,
+          homesteadPlayableScreenshotPath: catalogHomestead ? homesteadPlayableScreenshotPath : null,
+          homesteadEditScreenshotPath: catalogHomestead ? homesteadEditScreenshotPath : null,
           remoteWebSocket,
           remoteWebSocketUrl: remoteServer?.websocketUrl ?? null,
           canvasPixels,
@@ -4495,8 +4513,20 @@ async function probeGenericIndexedDbRecordExecutor(page) {
         requestId: "2",
         kind: "commit",
         mutations: [
-          { kind: "put", ...metadata, record: new Uint8Array([1, 2, 3]) },
-          { kind: "put", ...dimension, record: new Uint8Array([4, 5, 6, 7]) },
+          {
+            kind: "put",
+            ...metadata,
+            codecVersion: 7,
+            revision: "9007199254740993",
+            record: new Uint8Array([1, 2, 3]),
+          },
+          {
+            kind: "put",
+            ...dimension,
+            codecVersion: 8,
+            revision: "42",
+            record: new Uint8Array([4, 5, 6, 7]),
+          },
         ],
       },
       { requestId: "3", kind: "read", ...metadata },
@@ -4551,12 +4581,18 @@ async function probeGenericIndexedDbRecordExecutor(page) {
       ok: initial[0]?.ok === true
         && initial[0]?.found === false
         && initial[1]?.ok === true
+        && initial[2]?.codecVersion === 7
+        && initial[2]?.revision === "9007199254740993"
         && JSON.stringify(bytes(initial[2])) === JSON.stringify([1, 2, 3])
+        && initial[3]?.codecVersion === 8
+        && initial[3]?.revision === "42"
         && JSON.stringify(bytes(initial[3])) === JSON.stringify([4, 5, 6, 7])
         && initial[4]?.value === true
         && initial[5]?.ok === true
         && rejectedBatch[0]?.ok === false
         && rejectedBatch[0]?.errorKind === "unavailable"
+        && unchanged[0]?.codecVersion === 7
+        && unchanged[0]?.revision === "9007199254740993"
         && JSON.stringify(bytes(unchanged[0])) === JSON.stringify([1, 2, 3])
         && cleanup.every((completion) => completion.ok === true)
         && errorKinds.quota === "quota"
@@ -4838,30 +4874,46 @@ async function placeCylinderIndexedDbEditForSmoke(page, canvas, worldTopology) {
  * @param {Locator} canvas
  * @returns {Promise<any>}
  */
-async function runCatalogUiProbe(page, canvas) {
+async function runCatalogUiProbe(page, canvas, homestead = false) {
   await canvas.evaluate((element) => element.focus());
   await waitForWebAppReady(page);
   await installIndexedDbCountHelper(page);
   await clearBrowserIndexedDbCatalogStores(page);
   const before = await browserIndexedDbCatalogWorlds(page);
+  const recordExecutorProbe = homestead ? await probeGenericIndexedDbRecordExecutor(page) : null;
 
   await openNativeWorldList(page, 0);
   const openCreateReport = await clickWorldListFooterButton(page, 1);
   await waitForNativeUiScreen(page, "worldCreate", { openCreateReport });
-  const firstProfileReport = await clickWorldCreateProfile(page);
+  const firstProfileReport = homestead
+    ? await clickWorldCreateShowcase(page)
+    : await clickWorldCreateProfile(page);
+  if (homestead) {
+    await canvas.screenshot({ path: homesteadCreateScreenshotPath, timeout: 60_000 });
+  }
   const firstSessionProgressTrace = await traceSceneProgressDuringOperation(
     page,
     () => clickWorldCreateCreate(page),
   );
   const firstSession = await waitForSessionWorldId(page, { notWorldId: null });
   const firstWorldId = String(firstSession.sessionWorldId);
+  const firstHomesteadState = homestead ? await waitForHomesteadPlayable(page) : null;
+  if (homestead) {
+    await canvas.screenshot({ path: homesteadPlayableScreenshotPath, timeout: 60_000 });
+  }
+  const firstEdit = homestead ? await placePersistentDirtForCatalogProbe(page, canvas) : null;
+  if (homestead) {
+    await canvas.screenshot({ path: homesteadEditScreenshotPath, timeout: 60_000 });
+  }
   const firstRecords = await browserIndexedDbWorldRecordCounts(page, firstWorldId);
   const afterFirstCreate = await waitForBrowserCatalogWorldIds(page, [firstWorldId]);
 
   await openNativeWorldList(page, 1);
   await clickWorldListFooterButton(page, 1);
   await waitForNativeUiScreen(page, "worldCreate");
-  const secondProfileReport = await clickWorldCreateProfile(page);
+  const secondProfileReport = homestead
+    ? await clickWorldCreateStarter(page)
+    : await clickWorldCreateProfile(page);
   await clickWorldCreateCreate(page);
   const secondSession = await waitForSessionWorldId(page, { notWorldId: firstWorldId });
   const secondWorldId = String(secondSession.sessionWorldId);
@@ -4877,6 +4929,9 @@ async function runCatalogUiProbe(page, canvas) {
   }
   await clickWorldListFooterButton(page, 0);
   const openedFirstSession = await waitForSessionWorldId(page, { worldId: firstWorldId });
+  const reopenedEdit = firstEdit
+    ? await waitForBlockStateAt(page, firstEdit.placedBlock, DIRT_BLOCK_STATE_ID)
+    : null;
   const afterOpenFirst = await waitForBrowserCatalogWorldIds(page, [
     firstWorldId,
     secondWorldId,
@@ -4913,19 +4968,32 @@ async function runCatalogUiProbe(page, canvas) {
       && firstWorldId.length > 0
       && secondWorldId.length > 0
       && firstWorldId !== secondWorldId
+      && (!homestead || recordExecutorProbe?.ok === true)
       && firstSessionProgressTrace.operationStart.sceneBorrowExcluded === false
       && firstSessionProgressTrace.operationSample.sceneBorrowExcluded === false
       && firstSessionProgressTrace.operationFrameCountDelta > 0
       && firstSessionProgressTrace.operationRenderCountDelta > 0
       && firstSessionProgressTrace.operationInputFrameCountDelta > 0
-      && firstProfileReport?.action === "cycleWorldGenerationProfile"
-      && secondProfileReport?.action === "cycleWorldGenerationProfile"
+      && firstProfileReport?.action === (homestead
+        ? "applyHomesteadShowcasePreset"
+        : "cycleWorldGenerationProfile")
+      && secondProfileReport?.action === (homestead
+        ? "cycleWorldStarterContent"
+        : "cycleWorldGenerationProfile")
       && afterFirstCreate.some((/** @type {any} */ world) => (
-        world.id === firstWorldId && world.generationProfile === "flat-grass-v1"
+        world.id === firstWorldId
+          && world.generationProfile === (homestead ? "mclone-overworld-v1" : "flat-grass-v1")
+          && world.starterContent === (homestead ? "intro-homestead-v1" : "wild")
       ))
       && afterSecondCreate.some((/** @type {any} */ world) => (
-        world.id === secondWorldId && world.generationProfile === "small-island-v1"
+        world.id === secondWorldId
+          && world.generationProfile === (homestead ? "mclone-overworld-v1" : "small-island-v1")
+          && world.starterContent === "wild"
       ))
+      && (!homestead || Number(firstRecords.savedData) > 0)
+      && (!homestead || Number(firstHomesteadState?.activePersistentPassiveActorCount) === 5)
+      && (!homestead || firstEdit?.placedBlock?.blockStateId === DIRT_BLOCK_STATE_ID)
+      && (!homestead || reopenedEdit?.blockStateId === DIRT_BLOCK_STATE_ID)
       && secondRecords.total > 0
       && openedFirstSession.sessionWorldId === firstWorldId
       && afterDelete.some((/** @type {any} */ world) => world.id === firstWorldId)
@@ -4938,12 +5006,17 @@ async function runCatalogUiProbe(page, canvas) {
       && finalState.worldCatalogLoading === false
       && Number(finalState.lastReport?.frameRenderViewsMs) > 0,
     before,
+    homestead,
+    recordExecutorProbe,
     firstWorldId,
     secondWorldId,
     firstProfileReport,
     firstSessionProgressTrace,
     secondProfileReport,
     firstSession,
+    firstHomesteadState,
+    firstEdit,
+    reopenedEdit,
     secondSession,
     openedFirstSession,
     firstRecords,
@@ -5274,6 +5347,86 @@ async function clickWorldCreateProfile(page) {
 }
 
 /** @param {Page} page */
+async function clickWorldCreateStarter(page) {
+  return clickNativeUiPoint(page, worldCreateStarterPoint(await nativeUiGeometry(page)));
+}
+
+/** @param {Page} page */
+async function clickWorldCreateShowcase(page) {
+  return clickNativeUiPoint(page, worldCreateShowcasePoint(await nativeUiGeometry(page)));
+}
+
+/** @param {Page} page */
+async function waitForHomesteadPlayable(page) {
+  try {
+    await page.waitForFunction(
+      () => {
+        const state = globalThis.__mcloneWebApp?.state;
+        return state?.ok === true
+          && state.ready === true
+          && state.sessionState === "active"
+          && state.sessionKind === "localWorld"
+          && state.pendingCompileJobCount === 0
+          && Number(state.activePersistentPassiveActorCount) === 5;
+      },
+      undefined,
+      { timeout: 120_000 },
+    );
+  } catch (error) {
+    const state = await page.evaluate(() => globalThis.__mcloneWebApp?.state ?? null);
+    throw new Error(`homestead browser session did not become playable: ${String(error)}\n${JSON.stringify(state, null, 2)}`);
+  }
+  return page.evaluate(() => {
+    const state = globalThis.__mcloneWebApp.state;
+    return {
+      cameraX: state.cameraX,
+      cameraY: state.cameraY,
+      cameraZ: state.cameraZ,
+      activePersistentPassiveActorCount: state.activePersistentPassiveActorCount,
+      activePersistentPassiveActorIds: state.activePersistentPassiveActorIds,
+      streamingSettled: state.streamingSettled,
+    };
+  });
+}
+
+/** @param {Page} page @param {Locator} canvas */
+async function placePersistentDirtForCatalogProbe(page, canvas) {
+  await canvas.evaluate((element) => element.focus());
+  await canvas.click({ position: { x: 640, y: 360 } });
+  await page.mouse.down();
+  await page.mouse.move(640, 600);
+  await page.mouse.up();
+  await page.keyboard.press("2");
+  await page.waitForFunction(
+    () => globalThis.__mcloneWebApp?.state?.selectedHotbarSlot === 1,
+    undefined,
+    { timeout: 10_000 },
+  );
+  const placement = await submitBlockInteraction(page, "place", {
+    expectedSelectedHotbarSlot: 1,
+    expectedWorldBlockStateId: DIRT_BLOCK_STATE_ID,
+    expectedCarriedItemSynced: true,
+    requireStreamingSettled: false,
+  });
+  const candidates = placedBlockCandidates(placement?.interaction);
+  const observed = [];
+  for (const candidate of candidates) {
+    observed.push(await blockStateAt(page, candidate));
+  }
+  const placedBlock = observed.find((candidate) => (
+    candidate?.blockStateId === DIRT_BLOCK_STATE_ID
+  ));
+  if (placement?.ok !== true || !placedBlock) {
+    throw new Error(`homestead catalog edit did not place dirt:\n${JSON.stringify({
+      placement,
+      candidates,
+      observed,
+    }, null, 2)}`);
+  }
+  return { placement, placedBlock };
+}
+
+/** @param {Page} page */
 async function clickWorldDeleteConfirm(page) {
   await clickNativeUiPoint(page, worldDeleteConfirmPoint(await nativeUiGeometry(page)));
 }
@@ -5489,6 +5642,24 @@ function worldCreateProfilePoint(geometry) {
   return {
     x: panel.x + panel.width * 0.5,
     y: panel.y + 140.0,
+  };
+}
+
+/** @param {{ width: number, height: number }} geometry */
+function worldCreateStarterPoint(geometry) {
+  const panel = centeredPanel(geometry, 320.0, 264.0);
+  return {
+    x: panel.x + panel.width * 0.5,
+    y: panel.y + 164.0,
+  };
+}
+
+/** @param {{ width: number, height: number }} geometry */
+function worldCreateShowcasePoint(geometry) {
+  const panel = centeredPanel(geometry, 320.0, 264.0);
+  return {
+    x: panel.x + panel.width * 0.5,
+    y: panel.y + 188.0,
   };
 }
 
@@ -7155,18 +7326,20 @@ async function exerciseBlockInteraction(page, canvas) {
 /**
  * @param {Page} page
  * @param {string} action
- * @param {{ expectedSelectedHotbarSlot?: number, expectedWorldBlockStateId?: number, expectedCarriedItemSynced?: boolean }} [options]
+ * @param {{ expectedSelectedHotbarSlot?: number, expectedWorldBlockStateId?: number, expectedCarriedItemSynced?: boolean, requireStreamingSettled?: boolean }} [options]
  */
 async function submitBlockInteraction(page, action, options = {}) {
   await page.waitForFunction(
-    () => {
+    ({ requireStreamingSettled }) => {
       const state = globalThis.__mcloneWebApp?.state;
       return state?.ok === true
-        && state.streamingSettled === true
+        && (!requireStreamingSettled || state.streamingSettled === true)
+        && state.currentTarget?.ok === true
+        && state.currentTarget.hit === true
         && state.pendingCompileJobCount === 0
         && state.lastCompileReport?.pendingCompileJobCount === 0;
     },
-    undefined,
+    { requireStreamingSettled: options.requireStreamingSettled !== false },
     { timeout: 60_000 },
   );
   const start = await page.evaluate(() => {

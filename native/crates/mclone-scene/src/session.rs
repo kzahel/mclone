@@ -5958,6 +5958,7 @@ impl McloneSceneHost {
             let mut scene = self.active_world.scene.clone();
             scene.seed = summary.seed;
             scene.world_generation_profile = summary.world_generation_profile;
+            scene.starter_content = summary.starter_content;
             scene.use_initial_spawn_center = summary
                 .world_generation_profile
                 .authored_missing_chunk()

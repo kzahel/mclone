@@ -219,8 +219,8 @@ async function readRecord(
     ...successfulCompletion(request),
     ...address,
     found: true,
-    codecVersion: 0,
-    revision: "0",
+    codecVersion: storedCodecVersion(stored.codecVersion),
+    revision: storedRevision(stored.revision),
     record: uint8ArrayFromUnknown(stored.record),
   };
 }
@@ -263,7 +263,7 @@ async function commitRecords(
     if (mutation.kind === "delete") {
       store.delete(physicalKey(worldId, address, spec));
     } else {
-      store.put(physicalValue(worldId, address, spec, mutation.record));
+      store.put(physicalValue(worldId, address, spec, mutation));
     }
   }
   await transactionDone(transaction);
@@ -369,16 +369,39 @@ function physicalValue(
   worldId: string,
   address: PersistenceRecordAddress,
   spec: NamespaceSpec,
-  record: Uint8Array | undefined,
+  mutation: PersistenceRecordMutation,
 ): Record<string, unknown> {
+  const record = mutation.record;
   if (!(record instanceof Uint8Array)) {
     throw classifiedError("invalid-data", "persistence put is missing opaque record bytes");
   }
-  const value: Record<string, unknown> = { worldId, record };
+  const codecVersion = mutation.codecVersion ?? 0;
+  if (!Number.isInteger(codecVersion) || codecVersion < 0 || codecVersion > 0xffff_ffff) {
+    throw classifiedError("invalid-data", "persistence put has an invalid codec version");
+  }
+  const revision = storedRevision(mutation.revision);
+  const value: Record<string, unknown> = { worldId, codecVersion, revision, record };
   for (let index = 0; index < spec.valueFields.length; index += 1) {
     value[spec.valueFields[index]] = address.key[index].value;
   }
   return value;
+}
+
+function storedCodecVersion(value: unknown): number {
+  const codecVersion = value === undefined ? 0 : Number(value);
+  if (!Number.isInteger(codecVersion) || codecVersion < 0 || codecVersion > 0xffff_ffff) {
+    throw classifiedError("corrupt", "IndexedDB record has an invalid codec version");
+  }
+  return codecVersion;
+}
+
+function storedRevision(value: unknown): string {
+  const revision = value === undefined ? "0" : String(value);
+  if (!/^(0|[1-9][0-9]*)$/.test(revision)
+    || BigInt(revision) > 0xffff_ffff_ffff_ffffn) {
+    throw classifiedError("corrupt", "IndexedDB record has an invalid revision");
+  }
+  return revision;
 }
 
 function successfulCompletion(request: PersistenceRecordRequest): PersistenceRecordCompletion {

@@ -75,7 +75,8 @@ use mclone_render_session::{
     summarize_textured_render_section_build_report,
 };
 use mclone_server::{
-    ChunkLoadingProgressStats, ServerRunnerKind, SimulationCadenceConfig, WorldGenerationProfile,
+    ChunkLoadingProgressStats, ServerRunnerKind, SimulationCadenceConfig, StarterContentDescriptor,
+    WorldGenerationProfile,
 };
 use mclone_ui::{GameUiAction, GuiKey, LoadingProgressOverlay};
 
@@ -2659,6 +2660,12 @@ pub(crate) fn decode_web_local_world_create_options(
             WorldGenerationProfile::parse_label(&profile).map_err(|error| error.to_string())?,
         );
     }
+    if let Some(starter_content) = js_optional_string_property(value, "starterContent")? {
+        options = options.with_starter_content(
+            StarterContentDescriptor::parse_label(&starter_content)
+                .map_err(|error| error.to_string())?,
+        );
+    }
     Ok(options)
 }
 
@@ -2709,6 +2716,10 @@ pub(crate) fn decode_web_local_world_summary(value: &JsValue) -> Result<LocalWor
         .map(|profile| WorldGenerationProfile::parse_label(&profile))
         .transpose()?
         .unwrap_or_default();
+    summary.starter_content = js_optional_string_property(value, "starterContent")?
+        .map(|starter| StarterContentDescriptor::parse_label(&starter))
+        .transpose()?
+        .unwrap_or_default();
     summary.last_played_unix_millis = js_optional_u64_text_or_number_property(
         value,
         "lastPlayedUnixMillisText",
@@ -2741,6 +2752,7 @@ pub(crate) fn encode_web_local_world_summary(
         "generationProfile",
         summary.world_generation_profile.label(),
     )?;
+    set_string(&object, "starterContent", summary.starter_content.id())?;
     set_number(
         &object,
         "createdUnixMillis",
