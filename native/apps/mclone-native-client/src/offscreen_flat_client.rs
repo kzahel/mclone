@@ -1876,9 +1876,13 @@ pub(crate) fn run_offscreen_flat_client_screenshot(
 
     if asset_pack_preference_smoke {
         let diagnostics = host.driver.host().asset_pack_runtime_diagnostics();
+        let expected_original_ids =
+            mclone_app_runtime::prepared_assets::original_asset_pack_selection()
+                .enabled_ids()
+                .map(|id| id.as_str().to_owned())
+                .collect::<Vec<_>>();
         if diagnostics.epoch != 1
-            || diagnostics.active_ids
-                != [mclone_app_runtime::prepared_assets::AUTHORED_FIRST_PARTY_PACK_ID.to_owned()]
+            || diagnostics.active_ids != expected_original_ids
             || diagnostics.preferred_ids != diagnostics.active_ids
             || !diagnostics.proprietary_free
             || diagnostics.preference_error.is_some()
@@ -1894,8 +1898,12 @@ pub(crate) fn run_offscreen_flat_client_screenshot(
 
     if options.scene.asset_pack == AssetPackLaunchProfile::Original {
         let diagnostics = host.driver.host().asset_pack_runtime_diagnostics();
-        if diagnostics.active_ids
-            != [mclone_app_runtime::prepared_assets::AUTHORED_FIRST_PARTY_PACK_ID.to_owned()]
+        let expected_original_ids =
+            mclone_app_runtime::prepared_assets::original_asset_pack_selection()
+                .enabled_ids()
+                .map(|id| id.as_str().to_owned())
+                .collect::<Vec<_>>();
+        if diagnostics.active_ids != expected_original_ids
             || diagnostics.preferred_ids != diagnostics.active_ids
             || !diagnostics.proprietary_free
         {
