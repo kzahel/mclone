@@ -30,6 +30,17 @@ impl StarterContentDescriptor {
         }
     }
 
+    pub const fn admits_generation_profile(self, profile: crate::WorldGenerationProfile) -> bool {
+        match self {
+            Self::Wild => true,
+            Self::IntroHomesteadV1 => matches!(
+                profile,
+                crate::WorldGenerationProfile::FlatGrassV1
+                    | crate::WorldGenerationProfile::McloneOverworldV1
+            ),
+        }
+    }
+
     pub fn parse_label(value: &str) -> Result<Self, String> {
         match value.trim() {
             "wild" | "wild-start" => Ok(Self::Wild),
@@ -96,6 +107,14 @@ mod tests {
         assert_eq!(
             StarterContentDescriptor::parse_label("homestead").unwrap(),
             StarterContentDescriptor::IntroHomesteadV1
+        );
+        assert!(
+            StarterContentDescriptor::IntroHomesteadV1
+                .admits_generation_profile(crate::WorldGenerationProfile::McloneOverworldV1)
+        );
+        assert!(
+            !StarterContentDescriptor::IntroHomesteadV1
+                .admits_generation_profile(crate::WorldGenerationProfile::Overworld)
         );
     }
 }

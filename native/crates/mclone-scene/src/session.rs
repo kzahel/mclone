@@ -1477,7 +1477,8 @@ impl McloneSceneHost {
             pending.request,
             message
         );
-        self.session.fail_start(SessionFailure::new(
+        self.session.fail_start(SessionFailure::for_request(
+            &pending.request,
             pending.request.default_failure_message(),
         ));
         self.apply_xr_session_ui_effects(client_session_failed_start_ui_effects(
@@ -1746,8 +1747,10 @@ impl McloneSceneHost {
             }
             Err(error) => {
                 log::error!("failed to start XR session {request:?}: {error:#}");
-                self.session
-                    .fail_start(SessionFailure::new(request.default_failure_message()));
+                self.session.fail_start(SessionFailure::for_request(
+                    &request,
+                    request.default_failure_message(),
+                ));
                 self.apply_xr_session_ui_effects(client_session_failed_start_ui_effects(
                     &request, false,
                 ));
@@ -4347,7 +4350,8 @@ impl McloneSceneHost {
             Ok(()) => Ok(true),
             Err(error) => {
                 log::error!("failed to complete XR local world startup: {error:#}");
-                self.session.fail_start(SessionFailure::new(
+                self.session.fail_start(SessionFailure::for_request(
+                    &failed_request,
                     failed_request.default_failure_message(),
                 ));
                 self.apply_xr_session_ui_effects(client_session_failed_start_ui_effects(
@@ -5599,7 +5603,8 @@ impl McloneSceneHost {
             "failed to start XR local world {:?}: {error:#}",
             startup.request
         );
-        self.session.fail_start(SessionFailure::new(
+        self.session.fail_start(SessionFailure::for_request(
+            &startup.request,
             startup.request.default_failure_message(),
         ));
         self.apply_xr_session_ui_effects(client_session_failed_start_ui_effects(

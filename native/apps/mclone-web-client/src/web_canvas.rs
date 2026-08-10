@@ -2615,6 +2615,8 @@ pub(super) fn ui_action_label(action: GameUiAction) -> &'static str {
         GameUiAction::OpenJoinRemote => "openJoinRemote",
         GameUiAction::RerollSeed => "rerollSeed",
         GameUiAction::CycleWorldGenerationProfile => "cycleWorldGenerationProfile",
+        GameUiAction::CycleWorldStarterContent => "cycleWorldStarterContent",
+        GameUiAction::ApplyHomesteadShowcasePreset => "applyHomesteadShowcasePreset",
         GameUiAction::CreateWorld(_) => "createWorld",
         GameUiAction::JoinRemote => "joinRemote",
         GameUiAction::Resume => "resume",

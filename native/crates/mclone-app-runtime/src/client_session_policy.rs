@@ -1,10 +1,11 @@
 use crate::session::{GameSessionState, RemoteSessionEndpoint, SessionStartRequest, SessionStatus};
-use mclone_server::WorldGenerationProfile;
+use mclone_server::{StarterContentDescriptor, WorldGenerationProfile};
 use mclone_ui::{GameScreen, GameUiAction, LoadingProgressOverlay, StatusOverlay};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ClientSessionActionContext<'a> {
     pub new_world_generation_profile: WorldGenerationProfile,
+    pub new_world_starter_content: StarterContentDescriptor,
     pub next_new_world_seed: Option<i64>,
     pub current_join_remote_addr: &'a str,
     pub fallback_remote_addr: Option<&'a str>,
@@ -61,6 +62,11 @@ pub fn client_session_effects_for_action(
             clear_inactive_session_status: true,
             ..ClientSessionEffects::default()
         },
+        GameUiAction::ApplyHomesteadShowcasePreset => ClientSessionEffects {
+            new_world_seed: Some(0),
+            clear_inactive_session_status: true,
+            ..ClientSessionEffects::default()
+        },
         GameUiAction::OpenJoinRemote => ClientSessionEffects {
             join_remote_addr: Some(
                 context
@@ -73,9 +79,10 @@ pub fn client_session_effects_for_action(
         },
         GameUiAction::CreateWorld(seed) => ClientSessionEffects {
             session_start: Some(
-                SessionStartRequest::new_seed_local_world_with_generation_profile(
+                SessionStartRequest::new_seed_local_world_with_generation_profile_and_starter_content(
                     seed,
                     context.new_world_generation_profile,
+                    context.new_world_starter_content,
                 ),
             ),
             ..ClientSessionEffects::default()
@@ -193,6 +200,7 @@ mod tests {
     fn context() -> ClientSessionActionContext<'static> {
         ClientSessionActionContext {
             new_world_generation_profile: WorldGenerationProfile::Overworld,
+            new_world_starter_content: StarterContentDescriptor::Wild,
             next_new_world_seed: Some(42),
             current_join_remote_addr: "127.0.0.1:25565",
             fallback_remote_addr: Some("10.0.0.9:25565"),
@@ -239,6 +247,34 @@ mod tests {
                     WorldGenerationProfile::SmallIslandV1,
                 )
             )
+        );
+    }
+
+    #[test]
+    fn create_world_carries_selected_starter_content_and_showcase_seed() {
+        let mut action_context = context();
+        action_context.new_world_generation_profile = WorldGenerationProfile::McloneOverworldV1;
+        action_context.new_world_starter_content = StarterContentDescriptor::IntroHomesteadV1;
+        let effects =
+            client_session_effects_for_action(GameUiAction::CreateWorld(77), action_context);
+
+        assert_eq!(
+            effects.session_start,
+            Some(
+                SessionStartRequest::new_seed_local_world_with_generation_profile_and_starter_content(
+                    77,
+                    WorldGenerationProfile::McloneOverworldV1,
+                    StarterContentDescriptor::IntroHomesteadV1,
+                )
+            )
+        );
+        assert_eq!(
+            client_session_effects_for_action(
+                GameUiAction::ApplyHomesteadShowcasePreset,
+                context()
+            )
+            .new_world_seed,
+            Some(0)
         );
     }
 

@@ -1359,12 +1359,19 @@ impl UiSurface {
             panel.y + 70.0,
             Color::rgba(185, 212, 198, 255),
         );
+        self.font.draw_centered_atlas(
+            draw,
+            &format!("Start: {}", catalog.create_starter_content.as_str()),
+            panel.center_x(),
+            panel.y + 86.0,
+            Color::rgba(185, 212, 198, 255),
+        );
         if !catalog.create_supported {
             self.font.draw_centered_atlas(
                 draw,
                 "CREATE IS UNAVAILABLE",
                 panel.center_x(),
-                panel.y + 84.0,
+                panel.y + 100.0,
                 Color::rgba(255, 178, 178, 255),
             );
         }
@@ -1502,6 +1509,19 @@ impl UiSurface {
             ),
             self.scale.width * 0.5,
             self.scale.height * 0.28 + 38.0,
+            Color::rgba(185, 212, 198, 255),
+        );
+        self.font.draw_centered_atlas(
+            draw,
+            &format!(
+                "Start: {}",
+                self.render_state
+                    .world_catalog
+                    .create_starter_content
+                    .as_str()
+            ),
+            self.scale.width * 0.5,
+            self.scale.height * 0.28 + 54.0,
             Color::rgba(185, 212, 198, 255),
         );
         let interaction = self.interaction();
@@ -2869,7 +2889,9 @@ impl GameUiHost {
             GameUiAction::CreateWorld(_) | GameUiAction::JoinRemote => self.screen = None,
             GameUiAction::Respawn
             | GameUiAction::RerollSeed
-            | GameUiAction::CycleWorldGenerationProfile => {}
+            | GameUiAction::CycleWorldGenerationProfile
+            | GameUiAction::CycleWorldStarterContent
+            | GameUiAction::ApplyHomesteadShowcasePreset => {}
             GameUiAction::ToggleSectionOcclusion
             | GameUiAction::SetLeafDetail(_)
             | GameUiAction::SetGrassDetail(_)
@@ -3057,6 +3079,8 @@ const UI_V2_WORLD_CREATE_REROLL: UiWidgetId = UiWidgetId(901);
 const UI_V2_WORLD_CREATE_CREATE: UiWidgetId = UiWidgetId(902);
 const UI_V2_WORLD_CREATE_BACK: UiWidgetId = UiWidgetId(903);
 const UI_V2_WORLD_CREATE_PROFILE: UiWidgetId = UiWidgetId(904);
+const UI_V2_WORLD_CREATE_STARTER: UiWidgetId = UiWidgetId(905);
+const UI_V2_WORLD_CREATE_SHOWCASE: UiWidgetId = UiWidgetId(906);
 const UI_V2_WORLD_DELETE_CONFIRM: UiWidgetId = UiWidgetId(951);
 const UI_V2_WORLD_DELETE_CANCEL: UiWidgetId = UiWidgetId(952);
 const UI_V2_NEW_WORLD_REROLL: UiWidgetId = UiWidgetId(501);
@@ -3266,7 +3290,7 @@ fn world_list_layout(scale: GuiScale, revision: u64, catalog: WorldCatalogUiStat
 fn world_create_layout(scale: GuiScale, revision: u64, catalog: WorldCatalogUiState) -> UiLayout {
     let mut layout = UiLayout::new(Some(UiScreenId::WorldCreate), revision);
     let panel = world_create_panel_rect(scale);
-    let y = panel.y + 91.0;
+    let y = panel.y + 106.0;
     layout.push(
         UiWidget::button(
             UI_V2_WORLD_CREATE_REROLL,
@@ -3285,8 +3309,24 @@ fn world_create_layout(scale: GuiScale, revision: u64, catalog: WorldCatalogUiSt
     );
     layout.push(
         UiWidget::button(
-            UI_V2_WORLD_CREATE_CREATE,
+            UI_V2_WORLD_CREATE_STARTER,
             menu_button_rect_at(panel.center_x(), y + 48.0),
+            format!("Start: {}", catalog.create_starter_content.as_str()),
+        )
+        .action(GameUiAction::CycleWorldStarterContent),
+    );
+    layout.push(
+        UiWidget::button(
+            UI_V2_WORLD_CREATE_SHOWCASE,
+            menu_button_rect_at(panel.center_x(), y + 72.0),
+            "Use Homestead Showcase",
+        )
+        .action(GameUiAction::ApplyHomesteadShowcasePreset),
+    );
+    layout.push(
+        UiWidget::button(
+            UI_V2_WORLD_CREATE_CREATE,
+            menu_button_rect_at(panel.center_x(), y + 96.0),
             "Create World",
         )
         .enabled(catalog.create_supported)
@@ -3295,7 +3335,7 @@ fn world_create_layout(scale: GuiScale, revision: u64, catalog: WorldCatalogUiSt
     layout.push(
         UiWidget::button(
             UI_V2_WORLD_CREATE_BACK,
-            menu_button_rect_at(panel.center_x(), y + 72.0),
+            menu_button_rect_at(panel.center_x(), y + 120.0),
             "Back",
         )
         .action(GameUiAction::OpenWorldList),
@@ -3379,7 +3419,7 @@ fn storage_confirm_layout(
 
 fn new_world_layout(scale: GuiScale, revision: u64) -> UiLayout {
     let mut layout = UiLayout::new(Some(UiScreenId::NewWorld), revision);
-    let y = scale.height * 0.5 - 4.0;
+    let y = scale.height * 0.5 - 28.0;
     layout.push(
         UiWidget::button(UI_V2_NEW_WORLD_REROLL, menu_button_rect(scale, y), "Reroll")
             .action(GameUiAction::RerollSeed),
@@ -3394,8 +3434,24 @@ fn new_world_layout(scale: GuiScale, revision: u64) -> UiLayout {
     );
     layout.push(
         UiWidget::button(
-            UI_V2_NEW_WORLD_CREATE,
+            UI_V2_WORLD_CREATE_STARTER,
             menu_button_rect(scale, y + 48.0),
+            "Cycle World Start",
+        )
+        .action(GameUiAction::CycleWorldStarterContent),
+    );
+    layout.push(
+        UiWidget::button(
+            UI_V2_WORLD_CREATE_SHOWCASE,
+            menu_button_rect(scale, y + 72.0),
+            "Use Homestead Showcase",
+        )
+        .action(GameUiAction::ApplyHomesteadShowcasePreset),
+    );
+    layout.push(
+        UiWidget::button(
+            UI_V2_NEW_WORLD_CREATE,
+            menu_button_rect(scale, y + 96.0),
             "Create World",
         )
         .action(GameUiAction::CreateWorld(0)),
@@ -3403,7 +3459,7 @@ fn new_world_layout(scale: GuiScale, revision: u64) -> UiLayout {
     layout.push(
         UiWidget::button(
             UI_V2_NEW_WORLD_BACK,
-            menu_button_rect(scale, y + 72.0),
+            menu_button_rect(scale, y + 120.0),
             "Back",
         )
         .action(GameUiAction::BackToTitle),
@@ -3494,7 +3550,7 @@ fn world_list_panel_rect(scale: GuiScale) -> Rect {
 }
 
 fn world_create_panel_rect(scale: GuiScale) -> Rect {
-    centered_panel(scale, 320.0, 202.0)
+    centered_panel(scale, 320.0, 264.0)
 }
 
 fn world_delete_confirm_panel_rect(scale: GuiScale) -> Rect {

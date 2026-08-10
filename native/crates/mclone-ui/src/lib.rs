@@ -1037,6 +1037,7 @@ pub struct WorldCatalogUiState {
     pub status: WorldCatalogUiStatus,
     pub create_display_name: WorldCatalogUiText,
     pub create_generation_profile: WorldCatalogUiText,
+    pub create_starter_content: WorldCatalogUiText,
 }
 
 impl WorldCatalogUiState {
@@ -1054,6 +1055,7 @@ impl WorldCatalogUiState {
             status: WorldCatalogUiStatus::hidden(),
             create_display_name: WorldCatalogUiText::empty(),
             create_generation_profile: WorldCatalogUiText::empty(),
+            create_starter_content: WorldCatalogUiText::empty(),
         }
     }
 
@@ -1066,6 +1068,7 @@ impl WorldCatalogUiState {
             delete_supported: true,
             create_display_name: WorldCatalogUiText::new("New World"),
             create_generation_profile: WorldCatalogUiText::new("Vanilla 1.17 Overworld"),
+            create_starter_content: WorldCatalogUiText::new("Wild Start"),
             ..Self::empty()
         };
         state.set_entries(entries);
@@ -1990,6 +1993,8 @@ pub enum GameUiAction {
     OpenJoinRemote,
     RerollSeed,
     CycleWorldGenerationProfile,
+    CycleWorldStarterContent,
+    ApplyHomesteadShowcasePreset,
     CreateWorld(i64),
     JoinRemote,
     Resume,

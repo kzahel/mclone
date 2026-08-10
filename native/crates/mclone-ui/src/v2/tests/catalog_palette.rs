@@ -90,6 +90,28 @@ fn title_flow_screens_route_through_v2_surface() {
         profile_action,
         Some(GameUiAction::CycleWorldGenerationProfile)
     );
+    let starter = snapshot
+        .widgets
+        .iter()
+        .find(|widget| widget.id == UI_V2_WORLD_CREATE_STARTER)
+        .expect("World start button");
+    assert_eq!(starter.label, "Start: Wild Start");
+    assert!(host.pointer_down(point_in(starter.rect)));
+    assert_eq!(
+        host.pointer_up(point_in(starter.rect)).1,
+        Some(GameUiAction::CycleWorldStarterContent)
+    );
+    let showcase = snapshot
+        .widgets
+        .iter()
+        .find(|widget| widget.id == UI_V2_WORLD_CREATE_SHOWCASE)
+        .expect("Homestead showcase button");
+    assert_eq!(showcase.label, "Use Homestead Showcase");
+    assert!(host.pointer_down(point_in(showcase.rect)));
+    assert_eq!(
+        host.pointer_up(point_in(showcase.rect)).1,
+        Some(GameUiAction::ApplyHomesteadShowcasePreset)
+    );
     let create = snapshot
         .widgets
         .iter()

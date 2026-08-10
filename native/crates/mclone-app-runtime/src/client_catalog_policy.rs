@@ -7,7 +7,7 @@ use crate::world_catalog::{
     local_world_generation_profile_display_name, most_recent_compatible_local_world,
     next_local_world_generation_profile, sort_local_world_summaries,
 };
-use mclone_server::WorldGenerationProfile;
+use mclone_server::{StarterContentDescriptor, WorldGenerationProfile};
 use mclone_ui::{
     GameStorageAction, GameUiAction, WORLD_CATALOG_UI_ROW_CAPACITY, WorldCatalogUiEntry,
     WorldCatalogUiState, WorldCatalogUiStatus, WorldCatalogUiText, WorldCatalogUiWorldId,
@@ -23,6 +23,7 @@ pub struct ClientCatalogController {
     pending: HashMap<WorldCatalogRequestId, PendingCatalogRequest>,
     next_request_id: u64,
     new_world_generation_profile: WorldGenerationProfile,
+    new_world_starter_content: StarterContentDescriptor,
 }
 
 impl Default for ClientCatalogController {
@@ -42,6 +43,7 @@ impl ClientCatalogController {
             pending: HashMap::new(),
             next_request_id: 1,
             new_world_generation_profile: WorldGenerationProfile::Overworld,
+            new_world_starter_content: StarterContentDescriptor::Wild,
         }
     }
 
@@ -78,6 +80,10 @@ impl ClientCatalogController {
 
     pub const fn new_world_generation_profile(&self) -> WorldGenerationProfile {
         self.new_world_generation_profile
+    }
+
+    pub const fn new_world_starter_content(&self) -> StarterContentDescriptor {
+        self.new_world_starter_content
     }
 
     pub fn world_list_pending(&self) -> bool {
@@ -165,11 +171,29 @@ impl ClientCatalogController {
                 ClientCatalogEffects::default()
             }
             GameUiAction::CycleWorldGenerationProfile => {
-                self.new_world_generation_profile =
-                    next_local_world_generation_profile(self.new_world_generation_profile);
-                self.ui.create_generation_profile = WorldCatalogUiText::new(
-                    local_world_generation_profile_display_name(self.new_world_generation_profile),
-                );
+                self.cycle_world_generation_profile();
+                self.clear_status();
+                ClientCatalogEffects::default()
+            }
+            GameUiAction::CycleWorldStarterContent => {
+                self.new_world_starter_content = match self.new_world_starter_content {
+                    StarterContentDescriptor::Wild => StarterContentDescriptor::IntroHomesteadV1,
+                    StarterContentDescriptor::IntroHomesteadV1 => StarterContentDescriptor::Wild,
+                };
+                if !self
+                    .new_world_starter_content
+                    .admits_generation_profile(self.new_world_generation_profile)
+                {
+                    self.new_world_generation_profile = WorldGenerationProfile::McloneOverworldV1;
+                }
+                self.sync_create_choice_text();
+                self.clear_status();
+                ClientCatalogEffects::default()
+            }
+            GameUiAction::ApplyHomesteadShowcasePreset => {
+                self.new_world_generation_profile = WorldGenerationProfile::McloneOverworldV1;
+                self.new_world_starter_content = StarterContentDescriptor::IntroHomesteadV1;
+                self.sync_create_choice_text();
                 self.clear_status();
                 ClientCatalogEffects::default()
             }
@@ -295,7 +319,9 @@ impl ClientCatalogController {
             self.ui.create_display_name.as_str()
         };
         let options = match LocalWorldCreateOptions::new(display_name, seed) {
-            Ok(options) => options.with_world_generation_profile(self.new_world_generation_profile),
+            Ok(options) => options
+                .with_world_generation_profile(self.new_world_generation_profile)
+                .with_starter_content(self.new_world_starter_content),
             Err(error) => {
                 self.set_world_catalog_error(&error);
                 return ClientCatalogEffects::default();
@@ -424,6 +450,8 @@ impl ClientCatalogController {
         state.create_generation_profile = WorldCatalogUiText::new(
             local_world_generation_profile_display_name(self.new_world_generation_profile),
         );
+        state.create_starter_content =
+            WorldCatalogUiText::new(self.new_world_starter_content.label());
         state.selected = previous_selected;
         state.active = self.active_world.as_ref().and_then(|active| {
             cached_entries
@@ -445,6 +473,30 @@ impl ClientCatalogController {
         self.worlds = worlds;
         self.entries = cached_entries;
         self.ui = state;
+    }
+
+    fn cycle_world_generation_profile(&mut self) {
+        let mut next = self.new_world_generation_profile;
+        loop {
+            next = next_local_world_generation_profile(next);
+            if self
+                .new_world_starter_content
+                .admits_generation_profile(next)
+                || next == self.new_world_generation_profile
+            {
+                self.new_world_generation_profile = next;
+                break;
+            }
+        }
+        self.sync_create_choice_text();
+    }
+
+    fn sync_create_choice_text(&mut self) {
+        self.ui.create_generation_profile = WorldCatalogUiText::new(
+            local_world_generation_profile_display_name(self.new_world_generation_profile),
+        );
+        self.ui.create_starter_content =
+            WorldCatalogUiText::new(self.new_world_starter_content.label());
     }
 
     fn upsert_world(&mut self, summary: LocalWorldSummary) {
@@ -603,6 +655,7 @@ fn world_catalog_ui_state_for_capabilities(
         create_generation_profile: WorldCatalogUiText::new(
             local_world_generation_profile_display_name(WorldGenerationProfile::Overworld),
         ),
+        create_starter_content: WorldCatalogUiText::new(StarterContentDescriptor::Wild.label()),
         ..WorldCatalogUiState::empty()
     }
 }
@@ -806,6 +859,48 @@ mod tests {
         assert_eq!(
             options.world_generation_profile,
             WorldGenerationProfile::McloneOverworldV1
+        );
+        assert_eq!(options.starter_content, StarterContentDescriptor::Wild);
+    }
+
+    #[test]
+    fn homestead_choice_is_shared_by_catalog_creation_and_showcase_preset() {
+        let mut controller = persistent_controller(Vec::new());
+
+        controller.apply_ui_action(GameUiAction::CycleWorldStarterContent, context(91));
+        assert_eq!(
+            controller.new_world_starter_content(),
+            StarterContentDescriptor::IntroHomesteadV1
+        );
+        assert_eq!(
+            controller.new_world_generation_profile(),
+            WorldGenerationProfile::McloneOverworldV1
+        );
+        assert_eq!(
+            controller.ui_state().create_starter_content.as_str(),
+            "Homestead Start"
+        );
+
+        controller.apply_ui_action(GameUiAction::CycleWorldGenerationProfile, context(91));
+        assert_eq!(
+            controller.new_world_generation_profile(),
+            WorldGenerationProfile::FlatGrassV1
+        );
+        controller.apply_ui_action(GameUiAction::ApplyHomesteadShowcasePreset, context(91));
+        assert_eq!(
+            controller.new_world_generation_profile(),
+            WorldGenerationProfile::McloneOverworldV1
+        );
+
+        let request =
+            only_request(controller.apply_ui_action(GameUiAction::CreateCatalogWorld, context(0)));
+        let WorldCatalogRequest::CreateWorld { options } = request.request else {
+            panic!("expected create request");
+        };
+        assert_eq!(options.seed, 0);
+        assert_eq!(
+            options.starter_content,
+            StarterContentDescriptor::IntroHomesteadV1
         );
     }
 

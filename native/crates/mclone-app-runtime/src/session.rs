@@ -105,6 +105,15 @@ impl<P> GameSessionCoordinator<P> {
             GameSessionState::NoSession | GameSessionState::Active { .. } => None,
         }
     }
+
+    pub fn start_phase(&self) -> Option<SessionStartPhase> {
+        match &self.state {
+            GameSessionState::Starting { request } | GameSessionState::Failed { request, .. } => {
+                Some(request.start_phase())
+            }
+            GameSessionState::NoSession | GameSessionState::Active { .. } => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -176,6 +185,27 @@ pub enum SessionStartRequest {
     Unknown,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SessionStartPhase {
+    CreatingWorld,
+    PlanningHomestead,
+    LoadingWorld,
+    Connecting,
+    StartingSession,
+}
+
+impl SessionStartPhase {
+    pub const fn message(self) -> &'static str {
+        match self {
+            Self::CreatingWorld => "Creating world...",
+            Self::PlanningHomestead => "Planning homestead site...",
+            Self::LoadingWorld => "Loading world...",
+            Self::Connecting => "Connecting...",
+            Self::StartingSession => "Starting session...",
+        }
+    }
+}
+
 impl SessionStartRequest {
     pub fn new_seed_local_world(seed: i64) -> Self {
         Self::new_seed_local_world_with_generation_profile(seed, WorldGenerationProfile::Overworld)
@@ -216,17 +246,37 @@ impl SessionStartRequest {
         Self::OpenLocalWorld { id }
     }
 
-    pub fn starting_message(&self) -> &'static str {
+    pub const fn start_phase(&self) -> SessionStartPhase {
         match self {
-            Self::CreateLocalWorld { .. } => "Creating world...",
-            Self::OpenLocalWorld { .. } => "Loading world...",
-            Self::JoinRemote { .. } => "Connecting...",
-            Self::Unknown => "Starting session...",
+            Self::CreateLocalWorld { options }
+                if matches!(
+                    options.starter_content,
+                    StarterContentDescriptor::IntroHomesteadV1
+                ) =>
+            {
+                SessionStartPhase::PlanningHomestead
+            }
+            Self::CreateLocalWorld { .. } => SessionStartPhase::CreatingWorld,
+            Self::OpenLocalWorld { .. } => SessionStartPhase::LoadingWorld,
+            Self::JoinRemote { .. } => SessionStartPhase::Connecting,
+            Self::Unknown => SessionStartPhase::StartingSession,
         }
+    }
+
+    pub fn starting_message(&self) -> &'static str {
+        self.start_phase().message()
     }
 
     pub fn default_failure_message(&self) -> &'static str {
         match self {
+            Self::CreateLocalWorld { options }
+                if matches!(
+                    options.starter_content,
+                    StarterContentDescriptor::IntroHomesteadV1
+                ) =>
+            {
+                "Homestead planning failed; choose another seed or Wild Start"
+            }
             Self::CreateLocalWorld { .. } => "World creation failed; see log",
             Self::OpenLocalWorld { .. } => "World load failed; see log",
             Self::JoinRemote { .. } => "Connection failed; see log",
@@ -490,12 +540,31 @@ impl RemoteSessionEndpoint {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SessionFailure {
+    pub kind: SessionFailureKind,
     pub message: String,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SessionFailureKind {
+    General,
+    HomesteadPlanning,
 }
 
 impl SessionFailure {
     pub fn new(message: impl Into<String>) -> Self {
         Self {
+            kind: SessionFailureKind::General,
+            message: message.into(),
+        }
+    }
+
+    pub fn for_request(request: &SessionStartRequest, message: impl Into<String>) -> Self {
+        let kind = match request.start_phase() {
+            SessionStartPhase::PlanningHomestead => SessionFailureKind::HomesteadPlanning,
+            _ => SessionFailureKind::General,
+        };
+        Self {
+            kind,
             message: message.into(),
         }
     }
@@ -549,6 +618,49 @@ mod tests {
             }
         );
         assert_eq!(coordinator.status(), None);
+    }
+
+    #[test]
+    fn homestead_start_projects_typed_planning_progress_and_failure() {
+        let mut coordinator = GameSessionCoordinator::<()>::new();
+        let request =
+            SessionStartRequest::new_seed_local_world_with_generation_profile_and_starter_content(
+                0,
+                WorldGenerationProfile::McloneOverworldV1,
+                StarterContentDescriptor::IntroHomesteadV1,
+            );
+
+        coordinator.begin_start(request.clone());
+        assert_eq!(
+            coordinator.start_phase(),
+            Some(SessionStartPhase::PlanningHomestead)
+        );
+        assert_eq!(
+            coordinator.status(),
+            Some(SessionStatus {
+                message: "Planning homestead site...".to_owned(),
+                ok: true,
+            })
+        );
+
+        let failure = SessionFailure::for_request(&request, request.default_failure_message());
+        assert_eq!(failure.kind, SessionFailureKind::HomesteadPlanning);
+        assert_eq!(
+            failure.message,
+            "Homestead planning failed; choose another seed or Wild Start"
+        );
+        coordinator.fail_start(failure.clone());
+        assert_eq!(
+            coordinator.start_phase(),
+            Some(SessionStartPhase::PlanningHomestead)
+        );
+        assert_eq!(
+            coordinator.state(),
+            &GameSessionState::Failed {
+                request,
+                error: failure,
+            }
+        );
     }
 
     #[test]

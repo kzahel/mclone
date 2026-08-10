@@ -106,6 +106,8 @@ impl ClientExperienceController {
             | GameUiAction::OpenWorld(_)
             | GameUiAction::CreateCatalogWorld
             | GameUiAction::CycleWorldGenerationProfile
+            | GameUiAction::CycleWorldStarterContent
+            | GameUiAction::ApplyHomesteadShowcasePreset
             | GameUiAction::ConfirmDeleteWorld(_)
             | GameUiAction::DeleteWorld(_)
             | GameUiAction::CancelDeleteWorld => {
@@ -117,6 +119,10 @@ impl ClientExperienceController {
                 );
                 if matches!(action, GameUiAction::OpenWorldCreate) {
                     effects.session.new_world_seed = Some(context.new_world_seed);
+                }
+                if matches!(action, GameUiAction::ApplyHomesteadShowcasePreset) {
+                    effects.session.new_world_seed = Some(0);
+                    effects.session.clear_inactive_session_status = true;
                 }
                 if matches!(
                     action,
@@ -141,6 +147,7 @@ impl ClientExperienceController {
                     action,
                     ClientSessionActionContext {
                         new_world_generation_profile: self.catalog.new_world_generation_profile(),
+                        new_world_starter_content: self.catalog.new_world_starter_content(),
                         next_new_world_seed: context.next_new_world_seed,
                         current_join_remote_addr: context.current_join_remote_addr,
                         fallback_remote_addr: context.fallback_remote_addr,
@@ -1558,6 +1565,8 @@ pub enum ClientExperienceActionKind {
     OpenWorld,
     CreateCatalogWorld,
     CycleWorldGenerationProfile,
+    CycleWorldStarterContent,
+    ApplyHomesteadShowcasePreset,
     ConfirmDeleteWorld,
     DeleteWorld,
     CancelDeleteWorld,
@@ -1628,6 +1637,12 @@ pub fn client_experience_action_kind(action: GameUiAction) -> ClientExperienceAc
         GameUiAction::CreateCatalogWorld => ClientExperienceActionKind::CreateCatalogWorld,
         GameUiAction::CycleWorldGenerationProfile => {
             ClientExperienceActionKind::CycleWorldGenerationProfile
+        }
+        GameUiAction::CycleWorldStarterContent => {
+            ClientExperienceActionKind::CycleWorldStarterContent
+        }
+        GameUiAction::ApplyHomesteadShowcasePreset => {
+            ClientExperienceActionKind::ApplyHomesteadShowcasePreset
         }
         GameUiAction::ConfirmDeleteWorld(_) => ClientExperienceActionKind::ConfirmDeleteWorld,
         GameUiAction::DeleteWorld(_) => ClientExperienceActionKind::DeleteWorld,
@@ -1719,6 +1734,8 @@ pub const fn classify_client_experience_action_kind(
         | ClientExperienceActionKind::OpenWorld
         | ClientExperienceActionKind::CreateCatalogWorld
         | ClientExperienceActionKind::CycleWorldGenerationProfile
+        | ClientExperienceActionKind::CycleWorldStarterContent
+        | ClientExperienceActionKind::ApplyHomesteadShowcasePreset
         | ClientExperienceActionKind::ConfirmDeleteWorld
         | ClientExperienceActionKind::DeleteWorld
         | ClientExperienceActionKind::CancelDeleteWorld
@@ -1818,6 +1835,7 @@ fn finite_or(value: f32, fallback: f32) -> f32 {
 mod tests {
     use super::*;
     use crate::world_catalog::{LocalWorldId, WorldCatalogCapabilities, WorldCatalogRequest};
+    use mclone_server::{StarterContentDescriptor, WorldGenerationProfile};
     use mclone_ui::{
         AssetPackUiId, GameHelpParent, GameOptionsCategory, GameOptionsParent, GameScenarioId,
         WorldCatalogUiWorldId,
@@ -1968,6 +1986,9 @@ mod tests {
             GameUiAction::SelectWorld(WorldCatalogUiWorldId(1)),
             GameUiAction::OpenWorld(WorldCatalogUiWorldId(1)),
             GameUiAction::CreateCatalogWorld,
+            GameUiAction::CycleWorldGenerationProfile,
+            GameUiAction::CycleWorldStarterContent,
+            GameUiAction::ApplyHomesteadShowcasePreset,
             GameUiAction::ConfirmDeleteWorld(WorldCatalogUiWorldId(1)),
             GameUiAction::DeleteWorld(WorldCatalogUiWorldId(1)),
             GameUiAction::CancelDeleteWorld,
@@ -2038,7 +2059,7 @@ mod tests {
             GameUiAction::Quit,
         ];
 
-        assert_eq!(samples.len(), 60);
+        assert_eq!(samples.len(), 63);
         for sample in samples {
             let _ = classify_game_ui_action(sample);
         }
@@ -2116,6 +2137,18 @@ mod tests {
         assert!(effects.session.session_start.is_none());
         assert!(effects.session.host_action.is_none());
         assert!(effects.settings.is_empty());
+
+        let effects =
+            controller.apply_ui_action(GameUiAction::ApplyHomesteadShowcasePreset, context());
+        assert_eq!(effects.session.new_world_seed, Some(0));
+        assert_eq!(
+            controller.catalog().new_world_generation_profile(),
+            WorldGenerationProfile::McloneOverworldV1
+        );
+        assert_eq!(
+            controller.catalog().new_world_starter_content(),
+            StarterContentDescriptor::IntroHomesteadV1
+        );
     }
 
     #[test]
