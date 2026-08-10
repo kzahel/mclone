@@ -46,7 +46,7 @@ fn legacy_world_records_initialize_once_at_mclone_morning() {
 }
 
 #[test]
-fn stored_world_metadata_rejects_seed_and_profile_mismatches() {
+fn stored_world_metadata_rejects_seed_profile_and_starter_mismatches() {
     let mut seed_store = MemoryWorldStore::new();
     seed_store
         .save_world_metadata(&WorldMetadata::new(
@@ -82,6 +82,45 @@ fn stored_world_metadata_rejects_seed_and_profile_mismatches() {
             .to_string()
             .contains("world generation profile mismatch")
     );
+
+    let mut starter_store = MemoryWorldStore::new();
+    starter_store
+        .save_world_metadata(&WorldMetadata::new(
+            2,
+            WorldGenerationProfile::Overworld,
+            WorldBehaviorProfile::Mutable,
+            1_000,
+        ))
+        .unwrap();
+    let mut starter_mismatch = LocalRealmSession::with_world_store(2, Box::new(starter_store));
+    starter_mismatch.set_starter_content(StarterContentDescriptor::IntroHomesteadV1);
+    assert!(
+        starter_mismatch
+            .initialize_world_metadata_at_unix_millis(2_000)
+            .unwrap_err()
+            .to_string()
+            .contains("starter content mismatch")
+    );
+}
+
+#[test]
+fn new_world_metadata_persists_starter_content_orthogonally() {
+    let mut server = LocalRealmSession::with_world_store(77, Box::new(MemoryWorldStore::new()));
+    server.set_starter_content(StarterContentDescriptor::IntroHomesteadV1);
+
+    let initialized = server
+        .initialize_world_metadata_at_unix_millis(1_000)
+        .unwrap();
+
+    assert_eq!(
+        initialized.world_generation_profile,
+        WorldGenerationProfile::Overworld
+    );
+    assert_eq!(
+        initialized.starter_content,
+        StarterContentDescriptor::IntroHomesteadV1
+    );
+    assert_eq!(initialized.realized_starter_plan, None);
 }
 
 #[test]

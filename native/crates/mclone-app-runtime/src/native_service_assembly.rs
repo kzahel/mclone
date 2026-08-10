@@ -85,6 +85,7 @@ pub fn native_world_catalog_operations(root: PathBuf) -> WorldCatalogOperationSe
 pub struct LocalIntegratedSceneOptions {
     pub seed: i64,
     pub world_generation_profile: WorldGenerationProfile,
+    pub starter_content: mclone_server::StarterContentDescriptor,
     pub world_topology: HorizontalTopology,
     pub world_behavior_profile: WorldBehaviorProfile,
     pub center: ChunkPos,
@@ -158,6 +159,7 @@ impl LocalIntegratedSceneOptions {
         Self {
             seed,
             world_generation_profile: WorldGenerationProfile::Overworld,
+            starter_content: mclone_server::StarterContentDescriptor::Wild,
             world_topology: HorizontalTopology::UNBOUNDED,
             world_behavior_profile: WorldBehaviorProfile::Mutable,
             center,
@@ -187,6 +189,14 @@ impl LocalIntegratedSceneOptions {
 
     pub const fn with_world_generation_profile(mut self, profile: WorldGenerationProfile) -> Self {
         self.world_generation_profile = profile;
+        self
+    }
+
+    pub const fn with_starter_content(
+        mut self,
+        starter_content: mclone_server::StarterContentDescriptor,
+    ) -> Self {
+        self.starter_content = starter_content;
         self
     }
 
@@ -3176,6 +3186,7 @@ fn native_runner_config(
 ) -> NativeIntegratedServerRunnerConfig {
     let mut config = NativeIntegratedServerRunnerConfig::new(options.seed)
         .with_world_generation_profile(options.world_generation_profile)
+        .with_starter_content(options.starter_content)
         .with_world_topology(options.world_topology)
         .with_world_behavior_profile(options.world_behavior_profile)
         .with_lighting_enabled(options.lighting_enabled)

@@ -619,6 +619,7 @@ impl CatalogExecutionCore {
                     LocalWorldSummary::new(id, options.display_name, options.seed, now)
                         .map_err(|error| error.message)?;
                 summary.world_generation_profile = options.world_generation_profile;
+                summary.starter_content = options.starter_content;
                 summary.last_played_unix_millis = Some(now);
                 summary.backend_label = Some(self.created_world_backend_label.clone());
                 (StepCompletion::CreateRead(summary), Vec::new())

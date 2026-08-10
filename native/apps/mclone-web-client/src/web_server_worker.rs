@@ -198,6 +198,7 @@ fn web_dimension_definition(
 pub struct WebIntegratedServerRunnerConfig {
     pub seed: i64,
     pub world_generation_profile: WorldGenerationProfile,
+    pub starter_content: mclone_server::StarterContentDescriptor,
     pub world_topology: HorizontalTopology,
     pub world_behavior_profile: mclone_server::WorldBehaviorProfile,
     pub freeze_scheduled_fluid_ticks: bool,
@@ -236,6 +237,7 @@ impl WebIntegratedServerRunnerConfig {
         Self {
             seed,
             world_generation_profile: WorldGenerationProfile::default(),
+            starter_content: mclone_server::StarterContentDescriptor::Wild,
             world_topology: HorizontalTopology::UNBOUNDED,
             world_behavior_profile: mclone_server::WorldBehaviorProfile::default(),
             freeze_scheduled_fluid_ticks: false,
@@ -280,6 +282,14 @@ impl WebIntegratedServerRunnerConfig {
 
     pub const fn with_world_generation_profile(mut self, profile: WorldGenerationProfile) -> Self {
         self.world_generation_profile = profile;
+        self
+    }
+
+    pub const fn with_starter_content(
+        mut self,
+        starter_content: mclone_server::StarterContentDescriptor,
+    ) -> Self {
+        self.starter_content = starter_content;
         self
     }
 
@@ -672,6 +682,7 @@ impl WebIntegratedServerRunner {
         let startup_frame = WebIntegratedServerStartupConfig {
             seed: config.seed,
             world_generation_profile: config.world_generation_profile,
+            starter_content: config.starter_content,
             world_topology: config.world_topology,
             world_behavior_profile: config.world_behavior_profile,
             transient_authored_fixture: config.transient_authored_fixture,
@@ -2219,6 +2230,7 @@ fn apply_stored_world_metadata_profiles(
         .set_world_generation_profile(metadata.world_generation_profile)
         .map_err(|error| error.to_string())?;
     server.set_world_behavior_profile(metadata.world_behavior_profile);
+    server.set_starter_content(metadata.starter_content);
     Ok(())
 }
 
@@ -2384,6 +2396,9 @@ impl WebIntegratedServerStartup {
             worker
                 .server
                 .set_world_behavior_profile(self.config.world_behavior_profile);
+            worker
+                .server
+                .set_starter_content(self.config.starter_content);
         }
         if initialize_world_metadata {
             worker

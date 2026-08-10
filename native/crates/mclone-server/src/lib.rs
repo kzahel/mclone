@@ -37,6 +37,7 @@ mod scheduler;
 #[cfg(test)]
 mod sky_light_bridge;
 mod spawn;
+mod starter_content;
 mod structure_lab;
 mod timing;
 mod types;
@@ -127,6 +128,7 @@ pub use spawn::{
     initial_spawn_center_for_descriptor, initial_spawn_center_for_profile,
     initial_spawn_center_for_seed,
 };
+pub use starter_content::{RealizedStarterPlanIdentity, StarterContentDescriptor};
 pub use structure_lab::{
     BarnLength, BarnTemplateSet, BarnVariant, CottageDepth, CottageEntry, CottageVariant,
     STRUCTURE_FAMILY_LAB_GALLERY_ID, STRUCTURE_FAMILY_LAB_MARKER_FILE, STRUCTURE_FAMILY_LAB_SEED,

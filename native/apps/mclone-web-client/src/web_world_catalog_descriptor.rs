@@ -2,10 +2,10 @@ use mclone_app_runtime::world_catalog::{
     LOCAL_WORLD_CATALOG_SCHEMA_VERSION, LOCAL_WORLD_TARGET_MINECRAFT_VERSION, LocalWorldId,
     LocalWorldSummary,
 };
-use mclone_server::WorldGenerationProfile;
+use mclone_server::{StarterContentDescriptor, WorldGenerationProfile};
 
 const MAGIC: &[u8; 4] = b"MCWC";
-const VERSION: u8 = 1;
+const VERSION: u8 = 2;
 const MAX_STRING_BYTES: usize = u16::MAX as usize;
 
 pub(crate) fn encode(summary: &LocalWorldSummary) -> Result<Vec<u8>, String> {
@@ -20,6 +20,7 @@ pub(crate) fn encode(summary: &LocalWorldSummary) -> Result<Vec<u8>, String> {
         summary.world_generation_profile.label(),
         "generation profile",
     )?;
+    encode_string(&mut frame, summary.starter_content.id(), "starter content")?;
     frame.extend_from_slice(&summary.created_unix_millis.to_le_bytes());
     encode_optional_u64(&mut frame, summary.last_played_unix_millis);
     frame.extend_from_slice(&summary.storage_schema_version.to_le_bytes());
@@ -48,7 +49,7 @@ pub(crate) fn decode(frame: &[u8]) -> Result<LocalWorldSummary, String> {
         return Err("world catalog descriptor has invalid magic".to_owned());
     }
     let version = decoder.u8()?;
-    if version != VERSION {
+    if !(1..=VERSION).contains(&version) {
         return Err(format!(
             "world catalog descriptor version {version} is unsupported"
         ));
@@ -61,6 +62,19 @@ pub(crate) fn decode(frame: &[u8]) -> Result<LocalWorldSummary, String> {
     let generation_profile =
         WorldGenerationProfile::parse_label(&decoder.string("generation profile")?)
             .map_err(|error| format!("world catalog descriptor: {error}"))?;
+    let starter_content = if version >= 2 {
+        match decoder.string("starter content")?.as_str() {
+            "wild" => StarterContentDescriptor::Wild,
+            "intro-homestead-v1" => StarterContentDescriptor::IntroHomesteadV1,
+            value => {
+                return Err(format!(
+                    "world catalog descriptor has unknown starter content `{value}`"
+                ));
+            }
+        }
+    } else {
+        StarterContentDescriptor::Wild
+    };
     let created_unix_millis = decoder.u64()?;
     let last_played_unix_millis = decoder.optional_u64("last played timestamp")?;
     let storage_schema_version = decoder.u32()?;
@@ -73,6 +87,7 @@ pub(crate) fn decode(frame: &[u8]) -> Result<LocalWorldSummary, String> {
     let mut summary = LocalWorldSummary::new(id, display_name, seed, created_unix_millis)
         .map_err(|error| format!("world catalog descriptor: {}", error.message))?;
     summary.world_generation_profile = generation_profile;
+    summary.starter_content = starter_content;
     summary.last_played_unix_millis = last_played_unix_millis;
     summary.storage_schema_version = storage_schema_version;
     summary.target_minecraft_version = target_minecraft_version;
@@ -231,6 +246,7 @@ mod tests {
         )
         .unwrap();
         summary.world_generation_profile = WorldGenerationProfile::alpha_v1(true);
+        summary.starter_content = StarterContentDescriptor::IntroHomesteadV1;
         summary.last_played_unix_millis = Some(u64::MAX - 7);
         summary.mclone_version = Some("0.1.0-test".to_owned());
         summary.backend_label = Some("web-indexeddb".to_owned());
@@ -242,6 +258,27 @@ mod tests {
     fn descriptor_round_trips_exact_integer_and_optional_fields() {
         let summary = summary();
         assert_eq!(decode(&encode(&summary).unwrap()).unwrap(), summary);
+    }
+
+    #[test]
+    fn version_one_descriptor_defaults_to_wild_start() {
+        let mut expected = summary();
+        expected.starter_content = StarterContentDescriptor::Wild;
+        let mut frame = encode(&expected).unwrap();
+        let mut decoder = Decoder::new(&frame);
+        decoder.bytes(MAGIC.len()).unwrap();
+        decoder.u8().unwrap();
+        decoder.string("world id").unwrap();
+        decoder.string("display name").unwrap();
+        decoder.i64().unwrap();
+        decoder.string("generation profile").unwrap();
+        let starter_start = decoder.cursor;
+        decoder.string("starter content").unwrap();
+        let starter_end = decoder.cursor;
+        frame.drain(starter_start..starter_end);
+        frame[MAGIC.len()] = 1;
+
+        assert_eq!(decode(&frame).unwrap(), expected);
     }
 
     #[test]

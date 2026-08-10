@@ -14,7 +14,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 #[cfg(not(target_arch = "wasm32"))]
 use mclone_server::SqliteWorldStore;
-use mclone_server::WorldGenerationProfile;
+use mclone_server::{StarterContentDescriptor, WorldGenerationProfile};
 use serde::{Deserialize, Serialize};
 
 pub const LOCAL_WORLD_CATALOG_SCHEMA_VERSION: u32 = 1;
@@ -154,6 +154,8 @@ pub struct LocalWorldCreateOptions {
     pub seed: i64,
     #[serde(default)]
     pub world_generation_profile: WorldGenerationProfile,
+    #[serde(default)]
+    pub starter_content: StarterContentDescriptor,
     pub requested_id: Option<LocalWorldId>,
 }
 
@@ -163,6 +165,7 @@ impl LocalWorldCreateOptions {
             display_name: normalize_display_name(display_name.into())?,
             seed,
             world_generation_profile: WorldGenerationProfile::default(),
+            starter_content: StarterContentDescriptor::Wild,
             requested_id: None,
         })
     }
@@ -174,6 +177,11 @@ impl LocalWorldCreateOptions {
 
     pub fn with_world_generation_profile(mut self, profile: WorldGenerationProfile) -> Self {
         self.world_generation_profile = profile;
+        self
+    }
+
+    pub fn with_starter_content(mut self, starter_content: StarterContentDescriptor) -> Self {
+        self.starter_content = starter_content;
         self
     }
 
@@ -200,6 +208,8 @@ pub struct LocalWorldSummary {
     pub seed: i64,
     #[serde(default)]
     pub world_generation_profile: WorldGenerationProfile,
+    #[serde(default)]
+    pub starter_content: StarterContentDescriptor,
     pub created_unix_millis: u64,
     pub last_played_unix_millis: Option<u64>,
     pub storage_schema_version: u32,
@@ -222,6 +232,7 @@ impl LocalWorldSummary {
             display_name: normalize_display_name(display_name.into())?,
             seed,
             world_generation_profile: WorldGenerationProfile::default(),
+            starter_content: StarterContentDescriptor::Wild,
             created_unix_millis,
             last_played_unix_millis: None,
             storage_schema_version: LOCAL_WORLD_CATALOG_SCHEMA_VERSION,
@@ -645,6 +656,7 @@ impl NativeWorldCatalog {
             created_unix_millis,
         )?;
         summary.world_generation_profile = options.world_generation_profile;
+        summary.starter_content = options.starter_content;
         summary.last_played_unix_millis = Some(created_unix_millis);
         summary.mclone_version = Some(env!("CARGO_PKG_VERSION").to_owned());
         summary.backend_label = Some(NATIVE_WORLD_BACKEND_LABEL.to_owned());
@@ -1128,7 +1140,7 @@ mod tests {
     }
 
     #[test]
-    fn legacy_catalog_records_default_to_overworld_generation() {
+    fn legacy_catalog_records_default_to_overworld_and_wild_start() {
         let summary =
             LocalWorldSummary::new(LocalWorldId::new("legacy").unwrap(), "Legacy", 7, 100).unwrap();
         let mut encoded = serde_json::to_value(summary).unwrap();
@@ -1136,6 +1148,7 @@ mod tests {
             .as_object_mut()
             .unwrap()
             .remove("worldGenerationProfile");
+        encoded.as_object_mut().unwrap().remove("starterContent");
 
         let decoded: LocalWorldSummary = serde_json::from_value(encoded).unwrap();
 
@@ -1143,6 +1156,7 @@ mod tests {
             decoded.world_generation_profile,
             WorldGenerationProfile::Overworld
         );
+        assert_eq!(decoded.starter_content, StarterContentDescriptor::Wild);
     }
 
     #[test]
@@ -1158,6 +1172,27 @@ mod tests {
         assert_eq!(
             decoded.world_generation_profile,
             WorldGenerationProfile::authored_only()
+        );
+    }
+
+    #[test]
+    fn homestead_start_round_trips_independently_from_generation_profile() {
+        let options = LocalWorldCreateOptions::new("Homestead", 91)
+            .unwrap()
+            .with_world_generation_profile(WorldGenerationProfile::McloneOverworldV1)
+            .with_starter_content(StarterContentDescriptor::IntroHomesteadV1);
+
+        let decoded: LocalWorldCreateOptions =
+            serde_json::from_slice(&serde_json::to_vec(&options).unwrap()).unwrap();
+
+        assert_eq!(decoded, options);
+        assert_eq!(
+            decoded.world_generation_profile,
+            WorldGenerationProfile::McloneOverworldV1
+        );
+        assert_eq!(
+            decoded.starter_content,
+            StarterContentDescriptor::IntroHomesteadV1
         );
     }
 
@@ -1349,7 +1384,8 @@ mod tests {
             .create_world(
                 LocalWorldCreateOptions::new("My World", 123)
                     .unwrap()
-                    .with_world_generation_profile(WorldGenerationProfile::authored_only()),
+                    .with_world_generation_profile(WorldGenerationProfile::authored_only())
+                    .with_starter_content(StarterContentDescriptor::IntroHomesteadV1),
             )
             .unwrap();
         let second = catalog
@@ -1364,6 +1400,10 @@ mod tests {
         assert_eq!(
             first.world_generation_profile,
             WorldGenerationProfile::authored_only()
+        );
+        assert_eq!(
+            first.starter_content,
+            StarterContentDescriptor::IntroHomesteadV1
         );
         assert_eq!(second.id.as_str(), "my-world-2");
         assert_eq!(

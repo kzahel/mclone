@@ -2068,6 +2068,7 @@ fn lower_runtime_start(
                 bindgen_wasm_url,
             )
             .with_world_generation_profile(pending.scene.world_generation_profile)
+            .with_starter_content(pending.scene.starter_content)
             .with_world_topology(pending.scene.world_topology)
             .with_world_behavior_profile(pending.scene.world_behavior_profile)
             .with_freeze_scheduled_fluid_ticks(pending.scene.freeze_scheduled_fluid_ticks)

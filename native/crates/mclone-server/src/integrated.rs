@@ -29,7 +29,6 @@ use mclone_worldgen::biome::OverworldBiomeSource;
 use mclone_worldgen::block::{AIR, RawBlockId, block_name, generated_block_state_id};
 use mclone_worldgen::prng::SimpleRandomSource;
 
-use crate::NaturalSpawningDiagnostics;
 #[cfg(target_arch = "wasm32")]
 use crate::WasmServerJobWorkerConfig;
 use crate::entity::spawning::dry_run::{
@@ -75,6 +74,7 @@ use crate::spawn::{
     initial_spawn_center_for_descriptor,
 };
 use crate::timing::{simulation_timing_elapsed_us, simulation_timing_start};
+use crate::{NaturalSpawningDiagnostics, StarterContentDescriptor};
 
 fn move_player_command_with_position(
     command: MovePlayerCommand,
@@ -290,6 +290,7 @@ pub struct RealmServer {
     debug_passive_showcase_enabled: bool,
     volatile_natural_spawning_enabled: bool,
     world_behavior_profile: WorldBehaviorProfile,
+    starter_content: StarterContentDescriptor,
     players: ServerPlayerList,
     observers: BTreeMap<ObserverId, DimensionKey>,
     next_observer_id: u64,
@@ -760,6 +761,7 @@ impl RealmServer {
             debug_passive_showcase_enabled: true,
             volatile_natural_spawning_enabled: true,
             world_behavior_profile: WorldBehaviorProfile::default(),
+            starter_content: StarterContentDescriptor::Wild,
             players: ServerPlayerList::default(),
             observers: BTreeMap::new(),
             next_observer_id: 0,
@@ -1065,6 +1067,7 @@ impl RealmServer {
         let load = self.scheduler.load_world_metadata_blocking()?;
         let metadata_was_present = load.record.is_some();
         let requested_generation = self.scheduler.world_generation_profile();
+        let requested_starter_content = self.starter_content;
         let mut metadata_needs_migration = false;
         let mut metadata = match load.record {
             Some(mut metadata) => {
@@ -1072,15 +1075,17 @@ impl RealmServer {
                     &metadata,
                     self.seed,
                     requested_generation,
+                    requested_starter_content,
                     self.world_behavior_profile,
                 )?;
+                if metadata.codec_version != crate::persistence::WORLD_METADATA_VERSION {
+                    metadata_needs_migration = true;
+                }
                 if metadata.realm_id == RealmId::LEGACY_SINGLE_REALM {
                     if self.realm_id == RealmId::LEGACY_SINGLE_REALM {
                         self.realm_id = fresh_realm_id();
                     }
                     metadata.realm_id = self.realm_id;
-                    metadata.codec_version = crate::persistence::WORLD_METADATA_VERSION;
-                    metadata.revision = metadata.revision.saturating_add(1);
                     metadata_needs_migration = true;
                 } else {
                     if self.realm_id != RealmId::LEGACY_SINGLE_REALM
@@ -1092,6 +1097,10 @@ impl RealmServer {
                         )));
                     }
                     self.realm_id = metadata.realm_id;
+                }
+                if metadata_needs_migration {
+                    metadata.codec_version = crate::persistence::WORLD_METADATA_VERSION;
+                    metadata.revision = metadata.revision.saturating_add(1);
                 }
                 metadata
             }
@@ -1105,7 +1114,8 @@ impl RealmServer {
                     requested_generation,
                     self.world_behavior_profile,
                     now_unix_millis,
-                );
+                )
+                .with_starter_content(requested_starter_content);
                 metadata.day_time = INITIAL_DAY_TIME;
                 metadata
             }
@@ -1120,6 +1130,7 @@ impl RealmServer {
                     self.world_behavior_profile,
                     now_unix_millis,
                 )
+                .with_starter_content(requested_starter_content)
             }
         };
         if !metadata_was_present || metadata_needs_migration {
@@ -1259,6 +1270,14 @@ impl RealmServer {
 
     pub fn set_world_behavior_profile(&mut self, profile: WorldBehaviorProfile) {
         self.world_behavior_profile = profile;
+    }
+
+    pub const fn starter_content(&self) -> StarterContentDescriptor {
+        self.starter_content
+    }
+
+    pub fn set_starter_content(&mut self, starter_content: StarterContentDescriptor) {
+        self.starter_content = starter_content;
     }
 
     pub fn schedule_fluid_tick(&mut self, pos: WorldBlockPos, fluid: FluidKind, delay: i32) {
@@ -5519,6 +5538,7 @@ fn validate_world_metadata(
     metadata: &WorldMetadata,
     requested_seed: i64,
     requested_generation: WorldGenerationProfile,
+    requested_starter_content: StarterContentDescriptor,
     requested_behavior: WorldBehaviorProfile,
 ) -> ChunkStoreResult<()> {
     if metadata.seed != requested_seed {
@@ -5532,6 +5552,13 @@ fn validate_world_metadata(
             "world generation profile mismatch: stored {}, requested {}",
             metadata.world_generation_profile.label(),
             requested_generation.label()
+        )));
+    }
+    if metadata.starter_content != requested_starter_content {
+        return Err(ChunkStoreError::InvalidData(format!(
+            "starter content mismatch: stored {}, requested {}",
+            metadata.starter_content.id(),
+            requested_starter_content.id()
         )));
     }
     if metadata.world_behavior_profile != requested_behavior {

@@ -1,9 +1,12 @@
 use mclone_core::{AxisTopology, HorizontalTopology};
 use mclone_protocol::{ClientIdentity, PlayerProfileId};
-use mclone_server::{AuthoredWorldFixtureKind, WorldBehaviorProfile, WorldGenerationProfile};
+use mclone_server::{
+    AuthoredWorldFixtureKind, StarterContentDescriptor, WorldBehaviorProfile,
+    WorldGenerationProfile,
+};
 
 const STARTUP_MAGIC: [u8; 4] = *b"MCSI";
-const STARTUP_VERSION: u16 = 2;
+const STARTUP_VERSION: u16 = 3;
 const TOPOLOGY_PLANE: u8 = 0;
 const TOPOLOGY_CYLINDER_X: u8 = 1;
 const FLAG_FREEZE_SCHEDULED_FLUID_TICKS: u8 = 1 << 0;
@@ -20,6 +23,7 @@ const MAX_DISPLAY_NAME_BYTES: usize = 1_024;
 pub(crate) struct WebIntegratedServerStartupConfig {
     pub seed: i64,
     pub world_generation_profile: WorldGenerationProfile,
+    pub starter_content: StarterContentDescriptor,
     pub world_topology: HorizontalTopology,
     pub world_behavior_profile: WorldBehaviorProfile,
     pub transient_authored_fixture: Option<AuthoredWorldFixtureKind>,
@@ -44,6 +48,7 @@ impl WebIntegratedServerStartupConfig {
         frame.extend_from_slice(&STARTUP_MAGIC);
         frame.extend_from_slice(&STARTUP_VERSION.to_le_bytes());
         frame.push(generation_profile_tag(self.world_generation_profile));
+        frame.push(starter_content_tag(self.starter_content));
         encode_topology(self.world_topology, &mut frame)?;
         frame.push(behavior_profile_tag(self.world_behavior_profile));
         frame.push(authored_fixture_tag(self.transient_authored_fixture));
@@ -75,12 +80,17 @@ impl WebIntegratedServerStartupConfig {
             return Err("integrated-server startup frame has invalid magic".to_owned());
         }
         let version = decoder.u16()?;
-        if version != STARTUP_VERSION {
+        if !(2..=STARTUP_VERSION).contains(&version) {
             return Err(format!(
                 "unsupported integrated-server startup frame version {version}"
             ));
         }
         let world_generation_profile = generation_profile_from_tag(decoder.u8()?)?;
+        let starter_content = if version >= 3 {
+            starter_content_from_tag(decoder.u8()?)?
+        } else {
+            StarterContentDescriptor::Wild
+        };
         let world_topology = decode_topology(&mut decoder)?;
         let world_behavior_profile = behavior_profile_from_tag(decoder.u8()?)?;
         let transient_authored_fixture = authored_fixture_from_tag(decoder.u8()?)?;
@@ -115,6 +125,7 @@ impl WebIntegratedServerStartupConfig {
         let config = Self {
             seed,
             world_generation_profile,
+            starter_content,
             world_topology,
             world_behavior_profile,
             transient_authored_fixture,
@@ -159,6 +170,23 @@ impl WebIntegratedServerStartupConfig {
             ));
         }
         Ok(())
+    }
+}
+
+const fn starter_content_tag(starter_content: StarterContentDescriptor) -> u8 {
+    match starter_content {
+        StarterContentDescriptor::Wild => 0,
+        StarterContentDescriptor::IntroHomesteadV1 => 1,
+    }
+}
+
+fn starter_content_from_tag(tag: u8) -> Result<StarterContentDescriptor, String> {
+    match tag {
+        0 => Ok(StarterContentDescriptor::Wild),
+        1 => Ok(StarterContentDescriptor::IntroHomesteadV1),
+        _ => Err(format!(
+            "integrated-server startup frame has unknown starter content {tag}"
+        )),
     }
 }
 
@@ -344,6 +372,7 @@ mod tests {
         WebIntegratedServerStartupConfig {
             seed: -42,
             world_generation_profile: WorldGenerationProfile::FlatGrassV1,
+            starter_content: StarterContentDescriptor::IntroHomesteadV1,
             world_topology: HorizontalTopology::cylinder_x(0, 32),
             world_behavior_profile: WorldBehaviorProfile::ProtectedLobby,
             transient_authored_fixture: None,
@@ -371,6 +400,20 @@ mod tests {
     }
 
     #[test]
+    fn version_two_startup_defaults_to_wild_start() {
+        let mut expected = config();
+        expected.starter_content = StarterContentDescriptor::Wild;
+        let mut frame = expected.encode().unwrap();
+        frame[4..6].copy_from_slice(&2_u16.to_le_bytes());
+        frame.remove(4 + 2 + 1);
+
+        assert_eq!(
+            WebIntegratedServerStartupConfig::decode(&frame),
+            Ok(expected)
+        );
+    }
+
+    #[test]
     fn startup_frame_roundtrips_transient_authored_fixture() {
         let mut expected = config();
         expected.seed = AuthoredWorldFixtureKind::LobbyTableV2.seed();
@@ -388,11 +431,11 @@ mod tests {
         let frame = config().encode().unwrap();
 
         let mut bad_version = frame.clone();
-        bad_version[4..6].copy_from_slice(&3_u16.to_le_bytes());
+        bad_version[4..6].copy_from_slice(&4_u16.to_le_bytes());
         assert!(WebIntegratedServerStartupConfig::decode(&bad_version).is_err());
 
         let mut bad_flags = frame.clone();
-        let flags_index = 4 + 2 + 1 + 1 + 4 + 1 + 1;
+        let flags_index = 4 + 2 + 1 + 1 + 1 + 4 + 1 + 1;
         bad_flags[flags_index] |= 1 << 7;
         assert!(WebIntegratedServerStartupConfig::decode(&bad_flags).is_err());
 

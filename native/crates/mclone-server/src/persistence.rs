@@ -29,7 +29,10 @@ use mclone_protocol::{
     PlayerStatistics, PlayerVitals, RealmId, StatisticKey,
 };
 
-use crate::{WorldBehaviorProfile, WorldGenerationProfile};
+use crate::{
+    RealizedStarterPlanIdentity, StarterContentDescriptor, WorldBehaviorProfile,
+    WorldGenerationProfile,
+};
 
 mod record_executor;
 pub use record_executor::{
@@ -68,7 +71,7 @@ const LEGACY_PLAYER_RECORD_VERSION: u32 = 1;
 const STATISTICS_PLAYER_RECORD_VERSION: u32 = 2;
 pub const PLAYER_RECORD_VERSION: u32 = 3;
 pub const DIMENSION_RECORD_VERSION: u32 = 2;
-pub const WORLD_METADATA_VERSION: u32 = 2;
+pub const WORLD_METADATA_VERSION: u32 = 3;
 pub const WORLD_METADATA_TARGET_MINECRAFT_VERSION: &str = "1.17.1";
 
 pub type PersistenceRequestId = u64;
@@ -575,6 +578,8 @@ pub struct WorldMetadata {
     pub target_minecraft_version: String,
     pub seed: i64,
     pub world_generation_profile: WorldGenerationProfile,
+    pub starter_content: StarterContentDescriptor,
+    pub realized_starter_plan: Option<RealizedStarterPlanIdentity>,
     pub world_behavior_profile: WorldBehaviorProfile,
     pub created_unix_millis: u64,
     pub last_played_unix_millis: u64,
@@ -613,6 +618,8 @@ impl WorldMetadata {
             target_minecraft_version: WORLD_METADATA_TARGET_MINECRAFT_VERSION.to_owned(),
             seed,
             world_generation_profile,
+            starter_content: StarterContentDescriptor::Wild,
+            realized_starter_plan: None,
             world_behavior_profile,
             created_unix_millis: now_unix_millis,
             last_played_unix_millis: now_unix_millis,
@@ -637,6 +644,19 @@ impl WorldMetadata {
         );
         record.day_time = legacy_day_time;
         record
+    }
+
+    pub const fn with_starter_content(mut self, starter_content: StarterContentDescriptor) -> Self {
+        self.starter_content = starter_content;
+        self
+    }
+
+    pub const fn with_realized_starter_plan(
+        mut self,
+        identity: RealizedStarterPlanIdentity,
+    ) -> Self {
+        self.realized_starter_plan = Some(identity);
+        self
     }
 }
 
@@ -4560,6 +4580,8 @@ fn write_world_metadata(writer: &mut impl Write, record: &WorldMetadata) -> Chun
     write_u64(writer, record.game_time)?;
     write_u64(writer, record.day_time)?;
     write_bool(writer, record.do_daylight_cycle)?;
+    write_starter_content_descriptor(writer, record.starter_content)?;
+    write_realized_starter_plan_identity(writer, record.realized_starter_plan)?;
     writer.flush()?;
     Ok(())
 }
@@ -4743,19 +4765,39 @@ fn read_world_metadata(reader: &mut impl Read) -> ChunkStoreResult<WorldMetadata
     } else {
         RealmId::LEGACY_SINGLE_REALM
     };
+    let revision = read_u64(reader)?;
+    let target_minecraft_version = read_string(reader)?;
+    let seed = read_i64(reader)?;
+    let world_generation_profile = read_world_generation_profile(reader)?;
+    let world_behavior_profile = read_world_behavior_profile(reader)?;
+    let created_unix_millis = read_u64(reader)?;
+    let last_played_unix_millis = read_u64(reader)?;
+    let game_time = read_u64(reader)?;
+    let day_time = read_u64(reader)?;
+    let do_daylight_cycle = read_bool(reader)?;
+    let (starter_content, realized_starter_plan) = if codec_version >= 3 {
+        (
+            read_starter_content_descriptor(reader)?,
+            read_realized_starter_plan_identity(reader)?,
+        )
+    } else {
+        (StarterContentDescriptor::Wild, None)
+    };
     let record = WorldMetadata {
         codec_version,
         realm_id,
-        revision: read_u64(reader)?,
-        target_minecraft_version: read_string(reader)?,
-        seed: read_i64(reader)?,
-        world_generation_profile: read_world_generation_profile(reader)?,
-        world_behavior_profile: read_world_behavior_profile(reader)?,
-        created_unix_millis: read_u64(reader)?,
-        last_played_unix_millis: read_u64(reader)?,
-        game_time: read_u64(reader)?,
-        day_time: read_u64(reader)?,
-        do_daylight_cycle: read_bool(reader)?,
+        revision,
+        target_minecraft_version,
+        seed,
+        world_generation_profile,
+        starter_content,
+        realized_starter_plan,
+        world_behavior_profile,
+        created_unix_millis,
+        last_played_unix_millis,
+        game_time,
+        day_time,
+        do_daylight_cycle,
     };
     if record.target_minecraft_version != WORLD_METADATA_TARGET_MINECRAFT_VERSION {
         return Err(ChunkStoreError::classified(
@@ -4783,6 +4825,52 @@ fn read_world_generation_profile(
     WorldGenerationProfile::from_codec_tag(tag).ok_or_else(|| {
         ChunkStoreError::InvalidData(format!("unknown world generation profile tag {tag}"))
     })
+}
+
+fn write_starter_content_descriptor(
+    writer: &mut impl Write,
+    descriptor: StarterContentDescriptor,
+) -> ChunkStoreResult<()> {
+    write_u8(writer, descriptor.codec_tag())
+}
+
+fn read_starter_content_descriptor(
+    reader: &mut impl Read,
+) -> ChunkStoreResult<StarterContentDescriptor> {
+    let tag = read_u8(reader)?;
+    StarterContentDescriptor::from_codec_tag(tag).ok_or_else(|| {
+        ChunkStoreError::InvalidData(format!("unknown starter content descriptor tag {tag}"))
+    })
+}
+
+fn write_realized_starter_plan_identity(
+    writer: &mut impl Write,
+    identity: Option<RealizedStarterPlanIdentity>,
+) -> ChunkStoreResult<()> {
+    write_bool(writer, identity.is_some())?;
+    if let Some(identity) = identity {
+        write_u32(writer, identity.planner_revision)?;
+        write_u32(writer, identity.composition_revision)?;
+        writer.write_all(&identity.checksum)?;
+    }
+    Ok(())
+}
+
+fn read_realized_starter_plan_identity(
+    reader: &mut impl Read,
+) -> ChunkStoreResult<Option<RealizedStarterPlanIdentity>> {
+    if !read_bool(reader)? {
+        return Ok(None);
+    }
+    let planner_revision = read_u32(reader)?;
+    let composition_revision = read_u32(reader)?;
+    let mut checksum = [0_u8; 32];
+    reader.read_exact(&mut checksum)?;
+    Ok(Some(RealizedStarterPlanIdentity::new(
+        planner_revision,
+        composition_revision,
+        checksum,
+    )))
 }
 
 fn write_world_behavior_profile(
@@ -5731,27 +5819,47 @@ mod tests {
     fn binary_world_metadata_v1_decodes_with_legacy_realm_for_migration() {
         let current = encode_world_metadata(&test_world_metadata(45)).unwrap();
         let header_len = WORLD_METADATA_MAGIC.len() + std::mem::size_of::<u32>();
+        let v3_tail_len = 1 + 1 + 4 + 4 + 32;
         let mut legacy = current[..header_len].to_vec();
         legacy[WORLD_METADATA_MAGIC.len()..header_len].copy_from_slice(&1_u32.to_le_bytes());
-        legacy.extend_from_slice(&current[header_len + 16..]);
+        legacy.extend_from_slice(&current[header_len + 16..current.len() - v3_tail_len]);
 
         let decoded = decode_world_metadata(&legacy).unwrap();
 
         assert_eq!(decoded.codec_version, 1);
         assert_eq!(decoded.realm_id, RealmId::LEGACY_SINGLE_REALM);
         assert_eq!(decoded.revision, 45);
+        assert_eq!(decoded.starter_content, StarterContentDescriptor::Wild);
+        assert_eq!(decoded.realized_starter_plan, None);
+    }
+
+    #[test]
+    fn binary_world_metadata_v2_defaults_starter_identity_to_wild() {
+        let current = encode_world_metadata(&test_world_metadata(46)).unwrap();
+        let header_len = WORLD_METADATA_MAGIC.len() + std::mem::size_of::<u32>();
+        let v3_tail_len = 1 + 1 + 4 + 4 + 32;
+        let mut legacy = current[..current.len() - v3_tail_len].to_vec();
+        legacy[WORLD_METADATA_MAGIC.len()..header_len].copy_from_slice(&2_u32.to_le_bytes());
+
+        let decoded = decode_world_metadata(&legacy).unwrap();
+
+        assert_eq!(decoded.codec_version, 2);
+        assert_eq!(decoded.realm_id, RealmId::new([0x5a; 16]).unwrap());
+        assert_eq!(decoded.revision, 46);
+        assert_eq!(decoded.starter_content, StarterContentDescriptor::Wild);
+        assert_eq!(decoded.realized_starter_plan, None);
     }
 
     #[test]
     fn binary_world_metadata_rejects_unknown_versions_and_trailing_bytes() {
         let mut unknown_version = encode_world_metadata(&test_world_metadata(1)).unwrap();
-        unknown_version[WORLD_METADATA_MAGIC.len()] = 3;
+        unknown_version[WORLD_METADATA_MAGIC.len()] = 4;
         let error = decode_world_metadata(&unknown_version).unwrap_err();
         assert_eq!(error.kind(), PersistenceErrorKind::Incompatible);
         assert!(
             error
                 .to_string()
-                .contains("unsupported world metadata codec version 3")
+                .contains("unsupported world metadata codec version 4")
         );
 
         let mut trailing = encode_world_metadata(&test_world_metadata(1)).unwrap();
@@ -6781,6 +6889,8 @@ mod tests {
             target_minecraft_version: WORLD_METADATA_TARGET_MINECRAFT_VERSION.to_owned(),
             seed: -9_223_372_036_854_775,
             world_generation_profile: WorldGenerationProfile::authored_only(),
+            starter_content: StarterContentDescriptor::IntroHomesteadV1,
+            realized_starter_plan: Some(RealizedStarterPlanIdentity::new(3, 5, [0x6b; 32])),
             world_behavior_profile: WorldBehaviorProfile::ProtectedLobby,
             created_unix_millis: 1_784_203_200_000,
             last_played_unix_millis: 1_784_203_260_000,

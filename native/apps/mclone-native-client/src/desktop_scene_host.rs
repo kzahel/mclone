@@ -238,6 +238,7 @@ pub(crate) fn scene_host_options_from_desktop(
         simulation_cadence: scene.simulation_cadence,
         player_movement_cadence: mclone_scene::PlayerMovementCadenceConfig::default(),
         world_behavior_profile: mclone_server::WorldBehaviorProfile::Mutable,
+        starter_content: mclone_server::StarterContentDescriptor::Wild,
         first_person_player_visible: scene.first_person_player_visible,
         use_initial_spawn_center: false,
         freeze_scheduled_fluid_ticks: false,

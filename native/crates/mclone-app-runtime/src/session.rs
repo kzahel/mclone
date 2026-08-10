@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use mclone_server::WorldGenerationProfile;
+use mclone_server::{StarterContentDescriptor, WorldGenerationProfile};
 
 use crate::world_catalog::{LocalWorldCreateOptions, LocalWorldId, LocalWorldSummary};
 
@@ -185,13 +185,26 @@ impl SessionStartRequest {
         seed: i64,
         profile: WorldGenerationProfile,
     ) -> Self {
+        Self::new_seed_local_world_with_generation_profile_and_starter_content(
+            seed,
+            profile,
+            StarterContentDescriptor::Wild,
+        )
+    }
+
+    pub fn new_seed_local_world_with_generation_profile_and_starter_content(
+        seed: i64,
+        profile: WorldGenerationProfile,
+        starter_content: StarterContentDescriptor,
+    ) -> Self {
         Self::CreateLocalWorld {
             options: LocalWorldCreateOptions::new(
                 default_seed_local_world_display_name(seed),
                 seed,
             )
             .expect("default seed local world display name is valid")
-            .with_world_generation_profile(profile),
+            .with_world_generation_profile(profile)
+            .with_starter_content(starter_content),
         }
     }
 
@@ -308,6 +321,7 @@ pub fn plan_session_start<O, E>(
 pub struct SessionStorageIntent {
     seed: Option<i64>,
     world_generation_profile: WorldGenerationProfile,
+    starter_content: StarterContentDescriptor,
     remote_addr: Option<String>,
     world_dir: Option<PathBuf>,
     suppress_adaptive_chunk_publication_budget: bool,
@@ -318,6 +332,7 @@ impl SessionStorageIntent {
         Self {
             seed: Some(seed),
             world_generation_profile: WorldGenerationProfile::default(),
+            starter_content: StarterContentDescriptor::Wild,
             remote_addr: None,
             world_dir: None,
             suppress_adaptive_chunk_publication_budget: false,
@@ -331,6 +346,22 @@ impl SessionStorageIntent {
         Self {
             seed: Some(seed),
             world_generation_profile: profile,
+            starter_content: StarterContentDescriptor::Wild,
+            remote_addr: None,
+            world_dir: None,
+            suppress_adaptive_chunk_publication_budget: false,
+        }
+    }
+
+    pub fn transient_local_world_with_generation_profile_and_starter_content(
+        seed: i64,
+        profile: WorldGenerationProfile,
+        starter_content: StarterContentDescriptor,
+    ) -> Self {
+        Self {
+            seed: Some(seed),
+            world_generation_profile: profile,
+            starter_content,
             remote_addr: None,
             world_dir: None,
             suppress_adaptive_chunk_publication_budget: false,
@@ -341,6 +372,7 @@ impl SessionStorageIntent {
         Self {
             seed: Some(summary.seed),
             world_generation_profile: summary.world_generation_profile,
+            starter_content: summary.starter_content,
             remote_addr: None,
             world_dir: Some(world_dir),
             suppress_adaptive_chunk_publication_budget: false,
@@ -351,6 +383,7 @@ impl SessionStorageIntent {
         Self {
             seed: None,
             world_generation_profile: WorldGenerationProfile::default(),
+            starter_content: StarterContentDescriptor::Wild,
             remote_addr: Some(remote_addr.into()),
             world_dir: None,
             suppress_adaptive_chunk_publication_budget: true,
@@ -367,6 +400,10 @@ impl SessionStorageIntent {
 
     pub const fn world_generation_profile(&self) -> WorldGenerationProfile {
         self.world_generation_profile
+    }
+
+    pub const fn starter_content(&self) -> StarterContentDescriptor {
+        self.starter_content
     }
 
     pub fn world_dir(&self) -> Option<&Path> {

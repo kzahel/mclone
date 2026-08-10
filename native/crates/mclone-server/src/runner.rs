@@ -653,6 +653,7 @@ mod native {
     pub struct NativeIntegratedServerRunnerConfig {
         pub seed: i64,
         pub world_generation_profile: WorldGenerationProfile,
+        pub starter_content: crate::StarterContentDescriptor,
         pub world_topology: HorizontalTopology,
         pub world_behavior_profile: WorldBehaviorProfile,
         pub lighting_enabled: bool,
@@ -676,6 +677,7 @@ mod native {
             Self {
                 seed,
                 world_generation_profile: WorldGenerationProfile::default(),
+                starter_content: crate::StarterContentDescriptor::Wild,
                 world_topology: HorizontalTopology::UNBOUNDED,
                 world_behavior_profile: WorldBehaviorProfile::default(),
                 lighting_enabled: true,
@@ -704,6 +706,14 @@ mod native {
 
         pub fn with_world_generation_profile(mut self, profile: WorldGenerationProfile) -> Self {
             self.world_generation_profile = profile;
+            self
+        }
+
+        pub fn with_starter_content(
+            mut self,
+            starter_content: crate::StarterContentDescriptor,
+        ) -> Self {
+            self.starter_content = starter_content;
             self
         }
 
@@ -1246,6 +1256,7 @@ mod native {
             return Ok(());
         }
         server.set_world_behavior_profile(config.world_behavior_profile);
+        server.set_starter_content(config.starter_content);
         if !matches!(
             &config.world_storage,
             NativeIntegratedServerWorldStorage::Transient

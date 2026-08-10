@@ -1143,6 +1143,7 @@ impl McloneSceneHost {
                 let mut scene = self.active_world.scene.clone();
                 scene.seed = options.seed;
                 scene.world_generation_profile = options.world_generation_profile;
+                scene.starter_content = options.starter_content;
                 scene.use_initial_spawn_center = options
                     .world_generation_profile
                     .authored_missing_chunk()
@@ -1160,6 +1161,7 @@ impl McloneSceneHost {
                 let mut scene = self.active_world.scene.clone();
                 scene.seed = summary.seed;
                 scene.world_generation_profile = summary.world_generation_profile;
+                scene.starter_content = summary.starter_content;
                 scene.use_initial_spawn_center = summary
                     .world_generation_profile
                     .authored_missing_chunk()
@@ -1495,9 +1497,10 @@ impl McloneSceneHost {
         options: &LocalWorldCreateOptions,
     ) -> McloneSceneHostOptions {
         self.scene_for_storage_intent(
-            SessionStorageIntent::transient_local_world_with_generation_profile(
+            SessionStorageIntent::transient_local_world_with_generation_profile_and_starter_content(
                 options.seed,
                 options.world_generation_profile,
+                options.starter_content,
             ),
         )
     }
@@ -1526,6 +1529,7 @@ impl McloneSceneHost {
             scene.seed = seed;
         }
         scene.world_generation_profile = intent.world_generation_profile();
+        scene.starter_content = intent.starter_content();
         scene.use_initial_spawn_center = intent
             .world_generation_profile()
             .authored_missing_chunk()
@@ -6580,9 +6584,10 @@ fn bind_native_entry_world_dir(
 
 #[cfg(not(target_arch = "wasm32"))]
 fn transient_local_session_start_request(scene: &McloneSceneHostOptions) -> SessionStartRequest {
-    SessionStartRequest::new_seed_local_world_with_generation_profile(
+    SessionStartRequest::new_seed_local_world_with_generation_profile_and_starter_content(
         scene.seed,
         scene.world_generation_profile,
+        scene.starter_content,
     )
 }
 
@@ -6595,6 +6600,7 @@ pub fn local_integrated_scene_options(
     let mut options =
         LocalIntegratedSceneOptions::new(scene.seed, scene.center(), scene.render_distance)
             .with_world_generation_profile(scene.world_generation_profile)
+            .with_starter_content(scene.starter_content)
             .with_world_topology(scene.world_topology);
     // Procedural profiles own their preferred initial center. An authored
     // world instead keeps its persistence-backed entry hint so the ordinary
