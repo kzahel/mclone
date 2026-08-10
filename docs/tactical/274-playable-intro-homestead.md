@@ -1,13 +1,13 @@
 # Tactical 274: Playable Intro Homestead
 
-Status: **Replacement Human Review R2 reached and paused on 2026-08-10.
+Status: **Replacement Human Review R2 accepted on 2026-08-10; Slice 5 is
+active at the first-cottage milestone.
 Commit `b74cf73b` proved terrain materialization but its seed-`8675309` site
 failed visual review in shallow water. After the requested retry, commit
 `10329418` adds exact footprint validation and proposes a dry seed-`0`
 `compact-v1` rolling-meadow site with a tier-correct arrival and curved farm
-track. Its aerial, approach, and exact-arrival pixels have been inspected. No
-building blocks have been placed; human acceptance or rejection of this
-replacement remains the gate.**
+track. Its aerial, approach, and exact-arrival pixels were inspected and the
+human accepted the replacement. No building blocks have been placed yet.**
 
 Topic:
 
@@ -525,6 +525,10 @@ platform-boundary source lock with 3 of 4 tests passing: the current
 `WebSceneHost` has 38 mechanical exports while that pre-existing lock expects
 37. The homestead diff changes neither that host nor its exports.
 
+**Human decision, 2026-08-10:** accepted the replacement seed-`0`
+`compact-v1` terrain plan. Proceed with Slice 5, committing the first cottage
+and its rendered review before adding the remaining composition layers.
+
 ## Implementation Slices
 
 ### Slice 0 — baseline and contract locks
@@ -608,8 +612,7 @@ native web-client tests pass, and the web client checks for
 ### Slice 4 — grading, reservation, and first drawable milestone
 
 Result: **implemented in `b74cf73b`, rejected at the first Human Review R2,
-and revised in `10329418`; the dry rolling-meadow replacement is paused at
-the repeated Human Review R2 before buildings.**
+revised in `10329418`, and accepted at the repeated Human Review R2.**
 
 - Apply bounded foundations/terraces, path grading, authored water, and
   decoration reservation through ordinary chunk materialization.
