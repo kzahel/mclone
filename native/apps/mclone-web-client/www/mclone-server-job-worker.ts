@@ -21,6 +21,7 @@ type WasmModule = typeof import("mclone-web-client-wasm");
 // opaque init and request frames; shared-memory jobs carry the SAB control/request/response
 // buffers used to move those bytes between independent Wasm heaps.
 interface ServerJobWorkerMessage {
+  homesteadScoutWitness?: boolean;
   actorInitFrame?: Uint8Array;
   requestId?: number;
   bindgenJsUrl?: string;
@@ -40,6 +41,17 @@ workerSelf.onmessage = async (event: MessageEvent) => {
   const message = (event.data ?? {}) as ServerJobWorkerMessage;
   try {
     const module = await loadWasmModule(message.bindgenJsUrl, message.bindgenWasmUrl);
+    if (message.homesteadScoutWitness === true) {
+      const started = performance.now();
+      workerSelf.postMessage({
+        ok: true,
+        kind: "homestead-scout-witness",
+        flatChecksum: module.mclone_web_homestead_flat_witness(),
+        mcloneChecksum: module.mclone_web_homestead_mclone_witness(),
+        elapsedMillis: performance.now() - started,
+      });
+      return;
+    }
     if (message.transportKind === "shared-memory") {
       handleSharedMemoryJob(module, message);
     } else {

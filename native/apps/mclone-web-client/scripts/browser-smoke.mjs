@@ -123,6 +123,8 @@ const auxiliarySplitProbe = process.argv.includes("--auxiliary-split-probe")
   || process.env.MCLONE_NATIVE_WEB_AUXILIARY_SPLIT_PROBE === "1";
 const indexedDbReloadProbe = process.argv.includes("--indexeddb-reload-probe")
   || process.env.MCLONE_NATIVE_WEB_INDEXEDDB_RELOAD_PROBE === "1";
+const homesteadScoutProbe = process.argv.includes("--homestead-scout-probe")
+  || process.env.MCLONE_NATIVE_WEB_HOMESTEAD_SCOUT_PROBE === "1";
 const catalogUiProbe = process.argv.includes("--catalog-ui-probe")
   || process.env.MCLONE_NATIVE_WEB_CATALOG_UI_PROBE === "1";
 const assetPackUiProbe = process.argv.includes("--asset-pack-ui-probe")
@@ -1838,6 +1840,16 @@ async function run() {
       { timeout: 20_000 },
     );
     const result = await page.evaluate(() => globalThis.__mcloneNativeReady);
+    const homesteadScoutWitness = homesteadScoutProbe
+      ? await probeHomesteadScoutWorker(page, baseUrl)
+      : null;
+    if (homesteadScoutProbe) {
+      console.log(JSON.stringify({
+        url: smokeUrl,
+        homesteadScoutWitness,
+      }, null, 2));
+      return;
+    }
     let pageScreenshotCaptured = false;
     try {
       await page.screenshot({ path: screenshotPath, fullPage: false, timeout: 5_000 });
@@ -1861,6 +1873,7 @@ async function run() {
       remoteWebSocket,
       remoteWebSocketUrl: remoteServer?.websocketUrl ?? null,
       canvasPixels,
+      homesteadScoutWitness,
       result,
     }, null, 2));
   } finally {
@@ -7584,6 +7597,46 @@ function crossOriginIsolationHeaders() {
     "Cross-Origin-Embedder-Policy": "require-corp",
     "Cross-Origin-Resource-Policy": "same-origin",
   };
+}
+
+async function probeHomesteadScoutWorker(page, baseUrl) {
+  const witness = await page.evaluate(async ({ baseUrl }) => {
+    return await new Promise((resolve, reject) => {
+      const worker = new Worker(`${baseUrl}/mclone-server-job-worker.js`, { type: "module" });
+      const timeout = setTimeout(() => {
+        worker.terminate();
+        reject(new Error("homestead scout Worker timed out"));
+      }, 20_000);
+      worker.onmessage = (event) => {
+        clearTimeout(timeout);
+        worker.terminate();
+        resolve(event.data);
+      };
+      worker.onerror = (event) => {
+        clearTimeout(timeout);
+        worker.terminate();
+        reject(new Error(event.message || "homestead scout Worker failed"));
+      };
+      worker.postMessage({
+        homesteadScoutWitness: true,
+        bindgenJsUrl: `${baseUrl}/pkg/mclone_web_client.js`,
+        bindgenWasmUrl: `${baseUrl}/pkg/mclone_web_client_bg.wasm`,
+      });
+    });
+  }, { baseUrl });
+  const expectedFlat = "6a876dfba76200d18daa42aebb3687dbfc22397096c56c12c5d321c8ff728ead";
+  const expectedMclone = "127c1066b6994cfc5a056882511bd6e26addb455c9fa75298f523217e62d3c32";
+  if (
+    !witness?.ok
+    || witness.kind !== "homestead-scout-witness"
+    || witness.flatChecksum !== expectedFlat
+    || witness.mcloneChecksum !== expectedMclone
+    || !Number.isFinite(witness.elapsedMillis)
+    || witness.elapsedMillis > 750
+  ) {
+    throw new Error(`browser Worker homestead scout mismatch:\n${JSON.stringify(witness, null, 2)}`);
+  }
+  return witness;
 }
 
 /**

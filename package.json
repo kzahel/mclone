@@ -132,6 +132,7 @@
     "native:web:smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs",
     "native:web:scene-adapters": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --skip-threading",
     "native:web:thread-smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --require-threading",
+    "native:web:homestead-scout": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --homestead-scout-probe --skip-threading",
     "native:web:remote-smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --remote-websocket",
     "native:web:canvas-smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --require-canvas",
     "native:web:chunk-smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --require-canvas --require-chunk",

@@ -71,8 +71,8 @@ pub use surface::{
 };
 pub(crate) use terrain::apply_stream_plans;
 pub use terrain::{
-    McloneOverworldHydraulicClosureReport, analyze_mclone_overworld_hydraulic_closure,
-    generate_mclone_overworld_surface_chunk,
+    McloneOverworldHydraulicClosureReport, McloneOverworldSurveySampler,
+    analyze_mclone_overworld_hydraulic_closure, generate_mclone_overworld_surface_chunk,
     generate_mclone_overworld_surface_chunk_with_stream_cache,
     generate_mclone_overworld_surface_chunk_with_topology,
     generate_mclone_overworld_surface_chunks_with_topology,

@@ -27,6 +27,62 @@ use mclone_server::{IntegratedServerRunner, ServerRunnerDiagnostics, ServerRunne
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::JsValue;
 
+/// Run the pinned profile-neutral scout witness inside a browser Worker.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub fn mclone_web_homestead_flat_witness() -> Result<String, JsValue> {
+    use mclone_core::{BlockPos, HorizontalTopology};
+    use mclone_worldgen::homestead_site::{
+        FlatGrassHomesteadSurveySource, HomesteadScoutRequest, scout_homestead_site,
+    };
+
+    let receipt = scout_homestead_site(
+        &mut FlatGrassHomesteadSurveySource,
+        HomesteadScoutRequest {
+            seed: 8_675_309,
+            provisional_spawn: BlockPos::new(8, 4, 8),
+            topology: HorizontalTopology::UNBOUNDED,
+        },
+    )
+    .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    Ok(receipt
+        .selected
+        .expect("flat homestead witness must select a site")
+        .checksum_sha256)
+}
+
+/// Run the production Mclone scout receipt used for the R1 browser budget.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub fn mclone_web_homestead_mclone_witness() -> Result<String, JsValue> {
+    use mclone_core::{BlockPos, HorizontalTopology};
+    use mclone_worldgen::homestead_site::{
+        HomesteadScoutRequest, McloneOverworldHomesteadSurveySource, scout_homestead_site,
+    };
+    use mclone_worldgen::levelgen::{
+        McloneOverworldSamplingTopology, mclone_overworld_spawn_chunk,
+    };
+
+    let seed = 8_675_309;
+    let spawn = mclone_overworld_spawn_chunk(seed);
+    let receipt = scout_homestead_site(
+        &mut McloneOverworldHomesteadSurveySource::new(
+            seed,
+            McloneOverworldSamplingTopology::Unbounded,
+        ),
+        HomesteadScoutRequest {
+            seed,
+            provisional_spawn: BlockPos::new(spawn.min_block_x() + 8, 0, spawn.min_block_z() + 8),
+            topology: HorizontalTopology::UNBOUNDED,
+        },
+    )
+    .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    Ok(receipt
+        .selected
+        .expect("Mclone homestead witness must select a site")
+        .checksum_sha256)
+}
+
 mod render_worker_coordinator;
 #[cfg(any(target_arch = "wasm32", test))]
 mod web_integrated_server_startup;

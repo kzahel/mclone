@@ -30,6 +30,49 @@ pub struct McloneOverworldHydraulicClosureReport {
     pub scheduled_liquid_ticks: usize,
 }
 
+/// Metadata-only production terrain sampler for bounded site surveys.
+///
+/// It applies the same planned-stream records as surface generation without
+/// allocating or filling a chunk. Callers keep one instance so the bounded
+/// stream-plan cache is reused across nearby samples.
+#[derive(Clone, Debug)]
+pub struct McloneOverworldSurveySampler {
+    seed: i64,
+    topology: McloneOverworldSamplingTopology,
+    sampler: McloneOverworldSampler,
+    stream_cache: McloneOverworldStreamPlanCache,
+}
+
+impl McloneOverworldSurveySampler {
+    pub fn new(seed: i64, topology: McloneOverworldSamplingTopology) -> Self {
+        Self {
+            seed,
+            topology,
+            sampler: McloneOverworldSampler::new_with_topology(seed, topology),
+            stream_cache: McloneOverworldStreamPlanCache::new(seed, topology),
+        }
+    }
+
+    pub fn sample_landform(
+        &mut self,
+        world_x: i32,
+        world_z: i32,
+    ) -> Result<(McloneOverworldLandformSample, Option<ChunkPos>), String> {
+        sample_mclone_overworld_landform_with_sampler_and_stream_cache(
+            self.seed,
+            self.topology,
+            self.sampler,
+            world_x,
+            world_z,
+            &mut self.stream_cache,
+        )
+    }
+
+    pub fn stream_cache_report(&self) -> super::streams::McloneOverworldStreamPlanCacheReport {
+        self.stream_cache.report()
+    }
+}
+
 impl McloneOverworldHydraulicClosureReport {
     pub const fn is_closed(self) -> bool {
         self.horizontally_open_source_faces == 0
