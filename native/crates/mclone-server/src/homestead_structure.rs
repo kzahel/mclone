@@ -10,6 +10,9 @@ use mclone_worldgen::structure_template::{
     StructurePlaceSettings, TemplateMirror, TemplateRotation,
 };
 
+use crate::homestead_landscape::{
+    compile_landscape_pieces, is_dynamic_landscape_piece, materialize_dynamic_landscape_piece,
+};
 use crate::homestead_plan::{
     HomesteadPlanPiece, HomesteadPlanPieceKind, HomesteadPlanTemplateRotation,
     IntroHomesteadPlanRecord, load_homestead_structure_record,
@@ -25,6 +28,7 @@ pub const INTRO_HOMESTEAD_STRUCTURE_ID: &str = "mclone:intro_homestead_v1";
 #[derive(Clone, Debug)]
 pub struct IntroHomesteadStructureOverlay {
     topology: HorizontalTopology,
+    plan: IntroHomesteadPlanRecord,
     start: StructureStartRecord,
 }
 
@@ -50,6 +54,23 @@ impl IntroHomesteadStructureOverlay {
                 HomesteadPlanPieceKind::ChickenCoop,
             ],
         )
+    }
+
+    pub fn farmstead_composition(
+        plan: IntroHomesteadPlanRecord,
+        topology: HorizontalTopology,
+    ) -> Result<Self, String> {
+        let mut overlay = Self::farmstead_buildings(plan, topology)?;
+        overlay
+            .start
+            .pieces
+            .extend(compile_landscape_pieces(&overlay.plan)?);
+        overlay
+            .start
+            .pieces
+            .sort_by(|left, right| left.piece_id.cmp(&right.piece_id));
+        overlay.start.bounds = encompassing_bounds(&overlay.start.pieces)?;
+        Ok(overlay)
     }
 
     fn from_piece_kinds(
@@ -88,6 +109,7 @@ impl IntroHomesteadStructureOverlay {
             .ok_or_else(|| "intro homestead start anchor is outside topology".to_owned())?;
         Ok(Self {
             topology,
+            plan: plan.clone(),
             start: StructureStartRecord {
                 structure_id: INTRO_HOMESTEAD_STRUCTURE_ID.to_owned(),
                 start_chunk,
@@ -146,7 +168,20 @@ impl IntroHomesteadStructureOverlay {
             }
             receipt.referenced_starts += 1;
             for piece in &self.start.pieces {
-                if !piece.bounds.intersects_chunk(target) {
+                if !piece.bounds.intersects_chunk(target) || !is_dynamic_landscape_piece(piece) {
+                    continue;
+                }
+                receipt.intersecting_pieces += 1;
+                materialize_dynamic_landscape_piece(
+                    &self.plan,
+                    piece,
+                    target,
+                    chunk,
+                    &mut receipt,
+                )?;
+            }
+            for piece in &self.start.pieces {
+                if !piece.bounds.intersects_chunk(target) || is_dynamic_landscape_piece(piece) {
                     continue;
                 }
                 receipt.intersecting_pieces += 1;
@@ -298,10 +333,13 @@ const fn template_rotation(rotation: HomesteadPlanTemplateRotation) -> TemplateR
 mod tests {
     use std::collections::BTreeMap;
 
-    use mclone_worldgen::block::AIR;
+    use mclone_worldgen::block::{AIR, DANDELION, OAK_LEAVES, OAK_LOG, POPPY};
+    use mclone_worldgen::levelgen::McloneOverworldFeatureDependencyCache;
 
     use super::*;
-    use crate::{WorldGenerationProfile, realize_intro_homestead_plan};
+    use crate::{
+        IntroHomesteadTerrainOverlay, WorldGenerationProfile, realize_intro_homestead_plan,
+    };
 
     #[test]
     fn accepted_cottage_is_one_clipped_persistable_structure_start() {
@@ -413,5 +451,85 @@ mod tests {
             })
             .sum::<usize>();
         assert_eq!(placed_blocks, expected_blocks);
+    }
+
+    #[test]
+    fn accepted_complete_composition_is_order_independent() {
+        let plan = realize_intro_homestead_plan(
+            0,
+            WorldGenerationProfile::McloneOverworldV1,
+            HorizontalTopology::UNBOUNDED,
+        )
+        .unwrap();
+        let terrain = IntroHomesteadTerrainOverlay::new(plan.clone()).unwrap();
+        let overlay = IntroHomesteadStructureOverlay::farmstead_composition(
+            plan.clone(),
+            HorizontalTopology::UNBOUNDED,
+        )
+        .unwrap();
+        let targets = overlay
+            .start()
+            .touched_chunks(HorizontalTopology::UNBOUNDED)
+            .unwrap();
+        let generated = McloneOverworldFeatureDependencyCache::new()
+            .generate_features_chunks(0, targets.iter().copied())
+            .chunks;
+        let apply = |order: &[ChunkPos]| {
+            let mut chunks = generated.clone();
+            let mut receipt = StructurePlacementReceipt::default();
+            for pos in order {
+                let chunk = chunks.get_mut(pos).unwrap();
+                terrain.materialize_chunk(*pos, chunk).unwrap();
+                let references = overlay.references_for(*pos).unwrap();
+                let current = overlay.materialize_chunk(*pos, &references, chunk).unwrap();
+                receipt.referenced_starts += current.referenced_starts;
+                receipt.intersecting_pieces += current.intersecting_pieces;
+                receipt.considered_blocks += current.considered_blocks;
+                receipt.placed_blocks += current.placed_blocks;
+                receipt.skipped_outside_target += current.skipped_outside_target;
+            }
+            (chunks, receipt)
+        };
+        let (forward, receipt) = apply(&targets);
+        let (reverse, reverse_receipt) = apply(&targets.iter().rev().copied().collect::<Vec<_>>());
+
+        assert_eq!(forward, reverse);
+        assert_eq!(receipt, reverse_receipt);
+        assert_eq!(overlay.start().pieces.len(), 9);
+        assert!(
+            receipt.placed_blocks > 3_800,
+            "expected building and landscape placements, got {receipt:?}"
+        );
+        assert_eq!(
+            block_at(
+                &forward,
+                plan.planting.focal_oak[0],
+                plan.planting.focal_oak[1],
+                plan.planting.focal_oak[2],
+            ),
+            Some(OAK_LOG)
+        );
+        let authored_counts = forward
+            .values()
+            .flat_map(|chunk| chunk.blocks().iter().copied())
+            .fold([0usize; 3], |mut counts, block| {
+                if block == OAK_LEAVES {
+                    counts[0] += 1;
+                } else if block == DANDELION {
+                    counts[1] += 1;
+                } else if block == POPPY {
+                    counts[2] += 1;
+                }
+                counts
+            });
+        assert!(authored_counts[0] > 100);
+        assert!(authored_counts[1] > 10);
+        assert!(authored_counts[2] > 10);
+    }
+
+    fn block_at(chunks: &BTreeMap<ChunkPos, GeneratedChunk>, x: i32, y: i32, z: i32) -> Option<u8> {
+        chunks
+            .get(&ChunkPos::new(x.div_euclid(16), z.div_euclid(16)))
+            .map(|chunk| chunk.block_at_y(x.rem_euclid(16), y, z.rem_euclid(16)).0)
     }
 }

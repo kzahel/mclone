@@ -11,6 +11,7 @@ mod falling_block;
 mod fluid;
 mod game_mode;
 mod holder;
+mod homestead_landscape;
 mod homestead_plan;
 mod homestead_structure;
 mod homestead_terrain;

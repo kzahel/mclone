@@ -1953,7 +1953,7 @@ mod native {
             );
 
             let cottage = crate::IntroHomesteadStructureOverlay::first_cottage(
-                plan,
+                plan.clone(),
                 HorizontalTopology::UNBOUNDED,
             )
             .unwrap();
@@ -1969,6 +1969,17 @@ mod native {
                 BlockStateId(u32::from(roof_block.block)),
                 "expected authored cottage roof block at {:?}",
                 roof_block.pos
+            );
+            let focal_oak = BlockPos::new(
+                plan.planting.focal_oak[0],
+                plan.planting.focal_oak[1],
+                plan.planting.focal_oak[2],
+            );
+            let (snapshot, _) = load_chunk_snapshot(&mut runner, focal_oak.chunk_pos());
+            assert_eq!(
+                snapshot_block_state(&snapshot, focal_oak),
+                BlockStateId(u32::from(mclone_worldgen::block::OAK_LOG)),
+                "expected authored focal oak at {focal_oak:?}"
             );
             runner.join_shutdown().unwrap();
         }

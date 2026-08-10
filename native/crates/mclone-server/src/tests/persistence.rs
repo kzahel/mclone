@@ -498,7 +498,7 @@ fn homestead_grade_cache_reopens_and_player_edit_wins() {
 }
 
 #[test]
-fn homestead_cottage_cache_reopens_and_player_edit_wins() {
+fn homestead_composition_cache_reopens_and_player_edit_wins() {
     let store = SharedMemoryWorldStore::new();
     let seed = 8_675_309;
     let plan = crate::realize_intro_homestead_plan(
@@ -508,16 +508,19 @@ fn homestead_cottage_cache_reopens_and_player_edit_wins() {
     )
     .unwrap();
     let terrain = crate::IntroHomesteadTerrainOverlay::new(plan.clone()).unwrap();
-    let structure =
-        crate::IntroHomesteadStructureOverlay::first_cottage(plan, HorizontalTopology::UNBOUNDED)
-            .unwrap();
-    let authored = structure.start().pieces[0]
-        .blocks
-        .iter()
-        .filter(|placement| placement.block != AIR)
-        .max_by_key(|placement| placement.pos.y)
-        .copied()
-        .unwrap();
+    let authored = crate::StructureBlockPlacement {
+        pos: WorldBlockPos::new(
+            plan.planting.focal_oak[0],
+            plan.planting.focal_oak[1],
+            plan.planting.focal_oak[2],
+        ),
+        block: mclone_worldgen::block::OAK_LOG,
+    };
+    let structure = crate::IntroHomesteadStructureOverlay::farmstead_composition(
+        plan,
+        HorizontalTopology::UNBOUNDED,
+    )
+    .unwrap();
     let center = authored.pos.chunk_pos();
     let interest = ChunkView {
         center,
