@@ -83,6 +83,7 @@ where
         },
         requests: Vec::new(),
     };
+    let mut fallback_requests = Vec::new();
 
     if effective_max_spawns == 0 || player_positions.is_empty() {
         return result;
@@ -186,7 +187,7 @@ where
                 continue;
             }
 
-            result.requests.push(CreatureSpawnRequest {
+            let request = CreatureSpawnRequest {
                 kind,
                 position: Vec3d::new(
                     f64::from(pos.x) + 0.5,
@@ -194,7 +195,14 @@ where
                     f64::from(pos.z) + 0.5,
                 ),
                 y_rot_degrees: random.next_float() * 360.0,
-            });
+            };
+            if profile == CreatureSpawnProfile::McloneOverworld {
+                if fallback_requests.len() < effective_max_spawns {
+                    fallback_requests.push(request);
+                }
+            } else {
+                result.requests.push(request);
+            }
         }
 
         if result.diagnostics.attempts >= CREATURE_SPAWN_MAX_ATTEMPTS_PER_TICK
@@ -202,6 +210,15 @@ where
         {
             break;
         }
+    }
+
+    if profile == CreatureSpawnProfile::McloneOverworld
+        && result.requests.len() < effective_max_spawns
+    {
+        let remaining = effective_max_spawns - result.requests.len();
+        result
+            .requests
+            .extend(fallback_requests.into_iter().take(remaining));
     }
 
     result.diagnostics.spawned = result.requests.len();
@@ -617,5 +634,39 @@ mod tests {
         assert!(sampled.len() > CREATURE_SPAWN_MAX_CHUNKS_PER_TICK);
         assert!(sampled.iter().any(|chunk| chunk.x < 0));
         assert!(sampled.iter().any(|chunk| chunk.x > 0));
+    }
+
+    #[test]
+    fn mclone_farm_fallback_waits_for_the_bounded_habitat_scan() {
+        let chunks = [-6, -5, -4, -3, 3, 4, 5, 6]
+            .into_iter()
+            .map(|x| ChunkPos::new(x, 0))
+            .collect::<BTreeSet<_>>();
+        let plains = get_layered_biome_by_id(1);
+        let mut random = SimpleRandomSource::new(12_345);
+
+        let result = plan_creature_spawns(
+            &chunks,
+            &[Vec3d::new(0.0, 64.0, 0.0)],
+            4,
+            CreatureSpawnProfile::McloneOverworld,
+            &mut random,
+            grass_surface_block_at,
+            |_| Some(plains),
+            |_| Some(15),
+        );
+
+        assert_eq!(
+            result.diagnostics.attempts,
+            CREATURE_SPAWN_MAX_ATTEMPTS_PER_TICK
+        );
+        assert_eq!(result.requests.len(), 4);
+        assert!(
+            result
+                .requests
+                .iter()
+                .all(|request| matches!(request.kind, EntityKind::Cow | EntityKind::Chicken))
+        );
+        assert_eq!(result.diagnostics.mallard_flocks_spawned, 0);
     }
 }
