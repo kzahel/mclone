@@ -7,7 +7,9 @@ Status: active direction with its first end-to-end foundation complete on
 [`277`](../tactical/277-habitat-driven-creature-ecology-foundation.md) binds
 natural cow/chicken habitat to generated chunk biomes and proves immediate
 durability across persistent chunk unload/reload. Rich habitat fitness and
-mechanics-led species promotion remain open.
+mechanics-led species promotion are now active in Tactical
+[`278`](../tactical/278-mallard-wetland-ecology-loop.md), beginning with a
+mallard wetland loop.
 
 ## Scope
 
