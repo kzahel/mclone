@@ -13,6 +13,7 @@ export const FIRST_PARTY_FIGURES: readonly FirstPartyFigure[] = [
   firstPartyFigure("player"),
   firstPartyFigure("cow"),
   firstPartyFigure("chicken"),
+  firstPartyFigure("mallard_duck"),
   firstPartyFigure("upright_bear"),
 ];
 

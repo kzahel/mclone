@@ -1072,6 +1072,8 @@ mod tests {
         include_str!("../../../../assets/mclone/figures/player.figure.json");
     const CHICKEN_FIGURE_JSON: &str =
         include_str!("../../../../assets/mclone/figures/chicken.figure.json");
+    const MALLARD_DUCK_FIGURE_JSON: &str =
+        include_str!("../../../../assets/mclone/figures/mallard_duck.figure.json");
 
     #[test]
     fn compiles_player_figure_asset() {
@@ -1117,7 +1119,7 @@ mod tests {
         let source = mclone_assets::FilesystemAssetSource::new("../../..");
         let figures = load_first_party_actor_figures(&source).unwrap();
 
-        assert_eq!(figures.len(), 4);
+        assert_eq!(figures.len(), 5);
         assert!(
             figures
                 .get(mclone_assets::default_player_figure_id())
@@ -1130,6 +1132,11 @@ mod tests {
         );
         assert!(figures.get(mclone_assets::chicken_figure_id()).is_some());
         assert!(figures.get(mclone_assets::cow_figure_id()).is_some());
+        assert!(
+            figures
+                .get(mclone_assets::mallard_duck_figure_id())
+                .is_some()
+        );
     }
 
     #[test]
@@ -1267,6 +1274,10 @@ mod tests {
             include_str!("../../../../assets/mclone/figures/cow.figure.json"),
         );
         source.insert_text(mclone_assets::chicken_figure_path(), CHICKEN_FIGURE_JSON);
+        source.insert_text(
+            mclone_assets::mallard_duck_figure_path(),
+            MALLARD_DUCK_FIGURE_JSON,
+        );
         source
     }
 

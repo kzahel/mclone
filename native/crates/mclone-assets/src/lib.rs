@@ -26,9 +26,10 @@ pub use figure::{
     FigureAlphaCoverage, FigureAlphaMode, FigureAsciiTexture, FigureAsset, FigureClip,
     FigureClipContact, FigureClipKey, FigureClipLocomotion, FigureClipRole, FigureClipTransform,
     FigureFace, FigureJoint, FigureMaterial, FigurePart, FigurePlaneSidedness, FigurePrimitive,
-    UPRIGHT_BEAR_FIGURE_ID, UPRIGHT_BEAR_FIGURE_PATH, actor_figure_path, chicken_figure_id,
-    chicken_figure_path, cow_figure_id, cow_figure_path, default_player_figure_id,
-    default_player_figure_path, load_figure_asset, upright_bear_figure_id,
+    MALLARD_DUCK_FIGURE_ID, MALLARD_DUCK_FIGURE_PATH, UPRIGHT_BEAR_FIGURE_ID,
+    UPRIGHT_BEAR_FIGURE_PATH, actor_figure_path, chicken_figure_id, chicken_figure_path,
+    cow_figure_id, cow_figure_path, default_player_figure_id, default_player_figure_path,
+    load_figure_asset, mallard_duck_figure_id, mallard_duck_figure_path, upright_bear_figure_id,
     upright_bear_figure_path,
 };
 pub use first_party::{

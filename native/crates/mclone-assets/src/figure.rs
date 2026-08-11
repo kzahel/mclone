@@ -8,15 +8,18 @@ pub const DEFAULT_PLAYER_FIGURE_PATH: &str = "assets/mclone/figures/player.figur
 pub const UPRIGHT_BEAR_FIGURE_PATH: &str = "assets/mclone/figures/upright_bear.figure.json";
 pub const COW_FIGURE_PATH: &str = "assets/mclone/figures/cow.figure.json";
 pub const CHICKEN_FIGURE_PATH: &str = "assets/mclone/figures/chicken.figure.json";
+pub const MALLARD_DUCK_FIGURE_PATH: &str = "assets/mclone/figures/mallard_duck.figure.json";
 pub const DEFAULT_PLAYER_FIGURE_ID: ActorFigureId = ActorFigureId::from_static("mclone:player");
 pub const UPRIGHT_BEAR_FIGURE_ID: ActorFigureId = ActorFigureId::from_static("mclone:upright_bear");
 pub const COW_FIGURE_ID: ActorFigureId = ActorFigureId::from_static("mclone:cow");
 pub const CHICKEN_FIGURE_ID: ActorFigureId = ActorFigureId::from_static("mclone:chicken");
-pub const FIRST_PARTY_ACTOR_FIGURE_IDS: [ActorFigureId; 4] = [
+pub const MALLARD_DUCK_FIGURE_ID: ActorFigureId = ActorFigureId::from_static("mclone:mallard_duck");
+pub const FIRST_PARTY_ACTOR_FIGURE_IDS: [ActorFigureId; 5] = [
     DEFAULT_PLAYER_FIGURE_ID,
     UPRIGHT_BEAR_FIGURE_ID,
     COW_FIGURE_ID,
     CHICKEN_FIGURE_ID,
+    MALLARD_DUCK_FIGURE_ID,
 ];
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -211,6 +214,10 @@ pub fn chicken_figure_path() -> AssetPath {
     AssetPath::new(CHICKEN_FIGURE_PATH)
 }
 
+pub fn mallard_duck_figure_path() -> AssetPath {
+    AssetPath::new(MALLARD_DUCK_FIGURE_PATH)
+}
+
 pub const fn default_player_figure_id() -> ActorFigureId {
     DEFAULT_PLAYER_FIGURE_ID
 }
@@ -227,12 +234,17 @@ pub const fn chicken_figure_id() -> ActorFigureId {
     CHICKEN_FIGURE_ID
 }
 
+pub const fn mallard_duck_figure_id() -> ActorFigureId {
+    MALLARD_DUCK_FIGURE_ID
+}
+
 pub fn actor_figure_path(id: ActorFigureId) -> Option<AssetPath> {
     match id.as_str() {
         "mclone:player" => Some(default_player_figure_path()),
         "mclone:upright_bear" => Some(upright_bear_figure_path()),
         "mclone:cow" => Some(cow_figure_path()),
         "mclone:chicken" => Some(chicken_figure_path()),
+        "mclone:mallard_duck" => Some(mallard_duck_figure_path()),
         _ => None,
     }
 }
@@ -366,6 +378,15 @@ mod tests {
         assert_eq!(
             actor_figure_path(cow_figure_id()).unwrap(),
             cow_figure_path()
+        );
+    }
+
+    #[test]
+    fn mallard_figure_has_a_stable_runtime_mapping() {
+        assert_eq!(mallard_duck_figure_id().as_str(), "mclone:mallard_duck");
+        assert_eq!(
+            actor_figure_path(mallard_duck_figure_id()).unwrap(),
+            mallard_duck_figure_path()
         );
     }
 }

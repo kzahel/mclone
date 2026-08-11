@@ -208,8 +208,8 @@ mod tests {
     use super::*;
     use mclone_assets::{
         chicken_figure_id, chicken_figure_path, cow_figure_id, cow_figure_path,
-        default_player_figure_id, default_player_figure_path, upright_bear_figure_id,
-        upright_bear_figure_path,
+        default_player_figure_id, default_player_figure_path, mallard_duck_figure_id,
+        mallard_duck_figure_path, upright_bear_figure_id, upright_bear_figure_path,
     };
     use std::io::Cursor;
 
@@ -231,6 +231,10 @@ mod tests {
         source.insert_text(
             cow_figure_path(),
             include_str!("../../../../assets/mclone/figures/cow.figure.json"),
+        );
+        source.insert_text(
+            mallard_duck_figure_path(),
+            include_str!("../../../../assets/mclone/figures/mallard_duck.figure.json"),
         );
         source
     }
@@ -272,6 +276,7 @@ mod tests {
         assert!(assets.figures.get(upright_bear_figure_id()).is_some());
         assert!(assets.figures.get(chicken_figure_id()).is_some());
         assert!(assets.figures.get(cow_figure_id()).is_some());
+        assert!(assets.figures.get(mallard_duck_figure_id()).is_some());
         assert!(
             assets
                 .figures
@@ -279,6 +284,7 @@ mod tests {
                 .is_some()
         );
         assert!(assets.figures.prepared(chicken_figure_id()).is_some());
-        assert_eq!(assets.figures.len(), 4);
+        assert!(assets.figures.prepared(mallard_duck_figure_id()).is_some());
+        assert_eq!(assets.figures.len(), 5);
     }
 }

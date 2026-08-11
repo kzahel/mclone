@@ -8,7 +8,7 @@ use mclone_assets::{
     PreparedFigurePassRange, PreparedFigureVertex, chicken_figure_id, default_player_figure_id,
     evaluate_prepared_figure_clip_into,
     evaluate_prepared_figure_clip_with_part_rotation_overrides_into,
-    evaluate_prepared_figure_rest_pose_into,
+    evaluate_prepared_figure_rest_pose_into, mallard_duck_figure_id,
 };
 
 use crate::GpuPassId;
@@ -200,10 +200,11 @@ impl PreparedActorSharedResources {
             multiview_pipeline_count: if multiview_pipelines.is_some() { 6 } else { 0 },
             ..PreparedActorSharedSnapshot::default()
         };
-        for (id, figure) in figures
-            .prepared_figures()
-            .filter(|(id, _)| *id == default_player_figure_id() || *id == chicken_figure_id())
-        {
+        for (id, figure) in figures.prepared_figures().filter(|(id, _)| {
+            *id == default_player_figure_id()
+                || *id == chicken_figure_id()
+                || *id == mallard_duck_figure_id()
+        }) {
             let resources = PreparedActorFigureResources::new(
                 device,
                 queue,
@@ -873,8 +874,10 @@ fn prepared_actor_key(actor: ActorInstance) -> Option<(ActorInstanceId, ActorFig
     let ActorInstanceShape::Figure(figure_id) = actor.shape else {
         return None;
     };
-    (figure_id == chicken_figure_id() || figure_id == default_player_figure_id())
-        .then_some((id, figure_id))
+    (figure_id == chicken_figure_id()
+        || figure_id == default_player_figure_id()
+        || figure_id == mallard_duck_figure_id())
+    .then_some((id, figure_id))
 }
 
 fn actor_model_matrix(actor: ActorInstance) -> Option<Mat4> {
@@ -1343,6 +1346,13 @@ mod tests {
         assert_eq!(
             prepared_actor_key(anonymous.with_id(ActorInstanceId::Entity(9))),
             Some((ActorInstanceId::Entity(9), chicken_figure_id()))
+        );
+        let mallard =
+            ActorInstance::remote_player_with_figure(Vec3::ZERO, 0.0, mallard_duck_figure_id())
+                .with_id(ActorInstanceId::Entity(10));
+        assert_eq!(
+            prepared_actor_key(mallard),
+            Some((ActorInstanceId::Entity(10), mallard_duck_figure_id()))
         );
     }
 

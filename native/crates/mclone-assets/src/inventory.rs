@@ -121,6 +121,11 @@ fn direct_asset_requirements() -> Vec<CanonicalAssetRequirement> {
             Required,
         ),
         (
+            "assets/mclone/figures/mallard_duck.figure.json",
+            ActorFigure,
+            Required,
+        ),
+        (
             "assets/minecraft/textures/misc/underwater.png",
             ScreenEffect,
             Required,
