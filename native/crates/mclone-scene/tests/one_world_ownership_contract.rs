@@ -579,21 +579,35 @@ fn local_startup_installs_one_coherent_drawable_world() {
 }
 
 #[test]
-fn interactive_local_startup_reconciles_without_blocking_the_frame_callback() {
+fn interactive_local_startup_accepts_saved_pose_before_drawable_admission() {
     let source = read("src/session.rs");
     let advance = braced_item(&source, "fn advance_active_local_startup(");
     let complete = braced_item(&source, "pub(crate) fn complete_local_startup(");
+    let reconcile = braced_item(&source, "fn reconcile_local_startup_pose_pass(");
 
     assert_in_order(
         advance,
         &[
             ".pump",
             ".step(camera_position)",
-            "render_seed_drawable_section_count_near(center)",
-            "reconcile_xr_startup_pose(",
-            "reconciled_interest_center = Some(interest_after)",
+            "if step.spawn_authority_ready",
+            "reconcile_local_startup_pose_pass(startup, &self.services.clock)",
+            "if corrected_before_playable",
             "return Ok(false);",
+            "if !step.playable_ready",
+            "render_seed_drawable_section_count_near(center)",
+            "reconcile_local_startup_pose_pass(startup, &self.services.clock)",
             "self.complete_local_startup(device, queue, startup, step)",
+        ],
+    );
+    assert_in_order(
+        reconcile,
+        &[
+            "let interest_before = startup.pump.interest_center();",
+            "reconcile_xr_startup_pose(",
+            "let interest_after = startup.pump.interest_center();",
+            "startup.reconciliation_passes += 1;",
+            "startup.reconciled_interest_center = Some(interest_after);",
         ],
     );
     assert!(!advance.contains(".drive_to_ready_reconciled("));

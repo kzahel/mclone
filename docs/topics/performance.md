@@ -456,7 +456,13 @@ Use these local sources when implementing or reviewing performance work:
   correction-cascade and best-effort void-view rules. The regression was
   reproduced against a 5,141-chunk SQLite save whose player resumed 61 chunks
   from the provisional center; new worlds did not expose it because they had
-  no far saved-pose correction.
+  no far saved-pose correction. A follow-up moved the first saved-pose
+  reconciliation ahead of combined drawable admission: as soon as the server
+  has authoritative underfoot data, the scene accepts the restored camera and
+  makes the next budgeted pump step target that view. The same copied save,
+  with a then-current 58-chunk resume correction, reached playable in two
+  ordinary window startup polls and about one second instead of making a
+  provisional-camera render seed a prerequisite.
 - Desktop frame pacing controls and headless frame-budget probe:
   [`029`](../tactical/029-native-frame-pacing-and-streaming-hitches.md)
 - Completed chunk publication slicing and initial streaming attribution:

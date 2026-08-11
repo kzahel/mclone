@@ -4368,6 +4368,33 @@ impl McloneSceneHost {
             }
         };
 
+        // The server can restore a saved player pose as soon as spawn authority
+        // is ready, before the startup seed has drawable geometry. Accept that
+        // correction immediately. Waiting for the combined playable gate first
+        // makes the renderer build or wait at the provisional scene camera even
+        // though the server is already loading the persisted player's view.
+        let corrected_before_playable = if step.spawn_authority_ready {
+            let startup = self
+                .active_world
+                .local_startup
+                .as_mut()
+                .expect("startup must exist after successful pump step");
+            if startup.reconciliation_passes == 0 {
+                reconcile_local_startup_pose_pass(startup, &self.services.clock)
+                    .context("accept initial local-world startup pose")?
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+        if corrected_before_playable {
+            // Force the next budgeted step to use the corrected camera. A seed
+            // produced by this step may have been prioritized at the provisional
+            // camera and therefore cannot admit the persisted view.
+            return Ok(false);
+        }
+
         if !step.playable_ready {
             if self
                 .active_world
@@ -4430,27 +4457,8 @@ impl McloneSceneHost {
                 if startup.reconciliation_passes >= MAX_STARTUP_RECONCILE_PASSES {
                     true
                 } else {
-                    let interest_before = startup.pump.interest_center();
-                    reconcile_xr_startup_pose(
-                        startup.pump.runtime_services_mut(),
-                        &mut startup.camera,
-                        startup.startup_view_pose,
-                        &self.services.clock,
-                    )
-                    .context("reconcile incremental local-world startup pose")?;
-                    let interest_after = startup.pump.interest_center();
-                    startup.reconciliation_passes += 1;
-                    if interest_after == interest_before {
-                        true
-                    } else {
-                        startup.reconciled_interest_center = Some(interest_after);
-                        startup.reconciliation_deadline.get_or_insert_with(|| {
-                            self.services
-                                .clock
-                                .deadline_after(DEFAULT_STARTUP_READINESS_TIMEOUT)
-                        });
-                        false
-                    }
+                    !reconcile_local_startup_pose_pass(startup, &self.services.clock)
+                        .context("reconcile incremental local-world startup pose")?
                 }
             }
         };
@@ -6662,6 +6670,31 @@ where
         None,
     )?;
     Ok(changed)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn reconcile_local_startup_pose_pass(
+    startup: &mut SceneLocalStartup,
+    clock: &MonotonicClockHandle,
+) -> Result<bool> {
+    let interest_before = startup.pump.interest_center();
+    reconcile_xr_startup_pose(
+        startup.pump.runtime_services_mut(),
+        &mut startup.camera,
+        startup.startup_view_pose,
+        clock,
+    )?;
+    let interest_after = startup.pump.interest_center();
+    startup.reconciliation_passes += 1;
+    if interest_after == interest_before {
+        return Ok(false);
+    }
+
+    startup.reconciled_interest_center = Some(interest_after);
+    startup
+        .reconciliation_deadline
+        .get_or_insert_with(|| clock.deadline_after(DEFAULT_STARTUP_READINESS_TIMEOUT));
+    Ok(true)
 }
 
 pub(crate) fn xr_game_ui_for_session(
