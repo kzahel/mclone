@@ -76,6 +76,14 @@ framework or the owner of procedural terrain jobs. Tactical 256 does not
 authorize a shared Wasm heap; later `mclone-scene` adoption consumes the shared
 terrain service through a separate integration tactical.
 
+A 2026-08-11 enforcement follow-up registered the already-shipped
+`mclone-terrain-vegetation-worker.ts` entry in the executable ownership
+inventory. The inventory now covers 3,850 authored TypeScript lines across 17
+modules, including six Worker entries and one generic Worker-construction
+site. Its self-test and the aggregate thin-adapter purity gate pass; the
+production contract remains private Wasm memory per Worker with external
+`SharedArrayBuffer` mailboxes.
+
 Pinned desktop and phone runs matched native/offscreen source fingerprint,
 record hash, family counts, `2,609` records/instances, and `281,772` proxy
 vertices. The smoke-only `1 KiB` arena forced four overflows and bounded growth

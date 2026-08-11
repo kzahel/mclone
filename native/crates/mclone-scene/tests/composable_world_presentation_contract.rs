@@ -357,12 +357,17 @@ fn standby_preview_starts_as_an_observer_and_activation_exchanges_authority() {
 fn composition_phase_order_is_all_actors_between_all_opaque_and_translucent() {
     let frame = read("../mclone-app-runtime/src/frame_render.rs");
     let entry = braced_item(&frame, "fn render_full_frame_for_view_inner<BuildGuiDraw>(");
+    let backdrop = braced_item(
+        &frame,
+        "fn render_full_frame_for_view_inner_with_backdrop<BuildGuiDraw>(",
+    );
     let render = braced_item(
         &frame,
         "fn render_full_frame_for_view_inner_with_actor_preparation<BuildGuiDraw>(",
     );
-    assert!(entry.contains("render_full_frame_for_view_inner_with_actor_preparation("));
-    assert!(entry.contains("FrameActorPreparation::Refresh"));
+    assert!(entry.contains("render_full_frame_for_view_inner_with_backdrop("));
+    assert!(backdrop.contains("render_full_frame_for_view_inner_with_actor_preparation("));
+    assert!(backdrop.contains("FrameActorPreparation::Refresh"));
     assert_in_order(
         render,
         &[

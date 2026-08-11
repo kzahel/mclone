@@ -66,6 +66,9 @@ const DRAWABLE_WORLD_SLOT_FIELDS: &[&str] = &[
     "local_startup",
     "external_runtime_startup_pending",
     "local_participant",
+    "footsteps",
+    "pending_interaction_sounds",
+    "interaction_sound_sequence",
     "local_guest_preview",
     "draw",
     "actors",
@@ -137,6 +140,8 @@ const SCENE_HOST_FIELDS: &[&str] = &[
     "status_overlay",
     "sky",
     "screen_effects",
+    "terrain_view",
+    "terrain_vegetation_executor_factory",
     "underwater_effects",
     "last_underwater_update",
     "head_comfort",
@@ -180,9 +185,9 @@ fn host_has_one_active_and_one_optional_concrete_drawable_slot() {
     let slot_fields = field_names(slot);
     let host_fields = field_names(host);
     assert_eq!(slot_fields, DRAWABLE_WORLD_SLOT_FIELDS);
-    assert_eq!(slot_fields.len(), 21);
+    assert_eq!(slot_fields.len(), 24);
     assert_eq!(host_fields, SCENE_HOST_FIELDS);
-    assert_eq!(host_fields.len(), 90);
+    assert_eq!(host_fields.len(), 92);
     assert_eq!(host.matches("active_world: DrawableWorldSlot").count(), 1);
     assert_eq!(
         host.matches("standby_world: Option<DrawableWorldSlot>")
@@ -579,7 +584,7 @@ fn local_startup_installs_one_coherent_drawable_world() {
 }
 
 #[test]
-fn interactive_local_startup_accepts_saved_pose_before_drawable_admission() {
+fn interactive_local_startup_waits_for_saved_pose_before_drawable_admission() {
     let source = read("src/session.rs");
     let advance = braced_item(&source, "fn advance_active_local_startup(");
     let complete = braced_item(&source, "pub(crate) fn complete_local_startup(");
@@ -590,9 +595,11 @@ fn interactive_local_startup_accepts_saved_pose_before_drawable_admission() {
         &[
             ".pump",
             ".step(camera_position)",
-            "if step.spawn_authority_ready",
+            "apply_pending_engine_camera_position_updates(",
+            "if authoritative_pose_ready",
             "reconcile_local_startup_pose_pass(startup, &self.services.clock)",
-            "if corrected_before_playable",
+            "return Ok(false);",
+            ".is_some_and(|startup| startup.reconciliation_passes == 0)",
             "return Ok(false);",
             "if !step.playable_ready",
             "render_seed_drawable_section_count_near(center)",

@@ -62,7 +62,8 @@ fn indexed_db_schema_and_record_played_atomicity_stay_locked() {
     let indexed_db =
         fs::read_to_string(app_root().join("www/mclone-web-world-catalog.ts")).unwrap();
 
-    assert!(indexed_db.contains("WORLD_DB_VERSION = 6"));
+    assert!(indexed_db.contains("WORLD_DB_VERSION = 7"));
+    assert!(indexed_db.contains("WORLD_SAVED_DATA_STORE = \"savedData\""));
     assert!(indexed_db.contains("Enqueue read-dependent writes synchronously"));
     assert!(indexed_db.contains("record-played get/put must remain in one"));
     assert!(indexed_db.contains("Promise.all(step.transactions.map"));

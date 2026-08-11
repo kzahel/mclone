@@ -158,15 +158,17 @@ Completed on 2026-08-11.
   IDs.
 - `pnpm native:web:build` passes, compiling the shared server and scene owners
   into the browser target.
-- The broad native workspace run reaches and passes the changed core/server
-  suites, but the repository still has six unrelated stale ownership-lock
-  tests: two scene source-marker locks, three web baseline/database-version
-  locks, and the World Explorer vegetation dependency lock. Rerunning those
-  targets individually reproduces the same failures without this slice.
-- `pnpm native:thin-adapters:purity` reaches the ownership inventory but fails
-  because the existing `mclone-terrain-vegetation-worker.ts` module is not yet
-  registered in that inventory. This is the same ambient vegetation-ownership
-  drift and is outside this tactical's gameplay/persistence boundary.
+- The initial broad native workspace run reached and passed the changed
+  core/server suites, then exposed six unrelated stale source locks: two scene
+  markers, three web baseline/database-version locks, and the World Explorer
+  vegetation dependency lock. A 2026-08-11 follow-up refreshed each guard to
+  assert its already-intended owner and the complete workspace suite now
+  passes.
+- That follow-up also registered the existing
+  `mclone-terrain-vegetation-worker.ts` module in the Worker inventory.
+  `pnpm native:thin-adapters:purity` and the inventory's synthetic self-test
+  now pass without relaxing the domain-blind adapter or private-Wasm-memory
+  contracts.
 
 ### Rendered evidence
 

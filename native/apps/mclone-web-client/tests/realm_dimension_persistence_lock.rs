@@ -18,8 +18,10 @@ const SERVER_WORKER: &str = include_str!(concat!(
 ));
 
 #[test]
-fn indexed_db_v6_qualifies_dimension_records_without_runtime_migration() {
-    assert!(WORLD_CATALOG.contains("export const WORLD_DB_VERSION = 6;"));
+fn indexed_db_v7_qualifies_dimension_and_saved_data_records_without_runtime_migration() {
+    assert!(WORLD_CATALOG.contains("export const WORLD_DB_VERSION = 7;"));
+    assert!(WORLD_CATALOG.contains("export const WORLD_SAVED_DATA_STORE = \"savedData\";"));
+    assert!(WORLD_CATALOG.contains("keyPath: [\"worldId\", \"savedDataKey\"]"));
     assert!(WORLD_CATALOG.contains("keyPath: [\"worldId\", \"dimensionKey\", \"x\", \"z\"]"));
     assert!(WORLD_CATALOG.contains("keyPath: [\"worldId\", \"dimensionKey\"]"));
     assert!(WORLD_CATALOG.contains("keyPath: [\"worldId\", \"playerKey\"]"));

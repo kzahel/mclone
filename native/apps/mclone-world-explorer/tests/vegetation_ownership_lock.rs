@@ -42,6 +42,16 @@ fn braced_item<'a>(source: &'a str, marker: &str) -> &'a str {
     panic!("unterminated braced item for {marker}")
 }
 
+fn manifest_declares_dependency(manifest: &str, dependency: &str) -> bool {
+    manifest.lines().any(|line| {
+        let line = line.trim();
+        let Some(suffix) = line.strip_prefix(dependency) else {
+            return false;
+        };
+        matches!(suffix.as_bytes().first(), Some(b'.' | b'=' | b' ' | b'\t'))
+    })
+}
+
 #[test]
 fn explorer_session_does_not_own_vegetation_coordination_policy() {
     for forbidden in [
@@ -134,16 +144,24 @@ fn browser_javascript_and_shared_transport_are_domain_blind() {
 
 #[test]
 fn compiler_dependency_direction_stays_worldgen_to_terrain_view_consumer() {
+    assert!(manifest_declares_dependency(
+        "[dependencies]\nwasm-bindgen.workspace = true\n",
+        "wasm-bindgen"
+    ));
+    assert!(!manifest_declares_dependency(
+        "[dev-dependencies]\nwasm-bindgen-test.workspace = true\n",
+        "wasm-bindgen"
+    ));
     assert!(TERRAIN_VIEW_MANIFEST.contains("mclone-worldgen.workspace = true"));
     for forbidden in [
         "mclone-terrain-view",
-        "\nwgpu",
+        "wgpu",
         "wasm-bindgen",
         "web-sys",
         "winit",
     ] {
         assert!(
-            !WORLDGEN_MANIFEST.contains(forbidden),
+            !manifest_declares_dependency(WORLDGEN_MANIFEST, forbidden),
             "worldgen compiler boundary gained forbidden dependency {forbidden:?}"
         );
     }

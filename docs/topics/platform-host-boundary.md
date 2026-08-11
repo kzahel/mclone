@@ -34,6 +34,13 @@ product runtimes. The Explorer stays small through its Rust dependency
 closure, not through an Explorer-specific or semantically reduced JavaScript
 ABI.
 
+An enforcement-maintenance pass on 2026-08-11 refreshed source locks after
+intentional composed-terrain, world-slot audio, saved-pose startup, browser
+catalog v7, and vegetation-worker changes. The locks now name those owners
+explicitly instead of pinning stale field counts, call markers, database
+versions, or substring matches. The complete native workspace suite and
+`pnpm native:thin-adapters:purity` pass with the boundary unchanged.
+
 The completed Explorer proof adds a useful second browser consumer. One
 shared Rust session owns navigation, contact gestures, clipmap planning,
 rendering, and diagnostics. Native supplies `winit`, filesystem packs, elapsed
