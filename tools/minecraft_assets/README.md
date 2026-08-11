@@ -17,6 +17,7 @@ pnpm assets:pack:first-party
 pnpm assets:validate:first-party
 pnpm assets:pack:first-party:test
 pnpm assets:stage:first-party
+pnpm assets:sfx:check
 ```
 
 The checked freshness lock lives in:
@@ -67,9 +68,11 @@ generated-assets/texture-lab/mclone-generated-fallback.pbp
 generated-assets/texture-lab/mclone-diagnostic-missing.pbp
 ```
 
-The command first performs a clean texture-lab runtime export with
-`--no-reference`, packages the accepted authored PNGs and repo-owned figures,
-exports the shared Rust inventory, and builds the generated sources.
+The command first verifies the checked-in Kenney CC0 sound bank, performs a
+clean texture-lab runtime export with `--no-reference`, packages the accepted
+authored PNGs, repo-owned figures, and audio, exports the shared Rust inventory,
+and builds the generated sources. Audio import and provenance details live in
+[`../../assets/mclone/audio/README.md`](../../assets/mclone/audio/README.md).
 `generated-assets/` remains ignored.
 
 The legacy-named generated fallback is now the provisional source. It contains

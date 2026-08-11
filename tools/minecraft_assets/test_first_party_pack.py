@@ -150,6 +150,7 @@ class FirstPartyPackTests(unittest.TestCase):
             self.assertEqual(packs[0][0].read_bytes(), packs[1][0].read_bytes())
             self.assertEqual(packs[0][1].read_bytes(), packs[1][1].read_bytes())
             self.assertEqual(packs[0][2]["origin"], "first_party")
+            self.assertIn("audio_content", packs[0][2]["roles"])
             self.assertNotIn(sentinel.read_bytes(), packs[0][0].read_bytes())
             with zipfile.ZipFile(packs[0][0]) as archive:
                 self.assertEqual(

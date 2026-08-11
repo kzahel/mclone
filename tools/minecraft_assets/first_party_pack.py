@@ -619,7 +619,7 @@ def build_authored_pack(
         AUTHORED_PACK_ID,
         "Mclone Original Assets",
         "first_party",
-        ["authored_override", "render_content", "metadata"],
+        ["authored_override", "render_content", "audio_content", "metadata"],
         entries,
         ["texture_lab_curated_lifecycle", "repo_first_party_assets"],
     )

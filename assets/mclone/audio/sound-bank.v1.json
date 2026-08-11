@@ -1,0 +1,448 @@
+{
+  "families": [
+    {
+      "gain": 0.64,
+      "key": "mclone:break_glass",
+      "no_immediate_repeat": true,
+      "pitch_max": 1.06,
+      "pitch_min": 0.94,
+      "variants": [
+        "assets/mclone/sounds/kenney/impact/impactGlass_heavy_000.ogg",
+        "assets/mclone/sounds/kenney/impact/impactGlass_heavy_001.ogg",
+        "assets/mclone/sounds/kenney/impact/impactGlass_heavy_002.ogg",
+        "assets/mclone/sounds/kenney/impact/impactGlass_heavy_003.ogg",
+        "assets/mclone/sounds/kenney/impact/impactGlass_heavy_004.ogg"
+      ]
+    },
+    {
+      "gain": 0.6,
+      "key": "mclone:break_metal",
+      "no_immediate_repeat": true,
+      "pitch_max": 1.06,
+      "pitch_min": 0.94,
+      "variants": [
+        "assets/mclone/sounds/kenney/impact/impactMetal_heavy_000.ogg",
+        "assets/mclone/sounds/kenney/impact/impactMetal_heavy_001.ogg",
+        "assets/mclone/sounds/kenney/impact/impactMetal_heavy_002.ogg",
+        "assets/mclone/sounds/kenney/impact/impactMetal_heavy_003.ogg",
+        "assets/mclone/sounds/kenney/impact/impactMetal_heavy_004.ogg"
+      ]
+    },
+    {
+      "gain": 0.62,
+      "key": "mclone:break_soft",
+      "no_immediate_repeat": true,
+      "pitch_max": 1.06,
+      "pitch_min": 0.94,
+      "variants": [
+        "assets/mclone/sounds/kenney/impact/impactSoft_heavy_000.ogg",
+        "assets/mclone/sounds/kenney/impact/impactSoft_heavy_001.ogg",
+        "assets/mclone/sounds/kenney/impact/impactSoft_heavy_002.ogg",
+        "assets/mclone/sounds/kenney/impact/impactSoft_heavy_003.ogg",
+        "assets/mclone/sounds/kenney/impact/impactSoft_heavy_004.ogg"
+      ]
+    },
+    {
+      "gain": 0.64,
+      "key": "mclone:break_stone",
+      "no_immediate_repeat": true,
+      "pitch_max": 1.06,
+      "pitch_min": 0.94,
+      "variants": [
+        "assets/mclone/sounds/kenney/impact/impactMining_000.ogg",
+        "assets/mclone/sounds/kenney/impact/impactMining_001.ogg",
+        "assets/mclone/sounds/kenney/impact/impactMining_002.ogg",
+        "assets/mclone/sounds/kenney/impact/impactMining_003.ogg",
+        "assets/mclone/sounds/kenney/impact/impactMining_004.ogg"
+      ]
+    },
+    {
+      "gain": 0.62,
+      "key": "mclone:break_wood",
+      "no_immediate_repeat": true,
+      "pitch_max": 1.06,
+      "pitch_min": 0.94,
+      "variants": [
+        "assets/mclone/sounds/kenney/impact/impactWood_heavy_000.ogg",
+        "assets/mclone/sounds/kenney/impact/impactWood_heavy_001.ogg",
+        "assets/mclone/sounds/kenney/impact/impactWood_heavy_002.ogg",
+        "assets/mclone/sounds/kenney/impact/impactWood_heavy_003.ogg",
+        "assets/mclone/sounds/kenney/impact/impactWood_heavy_004.ogg"
+      ]
+    },
+    {
+      "gain": 0.4,
+      "key": "mclone:cloth_move",
+      "no_immediate_repeat": true,
+      "pitch_max": 1.03,
+      "pitch_min": 0.97,
+      "variants": [
+        "assets/mclone/sounds/kenney/rpg/cloth1.ogg",
+        "assets/mclone/sounds/kenney/rpg/cloth2.ogg",
+        "assets/mclone/sounds/kenney/rpg/cloth3.ogg",
+        "assets/mclone/sounds/kenney/rpg/cloth4.ogg"
+      ]
+    },
+    {
+      "gain": 0.45,
+      "key": "mclone:footstep_carpet",
+      "no_immediate_repeat": true,
+      "pitch_max": 1.06,
+      "pitch_min": 0.94,
+      "variants": [
+        "assets/mclone/sounds/kenney/impact/footstep_carpet_000.ogg",
+        "assets/mclone/sounds/kenney/impact/footstep_carpet_001.ogg",
+        "assets/mclone/sounds/kenney/impact/footstep_carpet_002.ogg",
+        "assets/mclone/sounds/kenney/impact/footstep_carpet_003.ogg",
+        "assets/mclone/sounds/kenney/impact/footstep_carpet_004.ogg"
+      ]
+    },
+    {
+      "gain": 0.46,
+      "key": "mclone:footstep_grass",
+      "no_immediate_repeat": true,
+      "pitch_max": 1.06,
+      "pitch_min": 0.94,
+      "variants": [
+        "assets/mclone/sounds/kenney/impact/footstep_grass_000.ogg",
+        "assets/mclone/sounds/kenney/impact/footstep_grass_001.ogg",
+        "assets/mclone/sounds/kenney/impact/footstep_grass_002.ogg",
+        "assets/mclone/sounds/kenney/impact/footstep_grass_003.ogg",
+        "assets/mclone/sounds/kenney/impact/footstep_grass_004.ogg"
+      ]
+    },
+    {
+      "gain": 0.38,
+      "key": "mclone:footstep_neutral",
+      "no_immediate_repeat": true,
+      "pitch_max": 1.06,
+      "pitch_min": 0.94,
+      "variants": [
+        "assets/mclone/sounds/kenney/rpg/footstep00.ogg",
+        "assets/mclone/sounds/kenney/rpg/footstep01.ogg",
+        "assets/mclone/sounds/kenney/rpg/footstep02.ogg",
+        "assets/mclone/sounds/kenney/rpg/footstep03.ogg",
+        "assets/mclone/sounds/kenney/rpg/footstep04.ogg",
+        "assets/mclone/sounds/kenney/rpg/footstep05.ogg",
+        "assets/mclone/sounds/kenney/rpg/footstep06.ogg",
+        "assets/mclone/sounds/kenney/rpg/footstep07.ogg",
+        "assets/mclone/sounds/kenney/rpg/footstep08.ogg",
+        "assets/mclone/sounds/kenney/rpg/footstep09.ogg"
+      ]
+    },
+    {
+      "gain": 0.43,
+      "key": "mclone:footstep_snow",
+      "no_immediate_repeat": true,
+      "pitch_max": 1.06,
+      "pitch_min": 0.94,
+      "variants": [
+        "assets/mclone/sounds/kenney/impact/footstep_snow_000.ogg",
+        "assets/mclone/sounds/kenney/impact/footstep_snow_001.ogg",
+        "assets/mclone/sounds/kenney/impact/footstep_snow_002.ogg",
+        "assets/mclone/sounds/kenney/impact/footstep_snow_003.ogg",
+        "assets/mclone/sounds/kenney/impact/footstep_snow_004.ogg"
+      ]
+    },
+    {
+      "gain": 0.42,
+      "key": "mclone:footstep_stone",
+      "no_immediate_repeat": true,
+      "pitch_max": 1.06,
+      "pitch_min": 0.94,
+      "variants": [
+        "assets/mclone/sounds/kenney/impact/footstep_concrete_000.ogg",
+        "assets/mclone/sounds/kenney/impact/footstep_concrete_001.ogg",
+        "assets/mclone/sounds/kenney/impact/footstep_concrete_002.ogg",
+        "assets/mclone/sounds/kenney/impact/footstep_concrete_003.ogg",
+        "assets/mclone/sounds/kenney/impact/footstep_concrete_004.ogg"
+      ]
+    },
+    {
+      "gain": 0.44,
+      "key": "mclone:footstep_wood",
+      "no_immediate_repeat": true,
+      "pitch_max": 1.06,
+      "pitch_min": 0.94,
+      "variants": [
+        "assets/mclone/sounds/kenney/impact/footstep_wood_000.ogg",
+        "assets/mclone/sounds/kenney/impact/footstep_wood_001.ogg",
+        "assets/mclone/sounds/kenney/impact/footstep_wood_002.ogg",
+        "assets/mclone/sounds/kenney/impact/footstep_wood_003.ogg",
+        "assets/mclone/sounds/kenney/impact/footstep_wood_004.ogg"
+      ]
+    },
+    {
+      "gain": 0.55,
+      "key": "mclone:impact_glass",
+      "no_immediate_repeat": true,
+      "pitch_max": 1.06,
+      "pitch_min": 0.94,
+      "variants": [
+        "assets/mclone/sounds/kenney/impact/impactGlass_medium_000.ogg",
+        "assets/mclone/sounds/kenney/impact/impactGlass_medium_001.ogg",
+        "assets/mclone/sounds/kenney/impact/impactGlass_medium_002.ogg",
+        "assets/mclone/sounds/kenney/impact/impactGlass_medium_003.ogg",
+        "assets/mclone/sounds/kenney/impact/impactGlass_medium_004.ogg"
+      ]
+    },
+    {
+      "gain": 0.55,
+      "key": "mclone:impact_metal",
+      "no_immediate_repeat": true,
+      "pitch_max": 1.06,
+      "pitch_min": 0.94,
+      "variants": [
+        "assets/mclone/sounds/kenney/impact/impactMetal_medium_000.ogg",
+        "assets/mclone/sounds/kenney/impact/impactMetal_medium_001.ogg",
+        "assets/mclone/sounds/kenney/impact/impactMetal_medium_002.ogg",
+        "assets/mclone/sounds/kenney/impact/impactMetal_medium_003.ogg",
+        "assets/mclone/sounds/kenney/impact/impactMetal_medium_004.ogg"
+      ]
+    },
+    {
+      "gain": 0.55,
+      "key": "mclone:impact_wood",
+      "no_immediate_repeat": true,
+      "pitch_max": 1.06,
+      "pitch_min": 0.94,
+      "variants": [
+        "assets/mclone/sounds/kenney/impact/impactWood_medium_000.ogg",
+        "assets/mclone/sounds/kenney/impact/impactWood_medium_001.ogg",
+        "assets/mclone/sounds/kenney/impact/impactWood_medium_002.ogg",
+        "assets/mclone/sounds/kenney/impact/impactWood_medium_003.ogg",
+        "assets/mclone/sounds/kenney/impact/impactWood_medium_004.ogg"
+      ]
+    },
+    {
+      "gain": 0.52,
+      "key": "mclone:item_pickup",
+      "no_immediate_repeat": true,
+      "pitch_max": 1.05,
+      "pitch_min": 0.97,
+      "variants": [
+        "assets/mclone/sounds/kenney/rpg/handleCoins.ogg",
+        "assets/mclone/sounds/kenney/rpg/handleCoins2.ogg"
+      ]
+    },
+    {
+      "gain": 0.58,
+      "key": "mclone:landing_carpet",
+      "no_immediate_repeat": true,
+      "pitch_max": 1.02,
+      "pitch_min": 0.9,
+      "variants": [
+        "assets/mclone/sounds/kenney/impact/impactSoft_medium_000.ogg",
+        "assets/mclone/sounds/kenney/impact/impactSoft_medium_001.ogg",
+        "assets/mclone/sounds/kenney/impact/impactSoft_medium_002.ogg",
+        "assets/mclone/sounds/kenney/impact/impactSoft_medium_003.ogg",
+        "assets/mclone/sounds/kenney/impact/impactSoft_medium_004.ogg"
+      ]
+    },
+    {
+      "gain": 0.58,
+      "key": "mclone:landing_grass",
+      "no_immediate_repeat": true,
+      "pitch_max": 1.02,
+      "pitch_min": 0.9,
+      "variants": [
+        "assets/mclone/sounds/kenney/impact/impactSoft_medium_000.ogg",
+        "assets/mclone/sounds/kenney/impact/impactSoft_medium_001.ogg",
+        "assets/mclone/sounds/kenney/impact/impactSoft_medium_002.ogg",
+        "assets/mclone/sounds/kenney/impact/impactSoft_medium_003.ogg",
+        "assets/mclone/sounds/kenney/impact/impactSoft_medium_004.ogg"
+      ]
+    },
+    {
+      "gain": 0.52,
+      "key": "mclone:landing_neutral",
+      "no_immediate_repeat": true,
+      "pitch_max": 1.02,
+      "pitch_min": 0.9,
+      "variants": [
+        "assets/mclone/sounds/kenney/impact/impactGeneric_light_000.ogg",
+        "assets/mclone/sounds/kenney/impact/impactGeneric_light_001.ogg",
+        "assets/mclone/sounds/kenney/impact/impactGeneric_light_002.ogg",
+        "assets/mclone/sounds/kenney/impact/impactGeneric_light_003.ogg",
+        "assets/mclone/sounds/kenney/impact/impactGeneric_light_004.ogg"
+      ]
+    },
+    {
+      "gain": 0.54,
+      "key": "mclone:landing_snow",
+      "no_immediate_repeat": true,
+      "pitch_max": 1.02,
+      "pitch_min": 0.9,
+      "variants": [
+        "assets/mclone/sounds/kenney/impact/impactSoft_medium_000.ogg",
+        "assets/mclone/sounds/kenney/impact/impactSoft_medium_001.ogg",
+        "assets/mclone/sounds/kenney/impact/impactSoft_medium_002.ogg",
+        "assets/mclone/sounds/kenney/impact/impactSoft_medium_003.ogg",
+        "assets/mclone/sounds/kenney/impact/impactSoft_medium_004.ogg"
+      ]
+    },
+    {
+      "gain": 0.56,
+      "key": "mclone:landing_stone",
+      "no_immediate_repeat": true,
+      "pitch_max": 1.02,
+      "pitch_min": 0.9,
+      "variants": [
+        "assets/mclone/sounds/kenney/impact/impactGeneric_light_000.ogg",
+        "assets/mclone/sounds/kenney/impact/impactGeneric_light_001.ogg",
+        "assets/mclone/sounds/kenney/impact/impactGeneric_light_002.ogg",
+        "assets/mclone/sounds/kenney/impact/impactGeneric_light_003.ogg",
+        "assets/mclone/sounds/kenney/impact/impactGeneric_light_004.ogg"
+      ]
+    },
+    {
+      "gain": 0.56,
+      "key": "mclone:landing_wood",
+      "no_immediate_repeat": true,
+      "pitch_max": 1.02,
+      "pitch_min": 0.9,
+      "variants": [
+        "assets/mclone/sounds/kenney/impact/impactPlank_medium_000.ogg",
+        "assets/mclone/sounds/kenney/impact/impactPlank_medium_001.ogg",
+        "assets/mclone/sounds/kenney/impact/impactPlank_medium_002.ogg",
+        "assets/mclone/sounds/kenney/impact/impactPlank_medium_003.ogg",
+        "assets/mclone/sounds/kenney/impact/impactPlank_medium_004.ogg"
+      ]
+    },
+    {
+      "gain": 0.45,
+      "key": "mclone:place_glass",
+      "no_immediate_repeat": true,
+      "pitch_max": 1.06,
+      "pitch_min": 0.96,
+      "variants": [
+        "assets/mclone/sounds/kenney/impact/impactGlass_light_000.ogg",
+        "assets/mclone/sounds/kenney/impact/impactGlass_light_001.ogg",
+        "assets/mclone/sounds/kenney/impact/impactGlass_light_002.ogg",
+        "assets/mclone/sounds/kenney/impact/impactGlass_light_003.ogg",
+        "assets/mclone/sounds/kenney/impact/impactGlass_light_004.ogg"
+      ]
+    },
+    {
+      "gain": 0.46,
+      "key": "mclone:place_metal",
+      "no_immediate_repeat": true,
+      "pitch_max": 1.06,
+      "pitch_min": 0.96,
+      "variants": [
+        "assets/mclone/sounds/kenney/impact/impactMetal_light_000.ogg",
+        "assets/mclone/sounds/kenney/impact/impactMetal_light_001.ogg",
+        "assets/mclone/sounds/kenney/impact/impactMetal_light_002.ogg",
+        "assets/mclone/sounds/kenney/impact/impactMetal_light_003.ogg",
+        "assets/mclone/sounds/kenney/impact/impactMetal_light_004.ogg"
+      ]
+    },
+    {
+      "gain": 0.45,
+      "key": "mclone:place_soft",
+      "no_immediate_repeat": true,
+      "pitch_max": 1.06,
+      "pitch_min": 0.96,
+      "variants": [
+        "assets/mclone/sounds/kenney/impact/impactSoft_medium_000.ogg",
+        "assets/mclone/sounds/kenney/impact/impactSoft_medium_001.ogg",
+        "assets/mclone/sounds/kenney/impact/impactSoft_medium_002.ogg",
+        "assets/mclone/sounds/kenney/impact/impactSoft_medium_003.ogg",
+        "assets/mclone/sounds/kenney/impact/impactSoft_medium_004.ogg"
+      ]
+    },
+    {
+      "gain": 0.45,
+      "key": "mclone:place_stone",
+      "no_immediate_repeat": true,
+      "pitch_max": 1.06,
+      "pitch_min": 0.96,
+      "variants": [
+        "assets/mclone/sounds/kenney/impact/impactGeneric_light_000.ogg",
+        "assets/mclone/sounds/kenney/impact/impactGeneric_light_001.ogg",
+        "assets/mclone/sounds/kenney/impact/impactGeneric_light_002.ogg",
+        "assets/mclone/sounds/kenney/impact/impactGeneric_light_003.ogg",
+        "assets/mclone/sounds/kenney/impact/impactGeneric_light_004.ogg"
+      ]
+    },
+    {
+      "gain": 0.46,
+      "key": "mclone:place_wood",
+      "no_immediate_repeat": true,
+      "pitch_max": 1.06,
+      "pitch_min": 0.96,
+      "variants": [
+        "assets/mclone/sounds/kenney/impact/impactWood_light_000.ogg",
+        "assets/mclone/sounds/kenney/impact/impactWood_light_001.ogg",
+        "assets/mclone/sounds/kenney/impact/impactWood_light_002.ogg",
+        "assets/mclone/sounds/kenney/impact/impactWood_light_003.ogg",
+        "assets/mclone/sounds/kenney/impact/impactWood_light_004.ogg"
+      ]
+    },
+    {
+      "gain": 0.36,
+      "key": "mclone:ui_back",
+      "no_immediate_repeat": false,
+      "pitch_max": 1.0,
+      "pitch_min": 1.0,
+      "variants": [
+        "assets/mclone/sounds/kenney/interface/back_001.ogg"
+      ]
+    },
+    {
+      "gain": 0.36,
+      "key": "mclone:ui_confirm",
+      "no_immediate_repeat": false,
+      "pitch_max": 1.0,
+      "pitch_min": 1.0,
+      "variants": [
+        "assets/mclone/sounds/kenney/interface/confirmation_001.ogg"
+      ]
+    },
+    {
+      "gain": 0.38,
+      "key": "mclone:ui_error",
+      "no_immediate_repeat": false,
+      "pitch_max": 1.0,
+      "pitch_min": 1.0,
+      "variants": [
+        "assets/mclone/sounds/kenney/interface/error_001.ogg"
+      ]
+    },
+    {
+      "gain": 0.34,
+      "key": "mclone:ui_open",
+      "no_immediate_repeat": false,
+      "pitch_max": 1.0,
+      "pitch_min": 1.0,
+      "variants": [
+        "assets/mclone/sounds/kenney/interface/open_001.ogg"
+      ]
+    },
+    {
+      "gain": 0.3,
+      "key": "mclone:ui_select",
+      "no_immediate_repeat": false,
+      "pitch_max": 1.0,
+      "pitch_min": 1.0,
+      "variants": [
+        "assets/mclone/sounds/kenney/interface/select_001.ogg"
+      ]
+    },
+    {
+      "gain": 0.52,
+      "key": "mclone:wood_creak",
+      "no_immediate_repeat": true,
+      "pitch_max": 1.04,
+      "pitch_min": 0.96,
+      "variants": [
+        "assets/mclone/sounds/kenney/rpg/creak1.ogg",
+        "assets/mclone/sounds/kenney/rpg/creak2.ogg",
+        "assets/mclone/sounds/kenney/rpg/creak3.ogg"
+      ]
+    }
+  ],
+  "license": "CC0-1.0",
+  "schema_version": 1,
+  "selected_file_count": 119
+}
