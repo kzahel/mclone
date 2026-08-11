@@ -226,3 +226,6 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
   topology
 - `quest-testbed` — public physical Quest ADB provider, recoverable headset
   leases, and removal of project-local wake/proximity/restore implementations
+- `first-party-sound-effects` — provenance-locked distributable CC0 effects,
+  shared variant and material semantics, gameplay/UI producers, and
+  cross-platform audio preparation
