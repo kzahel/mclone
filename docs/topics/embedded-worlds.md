@@ -213,6 +213,12 @@ forks gameplay or rendering by platform. Native flat/stereo and production
 browser WebGPU desktop/mobile lanes prove 2x2/4x4 app-private and catalog
 journeys, recency semantics, A-to-B-to-A, persistence, and stable supported
 landing.
+
+Catalog destinations now also carry their persisted starter-content identity
+through lobby preview warm-up, and every ordinary local-world projection resets
+the transient lobby's protected behavior to the catalog world's mutable
+behavior. This keeps Homestead worlds reopenable both as retained lobby
+destinations and through the ordinary catalog after entering the lobby.
 Direct single-world pixels remain byte-identical and native/browser controls
 remain within the accepted performance envelope.
 

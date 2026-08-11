@@ -29,7 +29,9 @@ use mclone_render::entity::{ActorDrawResourceSnapshot, ActorRenderStats};
 use mclone_render::opaque_world_gate::{OpaqueWorldGate, OpaqueWorldGateRenderer};
 use mclone_render::placement::{EmbeddedChunkRegion, WorldCompositionContext, WorldPlacement};
 use mclone_render_session::EngineCameraController;
-use mclone_server::{SimulationCadenceConfig, WorldBehaviorProfile, WorldGenerationProfile};
+use mclone_server::{
+    SimulationCadenceConfig, StarterContentDescriptor, WorldBehaviorProfile, WorldGenerationProfile,
+};
 
 use crate::McloneSceneHostOptions;
 
@@ -88,6 +90,7 @@ pub struct WarmWorldStandbyRequest {
     pub standby_cadence: Option<SimulationCadenceConfig>,
     pub storage_source: Option<LobbyWorldSource>,
     pub descriptor: Option<ActiveSessionDescriptor>,
+    pub starter_content: StarterContentDescriptor,
     pub world_behavior_profile: WorldBehaviorProfile,
     pub world_generation_profile: WorldGenerationProfile,
     pub presentation: WarmWorldPresentationRequest,
@@ -102,6 +105,7 @@ impl WarmWorldStandbyRequest {
             standby_cadence: None,
             storage_source: None,
             descriptor: None,
+            starter_content: StarterContentDescriptor::Wild,
             world_behavior_profile: WorldBehaviorProfile::Mutable,
             world_generation_profile: WorldGenerationProfile::Overworld,
             presentation: WarmWorldPresentationRequest::OpaqueGate,
@@ -130,6 +134,11 @@ impl WarmWorldStandbyRequest {
 
     pub const fn with_world_behavior_profile(mut self, profile: WorldBehaviorProfile) -> Self {
         self.world_behavior_profile = profile;
+        self
+    }
+
+    pub const fn with_starter_content(mut self, starter_content: StarterContentDescriptor) -> Self {
+        self.starter_content = starter_content;
         self
     }
 
@@ -1928,6 +1937,17 @@ pub(crate) fn bounded_preview_source_priority(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn standby_request_carries_explicit_starter_content() {
+        let request = WarmWorldStandbyRequest::new(0, ChunkPos::new(0, 0))
+            .with_starter_content(StarterContentDescriptor::IntroHomesteadV1);
+
+        assert_eq!(
+            request.starter_content,
+            StarterContentDescriptor::IntroHomesteadV1
+        );
+    }
 
     fn actor_observation(
         id: u64,

@@ -1141,13 +1141,12 @@ impl McloneSceneHost {
             request,
             |options| {
                 let mut scene = self.active_world.scene.clone();
-                scene.seed = options.seed;
-                scene.world_generation_profile = options.world_generation_profile;
-                scene.starter_content = options.starter_content;
-                scene.use_initial_spawn_center = options
-                    .world_generation_profile
-                    .authored_missing_chunk()
-                    .is_none();
+                project_ordinary_local_world_identity(
+                    &mut scene,
+                    options.seed,
+                    options.world_generation_profile,
+                    options.starter_content,
+                );
                 scene.world_dir = None;
                 Ok::<_, anyhow::Error>(scene)
             },
@@ -1159,13 +1158,12 @@ impl McloneSceneHost {
                     .cloned()
                     .context("local world is not present in the catalog view")?;
                 let mut scene = self.active_world.scene.clone();
-                scene.seed = summary.seed;
-                scene.world_generation_profile = summary.world_generation_profile;
-                scene.starter_content = summary.starter_content;
-                scene.use_initial_spawn_center = summary
-                    .world_generation_profile
-                    .authored_missing_chunk()
-                    .is_none();
+                project_ordinary_local_world_identity(
+                    &mut scene,
+                    summary.seed,
+                    summary.world_generation_profile,
+                    summary.starter_content,
+                );
                 scene.debug_passive_showcase = false;
                 scene.world_dir = None;
                 Ok((
@@ -1527,14 +1525,16 @@ impl McloneSceneHost {
     fn scene_for_storage_intent(&self, intent: SessionStorageIntent) -> McloneSceneHostOptions {
         let mut scene = self.active_world.scene.clone();
         if let Some(seed) = intent.seed() {
-            scene.seed = seed;
+            project_ordinary_local_world_identity(
+                &mut scene,
+                seed,
+                intent.world_generation_profile(),
+                intent.starter_content(),
+            );
+        } else {
+            scene.world_generation_profile = intent.world_generation_profile();
+            scene.starter_content = intent.starter_content();
         }
-        scene.world_generation_profile = intent.world_generation_profile();
-        scene.starter_content = intent.starter_content();
-        scene.use_initial_spawn_center = intent
-            .world_generation_profile()
-            .authored_missing_chunk()
-            .is_none();
         scene.world_dir = intent.world_dir().map(PathBuf::from);
         if intent.suppress_adaptive_chunk_publication_budget() {
             scene.adaptive_chunk_publication_budget = false;
@@ -2033,7 +2033,6 @@ impl McloneSceneHost {
     }
 
     fn prepare_catalog_lobby_destination(
-        &self,
         content: &mclone_app_runtime::scenario_content::LobbyScenarioContent,
         summary: &LocalWorldSummary,
         preview_bounds: mclone_app_runtime::scenario::ScenarioPreviewBounds,
@@ -2080,6 +2079,7 @@ impl McloneSceneHost {
                 summary.world_generation_profile,
             )
             .with_descriptor(ActiveSessionDescriptor::from_local_world_summary(summary))
+            .with_starter_content(summary.starter_content)
             .with_world_behavior_profile(mclone_server::WorldBehaviorProfile::Mutable)
             .with_embedded_preview_regions(region, return_region, placement, return_placement)
             .with_entry_relative_embedded_preview(
@@ -2102,7 +2102,7 @@ impl McloneSceneHost {
             return Ok(());
         }
         if let Some(summary) = catalog.most_recent_compatible_world().cloned() {
-            let destination = self.prepare_catalog_lobby_destination(
+            let destination = Self::prepare_catalog_lobby_destination(
                 &launch.content,
                 &summary,
                 launch.intent.preview_bounds,
@@ -2305,6 +2305,7 @@ impl McloneSceneHost {
         scene.world_dir = None;
         scene.world_behavior_profile = destination.destination.world_behavior_profile;
         scene.world_generation_profile = destination.destination.world_generation_profile;
+        scene.starter_content = destination.destination.starter_content;
         scene.use_initial_spawn_center = scene
             .world_generation_profile
             .authored_missing_chunk()
@@ -2621,6 +2622,7 @@ impl McloneSceneHost {
         };
         scene.world_behavior_profile = request.world_behavior_profile;
         scene.world_generation_profile = request.world_generation_profile;
+        scene.starter_content = request.starter_content;
         scene.use_initial_spawn_center = scene
             .world_generation_profile
             .authored_missing_chunk()
@@ -5961,13 +5963,12 @@ impl McloneSceneHost {
         #[cfg(target_arch = "wasm32")]
         {
             let mut scene = self.active_world.scene.clone();
-            scene.seed = summary.seed;
-            scene.world_generation_profile = summary.world_generation_profile;
-            scene.starter_content = summary.starter_content;
-            scene.use_initial_spawn_center = summary
-                .world_generation_profile
-                .authored_missing_chunk()
-                .is_none();
+            project_ordinary_local_world_identity(
+                &mut scene,
+                summary.seed,
+                summary.world_generation_profile,
+                summary.starter_content,
+            );
             scene.debug_passive_showcase = false;
             scene.world_dir = None;
             Ok(scene)
@@ -6593,6 +6594,20 @@ fn bind_native_entry_world_dir(
     scene
 }
 
+fn project_ordinary_local_world_identity(
+    scene: &mut McloneSceneHostOptions,
+    seed: i64,
+    world_generation_profile: mclone_server::WorldGenerationProfile,
+    starter_content: mclone_server::StarterContentDescriptor,
+) {
+    scene.seed = seed;
+    scene.world_generation_profile = world_generation_profile;
+    scene.starter_content = starter_content;
+    scene.world_behavior_profile = mclone_server::WorldBehaviorProfile::Mutable;
+    scene.use_initial_spawn_center = world_generation_profile.authored_missing_chunk().is_none();
+    scene.remote_addr = None;
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 fn transient_local_session_start_request(scene: &McloneSceneHostOptions) -> SessionStartRequest {
     SessionStartRequest::new_seed_local_world_with_generation_profile_and_starter_content(
@@ -6850,6 +6865,54 @@ mod camera_config_tests {
         );
         assert_eq!(
             local_integrated_scene_options(&island).world_behavior_profile,
+            mclone_server::WorldBehaviorProfile::Mutable
+        );
+    }
+
+    #[test]
+    fn ordinary_local_world_projection_drops_lobby_behavior_and_keeps_starter_identity() {
+        let mut scene = McloneSceneHostOptions::default();
+        scene.world_behavior_profile = mclone_server::WorldBehaviorProfile::ProtectedLobby;
+        project_ordinary_local_world_identity(
+            &mut scene,
+            0,
+            WorldGenerationProfile::Overworld,
+            mclone_server::StarterContentDescriptor::IntroHomesteadV1,
+        );
+
+        assert_eq!(
+            scene.world_behavior_profile,
+            mclone_server::WorldBehaviorProfile::Mutable
+        );
+        assert_eq!(
+            scene.starter_content,
+            mclone_server::StarterContentDescriptor::IntroHomesteadV1
+        );
+    }
+
+    #[test]
+    fn catalog_lobby_destination_keeps_homestead_identity_and_mutable_behavior() {
+        let content = mclone_app_runtime::scenario_content::LobbyScenarioContent::for_intent(
+            mclone_app_runtime::scenario::ScenarioLaunchIntent::lobby_preview(),
+        );
+        let mut summary =
+            LocalWorldSummary::new(LocalWorldId::new("new-world").unwrap(), "Homestead", 0, 1)
+                .unwrap();
+        summary.starter_content = mclone_server::StarterContentDescriptor::IntroHomesteadV1;
+
+        let destination = McloneSceneHost::prepare_catalog_lobby_destination(
+            &content,
+            &summary,
+            mclone_app_runtime::scenario::ScenarioPreviewBounds::square(2).unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            destination.destination.starter_content,
+            mclone_server::StarterContentDescriptor::IntroHomesteadV1
+        );
+        assert_eq!(
+            destination.destination.world_behavior_profile,
             mclone_server::WorldBehaviorProfile::Mutable
         );
     }
