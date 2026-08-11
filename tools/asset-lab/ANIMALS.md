@@ -115,7 +115,7 @@ reviewed rigs and then filling macro gaps.
 | Goat | P1 | ✅ | Q | white, brown, kid, billy (horns + beard) | `examples/goat` — canonical 24-box billy with stepped swept horns, beard, cloven-hoof texture, and upturned tail; rounded A/B retained at `legacy-examples/goat_rounded` |
 | Rabbit | P1 | ✅ | H | brown, white, gray, black, lop-ear, kit | `examples/rabbit` — canonical 18-box rabbit; `legacy-examples/rabbit_rounded` retains the rounded A/B and matching synchronized hop |
 | Donkey / Mule | P2 | ✅ | Q | donkey, mule | `examples/donkey` — approved 23-box adult with compact gray body, large four-box ears, upright mane, dorsal stripe, pale muzzle, and tasseled tail |
-| Duck | P2 | ✅ | W/S | mallard drake, hen, duckling | `examples/mallard_duck` — approved 14-box drake with low gray body, green head, white neck ring, blue wing speculum, yellow bill, and webbed-foot waddle |
+| Duck | P2 | ✅ | W/S | mallard drake, hen, duckling | `examples/mallard_duck` — runtime-promoted 14-box drake with low gray body, green head, white neck ring, blue wing speculum, yellow bill, and webbed-foot waddle |
 | Turkey | P2 | ✅ | W | tom (fanned tail), hen | `examples/wild_turkey` — approved 21-box strutting tom with bronze wings, bare blue-red neck, snood, wattle, and seven-feather display fan |
 | Llama / Alpaca | P2 | ✅ | Q | white, brown, gray | `examples/llama` — approved 27-box woolly llama with a deep fleece body, upright two-stage neck, long alert ears, slim two-stage legs, and curled tail |
 

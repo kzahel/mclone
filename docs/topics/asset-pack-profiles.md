@@ -120,7 +120,8 @@ Minecraft pack is not sufficient.
   Minecraft reference prerequisite. Their manifests declare stable identity,
   origin, roles, `mclone-visuals-v1`, and payload fingerprints.
 - The authored pack currently contains canonical namespaced and compatibility
-  PNGs, Structure Lab preview artifacts, and four first-party figures.
+  PNGs, Structure Lab preview artifacts, and five first-party figures,
+  including the runtime mallard.
   Canonical authored `mclone:block/*` materials can shadow the generated
   layer. The fallback pack contains labeled PNGs, the figures, block visual
   records, a short-code registry, coverage facts, and suppressed-audio policy.

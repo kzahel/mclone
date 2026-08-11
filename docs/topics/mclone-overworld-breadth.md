@@ -169,11 +169,11 @@ or persistence needs it.
 | climate | periodic temperature/moisture, altitude snowline, temperate/conifer/alpine/steppe response | regional water climate, more hot-wet and hot-dry extremes |
 | terrain | continents, coasts, broad lowlands, continuous quiet/rolling/ridge-valley/basin intent, a detailed mountain family, connected lows, and local valleys | accepted balance for the new ordinary fabric, plus plateaus, dunes, mesas, escarpments, volcanic terrain, high basins, and planned passes/corridors |
 | surfaces | grass, dirt, sand, gravel, clay, stone | snow/ice, podzol/coarse dirt, terracotta/red sand, fungal and richer rocky palettes |
-| vegetation | oak, grass, dandelion, poppy | every other tree family, undergrowth, aquatic plants, desert flora, fungi |
+| vegetation | oak, grass, dandelion, poppy, and sparse wetland lily-pad/reed cover | every other tree family, richer undergrowth and aquatic plants, desert flora, fungi |
 | water | ocean depth, Y63 rivers, wetlands, one creek family | lakes, climate variants, dramatic cascades/gorges/falls, reefs, frozen water |
 | geology | stone mass and exposed faces | rock types, strata, ores, boulders, scree, volumetric outcrops, arches, caves |
 | landmarks | bounded stream start/pieces | natural rock landmarks, ruins, bridges, towers, monuments, settlements |
-| ecology | authored residents plus bounded, durable natural cow/chicken spawning from generated biome habitat | richer habitat fitness, groups, ambient life, predators, aquatic life, and player mechanics |
+| ecology | authored residents; durable cow/chicken biome spawning; Mclone-only block-derived 2-4 mallard flocks, shore preference, and collectible wetland eggs | broader habitat fitness, cohesion/swimming, nests/breeding, ambient life, predators, and aquatic life |
 | ambience | common sky/fog/audio | climate weather, regional fog/sky/water color, particles, biome sound |
 
 ## First-Party Idea Garden

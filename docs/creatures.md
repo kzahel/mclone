@@ -84,11 +84,25 @@ runtime:
   stable-identity unload/reload proof, while null-store worlds remain
   deliberately volatile.
 
-Still not landed: complete group attempt geometry, shared-spawn exclusion,
-all passive entity kinds, hostile/ambient/aquatic categories, despawn,
+Tactical [`278`](tactical/278-mallard-wetland-ecology-loop.md) adds the first
+original Mclone ecology loop without changing the Java tables:
+
+- `mclone-overworld-v1` samples published blocks for grassy land beside
+  shallow water, then admits independently validated 2-4-member mallard
+  flocks under the ordinary creature cap and cadence;
+- bounded eligible chunks are sampled without replacement, and common
+  farm-animal candidates remain fallbacks until the habitat scan completes;
+- mallards prefer valid shore destinations and persist a habitat-gated egg
+  timer; and
+- birds and distinct mallard-egg items survive chunk unload/reload and use the
+  shared renderer and pickup path.
+
+Still not landed: complete Java group attempt geometry, shared-spawn exclusion,
+all vanilla passive entity kinds, hostile/ambient/aquatic categories, despawn,
 synchronized gamerules and dedicated flags, full vanilla
 `LivingEntity.travel(...)`/`Entity.move(...)`, breeding/hunting/farming and
-drop loops, or broad species-specific gameplay. The original Mclone
+drop loops, swimming/group cohesion, nests/hatching, or broad
+species-specific gameplay. The original Mclone
 terrain/creature co-design direction lives in
 [`topics/habitat-driven-creature-ecology.md`](topics/habitat-driven-creature-ecology.md).
 

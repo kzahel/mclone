@@ -2,12 +2,12 @@
 
 Topic: `habitat-driven-creature-ecology`
 
-Status: active direction with its first end-to-end foundation complete on
-2026-08-11. Tactical
+Status: active direction with its biome-habitat foundation and first original
+ecology loop complete on 2026-08-11. Tactical
 [`277`](../tactical/277-habitat-driven-creature-ecology-foundation.md) binds
 natural cow/chicken habitat to generated chunk biomes and proves immediate
 durability across persistent chunk unload/reload. Rich habitat fitness and
-mechanics-led species promotion are now active in Tactical
+mechanics-led species promotion is now proven by Tactical
 [`278`](../tactical/278-mallard-wetland-ecology-loop.md), beginning with a
 mallard wetland loop.
 
@@ -146,8 +146,8 @@ Keep these sources distinct even when they eventually share habitat tests:
 | population summary | unloaded abundance, migration, or recovery model | compact ecological state, not an entity impostor |
 | ambient presentation | bounded flock/insect/call effect with no individual gameplay identity | explicitly ephemeral |
 
-The implemented first slice uses only authored residents and live natural
-cow/chicken spawns. It does not claim a population-summary simulation.
+The implemented slices use authored residents plus live natural cow, chicken,
+and Mclone mallard spawns. They do not claim a population-summary simulation.
 
 ## Mechanics Ladder
 
@@ -207,9 +207,29 @@ Tactical 277 intentionally uses the existing cows and chickens and now proves:
 - diagnostics distinguish biome rejection, missing biome payload, entity-load
   readiness, and durable versus volatile outcomes.
 
-The habitat table remains the existing Java 1.17.1 farm-animal biome
-membership and only cow/chicken have implemented protocol/runtime kinds. This
-is a foundation proof, not the final original ecology design.
+At the Tactical 277 foundation stage, the habitat table remained the existing
+Java 1.17.1 farm-animal biome membership and only cow/chicken had implemented
+protocol/runtime kinds. That slice remains a foundation proof rather than the
+final original ecology design.
+
+## Mallard Wetland Vertical Slice
+
+Tactical 278 completes the first original terrain-creature-mechanics loop:
+
+- Mclone generation places sparse lily pads and sugar cane only over verified
+  inland wetland water and supported banks;
+- one shared live-block habitat sample measures water columns, shallow beds,
+  cover, and grass underfoot, and fails closed on missing data;
+- only the Mclone profile can turn that sample into a bounded 2-4-member
+  mallard flock, while Java farm-animal tables remain unchanged;
+- eligible chunks are sampled without replacement, and generic farm animals
+  wait as fallbacks until the bounded habitat scan finishes;
+- mallards prefer verified shore destinations and fall back safely when edits
+  remove the habitat;
+- a due timer remains due away from wetlands and emits one distinct durable
+  mallard egg on a qualifying shore; and
+- mallards and eggs use the ordinary authoritative protocol, item, pickup,
+  rendering, chunk persistence, and hydration paths.
 
 ## Current Evidence
 
@@ -226,19 +246,27 @@ is a foundation proof, not the final original ecology design.
   naturally spawned and rendered eight actors; the inspected
   [in-world capture](</tmp/mclone-habitat-natural-creatures.png>) shows a cow
   occupying a grassy pond edge through the shared first-party actor path.
+- A fresh persistent Mclone world naturally produced seven mallards with the
+  debug showcase disabled. Four reloaded as four authoritative/drawn actors;
+  the inspected [wetland capture](</tmp/mclone-mallard-natural-accepted.png>)
+  shows the flock on grassy shallow-water margins.
+- Generated-world integration proves a planned flock and its due egg survive
+  full entity-chunk unload/reload with stable persistent IDs and fresh runtime
+  IDs.
 
 ## Known Gaps and Recommended Next Work
 
-- Promote one visually and mechanically distinctive Creature Lab species,
-  preferably one that forces a new habitat fact rather than another generic
-  grassland animal.
 - Define a shared habitat-query/fitness record above raw biome IDs, backed by
   Mclone climate, landform, hydrology, vegetation, and substrate semantics.
-- Add species-sized groups, group cohesion, and spawn-family placement instead
-  of independent single-animal requests.
+- Extend the mallard egg into persistent nests, incubation, hatching, and
+  breeding only after ownership of nest blocks and lineage is explicit.
+- Add group cohesion and shallow-water swimming; current flocks share spawn
+  locality but remain individually navigated land animals.
+- Add field-guide discovery, calls, feathers, and nest traces so habitat can be
+  found without filling the active entity budget.
 - Add death/removal persistence coverage and prevent local population
   resurrection through seed-time decoration.
-- Add breeding, food, drops, and collection loops only with shared inventory,
+- Add food, drops, and further collection loops only with shared inventory,
   item, interaction, and persistence contracts.
 - Explore compact unloaded population summaries after individual durable
   entities are correct; do not use them to weaken visible-entity continuity.
@@ -248,7 +276,8 @@ is a foundation proof, not the final original ecology design.
 ## Code and Documentation Map
 
 - `native/crates/mclone-server/src/entity/spawning/`: caps, habitat tables,
-  dry-run diagnostics, placement, and live request planning
+  wetland sampling, fair bounded candidate selection, placement, and live
+  request planning
 - `native/crates/mclone-server/src/integrated.rs`: authoritative natural-spawn
   integration, generated-chunk habitat access, entity-load gating, and
   persistence selection

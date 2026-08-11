@@ -1,6 +1,6 @@
 # Tactical 278: Mallard Wetland Ecology Loop
 
-Status: **active 2026-08-11**
+Status: **complete 2026-08-11**
 
 Topic:
 
@@ -148,4 +148,50 @@ semantics.
 
 ## Execution Record
 
-Pending implementation and evidence.
+Completed in six logical commits:
+
+- `40c55a46` promoted the approved Asset Lab mallard into the first-party
+  runtime figure registry and both ordinary and multiview renderer resources.
+- `8a7d3594` added deterministic Mclone-only lily-pad and sugar-cane wetland
+  cover over verified inland water and supported banks.
+- `d07c8412` added the durable mallard species, shared live-block habitat
+  sample, shore-biased stroll, habitat-gated timer, distinct egg item,
+  protocol/persistence contracts, and shared presentation.
+- `adbb3b8e` connected Mclone-only 2-4-member flock planning, diagnostics,
+  ordinary creature caps, persistent realization, due-egg pickup, and
+  generated-world unload/reload evidence.
+- `75030bbd` replaced the pre-existing ordered western-edge chunk selection
+  with bounded sampling without replacement so habitats throughout the
+  ticking area can participate.
+- `f635ed61` made generic Mclone farm-animal requests fallback candidates until
+  the fixed habitat scan finishes, preventing common animals from consuming
+  the request budget before distinctive habitat content is considered.
+
+The Java Overworld lane still uses its original farm-animal biome tables and
+placement path. Mallards are admitted only for `mclone-overworld-v1` after a
+published-block sample proves grass underfoot, nearby water, a shallow bed,
+light, headroom, collision clearance, and player distance. Every flock member
+repeats those checks. Missing sample data fails closed.
+
+The server integration fixture loads seed `12345` chunk `(-142, -51)`, plans a
+flock from actual generated wetland blocks, lays a due mallard egg, unloads the
+entity chunks, and hydrates every bird and the egg under the same persistent
+IDs and fresh runtime IDs. A separate inventory fixture picks up the distinct
+egg through the ordinary item path.
+
+Validation passed on 2026-08-11:
+
+- the aggregate acceptance command passed `mclone-worldgen` (411 passed, one
+  ignored), `mclone-protocol` (52 passed), `mclone-assets` (75 unit tests plus
+  its runtime-boundary integration test), `mclone-server` (607 passed), and
+  `mclone-render-session` (126 passed), with all doc tests passing;
+- the full native workspace all-targets compile gate passed; and
+- `pnpm native:web:build` compiled the shared path and web client for
+  `wasm32-unknown-unknown`.
+
+Rendered acceptance used a fresh SQLite Mclone world, ordinary live spawn
+cadence, and `--debug-passive-showcase false`. Its durable records contained
+seven naturally spawned mallards. Reopening the four-bird habitat chunk
+reported four authoritative entities, four actors, and four drawn actors. The
+inspected [accepted capture](</tmp/mclone-mallard-natural-accepted.png>) shows
+the flock on grassy banks between shallow generated pools.

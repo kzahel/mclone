@@ -51,9 +51,9 @@ Do not add a platform-local gameplay implementation unless the behavior is
 genuinely platform-specific. Shared behavior belongs in shared crates and
 server/runtime modules, and validation follows the affected contracts.
 
-Do not model creatures as decorative render assets. A cow or chicken placed in
-the world is an entity with authoritative identity, chunk/section ownership,
-tracking, tick eligibility, and eventual persistence.
+Do not model creatures as decorative render assets. A cow, chicken, or mallard
+placed in the world is an entity with authoritative identity, chunk/section
+ownership, tracking, tick eligibility, and eventual persistence.
 
 ## Current Status
 
@@ -65,16 +65,19 @@ It deliberately places registered passive mobs near the initial safe spawn so
 new animal assets are visible while the entity stack is being built; it is not
 natural spawning.
 
-Natural spawning currently covers the `CREATURE` cadence/cap and implemented
-cow/chicken entries. Candidate chunks must be entity-ticking and in the
-player-distance set. Surface blocks, brightness, collision, and habitat biome
-all come from the same published generated chunk. Persistent worlds wait for
-entity-chunk load completion and save a naturally spawned animal immediately;
-null-store worlds label the same runtime path volatile and discard those
-animals at full unload. Tactical
+Natural spawning currently covers the `CREATURE` cadence/cap, implemented
+cow/chicken entries, and Mclone-only mallard wetland flocks. Candidate chunks
+must be entity-ticking and in the player-distance set. Surface blocks,
+brightness, collision, and habitat biome for cow/chicken all come from the
+same published generated chunk; the mallard wetland sample reads its canonical
+block state from that chunk instead.
+Persistent worlds wait for entity-chunk load completion and save a naturally
+spawned animal immediately; null-store worlds label the same runtime path
+volatile and discard those animals at full unload. Tactical
 [`277`](tactical/277-habitat-driven-creature-ecology-foundation.md) and
 [`topics/habitat-driven-creature-ecology.md`](topics/habitat-driven-creature-ecology.md)
-own the first slice and continuing product direction.
+own the foundation, first original ecology loop, and continuing product
+direction.
 
 The first shared ground/collision scaffold is also in place:
 
@@ -124,11 +127,13 @@ The first shared ground/collision scaffold is also in place:
   path, and the actual rebuild still flows through navigation and the path
   service. Java `trimPath()` scaffolding is also present, with cauldron
   behavior waiting on cauldron block facts.
-- Chicken now has compact server species state behind the shared mob runtime:
-  the supported passive goal tail is registered, flap/egg timer state ticks only
-  in entity-ticking chunks, and airborne downward velocity is damped like Java
-  `Chicken.aiStep()`. Egg item entities, sounds, persistence, and jockey
-  passenger behavior remain separate system follow-ups.
+- Chicken and mallard now have compact server species state behind the shared
+  mob runtime. Chicken's supported passive goal tail, flap/egg timer, and
+  airborne downward damping follow the current Java-shaped path. The mallard
+  owns a durable timer that stays due until a live wetland sample qualifies,
+  then emits a distinct ordinary item entity. Mallards also register a
+  higher-priority verified-shore stroll before the shared passive goal tail.
+  Chicken egg sounds and jockey passenger behavior remain follow-ups.
 - Passive mob head yaw and body yaw are tracked separately inside the server
   mob runtime. Until a head-yaw presentation lane exists, look goals must not
   fake visibility by mutating authoritative body yaw; body yaw remains the
@@ -285,8 +290,9 @@ caps, category counts, biome spawn lists, gamerules/server flags, light,
 collision, placement predicates, player/spawn distance exclusions, and chunk
 entity-ticking status.
 
-The current cow/chicken slice implements most of that shape but still lacks
-group spawning, shared-spawn exclusion, synchronized gamerules/dedicated
+The current cow/chicken slice plus Mclone mallard flock path implement most of
+that shape but still lack complete Java group geometry, group cohesion,
+shared-spawn exclusion, synchronized gamerules/dedicated
 flags, every passive species, hostile categories, and the complete Java
 attempt geometry. Habitat lookup must use the active generated chunk payload;
 it must not query a seed-only biome source belonging to another profile.
@@ -319,11 +325,11 @@ Minimum durable facts:
 
 Chunk-addressed entity records are live for memory, SQLite, and browser
 persistence backends. Runtime IDs are reconstructed while
-`EntityPersistentId`, pose/motion, and the implemented cow/chicken/item payload
-survive hydration. Natural animals join that ordinary record immediately in a
-persistent world; transient stores use a separately marked volatile set.
-Future subtype state must remain serializable without renderer handles or
-platform objects.
+`EntityPersistentId`, pose/motion, and the implemented
+cow/chicken/mallard/item payload survive hydration. Natural animals join that
+ordinary record immediately in a persistent world; transient stores use a
+separately marked volatile set. Future subtype state must remain serializable
+without renderer handles or platform objects.
 
 ## Asset-Lab Figure Integration
 
