@@ -1,9 +1,9 @@
 //! Server-owned entity replicas and visibility routing.
 //!
 //! This is intentionally narrower than Java's full `ChunkMap.TrackedEntity`
-//! stack. It gives native clients authoritative snapshots for simple passive
-//! actor rendering without enabling live natural spawning, persistence, or
-//! combat.
+//! stack. It owns authoritative passive actors, chunk-addressed persistence,
+//! and the first bounded live natural-spawn path while combat and broader mob
+//! categories remain out of scope.
 
 mod item;
 mod metadata;

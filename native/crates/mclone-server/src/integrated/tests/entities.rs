@@ -12,7 +12,7 @@ fn homestead_residents_realize_by_entity_chunk_once_with_stable_ids() {
     server.set_starter_content(StarterContentDescriptor::IntroHomesteadV1);
     server.initialize_world_metadata_blocking().unwrap();
     server.set_debug_passive_showcase_enabled(true);
-    server.set_volatile_natural_spawning_enabled(false);
+    server.set_natural_spawning_enabled(false);
     let plan = server.intro_homestead_plan().unwrap();
     let cow_chunk = BlockPos::new(
         plan.resident_markers[0].pos[0],
@@ -189,7 +189,7 @@ fn homestead_residents_reopen_once_and_removed_residents_stay_removed() {
         );
         let mut server = LocalRealmSession::from_server(realm);
         server.set_debug_passive_showcase_enabled(false);
-        server.set_volatile_natural_spawning_enabled(false);
+        server.set_natural_spawning_enabled(false);
         load_chunk_view(&mut server, cow_chunk);
         load_chunk_view(&mut server, chicken_chunk);
         assert!(server.scheduler_mut().set_block_at_world(edit_pos, BRICKS));
@@ -207,7 +207,7 @@ fn homestead_residents_reopen_once_and_removed_residents_stay_removed() {
         realm.initialize_world_metadata_blocking().unwrap();
         let mut reopened = LocalRealmSession::from_server(realm);
         reopened.set_debug_passive_showcase_enabled(false);
-        reopened.set_volatile_natural_spawning_enabled(false);
+        reopened.set_natural_spawning_enabled(false);
         load_chunk_view(&mut reopened, cow_chunk);
         load_chunk_view(&mut reopened, chicken_chunk);
         let states = reopened.entities.states();
@@ -244,7 +244,7 @@ fn homestead_residents_reopen_once_and_removed_residents_stay_removed() {
         realm.initialize_world_metadata_blocking().unwrap();
         let mut reopened = LocalRealmSession::from_server(realm);
         reopened.set_debug_passive_showcase_enabled(false);
-        reopened.set_volatile_natural_spawning_enabled(false);
+        reopened.set_natural_spawning_enabled(false);
         load_chunk_view(&mut reopened, chicken_chunk);
         assert!(
             reopened
@@ -661,15 +661,16 @@ fn natural_spawning_diagnostics_use_live_players_chunks_and_creature_counts() {
     assert!(spawning.dry_run_chunks_checked > 0);
     assert!(spawning.dry_run_chunks_checked <= 8);
     assert_eq!(
-        spawning.dry_run_biome_supported_positions + spawning.dry_run_blocked_by_biome,
-        spawning.dry_run_chunks_checked * 4
+        spawning.dry_run_biome_supported_positions
+            + spawning.dry_run_blocked_by_biome
+            + spawning.dry_run_blocked_missing_biome_data,
+        spawning.dry_run_positions_checked
     );
-    assert!(spawning.dry_run_positions_checked <= spawning.dry_run_biome_supported_positions);
     assert_eq!(spawning.dry_run_valid_candidates, 0);
 }
 
 #[test]
-fn volatile_natural_spawning_creates_entities_from_ticket_loaded_chunks() {
+fn transient_natural_spawning_creates_volatile_entities_from_generated_habitats() {
     let seed = 12_345;
     let mut server = LocalRealmSession::new(seed);
     server.set_debug_passive_showcase_enabled(false);
@@ -718,7 +719,100 @@ fn volatile_natural_spawning_creates_entities_from_ticket_loaded_chunks() {
         return;
     }
 
-    panic!("volatile natural spawning did not reach a creature cadence tick");
+    panic!("transient natural spawning did not reach a creature cadence tick");
+}
+
+#[test]
+fn persistent_natural_spawning_survives_entity_chunk_unload_and_reload() {
+    let seed = 12_345;
+    let definition =
+        crate::DimensionDefinition::overworld(seed, WorldGenerationProfile::McloneOverworldV1);
+    let mut server = LocalRealmSession::local_integrated_with_world_store_and_dimension_definition(
+        definition,
+        Box::new(MemoryWorldStore::new()),
+    );
+    server
+        .initialize_world_metadata_blocking()
+        .expect("initialize persistent wild world");
+    server.set_debug_passive_showcase_enabled(false);
+    server.set_lighting_enabled(true);
+    let player = server.add_player();
+    let center = crate::spawn::initial_spawn_center_for_seed(seed);
+    set_dedicated_chunk_view_and_poll(&mut server, player, center, 4);
+
+    let (persistent_ids, runtime_ids) = loop {
+        let report = server
+            .try_simulation_tick_report_for_player(player)
+            .expect("tick persistent natural spawning");
+        let spawning = report.natural_spawning;
+        if !spawning.creature_cadence_ready {
+            assert!(server.simulation_tick() <= 400);
+            continue;
+        }
+
+        assert!(spawning.live_attempts_enabled);
+        assert!(!spawning.live_spawns_are_volatile);
+        assert!(spawning.ready_for_live_attempts);
+        assert_eq!(spawning.blocker_count, 0);
+        assert_eq!(spawning.entity_ticking_spawn_chunks_awaiting_entity_load, 0);
+        assert!(spawning.live_spawned > 0);
+
+        let spawned = server.entities.states();
+        assert_eq!(spawned.len(), spawning.live_spawned);
+        break (
+            spawned
+                .iter()
+                .map(|entity| entity.persistent_id)
+                .collect::<BTreeSet<_>>(),
+            spawned
+                .iter()
+                .map(|entity| entity.id)
+                .collect::<BTreeSet<_>>(),
+        );
+    };
+
+    server.set_natural_spawning_enabled(false);
+    set_dedicated_chunk_view_and_poll(&mut server, player, ChunkPos::new(64, 0), 0);
+    for _ in 0..256 {
+        server
+            .try_simulation_tick_report_for_player(player)
+            .expect("drain persistent entity unload");
+        if server.entities.states().is_empty() {
+            break;
+        }
+    }
+    assert!(
+        server.entities.states().is_empty(),
+        "persistent natural animals should leave runtime state on full chunk unload"
+    );
+
+    set_dedicated_chunk_view_and_poll(&mut server, player, center, 4);
+    for _ in 0..256 {
+        server
+            .try_simulation_tick_report_for_player(player)
+            .expect("hydrate persistent natural animals");
+        let reloaded = server.entities.states();
+        let reloaded_persistent_ids = reloaded
+            .iter()
+            .map(|entity| entity.persistent_id)
+            .collect::<BTreeSet<_>>();
+        if reloaded_persistent_ids == persistent_ids {
+            assert!(
+                reloaded
+                    .iter()
+                    .all(|entity| !runtime_ids.contains(&entity.id)),
+                "runtime ids should be fresh after chunk hydration"
+            );
+            assert!(
+                reloaded
+                    .iter()
+                    .all(|entity| matches!(entity.kind, EntityKind::Cow | EntityKind::Chicken))
+            );
+            return;
+        }
+    }
+
+    panic!("persistent natural animals did not hydrate with stable identities");
 }
 
 #[test]
@@ -726,7 +820,7 @@ fn volatile_entities_are_discarded_when_ticket_loaded_chunk_fully_unloads() {
     let mut server = LocalRealmSession::new(12_345);
     server.set_lighting_enabled(false);
     server.set_debug_passive_showcase_enabled(false);
-    server.set_volatile_natural_spawning_enabled(false);
+    server.set_natural_spawning_enabled(false);
     let player = server.add_player();
     set_dedicated_chunk_view_and_poll(&mut server, player, ChunkPos::new(0, 0), 0);
     let entity = server.entities.spawn_volatile_passive_mob(
@@ -765,9 +859,9 @@ fn volatile_entities_are_discarded_when_ticket_loaded_chunk_fully_unloads() {
 }
 
 #[test]
-fn volatile_natural_spawning_can_be_disabled() {
+fn natural_spawning_can_be_disabled() {
     let mut server = LocalRealmSession::new(12_345);
-    server.set_volatile_natural_spawning_enabled(false);
+    server.set_natural_spawning_enabled(false);
 
     let spawning = server.natural_spawning_diagnostics(400, &[]);
 

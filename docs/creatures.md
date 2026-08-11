@@ -68,7 +68,29 @@ This document is a reference for creature work. It is not a tactical slice by it
 
 `Creatures11` lands passive-animal breadth for mooshrooms, rabbits, and wolves. These species now have baseline generated entity data, vanilla-shaped movement/look priorities where supported, model/renderer/texture hydration, starter-island visibility, and host publication coverage. Mooshroom mushroom block layers, rabbit jump/garden/avoid behavior, wolf tame/sitting/anger/collar behavior, and interaction systems remain deferred.
 
-Still not landed: live natural spawning, player-distance spawn eligibility, mob caps/counting, despawn, full vanilla `LivingEntity.travel(...)`/`Entity.move(...)` physics and `deltaMovement` push impulse consumption, persistence adapters beyond the in-memory runtime path, egg item/sound side effects, game-rule synchronization, item/entity interaction side effects, and animal-specific gameplay beyond sheep grass eating plus the current chicken flap/egg timer data.
+Tactical [`277`](tactical/277-habitat-driven-creature-ecology-foundation.md)
+lands the first live natural-spawn vertical slice in the current shared Rust
+runtime:
+
+- player-distance and entity-ticking chunk eligibility, Java-shaped creature
+  caps, and the 400-tick `CREATURE` cadence;
+- bounded cow/chicken requests through the existing farm-animal biome table,
+  grass-floor, brightness, collision, and 24-128-block player-distance checks;
+- habitat lookup from the active generated chunk's canonical biome payload at
+  the resolved surface position instead of the seed-only Java biome source;
+- explicit missing-biome, habitat-rejection, block/light, load-readiness, and
+  persistence-mode diagnostics; and
+- immediate chunk-addressed durability in entity-capable worlds, with
+  stable-identity unload/reload proof, while null-store worlds remain
+  deliberately volatile.
+
+Still not landed: complete group attempt geometry, shared-spawn exclusion,
+all passive entity kinds, hostile/ambient/aquatic categories, despawn,
+synchronized gamerules and dedicated flags, full vanilla
+`LivingEntity.travel(...)`/`Entity.move(...)`, breeding/hunting/farming and
+drop loops, or broad species-specific gameplay. The original Mclone
+terrain/creature co-design direction lives in
+[`topics/habitat-driven-creature-ecology.md`](topics/habitat-driven-creature-ecology.md).
 
 ## Reference Source Map
 
@@ -418,9 +440,15 @@ A useful first creature slice is not "all mobs." Keep it narrow:
 2. Done in `Entities0`: host-owned entity records keyed by id/uuid and chunk section, with tracked vs ticking visibility.
 3. Done in `Creatures1`: generation original mobs, `spawnOriginalMobs(...)`, `spawnMobsForChunkGeneration(...)` for `CREATURE` only, and passive spawn placement/collision rules enough for the committed sheep fixture.
 4. Done in the native server/client crates: integrate the entity runtime into the generated-world host lifecycle and publish simple generated-entity snapshots as data.
-5. Next: rendering follow-through, draw simple authoritative entity placeholders before first real models or behavior.
+5. Done in the shared render path: cow/chicken authoritative snapshots map to
+   prepared actor presentations across mono/stereo/multiview consumers.
+6. Done in Tactical 277: bounded live cow/chicken spawning consumes generated
+   habitat and uses persistent entity records when the world store supports
+   them.
 
-A later slice can add live natural spawning for `CREATURE`. Another can add common `MONSTER` spawning once stored lighting and entity ticking are credible, because hostile spawn rules depend on sky/block light and despawn behavior.
+A later slice can add a distinctive mechanics-complete species and richer
+habitat fitness. Common `MONSTER` spawning remains separate until hostile
+spawn geometry, difficulty/light randomness, and despawn are complete.
 
 ## Verification
 

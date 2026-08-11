@@ -25,7 +25,7 @@ use mclone_protocol::{
     SetCarriedItemCommand, SetDebugHotbarSlotCommand, SetPlayerAppearanceCommand, StatisticKey,
     UseItemOnCommand, sequence_is_newer, validate_body_pose_sample,
 };
-use mclone_worldgen::biome::OverworldBiomeSource;
+use mclone_worldgen::biome::{OverworldBiomeSource, get_layered_biome_by_id};
 use mclone_worldgen::block::{AIR, RawBlockId, block_name, generated_block_state_id};
 use mclone_worldgen::prng::SimpleRandomSource;
 
@@ -35,8 +35,7 @@ use crate::entity::spawning::dry_run::{
     NaturalSpawnDryRunDiagnostics, dry_run_creature_spawn_eligibility,
 };
 use crate::entity::spawning::live::{
-    VOLATILE_CREATURE_SPAWN_MAX_SPAWNS_PER_TICK, VolatileCreatureSpawnDiagnostics,
-    plan_volatile_creature_spawns,
+    CREATURE_SPAWN_MAX_SPAWNS_PER_TICK, CreatureSpawnDiagnostics, plan_creature_spawns,
 };
 use crate::entity::spawning::mob_category::MobCategory;
 use crate::entity::spawning::natural::{
@@ -317,7 +316,7 @@ pub struct RealmServer {
     intro_homestead_plan: Option<IntroHomesteadPlanRecord>,
     scheduled_fluid_ticks_frozen: bool,
     debug_passive_showcase_enabled: bool,
-    volatile_natural_spawning_enabled: bool,
+    natural_spawning_enabled: bool,
     world_behavior_profile: WorldBehaviorProfile,
     starter_content: StarterContentDescriptor,
     players: ServerPlayerList,
@@ -415,6 +414,7 @@ struct NaturalSpawningEvaluation {
     creature_state: crate::entity::spawning::spawn_state::CategorySpawnState,
     creature_cadence_ready: bool,
     creature_cap_has_room: bool,
+    entity_ticking_spawn_chunks_awaiting_entity_load: usize,
     dry_run: NaturalSpawnDryRunDiagnostics,
 }
 
@@ -789,7 +789,7 @@ impl RealmServer {
             intro_homestead_plan: None,
             scheduled_fluid_ticks_frozen: false,
             debug_passive_showcase_enabled: true,
-            volatile_natural_spawning_enabled: true,
+            natural_spawning_enabled: true,
             world_behavior_profile: WorldBehaviorProfile::default(),
             starter_content: StarterContentDescriptor::Wild,
             players: ServerPlayerList::default(),
@@ -1435,8 +1435,8 @@ impl RealmServer {
             .map(|script| script.player_id)
     }
 
-    pub fn set_volatile_natural_spawning_enabled(&mut self, enabled: bool) {
-        self.volatile_natural_spawning_enabled = enabled;
+    pub fn set_natural_spawning_enabled(&mut self, enabled: bool) {
+        self.natural_spawning_enabled = enabled;
     }
 
     pub const fn world_behavior_profile(&self) -> WorldBehaviorProfile {
@@ -2621,7 +2621,7 @@ impl RealmServer {
         let evaluation = self.evaluate_natural_spawning(game_time, entity_ticking_chunks);
         self.natural_spawning_diagnostics_from_evaluation(
             &evaluation,
-            VolatileCreatureSpawnDiagnostics::default(),
+            CreatureSpawnDiagnostics::default(),
         )
     }
 
@@ -2631,7 +2631,7 @@ impl RealmServer {
         entity_ticking_chunks: &[ChunkPos],
     ) -> NaturalSpawningTickResult {
         let evaluation = self.evaluate_natural_spawning(game_time, entity_ticking_chunks);
-        let mut live = VolatileCreatureSpawnDiagnostics::default();
+        let mut live = CreatureSpawnDiagnostics::default();
         let mut spawned_entities = Vec::new();
 
         if self.natural_spawning_runtime_enabled() && !evaluation.plan.is_blocked() {
@@ -2645,27 +2645,43 @@ impl RealmServer {
                 let max_spawns = creature_plan
                     .cap
                     .saturating_sub(creature_plan.current_count)
-                    .min(VOLATILE_CREATURE_SPAWN_MAX_SPAWNS_PER_TICK as u32)
+                    .min(CREATURE_SPAWN_MAX_SPAWNS_PER_TICK as u32)
                     as usize;
                 let mut random =
                     SimpleRandomSource::new(natural_spawn_tick_seed(self.seed, game_time));
-                let result = plan_volatile_creature_spawns(
+                let result = plan_creature_spawns(
                     &evaluation.chunk_inputs.eligible_entity_ticking_chunks,
                     &evaluation.player_positions,
                     max_spawns,
                     &mut random,
                     |pos| self.scheduler.block_at_world(pos),
-                    |x, z| self.biome_source.block_position_biome_definition(x, z),
+                    |pos| {
+                        self.scheduler
+                            .biome_id_at_world(pos)
+                            .map(get_layered_biome_by_id)
+                    },
                     |pos| self.scheduler.raw_brightness_at_world(pos, 0),
                 );
                 live = result.diagnostics;
+                let persistent = self.scheduler.entity_chunks_supported();
                 spawned_entities.extend(result.requests.into_iter().map(|request| {
-                    self.entities.spawn_volatile_passive_mob(
-                        request.kind,
-                        request.position,
-                        request.y_rot_degrees,
-                    )
+                    if persistent {
+                        self.entities.spawn_persistent_passive_mob(
+                            request.kind,
+                            request.position,
+                            request.y_rot_degrees,
+                        )
+                    } else {
+                        self.entities.spawn_volatile_passive_mob(
+                            request.kind,
+                            request.position,
+                            request.y_rot_degrees,
+                        )
+                    }
                 }));
+                if persistent {
+                    self.mark_entity_updates_dirty(&spawned_entities);
+                }
                 live.spawned = spawned_entities.len();
             }
         }
@@ -2682,17 +2698,29 @@ impl RealmServer {
         entity_ticking_chunks: &[ChunkPos],
     ) -> NaturalSpawningEvaluation {
         let player_positions = self.natural_spawn_player_positions();
-        let chunk_inputs = NaturalSpawnChunkInputs::from_players_and_entity_ticking_chunks(
+        let mut chunk_inputs = NaturalSpawnChunkInputs::from_players_and_entity_ticking_chunks(
             &player_positions,
             entity_ticking_chunks,
         );
+        let entity_ticking_spawn_chunks_awaiting_entity_load =
+            if self.scheduler.entity_chunks_supported() {
+                chunk_inputs.retain_entity_chunks_with_loaded_persistence(|chunk| {
+                    self.scheduler.entity_chunk_loaded(chunk)
+                })
+            } else {
+                0
+            };
         let category_counts = self.entities.natural_spawn_category_counts();
         let spawnable_chunk_count =
             u32::try_from(chunk_inputs.player_distance_chunk_count()).unwrap_or(u32::MAX);
         let dry_run = dry_run_creature_spawn_eligibility(
             &chunk_inputs.eligible_entity_ticking_chunks,
             |pos| self.scheduler.block_at_world(pos),
-            |x, z| self.biome_source.block_position_biome_definition(x, z),
+            |pos| {
+                self.scheduler
+                    .biome_id_at_world(pos)
+                    .map(get_layered_biome_by_id)
+            },
             |pos| self.scheduler.raw_brightness_at_world(pos, 0),
         );
 
@@ -2706,6 +2734,7 @@ impl RealmServer {
         context.brightness_checks_ready = self.scheduler.lighting_enabled();
         context.collision_checks_ready = true;
         context.gamerules_ready = self.natural_spawning_runtime_enabled();
+        context.persistence_ready = self.scheduler.entity_chunks_supported();
         let plan = plan_natural_spawns(self.natural_spawn_config(), context);
         let creature_state = SpawnState::new(spawnable_chunk_count, category_counts)
             .category_state(MobCategory::Creature);
@@ -2720,37 +2749,44 @@ impl RealmServer {
             creature_state,
             creature_cadence_ready,
             creature_cap_has_room,
+            entity_ticking_spawn_chunks_awaiting_entity_load,
             dry_run,
         }
     }
 
     fn natural_spawn_config(&self) -> NaturalSpawnConfig {
         if self.natural_spawning_runtime_enabled() {
-            NaturalSpawnConfig::enabled_volatile_passive_creatures()
+            if self.scheduler.entity_chunks_supported() {
+                NaturalSpawnConfig::enabled_persistent_passive_creatures()
+            } else {
+                NaturalSpawnConfig::enabled_volatile_passive_creatures()
+            }
         } else {
             NaturalSpawnConfig::default()
         }
     }
 
     fn natural_spawning_runtime_enabled(&self) -> bool {
-        self.volatile_natural_spawning_enabled
-            && self.active_dimension.definition.topology.is_unbounded()
+        self.natural_spawning_enabled && self.active_dimension.definition.topology.is_unbounded()
     }
 
     fn natural_spawning_diagnostics_from_evaluation(
         &self,
         evaluation: &NaturalSpawningEvaluation,
-        live: VolatileCreatureSpawnDiagnostics,
+        live: CreatureSpawnDiagnostics,
     ) -> NaturalSpawningDiagnostics {
         NaturalSpawningDiagnostics {
             live_attempts_enabled: self.natural_spawning_runtime_enabled(),
-            live_spawns_are_volatile: self.natural_spawning_runtime_enabled(),
+            live_spawns_are_volatile: self.natural_spawning_runtime_enabled()
+                && !self.scheduler.entity_chunks_supported(),
             ready_for_live_attempts: !evaluation.plan.is_blocked(),
             blocker_count: evaluation.plan.blocked_by.len(),
             player_distance_spawnable_chunks: evaluation.chunk_inputs.player_distance_chunk_count(),
             eligible_entity_ticking_spawn_chunks: evaluation
                 .chunk_inputs
                 .eligible_entity_ticking_chunk_count(),
+            entity_ticking_spawn_chunks_awaiting_entity_load: evaluation
+                .entity_ticking_spawn_chunks_awaiting_entity_load,
             creature_count: evaluation.creature_state.current_count,
             creature_cap: evaluation.creature_state.cap,
             creature_cadence_ready: evaluation.creature_cadence_ready,
@@ -2763,6 +2799,7 @@ impl RealmServer {
             live_spawned: live.spawned,
             live_spawn_budget_exhausted: live.spawn_budget_exhausted,
             live_blocked_by_biome: live.blocked_by_biome,
+            live_blocked_missing_biome_data: live.blocked_missing_biome_data,
             live_blocked_missing_block_data: live.blocked_missing_block_data,
             live_blocked_player_distance: live.blocked_player_distance,
             live_blocked_world_predicate: live.blocked_world_predicate,
@@ -2774,6 +2811,7 @@ impl RealmServer {
             dry_run_implemented_entries_checked: evaluation.dry_run.implemented_entries_checked,
             dry_run_valid_candidates: evaluation.dry_run.valid_candidates,
             dry_run_blocked_by_biome: evaluation.dry_run.blocked_by_biome,
+            dry_run_blocked_missing_biome_data: evaluation.dry_run.blocked_missing_biome_data,
             dry_run_blocked_missing_block_data: evaluation.dry_run.blocked_missing_block_data,
             dry_run_blocked_missing_brightness: evaluation.dry_run.blocked_missing_brightness,
             dry_run_blocked_invalid_floor: evaluation.dry_run.blocked_invalid_floor,

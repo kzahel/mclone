@@ -293,6 +293,31 @@ impl ChunkSnapshot {
         self
     }
 
+    /// Read the canonical quart-resolution biome payload at one chunk-local
+    /// block position.
+    ///
+    /// Biomes are stored in Y-major quart layers, then Z-major and X-major
+    /// within each 4-by-4 horizontal layer. Missing payloads and positions
+    /// outside this snapshot are reported explicitly instead of falling back
+    /// to a different biome source.
+    pub fn biome_id_at_local_block(&self, local_x: i32, block_y: i32, local_z: i32) -> Option<i32> {
+        if !(0..CHUNK_WIDTH).contains(&local_x)
+            || !(0..CHUNK_WIDTH).contains(&local_z)
+            || block_y < self.min_y
+            || block_y >= self.min_y + self.height
+        {
+            return None;
+        }
+
+        let quart_y = (block_y - self.min_y) / 4;
+        let quart_z = local_z / 4;
+        let quart_x = local_x / 4;
+        let quart_width = CHUNK_WIDTH / 4;
+        let index =
+            (quart_y * quart_width * quart_width + quart_z * quart_width + quart_x) as usize;
+        self.biomes.get(index).copied()
+    }
+
     pub fn patch_section_block(
         &mut self,
         section_y: i32,
@@ -585,6 +610,45 @@ mod tests {
 
         assert!(snapshot.patch_section_block(0, 1, 2, 3, AIR_BLOCK_STATE_ID));
         assert!(snapshot.sections.is_empty());
+    }
+
+    #[test]
+    fn chunk_snapshot_reads_canonical_quart_biome_order() {
+        let snapshot = ChunkSnapshot::from_block_state_ids(
+            ChunkPos::new(0, 0),
+            ChunkStatus::Surface,
+            ChunkRevision(1),
+            -16,
+            32,
+            &vec![AIR_BLOCK_STATE_ID; CHUNK_SECTION_VOLUME * 2],
+        )
+        .with_biomes((0..expected_chunk_biome_count(32) as i32).collect());
+
+        assert_eq!(snapshot.biome_id_at_local_block(0, -16, 0), Some(0));
+        assert_eq!(snapshot.biome_id_at_local_block(3, -13, 3), Some(0));
+        assert_eq!(snapshot.biome_id_at_local_block(4, -16, 0), Some(1));
+        assert_eq!(snapshot.biome_id_at_local_block(0, -16, 4), Some(4));
+        assert_eq!(snapshot.biome_id_at_local_block(0, -12, 0), Some(16));
+        assert_eq!(snapshot.biome_id_at_local_block(15, 15, 15), Some(127));
+    }
+
+    #[test]
+    fn chunk_snapshot_biome_lookup_rejects_missing_payload_and_bounds() {
+        let snapshot = ChunkSnapshot::from_block_state_ids(
+            ChunkPos::new(0, 0),
+            ChunkStatus::Surface,
+            ChunkRevision(1),
+            0,
+            16,
+            &vec![AIR_BLOCK_STATE_ID; CHUNK_SECTION_VOLUME],
+        );
+
+        assert_eq!(snapshot.biome_id_at_local_block(0, 0, 0), None);
+        assert_eq!(snapshot.biome_id_at_local_block(-1, 0, 0), None);
+        assert_eq!(snapshot.biome_id_at_local_block(16, 0, 0), None);
+        assert_eq!(snapshot.biome_id_at_local_block(0, -1, 0), None);
+        assert_eq!(snapshot.biome_id_at_local_block(0, 16, 0), None);
+        assert_eq!(snapshot.biome_id_at_local_block(0, 0, 16), None);
     }
 
     #[test]

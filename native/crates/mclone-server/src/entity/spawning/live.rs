@@ -10,22 +10,23 @@ use super::biome_tables::{MobSpawnEntry, farm_animal_spawns_for_biome};
 use super::dry_run::{SurfaceProbeFailure, top_motion_blocking_no_leaves_feet_y};
 use super::placements::check_farm_animal_natural_spawn;
 
-pub(crate) const VOLATILE_CREATURE_SPAWN_MAX_CHUNKS_PER_TICK: usize = 8;
-pub(crate) const VOLATILE_CREATURE_SPAWN_MAX_ATTEMPTS_PER_TICK: usize = 16;
-pub(crate) const VOLATILE_CREATURE_SPAWN_MAX_SPAWNS_PER_TICK: usize = 4;
+pub(crate) const CREATURE_SPAWN_MAX_CHUNKS_PER_TICK: usize = 8;
+pub(crate) const CREATURE_SPAWN_MAX_ATTEMPTS_PER_TICK: usize = 16;
+pub(crate) const CREATURE_SPAWN_MAX_SPAWNS_PER_TICK: usize = 4;
 
-const VOLATILE_CREATURE_SPAWN_ATTEMPTS_PER_CHUNK: usize = 2;
+const CREATURE_SPAWN_ATTEMPTS_PER_CHUNK: usize = 2;
 const MIN_SPAWN_DISTANCE_BLOCKS: f64 = 24.0;
 const MAX_SPAWN_DISTANCE_BLOCKS: f64 = 128.0;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub(crate) struct VolatileCreatureSpawnDiagnostics {
+pub(crate) struct CreatureSpawnDiagnostics {
     pub(crate) chunks_checked: usize,
     pub(crate) chunk_budget_exhausted: bool,
     pub(crate) attempts: usize,
     pub(crate) spawned: usize,
     pub(crate) spawn_budget_exhausted: bool,
     pub(crate) blocked_by_biome: usize,
+    pub(crate) blocked_missing_biome_data: usize,
     pub(crate) blocked_missing_block_data: usize,
     pub(crate) blocked_player_distance: usize,
     pub(crate) blocked_world_predicate: usize,
@@ -33,19 +34,19 @@ pub(crate) struct VolatileCreatureSpawnDiagnostics {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct VolatileCreatureSpawnRequest {
+pub(crate) struct CreatureSpawnRequest {
     pub(crate) kind: EntityKind,
     pub(crate) position: Vec3d,
     pub(crate) y_rot_degrees: f32,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
-pub(crate) struct VolatileCreatureSpawnResult {
-    pub(crate) diagnostics: VolatileCreatureSpawnDiagnostics,
-    pub(crate) requests: Vec<VolatileCreatureSpawnRequest>,
+pub(crate) struct CreatureSpawnResult {
+    pub(crate) diagnostics: CreatureSpawnDiagnostics,
+    pub(crate) requests: Vec<CreatureSpawnRequest>,
 }
 
-pub(crate) fn plan_volatile_creature_spawns<F, B, L>(
+pub(crate) fn plan_creature_spawns<F, B, L>(
     eligible_chunks: &BTreeSet<ChunkPos>,
     player_positions: &[Vec3d],
     max_spawns: usize,
@@ -53,18 +54,17 @@ pub(crate) fn plan_volatile_creature_spawns<F, B, L>(
     mut block_at: F,
     mut biome_at: B,
     mut raw_brightness_at: L,
-) -> VolatileCreatureSpawnResult
+) -> CreatureSpawnResult
 where
     F: FnMut(BlockPos) -> Option<RawBlockId>,
-    B: FnMut(i32, i32) -> BiomeDefinition,
+    B: FnMut(BlockPos) -> Option<BiomeDefinition>,
     L: FnMut(BlockPos) -> Option<u8>,
 {
-    let effective_max_spawns = max_spawns.min(VOLATILE_CREATURE_SPAWN_MAX_SPAWNS_PER_TICK);
-    let mut result = VolatileCreatureSpawnResult {
-        diagnostics: VolatileCreatureSpawnDiagnostics {
-            chunk_budget_exhausted: eligible_chunks.len()
-                > VOLATILE_CREATURE_SPAWN_MAX_CHUNKS_PER_TICK,
-            ..VolatileCreatureSpawnDiagnostics::default()
+    let effective_max_spawns = max_spawns.min(CREATURE_SPAWN_MAX_SPAWNS_PER_TICK);
+    let mut result = CreatureSpawnResult {
+        diagnostics: CreatureSpawnDiagnostics {
+            chunk_budget_exhausted: eligible_chunks.len() > CREATURE_SPAWN_MAX_CHUNKS_PER_TICK,
+            ..CreatureSpawnDiagnostics::default()
         },
         requests: Vec::new(),
     };
@@ -75,12 +75,12 @@ where
 
     for chunk in eligible_chunks
         .iter()
-        .take(VOLATILE_CREATURE_SPAWN_MAX_CHUNKS_PER_TICK)
+        .take(CREATURE_SPAWN_MAX_CHUNKS_PER_TICK)
     {
         result.diagnostics.chunks_checked += 1;
 
-        for _ in 0..VOLATILE_CREATURE_SPAWN_ATTEMPTS_PER_CHUNK {
-            if result.diagnostics.attempts >= VOLATILE_CREATURE_SPAWN_MAX_ATTEMPTS_PER_TICK
+        for _ in 0..CREATURE_SPAWN_ATTEMPTS_PER_CHUNK {
+            if result.diagnostics.attempts >= CREATURE_SPAWN_MAX_ATTEMPTS_PER_TICK
                 || result.requests.len() >= effective_max_spawns
             {
                 break;
@@ -89,12 +89,6 @@ where
 
             let x = chunk.min_block_x() + random.next_int_bound(16);
             let z = chunk.min_block_z() + random.next_int_bound(16);
-            let spawn_entries = farm_animal_spawns_for_biome(biome_at(x, z));
-            if spawn_entries.is_empty() {
-                result.diagnostics.blocked_by_biome += 1;
-                continue;
-            }
-
             let feet_y = match top_motion_blocking_no_leaves_feet_y(x, z, &mut block_at) {
                 Ok(feet_y) => feet_y,
                 Err(SurfaceProbeFailure::MissingBlockData) => {
@@ -108,6 +102,15 @@ where
             };
 
             let pos = BlockPos::new(x, feet_y, z);
+            let Some(biome) = biome_at(pos) else {
+                result.diagnostics.blocked_missing_biome_data += 1;
+                continue;
+            };
+            let spawn_entries = farm_animal_spawns_for_biome(biome);
+            if spawn_entries.is_empty() {
+                result.diagnostics.blocked_by_biome += 1;
+                continue;
+            }
             if !is_right_distance_to_player(pos, player_positions) {
                 result.diagnostics.blocked_player_distance += 1;
                 continue;
@@ -134,7 +137,7 @@ where
                 continue;
             }
 
-            result.requests.push(VolatileCreatureSpawnRequest {
+            result.requests.push(CreatureSpawnRequest {
                 kind,
                 position: Vec3d::new(
                     f64::from(pos.x) + 0.5,
@@ -145,7 +148,7 @@ where
             });
         }
 
-        if result.diagnostics.attempts >= VOLATILE_CREATURE_SPAWN_MAX_ATTEMPTS_PER_TICK
+        if result.diagnostics.attempts >= CREATURE_SPAWN_MAX_ATTEMPTS_PER_TICK
             || result.requests.len() >= effective_max_spawns
         {
             break;
@@ -219,18 +222,18 @@ mod tests {
     }
 
     #[test]
-    fn volatile_creature_spawns_from_supported_biome_and_valid_surface() {
+    fn creature_spawns_from_supported_biome_and_valid_surface() {
         let chunks = BTreeSet::from([ChunkPos::new(0, 0)]);
         let mut random = SimpleRandomSource::new(12_345);
         let plains = get_layered_biome_by_id(1);
 
-        let result = plan_volatile_creature_spawns(
+        let result = plan_creature_spawns(
             &chunks,
             &[Vec3d::new(80.0, 64.0, 8.0)],
             2,
             &mut random,
             grass_surface_block_at,
-            |_, _| plains,
+            |_| Some(plains),
             |_| Some(15),
         );
 
@@ -250,18 +253,18 @@ mod tests {
     }
 
     #[test]
-    fn volatile_creature_spawns_respect_player_minimum_distance() {
+    fn creature_spawns_respect_player_minimum_distance() {
         let chunks = BTreeSet::from([ChunkPos::new(0, 0)]);
         let mut random = SimpleRandomSource::new(12_345);
         let plains = get_layered_biome_by_id(1);
 
-        let result = plan_volatile_creature_spawns(
+        let result = plan_creature_spawns(
             &chunks,
             &[Vec3d::new(8.0, 64.0, 8.0)],
             2,
             &mut random,
             grass_surface_block_at,
-            |_, _| plains,
+            |_| Some(plains),
             |_| Some(15),
         );
 
@@ -269,23 +272,23 @@ mod tests {
         assert_eq!(result.diagnostics.spawned, 0);
         assert_eq!(
             result.diagnostics.blocked_player_distance,
-            VOLATILE_CREATURE_SPAWN_ATTEMPTS_PER_CHUNK
+            CREATURE_SPAWN_ATTEMPTS_PER_CHUNK
         );
     }
 
     #[test]
-    fn volatile_creature_spawns_skip_unsupported_biomes() {
+    fn creature_spawns_skip_unsupported_biomes() {
         let chunks = BTreeSet::from([ChunkPos::new(0, 0)]);
         let mut random = SimpleRandomSource::new(12_345);
         let desert = get_layered_biome_by_id(2);
 
-        let result = plan_volatile_creature_spawns(
+        let result = plan_creature_spawns(
             &chunks,
             &[Vec3d::new(80.0, 64.0, 8.0)],
             2,
             &mut random,
             grass_surface_block_at,
-            |_, _| desert,
+            |_| Some(desert),
             |_| Some(15),
         );
 
@@ -294,5 +297,28 @@ mod tests {
             result.diagnostics.blocked_by_biome,
             result.diagnostics.attempts
         );
+    }
+
+    #[test]
+    fn creature_spawns_report_missing_generated_biome_data() {
+        let chunks = BTreeSet::from([ChunkPos::new(0, 0)]);
+        let mut random = SimpleRandomSource::new(12_345);
+
+        let result = plan_creature_spawns(
+            &chunks,
+            &[Vec3d::new(80.0, 64.0, 8.0)],
+            2,
+            &mut random,
+            grass_surface_block_at,
+            |_| None,
+            |_| Some(15),
+        );
+
+        assert_eq!(result.requests, Vec::new());
+        assert_eq!(
+            result.diagnostics.blocked_missing_biome_data,
+            result.diagnostics.attempts
+        );
+        assert_eq!(result.diagnostics.blocked_by_biome, 0);
     }
 }

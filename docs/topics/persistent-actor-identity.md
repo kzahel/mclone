@@ -162,6 +162,11 @@ rather than reuse `tick_count`.
 Tactical 218 completed this concern. Further entity kinds should extend their
 own vanilla-shaped save payload and round-trip tests. They should not reopen
 runtime-ID persistence, generic tick persistence, offline catch-up, or browser
-platform policy. Natural-spawn persistence remains a separate entity-spawning
-concern: today's explicitly volatile farm-animal scaffold is excluded from the
-durable actor proof.
+platform policy. Tactical
+[`277`](../tactical/277-habitat-driven-creature-ecology-foundation.md) now
+applies the same durable-identity contract to naturally spawned cows and
+chickens: persistent worlds save them immediately and hydrate the same
+`EntityPersistentId` with a fresh runtime ID after chunk unload/reload.
+Null-store sessions retain an explicitly volatile path. The broader habitat
+and population direction remains a separate concern in
+[`habitat-driven-creature-ecology.md`](habitat-driven-creature-ecology.md).

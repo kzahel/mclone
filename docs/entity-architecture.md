@@ -57,12 +57,24 @@ tracking, tick eligibility, and eventual persistence.
 
 ## Current Status
 
-As of 2026-07-01, the native runtime has an explicit debug passive showcase
-path, enabled by default through shared startup/server options
+As of 2026-08-11, the native runtime has both an explicit debug passive
+showcase path and a bounded live natural-spawn path. The showcase remains
+enabled by default through shared startup/server options
 (`--debug-passive-showcase true|false`, `debugPassiveShowcase=true|false`).
-This is not natural spawning. It deliberately places registered passive mobs
-near the initial safe spawn so new animal assets are visible while the entity
-stack is being built.
+It deliberately places registered passive mobs near the initial safe spawn so
+new animal assets are visible while the entity stack is being built; it is not
+natural spawning.
+
+Natural spawning currently covers the `CREATURE` cadence/cap and implemented
+cow/chicken entries. Candidate chunks must be entity-ticking and in the
+player-distance set. Surface blocks, brightness, collision, and habitat biome
+all come from the same published generated chunk. Persistent worlds wait for
+entity-chunk load completion and save a naturally spawned animal immediately;
+null-store worlds label the same runtime path volatile and discard those
+animals at full unload. Tactical
+[`277`](tactical/277-habitat-driven-creature-ecology-foundation.md) and
+[`topics/habitat-driven-creature-ecology.md`](topics/habitat-driven-creature-ecology.md)
+own the first slice and continuing product direction.
 
 The first shared ground/collision scaffold is also in place:
 
@@ -273,6 +285,12 @@ caps, category counts, biome spawn lists, gamerules/server flags, light,
 collision, placement predicates, player/spawn distance exclusions, and chunk
 entity-ticking status.
 
+The current cow/chicken slice implements most of that shape but still lacks
+group spawning, shared-spawn exclusion, synchronized gamerules/dedicated
+flags, every passive species, hostile categories, and the complete Java
+attempt geometry. Habitat lookup must use the active generated chunk payload;
+it must not query a seed-only biome source belonging to another profile.
+
 Despawn rules are also foundational. Passive animals usually feel persistent
 because vanilla `Animal.removeWhenFarAway(...)` returns false, but killed
 animals are not seed-respawned decorations. Replacement animals arrive only
@@ -299,9 +317,13 @@ Minimum durable facts:
 - type/category metadata needed for caps and despawn
 - type-specific data for rendered or simulated species
 
-Persistence can be staged after initial cow/chicken behavior, but new entity
-code should carry state in a shape that can be serialized without renderer
-handles or platform objects.
+Chunk-addressed entity records are live for memory, SQLite, and browser
+persistence backends. Runtime IDs are reconstructed while
+`EntityPersistentId`, pose/motion, and the implemented cow/chicken/item payload
+survive hydration. Natural animals join that ordinary record immediately in a
+persistent world; transient stores use a separately marked volatile set.
+Future subtype state must remain serializable without renderer handles or
+platform objects.
 
 ## Asset-Lab Figure Integration
 

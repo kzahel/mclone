@@ -21,13 +21,14 @@ gameplay silently lose state on unload.
 
 ## Why This Matters Now
 
-The current native runtime can regenerate chunks and keep many gameplay facts in
-memory. That is useful for fast smoke tests and temporary worlds, but it blurs
-entity and spawning semantics:
+The native runtime can deliberately use transient worlds for fast smoke tests,
+but persistence-capable worlds now keep block, player, metadata, scheduled
+tick, and chunk-addressed entity records. That distinction matters for entity
+and spawning semantics:
 
 - generation-time animals become ambiguous if chunk unload deletes them
-- live natural spawning cannot match vanilla caps/despawn behavior without
-  durable entity records
+- live natural spawning needs durable entity records so revisit does not
+  reroll a materialized animal
 - killed generated animals must not reappear just because the same seed is
   loaded again
 - scheduled fluid/block ticks need save/load semantics rather than load-time

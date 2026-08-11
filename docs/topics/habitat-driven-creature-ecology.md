@@ -2,10 +2,12 @@
 
 Topic: `habitat-driven-creature-ecology`
 
-Status: accepted direction 2026-08-11. Tactical
-[`277`](../tactical/277-habitat-driven-creature-ecology-foundation.md) owns
-the first end-to-end slice: generated-biome habitat lookup and immediate
-durability for naturally spawned cows and chickens in persistent worlds.
+Status: active direction with its first end-to-end foundation complete on
+2026-08-11. Tactical
+[`277`](../tactical/277-habitat-driven-creature-ecology-foundation.md) binds
+natural cow/chicken habitat to generated chunk biomes and proves immediate
+durability across persistent chunk unload/reload. Rich habitat fitness and
+mechanics-led species promotion remain open.
 
 ## Scope
 
@@ -142,8 +144,8 @@ Keep these sources distinct even when they eventually share habitat tests:
 | population summary | unloaded abundance, migration, or recovery model | compact ecological state, not an entity impostor |
 | ambient presentation | bounded flock/insect/call effect with no individual gameplay identity | explicitly ephemeral |
 
-The first slice uses only authored residents and live natural cow/chicken
-spawns. It does not claim a population-summary simulation.
+The implemented first slice uses only authored residents and live natural
+cow/chicken spawns. It does not claim a population-summary simulation.
 
 ## Mechanics Ladder
 
@@ -189,7 +191,7 @@ genuinely distinct.
 
 ## First Vertical Slice
 
-Tactical 277 intentionally uses the existing cows and chickens:
+Tactical 277 intentionally uses the existing cows and chickens and now proves:
 
 - live spawn candidates query the biome payload of the published generated
   chunk at the candidate surface position;
@@ -203,9 +205,25 @@ Tactical 277 intentionally uses the existing cows and chickens:
 - diagnostics distinguish biome rejection, missing biome payload, entity-load
   readiness, and durable versus volatile outcomes.
 
-The first habitat table remains the existing Java 1.17.1 farm-animal biome
+The habitat table remains the existing Java 1.17.1 farm-animal biome
 membership and only cow/chicken have implemented protocol/runtime kinds. This
 is a foundation proof, not the final original ecology design.
+
+## Current Evidence
+
+- Canonical biome indexing covers X/Z quart cells, vertical quart layers,
+  nonzero `min_y`, bounds, missing payloads, and topology-aware scheduler
+  lookup.
+- Live and dry-run planners distinguish missing generated biome data from a
+  biome that honestly rejects farm animals.
+- Persistent spawn candidates wait for entity-chunk load completion.
+- A memory-world integration fixture naturally spawns four cows/chickens,
+  unloads their chunks, and hydrates the same persistent identities with fresh
+  runtime IDs on return.
+- A persistent SQLite screenshot world with the debug showcase disabled
+  naturally spawned and rendered eight actors; the inspected
+  [in-world capture](</tmp/mclone-habitat-natural-creatures.png>) shows a cow
+  occupying a grassy pond edge through the shared first-party actor path.
 
 ## Known Gaps and Recommended Next Work
 
@@ -242,4 +260,3 @@ is a foundation proof, not the final original ecology design.
 - [`animal-catalogue.md`](animal-catalogue.md): Creature Lab catalogue status
 - [`mclone-overworld-breadth.md`](mclone-overworld-breadth.md): original
   terrain/ecology breadth ledger
-

@@ -133,6 +133,18 @@ impl NaturalSpawnConfig {
         }
     }
 
+    pub(crate) const fn enabled_persistent_passive_creatures() -> Self {
+        Self {
+            enabled: true,
+            allow_friendly_categories: true,
+            allow_hostile_categories: false,
+            allow_persistent_categories: true,
+            category_set: NaturalSpawnCategorySet::CreatureOnly,
+            require_despawn_rules: false,
+            require_persistence: true,
+        }
+    }
+
     pub(crate) const fn allows_category(self, category: MobCategory) -> bool {
         if matches!(self.category_set, NaturalSpawnCategorySet::CreatureOnly)
             && !matches!(category, MobCategory::Creature)
@@ -241,6 +253,16 @@ impl NaturalSpawnChunkInputs {
             player_distance_chunks,
             eligible_entity_ticking_chunks,
         }
+    }
+
+    pub(crate) fn retain_entity_chunks_with_loaded_persistence(
+        &mut self,
+        mut entity_chunk_loaded: impl FnMut(ChunkPos) -> bool,
+    ) -> usize {
+        let before = self.eligible_entity_ticking_chunks.len();
+        self.eligible_entity_ticking_chunks
+            .retain(|chunk| entity_chunk_loaded(*chunk));
+        before.saturating_sub(self.eligible_entity_ticking_chunks.len())
     }
 
     pub(crate) fn player_distance_chunk_count(&self) -> usize {
@@ -490,6 +512,23 @@ mod tests {
     }
 
     #[test]
+    fn persistent_spawn_chunks_wait_for_entity_chunk_load_completion() {
+        let mut inputs = NaturalSpawnChunkInputs::from_players_and_entity_ticking_chunks(
+            &[Vec3d::new(8.0, 64.0, 8.0)],
+            &[ChunkPos::new(0, 0), ChunkPos::new(7, 0)],
+        );
+
+        let awaiting = inputs
+            .retain_entity_chunks_with_loaded_persistence(|chunk| chunk == ChunkPos::new(0, 0));
+
+        assert_eq!(awaiting, 1);
+        assert_eq!(
+            inputs.eligible_entity_ticking_chunks,
+            BTreeSet::from([ChunkPos::new(0, 0)])
+        );
+    }
+
+    #[test]
     fn partial_live_inputs_clear_chunk_and_count_blockers_only() {
         let context = NaturalSpawnContext::with_live_chunk_and_count_inputs(
             400,
@@ -533,5 +572,34 @@ mod tests {
         assert_eq!(plan.categories.len(), 1);
         assert_eq!(creature_plan(&plan).category, MobCategory::Creature);
         assert!(creature_plan(&plan).should_attempt);
+    }
+
+    #[test]
+    fn persistent_passive_creature_config_requires_persistence_but_not_despawn() {
+        let mut context = NaturalSpawnContext::with_live_chunk_and_count_inputs(
+            400,
+            289,
+            MobCategoryCounts::new(),
+        );
+        context.biome_spawn_tables_ready = true;
+        context.placement_predicates_ready = true;
+        context.brightness_checks_ready = true;
+        context.collision_checks_ready = true;
+        context.gamerules_ready = true;
+
+        let blocked = plan_natural_spawns(
+            NaturalSpawnConfig::enabled_persistent_passive_creatures(),
+            context,
+        );
+        assert_eq!(blocked.blocked_by, vec![NaturalSpawnBlocker::Persistence]);
+
+        context.persistence_ready = true;
+        let ready = plan_natural_spawns(
+            NaturalSpawnConfig::enabled_persistent_passive_creatures(),
+            context,
+        );
+        assert!(!ready.is_blocked());
+        assert_eq!(ready.categories.len(), 1);
+        assert!(creature_plan(&ready).should_attempt);
     }
 }

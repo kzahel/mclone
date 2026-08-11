@@ -22,6 +22,7 @@ pub(crate) struct NaturalSpawnDryRunDiagnostics {
     pub(crate) implemented_entries_checked: usize,
     pub(crate) valid_candidates: usize,
     pub(crate) blocked_by_biome: usize,
+    pub(crate) blocked_missing_biome_data: usize,
     pub(crate) blocked_missing_block_data: usize,
     pub(crate) blocked_missing_brightness: usize,
     pub(crate) blocked_invalid_floor: usize,
@@ -45,7 +46,7 @@ pub(crate) fn dry_run_creature_spawn_eligibility<F, B, L>(
 ) -> NaturalSpawnDryRunDiagnostics
 where
     F: FnMut(BlockPos) -> Option<RawBlockId>,
-    B: FnMut(i32, i32) -> BiomeDefinition,
+    B: FnMut(BlockPos) -> Option<BiomeDefinition>,
     L: FnMut(BlockPos) -> Option<u8>,
 {
     let mut diagnostics = NaturalSpawnDryRunDiagnostics {
@@ -62,13 +63,6 @@ where
         for (dx, dz) in NATURAL_SPAWN_DRY_RUN_SAMPLE_COLUMNS {
             let x = chunk.min_block_x() + dx;
             let z = chunk.min_block_z() + dz;
-            let spawn_entries = farm_animal_spawns_for_biome(biome_at(x, z));
-            if spawn_entries.is_empty() {
-                diagnostics.blocked_by_biome += 1;
-                continue;
-            }
-            diagnostics.biome_supported_positions += 1;
-
             let feet_y = match top_motion_blocking_no_leaves_feet_y(x, z, &mut block_at) {
                 Ok(feet_y) => feet_y,
                 Err(SurfaceProbeFailure::MissingBlockData) => {
@@ -82,6 +76,16 @@ where
             };
             let pos = BlockPos::new(x, feet_y, z);
             diagnostics.positions_checked += 1;
+            let Some(biome) = biome_at(pos) else {
+                diagnostics.blocked_missing_biome_data += 1;
+                continue;
+            };
+            let spawn_entries = farm_animal_spawns_for_biome(biome);
+            if spawn_entries.is_empty() {
+                diagnostics.blocked_by_biome += 1;
+                continue;
+            }
+            diagnostics.biome_supported_positions += 1;
 
             for entry in spawn_entries
                 .iter()
@@ -188,7 +192,7 @@ mod tests {
         let diagnostics = dry_run_creature_spawn_eligibility(
             &chunks,
             |pos| block_map_at(&blocks, pos),
-            |_, _| plains,
+            |_| Some(plains),
             |_| None,
         );
 
@@ -211,7 +215,7 @@ mod tests {
         let diagnostics = dry_run_creature_spawn_eligibility(
             &chunks,
             |pos| block_map_at(&blocks, pos),
-            |_, _| plains,
+            |_| Some(plains),
             |_| Some(15),
         );
 
@@ -231,13 +235,32 @@ mod tests {
         let diagnostics = dry_run_creature_spawn_eligibility(
             &chunks,
             |pos| block_map_at(&blocks, pos),
-            |_, _| desert,
+            |_| Some(desert),
             |_| Some(15),
         );
 
         assert_eq!(diagnostics.blocked_by_biome, 4);
-        assert_eq!(diagnostics.positions_checked, 0);
+        assert_eq!(diagnostics.positions_checked, 4);
         assert_eq!(diagnostics.implemented_entries_checked, 0);
+    }
+
+    #[test]
+    fn dry_run_reports_missing_generated_biome_data_after_surface_resolution() {
+        let chunk = ChunkPos::new(0, 0);
+        let chunks = BTreeSet::from([chunk]);
+        let blocks = sampled_grass_surface_blocks(chunk, 63);
+
+        let diagnostics = dry_run_creature_spawn_eligibility(
+            &chunks,
+            |pos| block_map_at(&blocks, pos),
+            |_| None,
+            |_| Some(15),
+        );
+
+        assert_eq!(diagnostics.positions_checked, 4);
+        assert_eq!(diagnostics.blocked_missing_biome_data, 4);
+        assert_eq!(diagnostics.blocked_by_biome, 0);
+        assert_eq!(diagnostics.biome_supported_positions, 0);
     }
 
     #[test]
@@ -247,7 +270,7 @@ mod tests {
         let diagnostics = dry_run_creature_spawn_eligibility(
             &chunks,
             |_| None,
-            |_, _| get_layered_biome_by_id(1),
+            |_| Some(get_layered_biome_by_id(1)),
             |_| Some(15),
         );
 

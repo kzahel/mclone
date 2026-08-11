@@ -1956,6 +1956,17 @@ impl ChunkScheduler {
             })
     }
 
+    pub(crate) fn biome_id_at_world(&self, pos: WorldBlockPos) -> Option<i32> {
+        let pos = self.topology.canonicalize_block(pos)?;
+        let chunk_pos = pos.chunk_pos();
+        let local_x = local_block_coord(pos.x);
+        let local_z = local_block_coord(pos.z);
+        self.holders
+            .get(&chunk_pos)
+            .and_then(|holder| holder.published_snapshot.as_ref())
+            .and_then(|snapshot| snapshot.biome_id_at_local_block(local_x, pos.y, local_z))
+    }
+
     pub(crate) fn raw_brightness_at_world(&self, pos: WorldBlockPos, sky_darken: u8) -> Option<u8> {
         let pos = self.topology.canonicalize_block(pos)?;
         let chunk_pos = pos.chunk_pos();
@@ -5951,6 +5962,36 @@ mod tests {
 
         assert_eq!(scheduler.raw_brightness_at_world(pos, 0), Some(12));
         assert_eq!(scheduler.raw_brightness_at_world(pos, 8), Some(5));
+    }
+
+    #[test]
+    fn biome_id_at_world_reads_published_chunk_payload() {
+        let blocks = vec![BlockStateId(0); CHUNK_SECTION_VOLUME];
+        let mut biomes = vec![1; mclone_core::expected_chunk_biome_count(16)];
+        biomes[7] = 35;
+        let snapshot = ChunkSnapshot::from_block_state_ids(
+            ChunkPos::new(-1, 2),
+            ChunkStatus::Light,
+            ChunkRevision(1),
+            0,
+            16,
+            &blocks,
+        )
+        .with_biomes(biomes);
+        let scheduler = scheduler_with_snapshot(snapshot);
+
+        assert_eq!(
+            scheduler.biome_id_at_world(WorldBlockPos::new(-1, 0, 39)),
+            Some(35)
+        );
+        assert_eq!(
+            scheduler.biome_id_at_world(WorldBlockPos::new(0, 0, 39)),
+            None
+        );
+        assert_eq!(
+            scheduler.biome_id_at_world(WorldBlockPos::new(-1, 16, 39)),
+            None
+        );
     }
 
     #[test]

@@ -1,6 +1,6 @@
 # Tactical 277: Habitat-Driven Creature Ecology Foundation
 
-Status: **active 2026-08-11**
+Status: **complete 2026-08-11**
 
 Topic:
 
@@ -129,5 +129,51 @@ protocol and actor presentation without natural-spawn policy branches.
 
 ## Execution Record
 
-Pending implementation and validation.
+Completed on 2026-08-11.
 
+### Implementation
+
+- `ChunkSnapshot` now owns canonical biome-payload lookup at a local block
+  position, including the payload's Y-major quart layers and nonzero world
+  minima. `ChunkScheduler` lifts that contract to topology-aware world
+  positions.
+- Live and dry-run planners resolve the generated surface first and query its
+  biome from the same published chunk. Missing biome data is now a readiness
+  diagnostic; a present biome outside the farm-animal table is a habitat
+  rejection.
+- Persistent worlds remove candidate chunks until their entity-chunk load has
+  completed. Natural cows and chickens then use ordinary persistent records,
+  become dirty immediately, and follow the existing save/unload/hydrate path.
+  Null-store worlds retain an explicitly volatile path.
+- Runtime naming no longer claims all natural spawning is volatile, and
+  diagnostics expose storage mode, entity-load exclusions, and missing-biome
+  failures.
+
+### Automated evidence
+
+- `cargo test --manifest-path native/Cargo.toml -p mclone-core -p
+  mclone-server --no-fail-fast` passes: 37 core tests and 595 server tests.
+  The server suite includes a natural-spawn fixture that unloads all four
+  generated animals and reloads the same persistent IDs under fresh runtime
+  IDs.
+- `pnpm native:web:build` passes, compiling the shared server and scene owners
+  into the browser target.
+- The broad native workspace run reaches and passes the changed core/server
+  suites, but the repository still has six unrelated stale ownership-lock
+  tests: two scene source-marker locks, three web baseline/database-version
+  locks, and the World Explorer vegetation dependency lock. Rerunning those
+  targets individually reproduces the same failures without this slice.
+- `pnpm native:thin-adapters:purity` reaches the ownership inventory but fails
+  because the existing `mclone-terrain-vegetation-worker.ts` module is not yet
+  registered in that inventory. This is the same ambient vegetation-ownership
+  drift and is outside this tactical's gameplay/persistence boundary.
+
+### Rendered evidence
+
+A persistent Mclone Overworld screenshot world was allowed to run ordinary
+natural-spawn cadence with `--debug-passive-showcase false`, closed, and
+reopened. The accepted capture reported eight authoritative entities, eight
+actors, and eight drawn actors. The inspected
+[in-world capture](</tmp/mclone-habitat-natural-creatures.png>) shows a
+first-party cow occupying a grassy pond edge through the shared actor renderer.
+No authored showcase animal supplied the evidence.

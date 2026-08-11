@@ -21,7 +21,9 @@ passed its objective gates. Human Review A found it improved but still
 structurally scalar and disconnected from water. Tactical 265 selects a
 bounded hybrid landform planner, and Tactical 267 now implements the fixed
 research-only comparison. It is paused at Human Review B before new breadth
-families or production integration.
+families or production integration. Tactical 277 separately makes the current
+cow/chicken natural-spawn habitat consume Mclone's generated biome payload;
+the richer original ecology vocabulary remains open.
 
 ## Scope
 
@@ -171,7 +173,7 @@ or persistence needs it.
 | water | ocean depth, Y63 rivers, wetlands, one creek family | lakes, climate variants, dramatic cascades/gorges/falls, reefs, frozen water |
 | geology | stone mass and exposed faces | rock types, strata, ores, boulders, scree, volumetric outcrops, arches, caves |
 | landmarks | bounded stream start/pieces | natural rock landmarks, ruins, bridges, towers, monuments, settlements |
-| ecology | debug/passive demonstrations | biome-owned natural spawn tables, ambient life, predators, aquatic life |
+| ecology | authored residents plus bounded, durable natural cow/chicken spawning from generated biome habitat | richer habitat fitness, groups, ambient life, predators, aquatic life, and player mechanics |
 | ambience | common sky/fog/audio | climate weather, regional fog/sky/water color, particles, biome sound |
 
 ## First-Party Idea Garden
