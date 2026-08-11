@@ -73,8 +73,9 @@ use mclone_app_runtime::monotonic::{MonotonicClockHandle, MonotonicDeadline, Mon
 #[cfg(not(target_arch = "wasm32"))]
 use mclone_app_runtime::native_service_assembly::{
     IntegratedWorldSessionStorage, LocalIntegratedSceneOptions, LocalIntegratedStartupPump,
-    LocalIntegratedStartupStep, NativeSceneServices, NativeSessionServices,
-    NativeSessionStartupCompletion, NativeSessionStartupPump, native_world_catalog_operations,
+    LocalIntegratedStartupStep, MAX_STARTUP_RECONCILE_PASSES, NativeSceneServices,
+    NativeSessionServices, NativeSessionStartupCompletion, NativeSessionStartupPump,
+    native_world_catalog_operations,
 };
 use mclone_app_runtime::platform_operation::{PlatformOperation, PlatformOperationLedger};
 use mclone_app_runtime::prepared_assets::{AssetPackSourceRegistry, PreparedSceneAssets};

@@ -579,6 +579,29 @@ fn local_startup_installs_one_coherent_drawable_world() {
 }
 
 #[test]
+fn interactive_local_startup_reconciles_without_blocking_the_frame_callback() {
+    let source = read("src/session.rs");
+    let advance = braced_item(&source, "fn advance_active_local_startup(");
+    let complete = braced_item(&source, "pub(crate) fn complete_local_startup(");
+
+    assert_in_order(
+        advance,
+        &[
+            ".pump",
+            ".step(camera_position)",
+            "render_seed_drawable_section_count_near(center)",
+            "reconcile_xr_startup_pose(",
+            "reconciled_interest_center = Some(interest_after)",
+            "return Ok(false);",
+            "self.complete_local_startup(device, queue, startup, step)",
+        ],
+    );
+    assert!(!advance.contains(".drive_to_ready_reconciled("));
+    assert!(!complete.contains(".drive_to_ready_reconciled("));
+    assert!(complete.contains("pump.into_runtime_with_startup_sections()"));
+}
+
+#[test]
 fn external_and_native_replacement_installs_keep_the_same_core_cluster() {
     let source = read("src/session.rs");
     let external = braced_item(&source, "pub fn complete_external_session_start(");

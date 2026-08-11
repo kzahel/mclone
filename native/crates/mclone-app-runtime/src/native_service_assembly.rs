@@ -72,10 +72,12 @@ use crate::{
 
 const RUNTIME_DIAGNOSTICS_POLL_INTERVAL: Duration = Duration::from_millis(500);
 const DEFAULT_LOCAL_INTEGRATED_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
-/// Bound on startup camera/interest reconciliation re-pump passes
-/// (docs/tactical/167 Slice 4). One correction/view-pose settles in a single
-/// pass; the bound only guards a pathological correction cascade.
-const MAX_STARTUP_RECONCILE_PASSES: usize = 4;
+/// Maximum camera/interest correction cascades accepted during startup.
+///
+/// Blocking platform startup drivers and the frame-driven shared scene host
+/// use the same bound so a producer cannot keep startup alive indefinitely by
+/// issuing a new correction after every reconciled view becomes ready.
+pub const MAX_STARTUP_RECONCILE_PASSES: usize = 4;
 
 pub fn native_world_catalog_operations(root: PathBuf) -> WorldCatalogOperationService {
     WorldCatalogOperationService::immediate(Box::new(NativeWorldCatalog::new(root)))
@@ -931,6 +933,10 @@ impl LocalIntegratedStartupPump {
             .expect("local startup pump always owns a local integrated runtime")
     }
 
+    pub fn interest_center(&self) -> ChunkPos {
+        self.inner.runtime.interest_center()
+    }
+
     /// Mutable shared-service view used by scene-owned detached startup to
     /// acknowledge the authoritative initial pose without exposing the native
     /// runner or duplicating startup policy.
@@ -967,6 +973,18 @@ impl LocalIntegratedStartupPump {
     /// Startup render-seed sections carrying drawable geometry.
     pub fn render_seed_drawable_section_count(&self) -> usize {
         self.inner.render_seed_drawable_section_count()
+    }
+
+    /// Drawable startup-seed coverage within the runtime's render distance of
+    /// `center`.
+    ///
+    /// Frame-driven hosts use this after a saved player pose moves interest.
+    /// It is the incremental counterpart of the coverage gate in
+    /// [`NativeSessionStartupPump::drive_to_ready_reconciled`].
+    pub fn render_seed_drawable_section_count_near(&self, center: ChunkPos) -> usize {
+        self.inner
+            .render_seed
+            .drawable_section_count_near(center, self.inner.runtime.render_distance() as i32)
     }
 
     /// CPU mesh payload retained by the one-shot startup seed.

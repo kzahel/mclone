@@ -147,6 +147,12 @@ pub(crate) struct SceneLocalStartup {
     pub(super) pump: LocalIntegratedStartupPump,
     pub(super) camera: EngineCameraController,
     pub(super) startup_view_pose: Option<XrStartupViewPose>,
+    /// Interest center whose drawable seed must arrive before the next pose
+    /// reconciliation pass. Keeping this state beside the pump lets interactive
+    /// hosts return to their event loop between startup steps.
+    pub(super) reconciled_interest_center: Option<ChunkPos>,
+    pub(super) reconciliation_deadline: Option<MonotonicDeadline>,
+    pub(super) reconciliation_passes: usize,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -408,6 +414,9 @@ impl McloneSceneHost {
                     pump,
                     camera: camera.clone(),
                     startup_view_pose,
+                    reconciled_interest_center: None,
+                    reconciliation_deadline: None,
+                    reconciliation_passes: 0,
                 }),
                 external_runtime_startup_pending: false,
                 camera,
@@ -1841,6 +1850,9 @@ impl McloneSceneHost {
             pump,
             camera,
             startup_view_pose: None,
+            reconciled_interest_center: None,
+            reconciliation_deadline: None,
+            reconciliation_passes: 0,
         });
         self.status_overlay = StatusOverlay::hidden();
         self.ui.clear_input();
@@ -2677,6 +2689,9 @@ impl McloneSceneHost {
             pump,
             camera: camera.clone(),
             startup_view_pose: None,
+            reconciled_interest_center: None,
+            reconciliation_deadline: None,
+            reconciliation_passes: 0,
         };
         self.install_prepared_warm_world_slot(
             request,
@@ -4354,6 +4369,92 @@ impl McloneSceneHost {
         };
 
         if !step.playable_ready {
+            if self
+                .active_world
+                .local_startup
+                .as_ref()
+                .and_then(|startup| startup.reconciliation_deadline.as_ref())
+                .is_some_and(MonotonicDeadline::is_reached)
+            {
+                let startup = self
+                    .active_world
+                    .local_startup
+                    .take()
+                    .expect("timed-out startup must still own its pump");
+                self.fail_local_startup(
+                    startup,
+                    anyhow!(
+                        "timed out after {:.3}s waiting for reconciled local-world startup readiness: cached_sections={} render_seed_drawable_sections={} pending_compile_jobs={}",
+                        DEFAULT_STARTUP_READINESS_TIMEOUT.as_secs_f64(),
+                        step.cached_section_count,
+                        step.render_seed_drawable_section_count,
+                        step.pending_compile_jobs,
+                    ),
+                );
+            }
+            return Ok(false);
+        }
+
+        // A saved player pose or explicit XR startup pose can move interest far
+        // away from the provisional scene center. Keep that re-pump incremental:
+        // this method runs from the presentation callback, so the blocking
+        // `drive_to_ready_reconciled` helper would stop the native event loop and
+        // make a large persisted world appear hung. Each call performs one
+        // budgeted pump step, then returns until the corrected view has drawable
+        // seed coverage and is ready for another correction pass.
+        let reconciliation_ready = {
+            let startup = self
+                .active_world
+                .local_startup
+                .as_mut()
+                .expect("startup must exist after playable step");
+            let coverage = startup
+                .reconciled_interest_center
+                .map(|center| startup.pump.render_seed_drawable_section_count_near(center));
+            let deadline_reached = startup
+                .reconciliation_deadline
+                .as_ref()
+                .is_some_and(MonotonicDeadline::is_reached);
+            if coverage.is_some_and(|count| count == 0) && !deadline_reached {
+                false
+            } else {
+                if coverage == Some(0) {
+                    log::warn!(
+                        "local-world startup reconciliation timed out after {:.3}s waiting for render-seed coverage near {:?}; completing with best-effort seed (render_seed_drawable_sections={})",
+                        DEFAULT_STARTUP_READINESS_TIMEOUT.as_secs_f64(),
+                        startup.reconciled_interest_center,
+                        step.render_seed_drawable_section_count,
+                    );
+                }
+
+                if startup.reconciliation_passes >= MAX_STARTUP_RECONCILE_PASSES {
+                    true
+                } else {
+                    let interest_before = startup.pump.interest_center();
+                    reconcile_xr_startup_pose(
+                        startup.pump.runtime_services_mut(),
+                        &mut startup.camera,
+                        startup.startup_view_pose,
+                        &self.services.clock,
+                    )
+                    .context("reconcile incremental local-world startup pose")?;
+                    let interest_after = startup.pump.interest_center();
+                    startup.reconciliation_passes += 1;
+                    if interest_after == interest_before {
+                        true
+                    } else {
+                        startup.reconciled_interest_center = Some(interest_after);
+                        startup.reconciliation_deadline.get_or_insert_with(|| {
+                            self.services
+                                .clock
+                                .deadline_after(DEFAULT_STARTUP_READINESS_TIMEOUT)
+                        });
+                        false
+                    }
+                }
+            }
+        };
+        if !reconciliation_ready {
             return Ok(false);
         }
 
@@ -5465,29 +5566,16 @@ impl McloneSceneHost {
             descriptor,
             scene,
             pump,
-            mut camera,
-            startup_view_pose,
+            camera,
+            ..
         } = startup;
         let descriptor = descriptor
             .or_else(|| request.active_descriptor())
             .context("XR local startup request did not describe an active session")?;
-        // docs/tactical/167 Slice 4: reconcile the final startup pose against the
-        // pump-owned runtime, then drain the render seed. The pump reaches playable
-        // at the spawn camera; if the accepted correction or the XR startup view
-        // pose moves chunk interest, the reconciled drive re-pumps at the new camera
-        // so the drained seed covers the final camera rather than the spawn camera.
-        let startup_camera = glam_vec3_from_vec3d(camera.snapshot().eye);
-        let clock = self.services.clock.clone();
-        let (local_runtime, startup_sections) = pump
-            .drive_to_ready_reconciled(
-                startup_camera,
-                DEFAULT_STARTUP_READINESS_TIMEOUT,
-                |runtime| {
-                    reconcile_xr_startup_pose(runtime, &mut camera, startup_view_pose, &clock)?;
-                    Ok(glam_vec3_from_vec3d(camera.snapshot().eye))
-                },
-            )
-            .context("reconcile XR local startup pose")?;
+        // Camera/interest reconciliation has already advanced frame by frame in
+        // `advance_active_local_startup`; completion only consumes the ready pump
+        // and its seed, so no interactive presentation callback spins here.
+        let (local_runtime, startup_sections) = pump.into_runtime_with_startup_sections();
         let runtime: SceneSessionRuntime = NativeSessionServices::<
             mclone_app_runtime::LocalOnlySession,
         >::from_active_runtime_with_descriptor(

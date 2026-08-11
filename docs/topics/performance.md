@@ -446,6 +446,17 @@ Use these local sources when implementing or reviewing performance work:
 
 ## Completed Or De-Risked
 
+- Frame-driven persisted-world startup reconciliation. Opening a save whose
+  player position moved interest far from the provisional scene center no
+  longer calls the blocking reconciled startup driver from the native frame
+  callback. The shared scene now advances one budgeted pump step per frame,
+  keeps loading/progress presentation responsive, waits for drawable seed
+  coverage around the corrected view, and preserves Tactical
+  [`167`](../tactical/167-shared-session-startup-contract.md)'s bounded
+  correction-cascade and best-effort void-view rules. The regression was
+  reproduced against a 5,141-chunk SQLite save whose player resumed 61 chunks
+  from the provisional center; new worlds did not expose it because they had
+  no far saved-pose correction.
 - Desktop frame pacing controls and headless frame-budget probe:
   [`029`](../tactical/029-native-frame-pacing-and-streaming-hitches.md)
 - Completed chunk publication slicing and initial streaming attribution:
