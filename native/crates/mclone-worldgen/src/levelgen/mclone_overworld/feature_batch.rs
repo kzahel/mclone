@@ -688,8 +688,9 @@ pub fn generate_mclone_overworld_chunk_with_topology(
 mod tests {
     use super::*;
     use crate::block::{
-        ACACIA_LOG, ANDESITE, COBBLESTONE, DANDELION, FERN, GRASS, LARGE_FERN_LOWER,
-        MOSSY_COBBLESTONE, OAK_LOG, POPPY, SPRUCE_LOG, SWEET_BERRY_BUSH, TALL_GRASS_LOWER, WATER,
+        ACACIA_LOG, ANDESITE, COBBLESTONE, DANDELION, FERN, GRASS, LARGE_FERN_LOWER, LILY_PAD,
+        MOSSY_COBBLESTONE, OAK_LOG, POPPY, SPRUCE_LOG, SUGAR_CANE, SWEET_BERRY_BUSH,
+        TALL_GRASS_LOWER, WATER, is_water,
     };
     use crate::levelgen::MCLONE_OVERWORLD_PERIOD_CHUNKS;
     use crate::levelgen::mclone_overworld::{
@@ -1070,6 +1071,75 @@ mod tests {
     }
 
     #[test]
+    fn wetland_cover_marks_real_inland_water_and_supported_banks() {
+        let seed = 12_345;
+        let center = ChunkPos::new(-142, -51);
+        let targets = (center.z - 1..=center.z + 1)
+            .flat_map(|z| (center.x - 1..=center.x + 1).map(move |x| ChunkPos::new(x, z)))
+            .collect::<Vec<_>>();
+        let chunks = McloneOverworldFeatureDependencyCache::new()
+            .generate_features_chunks(seed, targets)
+            .chunks;
+        let sampler = super::super::fields::McloneOverworldSampler::new(seed);
+        let mut lily_pads = 0;
+        let mut reed_bases = 0;
+
+        for (chunk_pos, chunk) in &chunks {
+            for local_z in 0..16 {
+                for local_x in 0..16 {
+                    let world_x = chunk_pos.min_block_x() + local_x;
+                    let world_z = chunk_pos.min_block_z() + local_z;
+                    for y in chunk.min_y..chunk.min_y + chunk.height {
+                        let pos = BlockPos::new(world_x, y, world_z);
+                        match block_at_world(&chunks, pos) {
+                            Some(LILY_PAD) => {
+                                lily_pads += 1;
+                                assert!(
+                                    block_at_world(
+                                        &chunks,
+                                        BlockPos::new(world_x, y - 1, world_z),
+                                    )
+                                    .is_some_and(is_water)
+                                );
+                                let terrain = sampler.sample(world_x, world_z);
+                                assert!(terrain.continentalness > 0.0);
+                                assert!(terrain.watercourse.wetland_influence > 0.25);
+                            }
+                            Some(SUGAR_CANE)
+                                if block_at_world(
+                                    &chunks,
+                                    BlockPos::new(world_x, y - 1, world_z),
+                                ) != Some(SUGAR_CANE) =>
+                            {
+                                reed_bases += 1;
+                                assert!([(1, 0), (-1, 0), (0, 1), (0, -1)].into_iter().any(
+                                    |(dx, dz)| {
+                                        (-2..=0).any(|dy| {
+                                            block_at_world(
+                                                &chunks,
+                                                BlockPos::new(
+                                                    world_x + dx,
+                                                    y - 1 + dy,
+                                                    world_z + dz,
+                                                ),
+                                            )
+                                            .is_some_and(is_water)
+                                        })
+                                    }
+                                ));
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        }
+
+        assert!((1..=27).contains(&lily_pads), "lily pads: {lily_pads}");
+        assert!((1..=36).contains(&reed_bases), "reed bases: {reed_bases}");
+    }
+
+    #[test]
     fn reviewed_landforms_pin_final_decorated_payloads() {
         let receipts = [
             (-98_765, ChunkPos::new(-186, 25)),
@@ -1098,7 +1168,7 @@ mod tests {
             [
                 ([0, 0, 0, 0], 14_512_218_172_821_283_965),
                 ([0, 2, 0, 0], 5_411_810_371_936_586_166),
-                ([0, 1, 0, 0], 15_834_644_531_338_998_004),
+                ([0, 1, 0, 0], 1_967_711_706_735_651_513),
             ]
         );
     }

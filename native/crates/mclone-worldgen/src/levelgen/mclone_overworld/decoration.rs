@@ -4,9 +4,9 @@ use mclone_core::chunk_min_block_coord;
 
 use crate::biome::get_layered_biome_by_id;
 use crate::block::{
-    ANDESITE, COARSE_DIRT, COBBLESTONE, DANDELION, DIRT, FERN, GRASS, GRASS_BLOCK, GRAVEL,
-    LARGE_FERN_LOWER, MOSSY_COBBLESTONE, POPPY, RawBlockId, SAND, STONE, SWEET_BERRY_BUSH,
-    TALL_GRASS_LOWER, is_water,
+    AIR, ANDESITE, CLAY, COARSE_DIRT, COBBLESTONE, DANDELION, DIRT, FERN, GRASS, GRASS_BLOCK,
+    GRAVEL, LARGE_FERN_LOWER, LILY_PAD, MOSSY_COBBLESTONE, POPPY, RawBlockId, SAND, STONE,
+    SUGAR_CANE, SWEET_BERRY_BUSH, TALL_GRASS_LOWER, is_water,
 };
 use crate::feature::{
     ConfiguredFeature, DecorationStep, FeatureRegion, FeatureWorld, PlacedFeature,
@@ -25,11 +25,15 @@ use super::biomes::{
 };
 use super::fields::{McloneOverworldSampler, McloneOverworldSamplingTopology};
 
-pub const MCLONE_OVERWORLD_DECORATION_REVISION: &str = "mclone-overworld-v1-decoration-14";
+pub const MCLONE_OVERWORLD_DECORATION_REVISION: &str = "mclone-overworld-v1-decoration-15";
 
 const MCLONE_OVERWORLD_DECORATION_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_6465_6331);
 const MCLONE_OVERWORLD_RIVER_ROCK_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_726f_636b);
+const MCLONE_OVERWORLD_WETLAND_COVER_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_7765_7463);
 const RIVER_ROCK_WATER_SITE_LIMIT: usize = 12;
+const WETLAND_COVER_WATER_SITE_LIMIT: usize = 16;
+const WETLAND_COVER_MAX_LILY_PADS: usize = 3;
+const WETLAND_COVER_MAX_REED_CLUMPS: usize = 3;
 const RIVER_ROCK_BANK_OFFSETS: [(i32, i32); 16] = [
     (4, 0),
     (-4, 0),
@@ -66,6 +70,7 @@ pub(super) fn decorate_mclone_overworld_center_with_topology(
     let min_z = chunk_min_block_coord(region.decoration_chunk_z());
     let sampler = McloneOverworldSampler::new_with_topology(seed, topology);
     let landform = sampler.sample_landform(min_x + 8, min_z + 8);
+    place_wetland_cover(seed, region, sampler);
     place_sparse_watercourse_rock(seed, region, sampler);
     let biome_id = mclone_overworld_biome_id_for_sample(landform);
     let features = feature_table(
@@ -89,6 +94,135 @@ pub(super) fn decorate_mclone_overworld_center_with_topology(
         region,
         preserved_tree_index,
     );
+}
+
+fn place_wetland_cover(seed: i64, region: &mut FeatureRegion, sampler: McloneOverworldSampler) {
+    let identity_min_x = chunk_min_block_coord(region.decoration_chunk_x());
+    let identity_min_z = chunk_min_block_coord(region.decoration_chunk_z());
+    let work_min_x = chunk_min_block_coord(region.center_chunk_x());
+    let work_min_z = chunk_min_block_coord(region.center_chunk_z());
+    let mut random = WorldgenRandom::default();
+    random.set_decoration_seed(
+        MCLONE_OVERWORLD_WETLAND_COVER_DOMAIN.derive(seed),
+        identity_min_x,
+        identity_min_z,
+    );
+    let mut water_sites = Vec::new();
+    for local_z in (1..16).step_by(2) {
+        for local_x in (1..16).step_by(2) {
+            let x = work_min_x + local_x;
+            let z = work_min_z + local_z;
+            let Some(ocean_floor_y) = region.height_at(HeightmapType::OceanFloorWg, x, z) else {
+                continue;
+            };
+            let Some(world_surface_y) = region.height_at(HeightmapType::WorldSurfaceWg, x, z)
+            else {
+                continue;
+            };
+            if world_surface_y <= ocean_floor_y
+                || !region
+                    .block_at_world(BlockPos::new(x, world_surface_y - 1, z))
+                    .is_some_and(is_water)
+            {
+                continue;
+            }
+            let terrain = sampler.sample(x, z);
+            if terrain.continentalness > 0.0 && terrain.watercourse.wetland_influence > 0.25 {
+                water_sites.push((x, world_surface_y, z));
+            }
+        }
+    }
+    if water_sites.is_empty() {
+        return;
+    }
+
+    let site_start = random.next_int_bound(water_sites.len() as i32) as usize;
+    let mut lily_pads = 0;
+    let mut reed_clumps = 0;
+    for site_offset in 0..water_sites.len().min(WETLAND_COVER_WATER_SITE_LIMIT) {
+        let (water_x, water_surface_y, water_z) =
+            water_sites[(site_start + site_offset) % water_sites.len()];
+        if lily_pads < WETLAND_COVER_MAX_LILY_PADS && random.next_int_bound(3) == 0 {
+            let lily_pos = BlockPos::new(water_x, water_surface_y, water_z);
+            if region.block_at_world(lily_pos) == Some(AIR)
+                && region.set_block_world(lily_pos, LILY_PAD)
+            {
+                lily_pads += 1;
+            }
+        }
+        if reed_clumps >= WETLAND_COVER_MAX_REED_CLUMPS || random.next_int_bound(2) != 0 {
+            continue;
+        }
+        let offset_start = random.next_int_bound(WETLAND_REED_OFFSETS.len() as i32) as usize;
+        for offset in 0..WETLAND_REED_OFFSETS.len() {
+            let (dx, dz) =
+                WETLAND_REED_OFFSETS[(offset_start + offset) % WETLAND_REED_OFFSETS.len()];
+            let x = water_x + dx;
+            let z = water_z + dz;
+            let Some(ground_y) = region.height_at(HeightmapType::OceanFloorWg, x, z) else {
+                continue;
+            };
+            let Some(world_surface_y) = region.height_at(HeightmapType::WorldSurfaceWg, x, z)
+            else {
+                continue;
+            };
+            if ground_y != world_surface_y || (ground_y - water_surface_y).abs() > 2 {
+                continue;
+            }
+            let support_pos = BlockPos::new(x, ground_y - 1, z);
+            if !region.block_at_world(support_pos).is_some_and(|block| {
+                matches!(block, GRASS_BLOCK | DIRT | COARSE_DIRT | SAND | CLAY)
+            }) || !support_has_adjacent_water(region, support_pos)
+            {
+                continue;
+            }
+            let reed_pos = BlockPos::new(x, ground_y, z);
+            if region.block_at_world(reed_pos) != Some(AIR)
+                || !region.set_block_world(reed_pos, SUGAR_CANE)
+            {
+                continue;
+            }
+            if random.next_boolean() {
+                let upper = BlockPos::new(reed_pos.x, reed_pos.y + 1, reed_pos.z);
+                if region.block_at_world(upper) == Some(AIR) {
+                    region.set_block_world(upper, SUGAR_CANE);
+                }
+            }
+            reed_clumps += 1;
+            break;
+        }
+    }
+}
+
+const WETLAND_REED_OFFSETS: [(i32, i32); 12] = [
+    (1, 0),
+    (-1, 0),
+    (0, 1),
+    (0, -1),
+    (1, 1),
+    (1, -1),
+    (-1, 1),
+    (-1, -1),
+    (2, 0),
+    (-2, 0),
+    (0, 2),
+    (0, -2),
+];
+
+fn support_has_adjacent_water(region: &mut FeatureRegion, support: BlockPos) -> bool {
+    [(1, 0), (-1, 0), (0, 1), (0, -1)]
+        .into_iter()
+        .any(|(dx, dz)| {
+            (-2..=0).any(|dy| {
+                region
+                    .block_at_world(BlockPos::new(
+                        support.x + dx,
+                        support.y + dy,
+                        support.z + dz,
+                    ))
+                    .is_some_and(is_water)
+            })
+        })
 }
 
 fn place_sparse_watercourse_rock(
