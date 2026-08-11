@@ -14,7 +14,7 @@ pub use player_movement::{
 };
 
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -100,10 +100,13 @@ use mclone_app_runtime::{
 };
 #[cfg(not(target_arch = "wasm32"))]
 use mclone_assets::AssetSource;
-use mclone_assets::{ActorFigureId, AssetPackCatalog, AssetPackSelection};
+use mclone_assets::{ActorFigureId, AssetPackCatalog, AssetPackSelection, BlockStateRegistry};
 #[cfg(not(target_arch = "wasm32"))]
 use mclone_audio::PreparedAudioAssets;
-use mclone_audio::{AudioOutputCapability, landing_playback_for_impact};
+use mclone_audio::{
+    AcousticMaterial, AudioOutputCapability, PlaybackParams, SoundKey, UI_BACK, UI_CONFIRM,
+    UI_ERROR, UI_OPEN, UI_SELECT, landing_playback_for_impact,
+};
 use mclone_client::{
     ActorInterpolationConfig, ActorInterpolationState, ActorPresentation, BlockInteractionTarget,
     ClientInteractionController, ClientRuntime, HAND_PUSH_DEFAULT_HEAD_RADIUS,
@@ -112,7 +115,8 @@ use mclone_client::{
     TeleportValidityReason, sphere_intersects_solid_blocks, view_vector_from_rot_degrees,
 };
 use mclone_core::{
-    Aabb, AxisTopology, BlockStateId, CHUNK_WIDTH, ChunkPos, HorizontalTopology, Vec3d, time,
+    Aabb, AxisTopology, BlockPos, BlockStateId, CHUNK_WIDTH, ChunkPos, HorizontalTopology, Vec3d,
+    time,
 };
 use mclone_diagnostics::{
     BudgetDecisionPanelReport, BudgetHostMode, FrameHostKind, FramePipelineReport, WorkWindow,
@@ -536,6 +540,7 @@ struct DrawableWorldSlot {
     /// making ownership explicit before the bounded participant group admits
     /// more than one presentation state.
     local_participant: LocalParticipantPresentation,
+    footsteps: FootstepCadence,
     /// First live consumer of the bounded local-participant foundation.
     ///
     /// This tactical keeps Guest 2 presentation-only until the live session
@@ -553,6 +558,149 @@ struct DrawableWorldSlot {
     render_admission_policy: RenderAdmissionPolicy,
     accepted_entry_pose: Option<WorldEntryPose>,
     pending_startup_sections: Vec<TexturedRenderSectionMesh>,
+}
+
+const FOOTSTEP_STRIDE_BLOCKS: f64 = 1.65;
+const MAX_FOOTSTEP_FRAME_DISTANCE: f64 = 1.0;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct FootstepEvent {
+    position: Vec3d,
+    sequence: u64,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+struct FootstepCadence {
+    distance_since_step: f64,
+    sequence: u64,
+}
+
+impl FootstepCadence {
+    fn advance(&mut self, before: Vec3d, after: Vec3d, grounded: bool) -> Option<FootstepEvent> {
+        if !grounded || !before.is_finite() || !after.is_finite() {
+            self.distance_since_step = 0.0;
+            return None;
+        }
+        let dx = after.x - before.x;
+        let dz = after.z - before.z;
+        let distance = dx.hypot(dz);
+        if distance > MAX_FOOTSTEP_FRAME_DISTANCE {
+            self.distance_since_step = 0.0;
+            return None;
+        }
+        self.distance_since_step += distance;
+        if self.distance_since_step < FOOTSTEP_STRIDE_BLOCKS {
+            return None;
+        }
+        self.distance_since_step %= FOOTSTEP_STRIDE_BLOCKS;
+        let event = FootstepEvent {
+            position: after,
+            sequence: self.sequence,
+        };
+        self.sequence = self.sequence.wrapping_add(1);
+        Some(event)
+    }
+
+    fn reset(&mut self) {
+        self.distance_since_step = 0.0;
+    }
+}
+
+fn spatial_sound_seed(position: Vec3d, salt: u64) -> u64 {
+    position.x.to_bits()
+        ^ position.y.to_bits().rotate_left(21)
+        ^ position.z.to_bits().rotate_left(42)
+        ^ salt
+}
+
+fn sound_for_ui_action(action: GameUiAction) -> SoundKey {
+    match action {
+        GameUiAction::CancelDeleteWorld
+        | GameUiAction::CloseHelp(_)
+        | GameUiAction::CancelAssetPacks
+        | GameUiAction::CancelStorageAction(_)
+        | GameUiAction::BackToTitle
+        | GameUiAction::BackToPause
+        | GameUiAction::QuitToTitle => UI_BACK,
+        GameUiAction::OpenWorldList
+        | GameUiAction::OpenWorldCreate
+        | GameUiAction::ConfirmDeleteWorld(_)
+        | GameUiAction::OpenNewWorld
+        | GameUiAction::OpenJoinRemote
+        | GameUiAction::OpenBlockPalette
+        | GameUiAction::OpenHelp(_)
+        | GameUiAction::OpenOptions(_)
+        | GameUiAction::OpenOptionsCategory(_, _)
+        | GameUiAction::OpenServerSettings(_)
+        | GameUiAction::OpenAssetPacks(_)
+        | GameUiAction::ConfirmStorageAction(_, _) => UI_OPEN,
+        GameUiAction::StartWorld
+        | GameUiAction::EnterScenario(_)
+        | GameUiAction::OpenWorld(_)
+        | GameUiAction::CreateCatalogWorld
+        | GameUiAction::DeleteWorld(_)
+        | GameUiAction::CreateWorld(_)
+        | GameUiAction::JoinRemote
+        | GameUiAction::Resume
+        | GameUiAction::Respawn
+        | GameUiAction::ApplyHomesteadShowcasePreset
+        | GameUiAction::AssignHotbarBlock { .. }
+        | GameUiAction::AssignHotbarActor { .. }
+        | GameUiAction::ApplyAssetPacks
+        | GameUiAction::ExecuteStorageAction(_, _)
+        | GameUiAction::ClearRebuildableCache
+        | GameUiAction::Quit => UI_CONFIRM,
+        _ => UI_SELECT,
+    }
+}
+
+#[cfg(test)]
+mod sound_effect_tests {
+    use super::*;
+
+    #[test]
+    fn footstep_cadence_uses_grounded_horizontal_distance() {
+        let mut cadence = FootstepCadence::default();
+        assert_eq!(
+            cadence.advance(Vec3d::ZERO, Vec3d::new(0.8, 0.0, 0.0), true),
+            None
+        );
+        let event = cadence
+            .advance(Vec3d::new(0.8, 0.0, 0.0), Vec3d::new(1.7, 0.0, 0.0), true)
+            .expect("stride should emit one footstep");
+        assert_eq!(event.position, Vec3d::new(1.7, 0.0, 0.0));
+        assert_eq!(event.sequence, 0);
+
+        assert_eq!(
+            cadence.advance(Vec3d::new(1.7, 0.0, 0.0), Vec3d::new(1.7, 2.0, 0.0), false,),
+            None
+        );
+        assert_eq!(cadence.distance_since_step, 0.0);
+    }
+
+    #[test]
+    fn footstep_cadence_rejects_teleport_sized_frame_motion() {
+        let mut cadence = FootstepCadence::default();
+        assert_eq!(
+            cadence.advance(Vec3d::ZERO, Vec3d::new(10.0, 0.0, 0.0), true),
+            None
+        );
+        assert_eq!(cadence.distance_since_step, 0.0);
+    }
+
+    #[test]
+    fn ui_actions_have_stable_semantic_feedback() {
+        assert_eq!(sound_for_ui_action(GameUiAction::BackToTitle), UI_BACK);
+        assert_eq!(sound_for_ui_action(GameUiAction::OpenWorldList), UI_OPEN);
+        assert_eq!(
+            sound_for_ui_action(GameUiAction::CreateCatalogWorld),
+            UI_CONFIRM
+        );
+        assert_eq!(
+            sound_for_ui_action(GameUiAction::CycleTexturePresentation),
+            UI_SELECT
+        );
+    }
 }
 
 impl std::ops::Deref for DrawableWorldSlot {
@@ -662,6 +810,7 @@ impl DrawableWorldSlot {
             local_startup: install.local_startup,
             external_runtime_startup_pending: install.external_runtime_startup_pending,
             local_participant,
+            footsteps: FootstepCadence::default(),
             local_guest_preview: None,
             draw: install.draw,
             actors: install.actors,
@@ -692,6 +841,7 @@ impl DrawableWorldSlot {
             self.camera.snapshot(),
         );
         self.local_guest_preview = None;
+        self.footsteps = FootstepCadence::default();
         self.draw = install.draw;
         self.actors = install.actors;
         self.actor_interpolation = ActorInterpolationState::new();
@@ -733,6 +883,7 @@ impl DrawableWorldSlot {
             self.scene.player_movement_cadence,
             self.camera.snapshot(),
         );
+        self.footsteps = FootstepCadence::default();
         self.pending_startup_sections = pending_startup_sections;
         self.render_stats = RenderStreamStats::default();
         self.actor_interpolation = ActorInterpolationState::new();
@@ -4863,12 +5014,76 @@ impl McloneSceneHost {
         self.commit_engine_camera_player_pose_timed().map(Some)
     }
 
-    fn play_landing_events(&mut self) {
+    fn play_local_movement_sounds(&mut self, before_feet: Vec3d) {
+        let first_party =
+            self.active_assets
+                .selection
+                .is_enabled(&mclone_assets::AssetPackId::new(
+                    mclone_assets::AUTHORED_FIRST_PARTY_PACK_ID,
+                ));
         let events = self.active_world.camera.take_landing_events();
         for event in events {
-            let (sound, gain) = landing_playback_for_impact(event.impact_speed);
-            self.services.audio.play(sound, gain);
+            let (legacy_sound, gain) = landing_playback_for_impact(event.impact_speed);
+            let sound = if first_party {
+                self.acoustic_material_below(event.position).landing_sound()
+            } else {
+                legacy_sound
+            };
+            self.services.audio.play_with(
+                sound,
+                PlaybackParams {
+                    gain,
+                    seed: spatial_sound_seed(event.position, 0x4c41_4e44),
+                    ..PlaybackParams::default()
+                },
+            );
         }
+
+        let after_feet = self.active_world.camera.feet_position();
+        let grounded = self.active_world.camera.on_ground();
+        if let Some(event) = self
+            .active_world
+            .footsteps
+            .advance(before_feet, after_feet, grounded)
+            && first_party
+        {
+            let sound = self
+                .acoustic_material_below(event.position)
+                .footstep_sound();
+            self.services.audio.play_with(
+                sound,
+                PlaybackParams {
+                    seed: spatial_sound_seed(event.position, event.sequence),
+                    ..PlaybackParams::default()
+                },
+            );
+        }
+    }
+
+    fn acoustic_material_below(&self, feet: Vec3d) -> AcousticMaterial {
+        static BLOCK_STATES: LazyLock<BlockStateRegistry> =
+            LazyLock::new(BlockStateRegistry::terrain_mvp);
+        let below = BlockPos::containing(Vec3d::new(feet.x, feet.y - 0.05, feet.z));
+        self.active_world
+            .runtime
+            .as_ref()
+            .and_then(|runtime| runtime.client().block_state_at_block_pos(below))
+            .and_then(|state| BLOCK_STATES.by_id(state))
+            .map_or(AcousticMaterial::Neutral, |state| {
+                AcousticMaterial::from_block_path(state.block.path())
+            })
+    }
+
+    fn play_ui_action_sound(&self, action: GameUiAction) {
+        self.services
+            .audio
+            .play_with(sound_for_ui_action(action), PlaybackParams::default());
+    }
+
+    fn play_ui_error_sound(&self) {
+        self.services
+            .audio
+            .play_with(UI_ERROR, PlaybackParams::default());
     }
 
     fn sky_clear_color(&self) -> wgpu::Color {

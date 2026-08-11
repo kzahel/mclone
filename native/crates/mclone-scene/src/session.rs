@@ -5627,6 +5627,7 @@ impl McloneSceneHost {
         self.tracking_origin = None;
         self.last_locomotion_update = None;
         self.active_world.local_participant.reset_movement();
+        self.active_world.footsteps.reset();
         self.player_pose_sync.reset();
         self.head_comfort.reset();
         self.clear_xr_blink_teleport();
@@ -5803,6 +5804,7 @@ impl McloneSceneHost {
             self.cancel_warm_world_standby("lobby title cancellation");
         }
         if self.active_world.local_startup.is_some() {
+            self.play_ui_error_sound();
             return Ok(false);
         }
         if matches!(self.ui.screen(), Some(GameScreen::Death { .. }))
@@ -5811,6 +5813,7 @@ impl McloneSceneHost {
                 GameUiAction::Respawn | GameUiAction::QuitToTitle | GameUiAction::Quit
             )
         {
+            self.play_ui_error_sound();
             return Ok(false);
         }
         let settings_state = self.client_experience_settings_state();
@@ -5846,6 +5849,7 @@ impl McloneSceneHost {
         if !self.ui.is_active() {
             self.clear_menu_input_state();
         }
+        self.play_ui_action_sound(action);
         Ok(scene_replaced)
     }
 

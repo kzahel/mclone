@@ -140,6 +140,120 @@ impl Default for PlaybackParams {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum AcousticMaterial {
+    Carpet,
+    Glass,
+    Grass,
+    Metal,
+    Snow,
+    Soft,
+    Stone,
+    Wood,
+    #[default]
+    Neutral,
+}
+
+impl AcousticMaterial {
+    pub fn from_block_path(block: &str) -> Self {
+        if block.contains("carpet") || block.contains("wool") {
+            Self::Carpet
+        } else if block.contains("glass") || block.contains("ice") {
+            Self::Glass
+        } else if block.contains("snow") {
+            Self::Snow
+        } else if block.contains("rail")
+            || block.contains("iron")
+            || block.contains("gold")
+            || block.contains("copper")
+            || block.contains("anvil")
+        {
+            Self::Metal
+        } else if block.contains("log")
+            || block.contains("wood")
+            || block.contains("plank")
+            || block.contains("bookshelf")
+            || block.contains("chest")
+            || block.contains("door")
+            || block.contains("fence")
+        {
+            Self::Wood
+        } else if block.contains("grass")
+            || block.contains("leaves")
+            || block.contains("fern")
+            || block.contains("flower")
+            || block.contains("moss")
+            || block.contains("vine")
+        {
+            Self::Grass
+        } else if block.contains("dirt")
+            || block.contains("sand")
+            || block.contains("gravel")
+            || block.contains("clay")
+            || block.contains("farmland")
+            || block.contains("mud")
+        {
+            Self::Soft
+        } else if block.contains("stone")
+            || block.contains("ore")
+            || block.contains("brick")
+            || block.contains("terracotta")
+            || block.contains("concrete")
+            || block.contains("bedrock")
+            || block.contains("basalt")
+            || block.contains("tuff")
+        {
+            Self::Stone
+        } else {
+            Self::Neutral
+        }
+    }
+
+    pub const fn footstep_sound(self) -> SoundKey {
+        match self {
+            Self::Carpet => FOOTSTEP_CARPET,
+            Self::Grass => FOOTSTEP_GRASS,
+            Self::Snow => FOOTSTEP_SNOW,
+            Self::Wood => FOOTSTEP_WOOD,
+            Self::Stone | Self::Glass | Self::Metal => FOOTSTEP_STONE,
+            Self::Soft | Self::Neutral => FOOTSTEP_NEUTRAL,
+        }
+    }
+
+    pub const fn landing_sound(self) -> SoundKey {
+        match self {
+            Self::Carpet => LANDING_CARPET,
+            Self::Grass => LANDING_GRASS,
+            Self::Snow => LANDING_SNOW,
+            Self::Wood => LANDING_WOOD,
+            Self::Stone | Self::Glass | Self::Metal => LANDING_STONE,
+            Self::Soft | Self::Neutral => LANDING_NEUTRAL,
+        }
+    }
+
+    pub const fn break_sound(self) -> SoundKey {
+        match self {
+            Self::Glass => BREAK_GLASS,
+            Self::Metal => BREAK_METAL,
+            Self::Carpet | Self::Grass | Self::Snow | Self::Soft => BREAK_SOFT,
+            Self::Stone => BREAK_STONE,
+            Self::Wood => BREAK_WOOD,
+            Self::Neutral => BREAK_STONE,
+        }
+    }
+
+    pub const fn place_sound(self) -> SoundKey {
+        match self {
+            Self::Glass => PLACE_GLASS,
+            Self::Metal => PLACE_METAL,
+            Self::Carpet | Self::Grass | Self::Snow | Self::Soft => PLACE_SOFT,
+            Self::Stone => PLACE_STONE,
+            Self::Wood => PLACE_WOOD,
+            Self::Neutral => PLACE_STONE,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AudioSettings {
     pub enabled: bool,
@@ -1162,5 +1276,27 @@ mod capability_tests {
             output.replacement(PreparedAudioAssets::silent()).unwrap(),
             AudioOutputCapability::Unavailable
         ));
+    }
+
+    #[test]
+    fn acoustic_materials_keep_snow_and_sand_semantically_distinct() {
+        assert_eq!(
+            AcousticMaterial::from_block_path("snow_block"),
+            AcousticMaterial::Snow
+        );
+        assert_eq!(
+            AcousticMaterial::from_block_path("sand"),
+            AcousticMaterial::Soft
+        );
+        assert_eq!(
+            AcousticMaterial::from_block_path("oak_planks"),
+            AcousticMaterial::Wood
+        );
+        assert_eq!(
+            AcousticMaterial::from_block_path("iron_ore"),
+            AcousticMaterial::Metal
+        );
+        assert_eq!(AcousticMaterial::Soft.footstep_sound(), FOOTSTEP_NEUTRAL);
+        assert_eq!(AcousticMaterial::Snow.footstep_sound(), FOOTSTEP_SNOW);
     }
 }

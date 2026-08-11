@@ -1017,6 +1017,7 @@ impl McloneSceneHost {
             .runtime
             .as_ref()
             .expect("startup completion requires runtime");
+        let before_feet = self.active_world.camera.feet_position();
         let frame_end = self.services.clock.now();
         let input = engine_camera_input_from_flat_frame(frame, dt_seconds);
         let (changed, _) = self.active_world.local_participant.advance_movement(
@@ -1025,7 +1026,7 @@ impl McloneSceneHost {
             dt_seconds,
             frame_end,
         );
-        self.play_landing_events();
+        self.play_local_movement_sounds(before_feet);
         changed
     }
 
@@ -1384,7 +1385,14 @@ impl McloneSceneHost {
         &mut self,
         navigation: mclone_ui::GuiNavigation,
     ) -> (bool, Option<GameUiAction>) {
-        self.ui.navigate(navigation)
+        let result = self.ui.navigate(navigation);
+        if result.0 && result.1.is_none() {
+            self.services.audio.play_with(
+                mclone_audio::UI_SELECT,
+                mclone_audio::PlaybackParams::default(),
+            );
+        }
+        result
     }
 
     pub fn mono_ui_scroll(&mut self, direction: MouseWheelDirection) -> bool {
@@ -1435,6 +1443,7 @@ impl McloneSceneHost {
             self.cancel_warm_world_standby("lobby title cancellation");
         }
         if self.active_world.local_startup.is_some() && !matches!(action, GameUiAction::Quit) {
+            self.play_ui_error_sound();
             return Ok(MonoUiActionOutcome::default());
         }
         if matches!(self.ui.screen(), Some(GameScreen::Death { .. }))
@@ -1443,6 +1452,7 @@ impl McloneSceneHost {
                 GameUiAction::Respawn | GameUiAction::QuitToTitle | GameUiAction::Quit
             )
         {
+            self.play_ui_error_sound();
             return Ok(MonoUiActionOutcome::default());
         }
 
@@ -1505,6 +1515,7 @@ impl McloneSceneHost {
         }
         let render_state = self.current_mono_ui_render_state();
         self.ui.commit_render_state(render_state);
+        self.play_ui_action_sound(action);
         Ok(MonoUiActionOutcome {
             scene_replaced,
             session_start_requested: starts_session,

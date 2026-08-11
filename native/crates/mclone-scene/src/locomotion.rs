@@ -632,6 +632,7 @@ impl McloneSceneHost {
             .runtime
             .as_ref()
             .expect("runtime presence checked");
+        let before_feet = self.active_world.camera.feet_position();
         let _ = self.active_world.local_participant.advance_movement(
             runtime.client(),
             input,
@@ -639,7 +640,7 @@ impl McloneSceneHost {
             now,
         );
         timing.camera_apply_ms = elapsed_ms(self.services.clock.elapsed_since(camera_apply_start));
-        self.play_landing_events();
+        self.play_local_movement_sounds(before_feet);
         if !suppress_gameplay_interaction {
             if gameplay_interaction_edges.any() {
                 let commit_start = self.services.clock.now();
