@@ -7,8 +7,8 @@ use mclone_app_runtime::client_session_policy::ClientSessionHostAction;
 use mclone_input::TouchControlsMode;
 use mclone_ui::{
     GameCollisionMode, GameGrassDetail, GameLeafDetail, GameMovementMode, GamePlayerModel,
-    GameSimulationCadence, GameTravelAssistMode, GameTurnMode, GameWorldRenderScaleMode,
-    GameXrTurnMode, StatusOverlay,
+    GameSimulationCadence, GameTerrainPresentationMode, GameTravelAssistMode, GameTurnMode,
+    GameWorldRenderScaleMode, GameXrTurnMode, StatusOverlay,
 };
 
 /// Platform hooks emitted by shared client-experience policy.
@@ -32,6 +32,7 @@ pub trait ClientExperienceSettingsHost {
     fn set_section_occlusion_culling(&mut self, enabled: bool) -> Result<()>;
     fn set_leaf_detail(&mut self, detail: GameLeafDetail) -> Result<()>;
     fn set_grass_detail(&mut self, detail: GameGrassDetail) -> Result<()>;
+    fn set_terrain_presentation(&mut self, mode: GameTerrainPresentationMode) -> Result<()>;
     fn set_fullbright(&mut self, enabled: bool) -> Result<()>;
     fn set_player_collision_box_visible(&mut self, visible: bool) -> Result<()>;
     fn set_first_person_player_visible(&mut self, visible: bool) -> Result<()>;
@@ -76,6 +77,9 @@ where
             }
             ClientExperienceSettingEffect::SetGrassDetail(detail) => {
                 target.set_grass_detail(detail)?;
+            }
+            ClientExperienceSettingEffect::SetTerrainPresentation(mode) => {
+                target.set_terrain_presentation(mode)?;
             }
             ClientExperienceSettingEffect::SetFullbright(enabled) => {
                 target.set_fullbright(enabled)?;
@@ -213,6 +217,7 @@ mod tests {
         record_method!(set_section_occlusion_culling(enabled: bool));
         record_method!(set_leaf_detail(detail: GameLeafDetail));
         record_method!(set_grass_detail(detail: GameGrassDetail));
+        record_method!(set_terrain_presentation(mode: GameTerrainPresentationMode));
         record_method!(set_fullbright(enabled: bool));
         record_method!(set_player_collision_box_visible(visible: bool));
         record_method!(set_first_person_player_visible(visible: bool));
@@ -260,6 +265,9 @@ mod tests {
             setting_effects: vec![
                 ClientExperienceSettingEffect::SetLeafDetail(GameLeafDetail::Bushy),
                 ClientExperienceSettingEffect::SetGrassDetail(GameGrassDetail::Lush),
+                ClientExperienceSettingEffect::SetTerrainPresentation(
+                    GameTerrainPresentationMode::Composed,
+                ),
                 ClientExperienceSettingEffect::SetFullbright(true),
                 ClientExperienceSettingEffect::SetTravelAssistMode(GameTravelAssistMode::Blink),
                 ClientExperienceSettingEffect::CycleFramePacing,
@@ -277,6 +285,7 @@ mod tests {
             vec![
                 "set_leaf_detail",
                 "set_grass_detail",
+                "set_terrain_presentation",
                 "set_fullbright",
                 "set_travel_assist_mode"
             ]

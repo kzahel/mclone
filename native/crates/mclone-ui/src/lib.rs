@@ -2022,6 +2022,7 @@ pub enum GameUiAction {
     ToggleSectionOcclusion,
     SetLeafDetail(GameLeafDetail),
     SetGrassDetail(GameGrassDetail),
+    SetTerrainPresentation(GameTerrainPresentationMode),
     ToggleFullbright,
     TogglePlayerCollisionBox,
     ToggleFirstPersonPlayer,
@@ -2097,6 +2098,39 @@ impl GameGrassDetail {
             Self::Sparse => "Sparse",
             Self::Lush => "Lush",
             Self::Ultra => "Ultra",
+        }
+    }
+}
+
+/// Player-facing choice between ordinary exact chunks and the shared
+/// exact-plus-procedural terrain composition.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum GameTerrainPresentationMode {
+    #[default]
+    ExactOnly,
+    Composed,
+}
+
+impl GameTerrainPresentationMode {
+    pub const fn next(self) -> Self {
+        match self {
+            Self::ExactOnly => Self::Composed,
+            Self::Composed => Self::ExactOnly,
+        }
+    }
+
+    /// Stable startup/configuration spelling.
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::ExactOnly => "exact-only",
+            Self::Composed => "composed",
+        }
+    }
+
+    pub const fn ui_label(self) -> &'static str {
+        match self {
+            Self::ExactOnly => "Exact Only",
+            Self::Composed => "Composed",
         }
     }
 }
@@ -2262,6 +2296,9 @@ pub struct GameUiRenderState {
     pub section_occlusion_culling: bool,
     pub leaf_detail: GameLeafDetail,
     pub grass_detail: GameGrassDetail,
+    /// `None` keeps the shared row visible but unavailable for an incompatible
+    /// world/session or render topology.
+    pub terrain_presentation: Option<GameTerrainPresentationMode>,
     pub force_fullbright: bool,
     pub player_collision_box_visible: bool,
     pub first_person_player_visible: bool,
@@ -2307,6 +2344,7 @@ impl Default for GameUiRenderState {
             section_occlusion_culling: true,
             leaf_detail: GameLeafDetail::Blocky,
             grass_detail: GameGrassDetail::Off,
+            terrain_presentation: None,
             force_fullbright: false,
             player_collision_box_visible: false,
             first_person_player_visible: false,

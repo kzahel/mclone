@@ -2,7 +2,7 @@ use super::*;
 use crate::{
     GameAuxiliarySplitMode, GameFlatPresentationState, GameGrassDetail, GameLeafDetail,
     GameLocalPlayControllerFamily, GameLocalPlayGuestInput, GameLocalPlayLayout,
-    GameLocalPlayState, GameWorldRenderScaleMode,
+    GameLocalPlayState, GameTerrainPresentationMode, GameWorldRenderScaleMode,
 };
 
 #[test]
@@ -502,6 +502,45 @@ fn graphics_options_show_and_cycle_grass_detail() {
         surface.pointer_up(point_in(grass_detail.rect), state).1,
         Some(GameUiAction::SetGrassDetail(GameGrassDetail::Ultra))
     );
+}
+
+#[test]
+fn graphics_options_cycle_or_disable_terrain_horizon() {
+    let mut surface = UiSurface::new();
+    surface.set_screen(Some(UiScreenId::OptionsCategory {
+        parent: GameOptionsParent::Pause,
+        category: GameOptionsCategory::Graphics,
+    }));
+    surface.set_scale(GuiScale::from_pixels(960, 540));
+    let state = GameUiRenderState {
+        terrain_presentation: Some(GameTerrainPresentationMode::ExactOnly),
+        ..GameUiRenderState::default()
+    };
+    surface.set_render_state(state);
+
+    let horizon = surface
+        .layout()
+        .widget(UI_V2_OPTIONS_TERRAIN_PRESENTATION)
+        .expect("terrain horizon row")
+        .clone();
+    assert_eq!(horizon.value.as_deref(), Some("Exact Only"));
+    assert!(horizon.enabled);
+    assert!(surface.pointer_down(point_in(horizon.rect), state));
+    assert_eq!(
+        surface.pointer_up(point_in(horizon.rect), state).1,
+        Some(GameUiAction::SetTerrainPresentation(
+            GameTerrainPresentationMode::Composed,
+        ))
+    );
+
+    let unavailable = GameUiRenderState::default();
+    surface.set_render_state(unavailable);
+    let horizon = surface
+        .layout()
+        .widget(UI_V2_OPTIONS_TERRAIN_PRESENTATION)
+        .expect("unavailable terrain horizon row");
+    assert_eq!(horizon.value.as_deref(), Some("Unavailable"));
+    assert!(!horizon.enabled);
 }
 
 #[test]

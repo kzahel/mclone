@@ -5,7 +5,17 @@ Topic: `procedural-horizon-clipmap`
 Status: the standalone cross-platform proof, transition hardening, and shared
 vegetation service are complete. Terrain Lab runtime-composition adoption,
 PH-4 live-game scene adoption, and their hosted human reviews are also
-complete. Coordinating parent Tactical
+complete. As of 2026-08-11, the shared in-game Graphics screen exposes
+`Terrain Horizon: Exact Only / Composed` as a live session control. The same
+UI action, settings reducer, and scene effect serve desktop, browser, flat
+Android, and ordinary per-eye XR. It is available only for a local
+`mclone-overworld-v1` source; remote and incompatible-profile sessions show
+the row as unavailable and project inherited state back to exact-only.
+Full-frame XR multiview is the explicit current exception: its platform
+capability disables the row and forces exact-only before rendering. Native,
+browser-Wasm, flat-Android APK, and Android-XR APK builds pass; physical
+Android/XR pixel and performance acceptance remain later work. Coordinating
+parent Tactical
 [`261`](../tactical/261-procedural-horizon-product-integration-roadmap.md)
 owns the global path into `mclone-scene`, exact/procedural arbitration,
 flat-platform promotion, and XR/multiview acceptance, but further execution is
@@ -15,8 +25,8 @@ cross-platform proof was completed and deployed on 2026-07-25 by Tactical
 [`249`](../tactical/249-cross-platform-procedural-horizon-proof.md). Shared
 toroidal planning, a ten-level fixed-budget renderer, native tree proxies, and
 one Rust terrain-view engine now run through Explorer, Terrain Lab, and the
-opt-in live game on native and browser hosts. Android and XR promotion remain
-later phases. Product scope and platform hosting are independent: the small
+live game. Android and XR performance promotion remains a later phase.
+Product scope and platform hosting are independent: the small
 Explorer and full game may both run in the browser, while the same terrain
 system remains usable on desktop, Android, and XR. Tactical
 [`245`](../tactical/245-retire-chunk-far-lod-runtime.md) remains the completed
@@ -69,7 +79,7 @@ pass, and hosted interactive Human Review 1B accepted the corrected
 composition on 2026-07-27. Minor z-fighting limited to the outermost exact
 blocks remains a known near-coincident frontier-overlap issue for later
 collar/skirt refinement; it does not reopen the shared-depth correction. No
-game-scene, Android, or XR adoption has started.
+game-scene, Android, or XR adoption had started at that checkpoint.
 Post-review Explorer evidence then showed that Slice 3B's viewer-forward
 anchor was useful for foreground diagnosis but confusing as the product
 default: it moves exact residency when yaw changes and can place exact terrain
@@ -91,14 +101,17 @@ hosted Human Review 1 accepted it on 2026-07-27. PH-3 is complete, PH-4
 shared terrain-view engine extraction plus full-game scene adoption is active
 in Tactical
 [`269`](../tactical/269-shared-terrain-engine-scene-adoption.md), and
-Android/XR promotion remains later. PH-4 now has an implemented ordinary
-scene path: a source-qualified live adapter derives exact coverage from the
-active draw store's traversal-ready columns, exact opaque/cutout terrain
-establishes the ordinary reversed-Z depth, and the shared procedural backdrop
-loads and extends the same target before actors and translucent terrain. The
-opt-in is `terrainPresentation=composed` /
-`--terrain-presentation composed`, currently restricted to local
-`mclone-overworld-v1`; exact-only remains allocation-free by default.
+Android/XR performance acceptance remains later. PH-4 now has an implemented
+ordinary scene path: a source-qualified live adapter derives exact coverage
+from the active draw store's traversal-ready columns, exact opaque/cutout
+terrain establishes the ordinary reversed-Z depth, and the shared procedural
+backdrop loads and extends the same target before actors and translucent
+terrain. The
+launch override is `terrainPresentation=composed` /
+`--terrain-presentation composed`, and the live Graphics control switches the
+same shared state between `Exact Only` and `Composed`. Both paths are
+currently restricted to local `mclone-overworld-v1`; exact-only remains
+allocation-free by default.
 Native low-angle and elevated captures show the exact foreground silhouette
 correctly occluding the surrounding procedural terrain. Native thread and
 browser Worker executors now feed the same vegetation coordinator; exact
@@ -128,8 +141,8 @@ sky-colored ring crack or stable tile-lighting grid. The browser reaches the
 same ten-level/stride-one pixels but required roughly two minutes to settle on
 the validation host, so startup and frame cost remain a separate, now
 measurable follow-up rather than justification for an implicit quality fork.
-Browser multi-flat,
-full-frame multiview, Android, and headset promotion remain PH-7/PH-8 work.
+Browser multi-flat, full-frame multiview composition, Android performance, and
+physical-headset acceptance remain PH-7/PH-8 work.
 Canonical exact generation and live authoritative render sections remain
 different truth-source adapters.
 
@@ -660,6 +673,11 @@ once per frame state, not once per eye. Both XR eyes consume the same committed
 ring set with their own view/projection data. Every renderer addition must
 support normal mono/per-eye rendering and full-frame multiview, or explicitly
 document an unavailable mode.
+
+The live player setting currently supports normal mono and per-eye XR. The
+alternative full-frame XR multiview topology explicitly advertises Terrain
+Horizon as unavailable and projects the scene to exact-only; it does not
+accept a composed choice that would silently omit the horizon.
 
 Residency should be centered on a locomotion/body anchor or stabilized
 head-space anchor. Raw per-eye positions and normal head wobble must not

@@ -115,6 +115,19 @@ impl McloneSceneHostOptions {
         ChunkPos::new(self.chunk_x, self.chunk_z)
     }
 
+    pub(crate) fn project_terrain_presentation_for_source(
+        &mut self,
+        local_authoritative_source: bool,
+    ) {
+        if !local_authoritative_source
+            || self.startup.world_generation_profile
+                != mclone_server::WorldGenerationProfile::McloneOverworldV1
+        {
+            self.startup.terrain_presentation =
+                mclone_app_runtime::startup_args::TerrainPresentationMode::ExactOnly;
+        }
+    }
+
     pub fn validated(self) -> Result<Self> {
         if self.startup.terrain_presentation
             == mclone_app_runtime::startup_args::TerrainPresentationMode::Composed
@@ -324,5 +337,35 @@ mod tests {
         scene.player_movement_cadence = PlayerMovementCadenceConfig::new(0, 0);
         let error = scene.validated().expect_err("invalid cadence");
         assert!(error.to_string().contains("player movement cadence"));
+    }
+
+    #[test]
+    fn session_source_projection_keeps_composed_only_for_local_overworlds() {
+        let mut compatible = McloneSceneHostOptions::default();
+        compatible.world_generation_profile =
+            mclone_server::WorldGenerationProfile::McloneOverworldV1;
+        compatible.terrain_presentation =
+            mclone_app_runtime::startup_args::TerrainPresentationMode::Composed;
+        compatible.project_terrain_presentation_for_source(true);
+        assert_eq!(
+            compatible.terrain_presentation,
+            mclone_app_runtime::startup_args::TerrainPresentationMode::Composed
+        );
+
+        let mut incompatible_profile = compatible.clone();
+        incompatible_profile.world_generation_profile =
+            mclone_server::WorldGenerationProfile::TopologyProbeV1;
+        incompatible_profile.project_terrain_presentation_for_source(true);
+        assert_eq!(
+            incompatible_profile.terrain_presentation,
+            mclone_app_runtime::startup_args::TerrainPresentationMode::ExactOnly
+        );
+
+        let mut remote = compatible;
+        remote.project_terrain_presentation_for_source(false);
+        assert_eq!(
+            remote.terrain_presentation,
+            mclone_app_runtime::startup_args::TerrainPresentationMode::ExactOnly
+        );
     }
 }

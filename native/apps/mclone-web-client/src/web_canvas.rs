@@ -2611,6 +2611,7 @@ pub(super) fn ui_action_label(action: GameUiAction) -> &'static str {
         GameUiAction::ToggleSectionOcclusion => "toggleSectionOcclusion",
         GameUiAction::SetLeafDetail(_) => "setLeafDetail",
         GameUiAction::SetGrassDetail(_) => "setGrassDetail",
+        GameUiAction::SetTerrainPresentation(_) => "setTerrainPresentation",
         GameUiAction::ToggleFullbright => "toggleFullbright",
         GameUiAction::TogglePlayerCollisionBox => "togglePlayerCollisionBox",
         GameUiAction::ToggleCrosshair => "toggleCrosshair",

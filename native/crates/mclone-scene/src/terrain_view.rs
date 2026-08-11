@@ -211,6 +211,40 @@ pub(crate) fn scene_terrain_projection_far_distance(
 }
 
 impl McloneSceneHost {
+    pub(crate) fn terrain_presentation_control_mode(
+        &self,
+    ) -> Option<mclone_ui::GameTerrainPresentationMode> {
+        let supported = self
+            .client_experience
+            .profile()
+            .settings
+            .terrain_presentation
+            .is_supported();
+        let compatible_source = self.active_world.scene.world_generation_profile
+            == mclone_server::WorldGenerationProfile::McloneOverworldV1
+            && self.active_remote_addr().is_none();
+        (supported && compatible_source)
+            .then_some(self.active_world.scene.startup.terrain_presentation)
+    }
+
+    pub(crate) fn set_live_terrain_presentation(
+        &mut self,
+        mode: mclone_ui::GameTerrainPresentationMode,
+    ) -> Result<()> {
+        if mode == mclone_ui::GameTerrainPresentationMode::Composed
+            && self.terrain_presentation_control_mode().is_none()
+        {
+            bail!("composed terrain is unavailable for this world or render mode");
+        }
+        if self.active_world.scene.startup.terrain_presentation == mode {
+            return Ok(());
+        }
+        self.active_world.scene.startup.terrain_presentation = mode;
+        self.reset_terrain_view();
+        log::info!("terrain horizon set to {}", mode.label());
+        Ok(())
+    }
+
     pub(crate) fn prepare_terrain_view_for_frame(
         &mut self,
         device: &wgpu::Device,

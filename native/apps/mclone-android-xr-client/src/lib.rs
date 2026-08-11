@@ -1967,6 +1967,12 @@ mod android {
                 client_entry.clone(),
             )
             .context("initialize Android XR full-frame multiview terrain runtime")?;
+            let mut multiview_profile = xr_native_client_experience_profile();
+            multiview_profile.settings.terrain_presentation =
+                mclone_app_runtime::client_experience::ClientExperienceCapabilityStatus::Unsupported(
+                    "Terrain Horizon is unavailable in full-frame XR multiview",
+                );
+            terrain.set_client_experience_profile(multiview_profile);
             let terrain_summary = terrain.frame_summary();
             terrain.set_display_refresh_hz(display_refresh.current_rate);
             terrain.set_render_split_timing_enabled(perf_seconds.is_some());

@@ -166,6 +166,7 @@ pub fn xr_view_to_chunk_render_view(
 pub fn fixed_startup_view_pose_render_views(
     view_pose: XrStartupViewPose,
     eye_fovs: [XrFov; 2],
+    far: f32,
 ) -> Result<[ChunkRenderView; 2]> {
     let yaw_radians = view_pose.yaw_degrees.to_radians();
     if !yaw_radians.is_finite() {
@@ -181,10 +182,18 @@ pub fn fixed_startup_view_pose_render_views(
     let orientation = Quat::from_rotation_y(yaw_radians);
     let eye_right = orientation * Vec3::X;
     let half_eye_offset = eye_right * (XR_FIXED_RENDER_EYE_SEPARATION_BLOCKS * 0.5);
-    let left =
-        fixed_startup_view_pose_render_view(center - half_eye_offset, orientation, eye_fovs[0])?;
-    let right =
-        fixed_startup_view_pose_render_view(center + half_eye_offset, orientation, eye_fovs[1])?;
+    let left = fixed_startup_view_pose_render_view(
+        center - half_eye_offset,
+        orientation,
+        eye_fovs[0],
+        far,
+    )?;
+    let right = fixed_startup_view_pose_render_view(
+        center + half_eye_offset,
+        orientation,
+        eye_fovs[1],
+        far,
+    )?;
     Ok([left, right])
 }
 
@@ -192,6 +201,7 @@ pub(crate) fn fixed_startup_view_pose_render_view(
     position: Vec3,
     orientation: Quat,
     fov: XrFov,
+    far: f32,
 ) -> Result<ChunkRenderView> {
     let render_view = render_view_from_world_pose(
         XrViewPose {
@@ -200,7 +210,7 @@ pub(crate) fn fixed_startup_view_pose_render_view(
         },
         fov,
         XR_NEAR,
-        XR_FAR,
+        far,
     )?;
     Ok(chunk_render_view_from_xr_render_view(render_view))
 }
@@ -300,9 +310,13 @@ impl McloneSceneHost {
                 .local_participant
                 .presentation_camera_snapshot(),
         )?;
+        let far = crate::terrain_view::scene_terrain_projection_far_distance(
+            self.active_world.scene.startup.terrain_presentation,
+            XR_FAR,
+        );
         Ok([
-            xr_view_to_chunk_render_view(&views[0], transform, XR_NEAR, XR_FAR)?,
-            xr_view_to_chunk_render_view(&views[1], transform, XR_NEAR, XR_FAR)?,
+            xr_view_to_chunk_render_view(&views[0], transform, XR_NEAR, far)?,
+            xr_view_to_chunk_render_view(&views[1], transform, XR_NEAR, far)?,
         ])
     }
 

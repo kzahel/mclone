@@ -234,6 +234,14 @@ impl McloneSceneHost {
     /// Replace only the platform capability profile while preserving catalog,
     /// asset-pack, and settings controller state.
     pub fn set_client_experience_profile(&mut self, profile: ClientExperienceProfile) {
+        if !profile.settings.terrain_presentation.is_supported()
+            && self.active_world.scene.startup.terrain_presentation
+                != GameTerrainPresentationMode::ExactOnly
+        {
+            self.active_world.scene.startup.terrain_presentation =
+                GameTerrainPresentationMode::ExactOnly;
+            self.reset_terrain_view();
+        }
         self.client_experience.set_profile(profile);
     }
 
@@ -1148,6 +1156,7 @@ impl McloneSceneHost {
                     options.starter_content,
                 );
                 scene.world_dir = None;
+                scene.project_terrain_presentation_for_source(true);
                 Ok::<_, anyhow::Error>(scene)
             },
             |id| {
@@ -1166,6 +1175,7 @@ impl McloneSceneHost {
                 );
                 scene.debug_passive_showcase = false;
                 scene.world_dir = None;
+                scene.project_terrain_presentation_for_source(true);
                 Ok((
                     scene,
                     ActiveSessionDescriptor::from_local_world_summary(&summary),
@@ -1174,6 +1184,7 @@ impl McloneSceneHost {
             |endpoint| {
                 let mut scene = self.active_world.scene.clone();
                 scene.world_dir = None;
+                scene.project_terrain_presentation_for_source(false);
                 let _ = endpoint;
                 Ok(scene)
             },
@@ -1536,6 +1547,7 @@ impl McloneSceneHost {
             scene.starter_content = intent.starter_content();
         }
         scene.world_dir = intent.world_dir().map(PathBuf::from);
+        scene.project_terrain_presentation_for_source(intent.remote_addr().is_none());
         if intent.suppress_adaptive_chunk_publication_budget() {
             scene.adaptive_chunk_publication_budget = false;
         }
@@ -1965,6 +1977,7 @@ impl McloneSceneHost {
         primary.freeze_scheduled_fluid_ticks = true;
         primary.debug_passive_showcase = false;
         primary.debug_auxiliary_player_script = false;
+        primary.project_terrain_presentation_for_source(true);
         primary.validated()
     }
 
@@ -2313,6 +2326,7 @@ impl McloneSceneHost {
         scene.debug_passive_showcase = self.debug_lobby_auxiliary_player_script
             && storage_source.allows_runtime_actor_authoring();
         scene.debug_auxiliary_player_script = self.debug_lobby_auxiliary_player_script;
+        scene.project_terrain_presentation_for_source(true);
         let scene = scene.validated()?;
         let instance_id = self.allocate_world_instance_id();
         let mut destination = destination;
@@ -2634,6 +2648,7 @@ impl McloneSceneHost {
                 .as_ref()
                 .is_none_or(|source| source.allows_runtime_actor_authoring());
         scene.debug_auxiliary_player_script = self.debug_lobby_auxiliary_player_script;
+        scene.project_terrain_presentation_for_source(true);
         let scene = scene.validated()?;
         let descriptor = request
             .descriptor
@@ -5971,6 +5986,7 @@ impl McloneSceneHost {
             );
             scene.debug_passive_showcase = false;
             scene.world_dir = None;
+            scene.project_terrain_presentation_for_source(true);
             Ok(scene)
         }
     }
@@ -6228,6 +6244,10 @@ impl ClientExperienceSettingsHost for McloneSceneHost {
     fn set_grass_detail(&mut self, detail: GameGrassDetail) -> Result<()> {
         self.request_grass_detail(engine_grass_detail(detail));
         Ok(())
+    }
+
+    fn set_terrain_presentation(&mut self, mode: GameTerrainPresentationMode) -> Result<()> {
+        self.set_live_terrain_presentation(mode)
     }
 
     fn set_fullbright(&mut self, enabled: bool) -> Result<()> {

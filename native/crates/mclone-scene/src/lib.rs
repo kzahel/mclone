@@ -186,12 +186,12 @@ use mclone_ui::{
     FlatHudDebugOverlay, GameAuxiliarySplitMode, GameCollisionMode, GameDeathCause,
     GameFlatPresentationState, GameFramePacingMode, GameGrassDetail, GameLeafDetail,
     GameLocalPlayControllerFamily, GameLocalPlayGuestInput, GameLocalPlayState, GameMovementMode,
-    GamePlayerModel, GameScreen, GameSimulationCadence, GameTouchSettings, GameTravelAssistMode,
-    GameTurnMode, GameUiAction, GameUiHost, GameUiRenderState, GameWorldRenderScaleMode,
-    GameXrTurnMode, GamepadHudOverlay, GuiDrawList, GuiKey, GuiScale, LoadingProgressOverlay,
-    Point, Rect, StatusOverlay, StorageProfileBackend, StorageProfileUiState, TouchOverlay,
-    UiDebugSnapshot, UiDrawCacheStats, UiPanelRevision, WorldCatalogUiStatus,
-    render_loading_progress_overlay, render_status_overlay,
+    GamePlayerModel, GameScreen, GameSimulationCadence, GameTerrainPresentationMode,
+    GameTouchSettings, GameTravelAssistMode, GameTurnMode, GameUiAction, GameUiHost,
+    GameUiRenderState, GameWorldRenderScaleMode, GameXrTurnMode, GamepadHudOverlay, GuiDrawList,
+    GuiKey, GuiScale, LoadingProgressOverlay, Point, Rect, StatusOverlay, StorageProfileBackend,
+    StorageProfileUiState, TouchOverlay, UiDebugSnapshot, UiDrawCacheStats, UiPanelRevision,
+    WorldCatalogUiStatus, render_loading_progress_overlay, render_status_overlay,
 };
 
 mod asset_replacement;
@@ -1526,7 +1526,11 @@ impl McloneSceneHost {
         self.sync_player_lifecycle_ui();
         let mut timing = XrTerrainFrameTiming::default();
         let render_views_start = self.services.clock.now();
-        let render_views = fixed_startup_view_pose_render_views(view_pose, eye_fovs)?;
+        let far = crate::terrain_view::scene_terrain_projection_far_distance(
+            self.active_world.scene.startup.terrain_presentation,
+            XR_FAR,
+        );
+        let render_views = fixed_startup_view_pose_render_views(view_pose, eye_fovs, far)?;
         timing.render_views_ms = elapsed_ms(self.services.clock.elapsed_since(render_views_start));
         self.render_prepared_frame(
             device,
@@ -1566,7 +1570,11 @@ impl McloneSceneHost {
         self.sync_player_lifecycle_ui();
         let mut timing = XrTerrainFrameTiming::default();
         let render_views_start = self.services.clock.now();
-        let render_views = fixed_startup_view_pose_render_views(view_pose, eye_fovs)?;
+        let far = crate::terrain_view::scene_terrain_projection_far_distance(
+            self.active_world.scene.startup.terrain_presentation,
+            XR_FAR,
+        );
+        let render_views = fixed_startup_view_pose_render_views(view_pose, eye_fovs, far)?;
         timing.render_views_ms = elapsed_ms(self.services.clock.elapsed_since(render_views_start));
         self.render_prepared_frame_multiview(
             device,
@@ -7317,7 +7325,8 @@ mod tests {
             angle_down: -0.5,
         };
 
-        let render_views = fixed_startup_view_pose_render_views(view_pose, [fov, fov]).unwrap();
+        let render_views =
+            fixed_startup_view_pose_render_views(view_pose, [fov, fov], XR_FAR).unwrap();
         let center = (render_views[0].camera_position + render_views[1].camera_position) * 0.5;
         let forward = average_unit_direction(
             render_views[0].camera_forward,

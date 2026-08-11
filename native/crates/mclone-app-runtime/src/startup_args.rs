@@ -13,6 +13,7 @@ use mclone_server::{
     DEFAULT_LIGHT_STATUS_BATCH_SIZE, StarterContentDescriptor, WorldGenerationProfile,
 };
 use mclone_ui::GameMovementMode;
+pub use mclone_ui::GameTerrainPresentationMode as TerrainPresentationMode;
 
 use crate::{
     DEFAULT_RENDER_SECTION_COMPILE_MAX_PENDING_JOBS, DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
@@ -141,22 +142,6 @@ pub const DEFAULT_STARTUP_SEED: i64 = 12_345;
 pub const DEFAULT_STARTUP_CHUNK_X: i32 = 0;
 pub const DEFAULT_STARTUP_CHUNK_Z: i32 = 0;
 pub const DEFAULT_STARTUP_RENDER_DISTANCE: u32 = 5;
-
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub enum TerrainPresentationMode {
-    #[default]
-    ExactOnly,
-    Composed,
-}
-
-impl TerrainPresentationMode {
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::ExactOnly => "exact-only",
-            Self::Composed => "composed",
-        }
-    }
-}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RenderDistanceLimits {
