@@ -1,7 +1,8 @@
 # Tactical 275: First-Party Sound Effects
 
-Status: **active 2026-08-11. The source/license audit and implementation plan
-are accepted; implementation starts with the provenance-locked audio bank.**
+Status: **implementation complete 2026-08-11. Automated content, mixer,
+shared-event, web compile, desktop XR compile, flat Android package, and
+Android XR package gates pass. Human mix listening remains pending.**
 
 Topic:
 
@@ -193,6 +194,8 @@ prove that Original resolves no Minecraft-reference or unknown source.
   validation, and deferrals;
 - add the commit-series topic and tactical index entry.
 
+Landed as `173f2837` (`Document first-party sound effects plan`).
+
 ### Slice 1: Curated CC0 bank and pack integration
 
 - add the reproducible import/validation tool and checked-in selected OGGs;
@@ -200,12 +203,18 @@ prove that Original resolves no Minecraft-reference or unknown source.
 - give the authored pack the audio role and include all catalog payloads;
 - make strict pack validation prove selected first-party audio provenance.
 
+Landed as `a49c18f2` (`Add provenance-locked first-party sound bank`).
+
 ### Slice 2: Shared family playback
 
 - load and validate variant families in `mclone-audio`;
 - add no-immediate-repeat selection and bounded gain/pitch/pan commands;
 - retain callback real-time invariants and graceful partial-bank behavior;
 - replace the two hard-coded landing samples with catalog families.
+
+Landed as `2582983a` (`Load first-party sound families in shared audio`). The
+two Mojang landing keys remain only as the local Vanilla Reference fallback;
+Mclone Original resolves all movement and landing keys through the CC0 bank.
 
 ### Slice 3: Shared gameplay and UI producers
 
@@ -215,6 +224,18 @@ prove that Original resolves no Minecraft-reference or unknown source.
   events exist, documenting any producer whose success contract is absent;
 - keep platform apps free of sound policy.
 
+Movement and UI landed as `1cfb5532` (`Add shared movement and UI sound
+producers`). Replica-confirmed break/place outcomes landed as `72fa5f80`
+(`Confirm block interaction sounds from replica state`). A submitted command is
+not treated as success: the scene retains a bounded intent and emits only after
+the client replica shows the expected block change. Rejected, denied, expired,
+unloaded, and actor/tool interactions remain silent.
+
+Pickup is explicitly not connected. The current shared protocol/replica path
+has no authoritative local item-acquisition event, so playing from proximity,
+raw input, or an optimistic command would invent success. Add pickup sound when
+that owner exposes a neutral outcome event.
+
 ### Slice 4: Platform and release validation
 
 - exercise first-party asset build/validation and catalog/provenance tests;
@@ -223,6 +244,62 @@ prove that Original resolves no Minecraft-reference or unknown source.
 - record device/browser capability gaps without converting them into engine
   silence or platform-specific behavior;
 - update Tactical 091 and the asset-pack topic with the new durable state.
+
+Completed in this closeout commit. Native desktop, desktop XR, flat Android,
+and Android XR retain the existing shared CPAL output path. Web prepares and
+validates the same sound bank but keeps the explicit unavailable capability;
+browser output and autoplay-resume glue remain deferred under Tactical 091.
+
+## Implementation Outcome
+
+- Mclone Original ships 119 CC0 OGG files selected from the three Kenney packs,
+  grouped into 33 semantic families. All bytes are checked in beneath a stable
+  pack namespace and covered by per-file SHA-256 provenance.
+- The importer verifies the three official archive hashes and fails on source,
+  license, file, catalog, or destination drift. Ordinary builds never download.
+- First-party preparation decodes each unique OGG once. Variant selection,
+  bounded gain/pitch/pan, fixed-capacity voices, and the bounded command queue
+  keep decoding, filesystem access, allocation, and locking off the callback.
+- Shared scene policy now owns grounded distance-based footsteps,
+  material-aware landing, material-aware confirmed block break/place feedback,
+  and semantic UI open/back/confirm/select/error feedback for mono and XR.
+- Generated Fallback Only remains explicitly silent. Vanilla Reference may use
+  the two local, unredistributed Mojang landing samples and does not leak them
+  into first-party provenance.
+
+## Validation Evidence
+
+Passing gates on 2026-08-11:
+
+- `pnpm assets:sfx:check`: exactly 119 checked-in OGG files verified against
+  provenance and catalog records.
+- `pnpm assets:pack:first-party:test`: six builder/packaging tests passed.
+- two consecutive `pnpm assets:pack:first-party` builds produced identical
+  hashes for all three packs, sidecars, and the staged catalog. The authored
+  pack hash was
+  `e8f5d40e8b2a03172b4b56dee9381ee8c0bd82489da78e05cb16b82389ee1ae6`.
+- `pnpm --silent assets:validate:first-party`: `proprietary_free=true`, 119
+  audio samples, 33 audio families, 126 resolved first-party entries, 145
+  resolved provisional entries, zero resolved Minecraft-reference/unknown
+  entries, two deliberate suppressions, and two optional missing colormaps.
+- `cargo test --manifest-path native/Cargo.toml -p mclone-audio`: 11 passed,
+  including real checked-in OGG decode plus nonzero, hard-panned 48 kHz PCM.
+- `cargo test --manifest-path native/Cargo.toml -p mclone-scene --lib`: 167
+  passed, including cadence, teleport rejection, material distinction,
+  replica-confirmed interaction, and UI classification.
+- `pnpm native:movement:smoke`, `pnpm native:web:build`, and
+  `pnpm native:xr:check` passed.
+- `pnpm native:android:apk` and `pnpm native:android-xr:apk` passed. Both APKs
+  contain the 9,021,735-byte authored pack and generated fallback pack.
+
+The repository-wide Rust test run reaches and passes the affected audio and
+scene unit suites, then fails the pre-existing static
+`composition_phase_order_is_all_actors_between_all_opaque_and_translucent`
+source assertion. The asserted `mclone-app-runtime/src/frame_render.rs` was last
+changed by `72fd1504`, before this series. `pnpm native:thin-adapters:purity`
+also fails on the pre-existing unregistered
+`mclone-terrain-vegetation-worker.ts` module, last changed by `8955d2c4`.
+Neither sentinel failure intersects the audio changes.
 
 ## Acceptance
 

@@ -5172,12 +5172,11 @@ impl McloneSceneHost {
     }
 
     fn play_local_movement_sounds(&mut self, before_feet: Vec3d) {
-        let first_party =
-            self.active_assets
-                .selection
-                .is_enabled(&mclone_assets::AssetPackId::new(
-                    mclone_assets::AUTHORED_FIRST_PARTY_PACK_ID,
-                ));
+        let first_party = self
+            .active_assets
+            .selection
+            .enabled_ids()
+            .any(|id| id.as_str() == mclone_assets::AUTHORED_FIRST_PARTY_PACK_ID);
         let events = self.active_world.camera.take_landing_events();
         for event in events {
             let (legacy_sound, gain) = landing_playback_for_impact(event.impact_speed);

@@ -1,10 +1,10 @@
 # 091: Engine Audio Foundation and Landing Sound
 
-Status: active; Slices 1-2 code landed 2026-06-26. The shared landing event,
-`mclone-audio` OGG sample mixer, desktop-flat wiring, desktop OpenXR wiring,
-flat Android wiring, Android XR wiring, optional local sound overlay, and
-placeholder fetch script are implemented and validated through automated gates.
-Manual listening/device validation and web/WASM remain.
+Status: active; Slices 1-2 code landed 2026-06-26 and Tactical
+[`275`](275-first-party-sound-effects.md) extended the foundation on
+2026-08-11. Native output, first-party content, and shared event producers are
+implemented and validated through automated gates. Manual listening/device
+validation and web audio output remain.
 
 ## Purpose
 
@@ -133,6 +133,22 @@ Validated:
 
 Not yet validated by automation: audible playback, AVD/Quest runtime audio, and
 desktop/headset manual listening. Web remains deferred by design.
+
+Extended by Tactical 275 on 2026-08-11:
+
+- Mclone Original now loads 119 redistributable Kenney CC0 OGGs into 33
+  semantic variant families; Generated Fallback Only remains silent.
+- Playback commands carry bounded gain, pitch, stereo pan, and deterministic
+  event seeds while preserving the bounded callback and voice model.
+- Shared scene policy emits grounded distance-based footsteps, material-aware
+  landings, replica-confirmed break/place sounds, and semantic UI feedback in
+  mono and XR.
+- The same first-party bank prepares successfully on web/WASM. Browser output
+  remains an explicit unavailable capability until thin autoplay/resume and
+  output glue are implemented.
+- Flat Android and Android XR APK builds include the authored pack and pass.
+  Actual loudness/cadence review on speakers, headphones, AVD/device, and
+  headset remains a human acceptance step.
 
 ## Placeholder Sound Assets
 

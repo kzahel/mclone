@@ -40,6 +40,17 @@ first-party and 126 generated resolutions, four figures, zero resolved
 Minecraft-reference/unknown assets, two suppressed sounds, and one optional
 missing colormap.
 
+Post-closeout extension (2026-08-11): the authored first-party pack now carries
+an `audio_content` role, a validated semantic catalog, and 119 checked-in
+Kenney CC0 OGG files across 33 variant families. Per-file provenance retains
+upstream paths, archive/file SHA-256 values, byte lengths, official sources,
+and all three CC0 texts. Two consecutive full builds produced byte-identical
+packs and sidecars. Strict preparation reports 119 audio samples, 33 families,
+126 resolved first-party and 145 provisional entries, zero resolved
+Minecraft-reference/unknown entries, two deliberate suppressions, and two
+optional missing colormaps. Generated Fallback Only stays silent; Mclone
+Original supplies the distributable audio bank.
+
 Scope: client-side discovery, selection, composition, provenance, preparation,
 and replacement of visual/audio asset packs. This topic owns the product truth
 behind “Minecraft reference assets are disabled” and the continuing path from
@@ -82,7 +93,7 @@ proprietary-free only when runtime provenance evidence reports zero resolved
 Minecraft/unknown assets. Merely putting the authored overlay before the
 Minecraft pack is not sufficient.
 
-## Current State (Verified 2026-07-11)
+## Current State (Verified 2026-08-11)
 
 - `mclone-assets` has validated ZIP-backed `PackedAssetSource` packs and a
   first-source-wins `AssetSourceChain`.

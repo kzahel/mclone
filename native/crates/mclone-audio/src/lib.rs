@@ -1261,6 +1261,34 @@ mod tests {
         assert_eq!(prepared.sound_count(), 119);
         assert_eq!(prepared.family_count(), 33);
     }
+
+    #[test]
+    fn checked_in_ogg_family_renders_nonzero_panned_pcm() {
+        let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        let source = mclone_assets::FilesystemAssetSource::new(repo_root);
+        let prepared = PreparedAudioAssets::load_first_party(&source).unwrap();
+        let bank = prepared.bank;
+        let playback = VariantSelector::default()
+            .resolve(
+                &bank,
+                FOOTSTEP_WOOD,
+                PlaybackParams {
+                    pan: 1.0,
+                    seed: 42,
+                    ..PlaybackParams::default()
+                },
+            )
+            .unwrap();
+        let (sender, receiver) = sync_channel(1);
+        let mut mixer = Mixer::new(bank, receiver, AudioSettings::default(), 48_000, 4);
+        sender.try_send(AudioCommand::Play(playback)).unwrap();
+        let mut output = vec![0.0; 96_000];
+
+        mixer.render(&mut output, 2);
+
+        assert!(output.chunks_exact(2).all(|frame| frame[0] == 0.0));
+        assert!(output.chunks_exact(2).any(|frame| frame[1].abs() > 1.0e-5));
+    }
 }
 
 #[cfg(test)]
