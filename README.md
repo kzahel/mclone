@@ -75,7 +75,9 @@ Worldgen, rendering, and subsystem docs:
 
 - [`docs/strategy.md`](docs/strategy.md) — translation/oracle policy
 - [`docs/worldgen-deterministic-order.md`](docs/worldgen-deterministic-order.md) — vanilla status order, decoration finality, lighting gates, and chunk publication gates
-- [`docs/lod-architecture.md`](docs/lod-architecture.md) — far-terrain LOD plan
+- [`docs/topics/lod.md`](docs/topics/lod.md) — current LOD terminology, ownership, and documentation routes
+- [`docs/topics/procedural-horizon-clipmap.md`](docs/topics/procedural-horizon-clipmap.md) — current shared terrain-horizon LOD implementation
+- [`docs/lod-architecture.md`](docs/lod-architecture.md) — retired chunk-based Far LOD architecture archive
 - [`docs/carver-status.md`](docs/carver-status.md) — carver-parity/oracle tracker
 - [`docs/structures.md`](docs/structures.md) — vanilla overworld structure generation architecture
 - [`docs/liquids.md`](docs/liquids.md) — liquid simulation architecture
@@ -103,7 +105,9 @@ with Minecraft Java 1.17.1 so it can be oracle-tested against reference output.
 - [`native/apps/mclone-web-client/`](native/apps/mclone-web-client/) - Rust/WASM browser client
 - [`native/apps/mclone-android-client/`](native/apps/mclone-android-client/) - flat Android client
 - [`native/apps/mclone-android-xr-client/`](native/apps/mclone-android-xr-client/) - Quest / Android XR client
+- [`native/apps/mclone-world-explorer/`](native/apps/mclone-world-explorer/) - standalone native/browser host for the shared terrain-horizon LOD system
 - [`native/apps/mclone-dedicated-server/`](native/apps/mclone-dedicated-server/) - headless dedicated server
+- [`native/crates/mclone-terrain-view/`](native/crates/mclone-terrain-view/) - shared procedural-horizon LOD, terrain composition, and detached exact-view owner
 - [`native/crates/`](native/crates/) - shared engine, protocol, runtime, renderer, UI, worldgen, asset, mesh, lighting, and XR crates
 - [`oracle/`](oracle/) - Java and TypeScript fixture-generation helpers
 - [`test/fixtures/`](test/fixtures/) - shared oracle fixture data consumed by Rust tests

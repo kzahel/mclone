@@ -65,6 +65,24 @@ small commit series may not warrant a durable topic doc.
 
 ## Implementation routing
 
+### LOD terminology and routing
+
+In user requests and current project discussion, unqualified **LOD** or **LOD
+system** means the current shared procedural-horizon geometry-clipmap system in
+`mclone-terrain-view`. It was first proven in World Explorer and is now shared
+by World Explorer, Terrain Lab, and the live game. Read
+[`docs/topics/lod.md`](docs/topics/lod.md) first for terminology and routing,
+then [`docs/topics/procedural-horizon-clipmap.md`](docs/topics/procedural-horizon-clipmap.md)
+for its current contract and status.
+
+Do not infer the deleted chunk-granular experiment from unqualified LOD. Refer
+to that system only as the **retired chunk-based Far LOD**, **legacy/old LOD**,
+or the `LodTileKey` system, and consult
+[`docs/topics/far-lod.md`](docs/topics/far-lod.md) only for its removal boundary
+and historical lessons. World Explorer is a host and proof surface for the
+current LOD system, not its implementation owner. Qualify narrower uses such
+as the vanilla terrain LOD sampler, vegetation/model LOD, or texture mip LOD.
+
 The live engine is the Rust workspace under `native/`, including the shared
 crates and the desktop, Android, XR, dedicated-server, and browser/WASM apps.
 The directory name is repository history, not a platform priority.

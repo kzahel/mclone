@@ -1,4 +1,4 @@
-# Procedural Horizon Clipmap
+# Current LOD: Procedural Horizon Clipmap
 
 Topic: `procedural-horizon-clipmap`
 
@@ -15,6 +15,13 @@ Full-frame XR multiview is the explicit current exception: its platform
 capability disables the row and forces exact-only before rendering. Native,
 browser-Wasm, flat-Android APK, and Android-XR APK builds pass; physical
 Android/XR pixel and performance acceptance remain later work.
+
+This is the current system meant by unqualified **LOD** or **LOD system** in
+project discussion. **Terrain Horizon** is its player-facing settings name.
+World Explorer was its first proof host and remains a consumer, but the shared
+implementation owner is `mclone-terrain-view`. The canonical terminology and
+document routes live in [`lod.md`](lod.md). The deleted chunk-granular system
+is always called the **retired chunk-based Far LOD**.
 
 Same-day composed review exposed one exact/procedural surface-contract defect:
 ordinary continental terrain may bottom out at Y62 and canonical columns then
@@ -243,7 +250,7 @@ that integration.
 
 ## Scope
 
-This topic owns the proposed runtime composition for presenting untouched
+This topic owns the current runtime composition for presenting untouched
 natural terrain beyond exact chunks:
 
 - fixed-budget multiscale terrain around a moving observer;
@@ -858,6 +865,7 @@ and
 
 ## Related Documents
 
+- [`lod.md`](lod.md) — canonical LOD terminology, ownership, and routing.
 - [`universe-product-shell.md`](universe-product-shell.md) — detached-preview
   product role, authority transitions, and preview-truth requirements.
 - [`gpu-procedural-terrain.md`](gpu-procedural-terrain.md) — terrain

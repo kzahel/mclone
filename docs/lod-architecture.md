@@ -1,18 +1,21 @@
-# Far Terrain LOD Architecture
+# Retired Chunk-Based Far LOD Architecture
 
 Status: retired experiment architecture 2026-07-25.
 
+This is a historical archive, not current LOD implementation guidance. In this
+document, **LOD** means only the retired chunk-based experiment. Unqualified
+LOD in current project discussion means the shared procedural-horizon
+geometry-clipmap system; start from
+[`docs/topics/lod.md`](topics/lod.md) and
+[`docs/topics/procedural-horizon-clipmap.md`](topics/procedural-horizon-clipmap.md).
+
 This document preserves the research and original experimental target shape
-after reviewing Distant Horizons and Voxy. It is not current implementation
-guidance. The resulting chunk-granular in-game system was removed by
+after reviewing Distant Horizons and Voxy. The resulting chunk-granular
+in-game system was removed by
 [`docs/tactical/245-retire-chunk-far-lod-runtime.md`](tactical/245-retire-chunk-far-lod-runtime.md).
-Current status lives in
-[`docs/topics/far-lod.md`](topics/far-lod.md); future multiscale work starts
-from Terrain Lab and
-[`docs/topics/gpu-procedural-terrain.md`](topics/gpu-procedural-terrain.md).
-The preferred first runtime proof is now specified separately in
-[`docs/topics/procedural-horizon-clipmap.md`](topics/procedural-horizon-clipmap.md);
-the architecture below remains historical.
+Its removal boundary lives in
+[`docs/topics/far-lod.md`](topics/far-lod.md). The architecture below remains
+historical.
 
 ## Historical Decision
 

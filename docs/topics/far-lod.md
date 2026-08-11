@@ -1,14 +1,19 @@
-# Far Terrain Presentation
+# Retired Chunk-Based Far LOD
 
 Topic: `retire-chunk-far-lod`
 
 Status: chunk-based in-game Far LOD rejected and removed on 2026-07-25 by
 Tactical
 [`245`](../tactical/245-retire-chunk-far-lod-runtime.md).
-No replacement in-game distant-terrain system is active. A toroidal
-geometry-clipmap is now the preferred first procedural-horizon proof, recorded
-separately in
-[`procedural-horizon-clipmap.md`](procedural-horizon-clipmap.md).
+The replacement is the current shared procedural-horizon geometry-clipmap,
+recorded in
+[`procedural-horizon-clipmap.md`](procedural-horizon-clipmap.md). It now runs
+through World Explorer, Terrain Lab, and the live game.
+
+In this document, **Far LOD** means only the retired chunk-based system.
+Unqualified **LOD** in current project discussion means the replacement; see
+the canonical terminology and routing page in [`lod.md`](lod.md). Do not use
+this retirement record as current implementation guidance.
 
 ## Decision
 
@@ -31,11 +36,10 @@ This can reduce vertices per chunk, but coverage work, lifecycle state,
 compilation requests, and arbitration still scale with the number of chunks in
 the covered area. It is not a viable basis for a 10–100 km horizon.
 
-Terrain Lab demonstrates the desired scale property: a bounded sample and
+Terrain Lab demonstrated the desired scale property: a bounded sample and
 resident-tile budget spans increasingly large world-space footprints by
-raising sample spacing. The eventual game design should be informed by that
-pipeline and by footprint-aware coarse summaries. It should not be constrained
-by the current runtime's `ChunkPos + level` identity.
+raising sample spacing. The replacement clipmap follows that direction and is
+not constrained by the retired runtime's `ChunkPos + level` identity.
 
 ## Removal Result
 
@@ -128,9 +132,10 @@ substrate.
 
 ## Replacement Boundary
 
-Tactical 245 intentionally leaves normal render distance as the complete
-in-game terrain presentation. It does not install a placeholder or hidden
-replacement.
+This section records the acceptance boundary established when Tactical 245
+removed the old system. Tactical 245 intentionally left normal render distance
+as the complete in-game terrain presentation; it did not install a placeholder
+or hidden replacement in the same slice.
 
 The later architecture study starts from
 [`gpu-procedural-terrain.md`](gpu-procedural-terrain.md) and measured Terrain
@@ -142,7 +147,7 @@ content pipeline. The detailed ring, seam, exact-mask, vegetation, natural-only
 v1, and shared-ownership contracts live in
 [`procedural-horizon-clipmap.md`](procedural-horizon-clipmap.md).
 
-The future system must prove:
+The replacement was required to prove:
 
 1. bounded work by visible sample/patch budget rather than covered chunk area;
 2. increasing world-space node extent with distance;

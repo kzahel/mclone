@@ -32,6 +32,10 @@ series implements the same concern, normally reuse the document slug in its
 
 ## Current Topics
 
+- [`lod.md`](lod.md): canonical LOD terminology and routing — unqualified LOD
+  means the current shared procedural-horizon geometry-clipmap in
+  `mclone-terrain-view`; World Explorer is a host, and the deleted
+  `LodTileKey` experiment is always the retired chunk-based Far LOD.
 - [`vanilla-terrain-lod.md`](vanilla-terrain-lod.md): active bounded direct
   Java 1.17.1 density-column LOD sampler and global Terrain Lab profile switch,
   with CPU-worker generation and explicit first-pass surface/content
@@ -295,17 +299,18 @@ series implements the same concern, normally reuse the document slug in its
   whole concern done.
 - [`far-lod.md`](far-lod.md): retirement status for the rejected chunk-based
   synthetic Far LOD, the aggressive Tactical 245 removal boundary, machinery
-  retained for active non-LOD consumers, and requirements a separate future
-  multiscale design must prove.
+  retained for active non-LOD consumers, and the acceptance requirements that
+  shaped its now-active replacement.
 - [`gpu-procedural-terrain.md`](gpu-procedural-terrain.md): accepted research
   direction for immediate GPU-generated first-party terrain, coverage-first
   16/8/4/2 refinement, authoritative chunk replacement, approximate GPU
   lighting, optional asynchronous canonical generation, and later volumetric
   residency/rendering experiments.
-- [`procedural-horizon-clipmap.md`](procedural-horizon-clipmap.md): preferred
-  toroidal geometry-clipmap proof for fixed-budget natural horizons, nested
-  rings and skirts, exact-painted chunk masking, vegetation handoff,
-  coarse-first XR-safe admission, and one shared Terrain Lab/game service.
+- [`procedural-horizon-clipmap.md`](procedural-horizon-clipmap.md): current
+  shared terrain-horizon LOD implementation in `mclone-terrain-view`, using a
+  toroidal geometry clipmap, nested rings, exact-painted chunk masking,
+  vegetation handoff, and coarse-first XR-safe admission across World
+  Explorer, Terrain Lab, and the live game.
   Coordinating parent Tactical
   [`261`](../tactical/261-procedural-horizon-product-integration-roadmap.md)
   inventories the completed proof stack and sequences real-game,
