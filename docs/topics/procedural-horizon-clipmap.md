@@ -29,6 +29,22 @@ WGSL validation, and an inspected 1,024-by-576 native composed capture at seed
 `8675309`, center `(-1536, 2032)`, pass; the capture shows blue procedural
 inland water rather than a sea-level grass sheet.
 
+Tactical
+[`276`](../tactical/276-lod-water-surface-presentation-unification.md) closes
+the related procedural water presentation defect found in that same composed
+capture. The analytic signed-distance river overlay had its own RGB palette,
+darkened from fragment depth, and continued across the continental boundary
+above valid submerged-outlet bathymetry. The shared shader now uses one
+bed-depth water color and material-texture path for ocean, pond, sampled river,
+and coarse river coverage; it admits the analytic coverage only with physical
+continental channel ownership. A matched 1,024-by-576 native composed capture
+at seed `8675309`, center `(-1536, 2032)`, retains the inland rivers and removes
+their dark ocean-surface continuations. Focused terrain-view/Naga tests and the
+World Explorer `wasm32-unknown-unknown` library check pass. Terrain evaluation,
+sea level, submerged floor shape, exact columns, and persisted worlds remain
+unchanged; any residual pond-junction silhouette is a separately deferred
+hydrology geometry question.
+
 Coordinating parent Tactical
 [`261`](../tactical/261-procedural-horizon-product-integration-roadmap.md)
 owns the global path into `mclone-scene`, exact/procedural arbitration,

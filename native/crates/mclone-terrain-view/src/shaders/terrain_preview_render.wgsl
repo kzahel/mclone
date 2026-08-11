@@ -79,6 +79,7 @@ struct VertexOutput {
     @location(6) semantics: vec4<f32>,
     @location(7) world_position: vec3<f32>,
     @location(8) @interpolate(flat) biome: u32,
+    @location(9) surface_y: f32,
 };
 
 fn exact_chunk_masked(chunk: vec2<i32>) -> bool {
@@ -355,14 +356,21 @@ fn terrain_material(sample: TerrainPreviewSample) -> u32 {
     )));
 }
 
+fn water_surface_color(surface_y: f32) -> vec3<f32> {
+    let depth = clamp((63.0 - surface_y) / 52.0, 0.0, 1.0);
+    return mix(
+        vec3<f32>(0.16, 0.55, 0.68),
+        vec3<f32>(0.025, 0.17, 0.34),
+        depth,
+    );
+}
+
 fn terrain_color(sample: TerrainPreviewSample, light: f32) -> vec3<f32> {
-    let surface_y = sample.terrain.x;
     let temperature = sample.climate.x;
     let moisture = sample.climate.y;
     let material = terrain_material(sample);
     if material == 2u {
-        let depth = clamp((63.0 - surface_y) / 52.0, 0.0, 1.0);
-        return mix(vec3<f32>(0.16, 0.55, 0.68), vec3<f32>(0.025, 0.17, 0.34), depth) * light;
+        return water_surface_color(sample.terrain.x) * light;
     }
     if material == 1u {
         return vec3<f32>(0.48, 0.49, 0.47) * light;
@@ -783,7 +791,38 @@ fn vertex_main(
         f32(world_z),
     );
     out.biome = u32(round(sample.semantics.y));
+    out.surface_y = sample.terrain.x;
     return out;
+}
+
+fn apply_material_texture(
+    base_color: vec3<f32>,
+    material: u32,
+    world_xz: vec2<f32>,
+    world_dx: vec2<f32>,
+    world_dy: vec2<f32>,
+    blocks_per_pixel: f32,
+) -> vec3<f32> {
+    let sprite = material_uvs.values[material];
+    let sprite_size = sprite.zw - sprite.xy;
+    let local_uv = fract(world_xz);
+    let atlas_uv = sprite.xy + local_uv * sprite_size;
+    let atlas_dx = world_dx * sprite_size;
+    let atlas_dy = world_dy * sprite_size;
+    let texel = textureSampleGrad(
+        material_atlas,
+        material_sampler,
+        atlas_uv,
+        atlas_dx,
+        atlas_dy,
+    );
+    let texture_weight = mix(
+        0.82,
+        0.42,
+        clamp((blocks_per_pixel - 1.0) / 7.0, 0.0, 1.0),
+    );
+    let texture_detail = clamp(texel.rgb * 1.25, vec3<f32>(0.0), vec3<f32>(1.5));
+    return base_color * mix(vec3<f32>(1.0), texture_detail, texture_weight);
 }
 
 @fragment
@@ -819,42 +858,48 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
         color = vec3<f32>(0.48, 0.49, 0.47) * input.light;
     }
     if input.textured != 0u && input.material < 256u {
-        let sprite = material_uvs.values[input.material];
-        let sprite_size = sprite.zw - sprite.xy;
-        let local_uv = fract(input.world_xz);
-        let atlas_uv = sprite.xy + local_uv * sprite_size;
-        let atlas_dx = world_dx * sprite_size;
-        let atlas_dy = world_dy * sprite_size;
-        let texel = textureSampleGrad(
-            material_atlas,
-            material_sampler,
-            atlas_uv,
-            atlas_dx,
-            atlas_dy,
+        color = apply_material_texture(
+            color,
+            input.material,
+            input.world_xz,
+            world_dx,
+            world_dy,
+            blocks_per_pixel,
         );
-        let texture_weight = mix(
-            0.82,
-            0.42,
-            clamp((blocks_per_pixel - 1.0) / 7.0, 0.0, 1.0),
-        );
-        let texture_detail = clamp(texel.rgb * 1.25, vec3<f32>(0.0), vec3<f32>(1.5));
-        color *= mix(vec3<f32>(1.0), texture_detail, texture_weight);
     }
     if input.textured != 0u
         && params.content_stage_flags.x >= 1u
         && preview_profile() == 0u {
         let visible_half_width = max(input.river.y, blocks_per_pixel * 0.70);
-        let river_alpha = 1.0 - smoothstep(
+        let river_distance_alpha = 1.0 - smoothstep(
             visible_half_width,
             visible_half_width + river_anti_alias,
             abs(input.river.x),
         );
-        let river_color = mix(
-            vec3<f32>(0.11, 0.48, 0.69),
-            vec3<f32>(0.035, 0.22, 0.42),
-            clamp((63.0 - input.position.z) * 0.15, 0.0, 1.0),
+        let physical_channel_edge = max(fwidth(input.river.z), 0.001);
+        let physical_channel_alpha = smoothstep(
+            0.0,
+            physical_channel_edge,
+            input.river.z,
         );
-        color = mix(color, river_color * input.light, river_alpha * 0.88);
+        let continental_channel_alpha = select(
+            0.0,
+            physical_channel_alpha,
+            input.river.w > 0.0,
+        );
+        let river_alpha = river_distance_alpha * continental_channel_alpha;
+        var river_color = color;
+        if input.material != 2u {
+            river_color = apply_material_texture(
+                water_surface_color(input.surface_y) * input.light,
+                2u,
+                input.world_xz,
+                world_dx,
+                world_dy,
+                blocks_per_pixel,
+            );
+        }
+        color = mix(color, river_color, river_alpha);
         if params.content_stage_flags.x >= 4u {
             let cover = clamp(input.semantics.w, 0.0, 1.0);
             color = mix(color, color * vec3<f32>(0.57, 0.82, 0.58), cover * 0.36);
