@@ -1322,7 +1322,7 @@ fn complete_hydrology(
         water,
     );
     var visible_material = macro_material;
-    if continentalness <= 0.0 || watercourse_water {
+    if water {
         visible_material = 2.0;
     } else if macro_material != 8.0
         && bank_influence > 0.0

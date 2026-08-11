@@ -185,7 +185,10 @@ pub fn mclone_overworld_macro_surface_top_material(
 pub fn mclone_overworld_preview_visible_material(
     terrain: super::fields::McloneOverworldTerrainSample,
 ) -> RawBlockId {
-    if terrain.continentalness <= 0.0 || terrain.watercourse.is_water() {
+    if terrain.surface_y < MCLONE_OVERWORLD_SEA_LEVEL
+        || terrain.continentalness <= 0.0
+        || terrain.watercourse.is_water()
+    {
         return WATER;
     }
     let macro_material = mclone_overworld_macro_surface_top_material(terrain);
@@ -705,6 +708,27 @@ mod tests {
         assert_eq!(
             mclone_overworld_macro_surface_top_material(terrain),
             COARSE_DIRT
+        );
+    }
+
+    #[test]
+    fn preview_visible_material_matches_inland_sea_fill() {
+        let flooded_inland = sample(MCLONE_OVERWORLD_SEA_LEVEL - 1, 0.0).terrain;
+        assert!(flooded_inland.continentalness > 0.0);
+        assert!(!flooded_inland.watercourse.is_water());
+        assert_eq!(
+            mclone_overworld_macro_surface_top_material(flooded_inland),
+            GRASS_BLOCK
+        );
+        assert_eq!(
+            mclone_overworld_preview_visible_material(flooded_inland),
+            WATER
+        );
+
+        let dry_inland = sample(MCLONE_OVERWORLD_SEA_LEVEL, 0.0).terrain;
+        assert_eq!(
+            mclone_overworld_preview_visible_material(dry_inland),
+            GRASS_BLOCK
         );
     }
 

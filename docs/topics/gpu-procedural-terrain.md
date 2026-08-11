@@ -221,7 +221,7 @@ The terrain compute pipeline now exists in
 [`mclone-terrain-view`](../../native/crates/mclone-terrain-view/). It:
 
 - accepts aligned 64-cell / 65-sample production-reference tiles;
-- evaluates the separately revisioned `mclone-overworld-v1-gpu-preview-a9`
+- evaluates the separately revisioned `mclone-overworld-v1-gpu-preview-a10`
   production graph through provisional/coast/final surface height and macro
   surface material into GPU-resident storage;
 - emulates the production unsigned 64-bit lattice hash with pairs of portable

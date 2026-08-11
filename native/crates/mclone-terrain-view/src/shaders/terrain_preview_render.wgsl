@@ -344,15 +344,22 @@ fn vanilla_mountain_exposure_biome(biome: u32) -> bool {
         || biome == 163u || biome == 164u;
 }
 
-fn terrain_color(sample: TerrainPreviewSample, light: f32) -> vec3<f32> {
-    let surface_y = sample.terrain.x;
-    let temperature = sample.climate.x;
-    let moisture = sample.climate.y;
-    let material = u32(round(select(
+fn terrain_material(sample: TerrainPreviewSample) -> u32 {
+    if sample.climate.z >= 0.5 {
+        return 2u;
+    }
+    return u32(round(select(
         sample.large_fields.w,
         sample.hydrology_detail.w,
         surface_quality() >= 1u,
     )));
+}
+
+fn terrain_color(sample: TerrainPreviewSample, light: f32) -> vec3<f32> {
+    let surface_y = sample.terrain.x;
+    let temperature = sample.climate.x;
+    let moisture = sample.climate.y;
+    let material = terrain_material(sample);
     if material == 2u {
         let depth = clamp((63.0 - surface_y) / 52.0, 0.0, 1.0);
         return mix(vec3<f32>(0.16, 0.55, 0.68), vec3<f32>(0.025, 0.17, 0.34), depth) * light;
@@ -752,11 +759,7 @@ fn vertex_main(
     out.color = sample_color(sample, reference, gpu, light);
     out.world_xz = vec2<f32>(f32(world_x), f32(world_z));
     out.light = light;
-    out.material = u32(round(select(
-        sample.large_fields.w,
-        sample.hydrology_detail.w,
-        surface_quality() >= 1u && params.content_stage_flags.x > 0u,
-    )));
+    out.material = terrain_material(sample);
     out.textured = select(
         0u,
         1u,

@@ -14,8 +14,22 @@ the row as unavailable and project inherited state back to exact-only.
 Full-frame XR multiview is the explicit current exception: its platform
 capability disables the row and forces exact-only before rendering. Native,
 browser-Wasm, flat-Android APK, and Android-XR APK builds pass; physical
-Android/XR pixel and performance acceptance remain later work. Coordinating
-parent Tactical
+Android/XR pixel and performance acceptance remain later work.
+
+Same-day composed review exposed one exact/procedural surface-contract defect:
+ordinary continental terrain may bottom out at Y62 and canonical columns then
+receive the profile's Y63 sea fill, but both LOD evaluators raised the display
+surface to Y63 while retaining a grass material. Final-stage water now selects
+the water material in the CPU reference sample, GPU evaluator, and shared
+Basic/Inferred renderer without changing terrain height, canonical blocks, or
+persisted worlds. The reference-grid schema is
+`mclone-terrain-preview-reference-grid-v10` and the GPU evaluator is
+`mclone-overworld-v1-gpu-preview-a10`. Focused worldgen and terrain-view tests,
+WGSL validation, and an inspected 1,024-by-576 native composed capture at seed
+`8675309`, center `(-1536, 2032)`, pass; the capture shows blue procedural
+inland water rather than a sea-level grass sheet.
+
+Coordinating parent Tactical
 [`261`](../tactical/261-procedural-horizon-product-integration-roadmap.md)
 owns the global path into `mclone-scene`, exact/procedural arbitration,
 flat-platform promotion, and XR/multiview acceptance, but further execution is

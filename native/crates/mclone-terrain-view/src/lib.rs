@@ -114,7 +114,7 @@ pub use viewport_renderer::{
     TerrainViewportFrameStats, TerrainViewportRenderer,
 };
 
-pub const TERRAIN_PREVIEW_GPU_EVALUATOR_REVISION: &str = "mclone-overworld-v1-gpu-preview-a9";
+pub const TERRAIN_PREVIEW_GPU_EVALUATOR_REVISION: &str = "mclone-overworld-v1-gpu-preview-a10";
 pub const TERRAIN_PREVIEW_COMPUTE_WGSL_TEMPLATE: &str =
     include_str!("shaders/terrain_preview_compute.wgsl");
 pub const TERRAIN_PREVIEW_RENDER_WGSL: &str = include_str!("shaders/terrain_preview_render.wgsl");
@@ -1956,7 +1956,7 @@ mod tests {
     fn evaluator_revision_and_production_spec_are_explicit() {
         assert_eq!(
             TERRAIN_PREVIEW_GPU_EVALUATOR_REVISION,
-            "mclone-overworld-v1-gpu-preview-a9"
+            "mclone-overworld-v1-gpu-preview-a10"
         );
         let shader = terrain_preview_compute_wgsl();
         assert!(!shader.contains("__MCLONE_PRODUCTION_FIELD_CONSTANTS__"));
@@ -1967,12 +1967,15 @@ mod tests {
         assert!(shader.contains("const RIVER_LARGE_SCALE: i32 = 768;"));
         assert!(shader.contains("fn river_geometry"));
         assert!(shader.contains("fn complete_hydrology"));
+        assert!(shader.contains("if water {"));
         assert!(shader.contains("fn splitmix64"));
         assert!(shader.contains("fn gradient_noise"));
         assert!(!shader.contains("band_weight"));
         assert!(TERRAIN_PREVIEW_RENDER_WGSL.contains("error_color"));
         assert!(TERRAIN_PREVIEW_RENDER_WGSL.contains("@builtin(instance_index)"));
         assert!(TERRAIN_PREVIEW_RENDER_WGSL.contains("fn base_sample"));
+        assert!(TERRAIN_PREVIEW_RENDER_WGSL.contains("fn terrain_material"));
+        assert!(TERRAIN_PREVIEW_RENDER_WGSL.contains("if sample.climate.z >= 0.5"));
         assert!(TERRAIN_PREVIEW_RENDER_WGSL.contains("visible_half_width"));
         assert!(TERRAIN_PREVIEW_RENDER_WGSL.contains("params.view_projection * vec4<f32>"));
         assert!(TERRAIN_PREVIEW_TREE_WGSL.contains("params.view_projection * vec4<f32>"));
