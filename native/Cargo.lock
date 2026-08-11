@@ -1607,6 +1607,8 @@ dependencies = [
  "lewton",
  "log",
  "mclone-assets",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

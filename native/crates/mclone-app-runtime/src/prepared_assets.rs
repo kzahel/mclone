@@ -49,6 +49,8 @@ pub struct PreparedAssetCoverage {
     pub block_states: usize,
     pub atlas_sprites: usize,
     pub actor_figures: usize,
+    pub audio_samples: usize,
+    pub audio_families: usize,
     pub missing_registry_entries: usize,
     pub first_party_resolutions: usize,
     pub generated_resolutions: usize,
@@ -67,6 +69,7 @@ pub struct PreparedAssetSet {
     pub terrain: TexturedTerrainAssets,
     pub actors: ActorTextureAssets,
     pub screen_effects: ScreenEffectTextureAssets,
+    pub audio: PreparedAudioAssets,
     pub audio_policy: FirstPartyAudioPolicy,
     pub missing_registry: Option<MissingAssetRegistry>,
     pub provenance: AssetProvenanceReport,
@@ -134,7 +137,7 @@ impl PreparedAssetSet {
             },
             actors: self.actors,
             screen_effects: self.screen_effects,
-            audio: PreparedAudioAssets::silent(),
+            audio: self.audio,
             audio_policy: self.audio_policy,
             provenance: self.provenance,
             coverage: Some(self.coverage),
@@ -480,6 +483,9 @@ fn prepare_scene_asset_selection(
     let reference_enabled = source_order
         .iter()
         .any(|descriptor| descriptor.origin == AssetPackOrigin::MinecraftReference);
+    let authored_audio_enabled = source_order
+        .iter()
+        .any(|descriptor| descriptor.id.as_str() == AUTHORED_FIRST_PARTY_PACK_ID);
     let source = AssetSourceChain::from_selection(
         catalog,
         &selection,
@@ -507,10 +513,16 @@ fn prepare_scene_asset_selection(
     let screen_effects = load_screen_effect_texture_assets(&tracker)
         .context("failed to prepare selected screen-effect assets")?;
 
-    let (audio, audio_policy, missing_registry) = if reference_enabled {
+    let audio = if authored_audio_enabled {
+        PreparedAudioAssets::load_first_party(&tracker)
+            .context("failed to prepare selected first-party audio")?
+    } else if reference_enabled {
+        PreparedAudioAssets::load(&tracker).context("failed to prepare selected reference audio")?
+    } else {
+        PreparedAudioAssets::silent()
+    };
+    let (audio_policy, missing_registry) = if reference_enabled {
         (
-            PreparedAudioAssets::load(&tracker)
-                .context("failed to prepare selected reference audio")?,
             FirstPartyAudioPolicy {
                 suppressed: Default::default(),
             },
@@ -529,7 +541,7 @@ fn prepare_scene_asset_selection(
         for path in &policy.suppressed {
             tracker.record_suppressed(path.clone(), policy_origin.clone());
         }
-        (PreparedAudioAssets::silent(), policy, registry)
+        (policy, registry)
     };
 
     let provenance = tracker.report(epoch, selection.clone());
@@ -556,6 +568,8 @@ fn prepare_scene_asset_selection(
         block_states: terrain.catalog.len(),
         atlas_sprites: terrain.atlas_sprite_count,
         actor_figures: actors.figures.len(),
+        audio_samples: audio.sound_count(),
+        audio_families: audio.family_count(),
         missing_registry_entries: missing_registry
             .as_ref()
             .map_or(0, MissingAssetRegistry::len),
@@ -745,6 +759,8 @@ pub fn prepare_first_party_asset_set(
         .context("failed to prepare first-party actor and figure assets")?;
     let screen_effects = load_screen_effect_texture_assets(&tracker)
         .context("failed to prepare first-party screen-effect assets")?;
+    let audio = PreparedAudioAssets::load_first_party(&tracker)
+        .context("failed to prepare first-party audio assets")?;
     let audio_policy = FirstPartyAudioPolicy::load(&tracker)
         .context("failed to prepare first-party audio policy")?;
     let missing_registry = MissingAssetRegistry::load_optional(&tracker)
@@ -767,6 +783,8 @@ pub fn prepare_first_party_asset_set(
         block_states: terrain.catalog.len(),
         atlas_sprites: terrain.atlas_sprite_count,
         actor_figures: actors.figures.len(),
+        audio_samples: audio.sound_count(),
+        audio_families: audio.family_count(),
         missing_registry_entries: missing_registry
             .as_ref()
             .map_or(0, MissingAssetRegistry::len),
@@ -785,6 +803,7 @@ pub fn prepare_first_party_asset_set(
         terrain,
         actors,
         screen_effects,
+        audio,
         audio_policy,
         missing_registry,
         provenance,

@@ -1,10 +1,13 @@
 #![forbid(unsafe_code)]
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::Cursor;
 use std::sync::Arc;
 #[cfg(not(target_arch = "wasm32"))]
-use std::sync::mpsc::{Receiver, SyncSender, TryRecvError, TrySendError, sync_channel};
+use std::sync::{
+    Mutex,
+    mpsc::{Receiver, SyncSender, TryRecvError, TrySendError, sync_channel},
+};
 
 use anyhow::{Context, Result, bail};
 #[cfg(not(target_arch = "wasm32"))]
@@ -13,12 +16,14 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, Sample, SampleFormat, SizedSample};
 use lewton::inside_ogg::OggStreamReader;
 use mclone_assets::{AssetPath, AssetSource};
+use serde::Deserialize;
 
 #[cfg(not(target_arch = "wasm32"))]
 const COMMAND_QUEUE_CAPACITY: usize = 128;
 #[cfg(not(target_arch = "wasm32"))]
 const DEFAULT_MAX_VOICES: usize = 32;
 const LANDING_BIG_IMPACT_SPEED: f64 = 6.0;
+pub const FIRST_PARTY_SOUND_BANK_PATH: &str = "assets/mclone/audio/sound-bank.v1.json";
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct SoundKey(&'static str);
@@ -31,6 +36,109 @@ impl SoundKey {
 
 pub const LANDING_SMALL: SoundKey = SoundKey("mclone:landing_small");
 pub const LANDING_BIG: SoundKey = SoundKey("mclone:landing_big");
+pub const FOOTSTEP_CARPET: SoundKey = SoundKey("mclone:footstep_carpet");
+pub const FOOTSTEP_GRASS: SoundKey = SoundKey("mclone:footstep_grass");
+pub const FOOTSTEP_NEUTRAL: SoundKey = SoundKey("mclone:footstep_neutral");
+pub const FOOTSTEP_SNOW: SoundKey = SoundKey("mclone:footstep_snow");
+pub const FOOTSTEP_STONE: SoundKey = SoundKey("mclone:footstep_stone");
+pub const FOOTSTEP_WOOD: SoundKey = SoundKey("mclone:footstep_wood");
+pub const LANDING_CARPET: SoundKey = SoundKey("mclone:landing_carpet");
+pub const LANDING_GRASS: SoundKey = SoundKey("mclone:landing_grass");
+pub const LANDING_NEUTRAL: SoundKey = SoundKey("mclone:landing_neutral");
+pub const LANDING_SNOW: SoundKey = SoundKey("mclone:landing_snow");
+pub const LANDING_STONE: SoundKey = SoundKey("mclone:landing_stone");
+pub const LANDING_WOOD: SoundKey = SoundKey("mclone:landing_wood");
+pub const BREAK_GLASS: SoundKey = SoundKey("mclone:break_glass");
+pub const BREAK_METAL: SoundKey = SoundKey("mclone:break_metal");
+pub const BREAK_SOFT: SoundKey = SoundKey("mclone:break_soft");
+pub const BREAK_STONE: SoundKey = SoundKey("mclone:break_stone");
+pub const BREAK_WOOD: SoundKey = SoundKey("mclone:break_wood");
+pub const PLACE_GLASS: SoundKey = SoundKey("mclone:place_glass");
+pub const PLACE_METAL: SoundKey = SoundKey("mclone:place_metal");
+pub const PLACE_SOFT: SoundKey = SoundKey("mclone:place_soft");
+pub const PLACE_STONE: SoundKey = SoundKey("mclone:place_stone");
+pub const PLACE_WOOD: SoundKey = SoundKey("mclone:place_wood");
+pub const IMPACT_GLASS: SoundKey = SoundKey("mclone:impact_glass");
+pub const IMPACT_METAL: SoundKey = SoundKey("mclone:impact_metal");
+pub const IMPACT_WOOD: SoundKey = SoundKey("mclone:impact_wood");
+pub const CLOTH_MOVE: SoundKey = SoundKey("mclone:cloth_move");
+pub const ITEM_PICKUP: SoundKey = SoundKey("mclone:item_pickup");
+pub const WOOD_CREAK: SoundKey = SoundKey("mclone:wood_creak");
+pub const UI_BACK: SoundKey = SoundKey("mclone:ui_back");
+pub const UI_CONFIRM: SoundKey = SoundKey("mclone:ui_confirm");
+pub const UI_ERROR: SoundKey = SoundKey("mclone:ui_error");
+pub const UI_OPEN: SoundKey = SoundKey("mclone:ui_open");
+pub const UI_SELECT: SoundKey = SoundKey("mclone:ui_select");
+
+const CATALOG_SOUND_KEYS: &[SoundKey] = &[
+    FOOTSTEP_CARPET,
+    FOOTSTEP_GRASS,
+    FOOTSTEP_NEUTRAL,
+    FOOTSTEP_SNOW,
+    FOOTSTEP_STONE,
+    FOOTSTEP_WOOD,
+    LANDING_CARPET,
+    LANDING_GRASS,
+    LANDING_NEUTRAL,
+    LANDING_SNOW,
+    LANDING_STONE,
+    LANDING_WOOD,
+    BREAK_GLASS,
+    BREAK_METAL,
+    BREAK_SOFT,
+    BREAK_STONE,
+    BREAK_WOOD,
+    PLACE_GLASS,
+    PLACE_METAL,
+    PLACE_SOFT,
+    PLACE_STONE,
+    PLACE_WOOD,
+    IMPACT_GLASS,
+    IMPACT_METAL,
+    IMPACT_WOOD,
+    CLOTH_MOVE,
+    ITEM_PICKUP,
+    WOOD_CREAK,
+    UI_BACK,
+    UI_CONFIRM,
+    UI_ERROR,
+    UI_OPEN,
+    UI_SELECT,
+];
+
+impl SoundKey {
+    fn parse(value: &str) -> Option<Self> {
+        CATALOG_SOUND_KEYS
+            .iter()
+            .copied()
+            .find(|key| key.as_str() == value)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PlaybackParams {
+    pub gain: f32,
+    pub pitch: f32,
+    pub pan: f32,
+    pub seed: u64,
+}
+
+impl PlaybackParams {
+    pub const fn with_gain(gain: f32) -> Self {
+        Self {
+            gain,
+            pitch: 1.0,
+            pan: 0.0,
+            seed: 0,
+        }
+    }
+}
+
+impl Default for PlaybackParams {
+    fn default() -> Self {
+        Self::with_gain(1.0)
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AudioSettings {
@@ -60,6 +168,8 @@ pub fn landing_playback_for_impact(impact_speed: f64) -> (SoundKey, f32) {
 #[cfg(not(target_arch = "wasm32"))]
 pub struct AudioEngine {
     commands: SyncSender<AudioCommand>,
+    bank: SoundBank,
+    selector: Mutex<VariantSelector>,
     _stream: cpal::Stream,
 }
 
@@ -84,7 +194,7 @@ impl AudioEngine {
         let output_channels = usize::from(config.channels);
         let (commands, receiver) = sync_channel(COMMAND_QUEUE_CAPACITY);
         let mixer = Mixer::new(
-            bank,
+            bank.clone(),
             receiver,
             settings,
             output_sample_rate,
@@ -103,16 +213,26 @@ impl AudioEngine {
         );
         Ok(Self {
             commands,
+            bank,
+            selector: Mutex::new(VariantSelector::default()),
             _stream: stream,
         })
     }
 
     pub fn play(&self, sound: SoundKey, gain: f32) {
-        let gain = gain.clamp(0.0, 1.0);
-        if gain <= 0.0 {
+        self.play_with(sound, PlaybackParams::with_gain(gain));
+    }
+
+    pub fn play_with(&self, sound: SoundKey, params: PlaybackParams) {
+        let Some(playback) = self
+            .selector
+            .lock()
+            .expect("audio variant selector poisoned")
+            .resolve(&self.bank, sound, params)
+        else {
             return;
-        }
-        match self.commands.try_send(AudioCommand::Play { sound, gain }) {
+        };
+        match self.commands.try_send(AudioCommand::Play(playback)) {
             Ok(()) => {}
             Err(TrySendError::Full(_)) => {
                 log::debug!("audio command queue full; dropping {}", sound.as_str());
@@ -143,15 +263,15 @@ impl AudioEngine {
 /// neutral sound commands and requests a replacement capability at an asset
 /// epoch boundary; output-device creation remains inside the implementation.
 pub trait AudioOutput: Send {
-    fn play(&self, sound: SoundKey, gain: f32);
+    fn play_with(&self, sound: SoundKey, params: PlaybackParams);
 
     fn replacement(&self, assets: PreparedAudioAssets) -> Result<Box<dyn AudioOutput>>;
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 impl AudioOutput for AudioEngine {
-    fn play(&self, sound: SoundKey, gain: f32) {
-        AudioEngine::play(self, sound, gain);
+    fn play_with(&self, sound: SoundKey, params: PlaybackParams) {
+        AudioEngine::play_with(self, sound, params);
     }
 
     fn replacement(&self, assets: PreparedAudioAssets) -> Result<Box<dyn AudioOutput>> {
@@ -178,8 +298,12 @@ impl AudioOutputCapability {
     }
 
     pub fn play(&self, sound: SoundKey, gain: f32) {
+        self.play_with(sound, PlaybackParams::with_gain(gain));
+    }
+
+    pub fn play_with(&self, sound: SoundKey, params: PlaybackParams) {
         if let Self::Available(output) = self {
-            output.play(sound, gain);
+            output.play_with(sound, params);
         }
     }
 
@@ -218,10 +342,18 @@ impl PreparedAudioAssets {
         })
     }
 
+    pub fn load_first_party(assets: &impl AssetSource) -> Result<Self> {
+        Ok(Self {
+            bank: SoundBank::load_first_party(assets)
+                .context("failed to load first-party audio sound bank")?,
+        })
+    }
+
     pub fn silent() -> Self {
         Self {
             bank: SoundBank {
-                samples: HashMap::new(),
+                samples: Vec::new(),
+                families: HashMap::new(),
             },
         }
     }
@@ -231,15 +363,28 @@ impl PreparedAudioAssets {
     }
 
     pub fn is_silent(&self) -> bool {
-        self.bank.samples.is_empty()
+        self.bank.families.is_empty()
+    }
+
+    pub fn family_count(&self) -> usize {
+        self.bank.families.len()
     }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum AudioCommand {
-    Play { sound: SoundKey, gain: f32 },
+    Play(ResolvedPlayback),
     Settings(AudioSettings),
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct ResolvedPlayback {
+    sample_index: u16,
+    gain: f32,
+    pitch: f32,
+    pan: f32,
 }
 
 #[derive(Clone)]
@@ -313,11 +458,176 @@ impl SampleData {
 
 #[derive(Clone)]
 struct SoundBank {
-    samples: HashMap<SoundKey, Arc<SampleData>>,
+    samples: Vec<Arc<SampleData>>,
+    families: HashMap<SoundKey, PreparedFamily>,
+}
+
+#[derive(Clone, Debug)]
+struct PreparedFamily {
+    variants: Vec<u16>,
+    gain: f32,
+    pitch_min: f32,
+    pitch_max: f32,
+    no_immediate_repeat: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawSoundCatalog {
+    schema_version: u32,
+    license: String,
+    selected_file_count: usize,
+    families: Vec<RawSoundFamily>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawSoundFamily {
+    key: String,
+    gain: f32,
+    pitch_min: f32,
+    pitch_max: f32,
+    no_immediate_repeat: bool,
+    variants: Vec<String>,
 }
 
 impl SoundBank {
     fn load(assets: &impl AssetSource) -> Result<Self> {
+        let catalog_path = AssetPath::new(FIRST_PARTY_SOUND_BANK_PATH);
+        if let Some(bytes) = assets
+            .read(&catalog_path)
+            .context("failed to read first-party sound catalog")?
+        {
+            return Self::from_catalog(assets, &bytes);
+        }
+        Self::load_legacy(assets)
+    }
+
+    fn load_first_party(assets: &impl AssetSource) -> Result<Self> {
+        let catalog_path = AssetPath::new(FIRST_PARTY_SOUND_BANK_PATH);
+        let bytes = assets
+            .read(&catalog_path)
+            .context("failed to read first-party sound catalog")?
+            .with_context(|| {
+                format!("required sound catalog {FIRST_PARTY_SOUND_BANK_PATH} is missing")
+            })?;
+        Self::from_catalog(assets, &bytes)
+    }
+
+    fn from_catalog(assets: &impl AssetSource, bytes: &[u8]) -> Result<Self> {
+        let raw: RawSoundCatalog =
+            serde_json::from_slice(bytes).context("invalid first-party sound catalog JSON")?;
+        if raw.schema_version != 1 {
+            bail!(
+                "unsupported first-party sound catalog schema {}",
+                raw.schema_version
+            );
+        }
+        if raw.license != "CC0-1.0" {
+            bail!("first-party sound catalog must declare CC0-1.0");
+        }
+        let mut family_keys = HashSet::new();
+        let mut selected_paths = HashSet::new();
+        for family in &raw.families {
+            if !family_keys.insert(family.key.as_str()) {
+                bail!("duplicate first-party sound family {}", family.key);
+            }
+            if SoundKey::parse(&family.key).is_none() {
+                bail!("unknown first-party sound family {}", family.key);
+            }
+            if family.variants.is_empty() {
+                bail!("first-party sound family {} has no variants", family.key);
+            }
+            if !family.gain.is_finite() || !(0.0..=1.0).contains(&family.gain) {
+                bail!("first-party sound family {} has invalid gain", family.key);
+            }
+            if !family.pitch_min.is_finite()
+                || !family.pitch_max.is_finite()
+                || !(0.5..=2.0).contains(&family.pitch_min)
+                || !(0.5..=2.0).contains(&family.pitch_max)
+                || family.pitch_min > family.pitch_max
+            {
+                bail!(
+                    "first-party sound family {} has invalid pitch range",
+                    family.key
+                );
+            }
+            let mut variants = HashSet::new();
+            for path in &family.variants {
+                if !path.starts_with("assets/mclone/sounds/") || !path.ends_with(".ogg") {
+                    bail!(
+                        "first-party sound family {} has invalid path {path}",
+                        family.key
+                    );
+                }
+                if !variants.insert(path.as_str()) {
+                    bail!("first-party sound family {} repeats {path}", family.key);
+                }
+                selected_paths.insert(path.clone());
+            }
+        }
+        if selected_paths.len() != raw.selected_file_count {
+            bail!(
+                "first-party catalog declares {} files but references {}",
+                raw.selected_file_count,
+                selected_paths.len()
+            );
+        }
+
+        let mut samples = Vec::with_capacity(selected_paths.len());
+        let mut sample_indexes = HashMap::new();
+        let mut ordered_paths = selected_paths.into_iter().collect::<Vec<_>>();
+        ordered_paths.sort_unstable();
+        for path in ordered_paths {
+            let asset_path = AssetPath::new(&path);
+            let Some(bytes) = assets
+                .read(&asset_path)
+                .with_context(|| format!("failed to read sound asset {path}"))?
+            else {
+                log::warn!("missing first-party sound asset {path}");
+                continue;
+            };
+            let sample = decode_ogg(&bytes)
+                .with_context(|| format!("failed to decode sound asset {path}"))?;
+            let index = u16::try_from(samples.len()).context("sound bank has too many samples")?;
+            sample_indexes.insert(path, index);
+            samples.push(Arc::new(sample));
+        }
+
+        let mut families = HashMap::new();
+        for raw_family in raw.families {
+            let key = SoundKey::parse(&raw_family.key)
+                .expect("catalog family keys were validated before decoding");
+            let variants = raw_family
+                .variants
+                .iter()
+                .filter_map(|path| sample_indexes.get(path.as_str()).copied())
+                .collect::<Vec<_>>();
+            if variants.is_empty() {
+                log::warn!(
+                    "sound family {} has no decoded variants; playback will be silent",
+                    key.as_str()
+                );
+                continue;
+            }
+            families.insert(
+                key,
+                PreparedFamily {
+                    variants,
+                    gain: raw_family.gain,
+                    pitch_min: raw_family.pitch_min,
+                    pitch_max: raw_family.pitch_max,
+                    no_immediate_repeat: raw_family.no_immediate_repeat,
+                },
+            );
+        }
+        log::info!(
+            "loaded first-party sound bank: {} samples across {} families",
+            samples.len(),
+            families.len()
+        );
+        Ok(Self { samples, families })
+    }
+
+    fn load_legacy(assets: &impl AssetSource) -> Result<Self> {
         let mut samples = HashMap::new();
         for def in SOUND_DEFS {
             let path = AssetPath::new(def.path);
@@ -344,23 +654,122 @@ impl SoundBank {
             );
             samples.insert(def.key, Arc::new(sample));
         }
-        Ok(Self { samples })
+        let mut ordered = samples.into_iter().collect::<Vec<_>>();
+        ordered.sort_by_key(|(key, _)| key.as_str());
+        let mut samples = Vec::with_capacity(ordered.len());
+        let mut families = HashMap::new();
+        for (key, sample) in ordered {
+            let sample_index =
+                u16::try_from(samples.len()).context("legacy sound bank has too many samples")?;
+            samples.push(sample);
+            families.insert(
+                key,
+                PreparedFamily {
+                    variants: vec![sample_index],
+                    gain: 1.0,
+                    pitch_min: 1.0,
+                    pitch_max: 1.0,
+                    no_immediate_repeat: false,
+                },
+            );
+        }
+        Ok(Self { samples, families })
     }
 
     #[cfg(test)]
     fn from_samples(samples: impl IntoIterator<Item = (SoundKey, SampleData)>) -> Self {
-        Self {
-            samples: samples
-                .into_iter()
-                .map(|(key, sample)| (key, Arc::new(sample)))
-                .collect(),
+        let mut bank = Self {
+            samples: Vec::new(),
+            families: HashMap::new(),
+        };
+        for (key, sample) in samples {
+            let sample_index = u16::try_from(bank.samples.len()).unwrap();
+            bank.samples.push(Arc::new(sample));
+            bank.families.insert(
+                key,
+                PreparedFamily {
+                    variants: vec![sample_index],
+                    gain: 1.0,
+                    pitch_min: 1.0,
+                    pitch_max: 1.0,
+                    no_immediate_repeat: false,
+                },
+            );
         }
+        bank
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    fn sample(&self, sound: SoundKey) -> Option<Arc<SampleData>> {
-        self.samples.get(&sound).cloned()
+    fn sample(&self, sample_index: u16) -> Option<Arc<SampleData>> {
+        self.samples.get(usize::from(sample_index)).cloned()
     }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Default)]
+struct VariantSelector {
+    sequence: u64,
+    last_variants: HashMap<SoundKey, usize>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl VariantSelector {
+    fn resolve(
+        &mut self,
+        bank: &SoundBank,
+        sound: SoundKey,
+        params: PlaybackParams,
+    ) -> Option<ResolvedPlayback> {
+        let family = bank.families.get(&sound)?;
+        if !params.gain.is_finite() || params.gain <= 0.0 {
+            return None;
+        }
+        let hash =
+            mix64(params.seed ^ self.sequence ^ stable_sound_hash(sound.as_str()).rotate_left(17));
+        self.sequence = self.sequence.wrapping_add(1);
+        let mut variant = hash as usize % family.variants.len();
+        if family.no_immediate_repeat
+            && family.variants.len() > 1
+            && self.last_variants.get(&sound) == Some(&variant)
+        {
+            variant = (variant + 1 + (hash >> 32) as usize % (family.variants.len() - 1))
+                % family.variants.len();
+        }
+        self.last_variants.insert(sound, variant);
+        let pitch_unit =
+            (mix64(hash ^ 0xa076_1d64_78bd_642f) >> 40) as f32 / ((1_u32 << 24) - 1) as f32;
+        let family_pitch = family.pitch_min + (family.pitch_max - family.pitch_min) * pitch_unit;
+        let requested_pitch = if params.pitch.is_finite() {
+            params.pitch
+        } else {
+            1.0
+        };
+        let pan = if params.pan.is_finite() {
+            params.pan.clamp(-1.0, 1.0)
+        } else {
+            0.0
+        };
+        Some(ResolvedPlayback {
+            sample_index: family.variants[variant],
+            gain: (family.gain * params.gain).clamp(0.0, 1.0),
+            pitch: (family_pitch * requested_pitch).clamp(0.5, 2.0),
+            pan,
+        })
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn stable_sound_hash(value: &str) -> u64 {
+    value.bytes().fold(0xcbf2_9ce4_8422_2325, |hash, byte| {
+        (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3)
+    })
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn mix64(mut value: u64) -> u64 {
+    value = (value ^ (value >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    value = (value ^ (value >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    value ^ (value >> 31)
 }
 
 struct SoundDef {
@@ -399,20 +808,25 @@ struct Voice {
     sample: Arc<SampleData>,
     frame_position: f64,
     gain: f32,
+    pitch: f32,
+    pan: f32,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 impl Voice {
-    fn new(sample: Arc<SampleData>, gain: f32) -> Self {
+    fn new(sample: Arc<SampleData>, gain: f32, pitch: f32, pan: f32) -> Self {
         Self {
             sample,
             frame_position: 0.0,
             gain,
+            pitch,
+            pan,
         }
     }
 
     fn advance(&mut self, output_sample_rate: u32) {
-        self.frame_position += f64::from(self.sample.sample_rate) / f64::from(output_sample_rate);
+        self.frame_position += f64::from(self.sample.sample_rate) / f64::from(output_sample_rate)
+            * f64::from(self.pitch);
     }
 
     fn is_finished(&self) -> bool {
@@ -481,6 +895,7 @@ impl Mixer {
                             .sample
                             .value_at(voice.frame_position, channel, self.output_channels)
                             * voice.gain
+                            * pan_gain(voice.pan, channel, self.output_channels)
                             * self.settings.master_gain;
                 }
                 *sample = T::from_sample(mixed.clamp(-1.0, 1.0));
@@ -495,7 +910,7 @@ impl Mixer {
     fn drain_commands(&mut self) {
         loop {
             match self.commands.try_recv() {
-                Ok(AudioCommand::Play { sound, gain }) => self.start_voice(sound, gain),
+                Ok(AudioCommand::Play(playback)) => self.start_voice(playback),
                 Ok(AudioCommand::Settings(settings)) => self.settings = settings,
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => break,
@@ -503,14 +918,31 @@ impl Mixer {
         }
     }
 
-    fn start_voice(&mut self, sound: SoundKey, gain: f32) {
+    fn start_voice(&mut self, playback: ResolvedPlayback) {
         if !self.settings.enabled || self.voices.len() >= self.max_voices {
             return;
         }
-        let Some(sample) = self.bank.sample(sound) else {
+        let Some(sample) = self.bank.sample(playback.sample_index) else {
             return;
         };
-        self.voices.push(Voice::new(sample, gain.clamp(0.0, 1.0)));
+        self.voices.push(Voice::new(
+            sample,
+            playback.gain.clamp(0.0, 1.0),
+            playback.pitch.clamp(0.5, 2.0),
+            playback.pan.clamp(-1.0, 1.0),
+        ));
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn pan_gain(pan: f32, output_channel: usize, output_channels: usize) -> f32 {
+    if output_channels < 2 {
+        return 1.0;
+    }
+    match output_channel {
+        0 => 1.0 - pan.max(0.0),
+        1 => 1.0 + pan.min(0.0),
+        _ => 1.0,
     }
 }
 
@@ -568,15 +1000,19 @@ mod tests {
         )
     }
 
+    fn playback(gain: f32) -> ResolvedPlayback {
+        ResolvedPlayback {
+            sample_index: 0,
+            gain,
+            pitch: 1.0,
+            pan: 0.0,
+        }
+    }
+
     #[test]
     fn mixer_renders_sample_and_stops_at_end() {
         let (sender, mut mixer) = test_mixer([(LANDING_SMALL, test_sample(&[0.25, -0.5]))], 4);
-        sender
-            .try_send(AudioCommand::Play {
-                sound: LANDING_SMALL,
-                gain: 1.0,
-            })
-            .unwrap();
+        sender.try_send(AudioCommand::Play(playback(1.0))).unwrap();
         let mut output = [1.0; 4];
 
         mixer.render(&mut output, 1);
@@ -589,12 +1025,7 @@ mod tests {
     fn mixer_overlapping_voices_sum() {
         let (sender, mut mixer) = test_mixer([(LANDING_SMALL, test_sample(&[0.25]))], 4);
         for _ in 0..2 {
-            sender
-                .try_send(AudioCommand::Play {
-                    sound: LANDING_SMALL,
-                    gain: 1.0,
-                })
-                .unwrap();
+            sender.try_send(AudioCommand::Play(playback(1.0))).unwrap();
         }
         let mut output = [0.0; 1];
 
@@ -606,12 +1037,7 @@ mod tests {
     #[test]
     fn mixer_missing_sound_is_silent_noop() {
         let (sender, mut mixer) = test_mixer([], 4);
-        sender
-            .try_send(AudioCommand::Play {
-                sound: LANDING_SMALL,
-                gain: 1.0,
-            })
-            .unwrap();
+        sender.try_send(AudioCommand::Play(playback(1.0))).unwrap();
         let mut output = [1.0; 2];
 
         mixer.render(&mut output, 1);
@@ -624,12 +1050,7 @@ mod tests {
     fn mixer_respects_voice_capacity() {
         let (sender, mut mixer) = test_mixer([(LANDING_SMALL, test_sample(&[0.25]))], 1);
         for _ in 0..2 {
-            sender
-                .try_send(AudioCommand::Play {
-                    sound: LANDING_SMALL,
-                    gain: 1.0,
-                })
-                .unwrap();
+            sender.try_send(AudioCommand::Play(playback(1.0))).unwrap();
         }
         let mut output = [0.0; 1];
 
@@ -643,6 +1064,88 @@ mod tests {
         assert_eq!(landing_playback_for_impact(1.0).0, LANDING_SMALL);
         assert_eq!(landing_playback_for_impact(10.0).0, LANDING_BIG);
         assert!(landing_playback_for_impact(10.0).1 <= 1.0);
+    }
+
+    #[test]
+    fn mixer_applies_pitch_and_stereo_pan() {
+        let (sender, mut mixer) =
+            test_mixer([(LANDING_SMALL, test_sample(&[0.25, 0.5, 0.75, 1.0]))], 4);
+        sender
+            .try_send(AudioCommand::Play(ResolvedPlayback {
+                sample_index: 0,
+                gain: 1.0,
+                pitch: 2.0,
+                pan: 1.0,
+            }))
+            .unwrap();
+        let mut output = [0.0; 4];
+
+        mixer.render(&mut output, 2);
+
+        assert_eq!(output, [0.0, 0.25, 0.0, 0.75]);
+    }
+
+    #[test]
+    fn variant_selector_is_stable_and_never_repeats_adjacent_variant() {
+        let bank = SoundBank {
+            samples: vec![
+                Arc::new(test_sample(&[0.1])),
+                Arc::new(test_sample(&[0.2])),
+                Arc::new(test_sample(&[0.3])),
+            ],
+            families: HashMap::from([(
+                FOOTSTEP_NEUTRAL,
+                PreparedFamily {
+                    variants: vec![0, 1, 2],
+                    gain: 0.5,
+                    pitch_min: 0.9,
+                    pitch_max: 1.1,
+                    no_immediate_repeat: true,
+                },
+            )]),
+        };
+        let sequence = |selector: &mut VariantSelector| {
+            (0..16)
+                .map(|seed| {
+                    selector
+                        .resolve(
+                            &bank,
+                            FOOTSTEP_NEUTRAL,
+                            PlaybackParams {
+                                gain: 0.8,
+                                pitch: 1.0,
+                                pan: 0.25,
+                                seed,
+                            },
+                        )
+                        .unwrap()
+                })
+                .collect::<Vec<_>>()
+        };
+
+        let first = sequence(&mut VariantSelector::default());
+        let second = sequence(&mut VariantSelector::default());
+
+        assert_eq!(first, second);
+        assert!(
+            first
+                .windows(2)
+                .all(|pair| pair[0].sample_index != pair[1].sample_index)
+        );
+        assert!(first.iter().all(|playback| {
+            playback.gain == 0.4 && (0.9..=1.1).contains(&playback.pitch) && playback.pan == 0.25
+        }));
+    }
+
+    #[test]
+    fn checked_in_first_party_catalog_loads_all_selected_samples() {
+        let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        let source = mclone_assets::FilesystemAssetSource::new(repo_root);
+
+        let prepared = PreparedAudioAssets::load_first_party(&source).unwrap();
+
+        assert_eq!(prepared.sound_count(), 119);
+        assert_eq!(prepared.family_count(), 33);
     }
 }
 

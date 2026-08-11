@@ -60,6 +60,8 @@ fn main() -> Result<()> {
                     "block_states": coverage.block_states,
                     "atlas_sprites": coverage.atlas_sprites,
                     "actor_figures": coverage.actor_figures,
+                    "audio_samples": coverage.audio_samples,
+                    "audio_families": coverage.audio_families,
                     "missing_registry_entries": coverage.missing_registry_entries,
                 },
                 "entries": entries,
@@ -74,11 +76,13 @@ fn main() -> Result<()> {
         return Ok(());
     }
     println!(
-        "prepared_epoch={} block_states={} atlas_sprites={} actor_figures={} missing_registry_entries={}",
+        "prepared_epoch={} block_states={} atlas_sprites={} actor_figures={} audio_samples={} audio_families={} missing_registry_entries={}",
         prepared.epoch,
         coverage.block_states,
         coverage.atlas_sprites,
         coverage.actor_figures,
+        coverage.audio_samples,
+        coverage.audio_families,
         coverage.missing_registry_entries,
     );
     println!(

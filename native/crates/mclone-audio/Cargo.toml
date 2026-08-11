@@ -10,6 +10,8 @@ anyhow.workspace = true
 lewton.workspace = true
 log.workspace = true
 mclone-assets.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 cpal.workspace = true
