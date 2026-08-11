@@ -3048,6 +3048,21 @@ impl RealmServer {
         mut command: SequencedMovePlayerCommand,
         pose_metadata: Option<(u32, u32, u32)>,
     ) -> ChunkStoreResult<Vec<ServerUpdate>> {
+        if self
+            .player_for_target(target)?
+            .needs_initial_position_sync()
+            && self.resume_record_for_target(target)?.is_some()
+        {
+            // The server owns first placement. In particular, a returning
+            // player's provisional client camera must not replace the loaded
+            // persistence record during the short interval before its safe
+            // destination is ready to publish.
+            return Ok(self
+                .initial_spawn_update_for_target(target)?
+                .map(ServerUpdate::PlayerPosition)
+                .into_iter()
+                .collect());
+        }
         let simulation_tick = self.simulation_tick;
         let command_sequence = command.sequence;
         let topology = self.active_dimension.definition.topology;
@@ -3781,11 +3796,11 @@ impl RealmServer {
         self.reconcile_remote_players_for_target_observer(target);
         let initial_spawn_update = self.initial_spawn_update_for_target(target)?;
         self.reconcile_entities_for_target_observer(target);
-        let mut updates = self.drain_chunk_updates_for_target(target)?;
         if let Some(update) = initial_spawn_update {
-            updates.push(ServerUpdate::PlayerPosition(update));
+            self.chunk_tracking
+                .queue_player_position_before_chunk_updates(target.player_id(), update);
         }
-        Ok(updates)
+        self.drain_chunk_updates_for_target(target)
     }
 
     fn route_scheduler_events(&mut self, events: Vec<ChunkSchedulerEvent>) -> ChunkStoreResult<()> {
@@ -4262,10 +4277,8 @@ impl RealmServer {
             let initial_spawn_update = self.initial_spawn_update_for_target(target)?;
             self.reconcile_entities_for_target_observer(target);
             if let Some(update) = initial_spawn_update {
-                self.chunk_tracking.queue_update_for_player(
-                    target.player_id(),
-                    ServerUpdate::PlayerPosition(update),
-                );
+                self.chunk_tracking
+                    .queue_player_position_before_chunk_updates(target.player_id(), update);
             }
         }
         let observers = self

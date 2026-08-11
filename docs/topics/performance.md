@@ -454,15 +454,19 @@ Use these local sources when implementing or reviewing performance work:
   coverage around the corrected view, and preserves Tactical
   [`167`](../tactical/167-shared-session-startup-contract.md)'s bounded
   correction-cascade and best-effort void-view rules. The regression was
-  reproduced against a 5,141-chunk SQLite save whose player resumed 61 chunks
-  from the provisional center; new worlds did not expose it because they had
-  no far saved-pose correction. A follow-up moved the first saved-pose
-  reconciliation ahead of combined drawable admission: as soon as the server
-  has authoritative underfoot data, the scene accepts the restored camera and
-  makes the next budgeted pump step target that view. The same copied save,
-  with a then-current 58-chunk resume correction, reached playable in two
-  ordinary window startup polls and about one second instead of making a
-  provisional-camera render seed a prerequisite.
+  reproduced against a 5,141-chunk SQLite save; new worlds did not expose it
+  because they had no saved-pose handoff. Later exact catalog/profile replay
+  found a remaining authority race: server-ready chunk diagnostics could lead
+  the initial position update by one frame, allowing the provisional camera to
+  submit the first movement, replace the restored player pose, and redirect
+  client interest while the server continued publishing the saved view. The
+  scene now withholds every camera commit until it has accepted the initial
+  server position, the server rejects premature movement while initial
+  placement remains unresolved, and position control updates lead queued bulk
+  chunk snapshots. A fresh copy of the 282 MB save reached active gameplay
+  through the real headless title/catalog action path in 0.354 seconds; the
+  pre-fix replay stayed in `Starting` beyond 19 seconds after all 7,056 saved
+  render sections had streamed.
 - Desktop frame pacing controls and headless frame-budget probe:
   [`029`](../tactical/029-native-frame-pacing-and-streaming-hitches.md)
 - Completed chunk publication slicing and initial streaming attribution:

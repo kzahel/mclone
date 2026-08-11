@@ -59,6 +59,12 @@ fn request_initial_chunk_view(server: &mut LocalRealmSession) {
 fn wait_for_initial_spawn_update(
     server: &mut LocalRealmSession,
 ) -> mclone_protocol::PlayerPositionUpdate {
+    wait_for_initial_spawn_update_batch(server).0
+}
+
+fn wait_for_initial_spawn_update_batch(
+    server: &mut LocalRealmSession,
+) -> (mclone_protocol::PlayerPositionUpdate, Vec<ServerUpdate>) {
     let mut spawn = None;
     for _ in 0..60_000 {
         let updates = server.try_poll().expect("poll");
@@ -69,7 +75,7 @@ fn wait_for_initial_spawn_update(
             })
         });
         if let Some(spawn) = spawn {
-            return spawn;
+            return (spawn, updates);
         }
         if server.pending_job_count() > 0 && server.pending_publication_count() == 0 {
             server.wait_for_worldgen_completion(Duration::from_secs(1));

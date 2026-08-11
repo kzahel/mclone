@@ -9,7 +9,9 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use mclone_core::{ChunkPos, ChunkSnapshot, HorizontalTopology, TopologyError};
-use mclone_protocol::{ChunkView, SectionBlockUpdate, ServerUpdate, encode_server_update};
+use mclone_protocol::{
+    ChunkView, PlayerPositionUpdate, SectionBlockUpdate, ServerUpdate, encode_server_update,
+};
 
 use crate::players::ServerPlayerId;
 
@@ -648,6 +650,36 @@ impl PlayerChunkTracking {
         }
     }
 
+    /// Queue the authoritative initial/respawn pose ahead of bulk chunk data.
+    ///
+    /// The pose is only created after its destination chunk is server-visible,
+    /// so it is safe to publish before that chunk's client snapshot. Keep any
+    /// already-queued control/lifecycle updates ahead of it, but do not make a
+    /// returning player drain a mature world's snapshot backlog before learning
+    /// where its camera and chunk interest belong.
+    pub(crate) fn queue_player_position_before_chunk_updates(
+        &mut self,
+        player_id: ServerPlayerId,
+        update: PlayerPositionUpdate,
+    ) {
+        if !self.players.contains_key(&player_id) {
+            return;
+        }
+        let pending = self.pending_updates.entry(player_id).or_default();
+        let mut bulk = VecDeque::new();
+        let mut control = VecDeque::new();
+        while let Some(update) = pending.pop_front() {
+            if server_update_is_bulk_chunk_data(&update) {
+                bulk.push_back(update);
+            } else {
+                control.push_back(update);
+            }
+        }
+        control.push_back(ServerUpdate::PlayerPosition(update));
+        control.append(&mut bulk);
+        *pending = control;
+    }
+
     pub(crate) fn queue_update_for_observer(
         &mut self,
         observer_id: ObserverId,
@@ -732,6 +764,15 @@ impl PlayerChunkTracking {
         self.aggregate_simulation_ticket_positions = simulation_positions;
         changed
     }
+}
+
+fn server_update_is_bulk_chunk_data(update: &ServerUpdate) -> bool {
+    matches!(
+        update,
+        ServerUpdate::ChunkSnapshot(_)
+            | ServerUpdate::SectionBlockUpdates { .. }
+            | ServerUpdate::ChunkUnload { .. }
+    )
 }
 
 pub(crate) fn chunk_positions_for_view_in(

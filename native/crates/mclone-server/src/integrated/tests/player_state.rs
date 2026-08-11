@@ -850,7 +850,22 @@ fn saved_player_pose_and_selected_slot_resume_for_stable_identity() {
         .configure_local_player_identity_blocking(identity)
         .unwrap();
     request_initial_chunk_view(&mut server);
-    let resumed = wait_for_initial_spawn_update(&mut server);
+    let provisional_position = Vec3d::new(-2_048.5, 200.0, 2_048.5);
+    assert!(
+        server
+            .try_handle_command(ClientCommand::move_player(MovePlayerCommand::Pos {
+                position: provisional_position,
+                on_ground: false,
+            }))
+            .unwrap()
+            .is_empty(),
+        "a premature move should wait when the saved destination is not ready"
+    );
+    assert!(
+        !server.player().has_accepted_position(),
+        "the provisional client camera must not claim initial-position authority"
+    );
+    let (resumed, arrival_batch) = wait_for_initial_spawn_update_batch(&mut server);
 
     assert_eq!(resumed.position, record.position);
     assert_eq!(resumed.y_rot_degrees, record.y_rot_degrees);
@@ -860,6 +875,16 @@ fn saved_player_pose_and_selected_slot_resume_for_stable_identity() {
     assert_eq!(server.total_experience(), 19);
     assert_eq!(server.player_vitals().health(), 13.5);
     assert_eq!(server.pending_death_cause(), None);
+    let position_index = arrival_batch
+        .iter()
+        .position(|update| matches!(update, ServerUpdate::PlayerPosition(_)))
+        .expect("arrival batch must contain the restored position");
+    assert!(
+        arrival_batch[..position_index]
+            .iter()
+            .all(|update| !matches!(update, ServerUpdate::ChunkSnapshot(_))),
+        "the restored position must lead bulk chunk snapshots"
+    );
 }
 
 #[test]

@@ -4368,30 +4368,52 @@ impl McloneSceneHost {
             }
         };
 
-        // The server can restore a saved player pose as soon as spawn authority
-        // is ready, before the startup seed has drawable geometry. Accept that
-        // correction immediately. Waiting for the combined playable gate first
-        // makes the renderer build or wait at the provisional scene camera even
-        // though the server is already loading the persisted player's view.
-        let corrected_before_playable = if step.spawn_authority_ready {
+        // Never submit the provisional scene camera before the server's initial
+        // position arrives. A returning player's persisted view can become
+        // server-ready one frame before its position update reaches the client;
+        // committing here based only on spawn diagnostics would overwrite the
+        // restored pose and redirect chunk interest to the provisional camera.
+        let authoritative_pose_ready = {
             let startup = self
                 .active_world
                 .local_startup
                 .as_mut()
                 .expect("startup must exist after successful pump step");
             if startup.reconciliation_passes == 0 {
-                reconcile_local_startup_pose_pass(startup, &self.services.clock)
-                    .context("accept initial local-world startup pose")?
+                mclone_app_runtime::apply_pending_engine_camera_position_updates(
+                    &mut **startup.pump.runtime_services_mut(),
+                    &mut startup.camera,
+                    XR_CAMERA_COMMIT_CONTEXT,
+                )
+                .context("accept authoritative local-world startup pose")?
             } else {
                 false
             }
-        } else {
-            false
         };
-        if corrected_before_playable {
-            // Force the next budgeted step to use the corrected camera. A seed
-            // produced by this step may have been prioritized at the provisional
-            // camera and therefore cannot admit the persisted view.
+        if authoritative_pose_ready {
+            let startup = self
+                .active_world
+                .local_startup
+                .as_mut()
+                .expect("startup must exist after accepted startup pose");
+            reconcile_local_startup_pose_pass(startup, &self.services.clock)
+                .context("reconcile authoritative local-world startup pose")?;
+            // Force the next budgeted step to use the authoritative camera. A
+            // seed produced by this step may still have been prioritized at the
+            // provisional scene center.
+            return Ok(false);
+        }
+
+        if self
+            .active_world
+            .local_startup
+            .as_ref()
+            .is_some_and(|startup| startup.reconciliation_passes == 0)
+        {
+            // Playable chunk evidence is not permission to synthesize an
+            // initial player pose. Keep polling until the server position is
+            // present; only then may the incremental reconciliation below send
+            // camera movement or retarget interest.
             return Ok(false);
         }
 
