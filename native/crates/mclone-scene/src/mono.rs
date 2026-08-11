@@ -1705,6 +1705,14 @@ impl McloneSceneHost {
             .as_mut()
             .expect("runtime presence checked")
             .send_gameplay_command(command)?;
+        self.enqueue_interaction_sound(
+            match action {
+                FlatInputAction::Attack => LocalInteractionSoundIntent::Break,
+                FlatInputAction::Use => LocalInteractionSoundIntent::Place,
+                _ => return Ok(MonoWorldActionStatus::NoCommand),
+            },
+            &target,
+        );
         Ok(MonoWorldActionStatus::Submitted { target })
     }
 

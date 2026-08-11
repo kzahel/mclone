@@ -13,6 +13,7 @@ pub use player_movement::{
     PlayerMovementAdvance, PlayerMovementCadenceConfig, PlayerMovementCommand,
 };
 
+use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::{Arc, LazyLock};
 use std::time::Duration;
@@ -115,8 +116,8 @@ use mclone_client::{
     TeleportValidityReason, sphere_intersects_solid_blocks, view_vector_from_rot_degrees,
 };
 use mclone_core::{
-    Aabb, AxisTopology, BlockPos, BlockStateId, CHUNK_WIDTH, ChunkPos, HorizontalTopology, Vec3d,
-    time,
+    AIR_BLOCK_STATE_ID, Aabb, AxisTopology, BlockPos, BlockStateId, CHUNK_WIDTH, ChunkPos,
+    HorizontalTopology, Vec3d, time,
 };
 use mclone_diagnostics::{
     BudgetDecisionPanelReport, BudgetHostMode, FrameHostKind, FramePipelineReport, WorkWindow,
@@ -541,6 +542,8 @@ struct DrawableWorldSlot {
     /// more than one presentation state.
     local_participant: LocalParticipantPresentation,
     footsteps: FootstepCadence,
+    pending_interaction_sounds: VecDeque<PendingInteractionSound>,
+    interaction_sound_sequence: u64,
     /// First live consumer of the bounded local-participant foundation.
     ///
     /// This tactical keeps Guest 2 presentation-only until the live session
@@ -562,6 +565,8 @@ struct DrawableWorldSlot {
 
 const FOOTSTEP_STRIDE_BLOCKS: f64 = 1.65;
 const MAX_FOOTSTEP_FRAME_DISTANCE: f64 = 1.0;
+const MAX_PENDING_INTERACTION_SOUNDS: usize = 16;
+const INTERACTION_SOUND_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct FootstepEvent {
@@ -573,6 +578,76 @@ struct FootstepEvent {
 struct FootstepCadence {
     distance_since_step: f64,
     sequence: u64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum LocalInteractionSoundIntent {
+    Break,
+    Place,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum PendingInteractionSoundKind {
+    Break {
+        pos: BlockPos,
+        before: BlockStateId,
+    },
+    Place {
+        candidates: [(BlockPos, Option<BlockStateId>); 2],
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct PendingInteractionSound {
+    kind: PendingInteractionSoundKind,
+    material: AcousticMaterial,
+    submitted_at: MonotonicInstant,
+    sequence: u64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PendingInteractionResolution {
+    Pending,
+    Rejected,
+    Confirmed { pos: BlockPos, sound: SoundKey },
+}
+
+impl PendingInteractionSound {
+    fn resolve(
+        self,
+        now: MonotonicInstant,
+        mut block_state_at: impl FnMut(BlockPos) -> Option<BlockStateId>,
+    ) -> PendingInteractionResolution {
+        if now.saturating_duration_since(self.submitted_at) > INTERACTION_SOUND_TIMEOUT {
+            return PendingInteractionResolution::Rejected;
+        }
+        match self.kind {
+            PendingInteractionSoundKind::Break { pos, before } => match block_state_at(pos) {
+                Some(current) if current == AIR_BLOCK_STATE_ID && before != current => {
+                    PendingInteractionResolution::Confirmed {
+                        pos,
+                        sound: self.material.break_sound(),
+                    }
+                }
+                Some(current) if current != before => PendingInteractionResolution::Rejected,
+                _ => PendingInteractionResolution::Pending,
+            },
+            PendingInteractionSoundKind::Place { candidates } => {
+                for (pos, before) in candidates {
+                    if let (Some(before), Some(current)) = (before, block_state_at(pos))
+                        && current != before
+                        && current != AIR_BLOCK_STATE_ID
+                    {
+                        return PendingInteractionResolution::Confirmed {
+                            pos,
+                            sound: self.material.place_sound(),
+                        };
+                    }
+                }
+                PendingInteractionResolution::Pending
+            }
+        }
+    }
 }
 
 impl FootstepCadence {
@@ -611,6 +686,24 @@ fn spatial_sound_seed(position: Vec3d, salt: u64) -> u64 {
         ^ position.y.to_bits().rotate_left(21)
         ^ position.z.to_bits().rotate_left(42)
         ^ salt
+}
+
+fn acoustic_material_for_state(state: BlockStateId) -> AcousticMaterial {
+    static BLOCK_STATES: LazyLock<BlockStateRegistry> =
+        LazyLock::new(BlockStateRegistry::terrain_mvp);
+    BLOCK_STATES
+        .by_id(state)
+        .map_or(AcousticMaterial::Neutral, |state| {
+            AcousticMaterial::from_block_path(state.block.path())
+        })
+}
+
+fn block_sound_position(pos: BlockPos) -> Vec3d {
+    Vec3d::new(
+        f64::from(pos.x) + 0.5,
+        f64::from(pos.y) + 0.5,
+        f64::from(pos.z) + 0.5,
+    )
 }
 
 fn sound_for_ui_action(action: GameUiAction) -> SoundKey {
@@ -699,6 +792,63 @@ mod sound_effect_tests {
         assert_eq!(
             sound_for_ui_action(GameUiAction::CycleTexturePresentation),
             UI_SELECT
+        );
+    }
+
+    #[test]
+    fn interaction_sounds_wait_for_authoritative_block_changes() {
+        let pos = BlockPos::new(1, 2, 3);
+        let submitted = PendingInteractionSound {
+            kind: PendingInteractionSoundKind::Break {
+                pos,
+                before: BlockStateId(7),
+            },
+            material: AcousticMaterial::Wood,
+            submitted_at: MonotonicInstant::ZERO,
+            sequence: 0,
+        };
+
+        assert_eq!(
+            submitted.resolve(MonotonicInstant::from_nanos(1), |_| Some(BlockStateId(7))),
+            PendingInteractionResolution::Pending
+        );
+        assert_eq!(
+            submitted.resolve(MonotonicInstant::from_nanos(2), |_| {
+                Some(AIR_BLOCK_STATE_ID)
+            }),
+            PendingInteractionResolution::Confirmed {
+                pos,
+                sound: mclone_audio::BREAK_WOOD,
+            }
+        );
+    }
+
+    #[test]
+    fn placement_sound_confirms_only_a_changed_non_air_candidate() {
+        let clicked = BlockPos::new(1, 2, 3);
+        let adjacent = BlockPos::new(1, 3, 3);
+        let submitted = PendingInteractionSound {
+            kind: PendingInteractionSoundKind::Place {
+                candidates: [
+                    (clicked, Some(BlockStateId(7))),
+                    (adjacent, Some(AIR_BLOCK_STATE_ID)),
+                ],
+            },
+            material: AcousticMaterial::Stone,
+            submitted_at: MonotonicInstant::ZERO,
+            sequence: 0,
+        };
+
+        assert_eq!(
+            submitted.resolve(MonotonicInstant::from_nanos(1), |pos| {
+                (pos == clicked)
+                    .then_some(BlockStateId(7))
+                    .or_else(|| (pos == adjacent).then_some(BlockStateId(8)))
+            }),
+            PendingInteractionResolution::Confirmed {
+                pos: adjacent,
+                sound: mclone_audio::PLACE_STONE,
+            }
         );
     }
 }
@@ -811,6 +961,8 @@ impl DrawableWorldSlot {
             external_runtime_startup_pending: install.external_runtime_startup_pending,
             local_participant,
             footsteps: FootstepCadence::default(),
+            pending_interaction_sounds: VecDeque::new(),
+            interaction_sound_sequence: 0,
             local_guest_preview: None,
             draw: install.draw,
             actors: install.actors,
@@ -842,6 +994,8 @@ impl DrawableWorldSlot {
         );
         self.local_guest_preview = None;
         self.footsteps = FootstepCadence::default();
+        self.pending_interaction_sounds.clear();
+        self.interaction_sound_sequence = 0;
         self.draw = install.draw;
         self.actors = install.actors;
         self.actor_interpolation = ActorInterpolationState::new();
@@ -884,6 +1038,8 @@ impl DrawableWorldSlot {
             self.camera.snapshot(),
         );
         self.footsteps = FootstepCadence::default();
+        self.pending_interaction_sounds.clear();
+        self.interaction_sound_sequence = 0;
         self.pending_startup_sections = pending_startup_sections;
         self.render_stats = RenderStreamStats::default();
         self.actor_interpolation = ActorInterpolationState::new();
@@ -3439,6 +3595,7 @@ impl McloneSceneHost {
             &policy,
             timing,
         )?;
+        self.play_confirmed_interaction_sounds();
         self.sync_player_lifecycle_ui();
         self.advance_warm_world_gpu(device, camera_position, standby_deadline)?;
         self.synchronize_world_gate_state();
@@ -5061,17 +5218,114 @@ impl McloneSceneHost {
     }
 
     fn acoustic_material_below(&self, feet: Vec3d) -> AcousticMaterial {
-        static BLOCK_STATES: LazyLock<BlockStateRegistry> =
-            LazyLock::new(BlockStateRegistry::terrain_mvp);
         let below = BlockPos::containing(Vec3d::new(feet.x, feet.y - 0.05, feet.z));
         self.active_world
             .runtime
             .as_ref()
             .and_then(|runtime| runtime.client().block_state_at_block_pos(below))
-            .and_then(|state| BLOCK_STATES.by_id(state))
-            .map_or(AcousticMaterial::Neutral, |state| {
-                AcousticMaterial::from_block_path(state.block.path())
-            })
+            .map_or(AcousticMaterial::Neutral, acoustic_material_for_state)
+    }
+
+    fn enqueue_interaction_sound(
+        &mut self,
+        intent: LocalInteractionSoundIntent,
+        target: &BlockInteractionTarget,
+    ) {
+        let Some(runtime) = self.active_world.runtime.as_ref() else {
+            return;
+        };
+        let client = runtime.client();
+        let kind_and_material = match intent {
+            LocalInteractionSoundIntent::Break => {
+                let pos = target.hit.block_pos;
+                let Some(before) = client.block_state_at_block_pos(pos) else {
+                    return;
+                };
+                if before == AIR_BLOCK_STATE_ID {
+                    return;
+                }
+                (
+                    PendingInteractionSoundKind::Break { pos, before },
+                    acoustic_material_for_state(before),
+                )
+            }
+            LocalInteractionSoundIntent::Place => {
+                let selected = usize::from(self.active_world.interaction.selected_hotbar_slot());
+                let Some(DebugHotbarItem::Block(block_state)) =
+                    self.active_world.interaction.hotbar_items()[selected]
+                else {
+                    return;
+                };
+                let clicked = target.hit.block_pos;
+                let adjacent = clicked.relative(target.hit.direction);
+                (
+                    PendingInteractionSoundKind::Place {
+                        candidates: [
+                            (clicked, client.block_state_at_block_pos(clicked)),
+                            (adjacent, client.block_state_at_block_pos(adjacent)),
+                        ],
+                    },
+                    acoustic_material_for_state(block_state),
+                )
+            }
+        };
+        if self.active_world.pending_interaction_sounds.len() == MAX_PENDING_INTERACTION_SOUNDS {
+            self.active_world.pending_interaction_sounds.pop_front();
+        }
+        let sequence = self.active_world.interaction_sound_sequence;
+        self.active_world.interaction_sound_sequence = sequence.wrapping_add(1);
+        self.active_world
+            .pending_interaction_sounds
+            .push_back(PendingInteractionSound {
+                kind: kind_and_material.0,
+                material: kind_and_material.1,
+                submitted_at: self.services.clock.now(),
+                sequence,
+            });
+    }
+
+    fn play_confirmed_interaction_sounds(&mut self) {
+        let now = self.services.clock.now();
+        let mut pending = std::mem::take(&mut self.active_world.pending_interaction_sounds);
+        let Some(runtime) = self.active_world.runtime.as_ref() else {
+            return;
+        };
+        let mut retained = VecDeque::with_capacity(pending.len());
+        let mut confirmed = Vec::new();
+        while let Some(sound) = pending.pop_front() {
+            match sound.resolve(now, |pos| runtime.client().block_state_at_block_pos(pos)) {
+                PendingInteractionResolution::Pending => retained.push_back(sound),
+                PendingInteractionResolution::Rejected => {}
+                PendingInteractionResolution::Confirmed { pos, sound: key } => {
+                    confirmed.push((key, pos, sound.sequence));
+                }
+            }
+        }
+        self.active_world.pending_interaction_sounds = retained;
+        for (sound, pos, sequence) in confirmed {
+            let position = block_sound_position(pos);
+            self.services.audio.play_with(
+                sound,
+                PlaybackParams {
+                    pan: self.world_sound_pan(position),
+                    seed: spatial_sound_seed(position, sequence),
+                    ..PlaybackParams::default()
+                },
+            );
+        }
+    }
+
+    fn world_sound_pan(&self, position: Vec3d) -> f32 {
+        let listener = self.active_world.camera.snapshot();
+        let delta = position.subtract(listener.eye);
+        let horizontal_length = delta.x.hypot(delta.z);
+        if horizontal_length <= 1.0e-6 {
+            return 0.0;
+        }
+        let forward = mclone_client::view_vector(listener.yaw_radians, 0.0);
+        let right_x = -forward.z;
+        let right_z = forward.x;
+        ((delta.x * right_x + delta.z * right_z) / horizontal_length).clamp(-1.0, 1.0) as f32 * 0.8
     }
 
     fn play_ui_action_sound(&self, action: GameUiAction) {

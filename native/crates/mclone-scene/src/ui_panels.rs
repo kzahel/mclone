@@ -1245,6 +1245,13 @@ impl McloneSceneHost {
         runtime
             .send_gameplay_command(command)
             .context("failed to send XR gameplay interaction command")?;
+        self.enqueue_interaction_sound(
+            match action {
+                XrGameplayInteractionAction::Attack => LocalInteractionSoundIntent::Break,
+                XrGameplayInteractionAction::Use => LocalInteractionSoundIntent::Place,
+            },
+            target,
+        );
         log::info!(
             "XR gameplay interaction {:?} submitted at ({}, {}, {}) face={:?}",
             action,

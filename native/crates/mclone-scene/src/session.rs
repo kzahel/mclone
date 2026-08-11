@@ -5628,6 +5628,7 @@ impl McloneSceneHost {
         self.last_locomotion_update = None;
         self.active_world.local_participant.reset_movement();
         self.active_world.footsteps.reset();
+        self.active_world.pending_interaction_sounds.clear();
         self.player_pose_sync.reset();
         self.head_comfort.reset();
         self.clear_xr_blink_teleport();
