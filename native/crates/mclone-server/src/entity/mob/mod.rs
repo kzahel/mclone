@@ -530,9 +530,11 @@ impl<'a> MobGoalContext<'a> {
     ) -> Option<Vec3d> {
         (0..8).find_map(|_| {
             let candidate = self.land_random_pos(horizontal_range, vertical_range)?;
-            sample_wetland_habitat(BlockPos::containing(candidate), &self.block_state_at)
-                .is_ok_and(|sample| sample.suitable())
-                .then_some(candidate)
+            sample_wetland_habitat(BlockPos::containing(candidate), &mut |pos| {
+                (self.block_state_at)(pos)
+            })
+            .is_ok_and(|sample| sample.suitable())
+            .then_some(candidate)
         })
     }
 

@@ -35,7 +35,8 @@ use crate::entity::spawning::dry_run::{
     NaturalSpawnDryRunDiagnostics, dry_run_creature_spawn_eligibility,
 };
 use crate::entity::spawning::live::{
-    CREATURE_SPAWN_MAX_SPAWNS_PER_TICK, CreatureSpawnDiagnostics, plan_creature_spawns,
+    CREATURE_SPAWN_MAX_SPAWNS_PER_TICK, CreatureSpawnDiagnostics, CreatureSpawnProfile,
+    plan_creature_spawns,
 };
 use crate::entity::spawning::mob_category::MobCategory;
 use crate::entity::spawning::natural::{
@@ -2653,6 +2654,13 @@ impl RealmServer {
                     &evaluation.chunk_inputs.eligible_entity_ticking_chunks,
                     &evaluation.player_positions,
                     max_spawns,
+                    if self.scheduler.world_generation_profile()
+                        == WorldGenerationProfile::McloneOverworldV1
+                    {
+                        CreatureSpawnProfile::McloneOverworld
+                    } else {
+                        CreatureSpawnProfile::ReferenceFarmAnimals
+                    },
                     &mut random,
                     |pos| self.scheduler.block_at_world(pos),
                     |pos| {
@@ -2804,6 +2812,9 @@ impl RealmServer {
             live_blocked_player_distance: live.blocked_player_distance,
             live_blocked_world_predicate: live.blocked_world_predicate,
             live_blocked_unsupported: live.blocked_unsupported,
+            live_wetland_habitats_detected: live.wetland_habitats_detected,
+            live_blocked_missing_wetland_data: live.blocked_missing_wetland_data,
+            live_mallard_flocks_spawned: live.mallard_flocks_spawned,
             dry_run_chunks_checked: evaluation.dry_run.chunks_checked,
             dry_run_chunk_budget_exhausted: evaluation.dry_run.chunk_budget_exhausted,
             dry_run_positions_checked: evaluation.dry_run.positions_checked,

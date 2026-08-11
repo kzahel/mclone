@@ -577,6 +577,12 @@ impl ServerEntityStore {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn set_mallard_egg_time_for_test(&mut self, id: EntityId, egg_time: i32) {
+        let mob = self.mobs.get_mut(&id).expect("test mallard mob state");
+        mob.set_mallard_egg_time_for_test(egg_time);
+    }
+
     pub(crate) fn tick_stationary<F>(
         &mut self,
         entity_ticking_chunks: &[ChunkPos],
@@ -1285,8 +1291,10 @@ fn is_mallard_egg_habitat(
     position: Vec3d,
     block_state_at: &impl Fn(BlockPos) -> Option<BlockStateId>,
 ) -> bool {
-    sample_wetland_habitat(BlockPos::containing(position), block_state_at)
-        .is_ok_and(|sample| sample.suitable())
+    sample_wetland_habitat(BlockPos::containing(position), &mut |pos| {
+        block_state_at(pos)
+    })
+    .is_ok_and(|sample| sample.suitable())
 }
 
 #[cfg(test)]

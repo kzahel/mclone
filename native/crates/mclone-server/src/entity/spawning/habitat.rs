@@ -28,7 +28,7 @@ pub(crate) enum WetlandHabitatFailure {
 
 pub(crate) fn sample_wetland_habitat(
     feet: BlockPos,
-    block_state_at: &impl Fn(BlockPos) -> Option<BlockStateId>,
+    block_state_at: &mut impl FnMut(BlockPos) -> Option<BlockStateId>,
 ) -> Result<WetlandHabitatSample, WetlandHabitatFailure> {
     let grass = generated_block_state_id(GRASS_BLOCK);
     let lily_pad = generated_block_state_id(LILY_PAD);
@@ -95,7 +95,7 @@ mod tests {
 
     #[test]
     fn shallow_grassy_shore_is_suitable() {
-        let sample = sample_wetland_habitat(BlockPos::new(0, 64, 0), &shallow_shore).unwrap();
+        let sample = sample_wetland_habitat(BlockPos::new(0, 64, 0), &mut shallow_shore).unwrap();
 
         assert!(sample.grass_floor);
         assert!(sample.water_columns >= 2);
@@ -105,7 +105,7 @@ mod tests {
 
     #[test]
     fn dry_deep_and_missing_sites_are_rejected() {
-        let dry = sample_wetland_habitat(BlockPos::new(0, 64, 0), &|pos| {
+        let dry = sample_wetland_habitat(BlockPos::new(0, 64, 0), &mut |pos| {
             Some(generated_block_state_id(if pos.y == 63 {
                 GRASS_BLOCK
             } else {
@@ -115,7 +115,7 @@ mod tests {
         .unwrap();
         assert!(!dry.suitable());
 
-        let deep = sample_wetland_habitat(BlockPos::new(0, 68, 0), &|pos| {
+        let deep = sample_wetland_habitat(BlockPos::new(0, 68, 0), &mut |pos| {
             Some(generated_block_state_id(if pos.y <= 63 {
                 DIRT
             } else if pos.y == 67 && !(2..=4).contains(&pos.x) {
@@ -131,7 +131,7 @@ mod tests {
         assert!(!deep.suitable());
 
         assert_eq!(
-            sample_wetland_habitat(BlockPos::new(0, 64, 0), &|_| None),
+            sample_wetland_habitat(BlockPos::new(0, 64, 0), &mut |_| None),
             Err(WetlandHabitatFailure::MissingBlockData)
         );
     }

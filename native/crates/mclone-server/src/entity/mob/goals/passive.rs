@@ -278,6 +278,30 @@ mod tests {
         })
     }
 
+    fn wetland_ground(pos: BlockPos) -> Option<BlockStateId> {
+        use mclone_worldgen::block::{AIR, DIRT, GRASS_BLOCK, WATER, generated_block_state_id};
+
+        Some(generated_block_state_id(if pos.y <= 62 {
+            DIRT
+        } else if pos.y == 63 {
+            GRASS_BLOCK
+        } else if pos.y == 64 && pos.x.rem_euclid(4) == 0 {
+            WATER
+        } else {
+            AIR
+        }))
+    }
+
+    fn dry_grass_ground(pos: BlockPos) -> Option<BlockStateId> {
+        use mclone_worldgen::block::{AIR, GRASS_BLOCK, generated_block_state_id};
+
+        Some(generated_block_state_id(if pos.y == 63 {
+            GRASS_BLOCK
+        } else {
+            AIR
+        }))
+    }
+
     #[test]
     fn look_at_player_goal_sets_look_control_target() {
         let metadata = EntityMetadata::for_kind(EntityKind::Cow).unwrap();
@@ -311,5 +335,46 @@ mod tests {
 
         assert_eq!(entity.y_rot_degrees, 0.0);
         assert_eq!(context.y_head_rot_degrees, 10.0);
+    }
+
+    #[test]
+    fn mallard_shore_destination_reads_live_habitat_and_falls_back_safely() {
+        let metadata = EntityMetadata::MALLARD;
+        let entity = ServerEntityState::from_metadata(
+            EntityId(2),
+            mclone_protocol::EntityPersistentId::new(0, 2),
+            metadata,
+            Vec3d::new(1.5, 64.0, 0.5),
+            0.0,
+            0.0,
+            None,
+            true,
+        );
+        let mut wetland = MobGoalContext::from_parts_for_test(
+            entity,
+            metadata.standing_eye_height() as f64,
+            Vec::new(),
+            SimpleRandomSource::new(12_345),
+            &wetland_ground,
+        );
+
+        let destination = wetland
+            .wetland_shore_random_pos(10, 5)
+            .expect("striped wetland should provide a shore destination");
+        let sample = crate::entity::spawning::habitat::sample_wetland_habitat(
+            BlockPos::containing(destination),
+            &mut wetland_ground,
+        )
+        .unwrap();
+        assert!(sample.suitable());
+
+        let mut dry = MobGoalContext::from_parts_for_test(
+            entity,
+            metadata.standing_eye_height() as f64,
+            Vec::new(),
+            SimpleRandomSource::new(12_345),
+            &dry_grass_ground,
+        );
+        assert_eq!(dry.wetland_shore_random_pos(10, 5), None);
     }
 }

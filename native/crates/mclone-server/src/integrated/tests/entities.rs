@@ -803,16 +803,161 @@ fn persistent_natural_spawning_survives_entity_chunk_unload_and_reload() {
                     .all(|entity| !runtime_ids.contains(&entity.id)),
                 "runtime ids should be fresh after chunk hydration"
             );
-            assert!(
-                reloaded
-                    .iter()
-                    .all(|entity| matches!(entity.kind, EntityKind::Cow | EntityKind::Chicken))
-            );
+            assert!(reloaded.iter().all(|entity| matches!(
+                entity.kind,
+                EntityKind::Cow | EntityKind::Chicken | EntityKind::Mallard
+            )));
             return;
         }
     }
 
     panic!("persistent natural animals did not hydrate with stable identities");
+}
+
+#[test]
+fn generated_wetland_mallard_flock_and_due_egg_survive_reload() {
+    let seed = 12_345;
+    let wetland = ChunkPos::new(-142, -51);
+    let definition =
+        crate::DimensionDefinition::overworld(seed, WorldGenerationProfile::McloneOverworldV1);
+    let mut server = LocalRealmSession::local_integrated_with_world_store_and_dimension_definition(
+        definition,
+        Box::new(MemoryWorldStore::new()),
+    );
+    server
+        .initialize_world_metadata_blocking()
+        .expect("initialize persistent Mclone world");
+    server.set_debug_passive_showcase_enabled(false);
+    server.set_natural_spawning_enabled(false);
+    server.set_lighting_enabled(true);
+    let player = server.add_player();
+    set_dedicated_chunk_view_and_poll(&mut server, player, wetland, 4);
+
+    let chunks = BTreeSet::from([wetland]);
+    let habitat_observer = Vec3d::new(
+        f64::from(wetland.min_block_x()) + 88.0,
+        64.0,
+        f64::from(wetland.min_block_z()) + 8.0,
+    );
+    let planned = (0..4_096_i64)
+        .find_map(|random_seed| {
+            let mut random = SimpleRandomSource::new(random_seed);
+            let result = plan_creature_spawns(
+                &chunks,
+                &[habitat_observer],
+                CREATURE_SPAWN_MAX_SPAWNS_PER_TICK,
+                CreatureSpawnProfile::McloneOverworld,
+                &mut random,
+                |pos| server.scheduler.block_at_world(pos),
+                |pos| {
+                    server
+                        .scheduler
+                        .biome_id_at_world(pos)
+                        .map(get_layered_biome_by_id)
+                },
+                |pos| server.scheduler.raw_brightness_at_world(pos, 0),
+            );
+            result
+                .requests
+                .iter()
+                .all(|request| request.kind == EntityKind::Mallard)
+                .then_some(result)
+                .filter(|result| result.requests.len() >= 2)
+        })
+        .expect("generated wetland should admit a deterministic mallard flock");
+    assert!((2..=4).contains(&planned.requests.len()));
+    assert!(planned.diagnostics.wetland_habitats_detected > 0);
+    assert!(planned.diagnostics.mallard_flocks_spawned > 0);
+
+    let spawned = planned
+        .requests
+        .into_iter()
+        .map(|request| {
+            server.entities.spawn_persistent_passive_mob(
+                request.kind,
+                request.position,
+                request.y_rot_degrees,
+            )
+        })
+        .collect::<Vec<_>>();
+    server.mark_entity_updates_dirty(&spawned);
+    server.reconcile_entity_subjects(spawned.iter().copied(), true);
+    server
+        .entities
+        .set_mallard_egg_time_for_test(spawned[0].id, 1);
+
+    server
+        .try_simulation_tick_report_for_player(player)
+        .expect("tick due mallard in wetland habitat");
+    let resident = server.entities.states();
+    let egg = resident
+        .iter()
+        .find(|entity| {
+            entity.item_stack
+                == Some(ItemStackSnapshot {
+                    kind: ItemKind::MallardEgg,
+                    count: 1,
+                })
+        })
+        .copied()
+        .expect("due wetland mallard should lay a distinct persistent egg");
+    let persistent_ids = resident
+        .iter()
+        .map(|entity| entity.persistent_id)
+        .collect::<BTreeSet<_>>();
+    let runtime_ids = resident
+        .iter()
+        .map(|entity| entity.id)
+        .collect::<BTreeSet<_>>();
+    assert_eq!(persistent_ids.len(), spawned.len() + 1);
+    assert!(persistent_ids.contains(&egg.persistent_id));
+
+    set_dedicated_chunk_view_and_poll(&mut server, player, ChunkPos::new(64, 0), 0);
+    for _ in 0..256 {
+        server
+            .try_simulation_tick_report_for_player(player)
+            .expect("drain mallard entity unload");
+        if server.entities.states().is_empty() {
+            break;
+        }
+    }
+    assert!(server.entities.states().is_empty());
+
+    set_dedicated_chunk_view_and_poll(&mut server, player, wetland, 4);
+    for _ in 0..256 {
+        server
+            .try_simulation_tick_report_for_player(player)
+            .expect("hydrate mallard wetland entities");
+        let reloaded = server.entities.states();
+        let reloaded_ids = reloaded
+            .iter()
+            .map(|entity| entity.persistent_id)
+            .collect::<BTreeSet<_>>();
+        if reloaded_ids == persistent_ids {
+            assert!(
+                reloaded
+                    .iter()
+                    .all(|entity| !runtime_ids.contains(&entity.id))
+            );
+            assert_eq!(
+                reloaded
+                    .iter()
+                    .filter(|entity| entity.kind == EntityKind::Mallard)
+                    .count(),
+                spawned.len()
+            );
+            assert!(reloaded.iter().any(|entity| {
+                entity.item_stack
+                    == Some(ItemStackSnapshot {
+                        kind: ItemKind::MallardEgg,
+                        count: 1,
+                    })
+            }));
+            return;
+        }
+    }
+
+    panic!("mallard flock and egg did not hydrate with stable identities");
 }
 
 #[test]
@@ -894,7 +1039,7 @@ fn local_player_picks_up_ready_item_entity_through_server_inventory() {
     let player_position = server.player().position();
     let item_id = server.entities.insert_item_entity_for_test(
         ItemStackSnapshot {
-            kind: ItemKind::Egg,
+            kind: ItemKind::MallardEgg,
             count: 1,
         },
         player_position,
@@ -915,6 +1060,6 @@ fn local_player_picks_up_ready_item_entity_through_server_inventory() {
         .expect("simulation tick should pick up item");
 
     assert!(has_entity_remove(&report.updates, item_id));
-    assert_eq!(server.inventory().item_count(ItemKind::Egg), 1);
+    assert_eq!(server.inventory().item_count(ItemKind::MallardEgg), 1);
     assert_eq!(server.entities.state(item_id), None);
 }

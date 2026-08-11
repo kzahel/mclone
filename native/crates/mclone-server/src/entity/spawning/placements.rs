@@ -78,8 +78,8 @@ pub(crate) fn farm_animal_placement_for_kind(kind: EntityKind) -> Option<SpawnPl
 pub(crate) fn check_farm_animal_natural_spawn<F, B>(
     kind: EntityKind,
     pos: BlockPos,
-    mut block_at: F,
-    mut raw_brightness_at: B,
+    block_at: F,
+    raw_brightness_at: B,
 ) -> Result<(), SpawnPlacementFailure>
 where
     F: FnMut(BlockPos) -> Option<RawBlockId>,
@@ -91,6 +91,26 @@ where
         || placement.predicate != SpawnPredicateKind::Animal
     {
         return Err(SpawnPlacementFailure::UnsupportedPlacement);
+    }
+
+    check_land_creature_natural_spawn(kind, pos, block_at, raw_brightness_at)
+}
+
+pub(crate) fn check_land_creature_natural_spawn<F, B>(
+    kind: EntityKind,
+    pos: BlockPos,
+    mut block_at: F,
+    mut raw_brightness_at: B,
+) -> Result<(), SpawnPlacementFailure>
+where
+    F: FnMut(BlockPos) -> Option<RawBlockId>,
+    B: FnMut(BlockPos) -> Option<u8>,
+{
+    if !matches!(
+        kind,
+        EntityKind::Cow | EntityKind::Chicken | EntityKind::Mallard
+    ) {
+        return Err(SpawnPlacementFailure::UnsupportedEntity);
     }
 
     let floor_pos = pos.below();
@@ -248,8 +268,20 @@ mod tests {
     }
 
     #[test]
-    fn non_farm_animals_have_no_scaffolded_placement_yet() {
+    fn original_creatures_do_not_mutate_the_reference_placement_table() {
+        assert_eq!(farm_animal_placement_for_kind(EntityKind::Mallard), None);
         assert_eq!(farm_animal_placement_for_kind(EntityKind::Item), None);
+
+        let blocks = valid_animal_spawn_blocks();
+        assert_eq!(
+            check_land_creature_natural_spawn(
+                EntityKind::Mallard,
+                BlockPos::new(0, 64, 0),
+                |pos| block_map_at(&blocks, pos),
+                |_| Some(15),
+            ),
+            Ok(())
+        );
     }
 
     #[test]
