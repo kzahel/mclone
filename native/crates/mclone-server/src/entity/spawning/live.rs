@@ -88,10 +88,8 @@ where
         return result;
     }
 
-    for chunk in eligible_chunks
-        .iter()
-        .take(CREATURE_SPAWN_MAX_CHUNKS_PER_TICK)
-    {
+    let chunks = sampled_eligible_chunks(eligible_chunks, random);
+    for chunk in chunks {
         result.diagnostics.chunks_checked += 1;
 
         for _ in 0..CREATURE_SPAWN_ATTEMPTS_PER_CHUNK {
@@ -209,6 +207,23 @@ where
     result.diagnostics.spawned = result.requests.len();
     result.diagnostics.spawn_budget_exhausted = result.requests.len() >= effective_max_spawns;
     result
+}
+
+fn sampled_eligible_chunks(
+    eligible_chunks: &BTreeSet<ChunkPos>,
+    random: &mut SimpleRandomSource,
+) -> Vec<ChunkPos> {
+    let mut chunks = eligible_chunks.iter().copied().collect::<Vec<_>>();
+    let sample_count = chunks.len().min(CREATURE_SPAWN_MAX_CHUNKS_PER_TICK);
+    for index in 0..sample_count {
+        let remaining = chunks.len() - index;
+        if remaining > 1 {
+            let selected = index + random.next_int_bound(remaining as i32) as usize;
+            chunks.swap(index, selected);
+        }
+    }
+    chunks.truncate(sample_count);
+    chunks
 }
 
 fn wetland_sample_from_raw(
@@ -585,5 +600,22 @@ mod tests {
             result.diagnostics.blocked_missing_wetland_data,
             result.diagnostics.attempts
         );
+    }
+
+    #[test]
+    fn bounded_chunk_sampling_does_not_starve_one_ordered_edge() {
+        let chunks = (-20..=20)
+            .map(|x| ChunkPos::new(x, 0))
+            .collect::<BTreeSet<_>>();
+        let mut sampled = BTreeSet::new();
+
+        for seed in 0..32 {
+            let mut random = SimpleRandomSource::new(seed);
+            sampled.extend(sampled_eligible_chunks(&chunks, &mut random));
+        }
+
+        assert!(sampled.len() > CREATURE_SPAWN_MAX_CHUNKS_PER_TICK);
+        assert!(sampled.iter().any(|chunk| chunk.x < 0));
+        assert!(sampled.iter().any(|chunk| chunk.x > 0));
     }
 }
