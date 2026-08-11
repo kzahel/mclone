@@ -7,6 +7,7 @@ use crate::entity::mob::{MobGoalContext, MobPlayerTarget};
 use super::{Goal, GoalFlags, GoalSelector};
 
 const RANDOM_STROLL_DEFAULT_INTERVAL: i32 = 120;
+const MALLARD_SHORE_STROLL_INTERVAL: i32 = 60;
 const WATER_AVOIDING_PROBABILITY: f32 = 0.001;
 const LOOK_AT_PLAYER_PROBABILITY: f32 = 0.02;
 const RANDOM_LOOK_AROUND_PROBABILITY: f32 = 0.02;
@@ -17,6 +18,54 @@ pub(crate) fn register_cow_goals(selector: &mut GoalSelector) {
 
 pub(crate) fn register_chicken_goals(selector: &mut GoalSelector) {
     register_supported_passive_animal_goals(selector);
+}
+
+pub(crate) fn register_mallard_goals(selector: &mut GoalSelector) {
+    selector.add_goal(4, MallardShoreStrollGoal::new(1.0));
+    register_supported_passive_animal_goals(selector);
+}
+
+#[derive(Debug)]
+struct MallardShoreStrollGoal {
+    wanted_position: Option<Vec3d>,
+    speed_modifier: f64,
+}
+
+impl MallardShoreStrollGoal {
+    fn new(speed_modifier: f64) -> Self {
+        Self {
+            wanted_position: None,
+            speed_modifier,
+        }
+    }
+}
+
+impl Goal for MallardShoreStrollGoal {
+    fn can_use(&mut self, context: &mut MobGoalContext<'_>) -> bool {
+        if context.random_int_bound(MALLARD_SHORE_STROLL_INTERVAL) != 0 {
+            return false;
+        }
+        self.wanted_position = context.wetland_shore_random_pos(10, 5);
+        self.wanted_position.is_some()
+    }
+
+    fn can_continue_to_use(&mut self, context: &mut MobGoalContext<'_>) -> bool {
+        context.is_navigation_in_progress()
+    }
+
+    fn start(&mut self, context: &mut MobGoalContext<'_>) {
+        if let Some(position) = self.wanted_position.take() {
+            context.move_to(position, self.speed_modifier);
+        }
+    }
+
+    fn stop(&mut self, context: &mut MobGoalContext<'_>) {
+        context.stop_navigation();
+    }
+
+    fn flags(&self) -> GoalFlags {
+        GoalFlags::MOVE
+    }
 }
 
 pub(crate) fn register_mannequin_goals(selector: &mut GoalSelector) {

@@ -333,7 +333,7 @@ const fn uses_movement_derived_travel_phase(kind: ActorPresentationKind) -> bool
         kind,
         ActorPresentationKind::RemotePlayer
             | ActorPresentationKind::Entity(
-                EntityKind::Cow | EntityKind::Chicken | EntityKind::Mannequin
+                EntityKind::Cow | EntityKind::Chicken | EntityKind::Mallard | EntityKind::Mannequin
             )
     )
 }

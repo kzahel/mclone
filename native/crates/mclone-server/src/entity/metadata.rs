@@ -45,6 +45,7 @@ pub(crate) struct EntityMetadata {
     pub(crate) client_tracking_range: u8,
 }
 
+/// Authored debug-showcase species, not the complete passive-mob catalogue.
 pub(crate) const PASSIVE_MOB_KINDS: &[EntityKind] = &[EntityKind::Cow, EntityKind::Chicken];
 
 impl EntityMetadata {
@@ -63,6 +64,15 @@ impl EntityMetadata {
         dimensions: EntityDimensions::scalable(0.4, 0.7),
         standing_eye_height: StandingEyeHeight::HeightScale(0.92),
         movement_speed: 0.25,
+        client_tracking_range: 10,
+    };
+
+    pub(crate) const MALLARD: Self = Self {
+        kind: EntityKind::Mallard,
+        category: EntityCategory::Creature,
+        dimensions: EntityDimensions::scalable(0.7, 0.75),
+        standing_eye_height: StandingEyeHeight::HeightScale(0.82),
+        movement_speed: 0.23,
         client_tracking_range: 10,
     };
 
@@ -88,6 +98,7 @@ impl EntityMetadata {
         match kind {
             EntityKind::Cow => Some(Self::COW),
             EntityKind::Chicken => Some(Self::CHICKEN),
+            EntityKind::Mallard => Some(Self::MALLARD),
             EntityKind::Mannequin => Some(Self::MANNEQUIN),
             EntityKind::Item => Some(Self::ITEM),
             EntityKind::DebugCube => None,
@@ -101,7 +112,7 @@ impl EntityMetadata {
     pub(crate) const fn is_passive_mob(self) -> bool {
         matches!(
             self.kind,
-            EntityKind::Cow | EntityKind::Chicken | EntityKind::Mannequin
+            EntityKind::Cow | EntityKind::Chicken | EntityKind::Mallard | EntityKind::Mannequin
         )
     }
 }
@@ -135,8 +146,32 @@ mod tests {
     }
 
     #[test]
+    fn mallard_metadata_is_a_persistent_creature_without_joining_debug_showcase() {
+        let metadata = EntityMetadata::for_kind(EntityKind::Mallard).expect("mallard metadata");
+
+        assert_eq!(metadata.category, EntityCategory::Creature);
+        assert!(metadata.is_passive_mob());
+        assert_eq!(metadata.dimensions, EntityDimensions::scalable(0.7, 0.75));
+        assert_eq!(metadata.standing_eye_height(), 0.75 * 0.82);
+        assert_eq!(metadata.movement_speed, 0.23);
+        assert!(!PASSIVE_MOB_KINDS.contains(&EntityKind::Mallard));
+    }
+
+    #[test]
     fn non_vanilla_debug_cube_has_no_passive_mob_metadata() {
         assert_eq!(EntityMetadata::for_kind(EntityKind::DebugCube), None);
+    }
+
+    #[test]
+    fn mallard_metadata_is_a_small_original_passive_creature() {
+        let metadata = EntityMetadata::for_kind(EntityKind::Mallard).expect("mallard metadata");
+
+        assert_eq!(metadata.category, EntityCategory::Creature);
+        assert_eq!(metadata.dimensions, EntityDimensions::scalable(0.7, 0.75));
+        assert_eq!(metadata.standing_eye_height(), 0.75 * 0.82);
+        assert_eq!(metadata.movement_speed, 0.23);
+        assert!(metadata.is_passive_mob());
+        assert!(!PASSIVE_MOB_KINDS.contains(&EntityKind::Mallard));
     }
 
     #[test]

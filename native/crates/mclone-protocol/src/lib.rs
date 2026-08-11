@@ -584,6 +584,7 @@ impl fmt::Display for EntityPersistentId {
 pub enum EntityKind {
     Cow,
     Chicken,
+    Mallard,
     Mannequin,
     DebugCube,
     Item,
@@ -592,6 +593,7 @@ pub enum EntityKind {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ItemKind {
     Egg,
+    MallardEgg,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1448,12 +1450,14 @@ impl ByteWriter {
             EntityKind::DebugCube => 2,
             EntityKind::Item => 3,
             EntityKind::Mannequin => 4,
+            EntityKind::Mallard => 5,
         });
     }
 
     fn write_item_kind(&mut self, kind: ItemKind) {
         self.write_u8(match kind {
             ItemKind::Egg => 0,
+            ItemKind::MallardEgg => 1,
         });
     }
 
@@ -1919,6 +1923,7 @@ impl<'a> ByteReader<'a> {
             2 => Ok(EntityKind::DebugCube),
             3 => Ok(EntityKind::Item),
             4 => Ok(EntityKind::Mannequin),
+            5 => Ok(EntityKind::Mallard),
             kind => Err(ProtocolCodecError::UnknownEntityKind(kind)),
         }
     }
@@ -1927,6 +1932,7 @@ impl<'a> ByteReader<'a> {
         let kind = self.read_u8()?;
         match kind {
             0 => Ok(ItemKind::Egg),
+            1 => Ok(ItemKind::MallardEgg),
             kind => Err(ProtocolCodecError::UnknownItemKind(kind)),
         }
     }
@@ -2799,7 +2805,7 @@ mod tests {
         let snapshot = EntitySnapshot {
             id: EntityId(7),
             persistent_id: EntityPersistentId::new(0x1234, 0x5678),
-            kind: EntityKind::DebugCube,
+            kind: EntityKind::Mallard,
             item_stack: None,
             position: Vec3d::new(12.5, 70.0, -3.25),
             y_rot_degrees: 90.0,
@@ -2856,7 +2862,7 @@ mod tests {
             persistent_id: EntityPersistentId::new(0x1234, 0x5679),
             kind: EntityKind::Item,
             item_stack: Some(ItemStackSnapshot {
-                kind: ItemKind::Egg,
+                kind: ItemKind::MallardEgg,
                 count: 1,
             }),
             position: Vec3d::new(12.5, 64.0, -3.25),
@@ -2876,7 +2882,7 @@ mod tests {
         let update = ServerUpdate::EntityUpdate(EntityUpdate {
             id: snapshot.id,
             item_stack: Some(ItemStackSnapshot {
-                kind: ItemKind::Egg,
+                kind: ItemKind::MallardEgg,
                 count: 2,
             }),
             position: snapshot.position,

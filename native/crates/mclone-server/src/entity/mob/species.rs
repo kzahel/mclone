@@ -4,11 +4,14 @@ use mclone_worldgen::prng::SimpleRandomSource;
 
 const CHICKEN_EGG_TIME_MIN: i32 = 6_000;
 const CHICKEN_EGG_TIME_RANGE: i32 = 6_000;
+const MALLARD_EGG_TIME_MIN: i32 = 8_000;
+const MALLARD_EGG_TIME_RANGE: i32 = 8_000;
 
 #[derive(Debug, PartialEq)]
 pub(super) enum MobSpeciesState {
     Cow,
     Chicken(ChickenRuntimeState),
+    Mallard(MallardRuntimeState),
 }
 
 impl MobSpeciesState {
@@ -16,6 +19,7 @@ impl MobSpeciesState {
         match kind {
             EntityKind::Cow | EntityKind::Mannequin => Self::Cow,
             EntityKind::Chicken => Self::Chicken(ChickenRuntimeState::new(random)),
+            EntityKind::Mallard => Self::Mallard(MallardRuntimeState::new(random)),
             EntityKind::DebugCube | EntityKind::Item => {
                 debug_assert!(false, "non-mob entities do not use mob species state");
                 Self::Cow
@@ -33,6 +37,9 @@ impl MobSpeciesState {
             EntityKind::Chicken => Self::Chicken(ChickenRuntimeState::from_saved(
                 egg_time.unwrap_or_else(|| next_egg_time(random)),
             )),
+            EntityKind::Mallard => Self::Mallard(MallardRuntimeState::from_saved(
+                egg_time.unwrap_or_else(|| next_mallard_egg_time(random)),
+            )),
             EntityKind::DebugCube | EntityKind::Item => {
                 debug_assert!(false, "non-mob entities do not use mob species state");
                 Self::Cow
@@ -49,6 +56,7 @@ impl MobSpeciesState {
         match self {
             Self::Cow => {}
             Self::Chicken(chicken) => chicken.ai_step(on_ground, delta_movement, random),
+            Self::Mallard(mallard) => mallard.ai_step(),
         }
     }
 
@@ -56,6 +64,7 @@ impl MobSpeciesState {
         match self {
             Self::Cow => None,
             Self::Chicken(chicken) => Some(chicken),
+            Self::Mallard(_) => None,
         }
     }
 
@@ -63,6 +72,21 @@ impl MobSpeciesState {
         match self {
             Self::Cow => None,
             Self::Chicken(chicken) => Some(chicken),
+            Self::Mallard(_) => None,
+        }
+    }
+
+    pub(super) fn mallard(&self) -> Option<&MallardRuntimeState> {
+        match self {
+            Self::Mallard(mallard) => Some(mallard),
+            Self::Cow | Self::Chicken(_) => None,
+        }
+    }
+
+    pub(super) fn mallard_mut(&mut self) -> Option<&mut MallardRuntimeState> {
+        match self {
+            Self::Mallard(mallard) => Some(mallard),
+            Self::Cow | Self::Chicken(_) => None,
         }
     }
 }
@@ -167,4 +191,52 @@ impl ChickenRuntimeState {
 
 fn next_egg_time(random: &mut SimpleRandomSource) -> i32 {
     random.next_int_bound(CHICKEN_EGG_TIME_RANGE) + CHICKEN_EGG_TIME_MIN
+}
+
+#[derive(Debug, PartialEq)]
+pub(super) struct MallardRuntimeState {
+    egg_time: i32,
+}
+
+impl MallardRuntimeState {
+    fn new(random: &mut SimpleRandomSource) -> Self {
+        Self {
+            egg_time: next_mallard_egg_time(random),
+        }
+    }
+
+    fn from_saved(egg_time: i32) -> Self {
+        Self { egg_time }
+    }
+
+    fn ai_step(&mut self) {
+        if self.egg_time > 0 {
+            self.egg_time -= 1;
+        }
+    }
+
+    pub(super) const fn egg_time(&self) -> i32 {
+        self.egg_time
+    }
+
+    pub(super) fn take_due_egg(
+        &mut self,
+        habitat_suitable: bool,
+        random: &mut SimpleRandomSource,
+    ) -> u32 {
+        if self.egg_time > 0 || !habitat_suitable {
+            return 0;
+        }
+        self.egg_time = next_mallard_egg_time(random);
+        1
+    }
+
+    #[cfg(test)]
+    pub(super) fn set_egg_time_for_test(&mut self, egg_time: i32) {
+        self.egg_time = egg_time;
+    }
+}
+
+fn next_mallard_egg_time(random: &mut SimpleRandomSource) -> i32 {
+    random.next_int_bound(MALLARD_EGG_TIME_RANGE) + MALLARD_EGG_TIME_MIN
 }

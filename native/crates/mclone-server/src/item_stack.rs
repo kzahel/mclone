@@ -4,7 +4,7 @@ pub(crate) const EGG_MAX_STACK_SIZE: u8 = 16;
 
 pub(crate) const fn item_max_stack_size(kind: ItemKind) -> u8 {
     match kind {
-        ItemKind::Egg => EGG_MAX_STACK_SIZE,
+        ItemKind::Egg | ItemKind::MallardEgg => EGG_MAX_STACK_SIZE,
     }
 }
 
@@ -37,6 +37,7 @@ mod tests {
     #[test]
     fn egg_stack_size_matches_java_1_17_1() {
         assert_eq!(item_max_stack_size(ItemKind::Egg), 16);
+        assert_eq!(item_max_stack_size(ItemKind::MallardEgg), 16);
     }
 
     #[test]
@@ -58,5 +59,15 @@ mod tests {
             })
         );
         assert_eq!(merged_item_stack(full, one), None);
+        assert_eq!(
+            merged_item_stack(
+                one,
+                ItemStackSnapshot {
+                    kind: ItemKind::MallardEgg,
+                    count: 1,
+                },
+            ),
+            None
+        );
     }
 }

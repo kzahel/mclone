@@ -405,6 +405,9 @@ pub enum EntitySavePayload {
     Chicken {
         egg_time: i32,
     },
+    Mallard {
+        egg_time: i32,
+    },
     Item {
         stack: ItemStackSaveRecord,
         age: u64,
@@ -431,6 +434,7 @@ impl From<ItemStackSnapshot> for ItemStackSaveRecord {
     fn from(stack: ItemStackSnapshot) -> Self {
         let kind = match stack.kind {
             mclone_protocol::ItemKind::Egg => "minecraft:egg",
+            mclone_protocol::ItemKind::MallardEgg => "mclone:mallard_egg",
         };
         Self::new(kind, stack.count)
     }
@@ -5363,6 +5367,10 @@ fn write_entity_save_payload(
             write_u8(writer, 1)?;
             write_i32(writer, *egg_time)
         }
+        EntitySavePayload::Mallard { egg_time } => {
+            write_u8(writer, 4)?;
+            write_i32(writer, *egg_time)
+        }
         EntitySavePayload::Item {
             stack,
             age,
@@ -5388,6 +5396,9 @@ fn read_entity_save_payload(reader: &mut impl Read) -> ChunkStoreResult<EntitySa
             pickup_delay: read_i32(reader)?,
         }),
         3 => Ok(EntitySavePayload::Mannequin),
+        4 => Ok(EntitySavePayload::Mallard {
+            egg_time: read_i32(reader)?,
+        }),
         value => Err(ChunkStoreError::InvalidData(format!(
             "unknown entity save payload kind {value}"
         ))),
@@ -5881,6 +5892,32 @@ mod tests {
                     rotation: None,
                     on_ground: true,
                     payload: EntitySavePayload::Mannequin,
+                },
+                EntitySaveRecord {
+                    persistent_id: EntityPersistentId::new(0xABCD, 0x9ABC),
+                    kind: "mclone:mallard".to_owned(),
+                    position: Vec3d::new(7.5, 64.0, 8.5),
+                    delta_movement: Vec3d::ZERO,
+                    y_rot_degrees: 135.0,
+                    x_rot_degrees: 0.0,
+                    rotation: None,
+                    on_ground: true,
+                    payload: EntitySavePayload::Mallard { egg_time: 4321 },
+                },
+                EntitySaveRecord {
+                    persistent_id: EntityPersistentId::new(0xABCD, 0xDEF0),
+                    kind: "minecraft:item".to_owned(),
+                    position: Vec3d::new(8.5, 64.0, 8.5),
+                    delta_movement: Vec3d::ZERO,
+                    y_rot_degrees: 0.0,
+                    x_rot_degrees: 0.0,
+                    rotation: None,
+                    on_ground: true,
+                    payload: EntitySavePayload::Item {
+                        stack: ItemStackSaveRecord::new("mclone:mallard_egg", 2),
+                        age: 30,
+                        pickup_delay: 0,
+                    },
                 },
             ],
         );

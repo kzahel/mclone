@@ -159,6 +159,7 @@ impl ItemEntityRuntimeState {
 fn item_random_seed(id: EntityId, stack: ItemStackSnapshot) -> i64 {
     let item_id = match stack.kind {
         mclone_protocol::ItemKind::Egg => 0x0000_0001_u64,
+        mclone_protocol::ItemKind::MallardEgg => 0x0000_0002_u64,
     };
     (id.0.wrapping_mul(0xbf58_476d_1ce4_e5b9).rotate_left(23) ^ item_id ^ u64::from(stack.count))
         as i64

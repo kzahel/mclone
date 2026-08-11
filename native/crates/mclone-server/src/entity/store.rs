@@ -18,6 +18,7 @@ use super::ServerEntityState;
 use super::item::{ITEM_ENTITY_LIFETIME_TICKS, ItemEntityRuntimeState};
 use super::metadata::{EntityMetadata, PASSIVE_MOB_KINDS};
 use super::mob::{MobPlayerTarget, MobRuntimeState};
+use super::spawning::habitat::sample_wetland_habitat;
 use super::spawning::mob_category::MobCategory;
 use super::spawning::spawn_state::MobCategoryCounts;
 use super::tick_list::ServerEntityTickList;
@@ -607,9 +608,18 @@ impl ServerEntityStore {
             if let Some(entity) = self.entities.get_mut(&id) {
                 if let Some(mob) = self.mobs.get_mut(&id) {
                     mob.tick_entity(entity, nearby_players, &block_state_at);
-                    let egg_count = mob.take_chicken_pending_egg_lays();
+                    let chicken_egg_count = mob.take_chicken_pending_egg_lays();
+                    egg_spawns.extend(
+                        (0..chicken_egg_count)
+                            .map(|_| (ItemKind::Egg, entity.position, entity.y_rot_degrees)),
+                    );
+                    let mallard_habitat = entity.kind == EntityKind::Mallard
+                        && is_mallard_egg_habitat(entity.position, &block_state_at);
+                    let mallard_egg_count = mob.take_mallard_due_egg(mallard_habitat);
                     egg_spawns
-                        .extend((0..egg_count).map(|_| (entity.position, entity.y_rot_degrees)));
+                        .extend((0..mallard_egg_count).map(|_| {
+                            (ItemKind::MallardEgg, entity.position, entity.y_rot_degrees)
+                        }));
                 }
                 let mut item_block_changed = false;
                 let mut is_item = false;
@@ -644,12 +654,9 @@ impl ServerEntityStore {
             self.remove_entity(id);
         }
         updated.extend(self.merge_item_entities(&merge_due_ids));
-        for (position, y_rot_degrees) in egg_spawns {
+        for (kind, position, y_rot_degrees) in egg_spawns {
             updated.push(self.insert_item_entity(
-                ItemStackSnapshot {
-                    kind: ItemKind::Egg,
-                    count: 1,
-                },
+                ItemStackSnapshot { kind, count: 1 },
                 position,
                 y_rot_degrees,
             ));
@@ -959,6 +966,14 @@ impl ServerEntityStore {
                     EntityKind::Chicken,
                     Some(*egg_time),
                 )?,
+            ("mclone:mallard", EntitySavePayload::Mallard { egg_time }) => self
+                .insert_saved_passive_mob(
+                    id,
+                    saved,
+                    canonical_position,
+                    EntityKind::Mallard,
+                    Some(*egg_time),
+                )?,
             ("mclone:mannequin", EntitySavePayload::Mannequin) => self.insert_saved_passive_mob(
                 id,
                 saved,
@@ -1078,6 +1093,13 @@ impl ServerEntityStore {
                     .mobs
                     .get(&entity.id)
                     .and_then(MobRuntimeState::chicken_egg_time)
+                    .unwrap_or(0),
+            },
+            EntityKind::Mallard => EntitySavePayload::Mallard {
+                egg_time: self
+                    .mobs
+                    .get(&entity.id)
+                    .and_then(MobRuntimeState::mallard_egg_time)
                     .unwrap_or(0),
             },
             EntityKind::Mannequin => EntitySavePayload::Mannequin,
@@ -1234,6 +1256,7 @@ fn entity_kind_code(kind: EntityKind) -> Option<&'static str> {
     match kind {
         EntityKind::Cow => Some("minecraft:cow"),
         EntityKind::Chicken => Some("minecraft:chicken"),
+        EntityKind::Mallard => Some("mclone:mallard"),
         EntityKind::Mannequin => Some("mclone:mannequin"),
         EntityKind::Item => Some("minecraft:item"),
         EntityKind::DebugCube => None,
@@ -1245,6 +1268,7 @@ fn item_stack_snapshot_from_save(
 ) -> ChunkStoreResult<ItemStackSnapshot> {
     let kind = match stack.kind.as_str() {
         "minecraft:egg" => ItemKind::Egg,
+        "mclone:mallard_egg" => ItemKind::MallardEgg,
         kind => {
             return Err(ChunkStoreError::InvalidData(format!(
                 "unsupported item stack kind {kind:?}"
@@ -1255,6 +1279,14 @@ fn item_stack_snapshot_from_save(
         kind,
         count: stack.count,
     })
+}
+
+fn is_mallard_egg_habitat(
+    position: Vec3d,
+    block_state_at: &impl Fn(BlockPos) -> Option<BlockStateId>,
+) -> bool {
+    sample_wetland_habitat(BlockPos::containing(position), block_state_at)
+        .is_ok_and(|sample| sample.suitable())
 }
 
 #[cfg(test)]
@@ -1297,6 +1329,31 @@ mod tests {
         } else {
             BlockStateId(mclone_blocks::terrain_id::AIR)
         })
+    }
+
+    fn wetland_ground(pos: BlockPos) -> Option<BlockStateId> {
+        use mclone_worldgen::block::{AIR, DIRT, GRASS_BLOCK, WATER, generated_block_state_id};
+
+        let raw = if pos.y <= 62 {
+            DIRT
+        } else if pos.y == 63 {
+            GRASS_BLOCK
+        } else if pos.y == 64 && (6..=8).contains(&pos.x) {
+            WATER
+        } else {
+            AIR
+        };
+        Some(generated_block_state_id(raw))
+    }
+
+    fn dry_grass_ground(pos: BlockPos) -> Option<BlockStateId> {
+        use mclone_worldgen::block::{AIR, GRASS_BLOCK, generated_block_state_id};
+
+        Some(generated_block_state_id(if pos.y == 63 {
+            GRASS_BLOCK
+        } else {
+            AIR
+        }))
     }
 
     #[test]
@@ -1606,6 +1663,18 @@ mod tests {
             },
             Vec3d::new(5.5, 64.0, 4.5),
         );
+        let mallard_id = store.insert_passive_mob_for_test(
+            EntityKind::Mallard,
+            Vec3d::new(7.5, 64.0, 4.5),
+            135.0,
+        );
+        let mallard_egg_id = store.insert_item_entity_for_test(
+            ItemStackSnapshot {
+                kind: ItemKind::MallardEgg,
+                count: 2,
+            },
+            Vec3d::new(8.5, 64.0, 4.5),
+        );
         let mannequin_id = store.insert_passive_mob_for_test(
             EntityKind::Mannequin,
             Vec3d::new(6.5, 64.0, 4.5),
@@ -1619,13 +1688,19 @@ mod tests {
             .get_mut(&chicken_id)
             .unwrap()
             .set_chicken_egg_time_for_test(1234);
+        store
+            .mobs
+            .get_mut(&mallard_id)
+            .unwrap()
+            .set_mallard_egg_time_for_test(4321);
         store.set_item_pickup_delay_for_test(item_id, 3);
+        store.set_item_pickup_delay_for_test(mallard_egg_id, 0);
 
         let record = store.entity_chunk_record(chunk, 7);
 
         assert_eq!(record.pos, chunk);
         assert_eq!(record.revision, 7);
-        assert_eq!(record.entities.len(), 3);
+        assert_eq!(record.entities.len(), 5);
         let chicken_record = record
             .entities
             .iter()
@@ -1654,12 +1729,29 @@ mod tests {
             .find(|entity| entity.kind == "mclone:mannequin")
             .expect("mannequin record");
         assert_eq!(mannequin_record.payload, EntitySavePayload::Mannequin);
+        let mallard_record = record
+            .entities
+            .iter()
+            .find(|entity| entity.kind == "mclone:mallard")
+            .expect("mallard record");
+        assert_eq!(
+            mallard_record.payload,
+            EntitySavePayload::Mallard { egg_time: 4321 }
+        );
+        assert!(record.entities.iter().any(|entity| {
+            entity.payload
+                == EntitySavePayload::Item {
+                    stack: ItemStackSaveRecord::new("mclone:mallard_egg", 2),
+                    age: 0,
+                    pickup_delay: 0,
+                }
+        }));
 
         let mut loaded = ServerEntityStore::default();
         loaded.next_entity_id = 100;
         let loaded_states = loaded.hydrate_entity_chunk_record(&record).unwrap();
 
-        assert_eq!(loaded_states.len(), 3);
+        assert_eq!(loaded_states.len(), 5);
         let loaded_chicken = loaded_states
             .iter()
             .find(|entity| entity.kind == EntityKind::Chicken)
@@ -1701,6 +1793,25 @@ mod tests {
         );
         assert_eq!(loaded.item_state(loaded_item.id).unwrap().pickup_delay(), 3);
         assert_eq!(loaded.item_state(loaded_item.id).unwrap().age(), 30);
+        let loaded_mallard = loaded_states
+            .iter()
+            .find(|entity| entity.kind == EntityKind::Mallard)
+            .expect("loaded mallard");
+        assert_eq!(
+            loaded
+                .mobs
+                .get(&loaded_mallard.id)
+                .unwrap()
+                .mallard_egg_time(),
+            Some(4321)
+        );
+        assert!(loaded_states.iter().any(|entity| {
+            entity.item_stack
+                == Some(ItemStackSnapshot {
+                    kind: ItemKind::MallardEgg,
+                    count: 2,
+                })
+        }));
         assert_eq!(loaded_chicken.tick_count, 0);
         assert_eq!(loaded_item.tick_count, 0);
         assert_eq!(loaded_mannequin.tick_count, 0);
@@ -1960,6 +2071,50 @@ mod tests {
                 .unwrap()
                 .chicken_pending_egg_lays_for_test(),
             Some(0)
+        );
+    }
+
+    #[test]
+    fn mallard_egg_waits_for_wetland_habitat_then_spawns_distinct_item() {
+        let mut store = ServerEntityStore::default();
+        let mallard_id =
+            store.insert_passive_mob_for_test(EntityKind::Mallard, Vec3d::new(4.0, 64.0, 4.0), 0.0);
+        store
+            .mobs
+            .get_mut(&mallard_id)
+            .unwrap()
+            .set_mallard_egg_time_for_test(1);
+
+        let dry_updates = store.tick_stationary(&[ChunkPos::new(0, 0)], &[], dry_grass_ground);
+        assert!(
+            dry_updates
+                .iter()
+                .all(|entity| entity.kind != EntityKind::Item)
+        );
+        assert_eq!(
+            store.mob_state(mallard_id).unwrap().mallard_egg_time(),
+            Some(0)
+        );
+
+        let wetland_updates = store.tick_stationary(&[ChunkPos::new(0, 0)], &[], wetland_ground);
+        let egg = wetland_updates
+            .iter()
+            .find(|entity| entity.kind == EntityKind::Item)
+            .expect("due mallard should lay in suitable wetland habitat");
+        assert_eq!(
+            egg.item_stack,
+            Some(ItemStackSnapshot {
+                kind: ItemKind::MallardEgg,
+                count: 1,
+            })
+        );
+        assert!(
+            store
+                .mob_state(mallard_id)
+                .unwrap()
+                .mallard_egg_time()
+                .unwrap()
+                >= 8_000
         );
     }
 

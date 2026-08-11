@@ -728,7 +728,7 @@ pub(crate) fn persistent_passive_actor_identity_summary(
         .filter(|(_, kind)| {
             matches!(
                 kind,
-                EntityKind::Cow | EntityKind::Chicken | EntityKind::Mannequin
+                EntityKind::Cow | EntityKind::Chicken | EntityKind::Mallard | EntityKind::Mannequin
             )
         })
         .collect::<Vec<_>>();
@@ -740,6 +740,7 @@ pub(crate) fn persistent_passive_actor_identity_summary(
                 EntityKind::Cow => 1,
                 EntityKind::Chicken => 2,
                 EntityKind::Mannequin => 3,
+                EntityKind::Mallard => 4,
                 EntityKind::DebugCube | EntityKind::Item => unreachable!("filtered above"),
             };
             let mut hash = 0xcbf2_9ce4_8422_2325_u64;

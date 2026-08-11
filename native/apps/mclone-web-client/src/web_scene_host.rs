@@ -3649,6 +3649,7 @@ impl WebSceneHost {
                         match observation.kind {
                             mclone_protocol::EntityKind::Cow => "cow",
                             mclone_protocol::EntityKind::Chicken => "chicken",
+                            mclone_protocol::EntityKind::Mallard => "mallard",
                             mclone_protocol::EntityKind::Mannequin => "mannequin",
                             mclone_protocol::EntityKind::DebugCube => "debugCube",
                             mclone_protocol::EntityKind::Item => "item",
@@ -3734,6 +3735,7 @@ impl WebSceneHost {
                         match to.kind {
                             mclone_protocol::EntityKind::Cow => "cow",
                             mclone_protocol::EntityKind::Chicken => "chicken",
+                            mclone_protocol::EntityKind::Mallard => "mallard",
                             mclone_protocol::EntityKind::Mannequin => "mannequin",
                             mclone_protocol::EntityKind::DebugCube => "debugCube",
                             mclone_protocol::EntityKind::Item => "item",

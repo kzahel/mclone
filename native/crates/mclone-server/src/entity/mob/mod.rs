@@ -11,6 +11,7 @@ use mclone_protocol::{EntityId, EntityKind};
 use mclone_worldgen::prng::SimpleRandomSource;
 
 use super::metadata::EntityMetadata;
+use super::spawning::habitat::sample_wetland_habitat;
 use super::state::ServerEntityState;
 
 mod attributes;
@@ -112,6 +113,7 @@ impl MobRuntimeState {
         match metadata.kind {
             EntityKind::Cow => passive::register_cow_goals(&mut goal_selector),
             EntityKind::Chicken => passive::register_chicken_goals(&mut goal_selector),
+            EntityKind::Mallard => passive::register_mallard_goals(&mut goal_selector),
             EntityKind::Mannequin => passive::register_mannequin_goals(&mut goal_selector),
             EntityKind::DebugCube | EntityKind::Item => {}
         }
@@ -142,7 +144,7 @@ impl MobRuntimeState {
         on_ground: bool,
         y_rot_degrees: f32,
         delta_movement: Vec3d,
-        chicken_egg_time: Option<i32>,
+        egg_time: Option<i32>,
     ) -> Self {
         debug_assert!(
             metadata.is_passive_mob(),
@@ -154,12 +156,13 @@ impl MobRuntimeState {
         }
 
         let mut random = SimpleRandomSource::new(mob_random_seed(id, metadata.kind));
-        let species = MobSpeciesState::from_saved(metadata.kind, &mut random, chicken_egg_time);
+        let species = MobSpeciesState::from_saved(metadata.kind, &mut random, egg_time);
 
         let mut goal_selector = GoalSelector::default();
         match metadata.kind {
             EntityKind::Cow => passive::register_cow_goals(&mut goal_selector),
             EntityKind::Chicken => passive::register_chicken_goals(&mut goal_selector),
+            EntityKind::Mallard => passive::register_mallard_goals(&mut goal_selector),
             EntityKind::Mannequin => passive::register_mannequin_goals(&mut goal_selector),
             EntityKind::DebugCube | EntityKind::Item => {}
         }
@@ -232,6 +235,10 @@ impl MobRuntimeState {
 
     pub(crate) fn chicken_egg_time(&self) -> Option<i32> {
         self.species.chicken().map(|chicken| chicken.egg_time())
+    }
+
+    pub(crate) fn mallard_egg_time(&self) -> Option<i32> {
+        self.species.mallard().map(|mallard| mallard.egg_time())
     }
 
     pub(crate) fn available_goal_count(&self) -> usize {
@@ -378,6 +385,21 @@ impl MobRuntimeState {
             .map(|chicken| chicken.take_pending_egg_lays())
             .unwrap_or(0)
     }
+
+    pub(crate) fn take_mallard_due_egg(&mut self, habitat_suitable: bool) -> u32 {
+        self.species
+            .mallard_mut()
+            .map(|mallard| mallard.take_due_egg(habitat_suitable, &mut self.random))
+            .unwrap_or(0)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_mallard_egg_time_for_test(&mut self, egg_time: i32) {
+        let Some(mallard) = self.species.mallard_mut() else {
+            panic!("test expected mallard species state");
+        };
+        mallard.set_egg_time_for_test(egg_time);
+    }
 }
 
 pub(crate) struct MobGoalContext<'a> {
@@ -499,6 +521,19 @@ impl<'a> MobGoalContext<'a> {
             self.block_state_at,
             |path_type| self.pathfinding_malus.get(path_type),
         )
+    }
+
+    pub(crate) fn wetland_shore_random_pos(
+        &mut self,
+        horizontal_range: i32,
+        vertical_range: i32,
+    ) -> Option<Vec3d> {
+        (0..8).find_map(|_| {
+            let candidate = self.land_random_pos(horizontal_range, vertical_range)?;
+            sample_wetland_habitat(BlockPos::containing(candidate), &self.block_state_at)
+                .is_ok_and(|sample| sample.suitable())
+                .then_some(candidate)
+        })
     }
 
     pub(crate) fn set_look_at(&mut self, position: Vec3d) {
@@ -827,6 +862,7 @@ fn mob_random_seed(id: EntityId, kind: EntityKind) -> i64 {
     let kind_id = match kind {
         EntityKind::Cow => 0x00c0_0001_u64,
         EntityKind::Chicken => 0x00c0_0002_u64,
+        EntityKind::Mallard => 0x00c0_0003_u64,
         EntityKind::Item => 0x00c0_0003_u64,
         EntityKind::Mannequin => 0x00c0_0004_u64,
         EntityKind::DebugCube => 0x00c0_00ff_u64,

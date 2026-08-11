@@ -11,6 +11,7 @@
 
 pub(crate) mod biome_tables;
 pub(crate) mod dry_run;
+pub(crate) mod habitat;
 pub(crate) mod live;
 pub(crate) mod mob_category;
 pub(crate) mod natural;

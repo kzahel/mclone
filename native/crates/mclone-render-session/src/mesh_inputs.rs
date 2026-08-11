@@ -264,6 +264,16 @@ pub fn actor_instances_from_presentations_near_observer(
                     .with_chicken_wing_flap_radians(actor.chicken_wing_flap_radians)
                     .with_packed_light(packed_light)
                 }
+                ActorPresentationKind::Entity(EntityKind::Mallard) => {
+                    ActorInstance::remote_player_with_figure(
+                        glam_vec3_from_vec3d(feet_position),
+                        actor.y_rot_degrees,
+                        mclone_assets::mallard_duck_figure_id(),
+                    )
+                    .with_dimensions(actor.width, actor.height)
+                    .with_walk_animation_distance(actor.walk_animation_distance)
+                    .with_packed_light(packed_light)
+                }
                 ActorPresentationKind::Entity(EntityKind::Mannequin) => {
                     ActorInstance::remote_player(
                         glam_vec3_from_vec3d(feet_position),
@@ -284,13 +294,15 @@ pub fn actor_instances_from_presentations_near_observer(
                 .with_packed_light(packed_light),
                 ActorPresentationKind::Entity(EntityKind::Item) => {
                     match actor.item_stack.map(|stack| stack.kind) {
-                        Some(ItemKind::Egg) | None => ActorInstance::item_egg(
-                            glam_vec3_from_vec3d(feet_position),
-                            actor.y_rot_degrees,
-                            actor.width,
-                            actor.height,
-                        )
-                        .with_packed_light(packed_light),
+                        Some(ItemKind::Egg | ItemKind::MallardEgg) | None => {
+                            ActorInstance::item_egg(
+                                glam_vec3_from_vec3d(feet_position),
+                                actor.y_rot_degrees,
+                                actor.width,
+                                actor.height,
+                            )
+                            .with_packed_light(packed_light)
+                        }
                     }
                 }
             };
@@ -350,6 +362,7 @@ pub fn actor_light_probe_height(actor: &ActorPresentation) -> f64 {
         ActorPresentationKind::RemotePlayer => LOCAL_PLAYER_STANDING_EYE_HEIGHT,
         ActorPresentationKind::Entity(EntityKind::Cow) => 1.3,
         ActorPresentationKind::Entity(EntityKind::Chicken) => f64::from(actor.height) * 0.92,
+        ActorPresentationKind::Entity(EntityKind::Mallard) => f64::from(actor.height) * 0.82,
         ActorPresentationKind::Entity(EntityKind::Mannequin) => 1.62,
         ActorPresentationKind::Entity(EntityKind::DebugCube) => f64::from(actor.height) * 0.5,
         ActorPresentationKind::Entity(EntityKind::Item) => f64::from(actor.height) * 0.5,

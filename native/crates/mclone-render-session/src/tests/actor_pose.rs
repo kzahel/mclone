@@ -167,6 +167,37 @@ fn cow_entity_actor_uses_authored_cow_figure() {
 }
 
 #[test]
+fn mallard_entity_actor_uses_authored_mallard_figure() {
+    let client = ClientRuntime::local_integrated();
+    let presentation = ActorPresentation {
+        id: ActorPresentationId::Entity(mclone_protocol::EntityId(9)),
+        kind: ActorPresentationKind::Entity(mclone_protocol::EntityKind::Mallard),
+        appearance: ActorAppearance::NONE,
+        item_stack: None,
+        feet_position: Vec3d::new(1.0, 64.0, 2.0),
+        y_rot_degrees: 45.0,
+        x_rot_degrees: 0.0,
+        rotation: None,
+        on_ground: true,
+        width: 0.7,
+        height: 0.75,
+        walk_animation_distance: 0.25,
+        chicken_wing_flap_radians: None,
+    };
+
+    let actors = actor_instances_from_presentations(&[presentation], &client);
+
+    assert_eq!(actors.len(), 1);
+    assert_eq!(
+        actors[0].shape,
+        mclone_render::entity::ActorInstanceShape::Figure(mclone_assets::mallard_duck_figure_id())
+    );
+    assert_eq!(actors[0].width, 0.7);
+    assert_eq!(actors[0].height, 0.75);
+    assert!(actors[0].animation.is_some());
+}
+
+#[test]
 fn actor_instance_identity_is_stable_across_presentation_reordering() {
     let client = ClientRuntime::local_integrated();
     let make = |id, kind| ActorPresentation {
@@ -272,6 +303,37 @@ fn item_entity_actor_uses_egg_item_shape() {
     );
     assert_eq!(actors[0].width, 0.25);
     assert_eq!(actors[0].height, 0.25);
+}
+
+#[test]
+fn mallard_egg_item_actor_uses_egg_item_shape() {
+    let client = ClientRuntime::local_integrated();
+    let presentation = ActorPresentation {
+        id: ActorPresentationId::Entity(mclone_protocol::EntityId(10)),
+        kind: ActorPresentationKind::Entity(mclone_protocol::EntityKind::Item),
+        appearance: ActorAppearance::NONE,
+        item_stack: Some(mclone_protocol::ItemStackSnapshot {
+            kind: mclone_protocol::ItemKind::MallardEgg,
+            count: 1,
+        }),
+        feet_position: Vec3d::new(1.0, 64.0, 2.0),
+        y_rot_degrees: 45.0,
+        x_rot_degrees: 0.0,
+        rotation: None,
+        on_ground: false,
+        width: 0.25,
+        height: 0.25,
+        walk_animation_distance: 0.0,
+        chicken_wing_flap_radians: None,
+    };
+
+    let actors = actor_instances_from_presentations(&[presentation], &client);
+
+    assert_eq!(actors.len(), 1);
+    assert_eq!(
+        actors[0].shape,
+        mclone_render::entity::ActorInstanceShape::ItemEgg
+    );
 }
 
 #[test]
