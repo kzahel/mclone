@@ -45,6 +45,10 @@ series implements the same concern, normally reuse the document slug in its
   counters may reset, UUID-equivalent identity and per-kind gameplay state must
   persist, and the authored-destination lifecycle fixture needs corresponding
   correction and cross-backend proof.
+- [`habitat-driven-creature-ecology.md`](habitat-driven-creature-ecology.md):
+  accepted terrain-and-creature co-design loop, immediate durability for
+  materialized animals, explicit lazy population layers, mechanics-led
+  Creature Lab promotion, and Tactical 277's first generated-habitat slice.
 - [`beta-world-generation.md`](beta-world-generation.md): active `beta-v1`
   implementation contract for a standalone Beta 1.7.3 Overworld with staged
   core parity, deterministic flavor-close population, product selection, and

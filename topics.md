@@ -229,3 +229,6 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
 - `first-party-sound-effects` — provenance-locked distributable CC0 effects,
   shared variant and material semantics, gameplay/UI producers, and
   cross-platform audio preparation
+- `habitat-driven-creature-ecology` — terrain and creature co-design,
+  generated-world habitat queries, durable visible animals, explicit ambient
+  summaries, and mechanics-led Creature Lab promotion

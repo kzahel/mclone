@@ -83,6 +83,7 @@ Worldgen, rendering, and subsystem docs:
 - [`docs/liquids.md`](docs/liquids.md) — liquid simulation architecture
 - [`docs/entity-architecture.md`](docs/entity-architecture.md) — entity/mob runtime boundaries
 - [`docs/creatures.md`](docs/creatures.md) — overworld creature spawning architecture
+- [`docs/topics/habitat-driven-creature-ecology.md`](docs/topics/habitat-driven-creature-ecology.md) — terrain/creature co-design, habitats, persistence, and mechanics-led content promotion
 - [`docs/topics/performance.md`](docs/topics/performance.md) — high-priority known performance issues and current pickup queue
 - [`docs/performance-records.md`](docs/performance-records.md) — native benchmark baselines
 - [`docs/assets-plan.md`](docs/assets-plan.md) — local Minecraft reference-asset extraction
