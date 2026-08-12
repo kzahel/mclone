@@ -208,6 +208,11 @@ pub fn actor_instances_from_presentations(
     actor_instances_from_presentations_near_observer(presentations, client, Vec3d::ZERO)
 }
 
+/// A mallard figure's body begins roughly one quarter of its normalized height
+/// above its feet. Sinking by that fraction puts the feet below a full water
+/// surface while leaving the breast and most of the body above it.
+pub const MALLARD_SWIM_VISUAL_SINK_HEIGHT_FACTOR: f32 = 0.24;
+
 pub fn actor_instances_from_presentations_near_observer(
     presentations: &[ActorPresentation],
     client: &ClientRuntime,
@@ -265,27 +270,29 @@ pub fn actor_instances_from_presentations_near_observer(
                     .with_packed_light(packed_light)
                 }
                 ActorPresentationKind::Entity(EntityKind::Mallard) => {
+                    let is_duckling = actor.mallard_life_stage
+                        == Some(mclone_protocol::MallardLifeStage::Duckling);
+                    let presented_width = if is_duckling {
+                        actor.width * 0.58
+                    } else {
+                        actor.width
+                    };
+                    let presented_height = if is_duckling {
+                        actor.height * 0.62
+                    } else {
+                        actor.height
+                    };
+                    let mut presented_feet = glam_vec3_from_vec3d(feet_position);
+                    if actor.in_water {
+                        presented_feet.y -=
+                            presented_height * MALLARD_SWIM_VISUAL_SINK_HEIGHT_FACTOR;
+                    }
                     ActorInstance::remote_player_with_figure(
-                        glam_vec3_from_vec3d(feet_position),
+                        presented_feet,
                         actor.y_rot_degrees,
                         mclone_assets::mallard_duck_figure_id(),
                     )
-                    .with_dimensions(
-                        if actor.mallard_life_stage
-                            == Some(mclone_protocol::MallardLifeStage::Duckling)
-                        {
-                            actor.width * 0.58
-                        } else {
-                            actor.width
-                        },
-                        if actor.mallard_life_stage
-                            == Some(mclone_protocol::MallardLifeStage::Duckling)
-                        {
-                            actor.height * 0.62
-                        } else {
-                            actor.height
-                        },
-                    )
+                    .with_dimensions(presented_width, presented_height)
                     .with_walk_animation_distance(actor.walk_animation_distance)
                     .with_packed_light(packed_light)
                 }

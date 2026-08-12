@@ -869,6 +869,8 @@ async function run() {
         if (
           mallardDisplacement.length !== 3
           || mallardDisplacement.some((distance) => !Number.isFinite(distance) || distance < 1.5)
+          || behaviorProbe.initialWaterCount < 1
+          || behaviorProbe.finalWaterCount < 1
           || behaviorProbe.finalDucklingCount < 2
           || (behaviorProbe.finalFieldGuideBits & 32) !== 32
         ) {

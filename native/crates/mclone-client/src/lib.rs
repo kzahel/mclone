@@ -29,9 +29,9 @@ use mclone_core::{
 use mclone_protocol::{
     ChunkView, ClientCommand, DimensionKey, DisconnectReason, DisconnectReasonCode, EntityId,
     EntitySnapshot, EntityUpdate, ItemStackSnapshot, MallardCallCue, MallardFieldGuideProgress,
-    MallardTrackCue, PlayerLifeState, PlayerPositionUpdate, PlayerStatistics, RemotePlayerId,
-    RemotePlayerUpdate, SectionBlockUpdate, ServerEphemeralMessage, ServerUpdate,
-    SessionConfiguration, validate_body_pose_sample,
+    MallardNestSnapshotData, MallardSnapshotData, MallardTrackCue, PlayerLifeState,
+    PlayerPositionUpdate, PlayerStatistics, RemotePlayerId, RemotePlayerUpdate, SectionBlockUpdate,
+    ServerEphemeralMessage, ServerUpdate, SessionConfiguration, validate_body_pose_sample,
 };
 
 pub use actor::{
@@ -814,6 +814,19 @@ impl ClientRuntime {
             }
             if let Some(stack) = update.item_stack {
                 snapshot.item_stack = Some(stack);
+            }
+            if let Some(mallard) = update.mallard {
+                snapshot.mallard = Some(MallardSnapshotData {
+                    life_stage: mallard.life_stage,
+                    in_water: mallard.in_water,
+                });
+            }
+            if let Some(nest) = update.mallard_nest {
+                snapshot.mallard_nest = Some(MallardNestSnapshotData {
+                    incubation_progress: nest.incubation_progress,
+                    incubation_required: nest.incubation_required,
+                    attended: nest.attended,
+                });
             }
             snapshot.position = update.position;
             snapshot.y_rot_degrees = update.y_rot_degrees;
@@ -1752,6 +1765,111 @@ mod tests {
         runtime.apply_update(ServerUpdate::EntityRemove { id });
         assert_eq!(runtime.entity_count(), 0);
         assert_eq!(runtime.entity(id), None);
+    }
+
+    #[test]
+    fn client_runtime_applies_mallard_ecology_updates() {
+        let mut runtime = ClientRuntime::new(ClientHost::RemoteDedicated);
+        let id = EntityId(8);
+        runtime.apply_update(ServerUpdate::EntitySnapshot(EntitySnapshot {
+            id,
+            persistent_id: mclone_protocol::EntityPersistentId::new(0, id.0),
+            kind: mclone_protocol::EntityKind::Mallard,
+            item_stack: None,
+            mallard: Some(mclone_protocol::MallardSnapshotData {
+                life_stage: mclone_protocol::MallardLifeStage::Adult,
+                in_water: false,
+            }),
+            mallard_nest: None,
+            position: Vec3d::new(1.5, 64.0, 2.5),
+            y_rot_degrees: 0.0,
+            x_rot_degrees: 0.0,
+            rotation: None,
+            on_ground: true,
+            width: 0.7,
+            height: 0.75,
+            tick_count: 1,
+        }));
+
+        runtime.apply_update(ServerUpdate::EntityUpdate(EntityUpdate {
+            id,
+            item_stack: None,
+            mallard: Some(mclone_protocol::MallardUpdateData {
+                life_stage: mclone_protocol::MallardLifeStage::Duckling,
+                in_water: true,
+            }),
+            mallard_nest: None,
+            position: Vec3d::new(1.75, 64.88, 2.5),
+            y_rot_degrees: 12.0,
+            x_rot_degrees: 0.0,
+            rotation: None,
+            on_ground: false,
+            tick_count: 2,
+        }));
+
+        let updated = runtime.entity(id).expect("updated mallard replica");
+        assert_eq!(
+            updated.mallard,
+            Some(mclone_protocol::MallardSnapshotData {
+                life_stage: mclone_protocol::MallardLifeStage::Duckling,
+                in_water: true,
+            })
+        );
+        let presentation = runtime.actor_presentations().remove(0);
+        assert_eq!(
+            presentation.mallard_life_stage,
+            Some(mclone_protocol::MallardLifeStage::Duckling)
+        );
+        assert!(presentation.in_water);
+
+        let nest_id = EntityId(9);
+        runtime.apply_update(ServerUpdate::EntitySnapshot(EntitySnapshot {
+            id: nest_id,
+            persistent_id: mclone_protocol::EntityPersistentId::new(0, nest_id.0),
+            kind: mclone_protocol::EntityKind::MallardNest,
+            item_stack: None,
+            mallard: None,
+            mallard_nest: Some(mclone_protocol::MallardNestSnapshotData {
+                incubation_progress: 10,
+                incubation_required: 20,
+                attended: false,
+            }),
+            position: Vec3d::new(2.5, 65.0, 3.5),
+            y_rot_degrees: 0.0,
+            x_rot_degrees: 0.0,
+            rotation: None,
+            on_ground: true,
+            width: 0.8,
+            height: 0.32,
+            tick_count: 1,
+        }));
+        runtime.apply_update(ServerUpdate::EntityUpdate(EntityUpdate {
+            id: nest_id,
+            item_stack: None,
+            mallard: None,
+            mallard_nest: Some(mclone_protocol::MallardNestUpdateData {
+                incubation_progress: 15,
+                incubation_required: 20,
+                attended: true,
+            }),
+            position: Vec3d::new(2.5, 65.0, 3.5),
+            y_rot_degrees: 0.0,
+            x_rot_degrees: 0.0,
+            rotation: None,
+            on_ground: true,
+            tick_count: 2,
+        }));
+
+        assert_eq!(
+            runtime
+                .entity(nest_id)
+                .and_then(|entity| entity.mallard_nest),
+            Some(mclone_protocol::MallardNestSnapshotData {
+                incubation_progress: 15,
+                incubation_required: 20,
+                attended: true,
+            })
+        );
     }
 
     #[test]

@@ -203,7 +203,49 @@ fn mallard_entity_actor_uses_authored_mallard_figure() {
     );
     assert_eq!(actors[0].width, 0.7);
     assert_eq!(actors[0].height, 0.75);
+    assert_eq!(actors[0].feet_position, Vec3::new(1.0, 64.0, 2.0));
     assert!(actors[0].animation.is_some());
+}
+
+#[test]
+fn swimming_mallard_sinks_its_figure_below_the_waterline() {
+    let client = ClientRuntime::local_integrated();
+    let presentation = ActorPresentation {
+        id: ActorPresentationId::Entity(mclone_protocol::EntityId(10)),
+        kind: ActorPresentationKind::Entity(mclone_protocol::EntityKind::Mallard),
+        appearance: ActorAppearance::NONE,
+        item_stack: None,
+        mallard_life_stage: Some(mclone_protocol::MallardLifeStage::Adult),
+        in_water: true,
+        mallard_nest: None,
+        feet_position: Vec3d::new(1.0, 64.88, 2.0),
+        y_rot_degrees: 45.0,
+        x_rot_degrees: 0.0,
+        rotation: None,
+        on_ground: false,
+        width: 0.7,
+        height: 0.75,
+        walk_animation_distance: 0.25,
+        chicken_wing_flap_radians: None,
+    };
+
+    let actor = actor_instances_from_presentations(&[presentation], &client)
+        .into_iter()
+        .next()
+        .expect("swimming mallard actor");
+
+    assert_eq!(
+        actor.id,
+        Some(mclone_render::entity::ActorInstanceId::Entity(10))
+    );
+    assert!((actor.feet_position.x - 1.0).abs() < 1.0e-6);
+    assert!((actor.feet_position.z - 2.0).abs() < 1.0e-6);
+    assert!(
+        (actor.feet_position.y - (64.88 - actor.height * MALLARD_SWIM_VISUAL_SINK_HEIGHT_FACTOR))
+            .abs()
+            < 1.0e-5
+    );
+    assert!(actor.feet_position.y < 64.88);
 }
 
 #[test]
