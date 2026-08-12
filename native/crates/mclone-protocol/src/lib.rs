@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+mod ecology;
 mod ephemeral;
 mod player_lifecycle;
 mod realm_dimension;
@@ -14,6 +15,11 @@ use mclone_core::{
     PackedChunkSection, PackedLightSection, SECTION_HEIGHT, Vec3d,
 };
 
+pub use ecology::{
+    MALLARD_FIELD_GUIDE_OBSERVATION_COUNT, MallardCallCue, MallardFieldGuideProgress,
+    MallardLifeStage, MallardNestSnapshotData, MallardNestUpdateData, MallardObservationKind,
+    MallardSnapshotData, MallardTrackCue, MallardUpdateData,
+};
 pub use ephemeral::{
     ClientEphemeralMessage, EffectiveEphemeralTransport, MAX_EPHEMERAL_MESSAGE_BYTES,
     PlayerBodyPoseSample, RemotePlayerBodyPoseSample, ServerEphemeralMessage,
@@ -36,7 +42,7 @@ pub use statistics::{
     SUCCESSFUL_BLOCK_PLACEMENT_STATISTIC_VALUE_KEY, StatisticKey, StatisticKeyError,
 };
 
-pub const PROTOCOL_VERSION: u32 = 34;
+pub const PROTOCOL_VERSION: u32 = 35;
 pub const HOTBAR_SLOT_COUNT: u8 = 9;
 pub const HOTBAR_SLOT_COUNT_USIZE: usize = HOTBAR_SLOT_COUNT as usize;
 pub const MAX_PLAYER_DISPLAY_NAME_BYTES: usize = 16;
@@ -87,6 +93,10 @@ const SERVER_UPDATE_DIMENSION_CHANGE: u8 = 18;
 const SERVER_UPDATE_PLAYER_STATISTICS: u8 = 19;
 const SERVER_UPDATE_PLAYER_LIFE: u8 = 20;
 const SERVER_UPDATE_EPHEMERAL_FALLBACK: u8 = 21;
+const SERVER_UPDATE_PLAYER_INVENTORY: u8 = 22;
+const SERVER_UPDATE_MALLARD_FIELD_GUIDE: u8 = 23;
+const SERVER_UPDATE_MALLARD_CALL: u8 = 24;
+const SERVER_UPDATE_MALLARD_TRACK: u8 = 25;
 
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 pub struct SessionCapabilities(u64);
@@ -524,6 +534,12 @@ pub enum ServerUpdate {
     PlayerStatistics {
         statistics: PlayerStatistics,
     },
+    PlayerInventory {
+        hotbar: [Option<ItemStackSnapshot>; HOTBAR_SLOT_COUNT_USIZE],
+    },
+    MallardFieldGuide(MallardFieldGuideProgress),
+    MallardCall(MallardCallCue),
+    MallardTrack(MallardTrackCue),
     /// Owner-only atomic health/death snapshot.
     PlayerLife(PlayerLifeState),
     EphemeralFallback(ServerEphemeralMessage),
@@ -585,6 +601,7 @@ pub enum EntityKind {
     Cow,
     Chicken,
     Mallard,
+    MallardNest,
     Mannequin,
     DebugCube,
     Item,
@@ -594,6 +611,7 @@ pub enum EntityKind {
 pub enum ItemKind {
     Egg,
     MallardEgg,
+    MallardFeather,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -625,6 +643,8 @@ pub struct EntitySnapshot {
     pub persistent_id: EntityPersistentId,
     pub kind: EntityKind,
     pub item_stack: Option<ItemStackSnapshot>,
+    pub mallard: Option<MallardSnapshotData>,
+    pub mallard_nest: Option<MallardNestSnapshotData>,
     pub position: Vec3d,
     pub y_rot_degrees: f32,
     pub x_rot_degrees: f32,
@@ -639,6 +659,8 @@ pub struct EntitySnapshot {
 pub struct EntityUpdate {
     pub id: EntityId,
     pub item_stack: Option<ItemStackSnapshot>,
+    pub mallard: Option<MallardUpdateData>,
+    pub mallard_nest: Option<MallardNestUpdateData>,
     pub position: Vec3d,
     pub y_rot_degrees: f32,
     pub x_rot_degrees: f32,
@@ -1007,6 +1029,40 @@ pub fn encode_server_update(update: &ServerUpdate) -> ProtocolCodecResult<Vec<u8
                 writer.write_u32(*value);
             }
         }
+        ServerUpdate::PlayerInventory { hotbar } => {
+            writer.write_u8(SERVER_UPDATE_PLAYER_INVENTORY);
+            for stack in hotbar {
+                writer.write_optional_item_stack_snapshot(*stack);
+            }
+        }
+        ServerUpdate::MallardFieldGuide(progress) => {
+            writer.write_u8(SERVER_UPDATE_MALLARD_FIELD_GUIDE);
+            writer.write_u32(progress.bits());
+        }
+        ServerUpdate::MallardCall(cue) => {
+            if !cue.position.is_finite()
+                || !cue.audible_radius.is_finite()
+                || cue.audible_radius <= 0.0
+            {
+                return Err(ProtocolCodecError::InvalidData("invalid mallard call cue"));
+            }
+            writer.write_u8(SERVER_UPDATE_MALLARD_CALL);
+            writer.write_entity_id(cue.source);
+            writer.write_vec3d(cue.position);
+            writer.write_u64(cue.sequence);
+            writer.write_f32(cue.audible_radius);
+        }
+        ServerUpdate::MallardTrack(cue) => {
+            if !cue.position.is_finite() || !cue.y_rot_degrees.is_finite() {
+                return Err(ProtocolCodecError::InvalidData("invalid mallard track cue"));
+            }
+            writer.write_u8(SERVER_UPDATE_MALLARD_TRACK);
+            writer.write_u64(cue.source.most);
+            writer.write_u64(cue.source.least);
+            writer.write_vec3d(cue.position);
+            writer.write_f32(cue.y_rot_degrees);
+            writer.write_u64(cue.sequence);
+        }
         ServerUpdate::PlayerLife(state) => {
             validate_player_life_state(*state)?;
             writer.write_u8(SERVER_UPDATE_PLAYER_LIFE);
@@ -1131,6 +1187,28 @@ pub fn decode_server_update(bytes: &[u8]) -> ProtocolCodecResult<ServerUpdate> {
             }
             ServerUpdate::PlayerStatistics { statistics }
         }
+        SERVER_UPDATE_PLAYER_INVENTORY => {
+            let mut hotbar = [None; HOTBAR_SLOT_COUNT_USIZE];
+            for stack in &mut hotbar {
+                *stack = reader.read_optional_item_stack_snapshot()?;
+            }
+            ServerUpdate::PlayerInventory { hotbar }
+        }
+        SERVER_UPDATE_MALLARD_FIELD_GUIDE => ServerUpdate::MallardFieldGuide(
+            MallardFieldGuideProgress::from_bits_retain(reader.read_u32()?),
+        ),
+        SERVER_UPDATE_MALLARD_CALL => ServerUpdate::MallardCall(MallardCallCue {
+            source: reader.read_entity_id()?,
+            position: reader.read_vec3d()?,
+            sequence: reader.read_u64()?,
+            audible_radius: reader.read_f32()?,
+        }),
+        SERVER_UPDATE_MALLARD_TRACK => ServerUpdate::MallardTrack(MallardTrackCue {
+            source: EntityPersistentId::new(reader.read_u64()?, reader.read_u64()?),
+            position: reader.read_vec3d()?,
+            y_rot_degrees: reader.read_f32()?,
+            sequence: reader.read_u64()?,
+        }),
         SERVER_UPDATE_PLAYER_LIFE => {
             let epoch = reader.read_u32()?;
             let vitals = PlayerVitals::new(reader.read_f32()?, reader.read_f32()?)
@@ -1256,6 +1334,15 @@ fn validate_entity_snapshot(snapshot: &EntitySnapshot) -> ProtocolCodecResult<()
     validate_entity_update(&EntityUpdate {
         id: snapshot.id,
         item_stack: snapshot.item_stack,
+        mallard: snapshot.mallard.map(|data| MallardUpdateData {
+            life_stage: data.life_stage,
+            in_water: data.in_water,
+        }),
+        mallard_nest: snapshot.mallard_nest.map(|data| MallardNestUpdateData {
+            incubation_progress: data.incubation_progress,
+            incubation_required: data.incubation_required,
+            attended: data.attended,
+        }),
         position: snapshot.position,
         y_rot_degrees: snapshot.y_rot_degrees,
         x_rot_degrees: snapshot.x_rot_degrees,
@@ -1286,6 +1373,16 @@ fn validate_entity_snapshot(snapshot: &EntitySnapshot) -> ProtocolCodecResult<()
         }
         (_, None) => {}
     }
+    if (snapshot.kind == EntityKind::Mallard) != snapshot.mallard.is_some() {
+        return Err(ProtocolCodecError::InvalidData(
+            "mallard entity snapshot has inconsistent species data",
+        ));
+    }
+    if (snapshot.kind == EntityKind::MallardNest) != snapshot.mallard_nest.is_some() {
+        return Err(ProtocolCodecError::InvalidData(
+            "mallard nest snapshot has inconsistent nest data",
+        ));
+    }
     Ok(())
 }
 
@@ -1311,6 +1408,13 @@ fn validate_entity_update(update: &EntityUpdate) -> ProtocolCodecResult<()> {
         ));
     }
     validate_optional_entity_rotation(update.rotation)?;
+    if let Some(nest) = update.mallard_nest
+        && (nest.incubation_required == 0 || nest.incubation_progress > nest.incubation_required)
+    {
+        return Err(ProtocolCodecError::InvalidData(
+            "mallard nest update has invalid incubation progress",
+        ));
+    }
     Ok(())
 }
 
@@ -1451,6 +1555,7 @@ impl ByteWriter {
             EntityKind::Item => 3,
             EntityKind::Mannequin => 4,
             EntityKind::Mallard => 5,
+            EntityKind::MallardNest => 6,
         });
     }
 
@@ -1458,6 +1563,7 @@ impl ByteWriter {
         self.write_u8(match kind {
             ItemKind::Egg => 0,
             ItemKind::MallardEgg => 1,
+            ItemKind::MallardFeather => 2,
         });
     }
 
@@ -1711,6 +1817,8 @@ impl ByteWriter {
         self.write_entity_persistent_id(snapshot.persistent_id);
         self.write_entity_kind(snapshot.kind);
         self.write_optional_item_stack_snapshot(snapshot.item_stack);
+        self.write_optional_mallard_snapshot_data(snapshot.mallard);
+        self.write_optional_mallard_nest_snapshot_data(snapshot.mallard_nest);
         self.write_vec3d(snapshot.position);
         self.write_f32(snapshot.y_rot_degrees);
         self.write_f32(snapshot.x_rot_degrees);
@@ -1734,12 +1842,55 @@ impl ByteWriter {
     fn write_entity_update(&mut self, update: &EntityUpdate) {
         self.write_entity_id(update.id);
         self.write_optional_item_stack_snapshot(update.item_stack);
+        self.write_optional_mallard_update_data(update.mallard);
+        self.write_optional_mallard_nest_update_data(update.mallard_nest);
         self.write_vec3d(update.position);
         self.write_f32(update.y_rot_degrees);
         self.write_f32(update.x_rot_degrees);
         self.write_optional_entity_rotation(update.rotation);
         self.write_bool(update.on_ground);
         self.write_u64(update.tick_count);
+    }
+
+    fn write_mallard_life_stage(&mut self, stage: MallardLifeStage) {
+        self.write_u8(match stage {
+            MallardLifeStage::Duckling => 0,
+            MallardLifeStage::Adult => 1,
+        });
+    }
+
+    fn write_optional_mallard_snapshot_data(&mut self, data: Option<MallardSnapshotData>) {
+        self.write_bool(data.is_some());
+        if let Some(data) = data {
+            self.write_mallard_life_stage(data.life_stage);
+            self.write_bool(data.in_water);
+        }
+    }
+
+    fn write_optional_mallard_update_data(&mut self, data: Option<MallardUpdateData>) {
+        self.write_bool(data.is_some());
+        if let Some(data) = data {
+            self.write_mallard_life_stage(data.life_stage);
+            self.write_bool(data.in_water);
+        }
+    }
+
+    fn write_optional_mallard_nest_snapshot_data(&mut self, data: Option<MallardNestSnapshotData>) {
+        self.write_bool(data.is_some());
+        if let Some(data) = data {
+            self.write_u32(data.incubation_progress);
+            self.write_u32(data.incubation_required);
+            self.write_bool(data.attended);
+        }
+    }
+
+    fn write_optional_mallard_nest_update_data(&mut self, data: Option<MallardNestUpdateData>) {
+        self.write_bool(data.is_some());
+        if let Some(data) = data {
+            self.write_u32(data.incubation_progress);
+            self.write_u32(data.incubation_required);
+            self.write_bool(data.attended);
+        }
     }
 
     fn write_optional_entity_rotation(&mut self, rotation: Option<EntityRotation>) {
@@ -1924,6 +2075,7 @@ impl<'a> ByteReader<'a> {
             3 => Ok(EntityKind::Item),
             4 => Ok(EntityKind::Mannequin),
             5 => Ok(EntityKind::Mallard),
+            6 => Ok(EntityKind::MallardNest),
             kind => Err(ProtocolCodecError::UnknownEntityKind(kind)),
         }
     }
@@ -1933,6 +2085,7 @@ impl<'a> ByteReader<'a> {
         match kind {
             0 => Ok(ItemKind::Egg),
             1 => Ok(ItemKind::MallardEgg),
+            2 => Ok(ItemKind::MallardFeather),
             kind => Err(ProtocolCodecError::UnknownItemKind(kind)),
         }
     }
@@ -2285,6 +2438,8 @@ impl<'a> ByteReader<'a> {
             persistent_id: self.read_entity_persistent_id()?,
             kind: self.read_entity_kind()?,
             item_stack: self.read_optional_item_stack_snapshot()?,
+            mallard: self.read_optional_mallard_snapshot_data()?,
+            mallard_nest: self.read_optional_mallard_nest_snapshot_data()?,
             position: self.read_vec3d()?,
             y_rot_degrees: self.read_f32()?,
             x_rot_degrees: self.read_f32()?,
@@ -2312,10 +2467,76 @@ impl<'a> ByteReader<'a> {
         Ok(Some(stack))
     }
 
+    fn read_mallard_life_stage(&mut self) -> ProtocolCodecResult<MallardLifeStage> {
+        match self.read_u8()? {
+            0 => Ok(MallardLifeStage::Duckling),
+            1 => Ok(MallardLifeStage::Adult),
+            _ => Err(ProtocolCodecError::InvalidData(
+                "unknown mallard life stage",
+            )),
+        }
+    }
+
+    fn read_optional_mallard_snapshot_data(
+        &mut self,
+    ) -> ProtocolCodecResult<Option<MallardSnapshotData>> {
+        self.read_bool()?
+            .then(|| {
+                Ok(MallardSnapshotData {
+                    life_stage: self.read_mallard_life_stage()?,
+                    in_water: self.read_bool()?,
+                })
+            })
+            .transpose()
+    }
+
+    fn read_optional_mallard_update_data(
+        &mut self,
+    ) -> ProtocolCodecResult<Option<MallardUpdateData>> {
+        self.read_bool()?
+            .then(|| {
+                Ok(MallardUpdateData {
+                    life_stage: self.read_mallard_life_stage()?,
+                    in_water: self.read_bool()?,
+                })
+            })
+            .transpose()
+    }
+
+    fn read_optional_mallard_nest_snapshot_data(
+        &mut self,
+    ) -> ProtocolCodecResult<Option<MallardNestSnapshotData>> {
+        self.read_bool()?
+            .then(|| {
+                Ok(MallardNestSnapshotData {
+                    incubation_progress: self.read_u32()?,
+                    incubation_required: self.read_u32()?,
+                    attended: self.read_bool()?,
+                })
+            })
+            .transpose()
+    }
+
+    fn read_optional_mallard_nest_update_data(
+        &mut self,
+    ) -> ProtocolCodecResult<Option<MallardNestUpdateData>> {
+        self.read_bool()?
+            .then(|| {
+                Ok(MallardNestUpdateData {
+                    incubation_progress: self.read_u32()?,
+                    incubation_required: self.read_u32()?,
+                    attended: self.read_bool()?,
+                })
+            })
+            .transpose()
+    }
+
     fn read_entity_update(&mut self) -> ProtocolCodecResult<EntityUpdate> {
         let update = EntityUpdate {
             id: self.read_entity_id()?,
             item_stack: self.read_optional_item_stack_snapshot()?,
+            mallard: self.read_optional_mallard_update_data()?,
+            mallard_nest: self.read_optional_mallard_nest_update_data()?,
             position: self.read_vec3d()?,
             y_rot_degrees: self.read_f32()?,
             x_rot_degrees: self.read_f32()?,
@@ -2807,6 +3028,11 @@ mod tests {
             persistent_id: EntityPersistentId::new(0x1234, 0x5678),
             kind: EntityKind::Mallard,
             item_stack: None,
+            mallard: Some(MallardSnapshotData {
+                life_stage: MallardLifeStage::Adult,
+                in_water: true,
+            }),
+            mallard_nest: None,
             position: Vec3d::new(12.5, 70.0, -3.25),
             y_rot_degrees: 90.0,
             x_rot_degrees: -15.0,
@@ -2824,6 +3050,11 @@ mod tests {
         let update = EntityUpdate {
             id: snapshot.id,
             item_stack: None,
+            mallard: Some(MallardUpdateData {
+                life_stage: MallardLifeStage::Adult,
+                in_water: false,
+            }),
+            mallard_nest: None,
             position: Vec3d::new(13.5, 70.0, -3.25),
             y_rot_degrees: 45.0,
             x_rot_degrees: 0.0,
@@ -2865,6 +3096,8 @@ mod tests {
                 kind: ItemKind::MallardEgg,
                 count: 1,
             }),
+            mallard: None,
+            mallard_nest: None,
             position: Vec3d::new(12.5, 64.0, -3.25),
             y_rot_degrees: 0.0,
             x_rot_degrees: 0.0,
@@ -2885,6 +3118,8 @@ mod tests {
                 kind: ItemKind::MallardEgg,
                 count: 2,
             }),
+            mallard: None,
+            mallard_nest: None,
             position: snapshot.position,
             y_rot_degrees: snapshot.y_rot_degrees,
             x_rot_degrees: snapshot.x_rot_degrees,
@@ -2921,6 +3156,8 @@ mod tests {
         let non_finite = ServerUpdate::EntityUpdate(EntityUpdate {
             id: EntityId(42),
             item_stack: None,
+            mallard: None,
+            mallard_nest: None,
             position: Vec3d::new(f64::NAN, 70.0, -3.25),
             y_rot_degrees: 90.0,
             x_rot_degrees: -15.0,
@@ -2940,6 +3177,8 @@ mod tests {
             persistent_id: EntityPersistentId::new(0x1234, 42),
             kind: EntityKind::Chicken,
             item_stack: None,
+            mallard: None,
+            mallard_nest: None,
             position: Vec3d::new(1.0, 70.0, -3.25),
             y_rot_degrees: 90.0,
             x_rot_degrees: -15.0,
@@ -2961,6 +3200,8 @@ mod tests {
             persistent_id: EntityPersistentId::new(0x1234, 42),
             kind: EntityKind::Item,
             item_stack: None,
+            mallard: None,
+            mallard_nest: None,
             position: Vec3d::new(1.0, 70.0, -3.25),
             y_rot_degrees: 90.0,
             x_rot_degrees: -15.0,
@@ -2985,6 +3226,8 @@ mod tests {
                 kind: ItemKind::Egg,
                 count: 1,
             }),
+            mallard: None,
+            mallard_nest: None,
             position: Vec3d::new(1.0, 70.0, -3.25),
             y_rot_degrees: 90.0,
             x_rot_degrees: -15.0,
@@ -3004,6 +3247,8 @@ mod tests {
         let invalid_rotation = ServerUpdate::EntityUpdate(EntityUpdate {
             id: EntityId(42),
             item_stack: None,
+            mallard: None,
+            mallard_nest: None,
             position: Vec3d::new(1.0, 70.0, -3.25),
             y_rot_degrees: 90.0,
             x_rot_degrees: -15.0,

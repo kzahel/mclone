@@ -20,7 +20,7 @@ impl MobSpeciesState {
             EntityKind::Cow | EntityKind::Mannequin => Self::Cow,
             EntityKind::Chicken => Self::Chicken(ChickenRuntimeState::new(random)),
             EntityKind::Mallard => Self::Mallard(MallardRuntimeState::new(random)),
-            EntityKind::DebugCube | EntityKind::Item => {
+            EntityKind::DebugCube | EntityKind::Item | EntityKind::MallardNest => {
                 debug_assert!(false, "non-mob entities do not use mob species state");
                 Self::Cow
             }
@@ -40,7 +40,7 @@ impl MobSpeciesState {
             EntityKind::Mallard => Self::Mallard(MallardRuntimeState::from_saved(
                 egg_time.unwrap_or_else(|| next_mallard_egg_time(random)),
             )),
-            EntityKind::DebugCube | EntityKind::Item => {
+            EntityKind::DebugCube | EntityKind::Item | EntityKind::MallardNest => {
                 debug_assert!(false, "non-mob entities do not use mob species state");
                 Self::Cow
             }

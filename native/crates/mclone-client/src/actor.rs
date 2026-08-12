@@ -3,8 +3,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use mclone_assets::{ActorFigureId, default_player_figure_id, upright_bear_figure_id};
 use mclone_core::{HorizontalTopology, Vec3d};
 use mclone_protocol::{
-    EntityId, EntityKind, EntityRotation, EntitySnapshot, ItemStackSnapshot, PlayerAppearance,
-    PlayerModelKind, RemotePlayerId, RemotePlayerUpdate,
+    EntityId, EntityKind, EntityRotation, EntitySnapshot, ItemStackSnapshot, MallardLifeStage,
+    MallardNestSnapshotData, PlayerAppearance, PlayerModelKind, RemotePlayerId, RemotePlayerUpdate,
 };
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -63,6 +63,9 @@ pub struct ActorPresentation {
     pub height: f32,
     pub walk_animation_distance: f32,
     pub chicken_wing_flap_radians: Option<f32>,
+    pub mallard_life_stage: Option<MallardLifeStage>,
+    pub in_water: bool,
+    pub mallard_nest: Option<MallardNestSnapshotData>,
 }
 
 impl ActorPresentation {
@@ -81,6 +84,9 @@ impl ActorPresentation {
             height: 1.8,
             walk_animation_distance,
             chicken_wing_flap_radians: None,
+            mallard_life_stage: None,
+            in_water: false,
+            mallard_nest: None,
         }
     }
 
@@ -99,6 +105,9 @@ impl ActorPresentation {
             height: snapshot.height,
             walk_animation_distance: 0.0,
             chicken_wing_flap_radians: None,
+            mallard_life_stage: snapshot.mallard.map(|data| data.life_stage),
+            in_water: snapshot.mallard.is_some_and(|data| data.in_water),
+            mallard_nest: snapshot.mallard_nest,
         }
     }
 }
@@ -220,6 +229,9 @@ impl ActorTrack {
         self.rendered.kind = actor.kind;
         self.rendered.appearance = actor.appearance;
         self.rendered.item_stack = actor.item_stack;
+        self.rendered.mallard_life_stage = actor.mallard_life_stage;
+        self.rendered.in_water = actor.in_water;
+        self.rendered.mallard_nest = actor.mallard_nest;
         self.rendered.on_ground = actor.on_ground;
         self.rendered.width = actor.width;
         self.rendered.height = actor.height;
@@ -464,6 +476,9 @@ mod tests {
             kind: ActorPresentationKind::RemotePlayer,
             appearance: ActorAppearance::default_player(),
             item_stack: None,
+            mallard_life_stage: None,
+            in_water: false,
+            mallard_nest: None,
             feet_position: Vec3d::new(x, 64.0, 2.0),
             y_rot_degrees,
             x_rot_degrees: 0.0,
@@ -482,6 +497,9 @@ mod tests {
             kind: ActorPresentationKind::Entity(EntityKind::Chicken),
             appearance: ActorAppearance::NONE,
             item_stack: None,
+            mallard_life_stage: None,
+            in_water: false,
+            mallard_nest: None,
             feet_position: Vec3d::new(0.0, y, 0.0),
             y_rot_degrees: 0.0,
             x_rot_degrees: 0.0,
@@ -500,6 +518,9 @@ mod tests {
             kind: ActorPresentationKind::Entity(EntityKind::Mannequin),
             appearance: ActorAppearance::NONE,
             item_stack: None,
+            mallard_life_stage: None,
+            in_water: false,
+            mallard_nest: None,
             feet_position: Vec3d::new(x, 64.0, 0.0),
             y_rot_degrees: 0.0,
             x_rot_degrees: 0.0,
@@ -530,6 +551,9 @@ mod tests {
                 kind: ActorPresentationKind::RemotePlayer,
                 appearance: ActorAppearance::default_player(),
                 item_stack: None,
+                mallard_life_stage: None,
+                in_water: false,
+                mallard_nest: None,
                 feet_position: update.position,
                 y_rot_degrees: update.y_rot_degrees,
                 x_rot_degrees: update.x_rot_degrees,
@@ -550,6 +574,8 @@ mod tests {
             persistent_id: mclone_protocol::EntityPersistentId::new(0, 7),
             kind: EntityKind::Cow,
             item_stack: None,
+            mallard: None,
+            mallard_nest: None,
             position: Vec3d::new(10.0, 64.0, -4.0),
             y_rot_degrees: -90.0,
             x_rot_degrees: 0.0,
@@ -567,6 +593,9 @@ mod tests {
                 kind: ActorPresentationKind::Entity(snapshot.kind),
                 appearance: ActorAppearance::NONE,
                 item_stack: snapshot.item_stack,
+                mallard_life_stage: None,
+                in_water: false,
+                mallard_nest: None,
                 feet_position: snapshot.position,
                 y_rot_degrees: snapshot.y_rot_degrees,
                 x_rot_degrees: snapshot.x_rot_degrees,

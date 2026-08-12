@@ -64,6 +64,10 @@ impl EngineServerUpdateReport {
                 | ServerUpdate::TimeUpdate { .. }
                 | ServerUpdate::PlayerExperience { .. }
                 | ServerUpdate::PlayerStatistics { .. }
+                | ServerUpdate::PlayerInventory { .. }
+                | ServerUpdate::MallardFieldGuide(_)
+                | ServerUpdate::MallardCall(_)
+                | ServerUpdate::MallardTrack(_)
                 | ServerUpdate::RemotePlayerAdd(_)
                 | ServerUpdate::RemotePlayerUpdate(_)
                 | ServerUpdate::RemotePlayerRemove { .. }
@@ -144,6 +148,10 @@ impl EngineServerUpdateDirtyBatch {
                 ServerUpdate::TimeUpdate { .. } => {}
                 ServerUpdate::PlayerExperience { .. } => {}
                 ServerUpdate::PlayerStatistics { .. } => {}
+                ServerUpdate::PlayerInventory { .. } => {}
+                ServerUpdate::MallardFieldGuide(_) => {}
+                ServerUpdate::MallardCall(_) => {}
+                ServerUpdate::MallardTrack(_) => {}
                 ServerUpdate::PlayerLife(_) => {}
                 ServerUpdate::PlayerPosition(_) => {}
                 ServerUpdate::RemotePlayerAdd(_)

@@ -1,10 +1,12 @@
 use mclone_protocol::{ItemKind, ItemStackSnapshot};
 
 pub(crate) const EGG_MAX_STACK_SIZE: u8 = 16;
+pub(crate) const FEATHER_MAX_STACK_SIZE: u8 = 64;
 
 pub(crate) const fn item_max_stack_size(kind: ItemKind) -> u8 {
     match kind {
         ItemKind::Egg | ItemKind::MallardEgg => EGG_MAX_STACK_SIZE,
+        ItemKind::MallardFeather => FEATHER_MAX_STACK_SIZE,
     }
 }
 

@@ -28,8 +28,9 @@ use mclone_core::{
 };
 use mclone_protocol::{
     ChunkView, ClientCommand, DimensionKey, DisconnectReason, DisconnectReasonCode, EntityId,
-    EntitySnapshot, EntityUpdate, PlayerLifeState, PlayerPositionUpdate, PlayerStatistics,
-    RemotePlayerId, RemotePlayerUpdate, SectionBlockUpdate, ServerEphemeralMessage, ServerUpdate,
+    EntitySnapshot, EntityUpdate, ItemStackSnapshot, MallardCallCue, MallardFieldGuideProgress,
+    MallardTrackCue, PlayerLifeState, PlayerPositionUpdate, PlayerStatistics, RemotePlayerId,
+    RemotePlayerUpdate, SectionBlockUpdate, ServerEphemeralMessage, ServerUpdate,
     SessionConfiguration, validate_body_pose_sample,
 };
 
@@ -105,6 +106,10 @@ pub struct ClientRuntime {
     daylight_cycle_running: bool,
     total_experience: u64,
     player_statistics: PlayerStatistics,
+    player_inventory: [Option<ItemStackSnapshot>; mclone_protocol::HOTBAR_SLOT_COUNT_USIZE],
+    mallard_field_guide: MallardFieldGuideProgress,
+    mallard_calls: VecDeque<MallardCallCue>,
+    mallard_tracks: VecDeque<MallardTrackCue>,
     player_life: PlayerLifeState,
     player_position_updates: VecDeque<PlayerPositionUpdate>,
     remote_players: BTreeMap<RemotePlayerId, RemotePlayerUpdate>,
@@ -136,6 +141,10 @@ impl ClientRuntime {
             daylight_cycle_running: true,
             total_experience: 0,
             player_statistics: PlayerStatistics::default(),
+            player_inventory: [None; mclone_protocol::HOTBAR_SLOT_COUNT_USIZE],
+            mallard_field_guide: MallardFieldGuideProgress::default(),
+            mallard_calls: VecDeque::new(),
+            mallard_tracks: VecDeque::new(),
             player_life: PlayerLifeState::default(),
             player_position_updates: VecDeque::new(),
             remote_players: BTreeMap::new(),
@@ -318,6 +327,14 @@ impl ClientRuntime {
             ServerUpdate::PlayerStatistics { statistics } => {
                 self.player_statistics = statistics;
             }
+            ServerUpdate::PlayerInventory { hotbar } => {
+                self.player_inventory = hotbar;
+            }
+            ServerUpdate::MallardFieldGuide(progress) => {
+                self.mallard_field_guide = progress;
+            }
+            ServerUpdate::MallardCall(cue) => self.mallard_calls.push_back(cue),
+            ServerUpdate::MallardTrack(cue) => self.mallard_tracks.push_back(cue),
             ServerUpdate::PlayerLife(state) => {
                 if state.epoch() >= self.player_life.epoch() {
                     self.player_life = state;
@@ -408,6 +425,24 @@ impl ClientRuntime {
 
     pub fn player_statistics(&self) -> &PlayerStatistics {
         &self.player_statistics
+    }
+
+    pub const fn player_inventory(
+        &self,
+    ) -> &[Option<ItemStackSnapshot>; mclone_protocol::HOTBAR_SLOT_COUNT_USIZE] {
+        &self.player_inventory
+    }
+
+    pub const fn mallard_field_guide(&self) -> MallardFieldGuideProgress {
+        self.mallard_field_guide
+    }
+
+    pub fn drain_mallard_calls(&mut self) -> impl Iterator<Item = MallardCallCue> + '_ {
+        self.mallard_calls.drain(..)
+    }
+
+    pub fn drain_mallard_tracks(&mut self) -> impl Iterator<Item = MallardTrackCue> + '_ {
+        self.mallard_tracks.drain(..)
     }
 
     pub const fn player_life(&self) -> PlayerLifeState {
@@ -1195,6 +1230,8 @@ mod tests {
             persistent_id: mclone_protocol::EntityPersistentId::new(0, 7),
             kind: mclone_protocol::EntityKind::Cow,
             item_stack: None,
+            mallard: None,
+            mallard_nest: None,
             position: mclone_core::Vec3d::new(4.0, 64.0, 5.0),
             y_rot_degrees: 0.0,
             x_rot_degrees: 0.0,
@@ -1554,6 +1591,8 @@ mod tests {
             persistent_id: mclone_protocol::EntityPersistentId::new(0, id.0),
             kind: mclone_protocol::EntityKind::Cow,
             item_stack: None,
+            mallard: None,
+            mallard_nest: None,
             position: Vec3d::new(511.75, 64.0, 2.0),
             y_rot_degrees: 0.0,
             x_rot_degrees: 0.0,
@@ -1566,6 +1605,8 @@ mod tests {
         runtime.apply_update(ServerUpdate::EntityUpdate(EntityUpdate {
             id,
             item_stack: None,
+            mallard: None,
+            mallard_nest: None,
             position: Vec3d::new(0.25, 64.0, 2.0),
             y_rot_degrees: 0.0,
             x_rot_degrees: 0.0,
@@ -1587,6 +1628,8 @@ mod tests {
             persistent_id: mclone_protocol::EntityPersistentId::new(0, id.0),
             kind: mclone_protocol::EntityKind::Cow,
             item_stack: None,
+            mallard: None,
+            mallard_nest: None,
             position: mclone_core::Vec3d::new(1.0, 64.0, 2.0),
             y_rot_degrees: 45.0,
             x_rot_degrees: 5.0,
@@ -1599,6 +1642,8 @@ mod tests {
         let moved = EntityUpdate {
             id,
             item_stack: None,
+            mallard: None,
+            mallard_nest: None,
             position: mclone_core::Vec3d::new(17.0, 65.0, 4.0),
             y_rot_degrees: 90.0,
             x_rot_degrees: -10.0,
@@ -1675,6 +1720,9 @@ mod tests {
                 kind: ActorPresentationKind::RemotePlayer,
                 appearance: ActorAppearance::figure(mclone_assets::upright_bear_figure_id()),
                 item_stack: None,
+                mallard_life_stage: None,
+                in_water: false,
+                mallard_nest: None,
                 feet_position: update.position,
                 y_rot_degrees: update.y_rot_degrees,
                 x_rot_degrees: update.x_rot_degrees,
@@ -1700,6 +1748,8 @@ mod tests {
             persistent_id: mclone_protocol::EntityPersistentId::new(0, 11),
             kind: mclone_protocol::EntityKind::Cow,
             item_stack: None,
+            mallard: None,
+            mallard_nest: None,
             position: mclone_core::Vec3d::new(10.0, 64.0, -4.0),
             y_rot_degrees: -90.0,
             x_rot_degrees: 0.0,
@@ -1719,6 +1769,9 @@ mod tests {
                 kind: ActorPresentationKind::Entity(snapshot.kind),
                 appearance: ActorAppearance::NONE,
                 item_stack: snapshot.item_stack,
+                mallard_life_stage: None,
+                in_water: false,
+                mallard_nest: None,
                 feet_position: snapshot.position,
                 y_rot_degrees: snapshot.y_rot_degrees,
                 x_rot_degrees: snapshot.x_rot_degrees,
@@ -1744,6 +1797,8 @@ mod tests {
             persistent_id: mclone_protocol::EntityPersistentId::new(0, 12),
             kind: mclone_protocol::EntityKind::Item,
             item_stack: Some(stack),
+            mallard: None,
+            mallard_nest: None,
             position: mclone_core::Vec3d::new(10.0, 64.0, -4.0),
             y_rot_degrees: 0.0,
             x_rot_degrees: 0.0,
@@ -1842,6 +1897,8 @@ mod tests {
                 kind: mclone_protocol::ItemKind::Egg,
                 count: 1,
             }),
+            mallard: None,
+            mallard_nest: None,
             position: mclone_core::Vec3d::new(1.0, 64.0, 2.0),
             y_rot_degrees: 0.0,
             x_rot_degrees: 0.0,
@@ -1858,6 +1915,8 @@ mod tests {
                 kind: mclone_protocol::ItemKind::Egg,
                 count: 2,
             }),
+            mallard: None,
+            mallard_nest: None,
             position: mclone_core::Vec3d::new(1.0, 64.0, 2.0),
             y_rot_degrees: 0.0,
             x_rot_degrees: 0.0,

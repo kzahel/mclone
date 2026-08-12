@@ -90,6 +90,8 @@ pub enum ActorInstanceShape {
     CowModel,
     DebugCube,
     ItemEgg,
+    MallardNest,
+    MallardFeather,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -284,6 +286,29 @@ impl ActorInstance {
             opacity: 1.0,
             animation: None,
             chicken_wing_flap_radians: None,
+        }
+    }
+
+    pub fn mallard_nest(feet_position: Vec3, y_rot_degrees: f32, width: f32, height: f32) -> Self {
+        Self {
+            shape: ActorInstanceShape::MallardNest,
+            body_color: [0.31, 0.20, 0.09, 1.0],
+            accent_color: [0.84, 0.75, 0.49, 1.0],
+            ..Self::item_egg(feet_position, y_rot_degrees, width, height)
+        }
+    }
+
+    pub fn mallard_feather(
+        feet_position: Vec3,
+        y_rot_degrees: f32,
+        width: f32,
+        height: f32,
+    ) -> Self {
+        Self {
+            shape: ActorInstanceShape::MallardFeather,
+            body_color: [0.73, 0.70, 0.62, 1.0],
+            accent_color: [0.16, 0.34, 0.62, 1.0],
+            ..Self::item_egg(feet_position, y_rot_degrees, width, height)
         }
     }
 
@@ -2059,6 +2084,12 @@ fn append_actor(
         ActorInstanceShape::CowModel => append_cow_model(mesh, actor, texture_layout, atlas_size),
         ActorInstanceShape::DebugCube => append_debug_cube(mesh, actor, texture_layout, atlas_size),
         ActorInstanceShape::ItemEgg => append_item_egg(mesh, actor, texture_layout, atlas_size),
+        ActorInstanceShape::MallardNest => {
+            append_mallard_nest(mesh, actor, texture_layout, atlas_size)
+        }
+        ActorInstanceShape::MallardFeather => {
+            append_mallard_feather(mesh, actor, texture_layout, atlas_size)
+        }
     }
     let opacity = if actor.opacity.is_finite() {
         actor.opacity.clamp(0.0, 1.0)
@@ -2667,6 +2698,55 @@ fn append_item_egg(
             spot,
             shell_light,
         ],
+    );
+}
+
+fn append_mallard_nest(
+    mesh: &mut ActorMesh,
+    actor: ActorInstance,
+    texture_layout: ActorTextureLayout,
+    atlas_size: [u32; 2],
+) {
+    let half = actor.width.max(0.5) * 0.5;
+    let white_uv = texture_region_center_uv(texture_layout.white, atlas_size);
+    append_box(
+        mesh,
+        actor,
+        Vec3::new(-half, 0.0, -half),
+        Vec3::new(half, actor.height.max(0.18), half),
+        white_uv,
+        [
+            scale_color(actor.body_color, 0.55),
+            actor.body_color,
+            scale_color(actor.body_color, 0.82),
+            actor.accent_color,
+            actor.body_color,
+            scale_color(actor.accent_color, 1.08),
+        ],
+    );
+    let mut egg = actor;
+    egg.feet_position.y += actor.height.max(0.18) * 0.55;
+    egg.width *= 0.38;
+    egg.height *= 0.72;
+    append_item_egg(mesh, egg, texture_layout, atlas_size);
+}
+
+fn append_mallard_feather(
+    mesh: &mut ActorMesh,
+    actor: ActorInstance,
+    texture_layout: ActorTextureLayout,
+    atlas_size: [u32; 2],
+) {
+    let width = actor.width.max(0.08);
+    let height = actor.height.max(0.24);
+    let white_uv = texture_region_center_uv(texture_layout.white, atlas_size);
+    append_box(
+        mesh,
+        actor,
+        Vec3::new(-width * 0.5, 0.0, -0.025),
+        Vec3::new(width * 0.5, height, 0.025),
+        white_uv,
+        [actor.body_color; 6],
     );
 }
 

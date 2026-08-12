@@ -115,7 +115,7 @@ impl MobRuntimeState {
             EntityKind::Chicken => passive::register_chicken_goals(&mut goal_selector),
             EntityKind::Mallard => passive::register_mallard_goals(&mut goal_selector),
             EntityKind::Mannequin => passive::register_mannequin_goals(&mut goal_selector),
-            EntityKind::DebugCube | EntityKind::Item => {}
+            EntityKind::DebugCube | EntityKind::Item | EntityKind::MallardNest => {}
         }
         let attributes = MobAttributes::from_metadata(metadata);
 
@@ -164,7 +164,7 @@ impl MobRuntimeState {
             EntityKind::Chicken => passive::register_chicken_goals(&mut goal_selector),
             EntityKind::Mallard => passive::register_mallard_goals(&mut goal_selector),
             EntityKind::Mannequin => passive::register_mannequin_goals(&mut goal_selector),
-            EntityKind::DebugCube | EntityKind::Item => {}
+            EntityKind::DebugCube | EntityKind::Item | EntityKind::MallardNest => {}
         }
         let attributes = MobAttributes::from_metadata(metadata);
 
@@ -868,6 +868,7 @@ fn mob_random_seed(id: EntityId, kind: EntityKind) -> i64 {
         EntityKind::Item => 0x00c0_0003_u64,
         EntityKind::Mannequin => 0x00c0_0004_u64,
         EntityKind::DebugCube => 0x00c0_00ff_u64,
+        EntityKind::MallardNest => 0x00c0_0006_u64,
     };
     let mixed = id.0.wrapping_mul(0x9e37_79b9_7f4a_7c15).rotate_left(17) ^ kind_id;
     mixed as i64

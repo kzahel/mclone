@@ -1930,8 +1930,10 @@ impl RealmServer {
             player
                 .inventory
                 .restore_selected_hotbar_slot(record.selected_hotbar_slot);
+            player.inventory.restore_item_stacks(record.inventory);
             player.total_experience = record.total_experience;
             player.statistics = record.statistics.clone();
+            player.mallard_field_guide = record.mallard_field_guide;
             player.vitals = mclone_protocol::PlayerVitals::new(
                 record.health,
                 mclone_protocol::DEFAULT_PLAYER_MAX_HEALTH,
@@ -1946,6 +1948,8 @@ impl RealmServer {
         }
         let total_experience = player.total_experience;
         let statistics = player.statistics.clone();
+        let inventory = player.inventory.hotbar_item_stacks();
+        let mallard_field_guide = player.mallard_field_guide;
         self.chunk_tracking.queue_update_for_player(
             player_id,
             ServerUpdate::PlayerExperience { total_experience },
@@ -1954,6 +1958,14 @@ impl RealmServer {
             self.chunk_tracking
                 .queue_update_for_player(player_id, ServerUpdate::PlayerStatistics { statistics });
         }
+        self.chunk_tracking.queue_update_for_player(
+            player_id,
+            ServerUpdate::PlayerInventory { hotbar: inventory },
+        );
+        self.chunk_tracking.queue_update_for_player(
+            player_id,
+            ServerUpdate::MallardFieldGuide(mallard_field_guide),
+        );
         let life = player_life_state(
             self.players
                 .get(player_id)
@@ -4731,8 +4743,10 @@ impl RealmServer {
             player
                 .inventory
                 .restore_selected_hotbar_slot(record.selected_hotbar_slot);
+            player.inventory.restore_item_stacks(record.inventory);
             player.total_experience = record.total_experience;
             player.statistics = record.statistics.clone();
+            player.mallard_field_guide = record.mallard_field_guide;
             player.vitals = mclone_protocol::PlayerVitals::new(
                 record.health,
                 mclone_protocol::DEFAULT_PLAYER_MAX_HEALTH,
@@ -4743,6 +4757,8 @@ impl RealmServer {
             player.resume_record = Some(record);
             let total_experience = player.total_experience;
             let statistics = player.statistics.clone();
+            let inventory = player.inventory.hotbar_item_stacks();
+            let mallard_field_guide = player.mallard_field_guide;
             let life = player_life_state(player);
             self.chunk_tracking.queue_update_for_player(
                 player_id,
@@ -4754,6 +4770,14 @@ impl RealmServer {
                     ServerUpdate::PlayerStatistics { statistics },
                 );
             }
+            self.chunk_tracking.queue_update_for_player(
+                player_id,
+                ServerUpdate::PlayerInventory { hotbar: inventory },
+            );
+            self.chunk_tracking.queue_update_for_player(
+                player_id,
+                ServerUpdate::MallardFieldGuide(mallard_field_guide),
+            );
             self.chunk_tracking
                 .queue_update_for_player(player_id, ServerUpdate::PlayerLife(life));
             let center = self
@@ -5896,8 +5920,10 @@ fn player_record_from_entry(
         record.last_known_name = identity.display_name.clone();
         record.dimension = player.dimension.clone();
         record.selected_hotbar_slot = player.inventory.selected_hotbar_slot();
+        record.inventory = player.inventory.item_stacks();
         record.total_experience = player.total_experience;
         record.statistics = player.statistics.clone();
+        record.mallard_field_guide = player.mallard_field_guide;
         record.health = player.vitals.health();
         record.pending_death_cause = player.pending_death_cause;
         return Some(record);
@@ -5930,8 +5956,10 @@ fn player_record_from_current_state_with_revision(
         x_rot_degrees: player.state.x_rot_degrees(),
         on_ground: player.state.on_ground(),
         selected_hotbar_slot: player.inventory.selected_hotbar_slot(),
+        inventory: player.inventory.item_stacks(),
         total_experience: player.total_experience,
         statistics: player.statistics.clone(),
+        mallard_field_guide: player.mallard_field_guide,
         health: player.vitals.health(),
         pending_death_cause: player.pending_death_cause,
     })

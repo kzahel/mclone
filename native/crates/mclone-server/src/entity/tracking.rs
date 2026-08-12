@@ -125,6 +125,8 @@ mod tests {
             persistent_id: mclone_protocol::EntityPersistentId::new(0, id),
             kind: EntityKind::Cow,
             item_stack: None,
+            mallard: None,
+            mallard_nest: None,
             position: Vec3d::new(x, 64.0, z),
             y_rot_degrees: 45.0,
             x_rot_degrees: 0.0,

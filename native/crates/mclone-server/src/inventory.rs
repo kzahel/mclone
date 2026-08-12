@@ -97,6 +97,42 @@ impl ServerInventory {
         }
     }
 
+    pub(crate) fn hotbar_item_stacks(
+        &self,
+    ) -> [Option<ItemStackSnapshot>; mclone_protocol::HOTBAR_SLOT_COUNT_USIZE] {
+        std::array::from_fn(|slot| self.item_stacks[slot])
+    }
+
+    pub(crate) fn restore_item_stacks(
+        &mut self,
+        stacks: [Option<ItemStackSnapshot>; PLAYER_MAIN_INVENTORY_SLOT_COUNT],
+    ) {
+        self.item_stacks = stacks;
+    }
+
+    pub(crate) fn item_stacks(
+        &self,
+    ) -> [Option<ItemStackSnapshot>; PLAYER_MAIN_INVENTORY_SLOT_COUNT] {
+        self.item_stacks
+    }
+
+    pub(crate) fn selected_item_stack(&self) -> Option<ItemStackSnapshot> {
+        self.item_stacks[usize::from(self.selected)]
+    }
+
+    pub(crate) fn consume_selected_item(&mut self, kind: mclone_protocol::ItemKind) -> bool {
+        let slot = usize::from(self.selected);
+        let Some(mut stack) = self.item_stacks[slot] else {
+            return false;
+        };
+        if stack.kind != kind || stack.count == 0 {
+            return false;
+        }
+        stack.count -= 1;
+        self.item_stacks[slot] = (stack.count > 0).then_some(stack);
+        true
+    }
+
     #[cfg(test)]
     pub(crate) fn item_count(&self, kind: ItemKind) -> u32 {
         self.item_stacks

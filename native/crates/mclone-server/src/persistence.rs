@@ -72,7 +72,8 @@ pub const CHUNK_LIGHT_ALGORITHM_VERSION: u32 = 1;
 pub const ENTITY_CHUNK_RECORD_VERSION: u32 = 2;
 const LEGACY_PLAYER_RECORD_VERSION: u32 = 1;
 const STATISTICS_PLAYER_RECORD_VERSION: u32 = 2;
-pub const PLAYER_RECORD_VERSION: u32 = 3;
+const PLAYER_LIFE_RECORD_VERSION: u32 = 3;
+pub const PLAYER_RECORD_VERSION: u32 = 4;
 pub const DIMENSION_RECORD_VERSION: u32 = 2;
 pub const WORLD_METADATA_VERSION: u32 = 3;
 pub const WORLD_METADATA_TARGET_MINECRAFT_VERSION: &str = "1.17.1";
@@ -435,6 +436,7 @@ impl From<ItemStackSnapshot> for ItemStackSaveRecord {
         let kind = match stack.kind {
             mclone_protocol::ItemKind::Egg => "minecraft:egg",
             mclone_protocol::ItemKind::MallardEgg => "mclone:mallard_egg",
+            mclone_protocol::ItemKind::MallardFeather => "mclone:mallard_feather",
         };
         Self::new(kind, stack.count)
     }
@@ -488,8 +490,10 @@ pub struct PlayerRecord {
     pub x_rot_degrees: f32,
     pub on_ground: bool,
     pub selected_hotbar_slot: u8,
+    pub inventory: [Option<ItemStackSnapshot>; 36],
     pub total_experience: u64,
     pub statistics: PlayerStatistics,
+    pub mallard_field_guide: mclone_protocol::MallardFieldGuideProgress,
     pub health: f32,
     pub pending_death_cause: Option<PlayerDamageCause>,
 }
@@ -512,8 +516,10 @@ impl PlayerRecord {
             x_rot_degrees: 0.0,
             on_ground: false,
             selected_hotbar_slot: 0,
+            inventory: [None; 36],
             total_experience: 0,
             statistics: PlayerStatistics::default(),
+            mallard_field_guide: mclone_protocol::MallardFieldGuideProgress::default(),
             health: DEFAULT_PLAYER_MAX_HEALTH,
             pending_death_cause: None,
         }
@@ -4827,8 +4833,12 @@ fn write_player_record(writer: &mut impl Write, record: &PlayerRecord) -> ChunkS
     write_f32(writer, record.x_rot_degrees)?;
     write_bool(writer, record.on_ground)?;
     write_u8(writer, record.selected_hotbar_slot)?;
+    for stack in record.inventory {
+        write_optional_item_stack_snapshot(writer, stack)?;
+    }
     write_u64(writer, record.total_experience)?;
     write_player_statistics(writer, &record.statistics)?;
+    write_u32(writer, record.mallard_field_guide.bits())?;
     write_f32(writer, record.health)?;
     write_player_damage_cause(writer, record.pending_death_cause)?;
     writer.flush()?;
@@ -5210,18 +5220,32 @@ fn read_player_record(reader: &mut impl Read) -> ChunkStoreResult<PlayerRecord> 
         x_rot_degrees: read_f32(reader)?,
         on_ground: read_bool(reader)?,
         selected_hotbar_slot: read_u8(reader)?,
+        inventory: if codec_version >= PLAYER_RECORD_VERSION {
+            let mut inventory = [None; 36];
+            for stack in &mut inventory {
+                *stack = read_optional_item_stack_snapshot(reader)?;
+            }
+            inventory
+        } else {
+            [None; 36]
+        },
         total_experience: read_u64(reader)?,
         statistics: if codec_version >= STATISTICS_PLAYER_RECORD_VERSION {
             read_player_statistics(reader)?
         } else {
             PlayerStatistics::default()
         },
-        health: if codec_version >= PLAYER_RECORD_VERSION {
+        mallard_field_guide: if codec_version >= PLAYER_RECORD_VERSION {
+            mclone_protocol::MallardFieldGuideProgress::from_bits_retain(read_u32(reader)?)
+        } else {
+            mclone_protocol::MallardFieldGuideProgress::default()
+        },
+        health: if codec_version >= PLAYER_LIFE_RECORD_VERSION {
             read_f32(reader)?
         } else {
             DEFAULT_PLAYER_MAX_HEALTH
         },
-        pending_death_cause: if codec_version >= PLAYER_RECORD_VERSION {
+        pending_death_cause: if codec_version >= PLAYER_LIFE_RECORD_VERSION {
             read_player_damage_cause(reader)?
         } else {
             None
@@ -5418,6 +5442,48 @@ fn read_item_stack_save_record(reader: &mut impl Read) -> ChunkStoreResult<ItemS
         read_string(reader)?,
         read_u8(reader)?,
     ))
+}
+
+fn write_optional_item_stack_snapshot(
+    writer: &mut impl Write,
+    stack: Option<ItemStackSnapshot>,
+) -> ChunkStoreResult<()> {
+    write_bool(writer, stack.is_some())?;
+    if let Some(stack) = stack {
+        let kind = match stack.kind {
+            mclone_protocol::ItemKind::Egg => 0,
+            mclone_protocol::ItemKind::MallardEgg => 1,
+            mclone_protocol::ItemKind::MallardFeather => 2,
+        };
+        write_u8(writer, kind)?;
+        write_u8(writer, stack.count)?;
+    }
+    Ok(())
+}
+
+fn read_optional_item_stack_snapshot(
+    reader: &mut impl Read,
+) -> ChunkStoreResult<Option<ItemStackSnapshot>> {
+    if !read_bool(reader)? {
+        return Ok(None);
+    }
+    let kind = match read_u8(reader)? {
+        0 => mclone_protocol::ItemKind::Egg,
+        1 => mclone_protocol::ItemKind::MallardEgg,
+        2 => mclone_protocol::ItemKind::MallardFeather,
+        value => {
+            return Err(ChunkStoreError::InvalidData(format!(
+                "unknown player inventory item kind {value}"
+            )));
+        }
+    };
+    let count = read_u8(reader)?;
+    if count == 0 {
+        return Err(ChunkStoreError::InvalidData(
+            "player inventory item stack has zero count".to_owned(),
+        ));
+    }
+    Ok(Some(ItemStackSnapshot { kind, count }))
 }
 
 fn write_vec3d(writer: &mut impl Write, value: Vec3d) -> ChunkStoreResult<()> {
@@ -7218,6 +7284,14 @@ mod tests {
             x_rot_degrees: -12.5,
             on_ground: false,
             selected_hotbar_slot: 4,
+            inventory: {
+                let mut inventory = [None; 36];
+                inventory[4] = Some(ItemStackSnapshot {
+                    kind: mclone_protocol::ItemKind::MallardEgg,
+                    count: 3,
+                });
+                inventory
+            },
             total_experience: 987,
             statistics: {
                 let mut statistics = PlayerStatistics::default();
@@ -7225,6 +7299,9 @@ mod tests {
                 statistics.set(StatisticKey::successful_block_placement(), 45);
                 statistics
             },
+            mallard_field_guide: mclone_protocol::MallardFieldGuideProgress::from_bits_retain(
+                0b101011,
+            ),
             health: 13.5,
             pending_death_cause: None,
         }

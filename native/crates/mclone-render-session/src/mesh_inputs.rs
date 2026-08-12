@@ -270,8 +270,32 @@ pub fn actor_instances_from_presentations_near_observer(
                         actor.y_rot_degrees,
                         mclone_assets::mallard_duck_figure_id(),
                     )
-                    .with_dimensions(actor.width, actor.height)
+                    .with_dimensions(
+                        if actor.mallard_life_stage
+                            == Some(mclone_protocol::MallardLifeStage::Duckling)
+                        {
+                            actor.width * 0.58
+                        } else {
+                            actor.width
+                        },
+                        if actor.mallard_life_stage
+                            == Some(mclone_protocol::MallardLifeStage::Duckling)
+                        {
+                            actor.height * 0.62
+                        } else {
+                            actor.height
+                        },
+                    )
                     .with_walk_animation_distance(actor.walk_animation_distance)
+                    .with_packed_light(packed_light)
+                }
+                ActorPresentationKind::Entity(EntityKind::MallardNest) => {
+                    ActorInstance::mallard_nest(
+                        glam_vec3_from_vec3d(feet_position),
+                        actor.y_rot_degrees,
+                        actor.width,
+                        actor.height,
+                    )
                     .with_packed_light(packed_light)
                 }
                 ActorPresentationKind::Entity(EntityKind::Mannequin) => {
@@ -303,6 +327,13 @@ pub fn actor_instances_from_presentations_near_observer(
                             )
                             .with_packed_light(packed_light)
                         }
+                        Some(ItemKind::MallardFeather) => ActorInstance::mallard_feather(
+                            glam_vec3_from_vec3d(feet_position),
+                            actor.y_rot_degrees,
+                            actor.width,
+                            actor.height,
+                        )
+                        .with_packed_light(packed_light),
                     }
                 }
             };
@@ -363,6 +394,7 @@ pub fn actor_light_probe_height(actor: &ActorPresentation) -> f64 {
         ActorPresentationKind::Entity(EntityKind::Cow) => 1.3,
         ActorPresentationKind::Entity(EntityKind::Chicken) => f64::from(actor.height) * 0.92,
         ActorPresentationKind::Entity(EntityKind::Mallard) => f64::from(actor.height) * 0.82,
+        ActorPresentationKind::Entity(EntityKind::MallardNest) => f64::from(actor.height) * 0.5,
         ActorPresentationKind::Entity(EntityKind::Mannequin) => 1.62,
         ActorPresentationKind::Entity(EntityKind::DebugCube) => f64::from(actor.height) * 0.5,
         ActorPresentationKind::Entity(EntityKind::Item) => f64::from(actor.height) * 0.5,

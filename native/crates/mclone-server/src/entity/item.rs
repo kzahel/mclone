@@ -160,6 +160,7 @@ fn item_random_seed(id: EntityId, stack: ItemStackSnapshot) -> i64 {
     let item_id = match stack.kind {
         mclone_protocol::ItemKind::Egg => 0x0000_0001_u64,
         mclone_protocol::ItemKind::MallardEgg => 0x0000_0002_u64,
+        mclone_protocol::ItemKind::MallardFeather => 0x0000_0003_u64,
     };
     (id.0.wrapping_mul(0xbf58_476d_1ce4_e5b9).rotate_left(23) ^ item_id ^ u64::from(stack.count))
         as i64
@@ -191,6 +192,8 @@ mod tests {
                 kind: ItemKind::Egg,
                 count: 1,
             }),
+            mallard: None,
+            mallard_nest: None,
             position: Vec3d::new(0.5, 64.0, 0.5),
             y_rot_degrees: 0.0,
             x_rot_degrees: 0.0,

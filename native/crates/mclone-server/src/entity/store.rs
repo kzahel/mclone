@@ -1114,7 +1114,7 @@ impl ServerEntityStore {
                 age: self.items.get(&entity.id)?.age(),
                 pickup_delay: self.items.get(&entity.id)?.pickup_delay(),
             },
-            EntityKind::DebugCube => return None,
+            EntityKind::MallardNest | EntityKind::DebugCube => return None,
         };
         Some(EntitySaveRecord {
             persistent_id,
@@ -1263,6 +1263,7 @@ fn entity_kind_code(kind: EntityKind) -> Option<&'static str> {
         EntityKind::Cow => Some("minecraft:cow"),
         EntityKind::Chicken => Some("minecraft:chicken"),
         EntityKind::Mallard => Some("mclone:mallard"),
+        EntityKind::MallardNest => Some("mclone:mallard_nest"),
         EntityKind::Mannequin => Some("mclone:mannequin"),
         EntityKind::Item => Some("minecraft:item"),
         EntityKind::DebugCube => None,
@@ -1275,6 +1276,7 @@ fn item_stack_snapshot_from_save(
     let kind = match stack.kind.as_str() {
         "minecraft:egg" => ItemKind::Egg,
         "mclone:mallard_egg" => ItemKind::MallardEgg,
+        "mclone:mallard_feather" => ItemKind::MallardFeather,
         kind => {
             return Err(ChunkStoreError::InvalidData(format!(
                 "unsupported item stack kind {kind:?}"

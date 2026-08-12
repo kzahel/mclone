@@ -1282,8 +1282,10 @@ mod tests {
             x_rot_degrees: 0.0,
             on_ground: true,
             selected_hotbar_slot: 0,
+            inventory: [None; 36],
             total_experience: 0,
             statistics: PlayerStatistics::default(),
+            mallard_field_guide: mclone_protocol::MallardFieldGuideProgress::default(),
             health: 20.0,
             pending_death_cause: None,
         }
