@@ -1056,6 +1056,7 @@ impl RealmServer {
     pub fn set_day_time(&mut self, day_time: u64) {
         self.day_time = day_time;
         self.day_time_debug_override = true;
+        self.queue_time_update_for_all_interest_sources(self.time_update());
     }
 
     /// Durable daylight gamerule. Debug `--freeze-time` is layered separately
@@ -1081,7 +1082,11 @@ impl RealmServer {
     /// Freeze or resume the day/night clock. While frozen, simulation ticks leave
     /// `day_time` unchanged (debug hook for inspecting a fixed time of day).
     pub fn set_day_time_frozen(&mut self, frozen: bool) {
+        if self.day_time_frozen == frozen {
+            return;
+        }
         self.day_time_frozen = frozen;
+        self.queue_time_update_for_all_interest_sources(self.time_update());
     }
 
     pub fn initialize_world_metadata_blocking(&mut self) -> ChunkStoreResult<WorldMetadata> {
@@ -4526,7 +4531,18 @@ impl RealmServer {
     }
 
     fn queue_time_update_for_all_interest_sources(&mut self, update: ServerUpdate) {
-        for source in self.chunk_tracking.interest_sources() {
+        let sources = self
+            .players
+            .iter()
+            .map(|(player_id, _)| DimensionInterestSource::Player(player_id))
+            .chain(
+                self.observers
+                    .keys()
+                    .copied()
+                    .map(DimensionInterestSource::Observer),
+            )
+            .collect::<Vec<_>>();
+        for source in sources {
             self.chunk_tracking
                 .queue_update_for_source(source, update.clone());
         }

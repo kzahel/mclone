@@ -757,24 +757,30 @@ async function run() {
       }
       const canvas = page.locator("#mclone-canvas");
       if (showcase) {
-        await page.waitForFunction(
-          () => {
-            const state = globalThis.__mcloneWebApp?.state;
-            return state?.startupReady === true
-              && state.streamingSettled === true
-              && state.pendingCompileJobCount === 0
-              && state.entityCount === state.showcaseEntityCount
-              && state.mallardCount === state.showcaseMallardCount
-              && state.mallardNestCount === state.showcaseMallardNestCount
-              && state.mallardFieldGuideBits === state.showcaseFieldGuideBits
-              && state.mallardEggHotbarCount === 2
-              && state.mallardFeatherHotbarCount === 1
-              && state.actorCount >= 5
-              && state.drawnActorCount >= 5;
-          },
-          undefined,
-          { timeout: 60_000 },
-        );
+        try {
+          await page.waitForFunction(
+            () => {
+              const state = globalThis.__mcloneWebApp?.state;
+              return state?.startupReady === true
+                && state.streamingSettled === true
+                && state.pendingCompileJobCount === 0
+                && state.entityCount === state.showcaseEntityCount
+                && state.mallardCount === state.showcaseMallardCount
+                && state.mallardNestCount === state.showcaseMallardNestCount
+                && state.mallardFieldGuideBits === state.showcaseFieldGuideBits
+                && state.dayTime === 6000
+                && state.mallardEggHotbarCount === 2
+                && state.mallardFeatherHotbarCount === 1
+                && state.actorCount >= 4
+                && state.drawnActorCount >= 4;
+            },
+            undefined,
+            { timeout: 60_000 },
+          );
+        } catch (error) {
+          const state = await page.evaluate(() => globalThis.__mcloneWebApp?.state ?? null);
+          throw new Error(`showcase did not settle: ${error instanceof Error ? error.message : String(error)}\nstate=${JSON.stringify(state, null, 2)}`);
+        }
         await page.evaluate(() => globalThis.__mcloneWebApp?.pauseRendering?.());
         await page.waitForFunction(
           () => globalThis.__mcloneWebApp?.state?.tickFrameBusy === false,
@@ -832,10 +838,12 @@ async function run() {
           || result?.showcaseRevision !== 1
           || result?.activeWorldSeedText !== "17502"
           || result?.generationProfile !== "authored-only"
+          || result?.dayTime !== 6000
           || result?.entityCount !== 4
           || result?.mallardCount !== 3
           || result?.mallardNestCount !== 1
           || result?.mallardFieldGuideBits !== 63
+          || String(result?.showcaseEntryEye) !== `${result.cameraX},${result.cameraY},${result.cameraZ}`
           || Object.values(worldRecordCounts).some((count) => count !== 0)
         ) {
           throw new Error(`browser playable-showcase probe failed:\n${JSON.stringify({

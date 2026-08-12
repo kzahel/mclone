@@ -8,12 +8,12 @@
   "dayTime": 6000,
   "freezeTime": true,
   "entry": {
-    "feet": [8.5, 66.0, 12.5],
-    "lookAt": [2.5, 65.2, 8.5]
+    "feet": [8.5, 66.0, 7.5],
+    "lookAt": [8.0, 65.0, 1.5]
   },
   "blockPatches": [
     {
-      "position": [0, 65, 8],
+      "position": [7, 65, 0],
       "block": "minecraft:lily_pad",
       "liveInstantiation": "minecraft-waterlily-patch"
     }
@@ -21,7 +21,7 @@
   "entities": [
     {
       "id": "parent-a",
-      "position": [0.5, 64.88, 7.5],
+      "position": [7.5, 64.88, 0.5],
       "yRotDegrees": 90.0,
       "onGround": false,
       "liveInstantiation": "mclone-mallard-natural-spawn",
@@ -36,7 +36,7 @@
     },
     {
       "id": "parent-b",
-      "position": [0.5, 64.88, 9.5],
+      "position": [9.5, 64.88, 0.5],
       "yRotDegrees": 90.0,
       "onGround": false,
       "liveInstantiation": "mclone-mallard-natural-spawn",
@@ -51,7 +51,7 @@
     },
     {
       "id": "duckling",
-      "position": [2.5, 65.0, 7.5],
+      "position": [8.5, 65.0, 2.5],
       "yRotDegrees": -35.0,
       "onGround": true,
       "liveInstantiation": "mclone-mallard-attended-hatch",
@@ -66,7 +66,7 @@
     },
     {
       "id": "nest",
-      "position": [5.5, 66.0, 11.5],
+      "position": [6.5, 66.0, 4.5],
       "yRotDegrees": 0.0,
       "onGround": true,
       "liveInstantiation": "mclone-mallard-nest-placement",

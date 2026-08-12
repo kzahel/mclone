@@ -3307,7 +3307,8 @@ impl WebSceneHost {
             report_set_number(
                 &object,
                 "dayTime",
-                f64::from(host.mono_time_of_day()) * 24_000.0,
+                host.mono_client()
+                    .map_or(0.0, |client| client.day_time() as f64),
             )?;
             report_set_number(&object, "sunAngle", f64::from(host.mono_sun_angle()))?;
             if let Some(client) = host.mono_client() {

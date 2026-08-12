@@ -17,7 +17,8 @@ use crate::persistence::{
 };
 use crate::{
     AUTHORED_WORLD_HEIGHT, AUTHORED_WORLD_MIN_Y, AuthoredWorldFixtureKind, ChunkStoreError,
-    MemoryWorldStore, WorldGenerationProfile, WorldStore, write_authored_world_fixture_to_store,
+    DimensionDefinition, DimensionRecord, MemoryWorldStore, WorldBehaviorProfile,
+    WorldGenerationProfile, WorldMetadata, WorldStore, write_authored_world_fixture_to_store,
 };
 
 pub const PLAYABLE_SHOWCASE_SCHEMA_VERSION: u32 = 1;
@@ -194,11 +195,36 @@ pub fn write_playable_showcase_to_store(
 ) -> Result<PlayableShowcaseManifest, PlayableShowcaseError> {
     let recipe = parse_and_validate_recipe(id, id.recipe_json())?;
     write_authored_world_fixture_to_store(store, recipe.base_terrain.fixture_kind())?;
+    write_world_records(store, &recipe)?;
     apply_block_patches(store, &recipe.block_patches)?;
     write_entities(store, id, &recipe.entities)?;
     write_player(store, identity, &recipe)?;
     store.flush()?;
     Ok(manifest_from_recipe(id, &recipe))
+}
+
+fn write_world_records(
+    store: &mut dyn WorldStore,
+    recipe: &PlayableShowcaseRecipe,
+) -> Result<(), PlayableShowcaseError> {
+    let mut metadata = WorldMetadata::new(
+        recipe.seed,
+        WorldGenerationProfile::authored_only(),
+        WorldBehaviorProfile::Mutable,
+        1,
+    );
+    metadata.day_time = recipe.day_time;
+    store.save_world_metadata(&metadata)?;
+    store.save_dimension(&DimensionRecord {
+        key: DimensionKey::overworld(),
+        codec_version: crate::DIMENSION_RECORD_VERSION,
+        revision: 1,
+        definition: DimensionDefinition::overworld(
+            recipe.seed,
+            WorldGenerationProfile::authored_only(),
+        ),
+    })?;
+    Ok(())
 }
 
 fn parse_and_validate_recipe(
@@ -799,6 +825,16 @@ mod tests {
             first_manifest.field_guide_bits,
             MallardFieldGuideProgress::KNOWN_MASK
         );
+        assert_eq!(first.world_metadata().unwrap().day_time, 6_000);
+        assert!(first.world_metadata().unwrap().do_daylight_cycle);
+        assert_eq!(
+            first
+                .dimension(&DimensionKey::overworld())
+                .unwrap()
+                .definition
+                .generation_profile,
+            WorldGenerationProfile::authored_only()
+        );
 
         let first_entities = first.entity_chunk(ChunkPos::new(0, 0)).unwrap();
         let second_entities = second.entity_chunk(ChunkPos::new(0, 0)).unwrap();
@@ -816,7 +852,7 @@ mod tests {
         );
 
         let center = first.chunk(ChunkPos::new(0, 0)).unwrap();
-        let pos = BlockPos::new(0, 65, 8);
+        let pos = BlockPos::new(7, 65, 0);
         let section = center
             .snapshot
             .sections

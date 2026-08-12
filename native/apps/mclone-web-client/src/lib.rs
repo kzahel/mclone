@@ -268,10 +268,11 @@ impl WebRuntime {
         initial_center: ChunkPos,
     ) -> Result<Self, String> {
         let seed = config.seed;
+        let initial_day_time = config.day_time;
         let runner = WebIntegratedServerRunner::new(config).await?;
         let diagnostics = runner.diagnostics();
         let mut core = SingleViewRuntime::local_integrated_with_seed(seed, initial_center, 0, 0);
-        core.force_day_time(diagnostics.day_time);
+        core.force_day_time(initial_day_time.unwrap_or(diagnostics.day_time));
         Ok(Self {
             core,
             host: WebRuntimeHost::Worker(runner),
