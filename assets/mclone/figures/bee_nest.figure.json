@@ -1,0 +1,225 @@
+{
+  "schemaVersion": 1,
+  "name": "bee_nest",
+  "materials": {
+    "bark": {
+      "color": "#64462d"
+    },
+    "bark_light": {
+      "color": "#8a6240"
+    },
+    "heartwood": {
+      "color": "#b08351"
+    },
+    "cavity": {
+      "color": "#211910"
+    },
+    "comb": {
+      "color": "#d5a72d"
+    },
+    "comb_light": {
+      "color": "#f0cf58"
+    }
+  },
+  "textures": {
+    "bark_stripe": {
+      "palette": {
+        ".": "#64462d",
+        "l": "#8a6240",
+        "d": "#49311f"
+      },
+      "pixels": [
+        "ll...d..ll",
+        "..dd...l..",
+        "l...ll...d",
+        "..l...dd..",
+        "dd...l...l",
+        "...ll..d.."
+      ]
+    },
+    "honeycomb": {
+      "palette": {
+        ".": "#d5a72d",
+        "l": "#f0cf58",
+        "d": "#9a6e1e"
+      },
+      "pixels": [
+        ".l..l..l",
+        "l.dd.dd.",
+        ".d..d..l",
+        "l.dd.dd.",
+        ".l..l..l",
+        "..dd.dd."
+      ]
+    }
+  },
+  "parts": [
+    {
+      "name": "log_floor",
+      "at": [
+        0,
+        0.12,
+        0
+      ],
+      "material": "bark",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          1.02,
+          0.24,
+          0.72
+        ],
+        "faces": {
+          "up": {
+            "texture": "bark_stripe"
+          }
+        }
+      }
+    },
+    {
+      "name": "log_roof",
+      "at": [
+        0,
+        0.7,
+        0.02
+      ],
+      "material": "bark",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          1.01,
+          0.2,
+          0.76
+        ],
+        "faces": {
+          "up": {
+            "texture": "bark_stripe"
+          }
+        }
+      }
+    },
+    {
+      "name": "log_side_l",
+      "at": [
+        -0.43,
+        0.41,
+        0.02
+      ],
+      "material": "bark_light",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.19,
+          0.48,
+          0.74
+        ],
+        "faces": {
+          "west": {
+            "texture": "bark_stripe"
+          }
+        }
+      }
+    },
+    {
+      "name": "log_side_r",
+      "at": [
+        0.43,
+        0.41,
+        0.02
+      ],
+      "material": "bark_light",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.19,
+          0.48,
+          0.74
+        ],
+        "faces": {
+          "east": {
+            "texture": "bark_stripe"
+          }
+        }
+      }
+    },
+    {
+      "name": "cavity_back",
+      "at": [
+        0,
+        0.42,
+        0.29
+      ],
+      "material": "cavity",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.68,
+          0.39,
+          0.08
+        ]
+      }
+    },
+    {
+      "name": "exposed_comb",
+      "at": [
+        0,
+        0.44,
+        -0.325
+      ],
+      "material": "comb",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.5,
+          0.31,
+          0.055
+        ],
+        "faces": {
+          "north": {
+            "texture": "honeycomb"
+          }
+        }
+      }
+    },
+    {
+      "name": "broken_end_l",
+      "at": [
+        -0.54,
+        0.38,
+        0.18
+      ],
+      "rot": [
+        0,
+        0,
+        13
+      ],
+      "material": "heartwood",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.12,
+          0.5,
+          0.32
+        ]
+      }
+    },
+    {
+      "name": "comb_glint",
+      "at": [
+        0.11,
+        0.48,
+        -0.36
+      ],
+      "material": "comb_light",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.12,
+          0.09,
+          0.025
+        ]
+      }
+    }
+  ],
+  "clips": {}
+}

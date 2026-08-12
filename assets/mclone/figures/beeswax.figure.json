@@ -1,0 +1,106 @@
+{
+  "schemaVersion": 1,
+  "name": "beeswax",
+  "materials": {
+    "wax": {
+      "color": "#d6a62c"
+    },
+    "wax_light": {
+      "color": "#f0cd58"
+    },
+    "wax_shadow": {
+      "color": "#a7761e"
+    }
+  },
+  "textures": {
+    "wax_face": {
+      "palette": {
+        ".": "#d6a62c",
+        "l": "#f0cd58",
+        "d": "#a7761e"
+      },
+      "pixels": [
+        "ll....ll",
+        "l......l",
+        "..d..d..",
+        ".d....d.",
+        "..d..d..",
+        "l......l"
+      ]
+    }
+  },
+  "parts": [
+    {
+      "name": "cake_center",
+      "at": [
+        0,
+        0,
+        0
+      ],
+      "rot": [
+        0,
+        -8,
+        0
+      ],
+      "material": "wax",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.54,
+          0.18,
+          0.43
+        ],
+        "faces": {
+          "up": {
+            "texture": "wax_face"
+          }
+        }
+      }
+    },
+    {
+      "name": "cake_left",
+      "at": [
+        -0.34,
+        -0.03,
+        0.12
+      ],
+      "rot": [
+        0,
+        18,
+        -3
+      ],
+      "material": "wax_shadow",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.3,
+          0.14,
+          0.3
+        ]
+      }
+    },
+    {
+      "name": "cake_right",
+      "at": [
+        0.33,
+        -0.02,
+        0.08
+      ],
+      "rot": [
+        0,
+        -20,
+        4
+      ],
+      "material": "wax_light",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.28,
+          0.15,
+          0.28
+        ]
+      }
+    }
+  ],
+  "clips": {}
+}

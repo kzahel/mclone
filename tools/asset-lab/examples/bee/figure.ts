@@ -5,11 +5,23 @@ import { figure } from "../../src/dsl";
 export default figure("bee", ({
   mat,
   asciiTexture,
+  defaultClip,
+  metadata,
   part,
   box,
   wingFlap,
   followThrough,
+  swing,
 }) => {
+  metadata({
+    bodyPlans: ["winged"],
+    disposition: "passive",
+    groups: ["animal"],
+    habitats: ["air", "land"],
+    scale: "tiny",
+    themes: ["bee", "flower", "pollinator", "temperate"],
+  });
+
   mat("yellow", "#d9a72e");
   mat("yellow_light", "#eccb58");
   mat("brown", "#4a3525");
@@ -176,9 +188,10 @@ export default figure("bee", ({
   }
 
   wingFlap("hover", {
+    label: "Colony hover",
+    role: "idle",
     fps: 24,
     duration: 0.8,
-    cycleDistance: 0.28,
     loop: true,
     samples: 21,
     body: "abdomen",
@@ -191,4 +204,48 @@ export default figure("bee", ({
       followThrough("abdomen_tip", { source: "abdomen", sourceChannel: "pos", sourceAxis: "y", axis: "x", degrees: 7, overshoot: 0.55, lag: 0.12 }),
     ],
   });
+  wingFlap("fly", {
+    label: "Forage flight",
+    role: "locomotion",
+    fps: 30,
+    duration: 0.58,
+    cycleDistance: 0.68,
+    loop: true,
+    samples: 19,
+    body: "abdomen",
+    bodyBob: 0.025,
+    degrees: 38,
+    frequency: 4,
+    leftWing: "forewing_l",
+    rightWing: "forewing_r",
+    tracks: [
+      swing("abdomen", { axis: "x", center: -8, degrees: 2.5, frequency: 1 }),
+      followThrough("abdomen_tip", { source: "abdomen", sourceChannel: "pos", sourceAxis: "y", axis: "x", degrees: 5, overshoot: 0.5, lag: 0.1 }),
+      swing("antenna_l", { axis: "x", center: -8, degrees: 6, frequency: 1, phase: 0.12 }),
+      swing("antenna_r", { axis: "x", center: -8, degrees: 6, frequency: 1, phase: 0.12 }),
+    ],
+  });
+  wingFlap("forage", {
+    label: "Flower forage",
+    role: "action",
+    fps: 24,
+    duration: 1.08,
+    loop: true,
+    samples: 27,
+    body: "abdomen",
+    bodyBob: 0.018,
+    bodyBobCenter: -0.04,
+    degrees: 18,
+    frequency: 2,
+    leftWing: "forewing_l",
+    rightWing: "forewing_r",
+    tracks: [
+      swing("abdomen", { axis: "x", center: 23, degrees: 5, frequency: 1 }),
+      swing("head", { axis: "x", center: 16, degrees: 8, frequency: 1, phase: 0.12 }),
+      swing("antenna_l", { axis: "x", center: 12, degrees: 12, frequency: 1, phase: 0.25 }),
+      swing("antenna_r", { axis: "x", center: 12, degrees: 12, frequency: 1, phase: 0.25 }),
+      followThrough("abdomen_tip", { source: "abdomen", sourceChannel: "rot", sourceAxis: "x", axis: "x", degrees: 5, overshoot: 0.35, lag: 0.1 }),
+    ],
+  });
+  defaultClip("hover");
 });

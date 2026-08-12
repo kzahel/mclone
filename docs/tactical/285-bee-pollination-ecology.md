@@ -164,10 +164,11 @@ Refine the checked bee source into reviewed named clips:
 - `forage`: action loop or bounded action with a flower-facing dip and wing
   modulation.
 
-Author `bee_nest`, `bee_hotel`, and `beeswax` through the generalized Asset Lab
-semantic-prop pipeline. A natural site should read as a sheltered wild cavity
-or comb-bearing log; the managed hotel must read as deliberate player-made
-habitat. Promote all four assets to `live_gameplay` only with ordinary
+Author `bee_nest`, `bee_hotel`, `bee_hotel_item`, and `beeswax` through the
+generalized Asset Lab semantic-prop pipeline. A natural site should read as a
+sheltered wild cavity or comb-bearing log; the managed hotel must read as
+deliberate player-made habitat, while its carried asset reads as an unassembled
+kit. Promote all five assets to `live_gameplay` only with ordinary
 instantiation and required runtime loading in the same series.
 
 Add a small first-party buzz family through the provenance-locked audio bank.
@@ -228,7 +229,8 @@ Acceptance requires:
 ## Human Review Points
 
 - **Review A — visual language:** bee hover/fly/forage sheets and the natural
-  nest, managed hotel, and wax props before they become runtime requirements.
+  nest, managed hotel/kit, and wax props before they become runtime
+  requirements.
 - **Review B — behavioral legibility:** an early real-world capture/video
   showing useful three-dimensional movement, flower approach, and return. A
   bee that only jitters, spins, or hovers in one cell is a failed gate.
@@ -273,3 +275,33 @@ At minimum:
 
 These are future chapters, not hidden requirements for calling the first
 flowering-colony loop complete.
+
+## Execution Record
+
+### Slice 0 — tactical
+
+Landed as `4a285e10` (`Plan bee pollination ecology`).
+
+### Slice 1 — Review A semantic assets
+
+The existing worker bee now owns explicit `hover`, distance-driven `fly`, and
+flower-dipping `forage` clips, with `hover` as its default. Checked semantic
+props add a comb-bearing hollow-branch colony, constructed hotel, compact
+carried hotel kit, and three-piece beeswax resource. All five assets remain
+`review_only` until ordinary gameplay integration lands.
+
+The following clean review sheets were rendered and inspected:
+
+- [`bee hover`](</tmp/mclone-bee-hover-sheet.png>)
+- [`bee flight`](</tmp/mclone-bee-fly-sheet.png>)
+- [`bee forage`](</tmp/mclone-bee-forage-sheet.png>)
+- [`wild colony`](</tmp/mclone-bee-nest-sheet.png>)
+- [`managed hotel`](</tmp/mclone-bee-hotel-sheet.png>)
+- [`carried hotel kit`](</tmp/mclone-bee-hotel-item-sheet.png>)
+- [`beeswax`](</tmp/mclone-beeswax-sheet.png>)
+
+Review A passes: the three bee poses remain identifiable at sheet scale, the
+wild and managed sites are visually distinct, and both inventory props retain
+readable silhouettes. `pnpm --dir tools/asset-lab test` passes the canonical
+JSON, catalogue, geometry, ground, and surface gates across 213 figures with no
+new acknowledged exceptions.

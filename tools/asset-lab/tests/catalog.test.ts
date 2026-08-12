@@ -186,7 +186,7 @@ test("discovers canonical examples without the legacy rounded archive", async ()
     FIRST_PARTY_FIGURES.filter((figure) => sourceSet.has(path.resolve(figure.sourcePath)))
       .map((figure) => figure.name)
       .sort(),
-    ["chicken", "cow", "deer", "mallard_duck", "player", "upright_bear"],
+    ["bee", "chicken", "cow", "deer", "mallard_duck", "player", "upright_bear"],
   );
 });
 

@@ -1,0 +1,172 @@
+{
+  "schemaVersion": 1,
+  "name": "bee_hotel",
+  "materials": {
+    "post": {
+      "color": "#6c4728"
+    },
+    "wood": {
+      "color": "#b48149"
+    },
+    "wood_light": {
+      "color": "#d0a365"
+    },
+    "roof": {
+      "color": "#755239"
+    },
+    "hole": {
+      "color": "#281e16"
+    }
+  },
+  "textures": {
+    "nesting_holes": {
+      "palette": {
+        ".": "#b48149",
+        "o": "#281e16",
+        "l": "#d0a365"
+      },
+      "pixels": [
+        "l........l",
+        ".oo.oo.oo.",
+        ".oo.oo.oo.",
+        "...oo.oo..",
+        "...oo.oo..",
+        ".oo.oo.oo.",
+        ".oo.oo.oo.",
+        "l........l"
+      ]
+    }
+  },
+  "parts": [
+    {
+      "name": "post_l",
+      "at": [
+        -0.35,
+        0.47,
+        0.08
+      ],
+      "material": "post",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.13,
+          0.94,
+          0.15
+        ]
+      }
+    },
+    {
+      "name": "post_r",
+      "at": [
+        0.35,
+        0.47,
+        0.08
+      ],
+      "material": "post",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.13,
+          0.94,
+          0.15
+        ]
+      }
+    },
+    {
+      "name": "hotel_body",
+      "at": [
+        0,
+        0.88,
+        0
+      ],
+      "material": "wood",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.86,
+          0.68,
+          0.42
+        ],
+        "faces": {
+          "north": {
+            "texture": "nesting_holes"
+          }
+        }
+      }
+    },
+    {
+      "name": "inner_shelf",
+      "at": [
+        0,
+        0.88,
+        -0.23
+      ],
+      "material": "wood_light",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.74,
+          0.07,
+          0.05
+        ]
+      }
+    },
+    {
+      "name": "roof",
+      "at": [
+        0,
+        1.27,
+        0
+      ],
+      "rot": [
+        0,
+        0,
+        -4
+      ],
+      "material": "roof",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          1.02,
+          0.13,
+          0.58
+        ]
+      }
+    },
+    {
+      "name": "foot_l",
+      "at": [
+        -0.35,
+        0.055,
+        0.08
+      ],
+      "material": "post",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.28,
+          0.11,
+          0.3
+        ]
+      }
+    },
+    {
+      "name": "foot_r",
+      "at": [
+        0.35,
+        0.055,
+        0.08
+      ],
+      "material": "post",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.28,
+          0.11,
+          0.3
+        ]
+      }
+    }
+  ],
+  "clips": {}
+}

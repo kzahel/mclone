@@ -1,0 +1,158 @@
+{
+  "schemaVersion": 1,
+  "name": "bee_hotel_item",
+  "materials": {
+    "wood": {
+      "color": "#a87540"
+    },
+    "wood_light": {
+      "color": "#d1a665"
+    },
+    "strap": {
+      "color": "#5c412b"
+    },
+    "hole": {
+      "color": "#2c2118"
+    }
+  },
+  "textures": {},
+  "parts": [
+    {
+      "name": "board_left",
+      "at": [
+        -0.2,
+        0,
+        0
+      ],
+      "material": "wood",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.16,
+          0.34,
+          0.72
+        ]
+      }
+    },
+    {
+      "name": "hole_left",
+      "at": [
+        -0.2,
+        0.05,
+        -0.37
+      ],
+      "material": "hole",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.065,
+          0.065,
+          0.025
+        ]
+      }
+    },
+    {
+      "name": "board_middle",
+      "at": [
+        0,
+        0,
+        0
+      ],
+      "material": "wood",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.16,
+          0.34,
+          0.72
+        ]
+      }
+    },
+    {
+      "name": "hole_middle",
+      "at": [
+        0,
+        0.05,
+        -0.37
+      ],
+      "material": "hole",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.065,
+          0.065,
+          0.025
+        ]
+      }
+    },
+    {
+      "name": "board_right",
+      "at": [
+        0.2,
+        0,
+        0
+      ],
+      "material": "wood",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.16,
+          0.34,
+          0.72
+        ]
+      }
+    },
+    {
+      "name": "hole_right",
+      "at": [
+        0.2,
+        0.05,
+        -0.37
+      ],
+      "material": "hole",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.065,
+          0.065,
+          0.025
+        ]
+      }
+    },
+    {
+      "name": "cap",
+      "at": [
+        0,
+        0.2,
+        0
+      ],
+      "material": "wood_light",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.68,
+          0.08,
+          0.78
+        ]
+      }
+    },
+    {
+      "name": "strap",
+      "at": [
+        0,
+        0.245,
+        0
+      ],
+      "material": "strap",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.1,
+          0.055,
+          0.84
+        ]
+      }
+    }
+  ],
+  "clips": {}
+}
