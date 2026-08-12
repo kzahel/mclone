@@ -9,6 +9,7 @@ pub const UPRIGHT_BEAR_FIGURE_PATH: &str = "assets/mclone/figures/upright_bear.f
 pub const COW_FIGURE_PATH: &str = "assets/mclone/figures/cow.figure.json";
 pub const CHICKEN_FIGURE_PATH: &str = "assets/mclone/figures/chicken.figure.json";
 pub const MALLARD_DUCK_FIGURE_PATH: &str = "assets/mclone/figures/mallard_duck.figure.json";
+pub const DEER_FIGURE_PATH: &str = "assets/mclone/figures/deer.figure.json";
 pub const MALLARD_NEST_FIGURE_PATH: &str = "assets/mclone/figures/mallard_nest.figure.json";
 pub const MALLARD_FEATHER_FIGURE_PATH: &str = "assets/mclone/figures/mallard_feather.figure.json";
 pub const DEFAULT_PLAYER_FIGURE_ID: ActorFigureId = ActorFigureId::from_static("mclone:player");
@@ -16,15 +17,17 @@ pub const UPRIGHT_BEAR_FIGURE_ID: ActorFigureId = ActorFigureId::from_static("mc
 pub const COW_FIGURE_ID: ActorFigureId = ActorFigureId::from_static("mclone:cow");
 pub const CHICKEN_FIGURE_ID: ActorFigureId = ActorFigureId::from_static("mclone:chicken");
 pub const MALLARD_DUCK_FIGURE_ID: ActorFigureId = ActorFigureId::from_static("mclone:mallard_duck");
+pub const DEER_FIGURE_ID: ActorFigureId = ActorFigureId::from_static("mclone:deer");
 pub const MALLARD_NEST_FIGURE_ID: ActorFigureId = ActorFigureId::from_static("mclone:mallard_nest");
 pub const MALLARD_FEATHER_FIGURE_ID: ActorFigureId =
     ActorFigureId::from_static("mclone:mallard_feather");
-pub const FIRST_PARTY_ACTOR_FIGURE_IDS: [ActorFigureId; 5] = [
+pub const FIRST_PARTY_ACTOR_FIGURE_IDS: [ActorFigureId; 6] = [
     DEFAULT_PLAYER_FIGURE_ID,
     UPRIGHT_BEAR_FIGURE_ID,
     COW_FIGURE_ID,
     CHICKEN_FIGURE_ID,
     MALLARD_DUCK_FIGURE_ID,
+    DEER_FIGURE_ID,
 ];
 pub const FIRST_PARTY_SEMANTIC_PROP_FIGURE_IDS: [SemanticFigureId; 2] =
     [MALLARD_NEST_FIGURE_ID, MALLARD_FEATHER_FIGURE_ID];
@@ -228,6 +231,10 @@ pub fn mallard_duck_figure_path() -> AssetPath {
     AssetPath::new(MALLARD_DUCK_FIGURE_PATH)
 }
 
+pub fn deer_figure_path() -> AssetPath {
+    AssetPath::new(DEER_FIGURE_PATH)
+}
+
 pub fn mallard_nest_figure_path() -> AssetPath {
     AssetPath::new(MALLARD_NEST_FIGURE_PATH)
 }
@@ -256,6 +263,10 @@ pub const fn mallard_duck_figure_id() -> ActorFigureId {
     MALLARD_DUCK_FIGURE_ID
 }
 
+pub const fn deer_figure_id() -> ActorFigureId {
+    DEER_FIGURE_ID
+}
+
 pub const fn mallard_nest_figure_id() -> SemanticFigureId {
     MALLARD_NEST_FIGURE_ID
 }
@@ -271,6 +282,7 @@ fn actor_figure_path(id: ActorFigureId) -> Option<AssetPath> {
         "mclone:cow" => Some(cow_figure_path()),
         "mclone:chicken" => Some(chicken_figure_path()),
         "mclone:mallard_duck" => Some(mallard_duck_figure_path()),
+        "mclone:deer" => Some(deer_figure_path()),
         _ => None,
     }
 }
@@ -435,6 +447,15 @@ mod tests {
         assert_eq!(
             semantic_figure_path(mallard_feather_figure_id()).unwrap(),
             mallard_feather_figure_path()
+        );
+    }
+
+    #[test]
+    fn deer_figure_has_a_stable_runtime_mapping() {
+        assert_eq!(deer_figure_id().as_str(), "mclone:deer");
+        assert_eq!(
+            first_party_actor_figure_path(deer_figure_id()).unwrap(),
+            deer_figure_path()
         );
     }
 }

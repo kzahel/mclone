@@ -26,7 +26,7 @@ export const FIRST_PARTY_SEMANTIC_ASSETS: readonly FirstPartySemanticAsset[] = [
   firstPartyActor("chicken"),
   firstPartyActor("mallard_duck"),
   firstPartyActor("upright_bear"),
-  firstPartyActor("deer", "review_only"),
+  firstPartyActor("deer"),
   firstPartyProp("mallard_nest", "world_prop", "ground"),
   firstPartyProp("mallard_feather", "item_prop", "item_center"),
 ];

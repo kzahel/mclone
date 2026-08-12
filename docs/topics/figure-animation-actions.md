@@ -2,11 +2,12 @@
 
 Topic: `figure-animation-actions`
 
-Status: shared runtime playback landed locally 2026-08-12. Canonical figures
+Status: shared runtime playback landed 2026-08-12. Canonical figures
 carry authored defaults and clip presentation metadata, Asset Lab plays and
 completes one-shot actions explicitly, and authoritative entities now replicate
 named distance- or elapsed-phase requests through persistence and rendering.
-Deer remains the first multi-action gameplay consumer planned by Tactical
+Deer is now the first accepted multi-action runtime asset; authoritative
+gameplay selection remains the next slice of Tactical
 [`284`](../tactical/284-deer-forest-edge-ecology-and-semantic-props.md).
 
 ## Scope
@@ -196,8 +197,9 @@ or a semantic figure-format change.
 
 ## Recommended Next Direction
 
-After human review, promote Tactical
-[`284`](../tactical/284-deer-forest-edge-ecology-and-semantic-props.md)'s deer
-candidate into the live actor inventory and use it to prove ordinary gameplay
-selection. Keep the existing Roly-poly lesson: do not extract anatomy-specific
-helpers until multiple corrected figures prove a stable common pattern.
+Use Tactical
+[`284`](../tactical/284-deer-forest-edge-ecology-and-semantic-props.md)'s
+accepted `mclone:deer` runtime asset to prove ordinary authoritative gameplay
+selection across idle, locomotion, and one-shot actions. Keep the existing
+Roly-poly lesson: do not extract anatomy-specific helpers until multiple
+corrected figures prove a stable common pattern.

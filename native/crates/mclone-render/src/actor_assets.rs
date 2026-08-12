@@ -237,6 +237,10 @@ mod tests {
             include_str!("../../../../assets/mclone/figures/mallard_duck.figure.json"),
         );
         source.insert_text(
+            mclone_assets::deer_figure_path(),
+            include_str!("../../../../assets/mclone/figures/deer.figure.json"),
+        );
+        source.insert_text(
             mclone_assets::mallard_nest_figure_path(),
             include_str!("../../../../assets/mclone/figures/mallard_nest.figure.json"),
         );
@@ -288,11 +292,23 @@ mod tests {
         assert!(
             assets
                 .figures
+                .get(mclone_assets::deer_figure_id())
+                .is_some()
+        );
+        assert!(
+            assets
+                .figures
                 .prepared(default_player_figure_id())
                 .is_some()
         );
         assert!(assets.figures.prepared(chicken_figure_id()).is_some());
         assert!(assets.figures.prepared(mallard_duck_figure_id()).is_some());
+        assert!(
+            assets
+                .figures
+                .prepared(mclone_assets::deer_figure_id())
+                .is_some()
+        );
         assert!(
             assets
                 .figures
@@ -305,6 +321,6 @@ mod tests {
                 .prepared(mclone_assets::mallard_feather_figure_id())
                 .is_some()
         );
-        assert_eq!(assets.figures.len(), 7);
+        assert_eq!(assets.figures.len(), 8);
     }
 }

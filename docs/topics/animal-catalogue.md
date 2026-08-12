@@ -16,7 +16,11 @@ bundle and after-main-push deployment path.
 
 Runtime promotion extended again on 2026-08-11: the approved mallard now joins
 player, chicken, upright bear, and cow in the first-party pack, bringing the
-catalogue's Runtime-only filter to five entries. The promotion itself remains
+catalogue's Runtime-only filter to five entries. Human Review 2 of Tactical
+284 subsequently accepted deer, bringing the filter to six entries and making
+its exact ten-clip semantic JSON a required shared runtime asset. Ordinary
+world instantiation remains separately gated by the deer ecology work. The
+promotion itself remains
 owned by the shared figure/runtime pipeline rather than this browser topic.
 
 ## Scope

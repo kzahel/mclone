@@ -1,6 +1,6 @@
 # Tactical 284: Deer Forest-Edge Ecology and Semantic Props
 
-Status: active; Review 2 deer action candidate ready 2026-08-12
+Status: active; Review 2 accepted and shared runtime asset promoted 2026-08-12
 
 Topics:
 
@@ -663,6 +663,24 @@ world-generation change into one opaque commit.
   habitat query, drop, or showcase code has landed. On acceptance, the next
   slice promotes this exact checked asset into shared runtime lookup before
   forest-edge terrain/habitat behavior begins.
+
+### 2026-08-12 — Review 2 acceptance and runtime promotion
+
+- Human review accepted the articulated deer and its ten-clip action set.
+- Changed its checked promotion status from `review_only` to `live_gameplay`
+  and added stable `mclone:deer` ID/path lookup to the shared Rust asset
+  inventory. The exact reviewed JSON is now a required first-party actor
+  resource and missing deer data fails shared preparation.
+- Kept this as an asset-capability boundary: no entity kind or showcase can
+  instantiate deer until the ordinary habitat/spawn slice lands. The status
+  means the accepted asset is available to live gameplay, not that ecology is
+  complete.
+- Asset Lab typecheck, all 33 semantic tests, 204-source geometry/ground/
+  surface gates, the catalogue build, first-party pack tests, strict
+  proprietary-free validation, 78 `mclone-assets` tests, and 188
+  `mclone-render` tests pass with 11 existing GPU-only ignores. The selected
+  first-party pack resolves eight semantic resources: six actors and two
+  props.
 
 For later slices, continue to record commit IDs, asset review paths,
 deterministic habitat/population measurements, focused and workspace tests,

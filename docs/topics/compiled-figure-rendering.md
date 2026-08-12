@@ -92,6 +92,12 @@ and feather now report `live_gameplay` because ordinary render-session
 composition selects their stable resource IDs; there are two runtime props and
 two live props.
 
+Human Review 2 accepted Tactical 284's articulated deer. Its exact checked
+semantic JSON is now required as `mclone:deer`, bringing the shared inventory
+to six actors and two props. This is runtime asset capability only: ordinary
+deer entity instantiation remains gated on the habitat/spawn slice, and a
+future showcase cannot substitute for that live producer.
+
 Prop JSON is classified as `SemanticProp`, never inserted into
 `FIRST_PARTY_ACTOR_FIGURE_IDS`, and is loaded as a required prepared resource.
 Ordinary live nest entities and feather items now select those resources, and

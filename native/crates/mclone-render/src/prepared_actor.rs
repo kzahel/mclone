@@ -1656,6 +1656,10 @@ mod tests {
             include_str!("../../../../assets/mclone/figures/mallard_duck.figure.json"),
         );
         source.insert_text(
+            mclone_assets::deer_figure_path(),
+            include_str!("../../../../assets/mclone/figures/deer.figure.json"),
+        );
+        source.insert_text(
             mclone_assets::mallard_nest_figure_path(),
             include_str!("../../../../assets/mclone/figures/mallard_nest.figure.json"),
         );

@@ -129,6 +129,11 @@ fn direct_asset_requirements() -> Vec<CanonicalAssetRequirement> {
             Required,
         ),
         (
+            "assets/mclone/figures/deer.figure.json",
+            ActorFigure,
+            Required,
+        ),
+        (
             "assets/mclone/figures/mallard_nest.figure.json",
             SemanticProp,
             Required,
@@ -284,6 +289,7 @@ mod tests {
         for required in [
             "assets/minecraft/textures/entity/cow/cow.png",
             "assets/mclone/figures/player.figure.json",
+            "assets/mclone/figures/deer.figure.json",
             "assets/mclone/figures/mallard_nest.figure.json",
             "assets/mclone/figures/mallard_feather.figure.json",
             "assets/minecraft/textures/misc/underwater.png",
