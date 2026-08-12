@@ -6,7 +6,10 @@ use mclone_core::{
 };
 #[cfg(feature = "physics-engine")]
 use mclone_protocol::EntityRotation;
-use mclone_protocol::{EntityId, EntityKind, EntityPersistentId, ItemKind, ItemStackSnapshot};
+use mclone_protocol::{
+    EntityId, EntityKind, EntityPersistentId, ItemKind, ItemStackSnapshot, MallardLifeStage,
+    MallardNestSnapshotData, MallardSnapshotData,
+};
 
 use crate::persistence::{
     ChunkStoreError, ChunkStoreResult, ENTITY_CHUNK_RECORD_VERSION, EntityChunkRecord,
@@ -17,7 +20,9 @@ use crate::players::ServerPlayerId;
 use super::ServerEntityState;
 use super::item::{ITEM_ENTITY_LIFETIME_TICKS, ItemEntityRuntimeState};
 use super::metadata::{EntityMetadata, PASSIVE_MOB_KINDS};
-use super::mob::{MobPlayerTarget, MobRuntimeState};
+use super::mob::{
+    MALLARD_GROWTH_REQUIRED_TICKS, MallardRuntimeSaveData, MobPlayerTarget, MobRuntimeState,
+};
 use super::spawning::habitat::sample_wetland_habitat;
 use super::spawning::mob_category::MobCategory;
 use super::spawning::spawn_state::MobCategoryCounts;
@@ -31,6 +36,16 @@ const ITEM_MERGE_INFLATE_XZ: f64 = 0.5;
 const ITEM_STATIONARY_MERGE_INTERVAL_TICKS: u64 = 40;
 const ITEM_MOVED_BLOCK_MERGE_INTERVAL_TICKS: u64 = 2;
 const ENTITY_PERSISTENT_ID_MOST: u64 = 0x6d63_6c6f_6e65_0001;
+pub(crate) const MALLARD_NEST_INCUBATION_REQUIRED_TICKS: u32 = 2_400;
+const MALLARD_NEST_ATTENDANCE_RADIUS_SQR: f64 = 8.0 * 8.0;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct MallardNestRuntimeState {
+    incubation_progress: u32,
+    incubation_required: u32,
+    parents: [Option<EntityPersistentId>; 2],
+    attended: bool,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct ItemPickupTarget {
@@ -44,6 +59,7 @@ pub(crate) struct ServerEntityStore {
     entities: BTreeMap<EntityId, ServerEntityState>,
     mobs: BTreeMap<EntityId, MobRuntimeState>,
     items: BTreeMap<EntityId, ItemEntityRuntimeState>,
+    mallard_nests: BTreeMap<EntityId, MallardNestRuntimeState>,
     persistent_ids: BTreeMap<EntityId, EntityPersistentId>,
     volatile_entities: BTreeSet<EntityId>,
     tick_list: ServerEntityTickList,
@@ -336,7 +352,7 @@ impl ServerEntityStore {
         &mut self,
         record: &EntityChunkRecord,
     ) -> ChunkStoreResult<Vec<ServerEntityState>> {
-        if record.codec_version != ENTITY_CHUNK_RECORD_VERSION {
+        if !(2..=ENTITY_CHUNK_RECORD_VERSION).contains(&record.codec_version) {
             return Err(ChunkStoreError::InvalidData(format!(
                 "unsupported entity chunk record version {}",
                 record.codec_version
@@ -440,6 +456,45 @@ impl ServerEntityStore {
     ) -> ServerEntityState {
         let id = self.allocate_entity_id();
         self.insert_passive_mob(id, kind, position, y_rot_degrees)
+    }
+
+    pub(crate) fn place_mallard_nest<F>(
+        &mut self,
+        position: Vec3d,
+        y_rot_degrees: f32,
+        block_state_at: F,
+    ) -> Option<ServerEntityState>
+    where
+        F: Fn(BlockPos) -> Option<BlockStateId>,
+    {
+        let position = self.topology.canonicalize_position(position)?;
+        if !is_valid_mallard_nest_site(position, &block_state_at)
+            || self.entities.values().any(|entity| {
+                entity.alive
+                    && entity.kind == EntityKind::MallardNest
+                    && squared_distance_xz(
+                        self.topology
+                            .nearest_position_lift(entity.position, position),
+                        position,
+                    ) < 1.0
+            })
+        {
+            return None;
+        }
+        let id = self.allocate_entity_id();
+        let persistent_id = self.allocate_persistent_id();
+        Some(self.insert_mallard_nest_with_persistent_id(
+            id,
+            persistent_id,
+            position,
+            y_rot_degrees,
+            MallardNestRuntimeState {
+                incubation_progress: 0,
+                incubation_required: MALLARD_NEST_INCUBATION_REQUIRED_TICKS,
+                parents: [None; 2],
+                attended: false,
+            },
+        ))
     }
 
     pub(crate) fn ensure_persistent_passive_mob(
@@ -605,10 +660,23 @@ impl ServerEntityStore {
             &entity_ticking_chunks,
         );
         let ticking_ids = self.tick_list.iteration_ids();
+        let adult_mallards = self
+            .entities
+            .values()
+            .filter(|entity| {
+                entity.alive
+                    && entity.kind == EntityKind::Mallard
+                    && entity
+                        .mallard
+                        .is_some_and(|mallard| mallard.life_stage == MallardLifeStage::Adult)
+            })
+            .map(|entity| (entity.persistent_id, entity.position))
+            .collect::<Vec<_>>();
         let mut updated = Vec::new();
         let mut egg_spawns = Vec::new();
         let mut merge_due_ids = Vec::new();
         let mut removed_ids = Vec::new();
+        let mut hatched_nests = Vec::new();
         for id in &ticking_ids {
             let id = *id;
             if let Some(entity) = self.entities.get_mut(&id) {
@@ -626,6 +694,58 @@ impl ServerEntityStore {
                         .extend((0..mallard_egg_count).map(|_| {
                             (ItemKind::MallardEgg, entity.position, entity.y_rot_degrees)
                         }));
+                    if entity.kind == EntityKind::Mallard {
+                        let life_stage =
+                            mob.mallard_life_stage().unwrap_or(MallardLifeStage::Adult);
+                        entity.mallard = Some(MallardSnapshotData {
+                            life_stage,
+                            in_water: false,
+                        });
+                        let scale = if life_stage == MallardLifeStage::Duckling {
+                            0.58
+                        } else {
+                            1.0
+                        };
+                        entity.width = EntityMetadata::MALLARD.dimensions.width * scale;
+                        entity.height = EntityMetadata::MALLARD.dimensions.height * scale;
+                    }
+                }
+                if let Some(nest) = self.mallard_nests.get_mut(&id) {
+                    let habitat_valid =
+                        is_valid_mallard_nest_site(entity.position, &block_state_at);
+                    let mut attendees =
+                        adult_mallards
+                            .iter()
+                            .filter_map(|(persistent_id, position)| {
+                                let lifted = self
+                                    .topology
+                                    .nearest_position_lift(*position, entity.position);
+                                (squared_distance_xz(lifted, entity.position)
+                                    <= MALLARD_NEST_ATTENDANCE_RADIUS_SQR)
+                                    .then_some(*persistent_id)
+                            });
+                    let parents = [attendees.next(), attendees.next()];
+                    nest.attended = habitat_valid && parents.iter().all(Option::is_some);
+                    if nest.attended {
+                        nest.parents = parents;
+                        nest.incubation_progress = nest
+                            .incubation_progress
+                            .saturating_add(1)
+                            .min(nest.incubation_required);
+                    }
+                    entity.mallard_nest = Some(MallardNestSnapshotData {
+                        incubation_progress: nest.incubation_progress,
+                        incubation_required: nest.incubation_required,
+                        attended: nest.attended,
+                    });
+                    if nest.incubation_progress >= nest.incubation_required {
+                        hatched_nests.push((
+                            id,
+                            entity.position,
+                            entity.y_rot_degrees,
+                            nest.parents,
+                        ));
+                    }
                 }
                 let mut item_block_changed = false;
                 let mut is_item = false;
@@ -658,6 +778,12 @@ impl ServerEntityStore {
         }
         for id in removed_ids {
             self.remove_entity(id);
+        }
+        for (id, position, y_rot_degrees, parents) in hatched_nests {
+            if let Some(removed) = self.remove_entity(id) {
+                updated.push(removed);
+            }
+            updated.push(self.insert_mallard_duckling(position, y_rot_degrees, parents));
         }
         updated.extend(self.merge_item_entities(&merge_due_ids));
         for (kind, position, y_rot_degrees) in egg_spawns {
@@ -834,6 +960,7 @@ impl ServerEntityStore {
         state.alive = false;
         self.mobs.remove(&id);
         self.items.remove(&id);
+        self.mallard_nests.remove(&id);
         self.persistent_ids.remove(&id);
         self.volatile_entities.remove(&id);
         self.provisional_debug_passive_showcase_ids.remove(&id);
@@ -880,6 +1007,112 @@ impl ServerEntityStore {
             id,
             MobRuntimeState::from_spawn(id, metadata, state.on_ground, state.y_rot_degrees),
         );
+        let state = if kind == EntityKind::Mallard {
+            let mut state = state;
+            state.mallard = Some(MallardSnapshotData {
+                life_stage: MallardLifeStage::Adult,
+                in_water: false,
+            });
+            state
+        } else {
+            state
+        };
+        self.entities.insert(id, state);
+        self.persistent_ids.insert(id, persistent_id);
+        state
+    }
+
+    fn insert_mallard_duckling(
+        &mut self,
+        position: Vec3d,
+        y_rot_degrees: f32,
+        parents: [Option<EntityPersistentId>; 2],
+    ) -> ServerEntityState {
+        let id = self.allocate_entity_id();
+        let persistent_id = self.allocate_persistent_id();
+        let saved = MallardRuntimeSaveData {
+            egg_time: 8_000,
+            age_ticks: 0,
+            parents,
+            feather_time: 2_400,
+            call_time: 200,
+        };
+        self.insert_mallard_with_runtime(id, persistent_id, position, y_rot_degrees, true, saved)
+    }
+
+    fn insert_mallard_with_runtime(
+        &mut self,
+        id: EntityId,
+        persistent_id: EntityPersistentId,
+        position: Vec3d,
+        y_rot_degrees: f32,
+        on_ground: bool,
+        saved: MallardRuntimeSaveData,
+    ) -> ServerEntityState {
+        let metadata = EntityMetadata::MALLARD;
+        let mut state = ServerEntityState::from_metadata(
+            id,
+            persistent_id,
+            metadata,
+            position,
+            y_rot_degrees,
+            0.0,
+            None,
+            on_ground,
+        );
+        state.mallard = Some(MallardSnapshotData {
+            life_stage: if saved.age_ticks < MALLARD_GROWTH_REQUIRED_TICKS {
+                MallardLifeStage::Duckling
+            } else {
+                MallardLifeStage::Adult
+            },
+            in_water: false,
+        });
+        if state.mallard.unwrap().life_stage == MallardLifeStage::Duckling {
+            state.width *= 0.58;
+            state.height *= 0.58;
+        }
+        self.mobs.insert(
+            id,
+            MobRuntimeState::from_saved(
+                id,
+                metadata,
+                on_ground,
+                y_rot_degrees,
+                Vec3d::ZERO,
+                None,
+                Some(saved),
+            ),
+        );
+        self.entities.insert(id, state);
+        self.persistent_ids.insert(id, persistent_id);
+        state
+    }
+
+    fn insert_mallard_nest_with_persistent_id(
+        &mut self,
+        id: EntityId,
+        persistent_id: EntityPersistentId,
+        position: Vec3d,
+        y_rot_degrees: f32,
+        nest: MallardNestRuntimeState,
+    ) -> ServerEntityState {
+        let mut state = ServerEntityState::from_metadata(
+            id,
+            persistent_id,
+            EntityMetadata::MALLARD_NEST,
+            position,
+            y_rot_degrees,
+            0.0,
+            None,
+            true,
+        );
+        state.mallard_nest = Some(MallardNestSnapshotData {
+            incubation_progress: nest.incubation_progress,
+            incubation_required: nest.incubation_required,
+            attended: nest.attended,
+        });
+        self.mallard_nests.insert(id, nest);
         self.entities.insert(id, state);
         self.persistent_ids.insert(id, persistent_id);
         state
@@ -961,9 +1194,14 @@ impl ServerEntityStore {
 
         let id = self.allocate_entity_id();
         let state = match (saved.kind.as_str(), &saved.payload) {
-            ("minecraft:cow", EntitySavePayload::Cow) => {
-                self.insert_saved_passive_mob(id, saved, canonical_position, EntityKind::Cow, None)?
-            }
+            ("minecraft:cow", EntitySavePayload::Cow) => self.insert_saved_passive_mob(
+                id,
+                saved,
+                canonical_position,
+                EntityKind::Cow,
+                None,
+                None,
+            )?,
             ("minecraft:chicken", EntitySavePayload::Chicken { egg_time }) => self
                 .insert_saved_passive_mob(
                     id,
@@ -971,20 +1209,56 @@ impl ServerEntityStore {
                     canonical_position,
                     EntityKind::Chicken,
                     Some(*egg_time),
+                    None,
                 )?,
-            ("mclone:mallard", EntitySavePayload::Mallard { egg_time }) => self
-                .insert_saved_passive_mob(
-                    id,
-                    saved,
-                    canonical_position,
-                    EntityKind::Mallard,
-                    Some(*egg_time),
-                )?,
+            (
+                "mclone:mallard",
+                EntitySavePayload::Mallard {
+                    egg_time,
+                    age_ticks,
+                    parents,
+                    feather_time,
+                    call_time,
+                },
+            ) => self.insert_saved_passive_mob(
+                id,
+                saved,
+                canonical_position,
+                EntityKind::Mallard,
+                None,
+                Some(MallardRuntimeSaveData {
+                    egg_time: *egg_time,
+                    age_ticks: *age_ticks,
+                    parents: *parents,
+                    feather_time: *feather_time,
+                    call_time: *call_time,
+                }),
+            )?,
+            (
+                "mclone:mallard_nest",
+                EntitySavePayload::MallardNest {
+                    incubation_progress,
+                    incubation_required,
+                    parents,
+                },
+            ) => self.insert_mallard_nest_with_persistent_id(
+                id,
+                saved.persistent_id,
+                canonical_position,
+                saved.y_rot_degrees,
+                MallardNestRuntimeState {
+                    incubation_progress: *incubation_progress,
+                    incubation_required: *incubation_required,
+                    parents: *parents,
+                    attended: false,
+                },
+            ),
             ("mclone:mannequin", EntitySavePayload::Mannequin) => self.insert_saved_passive_mob(
                 id,
                 saved,
                 canonical_position,
                 EntityKind::Mannequin,
+                None,
                 None,
             )?,
             (
@@ -1023,6 +1297,7 @@ impl ServerEntityStore {
         position: Vec3d,
         kind: EntityKind,
         chicken_egg_time: Option<i32>,
+        mallard: Option<MallardRuntimeSaveData>,
     ) -> ChunkStoreResult<ServerEntityState> {
         let metadata = EntityMetadata::for_kind(kind).ok_or_else(|| {
             ChunkStoreError::InvalidData(format!("entity kind {kind:?} has no metadata"))
@@ -1044,7 +1319,20 @@ impl ServerEntityStore {
             state.y_rot_degrees,
             saved.delta_movement,
             chicken_egg_time,
+            mallard,
         );
+        let mut state = state;
+        if kind == EntityKind::Mallard {
+            let life_stage = mob.mallard_life_stage().unwrap_or(MallardLifeStage::Adult);
+            state.mallard = Some(MallardSnapshotData {
+                life_stage,
+                in_water: false,
+            });
+            if life_stage == MallardLifeStage::Duckling {
+                state.width *= 0.58;
+                state.height *= 0.58;
+            }
+        }
         self.mobs.insert(id, mob);
         self.entities.insert(id, state);
         Ok(state)
@@ -1101,20 +1389,31 @@ impl ServerEntityStore {
                     .and_then(MobRuntimeState::chicken_egg_time)
                     .unwrap_or(0),
             },
-            EntityKind::Mallard => EntitySavePayload::Mallard {
-                egg_time: self
-                    .mobs
-                    .get(&entity.id)
-                    .and_then(MobRuntimeState::mallard_egg_time)
-                    .unwrap_or(0),
-            },
+            EntityKind::Mallard => {
+                let mallard = self.mobs.get(&entity.id)?.mallard_save_data()?;
+                EntitySavePayload::Mallard {
+                    egg_time: mallard.egg_time,
+                    age_ticks: mallard.age_ticks,
+                    parents: mallard.parents,
+                    feather_time: mallard.feather_time,
+                    call_time: mallard.call_time,
+                }
+            }
+            EntityKind::MallardNest => {
+                let nest = self.mallard_nests.get(&entity.id)?;
+                EntitySavePayload::MallardNest {
+                    incubation_progress: nest.incubation_progress,
+                    incubation_required: nest.incubation_required,
+                    parents: nest.parents,
+                }
+            }
             EntityKind::Mannequin => EntitySavePayload::Mannequin,
             EntityKind::Item => EntitySavePayload::Item {
                 stack: entity.item_stack.map(ItemStackSaveRecord::from)?,
                 age: self.items.get(&entity.id)?.age(),
                 pickup_delay: self.items.get(&entity.id)?.pickup_delay(),
             },
-            EntityKind::MallardNest | EntityKind::DebugCube => return None,
+            EntityKind::DebugCube => return None,
         };
         Some(EntitySaveRecord {
             persistent_id,
@@ -1299,6 +1598,26 @@ fn is_mallard_egg_habitat(
     .is_ok_and(|sample| sample.suitable())
 }
 
+fn is_valid_mallard_nest_site(
+    position: Vec3d,
+    block_state_at: &impl Fn(BlockPos) -> Option<BlockStateId>,
+) -> bool {
+    let feet = BlockPos::containing(position);
+    let empty_space = [feet, feet.offset(0, 1, 0)].into_iter().all(|pos| {
+        block_state_at(pos)
+            .is_some_and(|state| mclone_blocks::block_collision_aabb(state, pos).is_none())
+    });
+    empty_space
+        && sample_wetland_habitat(feet, &mut |pos| block_state_at(pos))
+            .is_ok_and(|sample| sample.suitable() && sample.cover_blocks > 0)
+}
+
+fn squared_distance_xz(left: Vec3d, right: Vec3d) -> f64 {
+    let dx = left.x - right.x;
+    let dz = left.z - right.z;
+    dx * dx + dz * dz
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1350,6 +1669,25 @@ mod tests {
             GRASS_BLOCK
         } else if pos.y == 64 && (6..=8).contains(&pos.x) {
             WATER
+        } else {
+            AIR
+        };
+        Some(generated_block_state_id(raw))
+    }
+
+    fn covered_wetland_ground(pos: BlockPos) -> Option<BlockStateId> {
+        use mclone_worldgen::block::{
+            AIR, DIRT, GRASS_BLOCK, SUGAR_CANE, WATER, generated_block_state_id,
+        };
+
+        let raw = if pos.y <= 62 {
+            DIRT
+        } else if pos.y == 63 {
+            GRASS_BLOCK
+        } else if pos.y == 64 && (6..=8).contains(&pos.x) {
+            WATER
+        } else if pos == BlockPos::new(5, 64, 4) {
+            SUGAR_CANE
         } else {
             AIR
         };
@@ -1744,10 +2082,16 @@ mod tests {
             .iter()
             .find(|entity| entity.kind == "mclone:mallard")
             .expect("mallard record");
-        assert_eq!(
+        assert!(matches!(
             mallard_record.payload,
-            EntitySavePayload::Mallard { egg_time: 4321 }
-        );
+            EntitySavePayload::Mallard {
+                egg_time: 4321,
+                age_ticks: MALLARD_GROWTH_REQUIRED_TICKS,
+                parents: [None, None],
+                feather_time: 2_400..=4_799,
+                call_time: 160..=479,
+            }
+        ));
         assert!(record.entities.iter().any(|entity| {
             entity.payload
                 == EntitySavePayload::Item {
@@ -1835,6 +2179,93 @@ mod tests {
         assert_eq!(
             resaved_chicken.persistent_id, chicken_record.persistent_id,
             "persistent id must survive fresh runtime id assignment"
+        );
+    }
+
+    #[test]
+    fn covered_wetland_nest_pauses_resumes_hatches_once_and_roundtrips() {
+        let mut store = ServerEntityStore::default();
+        let nest_position = Vec3d::new(4.5, 64.0, 4.5);
+        assert!(
+            store
+                .place_mallard_nest(nest_position, 0.0, dry_grass_ground)
+                .is_none()
+        );
+        let nest = store
+            .place_mallard_nest(nest_position, 0.0, covered_wetland_ground)
+            .expect("covered wetland shore nest");
+        store.insert_passive_mob_for_test(EntityKind::Mallard, Vec3d::new(3.5, 64.0, 4.5), 0.0);
+        store.insert_passive_mob_for_test(EntityKind::Mallard, Vec3d::new(4.5, 64.0, 3.5), 0.0);
+        store
+            .mallard_nests
+            .get_mut(&nest.id)
+            .unwrap()
+            .incubation_progress = MALLARD_NEST_INCUBATION_REQUIRED_TICKS - 1;
+
+        store.tick_stationary(&[ChunkPos::new(0, 0)], &[], dry_grass_ground);
+        let paused = store.state(nest.id).unwrap();
+        assert_eq!(
+            paused.mallard_nest.unwrap().incubation_progress,
+            MALLARD_NEST_INCUBATION_REQUIRED_TICKS - 1
+        );
+        assert!(!paused.mallard_nest.unwrap().attended);
+
+        let record = store.entity_chunk_record(ChunkPos::new(0, 0), 7);
+        let saved_nest = record
+            .entities
+            .iter()
+            .find(|entity| entity.kind == "mclone:mallard_nest")
+            .expect("saved nest");
+        assert_eq!(
+            saved_nest.payload,
+            EntitySavePayload::MallardNest {
+                incubation_progress: MALLARD_NEST_INCUBATION_REQUIRED_TICKS - 1,
+                incubation_required: MALLARD_NEST_INCUBATION_REQUIRED_TICKS,
+                parents: [None; 2],
+            }
+        );
+
+        let mut loaded = ServerEntityStore::default();
+        loaded.hydrate_entity_chunk_record(&record).unwrap();
+        let updates = loaded.tick_stationary(&[ChunkPos::new(0, 0)], &[], covered_wetland_ground);
+        assert!(updates.iter().any(|entity| {
+            entity.kind == EntityKind::Mallard
+                && entity
+                    .mallard
+                    .is_some_and(|mallard| mallard.life_stage == MallardLifeStage::Duckling)
+        }));
+        assert!(
+            !loaded
+                .states()
+                .iter()
+                .any(|entity| entity.kind == EntityKind::MallardNest)
+        );
+
+        let second = loaded.tick_stationary(&[ChunkPos::new(0, 0)], &[], covered_wetland_ground);
+        assert_eq!(
+            second
+                .iter()
+                .filter(|entity| {
+                    entity.kind == EntityKind::Mallard
+                        && entity
+                            .mallard
+                            .is_some_and(|mallard| mallard.life_stage == MallardLifeStage::Duckling)
+                })
+                .count(),
+            1
+        );
+        assert_eq!(
+            loaded
+                .states()
+                .iter()
+                .filter(|entity| {
+                    entity.kind == EntityKind::Mallard
+                        && entity
+                            .mallard
+                            .is_some_and(|mallard| mallard.life_stage == MallardLifeStage::Duckling)
+                })
+                .count(),
+            1
         );
     }
 

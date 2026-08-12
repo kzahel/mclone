@@ -1,11 +1,25 @@
 use mclone_core::Vec3d;
-use mclone_protocol::EntityKind;
+use mclone_protocol::{EntityKind, EntityPersistentId, MallardLifeStage};
 use mclone_worldgen::prng::SimpleRandomSource;
 
 const CHICKEN_EGG_TIME_MIN: i32 = 6_000;
 const CHICKEN_EGG_TIME_RANGE: i32 = 6_000;
 const MALLARD_EGG_TIME_MIN: i32 = 8_000;
 const MALLARD_EGG_TIME_RANGE: i32 = 8_000;
+const MALLARD_FEATHER_TIME_MIN: i32 = 2_400;
+const MALLARD_FEATHER_TIME_RANGE: i32 = 2_400;
+const MALLARD_CALL_TIME_MIN: i32 = 160;
+const MALLARD_CALL_TIME_RANGE: i32 = 320;
+pub(crate) const MALLARD_GROWTH_REQUIRED_TICKS: u32 = 2_400;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct MallardRuntimeSaveData {
+    pub(crate) egg_time: i32,
+    pub(crate) age_ticks: u32,
+    pub(crate) parents: [Option<EntityPersistentId>; 2],
+    pub(crate) feather_time: i32,
+    pub(crate) call_time: i32,
+}
 
 #[derive(Debug, PartialEq)]
 pub(super) enum MobSpeciesState {
@@ -31,6 +45,7 @@ impl MobSpeciesState {
         kind: EntityKind,
         random: &mut SimpleRandomSource,
         egg_time: Option<i32>,
+        mallard: Option<MallardRuntimeSaveData>,
     ) -> Self {
         match kind {
             EntityKind::Cow | EntityKind::Mannequin => Self::Cow,
@@ -38,7 +53,13 @@ impl MobSpeciesState {
                 egg_time.unwrap_or_else(|| next_egg_time(random)),
             )),
             EntityKind::Mallard => Self::Mallard(MallardRuntimeState::from_saved(
-                egg_time.unwrap_or_else(|| next_mallard_egg_time(random)),
+                mallard.unwrap_or(MallardRuntimeSaveData {
+                    egg_time: egg_time.unwrap_or_else(|| next_mallard_egg_time(random)),
+                    age_ticks: MALLARD_GROWTH_REQUIRED_TICKS,
+                    parents: [None; 2],
+                    feather_time: next_mallard_feather_time(random),
+                    call_time: next_mallard_call_time(random),
+                }),
             )),
             EntityKind::DebugCube | EntityKind::Item | EntityKind::MallardNest => {
                 debug_assert!(false, "non-mob entities do not use mob species state");
@@ -196,27 +217,69 @@ fn next_egg_time(random: &mut SimpleRandomSource) -> i32 {
 #[derive(Debug, PartialEq)]
 pub(super) struct MallardRuntimeState {
     egg_time: i32,
+    age_ticks: u32,
+    parents: [Option<EntityPersistentId>; 2],
+    feather_time: i32,
+    call_time: i32,
 }
 
 impl MallardRuntimeState {
     fn new(random: &mut SimpleRandomSource) -> Self {
         Self {
             egg_time: next_mallard_egg_time(random),
+            age_ticks: MALLARD_GROWTH_REQUIRED_TICKS,
+            parents: [None; 2],
+            feather_time: next_mallard_feather_time(random),
+            call_time: next_mallard_call_time(random),
         }
     }
 
-    fn from_saved(egg_time: i32) -> Self {
-        Self { egg_time }
+    fn from_saved(saved: MallardRuntimeSaveData) -> Self {
+        Self {
+            egg_time: saved.egg_time,
+            age_ticks: saved.age_ticks,
+            parents: saved.parents,
+            feather_time: saved.feather_time,
+            call_time: saved.call_time,
+        }
     }
 
     fn ai_step(&mut self) {
+        self.age_ticks = self
+            .age_ticks
+            .saturating_add(1)
+            .min(MALLARD_GROWTH_REQUIRED_TICKS);
         if self.egg_time > 0 {
             self.egg_time -= 1;
+        }
+        if self.feather_time > 0 {
+            self.feather_time -= 1;
+        }
+        if self.call_time > 0 {
+            self.call_time -= 1;
         }
     }
 
     pub(super) const fn egg_time(&self) -> i32 {
         self.egg_time
+    }
+
+    pub(super) const fn save_data(&self) -> MallardRuntimeSaveData {
+        MallardRuntimeSaveData {
+            egg_time: self.egg_time,
+            age_ticks: self.age_ticks,
+            parents: self.parents,
+            feather_time: self.feather_time,
+            call_time: self.call_time,
+        }
+    }
+
+    pub(super) const fn life_stage(&self) -> MallardLifeStage {
+        if self.age_ticks < MALLARD_GROWTH_REQUIRED_TICKS {
+            MallardLifeStage::Duckling
+        } else {
+            MallardLifeStage::Adult
+        }
     }
 
     pub(super) fn take_due_egg(
@@ -239,4 +302,12 @@ impl MallardRuntimeState {
 
 fn next_mallard_egg_time(random: &mut SimpleRandomSource) -> i32 {
     random.next_int_bound(MALLARD_EGG_TIME_RANGE) + MALLARD_EGG_TIME_MIN
+}
+
+fn next_mallard_feather_time(random: &mut SimpleRandomSource) -> i32 {
+    random.next_int_bound(MALLARD_FEATHER_TIME_RANGE) + MALLARD_FEATHER_TIME_MIN
+}
+
+fn next_mallard_call_time(random: &mut SimpleRandomSource) -> i32 {
+    random.next_int_bound(MALLARD_CALL_TIME_RANGE) + MALLARD_CALL_TIME_MIN
 }

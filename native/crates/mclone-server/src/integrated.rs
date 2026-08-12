@@ -19,11 +19,12 @@ use mclone_protocol::EntityRotation;
 use mclone_protocol::{
     AcceptTeleportCommand, ChunkView, ClientCommand, ClientEphemeralMessage, ClientIdentity,
     DebugActorKind, DebugHotbarItem, DimensionKey, EffectiveEphemeralTransport, EntityKind,
-    InteractionHand, MovePlayerCommand, PlayerActionCommand, PlayerActionKind, PlayerAppearance,
-    PlayerDamageCause, PlayerLifeState, PlayerModelKind, PlayerProfileId, PlayerStatistics,
-    RealmId, SequencedMovePlayerCommand, ServerUpdate, SessionCapabilities, SessionConfiguration,
-    SetCarriedItemCommand, SetDebugHotbarSlotCommand, SetPlayerAppearanceCommand, StatisticKey,
-    UseItemOnCommand, sequence_is_newer, validate_body_pose_sample,
+    InteractionHand, ItemKind, MovePlayerCommand, PlayerActionCommand, PlayerActionKind,
+    PlayerAppearance, PlayerDamageCause, PlayerLifeState, PlayerModelKind, PlayerProfileId,
+    PlayerStatistics, RealmId, SequencedMovePlayerCommand, ServerUpdate, SessionCapabilities,
+    SessionConfiguration, SetCarriedItemCommand, SetDebugHotbarSlotCommand,
+    SetPlayerAppearanceCommand, StatisticKey, UseItemOnCommand, sequence_is_newer,
+    validate_body_pose_sample,
 };
 use mclone_worldgen::biome::{OverworldBiomeSource, get_layered_biome_by_id};
 use mclone_worldgen::block::{AIR, RawBlockId, block_name, generated_block_state_id};
@@ -2467,15 +2468,29 @@ impl RealmServer {
         }
         let item_pickup_targets = self.item_pickup_targets();
         let players = &mut self.players;
+        let mut dirty_inventories = BTreeSet::new();
         entity_updates.extend(self.active_dimension.entities.collect_item_entities(
             &item_pickup_targets,
             |player_id, stack| {
-                players
-                    .get_mut(player_id)
-                    .map(|player| player.inventory.add_item_stack(stack).remaining)
-                    .unwrap_or(Some(stack))
+                players.get_mut(player_id).map_or(Some(stack), |player| {
+                    let result = player.inventory.add_item_stack(stack);
+                    if result.accepted_count > 0 {
+                        dirty_inventories.insert(player_id);
+                    }
+                    result.remaining
+                })
             },
         ));
+        for player_id in dirty_inventories {
+            if let Some(hotbar) = self
+                .players
+                .get(player_id)
+                .map(|player| player.inventory.hotbar_item_stacks())
+            {
+                self.chunk_tracking
+                    .queue_update_for_player(player_id, ServerUpdate::PlayerInventory { hotbar });
+            }
+        }
         let entity_tick_us = simulation_timing_elapsed_us(entity_tick_start);
 
         let physics_tick_start = simulation_timing_start();
@@ -3597,6 +3612,14 @@ impl RealmServer {
         target: CommandTarget,
         command: UseItemOnCommand,
     ) -> ChunkStoreResult<Vec<ServerUpdate>> {
+        if command.hand == InteractionHand::MainHand
+            && self
+                .inventory_for_target(target)?
+                .selected_item_stack()
+                .is_some_and(|stack| stack.kind == ItemKind::MallardEgg)
+        {
+            return self.handle_mallard_nest_use_item_on_for_target(target, command);
+        }
         if let Some(DebugHotbarItem::SpawnActor(kind)) =
             self.inventory_for_target(target)?.selected_debug_item()
         {
@@ -3623,6 +3646,61 @@ impl RealmServer {
                 )?,
             );
         }
+        Ok(updates)
+    }
+
+    fn handle_mallard_nest_use_item_on_for_target(
+        &mut self,
+        target: CommandTarget,
+        command: UseItemOnCommand,
+    ) -> ChunkStoreResult<Vec<ServerUpdate>> {
+        if !self.world_behavior_profile.allows_player_place() {
+            return Ok(Vec::new());
+        }
+        let (player_position, y_rot_degrees) = {
+            let player = self.player_for_target(target)?;
+            (player.position(), player.y_rot_degrees())
+        };
+        let context = ServerInteractionContext::debug_creative_in(
+            player_position,
+            self.active_dimension.definition.topology,
+        );
+        if !context.may_use_item_on(command.hit) {
+            return Ok(Vec::new());
+        }
+        let feet_block = command.hit.block_pos.relative(command.hit.direction);
+        if !context.may_place_at(feet_block) {
+            return Ok(Vec::new());
+        }
+        let position = Vec3d::new(
+            f64::from(feet_block.x) + 0.5,
+            f64::from(feet_block.y),
+            f64::from(feet_block.z) + 0.5,
+        );
+        let scheduler = &self.active_dimension.scheduler;
+        let Some(nest) =
+            self.active_dimension
+                .entities
+                .place_mallard_nest(position, y_rot_degrees, |pos| {
+                    scheduler
+                        .block_at_world(pos)
+                        .map(|block| BlockStateId(u32::from(block)))
+                })
+        else {
+            return Ok(Vec::new());
+        };
+        let consumed = self
+            .inventory_mut_for_target(target)?
+            .consume_selected_item(ItemKind::MallardEgg);
+        debug_assert!(
+            consumed,
+            "validated mallard egg disappeared before placement"
+        );
+        self.reconcile_entity_subjects(std::iter::once(nest), true);
+        self.mark_entity_updates_dirty(&[nest]);
+        let hotbar = self.inventory_for_target(target)?.hotbar_item_stacks();
+        let mut updates = self.drain_chunk_updates_for_target(target)?;
+        updates.push(ServerUpdate::PlayerInventory { hotbar });
         Ok(updates)
     }
 

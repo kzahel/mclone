@@ -69,7 +69,8 @@ pub const WORLD_WRITER_LOCK_FILE: &str = "world.writer.lock";
 const WORLD_ADMISSION_LOCK_FILE: &str = ".mclone-world-admission.lock";
 
 pub const CHUNK_LIGHT_ALGORITHM_VERSION: u32 = 1;
-pub const ENTITY_CHUNK_RECORD_VERSION: u32 = 2;
+const LEGACY_ENTITY_CHUNK_RECORD_VERSION: u32 = 2;
+pub const ENTITY_CHUNK_RECORD_VERSION: u32 = 3;
 const LEGACY_PLAYER_RECORD_VERSION: u32 = 1;
 const STATISTICS_PLAYER_RECORD_VERSION: u32 = 2;
 const PLAYER_LIFE_RECORD_VERSION: u32 = 3;
@@ -408,6 +409,15 @@ pub enum EntitySavePayload {
     },
     Mallard {
         egg_time: i32,
+        age_ticks: u32,
+        parents: [Option<EntityPersistentId>; 2],
+        feather_time: i32,
+        call_time: i32,
+    },
+    MallardNest {
+        incubation_progress: u32,
+        incubation_required: u32,
+        parents: [Option<EntityPersistentId>; 2],
     },
     Item {
         stack: ItemStackSaveRecord,
@@ -4778,7 +4788,7 @@ fn read_entity_chunk_record(reader: &mut impl Read) -> ChunkStoreResult<EntityCh
         ));
     }
     let version = read_u32(reader)?;
-    if version != ENTITY_CHUNK_RECORD_VERSION {
+    if !(LEGACY_ENTITY_CHUNK_RECORD_VERSION..=ENTITY_CHUNK_RECORD_VERSION).contains(&version) {
         return Err(ChunkStoreError::classified(
             PersistenceErrorKind::Incompatible,
             format!("unsupported entity chunk record version {version}"),
@@ -4787,7 +4797,8 @@ fn read_entity_chunk_record(reader: &mut impl Read) -> ChunkStoreResult<EntityCh
     let pos = ChunkPos::new(read_i32(reader)?, read_i32(reader)?);
     let revision = read_u64(reader)?;
     let codec_version = read_u32(reader)?;
-    if codec_version != ENTITY_CHUNK_RECORD_VERSION {
+    if !(LEGACY_ENTITY_CHUNK_RECORD_VERSION..=ENTITY_CHUNK_RECORD_VERSION).contains(&codec_version)
+    {
         return Err(ChunkStoreError::classified(
             PersistenceErrorKind::Incompatible,
             format!("unsupported entity chunk codec version {codec_version}"),
@@ -4796,7 +4807,7 @@ fn read_entity_chunk_record(reader: &mut impl Read) -> ChunkStoreResult<EntityCh
     let entity_count = read_len(reader)?;
     let mut entities = Vec::with_capacity(entity_count);
     for _ in 0..entity_count {
-        entities.push(read_entity_save_record(reader)?);
+        entities.push(read_entity_save_record(reader, version)?);
     }
     Ok(EntityChunkRecord {
         pos,
@@ -5357,7 +5368,10 @@ fn write_entity_save_record(
     write_entity_save_payload(writer, &record.payload)
 }
 
-fn read_entity_save_record(reader: &mut impl Read) -> ChunkStoreResult<EntitySaveRecord> {
+fn read_entity_save_record(
+    reader: &mut impl Read,
+    codec_version: u32,
+) -> ChunkStoreResult<EntitySaveRecord> {
     let persistent_id = EntityPersistentId::new(read_u64(reader)?, read_u64(reader)?);
     let kind = read_string(reader)?;
     let position = read_vec3d(reader)?;
@@ -5366,7 +5380,7 @@ fn read_entity_save_record(reader: &mut impl Read) -> ChunkStoreResult<EntitySav
     let x_rot_degrees = read_f32(reader)?;
     let rotation = read_optional_rotation(reader)?;
     let on_ground = read_bool(reader)?;
-    let payload = read_entity_save_payload(reader)?;
+    let payload = read_entity_save_payload(reader, codec_version)?;
     Ok(EntitySaveRecord {
         persistent_id,
         kind,
@@ -5391,9 +5405,34 @@ fn write_entity_save_payload(
             write_u8(writer, 1)?;
             write_i32(writer, *egg_time)
         }
-        EntitySavePayload::Mallard { egg_time } => {
+        EntitySavePayload::Mallard {
+            egg_time,
+            age_ticks,
+            parents,
+            feather_time,
+            call_time,
+        } => {
             write_u8(writer, 4)?;
-            write_i32(writer, *egg_time)
+            write_i32(writer, *egg_time)?;
+            write_u32(writer, *age_ticks)?;
+            for parent in parents {
+                write_optional_entity_persistent_id(writer, *parent)?;
+            }
+            write_i32(writer, *feather_time)?;
+            write_i32(writer, *call_time)
+        }
+        EntitySavePayload::MallardNest {
+            incubation_progress,
+            incubation_required,
+            parents,
+        } => {
+            write_u8(writer, 5)?;
+            write_u32(writer, *incubation_progress)?;
+            write_u32(writer, *incubation_required)?;
+            for parent in parents {
+                write_optional_entity_persistent_id(writer, *parent)?;
+            }
+            Ok(())
         }
         EntitySavePayload::Item {
             stack,
@@ -5408,7 +5447,10 @@ fn write_entity_save_payload(
     }
 }
 
-fn read_entity_save_payload(reader: &mut impl Read) -> ChunkStoreResult<EntitySavePayload> {
+fn read_entity_save_payload(
+    reader: &mut impl Read,
+    codec_version: u32,
+) -> ChunkStoreResult<EntitySavePayload> {
     match read_u8(reader)? {
         0 => Ok(EntitySavePayload::Cow),
         1 => Ok(EntitySavePayload::Chicken {
@@ -5420,13 +5462,65 @@ fn read_entity_save_payload(reader: &mut impl Read) -> ChunkStoreResult<EntitySa
             pickup_delay: read_i32(reader)?,
         }),
         3 => Ok(EntitySavePayload::Mannequin),
-        4 => Ok(EntitySavePayload::Mallard {
-            egg_time: read_i32(reader)?,
+        4 => {
+            let egg_time = read_i32(reader)?;
+            Ok(if codec_version >= ENTITY_CHUNK_RECORD_VERSION {
+                EntitySavePayload::Mallard {
+                    egg_time,
+                    age_ticks: read_u32(reader)?,
+                    parents: [
+                        read_optional_entity_persistent_id(reader)?,
+                        read_optional_entity_persistent_id(reader)?,
+                    ],
+                    feather_time: read_i32(reader)?,
+                    call_time: read_i32(reader)?,
+                }
+            } else {
+                EntitySavePayload::Mallard {
+                    egg_time,
+                    age_ticks: crate::entity::MALLARD_GROWTH_REQUIRED_TICKS,
+                    parents: [None; 2],
+                    feather_time: 2_400,
+                    call_time: 200,
+                }
+            })
+        }
+        5 if codec_version >= ENTITY_CHUNK_RECORD_VERSION => Ok(EntitySavePayload::MallardNest {
+            incubation_progress: read_u32(reader)?,
+            incubation_required: read_u32(reader)?,
+            parents: [
+                read_optional_entity_persistent_id(reader)?,
+                read_optional_entity_persistent_id(reader)?,
+            ],
         }),
         value => Err(ChunkStoreError::InvalidData(format!(
             "unknown entity save payload kind {value}"
         ))),
     }
+}
+
+fn write_optional_entity_persistent_id(
+    writer: &mut impl Write,
+    id: Option<EntityPersistentId>,
+) -> ChunkStoreResult<()> {
+    write_bool(writer, id.is_some())?;
+    if let Some(id) = id {
+        write_u64(writer, id.most)?;
+        write_u64(writer, id.least)?;
+    }
+    Ok(())
+}
+
+fn read_optional_entity_persistent_id(
+    reader: &mut impl Read,
+) -> ChunkStoreResult<Option<EntityPersistentId>> {
+    if !read_bool(reader)? {
+        return Ok(None);
+    }
+    Ok(Some(EntityPersistentId::new(
+        read_u64(reader)?,
+        read_u64(reader)?,
+    )))
 }
 
 fn write_item_stack_save_record(
@@ -5968,7 +6062,13 @@ mod tests {
                     x_rot_degrees: 0.0,
                     rotation: None,
                     on_ground: true,
-                    payload: EntitySavePayload::Mallard { egg_time: 4321 },
+                    payload: EntitySavePayload::Mallard {
+                        egg_time: 4321,
+                        age_ticks: crate::entity::MALLARD_GROWTH_REQUIRED_TICKS,
+                        parents: [None; 2],
+                        feather_time: 2_400,
+                        call_time: 200,
+                    },
                 },
                 EntitySaveRecord {
                     persistent_id: EntityPersistentId::new(0xABCD, 0xDEF0),
