@@ -172,6 +172,51 @@ This proves the native compile and offscreen lane, not the interactive Linux
 window path. Interactive validation still requires a working X11 or Wayland
 session and was not available on the first headless host.
 
+## Desktop OpenXR Through WiVRn
+
+The headset-backed Linux desktop OpenXR lane uses WiVRn. On Ubuntu, install the
+OpenXR loader and the official WiVRn Flatpak:
+
+```bash
+sudo apt-get install -y flatpak libopenxr-loader1 lsof
+flatpak remote-add --user --if-not-exists \
+  flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+flatpak install --user -y flathub io.github.wivrn.wivrn
+```
+
+Install the exact same WiVRn version on the Quest. The official GitHub APK uses
+package `org.meumeu.wivrn.github`; the Meta Store and local builds use different
+package names. The launcher checks the Flatpak and selected Quest package
+versions before starting. Override `QUEST_WIVRN_PACKAGE` when needed.
+
+With an authorized Quest attached over USB:
+
+```bash
+pnpm native:xr:linux:wivrn:check
+pnpm native:xr:linux:wivrn:smoke
+pnpm native:xr:linux:wivrn:mclone
+```
+
+The smoke launcher discovers `adb` from the Android SDK even when it is not on
+`PATH`. It starts the native `wivrn-server` when available, otherwise the
+Flatpak server; enables the runtime early; installs an ADB reverse tunnel;
+launches the Quest client without an interactive pairing requirement; waits
+for the connection; and restores the headset and host afterward. See
+[`topics/desktop-openxr-validation.md`](topics/desktop-openxr-validation.md)
+for the runtime contract and current evidence.
+
+For a longer visual check, bound the run and capture while it is focused:
+
+```bash
+pnpm native:xr:linux:wivrn:mclone -- --frames 1200
+adb exec-out screencap -p > /tmp/mclone-linux-wivrn.png
+```
+
+Run the capture from another shell before the bounded run exits, then inspect
+the PNG. The standard smoke commands are intentionally windowless and do not
+need `DISPLAY` or `WAYLAND_DISPLAY`. A persistent companion-window run still
+needs a real desktop session.
+
 ## Common Failures
 
 - `rustc ... is not supported` with a requirement for Rust 1.92: run
@@ -185,3 +230,7 @@ session and was not available on the first headless host.
   add Xvfb or a hidden window just for this validation path.
 - no Vulkan device at all: install a working Vulkan driver, verify `/dev/dri`,
   and rerun `vulkaninfo --summary` before diagnosing the renderer.
+- `failed to load OpenXR loader`: install `libopenxr-loader1`. Mclone accepts
+  Ubuntu's versioned `libopenxr_loader.so.1`; `libopenxr-dev` is not required.
+- WiVRn version mismatch: update either the Flatpak or Quest client so their
+  versions match exactly, then rerun the launcher.

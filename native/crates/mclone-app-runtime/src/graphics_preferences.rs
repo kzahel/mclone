@@ -2,7 +2,10 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use mclone_ui::{GameGrassDetail, GameLeafDetail};
+use mclone_ui::{
+    GameFogColorMode, GameFogMode, GameFogSettings, GameFogWeatherInfluence, GameGrassDetail,
+    GameLeafDetail, GameTerrainPresentation,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::input_preferences::PreferenceKeyValueStore;
@@ -11,10 +14,12 @@ pub const GRAPHICS_PREFERENCE_STORAGE_KEY: &str = "mclone.graphics.preferences.v
 pub const GRAPHICS_PREFERENCE_SCHEMA: u32 = 1;
 pub const GRAPHICS_PREFERENCE_FILE_NAME: &str = "graphics-preferences.v1.json";
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct ClientGraphicsPreferences {
     pub leaf_detail: GameLeafDetail,
     pub grass_detail: GameGrassDetail,
+    pub terrain_presentation: GameTerrainPresentation,
+    pub fog: GameFogSettings,
 }
 
 impl ClientGraphicsPreferences {
@@ -52,6 +57,8 @@ impl ClientGraphicsPreferences {
 struct StoredGraphicsPreferences {
     leaf_detail: StoredLeafDetail,
     grass_detail: StoredGrassDetail,
+    terrain_presentation: StoredTerrainPresentation,
+    fog: StoredFogSettings,
 }
 
 impl From<ClientGraphicsPreferences> for StoredGraphicsPreferences {
@@ -67,6 +74,11 @@ impl From<ClientGraphicsPreferences> for StoredGraphicsPreferences {
                 GameGrassDetail::Lush => StoredGrassDetail::Lush,
                 GameGrassDetail::Ultra => StoredGrassDetail::Ultra,
             },
+            terrain_presentation: match value.terrain_presentation {
+                GameTerrainPresentation::ExactOnly => StoredTerrainPresentation::ExactOnly,
+                GameTerrainPresentation::Experimental => StoredTerrainPresentation::Experimental,
+            },
+            fog: StoredFogSettings::from(value.fog),
         }
     }
 }
@@ -84,6 +96,11 @@ impl From<StoredGraphicsPreferences> for ClientGraphicsPreferences {
                 StoredGrassDetail::Lush => GameGrassDetail::Lush,
                 StoredGrassDetail::Ultra => GameGrassDetail::Ultra,
             },
+            terrain_presentation: match value.terrain_presentation {
+                StoredTerrainPresentation::ExactOnly => GameTerrainPresentation::ExactOnly,
+                StoredTerrainPresentation::Experimental => GameTerrainPresentation::Experimental,
+            },
+            fog: value.fog.into(),
         }
     }
 }
@@ -104,6 +121,140 @@ enum StoredGrassDetail {
     Sparse,
     Lush,
     Ultra,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum StoredTerrainPresentation {
+    #[default]
+    ExactOnly,
+    Experimental,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[serde(default, rename_all = "camelCase")]
+struct StoredFogSettings {
+    mode: StoredFogMode,
+    color_mode: StoredFogColorMode,
+    custom_color: [f32; 3],
+    visibility_blocks: f32,
+    classic_start: f32,
+    coverage_guard: bool,
+    guard_start: f32,
+    ground_base_y: f32,
+    ground_falloff_blocks: f32,
+    max_opacity: f32,
+    exponential_squared: bool,
+    far_cull: bool,
+    weather_influence: StoredFogWeatherInfluence,
+}
+
+impl Default for StoredFogSettings {
+    fn default() -> Self {
+        Self::from(GameFogSettings::default())
+    }
+}
+
+impl From<GameFogSettings> for StoredFogSettings {
+    fn from(value: GameFogSettings) -> Self {
+        let value = value.normalized();
+        Self {
+            mode: match value.mode {
+                GameFogMode::Off => StoredFogMode::Off,
+                GameFogMode::Classic => StoredFogMode::Classic,
+                GameFogMode::Natural => StoredFogMode::Natural,
+                GameFogMode::GroundHaze => StoredFogMode::GroundHaze,
+            },
+            color_mode: match value.color_mode {
+                GameFogColorMode::Sky => StoredFogColorMode::Sky,
+                GameFogColorMode::Neutral => StoredFogColorMode::Neutral,
+                GameFogColorMode::Warm => StoredFogColorMode::Warm,
+                GameFogColorMode::Cool => StoredFogColorMode::Cool,
+                GameFogColorMode::Custom => StoredFogColorMode::Custom,
+            },
+            custom_color: value.custom_color,
+            visibility_blocks: value.visibility_blocks,
+            classic_start: value.classic_start,
+            coverage_guard: value.coverage_guard,
+            guard_start: value.guard_start,
+            ground_base_y: value.ground_base_y,
+            ground_falloff_blocks: value.ground_falloff_blocks,
+            max_opacity: value.max_opacity,
+            exponential_squared: value.exponential_squared,
+            far_cull: value.far_cull,
+            weather_influence: match value.weather_influence {
+                GameFogWeatherInfluence::Off => StoredFogWeatherInfluence::Off,
+                GameFogWeatherInfluence::Subtle => StoredFogWeatherInfluence::Subtle,
+                GameFogWeatherInfluence::Strong => StoredFogWeatherInfluence::Strong,
+            },
+        }
+    }
+}
+
+impl From<StoredFogSettings> for GameFogSettings {
+    fn from(value: StoredFogSettings) -> Self {
+        Self {
+            mode: match value.mode {
+                StoredFogMode::Off => GameFogMode::Off,
+                StoredFogMode::Classic => GameFogMode::Classic,
+                StoredFogMode::Natural => GameFogMode::Natural,
+                StoredFogMode::GroundHaze => GameFogMode::GroundHaze,
+            },
+            color_mode: match value.color_mode {
+                StoredFogColorMode::Sky => GameFogColorMode::Sky,
+                StoredFogColorMode::Neutral => GameFogColorMode::Neutral,
+                StoredFogColorMode::Warm => GameFogColorMode::Warm,
+                StoredFogColorMode::Cool => GameFogColorMode::Cool,
+                StoredFogColorMode::Custom => GameFogColorMode::Custom,
+            },
+            custom_color: value.custom_color,
+            visibility_blocks: value.visibility_blocks,
+            classic_start: value.classic_start,
+            coverage_guard: value.coverage_guard,
+            guard_start: value.guard_start,
+            ground_base_y: value.ground_base_y,
+            ground_falloff_blocks: value.ground_falloff_blocks,
+            max_opacity: value.max_opacity,
+            exponential_squared: value.exponential_squared,
+            far_cull: value.far_cull,
+            weather_influence: match value.weather_influence {
+                StoredFogWeatherInfluence::Off => GameFogWeatherInfluence::Off,
+                StoredFogWeatherInfluence::Subtle => GameFogWeatherInfluence::Subtle,
+                StoredFogWeatherInfluence::Strong => GameFogWeatherInfluence::Strong,
+            },
+        }
+        .normalized()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum StoredFogMode {
+    Off,
+    Classic,
+    #[default]
+    Natural,
+    GroundHaze,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum StoredFogColorMode {
+    #[default]
+    Sky,
+    Neutral,
+    Warm,
+    Cool,
+    Custom,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum StoredFogWeatherInfluence {
+    Off,
+    #[default]
+    Subtle,
+    Strong,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -232,6 +383,14 @@ mod tests {
             ClientGraphicsPreferences::default().grass_detail,
             GameGrassDetail::Off
         );
+        assert_eq!(
+            ClientGraphicsPreferences::default().terrain_presentation,
+            GameTerrainPresentation::ExactOnly
+        );
+        assert_eq!(
+            ClientGraphicsPreferences::default().fog,
+            GameFogSettings::default()
+        );
     }
 
     #[test]
@@ -240,6 +399,15 @@ mod tests {
         let preferences = ClientGraphicsPreferences {
             leaf_detail: GameLeafDetail::Bushy,
             grass_detail: GameGrassDetail::Lush,
+            terrain_presentation: GameTerrainPresentation::Experimental,
+            fog: GameFogSettings {
+                mode: GameFogMode::GroundHaze,
+                visibility_blocks: 12_288.0,
+                exponential_squared: true,
+                far_cull: true,
+                weather_influence: GameFogWeatherInfluence::Strong,
+                ..GameFogSettings::default()
+            },
         };
         preferences.store(&store).unwrap();
 
@@ -269,6 +437,18 @@ mod tests {
             )
             .is_err()
         );
+        assert!(
+            ClientGraphicsPreferences::from_json(
+                r#"{"schema":1,"preferences":{"terrainPresentation":"cinematic"}}"#
+            )
+            .is_err()
+        );
+        assert!(
+            ClientGraphicsPreferences::from_json(
+                r#"{"schema":1,"preferences":{"fog":{"mode":"volumetric"}}}"#
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -292,6 +472,13 @@ mod tests {
         let preferences = ClientGraphicsPreferences {
             leaf_detail: GameLeafDetail::Bushy,
             grass_detail: GameGrassDetail::Ultra,
+            terrain_presentation: GameTerrainPresentation::Experimental,
+            fog: GameFogSettings {
+                mode: GameFogMode::Classic,
+                classic_start: 0.6,
+                coverage_guard: false,
+                ..GameFogSettings::default()
+            },
         };
 
         storage.store(&preferences).unwrap();

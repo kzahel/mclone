@@ -598,6 +598,19 @@ impl ActorDrawResources {
         )
     }
 
+    /// Prepare renderer-owned actor state once for a frame that may render
+    /// multiple views. Callers must pass the same actor slice to
+    /// `render_reusing_prepared_in_slot`; a count mismatch refreshes safely.
+    pub fn prepare_for_frame(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        actors: &[ActorInstance],
+    ) {
+        self.prepared
+            .prepare(device, queue, &self.shared.prepared, actors);
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn render_in_slot(
         &mut self,
@@ -1248,7 +1261,9 @@ impl ActorRenderer {
     fn new(device: &wgpu::Device, color_format: wgpu::TextureFormat) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("mclone_actor_shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/entity_actor.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(
+                crate::fog::inject_fog_wgsl(include_str!("shaders/entity_actor.wgsl")).into(),
+            ),
         });
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("mclone_actor_bind_group_layout"),
@@ -1357,7 +1372,8 @@ impl ActorMultiviewRenderer {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("mclone_actor_multiview_shader"),
             source: wgpu::ShaderSource::Wgsl(
-                include_str!("shaders/entity_actor_multiview.wgsl").into(),
+                crate::fog::inject_fog_wgsl(include_str!("shaders/entity_actor_multiview.wgsl"))
+                    .into(),
             ),
         });
         let uniform_bind_group_layout =
@@ -1410,7 +1426,8 @@ impl ActorPlacedRenderer {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("mclone_actor_placed_shader"),
             source: wgpu::ShaderSource::Wgsl(
-                include_str!("shaders/entity_actor_placed.wgsl").into(),
+                crate::fog::inject_fog_wgsl(include_str!("shaders/entity_actor_placed.wgsl"))
+                    .into(),
             ),
         });
         let uniform_bind_group_layout =
@@ -1480,7 +1497,10 @@ impl ActorPlacedMultiviewRenderer {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("mclone_actor_placed_multiview_shader"),
             source: wgpu::ShaderSource::Wgsl(
-                include_str!("shaders/entity_actor_placed_multiview.wgsl").into(),
+                crate::fog::inject_fog_wgsl(include_str!(
+                    "shaders/entity_actor_placed_multiview.wgsl"
+                ))
+                .into(),
             ),
         });
         let uniform_bind_group_layout =
@@ -3238,8 +3258,8 @@ fn uniform_bytes(
             0.0
         },
         render_options.sky_darken.clamp(0.0, 1.0),
-        if render_options.fog.enabled { 1.0 } else { 0.0 },
-        0.0,
+        render_options.fog.shader_options(),
+        render_options.fog.ground_base_y,
     ] {
         bytes[offset..offset + 4].copy_from_slice(&value.to_ne_bytes());
         offset += 4;
@@ -3258,12 +3278,13 @@ fn uniform_bytes(
         render_options.fog.color[0],
         render_options.fog.color[1],
         render_options.fog.color[2],
-        1.0,
+        render_options.fog.max_opacity,
     ] {
         bytes[offset..offset + 4].copy_from_slice(&value.to_ne_bytes());
         offset += 4;
     }
-    for value in [render_options.fog.start, render_options.fog.end, 0.0, 0.0] {
+    let fog_distances = render_options.fog.shader_distances();
+    for value in [fog_distances[0], fog_distances[1], 0.0, 0.0] {
         bytes[offset..offset + 4].copy_from_slice(&value.to_ne_bytes());
         offset += 4;
     }
@@ -3898,7 +3919,10 @@ mod tests {
         );
 
         assert_eq!(bytes.len(), UNIFORM_BYTE_LEN);
-        assert_eq!(f32::from_ne_bytes(bytes[72..76].try_into().unwrap()), 1.0);
+        assert_eq!(
+            f32::from_ne_bytes(bytes[72..76].try_into().unwrap()).to_bits() & 3,
+            crate::fog::RenderFogMode::Linear as u32
+        );
         assert_eq!(f32::from_ne_bytes(bytes[80..84].try_into().unwrap()), 4.0);
         assert_eq!(f32::from_ne_bytes(bytes[84..88].try_into().unwrap()), 5.0);
         assert_eq!(f32::from_ne_bytes(bytes[88..92].try_into().unwrap()), 6.0);
@@ -4167,7 +4191,8 @@ mod tests {
                 naga::valid::Capabilities::MULTIVIEW,
             ),
         ] {
-            let module = naga::front::wgsl::parse_str(source).expect("actor WGSL parses");
+            let source = crate::fog::inject_fog_wgsl(source);
+            let module = naga::front::wgsl::parse_str(&source).expect("actor WGSL parses");
             naga::valid::Validator::new(naga::valid::ValidationFlags::all(), capabilities)
                 .validate(&module)
                 .expect("actor WGSL validates");

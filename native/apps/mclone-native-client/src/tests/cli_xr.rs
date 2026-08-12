@@ -1,4 +1,5 @@
 use super::*;
+use crate::cli::XrRenderModeOption;
 use mclone_app_runtime::startup_args::StartupSceneOptions;
 
 #[test]
@@ -71,6 +72,8 @@ fn cli_parses_xr_mclone_smoke_options() {
                 }),
                 underwater_mode: XrUnderwaterMode::Midpoint,
                 debug_ui_screen: None,
+                render_mode: XrRenderModeOption::DualPerEye,
+                render_mode_cycle: false,
             },
         }
     );
@@ -94,6 +97,8 @@ fn cli_parses_xr_view_pose_default() {
                 view_pose: None,
                 underwater_mode: XrUnderwaterMode::Midpoint,
                 debug_ui_screen: None,
+                render_mode: XrRenderModeOption::DualPerEye,
+                render_mode_cycle: false,
             },
         }
     );
@@ -118,6 +123,8 @@ fn cli_parses_xr_underwater_mode() {
                 view_pose: None,
                 underwater_mode: XrUnderwaterMode::PerEye,
                 debug_ui_screen: None,
+                render_mode: XrRenderModeOption::DualPerEye,
+                render_mode_cycle: false,
             },
         }
     );
@@ -142,9 +149,31 @@ fn cli_parses_xr_debug_ui_screen() {
                 view_pose: None,
                 underwater_mode: XrUnderwaterMode::Midpoint,
                 debug_ui_screen: Some(XrDebugUiScreen::Controls),
+                render_mode: XrRenderModeOption::DualPerEye,
+                render_mode_cycle: false,
             },
         }
     );
+}
+
+#[test]
+fn cli_parses_xr_graphics_debug_screen() {
+    let cli = Cli::parse([
+        "--xr-mclone-smoke".to_owned(),
+        "--xr-debug-ui".to_owned(),
+        "graphics".to_owned(),
+    ])
+    .unwrap();
+
+    assert!(matches!(
+        cli,
+        Cli::XrMcloneSmoke {
+            options: XrMcloneSmokeOptions {
+                debug_ui_screen: Some(XrDebugUiScreen::Graphics),
+                ..
+            },
+        }
+    ));
 }
 
 #[test]
@@ -169,6 +198,8 @@ fn cli_parses_xr_forever_smoke_options() {
                 }),
                 underwater_mode: XrUnderwaterMode::Midpoint,
                 debug_ui_screen: None,
+                render_mode: XrRenderModeOption::DualPerEye,
+                render_mode_cycle: false,
             },
         }
     );
@@ -278,6 +309,8 @@ fn cli_parses_desktop_xr_persistent_with_window_by_default() {
                 view_pose: None,
                 underwater_mode: XrUnderwaterMode::Midpoint,
                 debug_ui_screen: None,
+                render_mode: XrRenderModeOption::DualPerEye,
+                render_mode_cycle: false,
             },
             window: true,
             start_intent: WindowStartIntent::Menu,

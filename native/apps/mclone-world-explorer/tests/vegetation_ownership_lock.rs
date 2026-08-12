@@ -153,6 +153,11 @@ fn compiler_dependency_direction_stays_worldgen_to_terrain_view_consumer() {
         "wasm-bindgen"
     ));
     assert!(TERRAIN_VIEW_MANIFEST.contains("mclone-worldgen.workspace = true"));
+    let worldgen_dependencies = WORLDGEN_MANIFEST
+        .split_once("[dependencies]")
+        .and_then(|(_, remainder)| remainder.split_once("[dev-dependencies]"))
+        .map(|(dependencies, _)| dependencies)
+        .expect("worldgen manifest keeps distinct production and dev dependency tables");
     for forbidden in [
         "mclone-terrain-view",
         "wgpu",
@@ -161,8 +166,8 @@ fn compiler_dependency_direction_stays_worldgen_to_terrain_view_consumer() {
         "winit",
     ] {
         assert!(
-            !manifest_declares_dependency(WORLDGEN_MANIFEST, forbidden),
-            "worldgen compiler boundary gained forbidden dependency {forbidden:?}"
+            !worldgen_dependencies.contains(forbidden),
+            "worldgen compiler boundary gained forbidden production dependency {forbidden:?}"
         );
     }
 }

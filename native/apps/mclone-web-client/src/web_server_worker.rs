@@ -1718,6 +1718,48 @@ fn parse_diagnostics(
         number_prop(value, "pendingPersistenceLoads").unwrap_or(0.0) as usize;
     diagnostics.pending_persistence_saves =
         number_prop(value, "pendingPersistenceSaves").unwrap_or(0.0) as usize;
+    diagnostics.persistence_queue_metrics.foreground_requests =
+        number_prop(value, "persistenceForegroundRequests").unwrap_or(0.0) as usize;
+    diagnostics.persistence_queue_metrics.durable_write_requests =
+        number_prop(value, "persistenceDurableWriteRequests").unwrap_or(0.0) as usize;
+    diagnostics.persistence_queue_metrics.durable_write_bytes =
+        number_prop(value, "persistenceDurableWriteBytes").unwrap_or(0.0) as usize;
+    diagnostics.persistence_queue_metrics.cache_write_requests =
+        number_prop(value, "persistenceCacheWriteRequests").unwrap_or(0.0) as usize;
+    diagnostics.persistence_queue_metrics.cache_write_bytes =
+        number_prop(value, "persistenceCacheWriteBytes").unwrap_or(0.0) as usize;
+    diagnostics
+        .persistence_queue_metrics
+        .retained_record_cache_entries =
+        number_prop(value, "persistenceRetainedRecordCacheEntries").unwrap_or(0.0) as usize;
+    diagnostics
+        .persistence_queue_metrics
+        .retained_record_cache_bytes =
+        number_prop(value, "persistenceRetainedRecordCacheBytes").unwrap_or(0.0) as usize;
+    diagnostics
+        .persistence_queue_metrics
+        .high_water_foreground_requests =
+        number_prop(value, "persistenceHighWaterForegroundRequests").unwrap_or(0.0) as usize;
+    diagnostics
+        .persistence_queue_metrics
+        .high_water_durable_write_requests =
+        number_prop(value, "persistenceHighWaterDurableWriteRequests").unwrap_or(0.0) as usize;
+    diagnostics
+        .persistence_queue_metrics
+        .high_water_durable_write_bytes =
+        number_prop(value, "persistenceHighWaterDurableWriteBytes").unwrap_or(0.0) as usize;
+    diagnostics
+        .persistence_queue_metrics
+        .high_water_cache_write_requests =
+        number_prop(value, "persistenceHighWaterCacheWriteRequests").unwrap_or(0.0) as usize;
+    diagnostics
+        .persistence_queue_metrics
+        .high_water_cache_write_bytes =
+        number_prop(value, "persistenceHighWaterCacheWriteBytes").unwrap_or(0.0) as usize;
+    diagnostics.persistence_queue_metrics.cancelled_requests =
+        number_prop(value, "persistenceCancelledRequests").unwrap_or(0.0) as u64;
+    diagnostics.persistence_queue_metrics.skipped_cache_writes =
+        number_prop(value, "persistenceSkippedCacheWrites").unwrap_or(0.0) as u64;
     diagnostics.worldgen_mailbox_kind = worldgen_mailbox_kind_prop(
         value,
         "worldgenMailboxKind",
@@ -2157,6 +2199,10 @@ impl PersistenceRecordExecutor for WebPersistenceRecordExecutor {
             batch,
         });
         Ok(())
+    }
+
+    fn release_cached_record(&mut self, address: &PersistenceRecordAddress) {
+        self.state.borrow_mut().records.remove(address);
     }
 
     fn flush(&mut self) -> ChunkStoreResult<()> {
@@ -3125,6 +3171,8 @@ impl McloneWebIntegratedServerWorker {
             self.server.scheduler().pending_persistence_load_count();
         self.diagnostics.pending_persistence_saves =
             self.server.scheduler().pending_persistence_save_count();
+        self.diagnostics.persistence_queue_metrics =
+            self.server.scheduler().persistence_queue_metrics();
         self.diagnostics.worldgen_mailbox_kind = self.server.scheduler().worldgen_mailbox_kind();
         self.diagnostics.light_status_mailbox_kind =
             self.server.scheduler().light_status_mailbox_kind();
@@ -3479,6 +3527,90 @@ fn diagnostics_to_js(diagnostics: &ServerRunnerDiagnostics) -> Result<JsValue, S
         &object,
         "pendingPersistenceSaves",
         diagnostics.pending_persistence_saves as f64,
+    )?;
+    set_number(
+        &object,
+        "persistenceForegroundRequests",
+        diagnostics.persistence_queue_metrics.foreground_requests as f64,
+    )?;
+    set_number(
+        &object,
+        "persistenceDurableWriteRequests",
+        diagnostics.persistence_queue_metrics.durable_write_requests as f64,
+    )?;
+    set_number(
+        &object,
+        "persistenceDurableWriteBytes",
+        diagnostics.persistence_queue_metrics.durable_write_bytes as f64,
+    )?;
+    set_number(
+        &object,
+        "persistenceCacheWriteRequests",
+        diagnostics.persistence_queue_metrics.cache_write_requests as f64,
+    )?;
+    set_number(
+        &object,
+        "persistenceCacheWriteBytes",
+        diagnostics.persistence_queue_metrics.cache_write_bytes as f64,
+    )?;
+    set_number(
+        &object,
+        "persistenceRetainedRecordCacheEntries",
+        diagnostics
+            .persistence_queue_metrics
+            .retained_record_cache_entries as f64,
+    )?;
+    set_number(
+        &object,
+        "persistenceRetainedRecordCacheBytes",
+        diagnostics
+            .persistence_queue_metrics
+            .retained_record_cache_bytes as f64,
+    )?;
+    set_number(
+        &object,
+        "persistenceHighWaterForegroundRequests",
+        diagnostics
+            .persistence_queue_metrics
+            .high_water_foreground_requests as f64,
+    )?;
+    set_number(
+        &object,
+        "persistenceHighWaterDurableWriteRequests",
+        diagnostics
+            .persistence_queue_metrics
+            .high_water_durable_write_requests as f64,
+    )?;
+    set_number(
+        &object,
+        "persistenceHighWaterDurableWriteBytes",
+        diagnostics
+            .persistence_queue_metrics
+            .high_water_durable_write_bytes as f64,
+    )?;
+    set_number(
+        &object,
+        "persistenceHighWaterCacheWriteRequests",
+        diagnostics
+            .persistence_queue_metrics
+            .high_water_cache_write_requests as f64,
+    )?;
+    set_number(
+        &object,
+        "persistenceHighWaterCacheWriteBytes",
+        diagnostics
+            .persistence_queue_metrics
+            .high_water_cache_write_bytes as f64,
+    )?;
+    set_number(
+        &object,
+        "persistenceCancelledRequests",
+        diagnostics.persistence_queue_metrics.cancelled_requests as f64,
+    )?;
+    set_number(
+        &object,
+        "persistenceSkippedCacheWrites",
+        diagnostics.persistence_queue_metrics.skipped_cache_writes as f64,
     )?;
     set_string(
         &object,

@@ -70,6 +70,14 @@ pnpm native:xr:mac:wivrn:smoke
 pnpm native:xr:mac:wivrn:mclone
 ```
 
+On Linux/WiVRn:
+
+```bash
+pnpm native:xr:linux:wivrn:check
+pnpm native:xr:linux:wivrn:smoke
+pnpm native:xr:linux:wivrn:mclone
+```
+
 Use the platform/runtime lane that matches the machine being validated. For
 session-replacement work, the `mclone` smoke is the important one because it
 loads the real terrain session path instead of only proving OpenXR startup.
@@ -81,6 +89,13 @@ WiVRn handshake before launching Mclone. If connection still fails before
 Mclone launch, inspect the printed WiVRn host log,
 `adb devices -l`, `adb reverse --list`, and Quest logcat for
 `org.meumeu.wivrn.local`.
+
+The Linux launcher prefers a native `wivrn-server` and falls back to the
+official Flatpak. It defaults to `org.meumeu.wivrn.github`, verifies that its
+version matches the Flatpak, drives the same USB reverse/wake/restore lifecycle,
+and uses WiVRn's no-encryption mode so a headless smoke does not pause for a
+pairing PIN. See
+[`topics/desktop-openxr-validation.md`](topics/desktop-openxr-validation.md).
 
 ## Flat Android
 

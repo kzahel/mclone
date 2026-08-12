@@ -11,12 +11,14 @@ pub(super) struct OpenXrEyeState {
     pub(super) depth: ChunkDepthTarget,
     pub(super) width: u32,
     pub(super) height: u32,
+    outstanding_images: u32,
 }
 
 pub(super) struct OpenXrStereoState {
     swapchain: VulkanStereoSwapchain,
     pub(super) width: u32,
     pub(super) height: u32,
+    outstanding_images: u32,
 }
 
 impl OpenXrEyeState {
@@ -55,6 +57,18 @@ impl mclone_xr_host::XrEyeSwapchain<AppGraphics> for OpenXrEyeState {
     fn height(&self) -> u32 {
         self.height
     }
+
+    fn outstanding_image_count(&self) -> u32 {
+        self.outstanding_images
+    }
+
+    fn record_image_acquired(&mut self) {
+        self.outstanding_images = self.outstanding_images.saturating_add(1);
+    }
+
+    fn record_image_released(&mut self) {
+        self.outstanding_images = self.outstanding_images.saturating_sub(1);
+    }
 }
 
 impl mclone_xr_host::XrStereoSwapchain<AppGraphics> for OpenXrStereoState {
@@ -80,6 +94,18 @@ impl mclone_xr_host::XrStereoSwapchain<AppGraphics> for OpenXrStereoState {
 
     fn array_size(&self) -> u32 {
         self.swapchain.array_size()
+    }
+
+    fn outstanding_image_count(&self) -> u32 {
+        self.outstanding_images
+    }
+
+    fn record_image_acquired(&mut self) {
+        self.outstanding_images = self.outstanding_images.saturating_add(1);
+    }
+
+    fn record_image_released(&mut self) {
+        self.outstanding_images = self.outstanding_images.saturating_sub(1);
     }
 }
 
@@ -126,6 +152,7 @@ pub(super) fn create_eye(
         depth: ChunkDepthTarget::new(device, eye_width, eye_height),
         width: eye_width,
         height: eye_height,
+        outstanding_images: 0,
     })
 }
 
@@ -157,5 +184,6 @@ pub(super) fn create_stereo(
         swapchain,
         width: eye_width,
         height: eye_height,
+        outstanding_images: 0,
     })
 }

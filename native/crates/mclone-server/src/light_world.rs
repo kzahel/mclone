@@ -45,7 +45,7 @@ impl RetainedInitialLightState {
         Vec<PackedLightSection>,
         LevelLightComputationTiming,
     )> {
-        let statuses = batch.into_statuses();
+        let (statuses, input_chunks) = batch.into_parts();
         if statuses.is_empty() {
             return Vec::new();
         }
@@ -54,8 +54,6 @@ impl RetainedInitialLightState {
         let mut timing = LevelLightComputationTiming::default();
         let min_y = statuses[0].feature_snapshot.min_y;
         let height = statuses[0].feature_snapshot.height;
-        let input_chunks = batch_input_chunks(&statuses);
-
         let start = timing_start();
         let changed_chunks = {
             let mut world = self.world.borrow_mut();
@@ -167,7 +165,9 @@ impl RetainedInitialLightState {
                     status.pos,
                     min_section_y,
                     section_count,
-                    status.raw_blocks(),
+                    input_chunks
+                        .get(&status.pos)
+                        .expect("Light target must have a batch input"),
                 ),
             );
         }
@@ -237,25 +237,6 @@ impl RetainedInitialLightState {
     pub(crate) fn retained_chunk_count(&self) -> usize {
         self.world.borrow().chunk_count()
     }
-}
-
-fn batch_input_chunks(statuses: &[PendingLightStatus]) -> BTreeMap<ChunkPos, &[RawBlockId]> {
-    let mut chunks = BTreeMap::new();
-    for status in statuses {
-        debug_assert_eq!(
-            status.feature_snapshot.min_y,
-            statuses[0].feature_snapshot.min_y
-        );
-        debug_assert_eq!(
-            status.feature_snapshot.height,
-            statuses[0].feature_snapshot.height
-        );
-        chunks.insert(status.pos, status.raw_blocks());
-        for (neighbor_pos, blocks) in status.neighbor_blocks() {
-            chunks.entry(*neighbor_pos).or_insert(blocks.as_slice());
-        }
-    }
-    chunks
 }
 
 fn collect_light_sections(
@@ -655,7 +636,7 @@ mod tests {
             ),
         ];
 
-        let chunks = batch_input_chunks(&statuses);
+        let (_, chunks) = PendingLightStatusBatch::new(statuses).into_parts();
 
         assert_eq!(
             chunks[&target][chunk_block_index(1, 1, 1)],

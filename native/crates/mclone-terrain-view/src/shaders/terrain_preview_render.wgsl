@@ -10,6 +10,13 @@ struct TerrainPreviewParams {
     content_stage_flags: vec4<u32>,
     clipmap_inner_bounds: vec4<i32>,
     view_projection: mat4x4<f32>,
+    fog_camera_position: vec4<f32>,
+    fog_render_options: vec4<f32>,
+    fog_color: vec4<f32>,
+    fog_distances: vec4<f32>,
+    view_projection_right: mat4x4<f32>,
+    fog_camera_position_right: vec4<f32>,
+    multiview_options: vec4<u32>,
 };
 
 struct TerrainPreviewSample {
@@ -25,6 +32,8 @@ struct TerrainPreviewSample {
 
 // __MCLONE_TARGET_COLOR_TRANSFER_WGSL__
 const terrain_target_color_transform: f32 = __MCLONE_TARGET_COLOR_TRANSFORM__;
+// MCLONE_FOG_FUNCTION
+
 const TERRAIN_HORIZON_NORMAL_EDGE_WEST: u32 = 0x08000000u;
 const TERRAIN_HORIZON_NORMAL_EDGE_EAST: u32 = 0x10000000u;
 const TERRAIN_HORIZON_NORMAL_EDGE_NORTH: u32 = 0x20000000u;
@@ -80,6 +89,7 @@ struct VertexOutput {
     @location(7) world_position: vec3<f32>,
     @location(8) @interpolate(flat) biome: u32,
     @location(9) surface_y: f32,
+    @location(10) @interpolate(flat) view_index: u32,
 };
 
 fn exact_chunk_masked(chunk: vec2<i32>) -> bool {
@@ -338,6 +348,29 @@ fn vanilla_grass_color(biome: u32) -> vec3<f32> {
     }
     return rgb8(0x91bd59u);
 }
+fn mclone_grass_biome(recipe: u32) -> u32 {
+    switch recipe {
+        // Keep this mapping aligned with
+        // mclone_overworld_biome_id_for_sample.
+        case 0u: { return 0u; }  // ocean
+        case 1u: { return 16u; } // shore / beach
+        case 2u: { return 7u; }  // river
+        case 3u: { return 13u; } // snowy alpine
+        case 4u: { return 5u; }  // cool wet conifer / taiga
+        case 5u: { return 35u; } // warm dry steppe / savanna
+        case 6u: { return 4u; }  // temperate woodland / forest
+        default: { return 1u; }  // temperate meadow / plains
+    }
+}
+
+fn water_surface_color(ground_y: f32, light: f32) -> vec3<f32> {
+    let depth = clamp((63.0 - ground_y) / 52.0, 0.0, 1.0);
+    return mix(
+        vec3<f32>(0.16, 0.55, 0.68),
+        vec3<f32>(0.025, 0.17, 0.34),
+        depth,
+    ) * light;
+}
 
 fn vanilla_mountain_exposure_biome(biome: u32) -> bool {
     return biome == 3u || biome == 20u || biome == 34u
@@ -356,21 +389,12 @@ fn terrain_material(sample: TerrainPreviewSample) -> u32 {
     )));
 }
 
-fn water_surface_color(surface_y: f32) -> vec3<f32> {
-    let depth = clamp((63.0 - surface_y) / 52.0, 0.0, 1.0);
-    return mix(
-        vec3<f32>(0.16, 0.55, 0.68),
-        vec3<f32>(0.025, 0.17, 0.34),
-        depth,
-    );
-}
-
 fn terrain_color(sample: TerrainPreviewSample, light: f32) -> vec3<f32> {
     let temperature = sample.climate.x;
     let moisture = sample.climate.y;
     let material = terrain_material(sample);
     if material == 2u {
-        return water_surface_color(sample.terrain.x) * light;
+        return water_surface_color(sample.terrain.x, light);
     }
     if material == 1u {
         return vec3<f32>(0.48, 0.49, 0.47) * light;
@@ -408,12 +432,9 @@ fn terrain_color(sample: TerrainPreviewSample, light: f32) -> vec3<f32> {
     if preview_profile() == 1u {
         return vanilla_grass_color(u32(round(sample.semantics.y))) * light;
     }
-    let dry = vec3<f32>(0.63, 0.54, 0.29);
-    let wet = vec3<f32>(0.17, 0.48, 0.25);
-    let cold = vec3<f32>(0.30, 0.49, 0.38);
-    let moisture_mix = clamp(moisture * 0.5 + 0.5, 0.0, 1.0);
-    let warmth = clamp(temperature * 0.5 + 0.5, 0.0, 1.0);
-    return mix(cold, mix(dry, wet, moisture_mix), warmth) * light;
+    return vanilla_grass_color(
+        mclone_grass_biome(u32(round(sample.semantics.y))),
+    ) * light;
 }
 
 fn height_color(height: f32) -> vec3<f32> {
@@ -614,10 +635,10 @@ fn sample_color(
     return terrain_color(sample, light);
 }
 
-@vertex
-fn vertex_main(
-    @builtin(vertex_index) vertex_index: u32,
-    @builtin(instance_index) instance_index: u32,
+fn terrain_vertex(
+    vertex_index: u32,
+    instance_index: u32,
+    view_index: u32,
 ) -> VertexOutput {
     let cells = u32(params.origin_spacing_cells.w);
     let cell_stride = max(terrain_render_cell_stride, 1u);
@@ -742,7 +763,11 @@ fn vertex_main(
         - params.presentation_center_extent.y;
     let compare = params.seed_source_view.z == 2u;
     let stacked_compare = compare && params.content_stage_flags.z == 1u;
-    var clip_position = params.view_projection * vec4<f32>(
+    var view_projection = params.view_projection;
+    if view_index != 0u {
+        view_projection = params.view_projection_right;
+    }
+    var clip_position = view_projection * vec4<f32>(
         vec3<f32>(
             relative_x,
             stitched_height + 1.0,
@@ -750,6 +775,9 @@ fn vertex_main(
         ),
         1.0,
     );
+    if (params.multiview_options.x & (1u << view_index)) == 0u {
+        clip_position = vec4<f32>(2.0, 2.0, 2.0, 1.0);
+    }
     if compare {
         if stacked_compare {
             let panel_center = select(0.5, -0.5, instance_index == 1u);
@@ -777,7 +805,7 @@ fn vertex_main(
         sample.hydrology.x,
         sample.hydrology.w,
         sample.hydrology.y,
-        sample.terrain.z,
+        sample.terrain.x,
     );
     out.semantics = vec4<f32>(
         sample.hydrology_detail.x,
@@ -792,6 +820,7 @@ fn vertex_main(
     );
     out.biome = u32(round(sample.semantics.y));
     out.surface_y = sample.terrain.x;
+    out.view_index = view_index;
     return out;
 }
 
@@ -825,6 +854,23 @@ fn apply_material_texture(
     return base_color * mix(vec3<f32>(1.0), texture_detail, texture_weight);
 }
 
+@vertex
+fn vertex_main(
+    @builtin(vertex_index) vertex_index: u32,
+    @builtin(instance_index) instance_index: u32,
+) -> VertexOutput {
+    return terrain_vertex(vertex_index, instance_index, 0u);
+}
+
+@vertex
+fn vertex_multiview_main(
+    @builtin(vertex_index) vertex_index: u32,
+    @builtin(instance_index) instance_index: u32,
+    @builtin(view_index) view_index: i32,
+) -> VertexOutput {
+    return terrain_vertex(vertex_index, instance_index, u32(view_index));
+}
+
 @fragment
 fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
     if params.clipmap_inner_bounds.z > params.clipmap_inner_bounds.x
@@ -844,6 +890,7 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let world_dy = dpdy(input.world_xz);
     let blocks_per_pixel = max(length(world_dx), length(world_dy));
     let river_anti_alias = max(fwidth(input.river.x), blocks_per_pixel * 0.35);
+    let pool_anti_alias = max(fwidth(input.semantics.y), 0.01);
     var color = input.color;
     let face_normal = normalize(cross(
         dpdx(input.world_position),
@@ -869,6 +916,7 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
     }
     if input.textured != 0u
         && params.content_stage_flags.x >= 1u
+        && input.material != 2u
         && preview_profile() == 0u {
         let visible_half_width = max(input.river.y, blocks_per_pixel * 0.70);
         let river_distance_alpha = 1.0 - smoothstep(
@@ -891,7 +939,7 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
         var river_color = color;
         if input.material != 2u {
             river_color = apply_material_texture(
-                water_surface_color(input.surface_y) * input.light,
+                water_surface_color(input.surface_y, input.light),
                 2u,
                 input.world_xz,
                 world_dx,
@@ -900,6 +948,17 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
             );
         }
         color = mix(color, river_color, river_alpha);
+        let pool_alpha = smoothstep(
+            0.55 - pool_anti_alias,
+            0.55 + pool_anti_alias,
+            input.semantics.y,
+        );
+        let water_alpha = max(river_alpha, pool_alpha);
+        color = mix(
+            color,
+            water_surface_color(input.river.w, input.light),
+            water_alpha * 0.88,
+        );
         if params.content_stage_flags.x >= 4u {
             let cover = clamp(input.semantics.w, 0.0, 1.0);
             color = mix(color, color * vec3<f32>(0.57, 0.82, 0.58), cover * 0.36);
@@ -915,6 +974,18 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
         );
         color = mix(color, coverage_color, 0.82);
     }
+    var fog_camera_position = params.fog_camera_position;
+    if input.view_index != 0u {
+        fog_camera_position = params.fog_camera_position_right;
+    }
+    let fog_factor = mclone_fog_factor(
+        input.world_position,
+        fog_camera_position,
+        params.fog_render_options,
+        params.fog_color,
+        params.fog_distances,
+    );
+    color = mix(color, params.fog_color.rgb, fog_factor);
     return mclone_apply_target_color_transform_rgba(
         vec4<f32>(color, 1.0),
         terrain_target_color_transform,

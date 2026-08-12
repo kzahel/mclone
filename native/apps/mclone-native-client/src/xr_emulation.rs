@@ -275,6 +275,18 @@ pub(crate) fn run_xr_emulation_screenshot(
             }
             let mut views = synthetic_stereo_views(driver.host().camera_snapshot(), size);
             driver.drive_stereo_until_view_settled(device, queue, views)?;
+            if scene.startup.terrain_presentation
+                == mclone_app_runtime::startup_args::TerrainPresentationMode::Composed
+            {
+                drive_terrain_horizon_until_ready(
+                    &mut driver,
+                    device,
+                    queue,
+                    size,
+                    left_view,
+                    right_view,
+                )?;
+            }
             drive_embedded_preview_until_visible(
                 &mut driver,
                 device,
@@ -517,6 +529,34 @@ fn validate_stereo_embedded_world_activation(
         );
     }
     Ok(())
+}
+
+fn drive_terrain_horizon_until_ready(
+    driver: &mut OffscreenDriver,
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    size: [u32; 2],
+    left_view: &wgpu::TextureView,
+    right_view: &wgpu::TextureView,
+) -> Result<()> {
+    let mut last = None;
+    for _ in 0..360 {
+        if last.is_some_and(|diagnostics: mclone_scene::SceneTerrainViewDiagnostics| {
+            diagnostics.target_ready && diagnostics.drawn_tiles > 0
+        }) {
+            return Ok(());
+        }
+        std::thread::sleep(XR_EMULATION_FRAME_TIME);
+        let views = synthetic_stereo_views(driver.host().camera_snapshot(), size);
+        driver.render_stereo(device, queue, views, left_view, right_view)?;
+        last = driver.host().terrain_view_diagnostics();
+    }
+    bail!(
+        "synthetic-stereo composed horizon did not become ready within 360 rendered frames: \
+         preference={:?} source_supported={} diagnostics={last:?}",
+        driver.host().terrain_presentation_preference(),
+        driver.host().terrain_presentation_supported(),
+    )
 }
 
 fn drive_embedded_preview_until_visible(

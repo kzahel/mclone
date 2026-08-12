@@ -19,6 +19,7 @@ pnpm native:worldgen:smoke
 pnpm native:scheduler-loading:smoke
 pnpm native:mesh-cpu:smoke
 pnpm native:gpu-upload:smoke
+pnpm native:actor-render:smoke
 pnpm native:movement:smoke
 pnpm native:movement-frame:smoke
 pnpm native:startup-streaming:smoke
@@ -35,6 +36,7 @@ pnpm native:scheduler-loading:persisted-memory:perf
 pnpm native:scheduler-loading:persisted-sqlite:perf
 pnpm native:mesh-cpu:perf
 pnpm native:gpu-upload:perf
+pnpm native:actor-render:perf
 pnpm native:movement:perf
 pnpm native:movement-frame:perf
 pnpm native:startup-streaming:perf
@@ -74,6 +76,7 @@ pnpm native:runtime:perf
 - `native:scheduler-loading:*`: server-only loading ceiling probe. Applies one local chunk view to `ChunkScheduler`, hot-polls until the target view is client-visible and server queues drain, and reports target chunks/sec plus worldgen/light/publication counters. It includes current scheduler job admission, publication, light status work, and persistence queues, but no client update pump, mesh preparation, GPU upload, or frame pacing. `native:scheduler-loading:persisted-memory:perf` runs a prewarm pass into shared in-memory `ChunkRecord`s, then measures reload from already-generated/lit records with no disk. `native:scheduler-loading:persisted-sqlite:perf` repeats that shape through a temp SQLite world directory to price the normal record decode/load/storage path separately from generation/light.
 - `native:mesh-cpu:*`: CPU-only render-section mesh probe. The default source prewarms a temp SQLite world, reloads already-generated/lit snapshots through `ChunkScheduler`, then builds all target-column render sections with the shared `mclone-render-session` mesh path. It includes asset catalog load, persisted server reload, snapshot-to-mesh conversion, ambient occlusion, light/tint sampling, and visibility-graph build. It excludes `wgpu`, GPU upload, frame pacing, render draw, and the runtime admission budget.
 - `native:gpu-upload:*`: extends the mesh CPU probe with `--gpu-upload`. After CPU mesh build, it creates headless draw resources, uploads the atlas outside the measured section-upload phase, then times `TexturedSectionDrawResources::apply_section_updates_with_context_timed` for the prebuilt section meshes. It includes real `wgpu` buffer creation and renderer section bookkeeping, but no draw pass, frame loop, runtime upload budget, or Quest frame pacing.
+- `native:actor-render:*`: deterministic offscreen actor-render isolation. It builds a visible actor grid and measures real prepare, encode, submit, and synchronous GPU completion while reporting prepared/legacy actor counts, pose and queue-write work, fallback mesh rebuild/upload bytes, draw pressure, and mutable/immutable memory. Controls select prepared or legacy admission, cow/chicken/mixed figures, animated or stationary input, and actor count. It excludes simulation/spawning, terrain, OpenXR, and swapchain presentation, so use it for route attribution and scaling rather than Quest acceptance. Current interpretation and future-work gates live in [`topics/actor-rendering-performance.md`](topics/actor-rendering-performance.md).
 - `native:movement:*`: integrated native client/server movement path. Reports chunk load/unload, scheduler polling, remesh time, dirty render-section rebuilds, and visible-vs-loaded face pressure.
 - `native:movement-frame:*`: headless live-frame walking probe. Moves at spectator speed without fully draining render work each step and reports frame-budget misses, poll/remesh/upload/render timing, and render compile queue counters.
 - `native:startup-streaming:*`: desktop-shaped local startup and streaming probe. The default perf lane uses RD10 at a 60 Hz budget for fast iteration; RD15 is the next stronger throughput signal before occasional RD20/RD30 long runs. Uses the same local startup pump to enter at the playable gate, then advances a paced headless frame loop that polls the runtime and syncs render sections under a frame deadline while the requested view fills in. Reports enter-playable time, first full-view-ready frame/time, stable first render-quiescent frame/time, frame-budget misses, runtime poll/remesh/upload/render timing, queue counters, and final readiness. `native:startup-streaming:persisted:*` first prewarms a temp SQLite world, reopens it through the same startup pump, and measures already-generated persisted startup/streaming without fresh generation/light noise. RD20 is an explicit long-run lane, not the default iteration target.
@@ -100,6 +103,120 @@ When adding a record, include:
 The benchmark JSON includes `benchmark`, `recorded_unix_seconds`, `git_commit`, `git_dirty`, and `debug_assertions`.
 
 ## Records
+
+### 2026-07-28 - Instanced Prepared Actor Crowds
+
+Commit reported by benchmark JSON: `32fcffaf`, `git_dirty=false`,
+`debug_assertions=false`. Host: Linux 7.0 x86_64, AMD Ryzen AI 9 365
+(20 logical CPUs) with Radeon 880M. Each table row is the mean of five clean
+release runs, 120 measured frames after 30 warmup frames at `640x360`.
+
+Code under test: actors with the same prepared figure share one immutable
+vertex/index buffer and one instanced draw per compatible material pass. Each
+instance supplies its own affine world transform, light, opacity, and
+body-palette base. Independently evaluated affine part palettes are packed in
+one texture per figure bucket, so unrelated animation phases do not split the
+batch. Engine-space clip channels and rest transforms are precomputed during
+figure preparation.
+
+Animated-cow scaling:
+
+| Actors | Avg frame | Mean p95 | Avg-run range | Prepare | Pose evaluation | Upload | Device poll | Draws / frame |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 10 | `0.145ms` | `0.189ms` | `0.119–0.202ms` | `0.022ms` | `0.015ms` | `0.006ms` | `0.094ms` | `1` |
+| 100 | `0.373ms` | `0.428ms` | `0.362–0.397ms` | `0.172ms` | `0.146ms` | `0.026ms` | `0.170ms` | `1` |
+| 1,000 | `1.939ms` | `2.594ms` | `1.656–2.336ms` | `1.345ms` | `1.150ms` | `0.195ms` | `0.570ms` | `1` |
+| 2,000 | `4.135ms` | `4.659ms` | `3.942–4.430ms` | `2.470ms` | `2.137ms` | `0.332ms` | `1.640ms` | `1` |
+
+Against the immediately preceding non-instanced prepared baseline, average
+frame time improved from `0.208ms` to `0.145ms` at 10 actors, `0.837ms` to
+`0.373ms` at 100, and `9.184ms` to `1.939ms` at 1,000. Those are `1.43x`,
+`2.24x`, and `4.74x` reductions respectively. One thousand cows now submit
+one draw containing 1,000 instances instead of 1,000 draws.
+
+The animated 1,000-cow frame performs one palette write of `1,056,768` bytes
+and one actor write of `64,000` bytes. The previous path wrote 1,000 palette
+buffers totaling `1,408,000` bytes and 1,000 actor buffers totaling `80,000`
+bytes. The affine layout therefore also removes 25% of matrix bytes and 20%
+of actor-record bytes.
+
+The matching stationary 1,000-cow control measured `0.531ms` average and
+`0.569ms` mean p95, down from `1.290/1.369ms`. It retained 120,000 exact-input
+reuse hits with no pose evaluation or actor/palette writes and issued one
+instanced draw per frame. Animated preparation is now the largest stable
+high-count component: pose evaluation averages about `1.15ms` per 1,000 cows,
+while synchronous device poll averages about `0.57ms`. GPU pose expansion or
+actor LOD are therefore separable next experiments rather than prerequisites
+for prepared instancing.
+
+Representative command:
+
+```bash
+native/target/release/actor_render_perf \
+  --actors 1000 --frames 120 --warmup-frames 30 \
+  --figure cow --path prepared --motion animated
+```
+
+Validation included the full `mclone-assets` and `mclone-render` library
+suites, explicit 1,000-instance residency, mono/stereo/full-frame multiview
+pixel proofs, headed production browser WebGPU actor composition, strict
+affected-crate Clippy, and a release Android XR APK build. Physical Quest
+frame pacing was not measured in this slice.
+
+### 2026-07-28 - Capability-Driven Prepared Actors And Crowd Lane
+
+Commit reported by benchmark JSON: `41fc9fae`, `git_dirty=false`,
+`debug_assertions=false`. Host: Linux 7.0 x86_64, AMD Ryzen AI 9 365
+(20 logical CPUs) with Radeon 880M. Each table cell is the mean of five clean
+release runs, 120 measured frames after 30 warmup frames at `640x360`.
+
+Code under test: stable entity figures are admitted by prepared-resource
+capability instead of the original player/chicken whitelist. Cow and upright
+bear therefore use immutable prepared geometry and world-local actor/palette
+records. Exact unchanged actor inputs reuse those records without pose
+evaluation or GPU writes. Local/remote player identities, anonymous actors,
+debug/item shapes, and unsupported figures retain the CPU-baked fallback.
+
+Prepared/legacy animated-cow A/B:
+
+| Actors | Path | Avg frame | Mean p95 | Mutable bytes | Legacy upload / frame |
+|---:|---|---:|---:|---:|---:|
+| 10 | prepared | `0.208ms` | `0.262ms` | `1,391,776` | `0` |
+| 10 | legacy | `3.302ms` | `3.525ms` | `36,425,472` | `7,838,400` |
+| 100 | prepared | `0.837ms` | `1.015ms` | `1,767,616` | `0` |
+| 100 | legacy | `31.782ms` | `32.192ms` | `403,484,800` | `78,384,000` |
+
+The prepared route is `15.9x` faster at 10 actors and `38.0x` faster at 100.
+The legacy totals over each 120-frame interval were `940,608,000` bytes and
+`9,406,080,000` bytes respectively; the prepared path rebuilt or uploaded no
+legacy mesh data.
+
+Prepared 1,000-cow motion control:
+
+| Motion | Avg frame | Mean p95 | Pose evaluations | Reuse hits | Palette / actor writes |
+|---|---:|---:|---:|---:|---:|
+| animated | `9.184ms` | `9.656ms` | `120,000` | `0` | `168,960,000 / 9,600,000 B` |
+| stationary | `1.290ms` | `1.369ms` | `0` | `120,000` | `0 / 0 B` |
+
+Both controls still issue 1,000 prepared draws per frame. The unchanged-state
+optimization removes pose and upload work, while the residual stationary
+slope identifies draw submission/GPU work as the next high-count target.
+Per-figure instancing is therefore a justified experiment for crowds, but this
+host lane does not show that ten prepared cows need it.
+
+Representative commands:
+
+```bash
+native/target/release/actor_render_perf --actors 10 --frames 120 --warmup-frames 30 --figure cow --path prepared --motion animated
+native/target/release/actor_render_perf --actors 10 --frames 120 --warmup-frames 30 --figure cow --path legacy --motion animated
+native/target/release/actor_render_perf --actors 1000 --frames 120 --warmup-frames 30 --figure cow --path prepared --motion stationary
+```
+
+Interpretation: the cow regression was route selection, not evidence that the
+prepared figure architecture is intrinsically slow. The remaining product gate
+is a physical Quest RD5 composed-orbit normal-actor/actor-skipped repeat with
+the rebuilt APK. This offscreen lane waits for each GPU submission and includes
+no terrain, simulation/spawn work, OpenXR runtime, or presentation overlap.
 
 ### 2026-07-08 - Tactical 155 P0 Fix A RD20 Free-Movement Retained-Light + RSS Soak
 

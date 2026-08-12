@@ -30,6 +30,10 @@ CHUNK_Z="${MCLONE_ANDROID_XR_CHUNK_Z:-0}"
 RENDER_DISTANCE="${MCLONE_ANDROID_XR_RENDER_DISTANCE:-5}"
 DAY_TIME="${MCLONE_ANDROID_XR_DAY_TIME:-6000}"
 ORBIT_SPEED="${MCLONE_ANDROID_XR_PERF_ORBIT_SPEED:-4.3}"
+FLIGHT_SPEED="${MCLONE_ANDROID_XR_PERF_FLIGHT_SPEED:-34.4}"
+SAMPLE_MODE="${MCLONE_ANDROID_XR_PERSISTED_SAMPLE_MODE:-orbit}"
+GENERATION_PROFILE="${MCLONE_ANDROID_XR_GENERATION_PROFILE:-mclone-overworld-v1}"
+TERRAIN_PRESENTATION="${MCLONE_ANDROID_XR_TERRAIN_PRESENTATION:-exact-only}"
 RENDER_COMPILE_WORKERS="${MCLONE_ANDROID_XR_RENDER_COMPILE_WORKERS:-2}"
 RENDER_COMPLETED_RESULT_ACCEPT_BUDGET="${MCLONE_ANDROID_XR_RENDER_COMPLETED_RESULT_ACCEPT_BUDGET:-2}"
 RENDER_SECTION_UPLOAD_BUDGET="${MCLONE_ANDROID_XR_RENDER_SECTION_UPLOAD_BUDGET:-16}"
@@ -68,6 +72,15 @@ Options:
   --chunk-x X
   --chunk-z Z
   --render-distance N
+  --generation-profile PROFILE
+                     Generation profile used for both launches.
+  --terrain-presentation MODE
+                     Terrain presentation used for both launches.
+  --sample-mode MODE Reopen sample mode: orbit or flight.
+  --perf-orbit-speed N
+                     Orbit speed in blocks per second.
+  --perf-flight-speed N
+                     Flight speed in blocks per second.
   -h, --help         Show this help.
 USAGE
 }
@@ -183,6 +196,31 @@ while [[ $# -gt 0 ]]; do
             RENDER_DISTANCE="$2"
             shift 2
             ;;
+        --generation-profile)
+            require_arg "$1" "${2:-}"
+            GENERATION_PROFILE="$2"
+            shift 2
+            ;;
+        --terrain-presentation)
+            require_arg "$1" "${2:-}"
+            TERRAIN_PRESENTATION="$2"
+            shift 2
+            ;;
+        --sample-mode)
+            require_arg "$1" "${2:-}"
+            SAMPLE_MODE="$2"
+            shift 2
+            ;;
+        --perf-orbit-speed)
+            require_arg "$1" "${2:-}"
+            ORBIT_SPEED="$2"
+            shift 2
+            ;;
+        --perf-flight-speed)
+            require_arg "$1" "${2:-}"
+            FLIGHT_SPEED="$2"
+            shift 2
+            ;;
         -h|--help)
             usage
             exit 0
@@ -209,6 +247,20 @@ validate_positive_integer "--prewarm-wait-seconds" "$PREWARM_WAIT_SECONDS"
 validate_positive_integer "--perf-seconds" "$SAMPLE_SECONDS"
 validate_positive_integer "--wait-seconds" "$SAMPLE_WAIT_SECONDS"
 validate_positive_integer "--render-distance" "$RENDER_DISTANCE"
+case "$SAMPLE_MODE" in
+    orbit|flight)
+        ;;
+    *)
+        mclone_die "--sample-mode must be 'orbit' or 'flight'"
+        ;;
+esac
+case "$TERRAIN_PRESENTATION" in
+    exact-only|composed)
+        ;;
+    *)
+        mclone_die "--terrain-presentation must be 'exact-only' or 'composed'"
+        ;;
+esac
 
 cd "$REPO_ROOT"
 ADB="$(mclone_android_tool adb platform-tools/adb)"
@@ -239,6 +291,10 @@ scene_args=(
     --chunk-x "$CHUNK_X"
     --chunk-z "$CHUNK_Z"
     --render-distance "$RENDER_DISTANCE"
+    --app-arg --generation-profile
+    --app-arg "$GENERATION_PROFILE"
+    --app-arg --terrain-presentation
+    --app-arg "$TERRAIN_PRESENTATION"
     --render-compile-workers "$RENDER_COMPILE_WORKERS"
     --day-time "$DAY_TIME"
     --freeze-time
@@ -257,7 +313,17 @@ bash "$ANDROID_XR_DIR/validate-quest-openxr.sh" \
     --perf-summary "$PREWARM_SUMMARY" \
     --log "$PREWARM_LOG"
 
-mclone_note "Reopening persisted Quest world for RD${RENDER_DISTANCE} orbit guardrail sample"
+sample_args=()
+case "$SAMPLE_MODE" in
+    orbit)
+        sample_args+=(--perf-settled-orbit --perf-orbit-speed "$ORBIT_SPEED")
+        ;;
+    flight)
+        sample_args+=(--perf-flight --perf-flight-speed "$FLIGHT_SPEED")
+        ;;
+esac
+
+mclone_note "Reopening persisted Quest world for RD${RENDER_DISTANCE} ${SAMPLE_MODE} guardrail sample"
 bash "$ANDROID_XR_DIR/validate-quest-openxr.sh" \
     --"$BUILD_TYPE" \
     --serial "$SERIAL" \
@@ -265,8 +331,7 @@ bash "$ANDROID_XR_DIR/validate-quest-openxr.sh" \
     --skip-assets \
     "${scene_args[@]}" \
     --perf-seconds "$SAMPLE_SECONDS" \
-    --perf-settled-orbit \
-    --perf-orbit-speed "$ORBIT_SPEED" \
+    "${sample_args[@]}" \
     --perf-metrics \
     --wait-seconds "$SAMPLE_WAIT_SECONDS" \
     --perf-summary "$SAMPLE_SUMMARY" \

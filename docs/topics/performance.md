@@ -33,6 +33,114 @@ known SwiftShader black-region artifact remains. Physical Quest RD5
 orbit/churn is still pending and remains the final hardware gate; AVD numbers
 are relative Android/shared-path evidence, not standalone Quest evidence.
 
+## Quest Procedural-Horizon Baseline
+
+Tactical
+[`277`](../tactical/277-quest-procedural-horizon-performance.md) establishes
+the first full-quality procedural-horizon Quest 3 baseline at RD5, 72 Hz,
+`1680x1760` per eye, render scale 1, foveation off, and the production per-eye
+frame-overlap path.
+
+Before culling, stationary exact/composed/exact measured:
+
+| Lane | FPS | App work avg / p95 | App GPU | Headroom avg |
+|---|---:|---:|---:|---:|
+| exact A | `72.00` | `5.397 / 6.175ms` | `2.330ms` | `8.492ms` |
+| composed | `51.91` | `19.157 / 20.313ms` | `11.906ms` | `-5.268ms` |
+| exact repeat | `72.00` | `5.382 / 6.404ms` | `2.267ms` | `8.506ms` |
+
+The shared horizon renderer was submitting all 160 resident tiles to each eye,
+including tiles hidden by finer clipmap levels and outside the physical-eye
+frustum. Commit `99d6c5b6` conservatively culls those tiles and retains a
+16-block vegetation-crown margin. The synthetic stereo reference remains
+byte-identical.
+
+Post-change stationary composed repeats draw 27–28 terrain tiles and hold
+`72.01 FPS`, `10.65–10.78ms` average app work, `11.57–11.77ms` p95,
+`5.63–5.71ms` Meta app GPU, and zero over-period frames. This is the current
+stationary acceptance baseline.
+
+Continuous presentation is close but not locked. Settled composed orbit
+repeats measure `71.81 FPS`, `11.19–11.23ms` average app work,
+`13.46–13.73ms` p95, and `2.2–2.8%` over-period frames. A five-minute
+`34.4`-block/second composed flight measures `71.70 FPS`, `13.944ms` p95, and
+`5.6%` over-period frames while Meta app GPU is only `4.748ms`.
+
+Those RD5 renderer and bounded-persistence results remain valid, but a later
+RD7 flight planned for 20 minutes reproduced low-memory termination after
+about 12 minutes and 25 kiloblocks. A two-minute diagnostic measured Features
+at `42.916/s`, Light at `20.266/s`, and 1,026 pending unbounded copied-input
+Light statuses while the server-update queue stayed empty.
+
+Tactical
+[`279`](../tactical/279-chunk-lighting-admission-and-backpressure.md) closes
+that P0 with four-at-a-time Player promotion, keyed/cancellable Light demand,
+request tokens and Light tickets, shared raw inputs, an 18-status / 64 MiB
+mailbox lifetime bound, fixed scheduler history, and a 4,096-item bound on the
+adjacent native-client deferred payload owner found during hardware
+acceptance. The final physical Quest 3 RD7 flight completed 20 minutes and
+41,277 blocks normally, kept admitted Light ownership below 10.7 MiB, published
+Features and Light at matching `26.46/s`, and showed a reclaiming
+working-set plateau rather than distance-proportional growth. The complete RD7
+view converged in `17.772s` after stopping, and the 1.60 GB pulled database
+passed integrity checking with 31,960 chunk records.
+
+The exact final RD5 churn and RD7 flight rows pass their absolute frame gates.
+Settled orbit still has the pre-existing presentation tail: the adjacent
+parent already missed RD5 p95 and RD7 p95/over-period limits, while the final
+candidate retains near-threshold RD5 work and one isolated over-2x RD7 frame.
+That gate is not waived, but it is no longer a reason to expand scheduler or
+Light ownership.
+
+The 2026-07-28 post-closeout A/B removed a dynamic-scene confound. Exact-only
+parent/final 45-second RD5 orbits with actors skipped measured
+`4.918/4.841ms` average app work, `8.127/8.005ms` app-work p95,
+`3.275/3.271ms` average thread CPU, and `4.888/4.887ms` thread-CPU p95.
+Stable foreground cost is unchanged even though final Light request count rose
+from 37 to 70. The final settle time also rose from `19.627s` to `33.186s`, so
+request fragmentation remains a useful-throughput/setup concern rather than a
+frame-time reason to relax memory bounds.
+
+The explicit LOD-on control clarifies the product problem. On
+`mclone-overworld-v1`, exact/composed actor-skipped orbits measured
+`4.068/10.723ms` average app work and `4.858/12.889ms` p95. The composed lane
+was horizon-active and target-ready and spent only `0.2%` of frames over the
+period. Restoring ten actors raised composed work to `12.252ms` average,
+`15.151ms` p95, and `16.3%` over-period. Earlier accepted composed rows had
+only six actors. Actor-skipped rows are attribution controls, never product
+acceptance; normal actors plus LOD remain binding.
+
+Commit `41fc9fae` addresses the discovered route defect: cow entities carried a
+prepared figure ID but were rejected by a stale player/chicken whitelist and
+fell through to whole-mesh CPU baking. Capability-driven admission landed,
+and `32fcffaf` subsequently instanced compatible prepared figures. The
+isolated lane improves ten cows by `15.9x` versus legacy and 1,000 animated
+cows from `9.184ms` to `1.939ms` versus the non-instanced prepared path.
+
+The physical Quest gate is now complete and fails the product target. In the
+same 45-second dual-per-eye RD5 composed orbit, ten actors measured
+`14.384/17.507ms` average/p95 app work, `8.523ms` average thread CPU, and
+`7.052ms` app GPU. Skipping actors measured `5.954/8.864ms`, `3.340ms`, and
+`2.847ms`, respectively, with zero over-period frames. The current prepared
+build therefore still attributes `8.430ms` app work, `5.183ms` thread CPU, and
+`4.205ms` reported app GPU to this actor-enabled workload. Actor route/stage
+and GPU-pass instrumentation now precede the previously ordered sparse upload,
+GPU palette, and LOD experiments.
+
+The full execution and exception disposition are in
+[`chunk-lighting-admission-and-backpressure.md`](chunk-lighting-admission-and-backpressure.md).
+
+The independent horizon experiment is complete under coordinating Tactical
+[`280`](../tactical/280-xr-multiview-render-path-workstream.md), which also
+owns safe live XR path selection and the final keep/default/remove decision.
+Focused child Tactical
+[`278`](../tactical/278-quest-procedural-horizon-multiview.md) adds the real
+two-layer horizon and its matched device comparison. Multiview cuts average
+thread CPU from `8.523ms` to `5.771ms` versus dual per-eye but increases app
+GPU from `7.052ms` to `9.244ms` and app work from `14.384ms` to `17.053ms`.
+Dual per-eye remains the default; all three live modes remain available for
+future optimization without retaining an inactive target family.
+
 ## High-Priority Known Performance Issues
 
 This is the first pickup list for measured, broadly applicable performance
@@ -94,17 +202,18 @@ live accounting after its one on-demand exact report.
 
 ### HP-1: Split Actor Pose Updates From Whole-Mesh Rebuilds
 
-**Priority: high. Status: CPU-baked fallback cleanup remains unclaimed; the
-startup-prepared static player proof is complete. Scope: general actor
-rendering, not embedded worlds. The first fallback index-reuse slice remains
-low-hanging.**
+**Priority: immediate. Status: stable entity figures are capability-routed and
+per-figure instanced as of 2026-07-28; the 2026-07-29 physical Quest gate
+still attributes a release-blocking CPU/GPU cost to ten actors. Scope: general
+actor rendering, not embedded worlds. CPU-baked fallback cleanup and prepared
+draw submission are no longer cow-path blockers.**
 
 Tactical 131 already fixed the old per-eye/per-frame GPU allocation defect.
 `ActorMeshCache` now owns reusable CPU scratch plus persistent, grow-only
 vertex and index buffers, and the second eye reuses the first eye's prepared
 geometry. Do not reopen or duplicate that completed resource-lifetime work.
 
-The remaining invalidation is too coarse. `ActorMeshCache::prepare` in
+The fallback invalidation remains too coarse. `ActorMeshCache::prepare` in
 `native/crates/mclone-render/src/entity.rs` compares the complete
 `[ActorInstance]` list. Any position, rotation, walk-distance, or figure-pose
 change then:
@@ -122,44 +231,84 @@ queue growth, or feature-off regression. The risk is proportional CPU and
 upload work as visible actor count, animation cadence, browser load, or XR
 refresh rate grows.
 
-The preferred bounded pickup order is:
+Physical Quest attribution now makes that risk release-relevant. In the same
+LOD-on RD5 orbit, suppressing ten actors reduced average app work from
+`12.252ms` to `10.723ms`, p95 from `15.151ms` to `12.889ms`, and average
+thread CPU from `9.363ms` to `8.258ms`. The no-actor row passes the main p95
+and over-period limits; the normal-actor row does not. This proves material
+actor-enabled cost. The 2026-07-28 investigation found the concrete cow-path
+cause: both prepared-resource creation and prepared-actor admission still had
+the original player/chicken whitelist. Cow joined render-session figure mapping
+on 2026-07-24, but that later promotion did not update either whitelist. Stable
+cow entities therefore fell through to the CPU-baked combined mesh, rebuilding
+and uploading all cow vertices and indices whenever any cow moved.
 
-1. Introduce an actor topology key that excludes pose-only fields while
-   retaining roster, shape/figure, visibility-part, and vertex-layout facts.
-2. On a pose-only change, reuse the existing index data and index buffer;
-   rebuild and upload vertices only. Prove index rebuild/upload counts stay
-   unchanged across movement and walk animation.
-3. For the CPU-baked fallback, consider stable per-actor vertex spans so one
-   changed pose rebuilds and uploads only that actor's vertex range rather than
-   the combined mesh.
-4. Treat Asset Lab figures separately from that fallback. Their semantic source
-   already provides rigid hierarchical parts, pivots, primitive topology, and
-   clips suitable for static compiled geometry plus GPU part transforms. The
-   selected [`compiled-figure-rendering`](compiled-figure-rendering.md) topic
-   owns that broader direction, including real UV/texture compilation,
-   presentation-rate rigid-part animation, instancing, and generated figure
-   LODs. Tactical
-   [`181`](../tactical/181-compiled-figure-static-box-proof.md) now proves the
-   artifact and static mono/per-eye/browser renderer without adopting it in
-   production. The next prepared-path slice is continuously interpolated CPU
-   part palettes and a human-reviewed walk clip, still before crowd
-   optimization.
+Commit `41fc9fae` removes figure-name admission. Every stable
+`ActorInstanceId::Entity` with a prepared `Figure` now uses immutable compiled
+geometry and world-local actor/palette records when that figure resource is
+available. Local and remote player identities deliberately remain on their
+player-specific legacy route; debug cubes, items, unsupported figures, and
+actors without stable entity identity also retain the fallback. Exact unchanged
+actor input now reuses its prepared actor and palette state without pose
+evaluation or queue writes.
 
-Do not make a large CPU span-cache campaign a prerequisite for the compiled
-Asset Lab path. Index reuse remains the low-risk first fallback win;
-measurements from the prepared animation path should decide how much fallback
-range-update work is worthwhile now that static geometry is proven.
+The new deterministic headless `actor_render_perf` lane isolates actor
+rendering and can select prepared or legacy admission, animated or stationary
+input, cow/chicken/mixed figures, and arbitrary actor counts. Five clean release
+runs on `41fc9fae`, Linux/Radeon 880M, measured:
 
-Acceptance evidence should include:
+| Workload | Prepared avg / p95 | Legacy avg / p95 | Legacy upload / frame | Relative avg |
+|---|---:|---:|---:|---:|
+| 10 animated cows | `0.208 / 0.262ms` | `3.302 / 3.525ms` | `7.84 MB` | `15.9x` faster |
+| 100 animated cows | `0.837 / 1.015ms` | `31.782 / 32.192ms` | `78.38 MB` | `38.0x` faster |
 
-- explicit topology-rebuild, vertex-update, index-update, changed-actor, and
-  uploaded-byte counters;
-- a fixture where one actor moves while multiple actors remain stationary;
-- unchanged direct actor pixels and actor ordering;
-- native flat, per-eye stereo, full-frame multiview where available, and
-  production browser WebGPU coverage; and
-- release comparisons showing that the direct single-world path and idle
-  unchanged-actor frames remain allocation- and upload-free.
+Prepared mutable allocation was `1.39 MB` at ten cows and `1.77 MB` at 100,
+versus `36.43 MB` and `403.48 MB` in the legacy route. At 1,000 prepared cows,
+animated input measured `9.184 / 9.656ms` average/p95 and performed 120,000
+pose evaluations over 120 frames. Identical stationary input measured
+`1.290 / 1.369ms`, with 120,000 unchanged-record reuses and zero pose,
+palette, or actor writes. Both still issue one draw per actor, so instancing is
+the next credible high-count optimization. These numbers include a synchronous
+GPU wait and no terrain, scene simulation, or OpenXR presentation; they are
+path attribution and scaling evidence, not Quest acceptance.
+
+Commit `32fcffaf` completes that instancing experiment. Actors sharing a
+prepared figure now use one instance bucket and one draw per compatible
+material pass. Every vertex still carries its rigid `part_id`; the instance
+selects its own actor transform and the base of its independently evaluated
+part-matrix palette in a shared texture. Actors can therefore have unrelated
+animation phases without splitting the batch. Affine 3x4 packing reduces both
+palette traffic and actor-record traffic, and startup-precomputed engine-space
+clip channels remove repeated coordinate and Euler-to-quaternion conversion
+from presentation-rate evaluation.
+
+Five clean release runs on the same Linux/Radeon 880M host and 120/30-frame
+protocol measured:
+
+| Animated cows | Instanced avg / p95 | Previous avg / p95 | Draws / frame | Pose / upload / poll |
+|---:|---:|---:|---:|---:|
+| 10 | `0.145 / 0.189ms` | `0.208 / 0.262ms` | `1` | `0.015 / 0.006 / 0.094ms` |
+| 100 | `0.373 / 0.428ms` | `0.837 / 1.015ms` | `1` | `0.146 / 0.026 / 0.170ms` |
+| 1,000 | `1.939 / 2.594ms` | `9.184 / 9.656ms` | `1` | `1.150 / 0.195 / 0.570ms` |
+| 2,000 | `4.135 / 4.659ms` | — | `1` | `2.137 / 0.332 / 1.640ms` |
+
+The 1,000-cow result is `4.74x` faster on average. Its five average-frame
+samples ranged from `1.656ms` to `2.336ms`, so the table does not hide host/GPU
+scheduling variance. The stationary 1,000-cow control improved from
+`1.290/1.369ms` to `0.531/0.569ms`, retained zero pose/upload work, and also
+used one draw. The remaining animated CPU cost is now approximately
+`1.15ms/1,000` cows for exact pose evaluation; the full-detail workload still
+executes 528,000 vertices and 792,000 indices. GPU pose expansion and actor LOD
+are the next distinct high-count levers, not further draw-call cleanup.
+
+[`actor-rendering-performance.md`](actor-rendering-performance.md) now owns the
+actor-specific memory model, benchmark controls, ordered future work, and
+acceptance criteria. Its current order is Quest route/stage and actor-pass GPU
+attribution, measured hybrid sparse/dense bucket uploads, capability-gated GPU
+palette expansion, projected-size actor LOD, and only then bounded CPU-baked
+fallback topology reuse. Update that topic rather than adding another actor
+TODO list here; this section retains only the cross-system priority and concise
+evidence.
 
 Preserve Tactical 179's ownership contract: immutable atlas/figure/pipeline
 resources may be shared, but mutable actor caches remain per drawable world.

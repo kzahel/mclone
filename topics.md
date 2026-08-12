@@ -34,6 +34,12 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
   passthrough, survival/multiplayer authority, and same-slot renderer reuse
 - `performance` — high-priority known performance issues, measured pickup
   queue, baselines, and cross-platform performance follow-ups
+- `actor-rendering-performance` — prepared/fallback actor render baselines,
+  instancing and memory tradeoffs, Quest acceptance, sparse upload, GPU pose,
+  and actor LOD follow-ups
+- `xr-render-path-switching` — live dual-eye, array per-eye, and array
+  multiview selection across desktop and Android OpenXR; transactional
+  frame-boundary target replacement with one steady-state swapchain family
 - `dynamic-point-lights` — presentation-side finite-radius point lights,
   many-light admission, voxel-DDA and entity-shadow experiments, shadow
   technique comparison, and shared mono/XR validation
@@ -89,6 +95,12 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
 - `world-dimension-storage-layout` — realm-global native SQLite metadata plus
   dimension-local SQLite shards beneath one world persistence owner, while
   browser IndexedDB remains physically consolidated
+- `generated-chunk-cache-policy` — authority-owned per-world choice to store or
+  regenerate deterministic unedited terrain cache, with durable provenance and
+  future reclamation boundaries
+- `chunk-lighting-admission-and-backpressure` — bounded current-interest Player
+  promotion, keyed Light demand, shared immutable Light inputs, cancellation,
+  ticket conservation, and long-travel memory/throughput gates
 - `platform-host-boundary` — one shared Rust input/context/action path across
   desktop, browser, flat Android, and XR interactive hosts; autonomous
   platform initialization and mechanics stay local; browser TS input
@@ -177,6 +189,9 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
 - `graphics-video-settings` — player-facing graphics/video controls,
   platform-profile and stored-preference precedence, output/UI/world
   resolution policy, and the remaining production settings backlog
+- `fog-atmosphere` — shared open-air linear, exponential, and height-aware
+  distance atmosphere, interactive graphics controls, exact/procedural
+  coverage concealment, weather response, and conservative far culling
 - `game-title-and-brand-identity` — public-title research and decision record:
   repo-derived naming brief, Wilderfold recommendation, retained fallbacks,
   preliminary availability evidence, and clearance/adoption gates
@@ -203,6 +218,9 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
 - `procedural-horizon-clipmap` — fixed-budget toroidal natural-terrain rings,
   skirts, exact-painted chunk masking, vegetation handoff, and predictable
   native/browser/XR frame admission
+- `procedural-horizon-surface-appearance` — block-atlas ground texture,
+  biome/material color, approximate lighting, interpolated inland water, and
+  measured fixed-budget quality improvements
 - `world-view-navigation` — shared map/orbit/focus/zoom control across Terrain
   Lab, standalone World Explorer, tabletop, and game consumers, plus the
   authoritative Explorer-to-play handoff
@@ -235,3 +253,6 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
 - `playable-showcases` — bounded data-driven tiny-save recipes, live-game
   instantiation evidence, matched capture/browser review, and temporary hosted
   play links
+- `desktop-openxr-validation` — Windows VDXR and macOS/Linux WiVRn runtime
+  bootstrap, headset-backed smoke evidence, Vulkan interop, and remaining
+  desktop OpenXR hardware acceptance

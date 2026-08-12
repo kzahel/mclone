@@ -102,9 +102,39 @@ fn integrated_server_publishes_interested_chunks() {
         (792, 24, 16, 9, 25, 9)
     );
     assert_eq!(server.scheduler().ready_dependency_chunk_count(), 9 * 9);
+    let mut scheduler_metrics = server.scheduler().metrics();
+    assert!((1..=9).contains(&scheduler_metrics.completed_jobs));
+    assert_eq!(scheduler_metrics.total_dependency_cache_misses, 9 * 9);
+    assert!((1..=4 * 9).contains(&scheduler_metrics.max_feature_job_target_chunks));
+    assert!(scheduler_metrics.max_feature_job_feature_centers > 0);
+    assert!(scheduler_metrics.latest_feature_job_id.is_some());
+    // Admission refills as the native Light worker completes. Its exact
+    // completion boundary can repartition the same 25 target chunks among a
+    // few feature jobs without changing generated output or total work.
+    scheduler_metrics.completed_jobs = 0;
+    scheduler_metrics.total_seeded_dependency_chunks = 0;
+    scheduler_metrics.total_dependency_cache_hits = 0;
+    scheduler_metrics.total_retained_dependency_chunks = 0;
+    scheduler_metrics.max_feature_job_target_chunks = 0;
+    scheduler_metrics.max_feature_job_feature_centers = 0;
+    scheduler_metrics.max_feature_job_dependency_chunks = 0;
+    scheduler_metrics.completed_job_records_retained = 0;
+    scheduler_metrics.recent_job_summaries_retained = 0;
+    scheduler_metrics.latest_feature_job_id = None;
+    scheduler_metrics.latest_feature_job_target_chunks = 0;
+    scheduler_metrics.latest_feature_job_feature_centers = 0;
+    scheduler_metrics.latest_feature_job_dependency_chunks = 0;
+    scheduler_metrics.latest_feature_job_first_target = None;
     assert_eq!(
-        server.scheduler().metrics(),
+        scheduler_metrics,
         ChunkSchedulerMetrics {
+            player_promotion_desired: 9,
+            player_promotion_queued: 0,
+            player_promotion_active: 0,
+            player_promotion_max_active: 4,
+            player_promotion_admitted_total: 9,
+            player_promotion_cancelled_before_admission: 0,
+            player_promotion_oldest_age_ticks: 0,
             direct_ticket_chunks: 9,
             active_ticket_chunks: 29 * 29,
             holder_chunks: 29 * 29,
@@ -120,19 +150,28 @@ fn integrated_server_publishes_interested_chunks() {
             ready_dependency_chunks: 9 * 9,
             dirty_chunks: 0,
             pending_jobs: 0,
-            completed_jobs: 1,
+            completed_jobs: 0,
+            completed_job_records_retained: 0,
+            recent_job_summaries_retained: 0,
             total_seeded_dependency_chunks: 0,
             total_dependency_cache_hits: 0,
             total_dependency_cache_misses: 9 * 9,
-            total_retained_dependency_chunks: 9 * 9,
-            max_feature_job_target_chunks: 25,
-            max_feature_job_feature_centers: 7 * 7,
-            max_feature_job_dependency_chunks: 9 * 9,
-            latest_feature_job_id: Some(ChunkJobId(1)),
-            latest_feature_job_target_chunks: 25,
-            latest_feature_job_feature_centers: 7 * 7,
-            latest_feature_job_dependency_chunks: 9 * 9,
-            latest_feature_job_first_target: Some(ChunkPos::new(0, 0)),
+            total_retained_dependency_chunks: 0,
+            max_feature_job_target_chunks: 0,
+            max_feature_job_feature_centers: 0,
+            max_feature_job_dependency_chunks: 0,
+            latest_feature_job_id: None,
+            latest_feature_job_target_chunks: 0,
+            latest_feature_job_feature_centers: 0,
+            latest_feature_job_dependency_chunks: 0,
+            latest_feature_job_first_target: None,
+            light_ticket_count: 0,
+            light_tickets_added: 25,
+            light_tickets_released: 25,
+            light_ticket_conservation_failures: 0,
+            light_demand_queued: 0,
+            light_demands_cancelled: 0,
+            light_statuses_stale: 0,
             completed_light_statuses: 25,
             completed_light_batches: server.scheduler().metrics().completed_light_batches,
             total_light_status_compute_us: server
@@ -319,32 +358,21 @@ fn integrated_server_publishes_interested_chunks() {
                 .total_light_status_publication_units,
         }
     );
-    assert_eq!(server.scheduler().job_count(), 1);
-    let job = server.scheduler().jobs().next().unwrap();
-    assert_eq!(job.id, ChunkJobId(1));
-    assert_eq!(job.status, ChunkStatus::Features);
-    assert_eq!(job.state, ChunkJobState::Complete);
-    assert_eq!(job.target_chunks.len(), 25);
-    assert_eq!(job.feature_centers.len(), 7 * 7);
-    assert_eq!(job.dependency_chunks.len(), 9 * 9);
-    assert_eq!(job.seeded_dependency_chunks, 0);
-    assert_eq!(job.dependency_cache_hits, 0);
-    assert_eq!(job.dependency_cache_misses, 9 * 9);
-    assert_eq!(job.retained_dependency_chunks, 9 * 9);
-    assert!(job.dependency_chunks.contains(&ChunkPos::new(-4, -4)));
-    assert!(job.dependency_chunks.contains(&ChunkPos::new(4, 4)));
-    for target in &job.target_chunks {
-        assert_eq!(
-            server
-                .scheduler()
-                .holder(*target)
-                .unwrap()
-                .status_slot(ChunkStatus::Features)
-                .unwrap()
-                .job_id,
-            Some(job.id)
-        );
+    let jobs = server
+        .scheduler()
+        .completed_job_summaries()
+        .collect::<Vec<_>>();
+    assert!((1..=9).contains(&jobs.len()));
+    assert_eq!(
+        jobs.iter().map(|job| job.target_chunk_count).sum::<usize>(),
+        25
+    );
+    for job in jobs {
+        assert_eq!(job.status, ChunkStatus::Features);
+        assert!(job.target_chunk_count <= 4 * 9);
+        assert!(job.dependency_chunk_count <= 9 * 9);
     }
+    assert_eq!(server.scheduler().full_job_record_count(), 0);
     assert!(updates.iter().skip(5).all(|update| {
         matches!(
             update,

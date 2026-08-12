@@ -238,7 +238,8 @@ fn actor_composition_is_opt_in_shared_and_portable() {
     let web_proof = braced_item(&web, "fn render_actor_composition_proof(");
     let smoke_export = braced_item(&web, "pub fn render_actor_composition_proof(");
     assert!(fixture.contains("pub struct ActorCompositionFixture"));
-    assert!(fixture.contains("ActorInstance::cow_model"));
+    assert!(fixture.contains("cow_figure_id()"));
+    assert!(fixture.contains(".with_id(ActorInstanceId::Entity(9))"));
     assert!(fixture.contains("chicken_figure_id()"));
     assert!(fixture.contains("ActorInstance::item_egg"));
     assert!(fixture.contains("ActorInstance::remote_player("));
@@ -357,7 +358,7 @@ fn standby_preview_starts_as_an_observer_and_activation_exchanges_authority() {
 fn composition_phase_order_is_all_actors_between_all_opaque_and_translucent() {
     let frame = read("../mclone-app-runtime/src/frame_render.rs");
     let entry = braced_item(&frame, "fn render_full_frame_for_view_inner<BuildGuiDraw>(");
-    let backdrop = braced_item(
+    let backdrop_entry = braced_item(
         &frame,
         "fn render_full_frame_for_view_inner_with_backdrop<BuildGuiDraw>(",
     );
@@ -366,8 +367,8 @@ fn composition_phase_order_is_all_actors_between_all_opaque_and_translucent() {
         "fn render_full_frame_for_view_inner_with_actor_preparation<BuildGuiDraw>(",
     );
     assert!(entry.contains("render_full_frame_for_view_inner_with_backdrop("));
-    assert!(backdrop.contains("render_full_frame_for_view_inner_with_actor_preparation("));
-    assert!(backdrop.contains("FrameActorPreparation::Refresh"));
+    assert!(backdrop_entry.contains("render_full_frame_for_view_inner_with_actor_preparation("));
+    assert!(backdrop_entry.contains("FrameActorPreparation::Refresh"));
     assert_in_order(
         render,
         &[

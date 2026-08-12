@@ -3,8 +3,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use mclone_core::{
-    AxisTopology, BlockPos, ChunkPos, ChunkSnapshot, ChunkStatus, HorizontalTopology,
-    PackedLightSection,
+    AxisTopology, BlockPos, ChunkPos, ChunkRevision, ChunkSnapshot, ChunkStatus,
+    HorizontalTopology, PackedLightSection,
 };
 use mclone_protocol::{ServerUpdate, decode_server_update, encode_server_update};
 use mclone_worldgen::feature::{DecorationStep, FeatureDecorationTiming};
@@ -20,7 +20,7 @@ use mclone_worldgen::levelgen::{
 
 use crate::level_light_bridge::LevelLightComputationTiming;
 use crate::light_mailbox::CompletedLightStatus;
-use crate::light_status::{PendingLightStatus, PendingLightStatusBatch};
+use crate::light_status::{LightRequestToken, PendingLightStatus, PendingLightStatusBatch};
 use crate::light_world::RetainedInitialLightState;
 use crate::lighting_seed::provisional_light_neighbor_lift;
 #[cfg(test)]
@@ -44,7 +44,7 @@ const WORLDGEN_RESPONSE_MAGIC: u32 = 0x5747_4A53;
 const WORLDGEN_DELTA_REQUEST_MAGIC: u32 = 0x5747_4A44;
 const LIGHT_REQUEST_MAGIC: u32 = 0x4C54_4A52;
 const LIGHT_RESPONSE_MAGIC: u32 = 0x4C54_4A53;
-const JOB_FRAME_VERSION: u32 = 6;
+const JOB_FRAME_VERSION: u32 = 7;
 const SERVER_JOB_ACTOR_INIT_MAGIC: u32 = 0x534A_4149;
 const SERVER_JOB_ACTOR_INIT_VERSION: u32 = 1;
 const SERVER_JOB_ACTOR_INIT_FRAME_BYTES: usize = 9;
@@ -1083,6 +1083,7 @@ impl FrameWriter {
     }
 
     fn write_pending_light_status(&mut self, status: &PendingLightStatus) -> Result<(), String> {
+        self.write_u64(status.token.id);
         self.write_chunk_pos(status.pos);
         self.write_snapshot(&status.feature_snapshot)?;
         self.write_tick_records(
@@ -1109,6 +1110,7 @@ impl FrameWriter {
         &mut self,
         status: &CompletedLightStatus,
     ) -> Result<(), String> {
+        self.write_u64(status.token.id);
         self.write_chunk_pos(status.pos);
         self.write_snapshot(&status.feature_snapshot)?;
         self.write_tick_records(
@@ -1124,6 +1126,7 @@ impl FrameWriter {
             self.write_light_section(section)?;
         }
         self.write_bool(status.batch_compute_leader);
+        self.write_bool(status.cancelled);
         self.write_u128(status.compute_us);
         self.write_level_light_timing(status.timing);
         Ok(())
@@ -1522,6 +1525,7 @@ impl<'a> FrameReader<'a> {
     }
 
     fn read_pending_light_status(&mut self) -> Result<PendingLightStatus, String> {
+        let token_id = self.read_u64()?;
         let pos = self.read_chunk_pos()?;
         let feature_snapshot = self.read_snapshot()?;
         let scheduled_block_ticks = self.read_tick_records("light status scheduled block ticks")?;
@@ -1532,8 +1536,8 @@ impl<'a> FrameReader<'a> {
             let blocks = reader.read_bytes("light status neighbor block data")?;
             Ok((pos, blocks))
         })?;
-        Ok(PendingLightStatus::from_parts(
-            pos,
+        Ok(PendingLightStatus::from_parts_with_token(
+            LightRequestToken::new(token_id, pos, feature_snapshot.revision),
             feature_snapshot,
             raw_blocks,
             neighbor_blocks,
@@ -1546,8 +1550,11 @@ impl<'a> FrameReader<'a> {
     }
 
     fn read_completed_light_status(&mut self) -> Result<CompletedLightStatus, String> {
+        let token_id = self.read_u64()?;
         let pos = self.read_chunk_pos()?;
         let feature_snapshot = self.read_snapshot()?;
+        let token =
+            LightRequestToken::new(token_id, pos, ChunkRevision(feature_snapshot.revision.0));
         let scheduled_block_ticks =
             self.read_tick_records("completed light status scheduled block ticks")?;
         let scheduled_fluid_ticks =
@@ -1555,9 +1562,11 @@ impl<'a> FrameReader<'a> {
         let light_sections =
             self.read_vec("completed light sections", FrameReader::read_light_section)?;
         let batch_compute_leader = self.read_bool()?;
+        let cancelled = self.read_bool()?;
         let compute_us = self.read_u128()?;
         let timing = self.read_level_light_timing()?;
         Ok(CompletedLightStatus {
+            token,
             pos,
             feature_snapshot,
             scheduled_block_ticks,
@@ -1566,6 +1575,7 @@ impl<'a> FrameReader<'a> {
             batch_compute_leader,
             compute_us,
             timing,
+            cancelled,
         })
     }
 

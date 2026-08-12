@@ -25,6 +25,7 @@ test("semantic terrain is pannable, exact, and responsive", async ({
   url.searchParams.set("semanticFeatures", "combined");
   url.searchParams.set("semanticTopology", "torus");
   url.searchParams.set("semanticCorrection", "local");
+  url.searchParams.set("semanticVertical", "1x");
   url.searchParams.set("semanticGuides", "1");
   await page.goto(url.href, { waitUntil: "networkidle" });
 
@@ -38,7 +39,7 @@ test("semantic terrain is pannable, exact, and responsive", async ({
   );
   await expect(stage).toHaveAttribute("data-render-ready", "true");
   await expect(stage).toHaveAttribute("data-vertical-datum", "64");
-  await expect(stage).toHaveAttribute("data-vertical-span", "192");
+  await expect(stage).toHaveAttribute("data-vertical-exaggeration", "1");
   const initialChecksum = await shell.getAttribute("data-semantic-checksum");
   expect(initialChecksum).toMatch(/^[0-9a-f]{64}$/u);
 
@@ -92,7 +93,7 @@ test("semantic terrain is pannable, exact, and responsive", async ({
   await expect(stage).toHaveAttribute("data-render-updating", "false");
   await expect.poll(() => canvasVisualSignature(canvas)).not.toBe(beforeZoomVisual);
   await expect(stage).toHaveAttribute("data-vertical-datum", "64");
-  await expect(stage).toHaveAttribute("data-vertical-span", "192");
+  await expect(stage).toHaveAttribute("data-vertical-exaggeration", "1");
 
   await page.getByRole("button", { name: "Map", exact: true }).click();
   await expect(page).toHaveURL(/view=map/u);
@@ -107,6 +108,9 @@ test("semantic terrain is pannable, exact, and responsive", async ({
     "data-semantic-checksum",
     initialChecksum!,
   );
+  await page.getByRole("button", { name: "24×", exact: true }).click();
+  await expect(page).toHaveURL(/semanticVertical=24x/u);
+  await expect(stage).toHaveAttribute("data-vertical-exaggeration", "24");
   expect(pageErrors).toEqual([]);
 });
 

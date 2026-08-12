@@ -6,9 +6,9 @@ use mclone_app_runtime::client_experience::{
 use mclone_app_runtime::client_session_policy::ClientSessionHostAction;
 use mclone_input::TouchControlsMode;
 use mclone_ui::{
-    GameCollisionMode, GameGrassDetail, GameLeafDetail, GameMovementMode, GamePlayerModel,
-    GameSimulationCadence, GameTerrainPresentationMode, GameTravelAssistMode, GameTurnMode,
-    GameWorldRenderScaleMode, GameXrTurnMode, StatusOverlay,
+    GameCollisionMode, GameFogSettings, GameGrassDetail, GameLeafDetail, GameMovementMode,
+    GamePlayerModel, GameSimulationCadence, GameTerrainPresentation, GameTravelAssistMode,
+    GameTurnMode, GameWorldRenderScaleMode, GameXrRenderMode, GameXrTurnMode, StatusOverlay,
 };
 
 /// Platform hooks emitted by shared client-experience policy.
@@ -32,7 +32,8 @@ pub trait ClientExperienceSettingsHost {
     fn set_section_occlusion_culling(&mut self, enabled: bool) -> Result<()>;
     fn set_leaf_detail(&mut self, detail: GameLeafDetail) -> Result<()>;
     fn set_grass_detail(&mut self, detail: GameGrassDetail) -> Result<()>;
-    fn set_terrain_presentation(&mut self, mode: GameTerrainPresentationMode) -> Result<()>;
+    fn set_terrain_presentation(&mut self, presentation: GameTerrainPresentation) -> Result<()>;
+    fn set_fog_settings(&mut self, settings: GameFogSettings) -> Result<()>;
     fn set_fullbright(&mut self, enabled: bool) -> Result<()>;
     fn set_player_collision_box_visible(&mut self, visible: bool) -> Result<()>;
     fn set_first_person_player_visible(&mut self, visible: bool) -> Result<()>;
@@ -46,6 +47,7 @@ pub trait ClientExperienceSettingsHost {
     fn set_travel_assist_mode(&mut self, mode: GameTravelAssistMode) -> Result<()>;
     fn set_turn_mode(&mut self, mode: GameTurnMode) -> Result<()>;
     fn set_xr_turn_mode(&mut self, mode: GameXrTurnMode) -> Result<()>;
+    fn request_xr_render_mode(&mut self, mode: GameXrRenderMode) -> Result<()>;
     fn set_render_distance(&mut self, render_distance: u32) -> Result<()>;
     fn set_fly_speed_multiplier(&mut self, multiplier: f32) -> Result<()>;
     fn set_movement_speed_multiplier(&mut self, multiplier: f32) -> Result<()>;
@@ -78,8 +80,11 @@ where
             ClientExperienceSettingEffect::SetGrassDetail(detail) => {
                 target.set_grass_detail(detail)?;
             }
-            ClientExperienceSettingEffect::SetTerrainPresentation(mode) => {
-                target.set_terrain_presentation(mode)?;
+            ClientExperienceSettingEffect::SetTerrainPresentation(presentation) => {
+                target.set_terrain_presentation(presentation)?;
+            }
+            ClientExperienceSettingEffect::SetFogSettings(settings) => {
+                target.set_fog_settings(settings)?;
             }
             ClientExperienceSettingEffect::SetFullbright(enabled) => {
                 target.set_fullbright(enabled)?;
@@ -122,6 +127,9 @@ where
             ClientExperienceSettingEffect::SetTurnMode(mode) => target.set_turn_mode(mode)?,
             ClientExperienceSettingEffect::SetXrTurnMode(mode) => {
                 target.set_xr_turn_mode(mode)?;
+            }
+            ClientExperienceSettingEffect::SetXrRenderMode(mode) => {
+                target.request_xr_render_mode(mode)?;
             }
             ClientExperienceSettingEffect::CycleFramePacing => host.cycle_frame_pacing()?,
             ClientExperienceSettingEffect::CycleFpsCap => host.cycle_fps_cap()?,
@@ -217,7 +225,8 @@ mod tests {
         record_method!(set_section_occlusion_culling(enabled: bool));
         record_method!(set_leaf_detail(detail: GameLeafDetail));
         record_method!(set_grass_detail(detail: GameGrassDetail));
-        record_method!(set_terrain_presentation(mode: GameTerrainPresentationMode));
+        record_method!(set_terrain_presentation(presentation: GameTerrainPresentation));
+        record_method!(set_fog_settings(settings: GameFogSettings));
         record_method!(set_fullbright(enabled: bool));
         record_method!(set_player_collision_box_visible(visible: bool));
         record_method!(set_first_person_player_visible(visible: bool));
@@ -231,6 +240,7 @@ mod tests {
         record_method!(set_travel_assist_mode(mode: GameTravelAssistMode));
         record_method!(set_turn_mode(mode: GameTurnMode));
         record_method!(set_xr_turn_mode(mode: GameXrTurnMode));
+        record_method!(request_xr_render_mode(mode: GameXrRenderMode));
         record_method!(set_render_distance(render_distance: u32));
         record_method!(set_fly_speed_multiplier(multiplier: f32));
         record_method!(set_movement_speed_multiplier(multiplier: f32));
@@ -266,14 +276,16 @@ mod tests {
                 ClientExperienceSettingEffect::SetLeafDetail(GameLeafDetail::Bushy),
                 ClientExperienceSettingEffect::SetGrassDetail(GameGrassDetail::Lush),
                 ClientExperienceSettingEffect::SetTerrainPresentation(
-                    GameTerrainPresentationMode::Composed,
+                    GameTerrainPresentation::Experimental,
                 ),
+                ClientExperienceSettingEffect::SetFogSettings(GameFogSettings::default()),
                 ClientExperienceSettingEffect::SetFullbright(true),
                 ClientExperienceSettingEffect::SetTravelAssistMode(GameTravelAssistMode::Blink),
                 ClientExperienceSettingEffect::CycleFramePacing,
                 ClientExperienceSettingEffect::SetWorldRenderScaleMode(
                     GameWorldRenderScaleMode::ThreeQuarters,
                 ),
+                ClientExperienceSettingEffect::SetXrRenderMode(GameXrRenderMode::ArrayPerEye),
                 ClientExperienceSettingEffect::SetTouchControlsMode(TouchControlsMode::On),
             ],
             ..ClientExperienceSettingsEffects::default()
@@ -286,8 +298,10 @@ mod tests {
                 "set_leaf_detail",
                 "set_grass_detail",
                 "set_terrain_presentation",
+                "set_fog_settings",
                 "set_fullbright",
-                "set_travel_assist_mode"
+                "set_travel_assist_mode",
+                "request_xr_render_mode",
             ]
         );
         assert_eq!(

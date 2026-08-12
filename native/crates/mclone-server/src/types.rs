@@ -133,6 +133,7 @@ impl ChunkTicketType {
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub enum ChunkTicketKey {
     Chunk(ChunkPos),
+    LightRequest(u64),
     Named(String),
 }
 

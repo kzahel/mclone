@@ -29,6 +29,7 @@ impl XrUnderwaterDetectionMode {
 pub enum XrDebugUiScreen {
     Pause,
     Controls,
+    Graphics,
 }
 
 impl XrDebugUiScreen {
@@ -36,7 +37,8 @@ impl XrDebugUiScreen {
         match value.trim() {
             "pause" => Ok(Self::Pause),
             "controls" | "help" => Ok(Self::Controls),
-            value => bail!("{flag} must be pause or controls, got `{value}`"),
+            "graphics" | "video" => Ok(Self::Graphics),
+            value => bail!("{flag} must be pause, controls, or graphics, got `{value}`"),
         }
     }
 }

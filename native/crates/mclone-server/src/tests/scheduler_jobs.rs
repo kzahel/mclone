@@ -184,12 +184,15 @@ fn adjacent_interest_reuses_retained_dependency_chunks() {
     );
     assert!(snapshot_update_for(&first_updates, ChunkPos::new(0, 0)).is_some());
     assert_eq!(
-        server.scheduler().job(ChunkJobId(1)).map(|job| (
-            job.seeded_dependency_chunks,
-            job.dependency_cache_hits,
-            job.dependency_cache_misses,
-            job.retained_dependency_chunks
-        )),
+        server
+            .scheduler()
+            .completed_job_summary(ChunkJobId(1))
+            .map(|summary| (
+                summary.seeded_dependency_chunks,
+                summary.dependency_cache_hits,
+                summary.dependency_cache_misses,
+                summary.retained_dependency_chunks
+            )),
         Some((0, 0, 7 * 7, 7 * 7))
     );
 
@@ -203,12 +206,15 @@ fn adjacent_interest_reuses_retained_dependency_chunks() {
     );
     assert!(snapshot_update_for(&moved_updates, ChunkPos::new(1, 0)).is_some());
     assert_eq!(
-        server.scheduler().job(ChunkJobId(2)).map(|job| (
-            job.seeded_dependency_chunks,
-            job.dependency_cache_hits,
-            job.dependency_cache_misses,
-            job.retained_dependency_chunks
-        )),
+        server
+            .scheduler()
+            .completed_job_summary(ChunkJobId(2))
+            .map(|summary| (
+                summary.seeded_dependency_chunks,
+                summary.dependency_cache_hits,
+                summary.dependency_cache_misses,
+                summary.retained_dependency_chunks
+            )),
         Some((4 * 7, 4 * 7, 7, 5 * 7))
     );
 }
@@ -225,7 +231,9 @@ fn chunk_scheduler_apply_interest_enqueues_features_before_poll() {
         })
         .unwrap();
 
-    assert_eq!(scheduler.pending_job_count(), 0);
+    // The cold Player promotion is admitted immediately but remains active
+    // until its runtime dependency ring reaches Light.
+    assert_eq!(scheduler.pending_job_count(), 1);
     assert_eq!(scheduler.pending_persistence_load_count(), 9);
     assert_eq!(scheduler.loaded_chunk_count(), 0);
     assert_eq!(scheduler.job_count(), 0);
@@ -246,7 +254,7 @@ fn chunk_scheduler_apply_interest_enqueues_features_before_poll() {
 
     let mut ready_events = scheduler.poll().unwrap();
     assert_eq!(scheduler.pending_persistence_load_count(), 0);
-    assert_eq!(scheduler.pending_job_count(), 1);
+    assert_eq!(scheduler.pending_job_count(), 2);
     assert_eq!(
         scheduler.job(ChunkJobId(1)).map(|job| job.state),
         Some(ChunkJobState::Running)
@@ -370,7 +378,7 @@ fn chunk_scheduler_poll_slices_completed_publication() {
         9 - DEFAULT_COMPLETED_CHUNK_PUBLISH_BUDGET
     );
     assert!(scheduler.pending_publication_count() > 0);
-    assert_eq!(scheduler.pending_job_count(), 2);
+    assert_eq!(scheduler.pending_job_count(), 3);
     assert!(
         without_fluid_tick_events(&first_events)
             .iter()
@@ -463,12 +471,12 @@ fn duplicate_interest_while_job_running_does_not_enqueue_second_job() {
         ),
         9
     );
-    assert_eq!(scheduler.pending_job_count(), 1);
+    assert_eq!(scheduler.pending_job_count(), 2);
     assert_eq!(scheduler.job_count(), 1);
 
     let second_events = scheduler.apply_interest(interest).unwrap();
     assert_eq!(second_events, Vec::new());
-    assert_eq!(scheduler.pending_job_count(), 1);
+    assert_eq!(scheduler.pending_job_count(), 2);
     assert_eq!(scheduler.job_count(), 1);
 
     assert_eq!(

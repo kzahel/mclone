@@ -2,6 +2,7 @@ use std::collections::BTreeSet;
 
 use anyhow::{Context, Result, bail};
 use mclone_app_runtime::frame_render::{TerrainBackdropRenderContext, TerrainBackdropRenderer};
+use mclone_app_runtime::host_mode::SingleViewHostMode;
 use mclone_app_runtime::render_asset_data::TexturedMeshAssets;
 use mclone_core::{BlockStateId, ChunkPos, HorizontalTopology};
 use mclone_render::color_profile::RenderColorProfile;
@@ -15,7 +16,9 @@ use mclone_terrain_view::{
 };
 use mclone_worldgen::terrain_preview::{TerrainPreviewContentStage, TerrainPreviewProfile};
 
-use crate::{McloneSceneHost, WorldInstanceId};
+use crate::{
+    GameTerrainPresentation, McloneSceneHost, WorldInstanceId, engine_terrain_presentation,
+};
 
 pub(crate) type SceneTerrainVegetationExecutorFactory =
     Box<dyn Fn() -> Result<Box<dyn TerrainVegetationExecutor>, String>>;
@@ -41,10 +44,16 @@ pub struct SceneTerrainViewDiagnostics {
     pub source_generation: u64,
     pub coverage_generation: u64,
     pub exact_column_count: u32,
+    pub exact_center_ready: bool,
     pub last_frame_revision: u64,
     pub ready_slots: u32,
     pub drawn_levels: u32,
     pub drawn_tiles: u32,
+    pub inner_hole_culled_tiles: u32,
+    pub frustum_culled_tiles: u32,
+    pub far_culled_tiles: u32,
+    pub drawn_tree_tiles: u32,
+    pub drawn_tree_instances: u32,
     pub target_ready: bool,
     pub tree_instance_count: u32,
     pub pending_vegetation_tiles: u32,
@@ -186,6 +195,8 @@ impl SceneTerrainViewState {
         self.diagnostics.coverage_generation = self.coverage_generation;
         self.diagnostics.exact_column_count =
             u32::try_from(self.ready_columns.len()).unwrap_or(u32::MAX);
+        self.diagnostics.exact_center_ready =
+            terrain_exact_center_ready(&self.ready_columns, focus);
         Ok(())
     }
 
@@ -195,6 +206,54 @@ impl SceneTerrainViewState {
 
     pub(crate) fn shutdown(&mut self) {
         self.engine.shutdown();
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn render_multiview(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        color_view: &wgpu::TextureView,
+        depth_view: &wgpu::TextureView,
+        size: [u32; 2],
+        render_views: [mclone_render::chunk::ChunkRenderView; 2],
+        fog: mclone_render::fog::RenderFog,
+    ) -> Result<()> {
+        self.engine.resize(device, size[0], size[1]);
+        let presentation = TerrainHorizonPresentation::new(
+            self.anchor[0],
+            self.anchor[1],
+            1_048_576.0,
+            1_048_576.0,
+            TerrainPreviewView::ThreeDimensional,
+            TerrainPreviewCamera::default(),
+        )
+        .and_then(|presentation| presentation.with_multiview_render_views(render_views))
+        .map_err(anyhow::Error::msg)?
+        .with_fog(fog);
+        let stats = self
+            .engine
+            .encode_multiview_to_target(
+                device,
+                queue,
+                encoder,
+                TerrainHorizonRenderTarget {
+                    color_view,
+                    depth_view,
+                    color_load: wgpu::LoadOp::Load,
+                    color_store: wgpu::StoreOp::Store,
+                    depth_load: wgpu::LoadOp::Load,
+                    depth_store: wgpu::StoreOp::Store,
+                },
+                presentation,
+                Some((&self.exact, TerrainExactCoverageMode::DiscardPainted)),
+                None,
+            )
+            .map_err(anyhow::Error::msg)
+            .context("render shared live terrain backdrop multiview")?;
+        self.record_stats(stats);
+        Ok(())
     }
 }
 
@@ -211,37 +270,51 @@ pub(crate) fn scene_terrain_projection_far_distance(
 }
 
 impl McloneSceneHost {
-    pub(crate) fn terrain_presentation_control_mode(
-        &self,
-    ) -> Option<mclone_ui::GameTerrainPresentationMode> {
-        let supported = self
-            .client_experience
-            .profile()
-            .settings
-            .terrain_presentation
-            .is_supported();
-        let compatible_source = self.active_world.scene.world_generation_profile
-            == mclone_server::WorldGenerationProfile::McloneOverworldV1
-            && self.active_remote_addr().is_none();
-        (supported && compatible_source)
-            .then_some(self.active_world.scene.startup.terrain_presentation)
+    pub const fn terrain_presentation_preference(&self) -> GameTerrainPresentation {
+        self.terrain_presentation_preference
     }
 
-    pub(crate) fn set_live_terrain_presentation(
-        &mut self,
-        mode: mclone_ui::GameTerrainPresentationMode,
-    ) -> Result<()> {
-        if mode == mclone_ui::GameTerrainPresentationMode::Composed
-            && self.terrain_presentation_control_mode().is_none()
-        {
-            bail!("composed terrain is unavailable for this world or render mode");
+    pub fn terrain_presentation_supported(&self) -> bool {
+        self.active_world.scene.world_generation_profile
+            == mclone_server::WorldGenerationProfile::McloneOverworldV1
+            && self.active_world.runtime.as_ref().map_or_else(
+                || self.active_world.scene.startup.remote_addr.is_none(),
+                |runtime| runtime.host_mode() == SingleViewHostMode::LocalIntegrated,
+            )
+    }
+
+    pub(crate) fn effective_terrain_presentation_mode(
+        &self,
+    ) -> mclone_app_runtime::startup_args::TerrainPresentationMode {
+        if self.terrain_presentation_supported() {
+            engine_terrain_presentation(self.terrain_presentation_preference)
+        } else {
+            mclone_app_runtime::startup_args::TerrainPresentationMode::ExactOnly
         }
-        if self.active_world.scene.startup.terrain_presentation == mode {
+    }
+
+    pub(crate) fn terrain_projection_far_distance(&self, ordinary_far_distance: f32) -> f32 {
+        scene_terrain_projection_far_distance(
+            self.effective_terrain_presentation_mode(),
+            ordinary_far_distance,
+        )
+    }
+
+    pub fn request_terrain_presentation(
+        &mut self,
+        presentation: GameTerrainPresentation,
+    ) -> Result<()> {
+        if presentation == self.terrain_presentation_preference {
             return Ok(());
         }
-        self.active_world.scene.startup.terrain_presentation = mode;
+        self.terrain_presentation_preference = presentation;
         self.reset_terrain_view();
-        log::info!("terrain horizon set to {}", mode.label());
+        self.persist_graphics_preferences();
+        log::info!(
+            "distant terrain preference set to {}; active={}",
+            presentation.label(),
+            self.effective_terrain_presentation_mode().label(),
+        );
         Ok(())
     }
 
@@ -251,7 +324,7 @@ impl McloneSceneHost {
         queue: &wgpu::Queue,
         focus: [f64; 3],
     ) -> Result<bool> {
-        if self.active_world.scene.startup.terrain_presentation
+        if self.effective_terrain_presentation_mode()
             != mclone_app_runtime::startup_args::TerrainPresentationMode::Composed
         {
             self.reset_terrain_view();
@@ -328,7 +401,8 @@ impl TerrainBackdropRenderer for SceneTerrainViewState {
             TerrainPreviewCamera::default(),
         )
         .and_then(|presentation| presentation.with_render_view(context.render_view))
-        .map_err(anyhow::Error::msg)?;
+        .map_err(anyhow::Error::msg)?
+        .with_fog(context.fog);
         let stats = self
             .engine
             .encode_to_target(
@@ -363,6 +437,11 @@ impl SceneTerrainViewState {
         self.diagnostics.ready_slots = stats.ready_slots;
         self.diagnostics.drawn_levels = stats.drawn_levels;
         self.diagnostics.drawn_tiles = stats.drawn_tiles;
+        self.diagnostics.inner_hole_culled_tiles = stats.inner_hole_culled_tiles;
+        self.diagnostics.frustum_culled_tiles = stats.frustum_culled_tiles;
+        self.diagnostics.far_culled_tiles = stats.far_culled_tiles;
+        self.diagnostics.drawn_tree_tiles = stats.drawn_tree_tiles;
+        self.diagnostics.drawn_tree_instances = stats.drawn_tree_instances;
         self.diagnostics.target_ready = stats.target_ready;
         self.diagnostics.tree_instance_count = stats.tree_instance_count;
         self.diagnostics.pending_vegetation_tiles = stats.pending_vegetation_tiles;
@@ -413,6 +492,12 @@ fn floor_f64_to_i32(value: f64) -> i32 {
     }
 }
 
+fn terrain_exact_center_ready(ready_columns: &BTreeSet<ChunkPos>, focus: [f64; 3]) -> bool {
+    let center =
+        ChunkPos::from_block_coords(floor_f64_to_i32(focus[0]), floor_f64_to_i32(focus[2]));
+    ready_columns.contains(&center)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -441,6 +526,13 @@ mod tests {
         assert_eq!(floor_f64_to_i32(f64::INFINITY), i32::MAX);
         assert_eq!(floor_f64_to_i32(f64::NEG_INFINITY), i32::MIN);
         assert_eq!(floor_f64_to_i32(f64::NAN), 0);
+    }
+
+    #[test]
+    fn exact_center_readiness_tracks_the_focus_chunk() {
+        let ready = BTreeSet::from([ChunkPos::new(-1, 2), ChunkPos::new(0, 2)]);
+        assert!(terrain_exact_center_ready(&ready, [-0.01, 90.0, 47.99]));
+        assert!(!terrain_exact_center_ready(&ready, [16.0, 90.0, 47.99]));
     }
 
     #[test]

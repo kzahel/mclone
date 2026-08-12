@@ -27,6 +27,8 @@ SESSION_ONLY=0
 START_VIEW_POSE="${MCLONE_ANDROID_XR_VIEW_POSE:-0}"
 XR_UNDERWATER_MODE="${MCLONE_ANDROID_XR_UNDERWATER_MODE:-}"
 XR_DEBUG_UI="${MCLONE_ANDROID_XR_DEBUG_UI:-}"
+XR_RENDER_MODE="${MCLONE_ANDROID_XR_RENDER_MODE:-}"
+XR_RENDER_MODE_CYCLE="${MCLONE_ANDROID_XR_RENDER_MODE_CYCLE:-0}"
 REMOTE_ADDR="${MCLONE_ANDROID_XR_REMOTE_ADDR:-}"
 START_SERVER=0
 SERVER_LISTEN="${MCLONE_ANDROID_XR_SERVER_LISTEN:-0.0.0.0:25565}"
@@ -106,9 +108,14 @@ Options:
                      Set debug.mclone.xr_view_pose before launch.
   --xr-underwater-mode midpoint|per-eye
                      Add --xr-underwater-mode MODE to startup argv.
-  --xr-debug-ui none|pause|controls
+  --xr-debug-ui none|pause|controls|graphics
                      Hold an XR debug UI panel open after startup for headset
                      UI validation. Default: none.
+  --xr-render-mode dual-per-eye|array-per-eye|array-multiview
+                     Select the initial submitted XR render path.
+  --xr-render-mode-cycle
+                     Exercise all three modes and both target topologies in
+                     one live OpenXR/world session.
   --remote-addr ADDR
                      Add --remote-addr ADDR to mclone.startup.argv.
   --world-dir PATH   Add --world-dir PATH to mclone.startup.argv.
@@ -514,6 +521,11 @@ while [[ $# -gt 0 ]]; do
             XR_DEBUG_UI="$2"
             shift 2
             ;;
+        --xr-render-mode)
+            require_arg "$1" "${2:-}"
+            XR_RENDER_MODE="$2"
+            shift 2
+            ;;
         --remote-addr)
             require_arg "$1" "${2:-}"
             REMOTE_ADDR="$2"
@@ -562,6 +574,11 @@ while [[ $# -gt 0 ]]; do
             require_arg "$1" "${2:-}"
             STARTUP_ARGV+=("$1" "$2")
             shift 2
+            ;;
+        --xr-render-mode-cycle)
+            XR_RENDER_MODE_CYCLE=1
+            STARTUP_ARGV+=("$1")
+            shift
             ;;
         --freeze-time|--transient)
             STARTUP_ARGV+=("$1")
@@ -764,10 +781,17 @@ case "$XR_UNDERWATER_MODE" in
         ;;
 esac
 case "$XR_DEBUG_UI" in
-    ""|none|pause|controls)
+    ""|none|pause|controls|graphics)
         ;;
     *)
-        mclone_die "unsupported --xr-debug-ui '$XR_DEBUG_UI'; expected none, pause, or controls"
+        mclone_die "unsupported --xr-debug-ui '$XR_DEBUG_UI'; expected none, pause, controls, or graphics"
+        ;;
+esac
+case "$XR_RENDER_MODE" in
+    ""|dual-per-eye|array-per-eye|array-multiview)
+        ;;
+    *)
+        mclone_die "unsupported --xr-render-mode '$XR_RENDER_MODE'; expected dual-per-eye, array-per-eye, or array-multiview"
         ;;
 esac
 case "$FRAME_ACCOUNTING" in
@@ -1055,6 +1079,9 @@ fi
 if [[ -n "$XR_DEBUG_UI" ]]; then
     STARTUP_ARGV+=(--xr-debug-ui "$XR_DEBUG_UI")
 fi
+if [[ -n "$XR_RENDER_MODE" ]]; then
+    STARTUP_ARGV+=(--xr-render-mode "$XR_RENDER_MODE")
+fi
 if [[ -n "$SESSION_SMOKE" ]]; then
     STARTUP_ARGV+=(--session-smoke "$SESSION_SMOKE")
 fi
@@ -1185,6 +1212,10 @@ deadline=$((SECONDS + WAIT_SECONDS))
 success=0
 failure=0
 while (( SECONDS < deadline )); do
+    if [[ "$XR_RENDER_MODE_CYCLE" == "1" ]] && grep -F "MCLONE_XR_RENDER_PATH_CYCLE_COMPLETE" "$LOG_PATH" >/dev/null 2>&1; then
+        success=1
+        break
+    fi
     if [[ "$MULTIVIEW_PROOF" == "1" ]] && grep -F "MCLONE_ANDROID_XR_MULTIVIEW_PROOF_READY" "$LOG_PATH" >/dev/null 2>&1; then
         success=1
         break
@@ -1217,7 +1248,7 @@ while (( SECONDS < deadline )); do
         success=1
         break
     fi
-    if [[ "$MULTIVIEW_PROOF" != "1" && "$TERRAIN_MULTIVIEW_PROOF" != "1" && "$TERRAIN_MULTIVIEW_PERF" != "1" && "$SKY_TERRAIN_MULTIVIEW_PERF" != "1" && "$SKY_TERRAIN_ACTORS_MULTIVIEW_PERF" != "1" && "$XR_FULL_FRAME_MULTIVIEW" != "1" && -z "$SESSION_SMOKE" && -z "$PERF_SECONDS" ]] && grep -F "MCLONE_ANDROID_XR_READY" "$LOG_PATH" >/dev/null 2>&1; then
+    if [[ "$XR_RENDER_MODE_CYCLE" != "1" && "$MULTIVIEW_PROOF" != "1" && "$TERRAIN_MULTIVIEW_PROOF" != "1" && "$TERRAIN_MULTIVIEW_PERF" != "1" && "$SKY_TERRAIN_MULTIVIEW_PERF" != "1" && "$SKY_TERRAIN_ACTORS_MULTIVIEW_PERF" != "1" && "$XR_FULL_FRAME_MULTIVIEW" != "1" && -z "$SESSION_SMOKE" && -z "$PERF_SECONDS" ]] && grep -F "MCLONE_ANDROID_XR_READY" "$LOG_PATH" >/dev/null 2>&1; then
         success=1
         break
     fi
@@ -1242,7 +1273,9 @@ if [[ "$success" != "1" ]]; then
     if grep -F "LaunchCheckControllerRequiredDialogActivity" "$ACTIVITY_PATH" >/dev/null 2>&1; then
         mclone_die "OpenXR launch was blocked by the Oculus controller-required launch check; activity dump: $ACTIVITY_PATH; logcat: $LOG_PATH"
     fi
-    if [[ "$MULTIVIEW_PROOF" == "1" ]]; then
+    if [[ "$XR_RENDER_MODE_CYCLE" == "1" ]]; then
+        mclone_die "Android XR render-mode cycle completion marker was not seen within ${WAIT_SECONDS}s; see $LOG_PATH"
+    elif [[ "$MULTIVIEW_PROOF" == "1" ]]; then
         mclone_die "Android XR multiview proof marker was not seen within ${WAIT_SECONDS}s; see $LOG_PATH"
     elif [[ "$TERRAIN_MULTIVIEW_PROOF" == "1" ]]; then
         mclone_die "Android XR terrain multiview proof marker was not seen within ${WAIT_SECONDS}s; see $LOG_PATH"
@@ -1384,7 +1417,7 @@ if [[ -n "$PERF_SECONDS" ]]; then
         if ! grep -E "MCLONE_ANDROID_XR_PERF_DETAIL .*frame_details=disabled" "$LOG_PATH" >/dev/null 2>&1; then
             mclone_die "Android XR minimal perf detail marker was not seen; see $LOG_PATH"
         fi
-        if grep -E "MCLONE_ANDROID_XR_PERF_(FRAME_PIPELINE|QUEUE|PEER|STAGE|STAGES|LOCOMOTION|LOCOMOTION_COMMAND|LOCOMOTION_INTEREST_COMMAND|TERRAIN|TERRAIN_RUNTIME|GPU_SYNC_MAX|UPLOAD_APPLY_MAX|TERRAIN_PREP|OVERLAP|MULTIVIEW|UPLOAD_MAX|UPLOAD_PHASE_MAX|RECORD_CACHE|RUNTIME_MAX|UPDATE_APPLY_MAX|QUEUE_MAX|COMPILE_MAX|UPLOAD_LAST|WORST_FRAME)([[:space:]]|$)" "$LOG_PATH" >/dev/null 2>&1; then
+        if grep -E "MCLONE_ANDROID_XR_PERF_(FRAME_PIPELINE|QUEUE|PEER|STAGE|STAGES|LOCOMOTION|LOCOMOTION_COMMAND|LOCOMOTION_INTEREST_COMMAND|TERRAIN|TERRAIN_RUNTIME|GPU_SYNC_MAX|UPLOAD_APPLY_MAX|TERRAIN_PREP|OVERLAP|MULTIVIEW|UPLOAD_MAX|UPLOAD_PHASE_MAX|RECORD_CACHE|RUNTIME_MAX|UPDATE_APPLY_MAX|QUEUE_MAX|LIGHT_OWNERSHIP|LIGHT_MAILBOX|COMPILE_MAX|UPLOAD_LAST|WORST_FRAME)([[:space:]]|$)" "$LOG_PATH" >/dev/null 2>&1; then
             mclone_die "Android XR minimal perf emitted full-detail markers; see $LOG_PATH"
         fi
     else
@@ -1409,6 +1442,8 @@ if [[ -n "$PERF_SECONDS" ]]; then
             MCLONE_ANDROID_XR_PERF_RUNTIME_MAX \
             MCLONE_ANDROID_XR_PERF_UPDATE_APPLY_MAX \
             MCLONE_ANDROID_XR_PERF_QUEUE_MAX \
+            MCLONE_ANDROID_XR_PERF_LIGHT_OWNERSHIP \
+            MCLONE_ANDROID_XR_PERF_LIGHT_MAILBOX \
             MCLONE_ANDROID_XR_PERF_COMPILE_MAX \
             MCLONE_ANDROID_XR_PERF_UPLOAD_LAST \
             MCLONE_ANDROID_XR_PERF_DRAW
@@ -1470,7 +1505,7 @@ if [[ -n "$PERF_SECONDS" ]]; then
         fi
     fi
     mkdir -p "$(dirname "$PERF_SUMMARY_PATH")"
-    grep -E "MCLONE_ANDROID_XR_PERF_(START|SUMMARY|FRAME_PIPELINE|QUEUE|PEER|STAGE|HEADROOM|CPU_BLOCKED|DETAIL|PUBLICATION|STAGES|LOCOMOTION|LOCOMOTION_COMMAND|LOCOMOTION_INTEREST_COMMAND|TERRAIN|TERRAIN_RUNTIME|GPU_SYNC_MAX|UPLOAD_APPLY_MAX|TERRAIN_PREP|OVERLAP|MULTIVIEW|UPLOAD_MAX|UPLOAD_PHASE_MAX|RECORD_CACHE|RUNTIME_MAX|UPDATE_APPLY_MAX|QUEUE_MAX|COMPILE_MAX|UPLOAD_LAST|DRAW|WORST_FRAME|WORST_FRAME_LOCOMOTION|WORST_FRAME_LOCOMOTION_COMMAND|WORST_FRAME_LOCOMOTION_INTEREST_COMMAND|WORST_FRAME_BUDGET|WORST_FRAME_TERRAIN|WORST_FRAME_RUNTIME|WORST_FRAME_GPU_SYNC|WORST_FRAME_UPLOAD_APPLY|WORST_FRAME_UPDATE_APPLY|WORST_FRAME_UPLOAD)([[:space:]]|$)|MCLONE_ANDROID_XR_PERF_METRICS(_WINDOW_START)?[[:space:]]" "$LOG_PATH" \
+    grep -E "MCLONE_ANDROID_XR_PERF_(START|SETTLED|SUMMARY|FRAME_PIPELINE|QUEUE|PEER|STAGE|HEADROOM|CPU_BLOCKED|HORIZON|PERSISTENCE|DETAIL|PUBLICATION|STAGES|LOCOMOTION|LOCOMOTION_COMMAND|LOCOMOTION_INTEREST_COMMAND|TERRAIN|TERRAIN_RUNTIME|TERRAIN_EYE_SPLIT|GPU_SYNC_MAX|UPLOAD_APPLY_MAX|TERRAIN_PREP|OVERLAP|MULTIVIEW|UPLOAD_MAX|UPLOAD_PHASE_MAX|RECORD_CACHE|RUNTIME_MAX|UPDATE_APPLY_MAX|QUEUE_MAX|LIGHT_OWNERSHIP|LIGHT_MAILBOX|COMPILE_MAX|UPLOAD_LAST|DRAW|WORST_FRAME|WORST_FRAME_LOCOMOTION|WORST_FRAME_LOCOMOTION_COMMAND|WORST_FRAME_LOCOMOTION_INTEREST_COMMAND|WORST_FRAME_BUDGET|WORST_FRAME_TERRAIN|WORST_FRAME_RUNTIME|WORST_FRAME_GPU_SYNC|WORST_FRAME_UPLOAD_APPLY|WORST_FRAME_UPDATE_APPLY|WORST_FRAME_UPLOAD)([[:space:]]|$)|MCLONE_ANDROID_XR_PERF_METRICS(_WINDOW_START)?[[:space:]]" "$LOG_PATH" \
         | tail -n 160 > "$PERF_SUMMARY_PATH"
     mclone_note "Perf summary: $PERF_SUMMARY_PATH"
 fi

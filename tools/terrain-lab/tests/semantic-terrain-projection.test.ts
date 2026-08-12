@@ -3,32 +3,35 @@ import test from "node:test";
 
 import {
   SEMANTIC_TERRAIN_VERTICAL_DATUM,
-  SEMANTIC_TERRAIN_VERTICAL_DISPLAY_SCALE,
-  SEMANTIC_TERRAIN_VERTICAL_SPAN,
+  semanticTerrainVerticalExaggeration,
   semanticTerrainVerticalOffset,
 } from "../src/web/semantic-terrain-projection";
 
-test("uses one fixed vertical datum and span", () => {
+test("uses the horizontal world scale for physical vertical projection", () => {
   const pitch = 0.65;
   const panelScale = 320;
+  const blocksAcross = 6_144;
   assert.equal(
     semanticTerrainVerticalOffset(
       SEMANTIC_TERRAIN_VERTICAL_DATUM,
       pitch,
       panelScale,
+      blocksAcross,
+      1,
     ),
     0,
   );
   const expected = 48
-    / SEMANTIC_TERRAIN_VERTICAL_SPAN
+    / (blocksAcross * 0.5)
     * panelScale
-    * SEMANTIC_TERRAIN_VERTICAL_DISPLAY_SCALE
     * Math.cos(pitch);
   assert.equal(
     semanticTerrainVerticalOffset(
       SEMANTIC_TERRAIN_VERTICAL_DATUM + 48,
       pitch,
       panelScale,
+      blocksAcross,
+      1,
     ),
     expected,
   );
@@ -37,11 +40,22 @@ test("uses one fixed vertical datum and span", () => {
       SEMANTIC_TERRAIN_VERTICAL_DATUM - 48,
       pitch,
       panelScale,
+      blocksAcross,
+      1,
     ),
     -expected,
   );
 });
 
-test("keeps viewport extrema and horizontal zoom outside the Y contract", () => {
-  assert.equal(semanticTerrainVerticalOffset.length, 3);
+test("makes peaks shrink with zoom-out and keeps exaggeration explicit", () => {
+  const near = semanticTerrainVerticalOffset(112, 0.7, 300, 4_096, 1);
+  const far = semanticTerrainVerticalOffset(112, 0.7, 300, 8_192, 1);
+  assert.equal(far, near * 0.5);
+  assert.equal(
+    semanticTerrainVerticalOffset(112, 0.7, 300, 4_096, 8),
+    near * 8,
+  );
+  assert.equal(semanticTerrainVerticalExaggeration("1x"), 1);
+  assert.equal(semanticTerrainVerticalExaggeration("8x"), 8);
+  assert.equal(semanticTerrainVerticalExaggeration("24x"), 24);
 });

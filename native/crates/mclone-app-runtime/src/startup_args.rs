@@ -13,7 +13,6 @@ use mclone_server::{
     DEFAULT_LIGHT_STATUS_BATCH_SIZE, StarterContentDescriptor, WorldGenerationProfile,
 };
 use mclone_ui::GameMovementMode;
-pub use mclone_ui::GameTerrainPresentationMode as TerrainPresentationMode;
 
 use crate::{
     DEFAULT_RENDER_SECTION_COMPILE_MAX_PENDING_JOBS, DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
@@ -143,6 +142,22 @@ pub const DEFAULT_STARTUP_CHUNK_X: i32 = 0;
 pub const DEFAULT_STARTUP_CHUNK_Z: i32 = 0;
 pub const DEFAULT_STARTUP_RENDER_DISTANCE: u32 = 5;
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum TerrainPresentationMode {
+    #[default]
+    ExactOnly,
+    Composed,
+}
+
+impl TerrainPresentationMode {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::ExactOnly => "exact-only",
+            Self::Composed => "composed",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RenderDistanceLimits {
     pub min: u32,
@@ -177,6 +192,7 @@ pub struct StartupSceneOptions {
     pub lighting_enabled: bool,
     pub light_status_batch_size: usize,
     pub terrain_presentation: TerrainPresentationMode,
+    pub terrain_presentation_explicit: bool,
 }
 
 impl Default for StartupSceneOptions {
@@ -202,6 +218,7 @@ impl Default for StartupSceneOptions {
             lighting_enabled: true,
             light_status_batch_size: DEFAULT_LIGHT_STATUS_BATCH_SIZE,
             terrain_presentation: TerrainPresentationMode::ExactOnly,
+            terrain_presentation_explicit: false,
         }
     }
 }
@@ -505,6 +522,7 @@ impl StartupArgState {
             ARG_TERRAIN_PRESENTATION => {
                 self.scene.terrain_presentation =
                     parse_terrain_presentation_mode(ARG_TERRAIN_PRESENTATION, args.next())?;
+                self.scene.terrain_presentation_explicit = true;
             }
             ARG_SCREENSHOT_EYE => {
                 self.camera.eye = Some(parse_f32_vec3_arg(ARG_SCREENSHOT_EYE, args.next())?);
@@ -627,6 +645,7 @@ impl StartupArgState {
             QUERY_TERRAIN_PRESENTATION => {
                 self.scene.terrain_presentation =
                     parse_terrain_presentation_mode(QUERY_TERRAIN_PRESENTATION, value)?;
+                self.scene.terrain_presentation_explicit = true;
             }
             QUERY_SCREENSHOT_EYE => {
                 self.camera.eye = Some(parse_f32_vec3_arg(QUERY_SCREENSHOT_EYE, value)?);
@@ -919,6 +938,7 @@ mod tests {
                 lighting_enabled: true,
                 light_status_batch_size: DEFAULT_LIGHT_STATUS_BATCH_SIZE,
                 terrain_presentation: TerrainPresentationMode::ExactOnly,
+                terrain_presentation_explicit: false,
             }
         );
         assert_eq!(
@@ -1072,6 +1092,7 @@ mod tests {
                 lighting_enabled: true,
                 light_status_batch_size: 5,
                 terrain_presentation: TerrainPresentationMode::ExactOnly,
+                terrain_presentation_explicit: false,
             }
         );
         assert_eq!(
@@ -1403,6 +1424,7 @@ mod tests {
                 lighting_enabled: false,
                 light_status_batch_size: 5,
                 terrain_presentation: TerrainPresentationMode::ExactOnly,
+                terrain_presentation_explicit: false,
             }
         );
         assert!(!options.render_options.section_occlusion_culling);
@@ -1439,12 +1461,9 @@ mod tests {
             StartupSceneOptions::default().terrain_presentation,
             TerrainPresentationMode::ExactOnly
         );
-        assert_eq!(
-            parse(&[ARG_TERRAIN_PRESENTATION, "composed"])
-                .scene
-                .terrain_presentation,
-            TerrainPresentationMode::Composed
-        );
+        let argv = parse(&[ARG_TERRAIN_PRESENTATION, "composed"]).scene;
+        assert_eq!(argv.terrain_presentation, TerrainPresentationMode::Composed);
+        assert!(argv.terrain_presentation_explicit);
         let mut query = StartupArgState::default();
         assert!(
             query
@@ -1455,10 +1474,12 @@ mod tests {
                 )
                 .unwrap()
         );
+        let query = query.finish().scene;
         assert_eq!(
-            query.finish().scene.terrain_presentation,
+            query.terrain_presentation,
             TerrainPresentationMode::Composed
         );
+        assert!(query.terrain_presentation_explicit);
         assert_eq!(
             parse_terrain_presentation_mode(ARG_TERRAIN_PRESENTATION, Some("sideways".to_owned()))
                 .unwrap_err()

@@ -195,6 +195,10 @@ series implements the same concern, normally reuse the document slug in its
   shared-contract × consumer reuse matrix, and the cross-cutting blockers that
   keep new features from re-forking across the client lanes and offscreen
   validation hosts.
+- [`desktop-openxr-validation.md`](desktop-openxr-validation.md): current
+  Windows VirtualDesktopXR and macOS/Linux WiVRn runtime lanes, Linux
+  native/Flatpak USB bootstrap, version-matched Quest client contract, Vulkan
+  interop guardrails, accepted headset evidence, and remaining hardware checks.
 - [`client-entry-lifecycle.md`](client-entry-lifecycle.md): accepted
   menu-first product entry and repeatable host-lifecycle contract — sessions
   require explicit host-neutral launch intent, platform presentation does not
@@ -218,6 +222,10 @@ series implements the same concern, normally reuse the document slug in its
   player-facing graphics/video contract — current live controls and SteamOS
   profile behavior, settings-persistence investigation, output/UI/world
   resolution policy, and the remaining production settings backlog.
+- [`fog-atmosphere.md`](fog-atmosphere.md): active shared open-air distance
+  atmosphere, Fog submenu, linear/exponential/height-aware evaluation modes,
+  exact/procedural coverage guard, weather inputs, conservative far culling,
+  and cross-platform performance and pixel decision gate.
 - [`release-distribution-and-updates.md`](release-distribution-and-updates.md):
   accepted first-party/store distribution architecture — a stable Tauri
   launcher for managed direct desktop installs, store-owned updates for
@@ -270,6 +278,10 @@ series implements the same concern, normally reuse the document slug in its
   executors, and world-scoped writer admission. Tactical
   [`199`](../tactical/199-unified-persistence-interface.md) records the
   implementation.
+- [`generated-chunk-cache-policy.md`](generated-chunk-cache-policy.md):
+  accepted server-owned per-world option for storing or regenerating
+  deterministic unedited terrain, with conservative durable-state boundaries,
+  all-client authority-aware UI, and provenance-gated cache reclamation.
 - [`world-dimension-storage-layout.md`](world-dimension-storage-layout.md):
   accepted physical-layout direction for a realm-global native database plus
   dimension SQLite shards, retained logical dimension keys and world-level
@@ -319,6 +331,10 @@ series implements the same concern, normally reuse the document slug in its
   [`261`](../tactical/261-procedural-horizon-product-integration-roadmap.md)
   inventories the completed proof stack and sequences real-game,
   flat-platform, and XR/multiview integration.
+- [`procedural-horizon-surface-appearance.md`](procedural-horizon-surface-appearance.md):
+  current material classification, block-atlas texture filtering, biome tint,
+  approximate lighting, interpolated inland-water presentation, performance
+  evidence, known limits, and the measured next-work boundary.
 - [`lod-native-vegetation.md`](lod-native-vegetation.md): accepted immediate
   migration of original-profile trees from vanilla-shaped chunk decoration to
   worldgen-owned forest intent and stable tree records shared by exact chunks,
@@ -326,6 +342,12 @@ series implements the same concern, normally reuse the document slug in its
   architecture; Tactical 245 removed the rejected chunk-Far-LOD adapter.
 - [`lighting.md`](lighting.md): native Java-shaped stored-light system,
   render handoff, solver/status/rendering gaps, and next slices.
+- [`chunk-lighting-admission-and-backpressure.md`](chunk-lighting-admission-and-backpressure.md):
+  accepted P0 shared scheduling direction after the extended RD7 Quest soak
+  exposed an unbounded copied-input light backlog; records the Java 1.17.1
+  ticket/status comparison, four-at-a-time promotion admission, keyed
+  cancellation, shared light inputs, hard lifecycle byte bounds, and Tactical
+  279 acceptance gate.
 - [`dynamic-point-lights.md`](dynamic-point-lights.md): presentation-side
   finite-radius point lights, many-light admission, voxel-DDA and entity-shadow
   options, cubemap/stencil comparisons, and shared mono/XR validation direction.
@@ -337,6 +359,14 @@ series implements the same concern, normally reuse the document slug in its
   and Java-shaped render/scheduling follow-ups.
   The broader frame/terrain/host accounting model lives in
   [`../frame-pipeline-accounting.md`](../frame-pipeline-accounting.md).
+- [`actor-rendering-performance.md`](actor-rendering-performance.md): durable
+  prepared/legacy actor-rendering baselines, instancing and memory tradeoffs,
+  physical Quest gate, and the ordered sparse-upload, GPU palette-expansion,
+  actor-LOD, and fallback optimization queue.
+- [`xr-render-path-switching.md`](xr-render-path-switching.md): accepted
+  three-mode live XR render-path contract across desktop and Android OpenXR,
+  with transactional frame-boundary topology replacement and exactly one
+  steady-state target family.
 - [`lush-grass-rendering.md`](lush-grass-rendering.md): pinned Grassier Grass
   artifact/reconstruction research, observed section/wind/interaction/color
   architecture, attribution and license constraints, and the accepted

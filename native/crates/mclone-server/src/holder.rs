@@ -11,6 +11,7 @@ use std::collections::BTreeMap;
 use mclone_core::{ChunkPos, ChunkRevision, ChunkSnapshot, ChunkStatus};
 use mclone_worldgen::levelgen::MutableChunkBlockBuffer;
 
+use crate::light_status::LightRequestToken;
 use crate::{
     ChunkJobId, ChunkResidency, ChunkStatusStep, ChunkStructureData, FullChunkStatus,
     UNLOADED_CHUNK_LEVEL, full_chunk_status_for_ticket_level, mutable_buffer_from_snapshot,
@@ -22,6 +23,7 @@ pub struct ChunkStatusSlot {
     pub step: ChunkStatusStep,
     pub revision: Option<ChunkRevision>,
     pub job_id: Option<ChunkJobId>,
+    pub(crate) light_request_token: Option<LightRequestToken>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -127,6 +129,7 @@ impl ChunkHolder {
                 step: ChunkStatusStep::Scheduled,
                 revision: None,
                 job_id: None,
+                light_request_token: None,
             },
         );
     }
@@ -140,6 +143,7 @@ impl ChunkHolder {
                 step: ChunkStatusStep::Ready,
                 revision,
                 job_id,
+                light_request_token: None,
             },
         );
     }
@@ -152,8 +156,51 @@ impl ChunkHolder {
                 step: ChunkStatusStep::Scheduled,
                 revision: None,
                 job_id: None,
+                light_request_token: None,
             })
             .job_id = Some(job_id);
+    }
+
+    pub(crate) fn clear_status_job(&mut self, status: ChunkStatus, expected: ChunkJobId) -> bool {
+        let Some(slot) = self.status_slots.get_mut(&status) else {
+            return false;
+        };
+        if slot.job_id != Some(expected) {
+            return false;
+        }
+        slot.job_id = None;
+        true
+    }
+
+    pub(crate) fn assign_light_request_token(&mut self, token: LightRequestToken) {
+        debug_assert_eq!(token.pos, self.pos);
+        self.status_slots
+            .entry(ChunkStatus::Light)
+            .or_insert(ChunkStatusSlot {
+                status: ChunkStatus::Light,
+                step: ChunkStatusStep::Scheduled,
+                revision: None,
+                job_id: None,
+                light_request_token: None,
+            })
+            .light_request_token = Some(token);
+    }
+
+    pub(crate) fn light_request_token(&self) -> Option<LightRequestToken> {
+        self.status_slots
+            .get(&ChunkStatus::Light)
+            .and_then(|slot| slot.light_request_token)
+    }
+
+    pub(crate) fn clear_light_request_token(&mut self, expected: LightRequestToken) -> bool {
+        let Some(slot) = self.status_slots.get_mut(&ChunkStatus::Light) else {
+            return false;
+        };
+        if slot.light_request_token != Some(expected) {
+            return false;
+        }
+        slot.light_request_token = None;
+        true
     }
 
     pub(crate) fn publish_snapshot(

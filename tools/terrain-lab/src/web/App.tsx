@@ -26,6 +26,7 @@ import {
   type SemanticTerrainCorrection,
   type SemanticTerrainFeatures,
   type SemanticTerrainSubstrate,
+  type SemanticTerrainVerticalScale,
   type TerrainLabComparisonVisualProfile,
   type TerrainLabState,
   type TerrainLabTexturePresentation,
@@ -1228,6 +1229,29 @@ export function App(): React.JSX.Element {
                   ]}
                   onChange={(semanticCorrection) =>
                     patchState({ semanticCorrection })}
+                />
+                <SegmentedControl<SemanticTerrainVerticalScale>
+                  label="Vertical scale"
+                  value={state.semanticVerticalScale}
+                  options={[
+                    {
+                      value: "1x",
+                      label: "Physical 1×",
+                      note: "One vertical block uses the horizontal world scale",
+                    },
+                    {
+                      value: "8x",
+                      label: "8×",
+                      note: "Explicit world-scale diagnostic exaggeration",
+                    },
+                    {
+                      value: "24x",
+                      label: "24×",
+                      note: "Strong exaggeration for broad-landform inspection",
+                    },
+                  ]}
+                  onChange={(semanticVerticalScale) =>
+                    patchState({ semanticVerticalScale })}
                 />
                 <div className="visibilityToggles">
                   <ToggleButton

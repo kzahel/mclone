@@ -109,6 +109,115 @@ force-stops the app and sleeps the headset during cleanup.
 
 ## Records
 
+### 2026-07-28 - Procedural Horizon RD5 Performance And Travel
+
+Baseline instrumentation commit: `770ebe89`. Culling runtime commit:
+`99d6c5b6`. Travel-health instrumentation commit: `1d244c80`.
+
+All rows use physical Quest 3 `2G0YC1ZF93041Z`, Android API 34, Oculus OpenXR,
+72 Hz / `13.889ms`, `1680x1760` per eye, render scale 1, foveation off,
+per-eye frame overlap, local `mclone-overworld-v1`, seed `12345`, noon,
+render distance 5, and the fixed start pose `0,120,-96,180`. Stationary and
+orbit samples are transient. Travel uses the disposable persistent guardrail
+world.
+
+Matched stationary baseline:
+
+| Revision / lane | FPS | App avg | App p95 | Headroom avg | App GPU | Over-period | Horizon tiles |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| `770ebe89` exact A | `72.00` | `5.397ms` | `6.175ms` | `8.492ms` | `2.330ms` | `0%` | 0 |
+| `770ebe89` composed | `51.91` | `19.157ms` | `20.313ms` | `-5.268ms` | `11.906ms` | `100%` | 160 |
+| `770ebe89` exact repeat | `72.00` | `5.382ms` | `6.404ms` | `8.506ms` | `2.267ms` | `0%` | 0 |
+
+The exact repeat bounds short-run thermal and order variance. The composed
+path's `+9.6ms` Meta app GPU delta and duplicated roughly four-millisecond
+per-eye backdrop encoding are both material.
+
+`99d6c5b6` skips terrain tiles wholly hidden by finer committed levels or
+outside the physical-eye frustum and applies a 16-block crown margin to
+vegetation. It allocates no per-frame visibility storage. The pre/post
+synthetic stereo images are byte-identical, SHA-256:
+
+```text
+f8f013e7a550554ab0fb43b58cc586c87e482c926fe6151f28ad9e4d63dc6d22
+```
+
+Stationary post-change repeats:
+
+| Lane | FPS | App avg | App p95 | Headroom avg | App GPU | Over-period | Drawn / covered / frustum |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| composed 1 | `72.01` | `10.648ms` | `11.570ms` | `3.240ms` | `5.629ms` | `0%` | `27 / 36 / 97` |
+| composed 2 | `72.01` | `10.781ms` | `11.770ms` | `3.108ms` | `5.711ms` | `0%` | `28 / 36 / 96` |
+
+Matched continuous presentation:
+
+| Lane | Sample | FPS | App avg | App p95 | Headroom avg | App GPU | Over-period |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| exact orbit | `20.013s` | `72.00` | `6.090ms` | `7.834ms` | `7.799ms` | `1.987ms` | `0%` |
+| composed orbit 1 | `20.011s` | `71.81` | `11.192ms` | `13.734ms` | `2.697ms` | `5.128ms` | `2.8%` |
+| composed orbit 2 | `20.010s` | `71.81` | `11.230ms` | `13.463ms` | `2.659ms` | `5.630ms` | `2.2%` |
+
+The stationary product gate is now clean. Moving presentation remains close
+to 72 Hz but has a reproducible CPU-side tail; app GPU remains well under the
+period. Tactical 278 owns the true horizon multiview experiment.
+
+Post-closeout frame attribution used final runtime code `10ee9156`, the same
+physical device and view, 45-second orbit samples, two render-compile workers,
+and bounded upload/accept/completion budgets `16/64/2`:
+
+| Lane | Actors | App avg | App p95 | Thread CPU avg / p95 | App GPU | Over-period |
+|---|---:|---:|---:|---:|---:|---:|
+| exact, actors skipped | `0` | `4.068ms` | `4.858ms` | `3.195 / 3.834ms` | `1.746ms` | `0.0%` |
+| composed, actors skipped | `0` | `10.723ms` | `12.889ms` | `8.258 / 9.333ms` | `5.332ms` | `0.2%` |
+| composed, product | `10` | `12.252ms` | `15.151ms` | `9.363 / 11.850ms` | `5.524ms` | `16.3%` |
+
+Both composed rows were horizon-active and target-ready throughout and ended
+with 10 drawn levels and 47 terrain tiles. The actor-skipped composed row is an
+attribution control and not a product acceptance waiver. The ten-actor row is
+the binding result and shows that dynamic actor cost consumes the remaining
+RD5 margin; the older composed rows above rendered six actors.
+
+The same investigation compared exact-only actor-skipped parent
+`01a221b8` and final `10ee9156` APKs:
+
+| Runtime | Settle | Worldgen / Light requests | App avg / p95 | Thread CPU avg / p95 |
+|---|---:|---:|---:|---:|
+| parent | `19.627s` | `10 / 37` | `4.918 / 8.127ms` | `3.275 / 4.888ms` |
+| final | `33.186s` | `28 / 70` | `4.841 / 8.005ms` | `3.271 / 4.887ms` |
+
+Foreground frame cost is unchanged. The higher request count and longer cold
+settle remain a throughput/setup follow-up; they do not support widening the
+accepted Light memory bounds.
+
+Persistent 8x travel (`34.4` blocks/second):
+
+| Sample | Distance | FPS | App p95 | Over-period | Exact-center misses | Foreground max | Cache max / high-water |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| `180s` | `6,191` blocks | `71.76` | `13.513ms` | `2.5%` | `0 / 12,916` | 30 | `15 / 15`, `0.61MiB` |
+| `300s` minimal detail | `10,319` blocks | `71.70` | `13.944ms` | `5.6%` | `0 / 21,510` | 30 | `12 / 15`, `0.60MiB` |
+
+Durable persistence peaked at two requests / 720 bytes. The 300-second run
+ended with no foreground or durable work and one `15KiB` cache write. Quest
+RSS samples were approximately `1.10`, `1.03`, `1.03`, `1.16`, and
+`1.22GiB`, with no distance-proportional trend or low-memory termination. The
+test world reached `504,496KiB`; generated-clean disk growth remains a
+separate policy issue.
+
+Raw summaries:
+
+```text
+/tmp/mclone-277-stationary-exact-a2.txt
+/tmp/mclone-277-stationary-composed-b2.txt
+/tmp/mclone-277-stationary-exact-c.txt
+/tmp/mclone-277-stationary-composed-cull.txt
+/tmp/mclone-277-stationary-composed-cull-repeat.txt
+/tmp/mclone-277-orbit-exact.txt
+/tmp/mclone-277-orbit-composed-cull.txt
+/tmp/mclone-277-orbit-composed-cull-repeat.txt
+/tmp/mclone-277-persisted-flight.txt
+/tmp/mclone-277-persisted-flight-long.txt
+```
+
 ### 2026-07-24 - Exact Frame-Accounting Measurement Defect
 
 Benchmarked runtime endpoint: `696a4271`. The corrected APK was built from a

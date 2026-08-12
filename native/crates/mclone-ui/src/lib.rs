@@ -1358,6 +1358,8 @@ pub enum GameOptionsParent {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum GameOptionsCategory {
     Graphics,
+    /// Experimental open-air fog controls nested under Graphics.
+    Fog,
     Movement,
     Display,
     LocalPlay,
@@ -1379,6 +1381,7 @@ impl GameOptionsCategory {
     pub const fn label(self) -> &'static str {
         match self {
             Self::Graphics => "Graphics",
+            Self::Fog => "Fog",
             Self::Movement => "Movement",
             Self::Display => "Display",
             Self::LocalPlay => "Local Play",
@@ -1391,6 +1394,7 @@ impl GameOptionsCategory {
     pub const fn title(self) -> &'static str {
         match self {
             Self::Graphics => "GRAPHICS",
+            Self::Fog => "FOG",
             Self::Movement => "MOVEMENT",
             Self::Display => "DISPLAY",
             Self::LocalPlay => "LOCAL PLAY",
@@ -2022,7 +2026,8 @@ pub enum GameUiAction {
     ToggleSectionOcclusion,
     SetLeafDetail(GameLeafDetail),
     SetGrassDetail(GameGrassDetail),
-    SetTerrainPresentation(GameTerrainPresentationMode),
+    SetTerrainPresentation(GameTerrainPresentation),
+    SetFogSettings(GameFogSettings),
     ToggleFullbright,
     TogglePlayerCollisionBox,
     ToggleFirstPersonPlayer,
@@ -2041,6 +2046,7 @@ pub enum GameUiAction {
     CycleFramePacing,
     CycleFpsCap,
     SetWorldRenderScaleMode(GameWorldRenderScaleMode),
+    SetXrRenderMode(GameXrRenderMode),
     SetRenderDistance(i32),
     SetFlySpeed(f32),
     SetMovementSpeed(f32),
@@ -2048,6 +2054,142 @@ pub enum GameUiAction {
     SetTouchControlsMode(TouchControlsMode),
     SetServerSimulationCadence(GameSimulationCadence),
     Quit,
+}
+
+/// Host-neutral selection for the way one XR frame is encoded and presented.
+///
+/// The two array modes deliberately remain distinct: `ArrayPerEye` isolates
+/// the OpenXR target topology from multiview command encoding.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum GameXrRenderMode {
+    #[default]
+    DualPerEye,
+    ArrayPerEye,
+    ArrayMultiview,
+}
+
+impl GameXrRenderMode {
+    pub const ALL: [Self; 3] = [Self::DualPerEye, Self::ArrayPerEye, Self::ArrayMultiview];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::DualPerEye => "Dual per-eye",
+            Self::ArrayPerEye => "Array per-eye",
+            Self::ArrayMultiview => "Array multiview",
+        }
+    }
+
+    const fn bit(self) -> u8 {
+        match self {
+            Self::DualPerEye => 1 << 0,
+            Self::ArrayPerEye => 1 << 1,
+            Self::ArrayMultiview => 1 << 2,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct GameXrRenderModeSet(u8);
+
+impl GameXrRenderModeSet {
+    pub const NONE: Self = Self(0);
+    pub const DUAL_PER_EYE: Self = Self(GameXrRenderMode::DualPerEye.bit());
+    pub const ARRAY_PER_EYE: Self = Self(GameXrRenderMode::ArrayPerEye.bit());
+    pub const ARRAY_MULTIVIEW: Self = Self(GameXrRenderMode::ArrayMultiview.bit());
+    pub const ALL: Self = Self(
+        GameXrRenderMode::DualPerEye.bit()
+            | GameXrRenderMode::ArrayPerEye.bit()
+            | GameXrRenderMode::ArrayMultiview.bit(),
+    );
+
+    pub const fn contains(self, mode: GameXrRenderMode) -> bool {
+        self.0 & mode.bit() != 0
+    }
+
+    pub const fn union(self, other: Self) -> Self {
+        Self(self.0 | other.0)
+    }
+
+    pub fn next_after(self, current: GameXrRenderMode) -> GameXrRenderMode {
+        let current_index = match current {
+            GameXrRenderMode::DualPerEye => 0,
+            GameXrRenderMode::ArrayPerEye => 1,
+            GameXrRenderMode::ArrayMultiview => 2,
+        };
+        for offset in 1..=GameXrRenderMode::ALL.len() {
+            let candidate =
+                GameXrRenderMode::ALL[(current_index + offset) % GameXrRenderMode::ALL.len()];
+            if self.contains(candidate) {
+                return candidate;
+            }
+        }
+        current
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum GameXrRenderTransitionState {
+    #[default]
+    Idle,
+    Pending,
+    Committed,
+    Rejected,
+    Failed,
+}
+
+/// Host-confirmed XR render-path state projected into the shared menu.
+///
+/// `None` in [`GameUiRenderState::xr_render_path`] means the active client is
+/// not an XR host, so flat clients omit the setting instead of showing an inert
+/// row.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct GameXrRenderPathState {
+    pub supported_modes: GameXrRenderModeSet,
+    pub requested_mode: GameXrRenderMode,
+    pub pending_mode: Option<GameXrRenderMode>,
+    pub active_mode: GameXrRenderMode,
+    pub transition_state: GameXrRenderTransitionState,
+}
+
+impl GameXrRenderPathState {
+    pub const fn new(
+        supported_modes: GameXrRenderModeSet,
+        requested_mode: GameXrRenderMode,
+        pending_mode: Option<GameXrRenderMode>,
+        active_mode: GameXrRenderMode,
+        transition_state: GameXrRenderTransitionState,
+    ) -> Self {
+        Self {
+            supported_modes,
+            requested_mode,
+            pending_mode,
+            active_mode,
+            transition_state,
+        }
+    }
+
+    pub fn next_mode(self) -> GameXrRenderMode {
+        self.supported_modes.next_after(self.requested_mode)
+    }
+
+    pub fn value_label(self) -> String {
+        match self.transition_state {
+            GameXrRenderTransitionState::Pending => format!(
+                "{} -> {} (pending)",
+                self.active_mode.label(),
+                self.pending_mode.unwrap_or(self.requested_mode).label()
+            ),
+            GameXrRenderTransitionState::Rejected => {
+                format!("{} (rejected)", self.active_mode.label())
+            }
+            GameXrRenderTransitionState::Failed => {
+                format!("{} (switch failed)", self.active_mode.label())
+            }
+            GameXrRenderTransitionState::Idle | GameXrRenderTransitionState::Committed => {
+                self.active_mode.label().to_owned()
+            }
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -2102,35 +2244,200 @@ impl GameGrassDetail {
     }
 }
 
-/// Player-facing choice between ordinary exact chunks and the shared
-/// exact-plus-procedural terrain composition.
+/// Player-facing selection for exact-only or composed distant terrain.
+///
+/// `Experimental` keeps the product language honest while the procedural
+/// horizon is being accepted across mobile and XR hardware.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub enum GameTerrainPresentationMode {
+pub enum GameTerrainPresentation {
     #[default]
     ExactOnly,
-    Composed,
+    Experimental,
 }
 
-impl GameTerrainPresentationMode {
+impl GameTerrainPresentation {
     pub const fn next(self) -> Self {
         match self {
-            Self::ExactOnly => Self::Composed,
-            Self::Composed => Self::ExactOnly,
+            Self::ExactOnly => Self::Experimental,
+            Self::Experimental => Self::ExactOnly,
         }
     }
 
-    /// Stable startup/configuration spelling.
     pub const fn label(self) -> &'static str {
         match self {
-            Self::ExactOnly => "exact-only",
-            Self::Composed => "composed",
+            Self::ExactOnly => "Off",
+            Self::Experimental => "Experimental",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum GameFogMode {
+    Off,
+    Classic,
+    #[default]
+    Natural,
+    GroundHaze,
+}
+
+impl GameFogMode {
+    pub const fn next(self) -> Self {
+        match self {
+            Self::Off => Self::Classic,
+            Self::Classic => Self::Natural,
+            Self::Natural => Self::GroundHaze,
+            Self::GroundHaze => Self::Off,
         }
     }
 
-    pub const fn ui_label(self) -> &'static str {
+    pub const fn label(self) -> &'static str {
         match self {
-            Self::ExactOnly => "Exact Only",
-            Self::Composed => "Composed",
+            Self::Off => "Off",
+            Self::Classic => "Classic",
+            Self::Natural => "Natural",
+            Self::GroundHaze => "Ground Haze",
+        }
+    }
+
+    pub const fn uses_exponential(self) -> bool {
+        matches!(self, Self::Natural | Self::GroundHaze)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum GameFogColorMode {
+    #[default]
+    Sky,
+    Neutral,
+    Warm,
+    Cool,
+    Custom,
+}
+
+impl GameFogColorMode {
+    pub const fn next(self) -> Self {
+        match self {
+            Self::Sky => Self::Neutral,
+            Self::Neutral => Self::Warm,
+            Self::Warm => Self::Cool,
+            Self::Cool => Self::Custom,
+            Self::Custom => Self::Sky,
+        }
+    }
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Sky => "Sky Adaptive",
+            Self::Neutral => "Neutral",
+            Self::Warm => "Warm",
+            Self::Cool => "Cool",
+            Self::Custom => "Custom RGB",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum GameFogWeatherInfluence {
+    Off,
+    #[default]
+    Subtle,
+    Strong,
+}
+
+impl GameFogWeatherInfluence {
+    pub const fn next(self) -> Self {
+        match self {
+            Self::Off => Self::Subtle,
+            Self::Subtle => Self::Strong,
+            Self::Strong => Self::Off,
+        }
+    }
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Off => "Off",
+            Self::Subtle => "Subtle",
+            Self::Strong => "Strong",
+        }
+    }
+}
+
+/// Evaluation-facing open-air fog policy.
+///
+/// The intentionally broad first-pass controls let the player compare curves
+/// interactively. Media/gameplay fog such as underwater visibility is a
+/// stronger renderer override and is not represented here.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GameFogSettings {
+    pub mode: GameFogMode,
+    pub color_mode: GameFogColorMode,
+    pub custom_color: [f32; 3],
+    pub visibility_blocks: f32,
+    pub classic_start: f32,
+    pub coverage_guard: bool,
+    pub guard_start: f32,
+    pub ground_base_y: f32,
+    pub ground_falloff_blocks: f32,
+    pub max_opacity: f32,
+    pub exponential_squared: bool,
+    pub far_cull: bool,
+    pub weather_influence: GameFogWeatherInfluence,
+}
+
+impl GameFogSettings {
+    pub const MIN_VISIBILITY_BLOCKS: f32 = 64.0;
+    pub const MAX_VISIBILITY_BLOCKS: f32 = 131_072.0;
+    pub const MIN_START_RATIO: f32 = 0.0;
+    pub const MAX_START_RATIO: f32 = 0.99;
+    pub const MIN_GROUND_BASE_Y: f32 = -64.0;
+    pub const MAX_GROUND_BASE_Y: f32 = 320.0;
+    pub const MIN_GROUND_FALLOFF_BLOCKS: f32 = 8.0;
+    pub const MAX_GROUND_FALLOFF_BLOCKS: f32 = 512.0;
+    pub const MIN_MAX_OPACITY: f32 = 0.5;
+    pub const MAX_MAX_OPACITY: f32 = 1.0;
+
+    pub fn normalized(self) -> Self {
+        Self {
+            visibility_blocks: finite_or(self.visibility_blocks, 32_768.0)
+                .clamp(Self::MIN_VISIBILITY_BLOCKS, Self::MAX_VISIBILITY_BLOCKS),
+            classic_start: finite_or(self.classic_start, 0.75)
+                .clamp(Self::MIN_START_RATIO, Self::MAX_START_RATIO),
+            guard_start: finite_or(self.guard_start, 0.9)
+                .clamp(Self::MIN_START_RATIO, Self::MAX_START_RATIO),
+            ground_base_y: finite_or(self.ground_base_y, 64.0)
+                .clamp(Self::MIN_GROUND_BASE_Y, Self::MAX_GROUND_BASE_Y),
+            ground_falloff_blocks: finite_or(self.ground_falloff_blocks, 64.0).clamp(
+                Self::MIN_GROUND_FALLOFF_BLOCKS,
+                Self::MAX_GROUND_FALLOFF_BLOCKS,
+            ),
+            max_opacity: finite_or(self.max_opacity, 0.98)
+                .clamp(Self::MIN_MAX_OPACITY, Self::MAX_MAX_OPACITY),
+            custom_color: self
+                .custom_color
+                .map(|channel| finite_or(channel, 0.7).clamp(0.0, 1.0)),
+            ..self
+        }
+    }
+}
+
+impl Default for GameFogSettings {
+    fn default() -> Self {
+        Self {
+            mode: GameFogMode::Natural,
+            color_mode: GameFogColorMode::Sky,
+            custom_color: [0.7, 0.75, 0.8],
+            visibility_blocks: 32_768.0,
+            classic_start: 0.75,
+            coverage_guard: true,
+            guard_start: 0.9,
+            ground_base_y: 64.0,
+            ground_falloff_blocks: 64.0,
+            max_opacity: 0.98,
+            exponential_squared: false,
+            // Preserve identical draw submission for the first visual
+            // comparison; the menu exposes culling as a measured opt-in.
+            far_cull: false,
+            weather_influence: GameFogWeatherInfluence::Subtle,
         }
     }
 }
@@ -2296,9 +2603,9 @@ pub struct GameUiRenderState {
     pub section_occlusion_culling: bool,
     pub leaf_detail: GameLeafDetail,
     pub grass_detail: GameGrassDetail,
-    /// `None` keeps the shared row visible but unavailable for an incompatible
-    /// world/session or render topology.
-    pub terrain_presentation: Option<GameTerrainPresentationMode>,
+    pub terrain_presentation: GameTerrainPresentation,
+    pub terrain_presentation_available: bool,
+    pub fog: GameFogSettings,
     pub force_fullbright: bool,
     pub player_collision_box_visible: bool,
     pub first_person_player_visible: bool,
@@ -2325,6 +2632,8 @@ pub struct GameUiRenderState {
     pub fps_cap: u32,
     /// `None` when this projection does not own a conventional flat output.
     pub flat_presentation: Option<GameFlatPresentationState>,
+    /// `None` for flat clients; XR hosts publish requested/pending/active state.
+    pub xr_render_path: Option<GameXrRenderPathState>,
     pub server_cadence: Option<GameSimulationCadence>,
     pub touch_controls_mode: Option<TouchControlsMode>,
     pub touch_settings: Option<GameTouchSettings>,
@@ -2344,7 +2653,9 @@ impl Default for GameUiRenderState {
             section_occlusion_culling: true,
             leaf_detail: GameLeafDetail::Blocky,
             grass_detail: GameGrassDetail::Off,
-            terrain_presentation: None,
+            terrain_presentation: GameTerrainPresentation::ExactOnly,
+            terrain_presentation_available: true,
+            fog: GameFogSettings::default(),
             force_fullbright: false,
             player_collision_box_visible: false,
             first_person_player_visible: false,
@@ -2368,6 +2679,7 @@ impl Default for GameUiRenderState {
             frame_pacing_mode: GameFramePacingMode::Vsync,
             fps_cap: 120,
             flat_presentation: None,
+            xr_render_path: None,
             server_cadence: None,
             touch_controls_mode: None,
             touch_settings: None,
@@ -3729,6 +4041,171 @@ fn render_distance_label(state: GameUiRenderState) -> String {
     let radius = state.clamped_render_distance();
     let suffix = if radius == 1 { "chunk" } else { "chunks" };
     format!("Render Distance: {radius} {suffix}")
+}
+
+fn fog_visibility_slider_value(settings: GameFogSettings) -> f32 {
+    let settings = settings.normalized();
+    let min = GameFogSettings::MIN_VISIBILITY_BLOCKS;
+    let max = GameFogSettings::MAX_VISIBILITY_BLOCKS;
+    (settings.visibility_blocks.ln() - min.ln()) / (max.ln() - min.ln())
+}
+
+fn fog_visibility_from_slider_value(value: f32, settings: GameFogSettings) -> GameFogSettings {
+    let min = GameFogSettings::MIN_VISIBILITY_BLOCKS;
+    let max = GameFogSettings::MAX_VISIBILITY_BLOCKS;
+    let raw = (min.ln() + value.clamp(0.0, 1.0) * (max.ln() - min.ln())).exp();
+    let rounded = if raw >= 1_024.0 {
+        (raw / 1_024.0).round() * 1_024.0
+    } else {
+        (raw / 16.0).round() * 16.0
+    };
+    GameFogSettings {
+        visibility_blocks: rounded,
+        ..settings
+    }
+    .normalized()
+}
+
+fn fog_visibility_label(settings: GameFogSettings) -> String {
+    let visibility = settings.normalized().visibility_blocks;
+    if visibility >= 1_000.0 {
+        format!("Visibility: {:.1} km", visibility / 1_000.0)
+    } else {
+        format!("Visibility: {visibility:.0} blocks")
+    }
+}
+
+fn fog_classic_start_slider_value(settings: GameFogSettings) -> f32 {
+    settings.normalized().classic_start
+}
+
+fn fog_classic_start_from_slider_value(value: f32, settings: GameFogSettings) -> GameFogSettings {
+    GameFogSettings {
+        classic_start: value,
+        ..settings
+    }
+    .normalized()
+}
+
+fn fog_classic_start_label(settings: GameFogSettings) -> String {
+    format!(
+        "Classic Start: {:.0}%",
+        settings.normalized().classic_start * 100.0
+    )
+}
+
+fn fog_guard_start_slider_value(settings: GameFogSettings) -> f32 {
+    settings.normalized().guard_start
+}
+
+fn fog_guard_start_from_slider_value(value: f32, settings: GameFogSettings) -> GameFogSettings {
+    GameFogSettings {
+        guard_start: value,
+        ..settings
+    }
+    .normalized()
+}
+
+fn fog_guard_start_label(settings: GameFogSettings) -> String {
+    format!(
+        "Guard Start: {:.0}%",
+        settings.normalized().guard_start * 100.0
+    )
+}
+
+fn fog_ground_base_slider_value(settings: GameFogSettings) -> f32 {
+    let settings = settings.normalized();
+    (settings.ground_base_y - GameFogSettings::MIN_GROUND_BASE_Y)
+        / (GameFogSettings::MAX_GROUND_BASE_Y - GameFogSettings::MIN_GROUND_BASE_Y)
+}
+
+fn fog_ground_base_from_slider_value(value: f32, settings: GameFogSettings) -> GameFogSettings {
+    let raw = GameFogSettings::MIN_GROUND_BASE_Y
+        + value.clamp(0.0, 1.0)
+            * (GameFogSettings::MAX_GROUND_BASE_Y - GameFogSettings::MIN_GROUND_BASE_Y);
+    GameFogSettings {
+        ground_base_y: raw.round(),
+        ..settings
+    }
+    .normalized()
+}
+
+fn fog_ground_base_label(settings: GameFogSettings) -> String {
+    format!("Ground Base: Y {:.0}", settings.normalized().ground_base_y)
+}
+
+fn fog_ground_falloff_slider_value(settings: GameFogSettings) -> f32 {
+    let settings = settings.normalized();
+    let min = GameFogSettings::MIN_GROUND_FALLOFF_BLOCKS;
+    let max = GameFogSettings::MAX_GROUND_FALLOFF_BLOCKS;
+    (settings.ground_falloff_blocks.ln() - min.ln()) / (max.ln() - min.ln())
+}
+
+fn fog_ground_falloff_from_slider_value(value: f32, settings: GameFogSettings) -> GameFogSettings {
+    let min = GameFogSettings::MIN_GROUND_FALLOFF_BLOCKS;
+    let max = GameFogSettings::MAX_GROUND_FALLOFF_BLOCKS;
+    let raw = (min.ln() + value.clamp(0.0, 1.0) * (max.ln() - min.ln())).exp();
+    GameFogSettings {
+        ground_falloff_blocks: (raw / 4.0).round() * 4.0,
+        ..settings
+    }
+    .normalized()
+}
+
+fn fog_ground_falloff_label(settings: GameFogSettings) -> String {
+    format!(
+        "Ground Falloff: {:.0} blocks",
+        settings.normalized().ground_falloff_blocks
+    )
+}
+
+fn fog_max_opacity_slider_value(settings: GameFogSettings) -> f32 {
+    let settings = settings.normalized();
+    (settings.max_opacity - GameFogSettings::MIN_MAX_OPACITY)
+        / (GameFogSettings::MAX_MAX_OPACITY - GameFogSettings::MIN_MAX_OPACITY)
+}
+
+fn fog_max_opacity_from_slider_value(value: f32, settings: GameFogSettings) -> GameFogSettings {
+    let raw = GameFogSettings::MIN_MAX_OPACITY
+        + value.clamp(0.0, 1.0)
+            * (GameFogSettings::MAX_MAX_OPACITY - GameFogSettings::MIN_MAX_OPACITY);
+    GameFogSettings {
+        max_opacity: (raw * 100.0).round() / 100.0,
+        ..settings
+    }
+    .normalized()
+}
+
+fn fog_max_opacity_label(settings: GameFogSettings) -> String {
+    format!(
+        "Maximum Opacity: {:.0}%",
+        settings.normalized().max_opacity * 100.0
+    )
+}
+
+fn fog_color_component_slider_value(settings: GameFogSettings, component: usize) -> f32 {
+    settings.normalized().custom_color[component.min(2)]
+}
+
+fn fog_color_component_from_slider_value(
+    value: f32,
+    settings: GameFogSettings,
+    component: usize,
+) -> GameFogSettings {
+    let mut custom_color = settings.normalized().custom_color;
+    custom_color[component.min(2)] = (value.clamp(0.0, 1.0) * 100.0).round() / 100.0;
+    GameFogSettings {
+        custom_color,
+        ..settings
+    }
+    .normalized()
+}
+
+fn fog_color_component_label(settings: GameFogSettings, component: usize, name: &str) -> String {
+    format!(
+        "Color {name}: {:.0}%",
+        settings.normalized().custom_color[component.min(2)] * 100.0
+    )
 }
 
 fn fly_speed_slider_value(state: GameUiRenderState) -> f32 {

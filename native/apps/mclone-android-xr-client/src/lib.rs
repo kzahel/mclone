@@ -36,6 +36,8 @@ const ANDROID_XR_LOCAL_ARG_FLAGS: &[&str] = &[
     "--xr-overlap-eye-submits",
     "--xr-overlap-runtime-prefetch",
     "--xr-render-completed-result-accept-budget",
+    "--xr-render-mode",
+    "--xr-render-mode-cycle",
     "--xr-render-scale",
     "--xr-render-section-accept-budget",
     "--xr-render-section-upload-budget",
@@ -106,12 +108,13 @@ mod android {
     };
     use mclone_render_session::EngineCameraSnapshot;
     use mclone_scene::{
-        MAX_XR_RENDER_DISTANCE, McloneSceneHost, McloneSceneHostOptions, XrControllerInputRouter,
-        XrDebugUiScreen, XrFrameLocomotionAutomation, XrFramePipelineHostTiming,
-        XrSceneFrameTarget, XrStartupViewPose, XrTerrainEyeTarget, XrTerrainMultiviewTarget,
-        XrUnderwaterDetectionMode, record_xr_frame_pipeline,
-        record_xr_frame_pipeline_with_peer_threads, single_view_host_options,
-        xr_frame_pipeline_accounting_config, xr_frame_pipeline_peer_threads,
+        MAX_XR_RENDER_DISTANCE, McloneSceneHost, McloneSceneHostOptions,
+        SceneTerrainViewDiagnostics, XrControllerInputRouter, XrDebugUiScreen,
+        XrFrameLocomotionAutomation, XrFramePipelineHostTiming, XrSceneFrameTarget,
+        XrStartupViewPose, XrTerrainEyeTarget, XrTerrainMultiviewTarget, XrUnderwaterDetectionMode,
+        record_xr_frame_pipeline, record_xr_frame_pipeline_with_peer_threads,
+        single_view_host_options, xr_frame_pipeline_accounting_config,
+        xr_frame_pipeline_peer_threads,
     };
     use mclone_xr_host::{
         OpenXrControllerActions, OpenXrHostEvent, PRIMARY_STEREO_VIEW_TYPE,
@@ -342,7 +345,8 @@ mod android {
         sky_terrain_multiview_perf: bool,
         sky_terrain_actors_multiview_perf: bool,
         skip_actors: bool,
-        full_frame_multiview: bool,
+        xr_render_mode: mclone_xr_host::XrRenderMode,
+        xr_render_mode_cycle: bool,
         frame_overlap: bool,
         frame_overlap_mode: AndroidXrFrameOverlapMode,
         overlap_eye_submits: bool,
@@ -380,7 +384,8 @@ mod android {
                 sky_terrain_multiview_perf: false,
                 sky_terrain_actors_multiview_perf: false,
                 skip_actors: false,
-                full_frame_multiview: false,
+                xr_render_mode: mclone_xr_host::XrRenderMode::DualPerEye,
+                xr_render_mode_cycle: false,
                 frame_overlap: false,
                 frame_overlap_mode: AndroidXrFrameOverlapMode::default(),
                 overlap_eye_submits: false,
@@ -737,7 +742,17 @@ mod android {
                     options.skip_actors = true;
                 }
                 "--xr-full-frame-multiview" => {
-                    options.full_frame_multiview = true;
+                    options.xr_render_mode = mclone_xr_host::XrRenderMode::ArrayMultiview;
+                }
+                "--xr-render-mode" => {
+                    let mode = mclone_xr_host::XrRenderMode::parse_label(&parse_next_string(
+                        &mut argv,
+                        "--xr-render-mode",
+                    )?)?;
+                    options.xr_render_mode = mode;
+                }
+                "--xr-render-mode-cycle" => {
+                    options.xr_render_mode_cycle = true;
                 }
                 "--xr-frame-overlap" => {
                     if options.frame_overlap_mode == AndroidXrFrameOverlapMode::Serial {
@@ -897,7 +912,7 @@ mod android {
         {
             bail!("multiview perf modes cannot be combined with multiview proof modes");
         }
-        if options.full_frame_multiview
+        if options.xr_render_mode != mclone_xr_host::XrRenderMode::DualPerEye
             && (options.multiview_proof
                 || options.terrain_multiview_proof
                 || options.terrain_multiview_perf
@@ -909,7 +924,7 @@ mod android {
             );
         }
         if options.overlap_eye_submits
-            && (options.full_frame_multiview
+            && (options.xr_render_mode != mclone_xr_host::XrRenderMode::DualPerEye
                 || options.multiview_proof
                 || options.terrain_multiview_proof
                 || options.terrain_multiview_perf
@@ -919,7 +934,7 @@ mod android {
             bail!("--xr-overlap-eye-submits only applies to the per-eye full-frame path");
         }
         if options.overlap_runtime_prefetch
-            && (options.full_frame_multiview
+            && (options.xr_render_mode != mclone_xr_host::XrRenderMode::DualPerEye
                 || options.multiview_proof
                 || options.terrain_multiview_proof
                 || options.terrain_multiview_perf
@@ -930,6 +945,11 @@ mod android {
         }
         if options.overlap_runtime_prefetch && options.perf_frozen_render {
             bail!("--xr-overlap-runtime-prefetch cannot be combined with --perf-frozen-render");
+        }
+        if options.xr_render_mode_cycle
+            && options.xr_render_mode != mclone_xr_host::XrRenderMode::DualPerEye
+        {
+            bail!("--xr-render-mode-cycle must start in dual-per-eye mode");
         }
         if matches!(options.perf_detail, AndroidXrPerfDetail::Minimal)
             && !options.frame_accounting_enabled
@@ -1030,7 +1050,7 @@ mod android {
     }
 
     fn android_xr_uses_per_eye_full_frame_path(options: &AndroidXrStartupOptions) -> bool {
-        !(options.full_frame_multiview
+        !(options.xr_render_mode != mclone_xr_host::XrRenderMode::DualPerEye
             || options.multiview_proof
             || options.terrain_multiview_proof
             || options.terrain_multiview_perf
@@ -1420,8 +1440,9 @@ mod android {
         );
         log::info!("Android XR skip actors: {}", startup_options.skip_actors);
         log::info!(
-            "Android XR full-frame multiview: {}",
-            startup_options.full_frame_multiview
+            "Android XR render mode: {} cycle={}",
+            startup_options.xr_render_mode.label(),
+            startup_options.xr_render_mode_cycle
         );
         log::info!(
             "Android XR frame overlap mode: {}",
@@ -1519,7 +1540,8 @@ mod android {
             startup_options.terrain_multiview_perf,
             startup_options.sky_terrain_multiview_perf,
             startup_options.sky_terrain_actors_multiview_perf,
-            startup_options.full_frame_multiview,
+            startup_options.xr_render_mode,
+            startup_options.xr_render_mode_cycle,
             startup_options.frame_overlap,
             startup_options.overlap_eye_submits,
             startup_options.overlap_runtime_prefetch,
@@ -1558,7 +1580,8 @@ mod android {
         terrain_multiview_perf: bool,
         sky_terrain_multiview_perf: bool,
         sky_terrain_actors_multiview_perf: bool,
-        full_frame_multiview: bool,
+        xr_render_mode: mclone_xr_host::XrRenderMode,
+        xr_render_mode_cycle: bool,
         frame_overlap: bool,
         overlap_eye_submits: bool,
         overlap_runtime_prefetch: bool,
@@ -1844,6 +1867,24 @@ mod android {
             eye_height,
             xr_render_scale * xr_render_scale
         );
+        let target_spec = AndroidXrTargetSpec {
+            eye_width,
+            eye_height,
+            color_format: XR_COLOR_FORMAT,
+            depth_format: XR_DEPTH_FORMAT,
+            sample_count: XR_SAMPLE_COUNT,
+            foveation: xr_foveation,
+        };
+        let supported_render_modes = if graphics
+            .device
+            .features()
+            .contains(wgpu::Features::MULTIVIEW)
+        {
+            mclone_xr_host::XrRenderModeSet::ALL
+        } else {
+            mclone_xr_host::XrRenderModeSet::DUAL_PER_EYE
+                .union(mclone_xr_host::XrRenderModeSet::ARRAY_PER_EYE)
+        };
         if multiview_proof || terrain_multiview_proof {
             let mut stereo_target = graphics_vulkan::create_stereo(
                 &graphics.device,
@@ -1922,8 +1963,8 @@ mod android {
             );
         }
 
-        if full_frame_multiview {
-            let mut stereo_target = graphics_vulkan::create_stereo(
+        if xr_render_mode != mclone_xr_host::XrRenderMode::DualPerEye {
+            let stereo_target = graphics_vulkan::create_stereo(
                 &graphics.device,
                 &graphics.session,
                 eye_width,
@@ -1932,11 +1973,12 @@ mod android {
                 XR_SAMPLE_COUNT,
                 xr_foveation.level_profile(),
             )
-            .context("create OpenXR full-frame multiview stereo array swapchain")?;
-            let mut multiview_depth =
+            .context("create OpenXR stereo-array swapchain")?;
+            let multiview_depth =
                 ChunkMultiviewDepthTarget::new(&graphics.device, eye_width, eye_height);
             log::info!(
-                "OpenXR full-frame multiview swapchain: color_format={XR_COLOR_FORMAT:?} eye={}x{} images={} layers={}",
+                "OpenXR stereo-array swapchain: mode={} color_format={XR_COLOR_FORMAT:?} eye={}x{} images={} layers={}",
+                xr_render_mode.label(),
                 eye_width,
                 eye_height,
                 stereo_target.texture_count(),
@@ -1966,20 +2008,28 @@ mod android {
                 render_options,
                 client_entry.clone(),
             )
-            .context("initialize Android XR full-frame multiview terrain runtime")?;
-            let mut multiview_profile = xr_native_client_experience_profile();
-            multiview_profile.settings.terrain_presentation =
-                mclone_app_runtime::client_experience::ClientExperienceCapabilityStatus::Unsupported(
-                    "Terrain Horizon is unavailable in full-frame XR multiview",
-                );
-            terrain.set_client_experience_profile(multiview_profile);
+            .context("initialize Android XR stereo-array terrain runtime")?;
             let terrain_summary = terrain.frame_summary();
             terrain.set_display_refresh_hz(display_refresh.current_rate);
             terrain.set_render_split_timing_enabled(perf_seconds.is_some());
+            // Array-backed per-eye rendering still submits two independent
+            // layer passes. Defer their waits exactly like the accepted
+            // dual-swapchain path; full-frame multiview ignores this policy.
+            terrain.set_defer_eye_waits_enabled(true);
+            terrain.set_overlap_runtime_prefetch_enabled(true);
             terrain.set_render_section_upload_budget(render_section_upload_budget);
             terrain.set_render_section_accept_budget(render_section_accept_budget);
             terrain
                 .set_render_completed_result_accept_budget(render_completed_result_accept_budget);
+            let target_manager = mclone_xr_host::XrTargetManager::new(
+                AndroidXrTargetFamily::StereoArray {
+                    stereo: stereo_target,
+                    depth: multiview_depth,
+                },
+                xr_render_mode,
+                supported_render_modes,
+            )
+            .context("initialize Android XR target manager")?;
             log::info!(
                 "MCLONE_ANDROID_XR_TERRAIN_READY sections={} indices={} actors={}",
                 terrain_summary.section_count,
@@ -1992,10 +2042,12 @@ mod android {
                 &mut graphics,
                 &stage,
                 environment_blend_mode,
-                AndroidXrFrameTargets::Multiview {
-                    stereo_target: &mut stereo_target,
-                    depth: &mut multiview_depth,
-                },
+                target_manager,
+                target_spec,
+                true,
+                false,
+                true,
+                xr_render_mode_cycle,
                 &mut terrain,
                 &mut controller_actions,
                 &controller_preferences,
@@ -2026,7 +2078,7 @@ mod android {
             );
         }
 
-        let mut left_eye = graphics_vulkan::create_eye(
+        let left_eye = graphics_vulkan::create_eye(
             &graphics.device,
             &graphics.session,
             eye_width,
@@ -2037,7 +2089,7 @@ mod android {
             xr_foveation.level_profile(),
         )
         .context("create OpenXR left-eye color swapchain")?;
-        let mut right_eye = graphics_vulkan::create_eye(
+        let right_eye = graphics_vulkan::create_eye(
             &graphics.device,
             &graphics.session,
             eye_width,
@@ -2090,6 +2142,15 @@ mod android {
         terrain.set_render_section_upload_budget(render_section_upload_budget);
         terrain.set_render_section_accept_budget(render_section_accept_budget);
         terrain.set_render_completed_result_accept_budget(render_completed_result_accept_budget);
+        let target_manager = mclone_xr_host::XrTargetManager::new(
+            AndroidXrTargetFamily::DualEye {
+                left: left_eye,
+                right: right_eye,
+            },
+            mclone_xr_host::XrRenderMode::DualPerEye,
+            supported_render_modes,
+        )
+        .context("initialize Android XR target manager")?;
         log::info!("Android XR frame overlap active: {}", frame_overlap);
         log::info!(
             "Android XR per-eye submit overlap active: {}",
@@ -2111,13 +2172,12 @@ mod android {
             &mut graphics,
             &stage,
             environment_blend_mode,
-            AndroidXrFrameTargets::PerEye {
-                left_eye: &mut left_eye,
-                right_eye: &mut right_eye,
-                frame_overlap,
-                overlap_eye_submits,
-                overlap_runtime_prefetch,
-            },
+            target_manager,
+            target_spec,
+            frame_overlap,
+            overlap_eye_submits,
+            overlap_runtime_prefetch,
+            xr_render_mode_cycle,
             &mut terrain,
             &mut controller_actions,
             &controller_preferences,
@@ -3386,7 +3446,12 @@ mod android {
         graphics: &mut graphics_vulkan::VulkanGraphicsSession,
         stage: &xr::Space,
         environment_blend_mode: xr::EnvironmentBlendMode,
-        frame_targets: AndroidXrFrameTargets<'_>,
+        target_manager: mclone_xr_host::XrTargetManager<AndroidXrTargetFamily>,
+        target_spec: AndroidXrTargetSpec,
+        frame_overlap: bool,
+        overlap_eye_submits: bool,
+        overlap_runtime_prefetch: bool,
+        xr_render_mode_cycle: bool,
         terrain: &mut AndroidXrTerrainState,
         controller_actions: &mut OpenXrControllerActions,
         controller_preferences: &ControllerInputPreferences,
@@ -3415,8 +3480,29 @@ mod android {
         xr_foveation: AndroidXrFoveation,
         xr_render_scale: f32,
     ) -> Result<()> {
-        let render_path = frame_targets.render_path();
-        let xr_eye_size = frame_targets.eye_size();
+        let render_path = android_xr_render_path(
+            target_manager.active_mode(),
+            frame_overlap,
+            overlap_eye_submits,
+            overlap_runtime_prefetch,
+        );
+        let xr_eye_size = target_manager.active_target().eye_size();
+        let target_snapshot = target_manager.snapshot();
+        log::info!(
+            "MCLONE_XR_RENDER_PATH_READY active={} topology={} supported={} color_images={} active_bytes={} outstanding={}",
+            target_snapshot.active_mode.label(),
+            target_snapshot.active_topology.label(),
+            target_snapshot
+                .supported_modes
+                .iter()
+                .map(mclone_xr_host::XrRenderMode::label)
+                .collect::<Vec<_>>()
+                .join(","),
+            target_manager.active_target().color_texture_count(),
+            target_snapshot.active_target_bytes,
+            target_snapshot.outstanding_images
+        );
+        terrain.set_xr_render_path_state(Some(ui_xr_render_path_state(target_snapshot)));
         let frame_pipeline_accountant = FramePipelineAccountant::new_live(
             xr_frame_pipeline_accounting_config(display_refresh.current_rate.map(f64::from)),
         );
@@ -3478,8 +3564,14 @@ mod android {
             app,
             device: &graphics.device,
             queue: &graphics.queue,
+            session: &graphics.session,
             stage,
-            frame_targets,
+            target_manager,
+            target_spec,
+            frame_overlap,
+            overlap_eye_submits,
+            overlap_runtime_prefetch,
+            render_mode_cycle: xr_render_mode_cycle.then(AndroidXrRenderModeCycle::default),
             terrain,
             controller_actions,
             session_smoke,
@@ -3539,6 +3631,7 @@ mod android {
     struct AndroidXrRenderedFrame {
         summary: mclone_scene::XrTerrainFrameSummary,
         camera: EngineCameraSnapshot,
+        terrain_view: Option<SceneTerrainViewDiagnostics>,
         timing: AndroidXrRenderFrameTiming,
     }
 
@@ -3548,6 +3641,7 @@ mod android {
         PerEyeFrameOverlap,
         PerEyeOverlap,
         PerEyePrefetch,
+        ArrayPerEye,
         Multiview,
     }
 
@@ -3558,55 +3652,154 @@ mod android {
                 Self::PerEyeFrameOverlap => "per-eye-frame-overlap",
                 Self::PerEyeOverlap => "per-eye-overlap",
                 Self::PerEyePrefetch => "per-eye-prefetch",
+                Self::ArrayPerEye => "array-per-eye",
                 Self::Multiview => "multiview",
             }
         }
     }
 
-    enum AndroidXrFrameTargets<'a> {
-        PerEye {
-            left_eye: &'a mut graphics_vulkan::OpenXrEyeState,
-            right_eye: &'a mut graphics_vulkan::OpenXrEyeState,
-            frame_overlap: bool,
-            overlap_eye_submits: bool,
-            overlap_runtime_prefetch: bool,
+    #[derive(Clone, Copy)]
+    struct AndroidXrTargetSpec {
+        eye_width: u32,
+        eye_height: u32,
+        color_format: wgpu::TextureFormat,
+        depth_format: wgpu::TextureFormat,
+        sample_count: u32,
+        foveation: AndroidXrFoveation,
+    }
+
+    enum AndroidXrTargetFamily {
+        DualEye {
+            left: graphics_vulkan::OpenXrEyeState,
+            right: graphics_vulkan::OpenXrEyeState,
         },
-        Multiview {
-            stereo_target: &'a mut graphics_vulkan::OpenXrStereoState,
-            depth: &'a mut ChunkMultiviewDepthTarget,
+        StereoArray {
+            stereo: graphics_vulkan::OpenXrStereoState,
+            depth: ChunkMultiviewDepthTarget,
         },
     }
 
-    impl AndroidXrFrameTargets<'_> {
-        fn render_path(&self) -> AndroidXrRenderPath {
+    impl AndroidXrTargetFamily {
+        fn eye_size(&self) -> [u32; 2] {
             match self {
-                Self::PerEye {
-                    frame_overlap,
-                    overlap_eye_submits,
-                    overlap_runtime_prefetch,
-                    ..
-                } => {
-                    if *frame_overlap {
-                        AndroidXrRenderPath::PerEyeFrameOverlap
-                    } else if *overlap_runtime_prefetch {
-                        AndroidXrRenderPath::PerEyePrefetch
-                    } else if *overlap_eye_submits {
-                        AndroidXrRenderPath::PerEyeOverlap
-                    } else {
-                        AndroidXrRenderPath::PerEye
-                    }
-                }
-                Self::Multiview { .. } => AndroidXrRenderPath::Multiview,
+                Self::DualEye { left, .. } => [left.width, left.height],
+                Self::StereoArray { stereo, .. } => [stereo.width, stereo.height],
             }
         }
 
-        fn eye_size(&self) -> [u32; 2] {
+        fn color_texture_count(&self) -> usize {
             match self {
-                Self::PerEye { left_eye, .. } => [left_eye.width, left_eye.height],
-                Self::Multiview { stereo_target, .. } => {
-                    [stereo_target.width, stereo_target.height]
+                Self::DualEye { left, right } => {
+                    left.texture_count().saturating_add(right.texture_count())
                 }
+                Self::StereoArray { stereo, .. } => stereo.texture_count(),
             }
+        }
+    }
+
+    impl mclone_xr_host::XrTargetFamily for AndroidXrTargetFamily {
+        fn topology(&self) -> mclone_xr_host::XrTargetTopology {
+            match self {
+                Self::DualEye { .. } => mclone_xr_host::XrTargetTopology::DualEye,
+                Self::StereoArray { .. } => mclone_xr_host::XrTargetTopology::StereoArray,
+            }
+        }
+
+        fn estimated_owned_bytes(&self) -> u64 {
+            let [width, height] = self.eye_size();
+            let pixels = u64::from(width) * u64::from(height);
+            let color_layers = match self {
+                Self::DualEye { .. } => self.color_texture_count() as u64,
+                Self::StereoArray { stereo, .. } => {
+                    self.color_texture_count() as u64 * u64::from(stereo.array_size())
+                }
+            };
+            let depth_layers = 2_u64;
+            pixels
+                .saturating_mul(4)
+                .saturating_mul(color_layers.saturating_add(depth_layers))
+        }
+
+        fn outstanding_image_count(&self) -> u32 {
+            use mclone_xr_host::{XrEyeSwapchain, XrStereoSwapchain};
+
+            match self {
+                Self::DualEye { left, right } => left
+                    .outstanding_image_count()
+                    .saturating_add(right.outstanding_image_count()),
+                Self::StereoArray { stereo, .. } => stereo.outstanding_image_count(),
+            }
+        }
+    }
+
+    fn create_android_xr_target_family(
+        device: &wgpu::Device,
+        session: &xr::Session<graphics_vulkan::AppGraphics>,
+        spec: AndroidXrTargetSpec,
+        topology: mclone_xr_host::XrTargetTopology,
+    ) -> Result<AndroidXrTargetFamily> {
+        match topology {
+            mclone_xr_host::XrTargetTopology::DualEye => {
+                let left = graphics_vulkan::create_eye(
+                    device,
+                    session,
+                    spec.eye_width,
+                    spec.eye_height,
+                    spec.color_format,
+                    spec.depth_format,
+                    spec.sample_count,
+                    spec.foveation.level_profile(),
+                )
+                .context("create replacement OpenXR left-eye target")?;
+                let right = graphics_vulkan::create_eye(
+                    device,
+                    session,
+                    spec.eye_width,
+                    spec.eye_height,
+                    spec.color_format,
+                    spec.depth_format,
+                    spec.sample_count,
+                    spec.foveation.level_profile(),
+                )
+                .context("create replacement OpenXR right-eye target")?;
+                Ok(AndroidXrTargetFamily::DualEye { left, right })
+            }
+            mclone_xr_host::XrTargetTopology::StereoArray => {
+                let stereo = graphics_vulkan::create_stereo(
+                    device,
+                    session,
+                    spec.eye_width,
+                    spec.eye_height,
+                    spec.color_format,
+                    spec.sample_count,
+                    spec.foveation.level_profile(),
+                )
+                .context("create replacement OpenXR stereo-array target")?;
+                let depth = ChunkMultiviewDepthTarget::new(device, spec.eye_width, spec.eye_height);
+                Ok(AndroidXrTargetFamily::StereoArray { stereo, depth })
+            }
+        }
+    }
+
+    fn android_xr_render_path(
+        mode: mclone_xr_host::XrRenderMode,
+        frame_overlap: bool,
+        overlap_eye_submits: bool,
+        overlap_runtime_prefetch: bool,
+    ) -> AndroidXrRenderPath {
+        match mode {
+            mclone_xr_host::XrRenderMode::DualPerEye if frame_overlap => {
+                AndroidXrRenderPath::PerEyeFrameOverlap
+            }
+            mclone_xr_host::XrRenderMode::DualPerEye if overlap_runtime_prefetch => {
+                AndroidXrRenderPath::PerEyePrefetch
+            }
+            mclone_xr_host::XrRenderMode::DualPerEye if overlap_eye_submits => {
+                AndroidXrRenderPath::PerEyeOverlap
+            }
+            mclone_xr_host::XrRenderMode::DualPerEye => AndroidXrRenderPath::PerEye,
+            mclone_xr_host::XrRenderMode::ArrayPerEye => AndroidXrRenderPath::ArrayPerEye,
+            mclone_xr_host::XrRenderMode::ArrayMultiview => AndroidXrRenderPath::Multiview,
         }
     }
 
@@ -3616,12 +3809,97 @@ mod android {
         perf_started_after_ready: bool,
     }
 
+    const ANDROID_XR_RENDER_MODE_CYCLE_DWELL_FRAMES: u64 = 180;
+    const ANDROID_XR_RENDER_MODE_CYCLE: [mclone_xr_host::XrRenderMode; 4] = [
+        mclone_xr_host::XrRenderMode::ArrayPerEye,
+        mclone_xr_host::XrRenderMode::ArrayMultiview,
+        mclone_xr_host::XrRenderMode::ArrayPerEye,
+        mclone_xr_host::XrRenderMode::DualPerEye,
+    ];
+
+    const fn ui_xr_render_mode(mode: mclone_xr_host::XrRenderMode) -> mclone_ui::GameXrRenderMode {
+        match mode {
+            mclone_xr_host::XrRenderMode::DualPerEye => mclone_ui::GameXrRenderMode::DualPerEye,
+            mclone_xr_host::XrRenderMode::ArrayPerEye => mclone_ui::GameXrRenderMode::ArrayPerEye,
+            mclone_xr_host::XrRenderMode::ArrayMultiview => {
+                mclone_ui::GameXrRenderMode::ArrayMultiview
+            }
+        }
+    }
+
+    const fn host_xr_render_mode(
+        mode: mclone_ui::GameXrRenderMode,
+    ) -> mclone_xr_host::XrRenderMode {
+        match mode {
+            mclone_ui::GameXrRenderMode::DualPerEye => mclone_xr_host::XrRenderMode::DualPerEye,
+            mclone_ui::GameXrRenderMode::ArrayPerEye => mclone_xr_host::XrRenderMode::ArrayPerEye,
+            mclone_ui::GameXrRenderMode::ArrayMultiview => {
+                mclone_xr_host::XrRenderMode::ArrayMultiview
+            }
+        }
+    }
+
+    fn ui_xr_render_path_state(
+        snapshot: mclone_xr_host::XrRenderPathSnapshot,
+    ) -> mclone_ui::GameXrRenderPathState {
+        let mut supported_modes = mclone_ui::GameXrRenderModeSet::NONE;
+        for mode in snapshot.supported_modes.iter() {
+            supported_modes = supported_modes.union(match mode {
+                mclone_xr_host::XrRenderMode::DualPerEye => {
+                    mclone_ui::GameXrRenderModeSet::DUAL_PER_EYE
+                }
+                mclone_xr_host::XrRenderMode::ArrayPerEye => {
+                    mclone_ui::GameXrRenderModeSet::ARRAY_PER_EYE
+                }
+                mclone_xr_host::XrRenderMode::ArrayMultiview => {
+                    mclone_ui::GameXrRenderModeSet::ARRAY_MULTIVIEW
+                }
+            });
+        }
+        let transition_state = match snapshot.transition_state {
+            mclone_xr_host::XrRenderTransitionState::Idle => {
+                mclone_ui::GameXrRenderTransitionState::Idle
+            }
+            mclone_xr_host::XrRenderTransitionState::Pending => {
+                mclone_ui::GameXrRenderTransitionState::Pending
+            }
+            mclone_xr_host::XrRenderTransitionState::Committed => {
+                mclone_ui::GameXrRenderTransitionState::Committed
+            }
+            mclone_xr_host::XrRenderTransitionState::RejectedUnsupported => {
+                mclone_ui::GameXrRenderTransitionState::Rejected
+            }
+            mclone_xr_host::XrRenderTransitionState::Failed => {
+                mclone_ui::GameXrRenderTransitionState::Failed
+            }
+        };
+        mclone_ui::GameXrRenderPathState::new(
+            supported_modes,
+            ui_xr_render_mode(snapshot.requested_mode),
+            snapshot.pending_mode.map(ui_xr_render_mode),
+            ui_xr_render_mode(snapshot.active_mode),
+            transition_state,
+        )
+    }
+
+    #[derive(Default)]
+    struct AndroidXrRenderModeCycle {
+        next_mode_index: usize,
+        next_submitted_frame: u64,
+    }
+
     struct AndroidXrMainFrameLoop<'a> {
         app: &'a AndroidApp,
         device: &'a wgpu::Device,
         queue: &'a wgpu::Queue,
+        session: &'a xr::Session<graphics_vulkan::AppGraphics>,
         stage: &'a xr::Space,
-        frame_targets: AndroidXrFrameTargets<'a>,
+        target_manager: mclone_xr_host::XrTargetManager<AndroidXrTargetFamily>,
+        target_spec: AndroidXrTargetSpec,
+        frame_overlap: bool,
+        overlap_eye_submits: bool,
+        overlap_runtime_prefetch: bool,
+        render_mode_cycle: Option<AndroidXrRenderModeCycle>,
         terrain: &'a mut AndroidXrTerrainState,
         controller_actions: &'a mut OpenXrControllerActions,
         session_smoke: Option<AndroidXrSessionSmoke>,
@@ -3759,38 +4037,59 @@ mod android {
             }
 
             let render_start = Instant::now();
-            let rendered = match &mut self.frame_targets {
-                AndroidXrFrameTargets::PerEye {
-                    left_eye,
-                    right_eye,
-                    ..
-                } => render_android_xr_per_eye_frame(
+            let active_mode = self.target_manager.active_mode();
+            let rendered = match (active_mode, self.target_manager.active_target_mut()) {
+                (
+                    mclone_xr_host::XrRenderMode::DualPerEye,
+                    AndroidXrTargetFamily::DualEye { left, right },
+                ) => render_android_xr_per_eye_frame(
                     self.device,
                     self.queue,
                     frame,
                     self.stage,
-                    left_eye,
-                    right_eye,
+                    left,
+                    right,
                     self.terrain,
                     &input,
                     self.perf_probe.automation(),
                     self.fixed_render_view_pose,
                 ),
-                AndroidXrFrameTargets::Multiview {
-                    stereo_target,
-                    depth,
-                } => render_android_xr_multiview_frame(
+                (
+                    mclone_xr_host::XrRenderMode::ArrayPerEye,
+                    AndroidXrTargetFamily::StereoArray { stereo, depth },
+                ) => render_android_xr_array_per_eye_frame(
                     self.device,
                     self.queue,
                     frame,
                     self.stage,
-                    stereo_target,
+                    stereo,
                     depth,
                     self.terrain,
                     &input,
                     self.perf_probe.automation(),
                     self.fixed_render_view_pose,
                 ),
+                (
+                    mclone_xr_host::XrRenderMode::ArrayMultiview,
+                    AndroidXrTargetFamily::StereoArray { stereo, depth },
+                ) => render_android_xr_multiview_frame(
+                    self.device,
+                    self.queue,
+                    frame,
+                    self.stage,
+                    stereo,
+                    depth,
+                    self.terrain,
+                    &input,
+                    self.perf_probe.automation(),
+                    self.fixed_render_view_pose,
+                ),
+                (mode, family) => Err(anyhow::anyhow!(
+                    "Android XR render mode {} requires {} topology, active family is {}",
+                    mode.label(),
+                    mode.topology().label(),
+                    mclone_xr_host::XrTargetFamily::topology(family).label()
+                )),
             };
             self.frame_timing.render_mclone_frame_ms = elapsed_ms(render_start);
             let rendered = rendered?;
@@ -3940,6 +4239,106 @@ mod android {
                     outcome.stats.skipped_frames
                 );
             }
+            if self.logged_ready {
+                if let Some(cycle) = self.render_mode_cycle.as_mut() {
+                    if cycle.next_mode_index < ANDROID_XR_RENDER_MODE_CYCLE.len()
+                        && outcome.stats.submitted_frames >= cycle.next_submitted_frame
+                    {
+                        let mode = ANDROID_XR_RENDER_MODE_CYCLE[cycle.next_mode_index];
+                        let step = cycle.next_mode_index + 1;
+                        self.terrain.apply_xr_ui_action(
+                            mclone_ui::GameUiAction::SetXrRenderMode(ui_xr_render_mode(mode)),
+                            self.device,
+                            self.queue,
+                        )?;
+                        log::info!(
+                            "MCLONE_XR_RENDER_PATH_CYCLE_REQUEST step={step}/{} requested={} result=SharedUiQueued",
+                            ANDROID_XR_RENDER_MODE_CYCLE.len(),
+                            mode.label()
+                        );
+                        cycle.next_mode_index += 1;
+                        cycle.next_submitted_frame = outcome
+                            .stats
+                            .submitted_frames
+                            .saturating_add(ANDROID_XR_RENDER_MODE_CYCLE_DWELL_FRAMES);
+                    } else if cycle.next_mode_index == ANDROID_XR_RENDER_MODE_CYCLE.len()
+                        && outcome.stats.submitted_frames >= cycle.next_submitted_frame
+                    {
+                        log::info!(
+                            "MCLONE_XR_RENDER_PATH_CYCLE_COMPLETE active={} submitted={}",
+                            self.target_manager.active_mode().label(),
+                            outcome.stats.submitted_frames
+                        );
+                        self.render_mode_cycle = None;
+                    }
+                }
+            }
+            if let Some(requested_mode) = self.terrain.take_xr_render_mode_request() {
+                let requested_mode = host_xr_render_mode(requested_mode);
+                let result = self.target_manager.request_mode(requested_mode);
+                log::info!(
+                    "MCLONE_XR_RENDER_PATH_UI_REQUEST requested={} result={result:?}",
+                    requested_mode.label()
+                );
+                if result == mclone_xr_host::XrRenderModeRequest::RejectedUnsupported {
+                    self.terrain.report_xr_render_path_failure(
+                        "The selected XR render path is unsupported by this host",
+                    );
+                }
+            }
+            if self.target_manager.snapshot().pending_mode.is_some() {
+                self.device
+                    .poll(wgpu::PollType::Wait)
+                    .context("quiesce Android XR GPU work before target transition")?;
+            }
+            let transition_started = Instant::now();
+            match self.target_manager.apply_pending(|topology| {
+                create_android_xr_target_family(
+                    self.device,
+                    self.session,
+                    self.target_spec,
+                    topology,
+                )
+            }) {
+                Ok(Some(transition)) => {
+                    self.render_path = android_xr_render_path(
+                        transition.active_mode,
+                        self.frame_overlap,
+                        self.overlap_eye_submits,
+                        self.overlap_runtime_prefetch,
+                    );
+                    let snapshot = self.target_manager.snapshot();
+                    log::info!(
+                        "MCLONE_XR_RENDER_PATH_COMMITTED previous={} active={} topology={} recreated={} retired_bytes={} active_bytes={} peak_bytes={} outstanding={} transition_ms={:.3}",
+                        transition.previous_mode.label(),
+                        transition.active_mode.label(),
+                        snapshot.active_topology.label(),
+                        transition.topology_recreated,
+                        transition.retired_target_bytes,
+                        transition.active_target_bytes,
+                        transition.peak_transition_bytes,
+                        snapshot.outstanding_images,
+                        elapsed_ms(transition_started)
+                    );
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    let snapshot = self.target_manager.snapshot();
+                    log::warn!(
+                        "MCLONE_XR_RENDER_PATH_FAILED active={} topology={} outstanding={} error={error:#}",
+                        snapshot.active_mode.label(),
+                        snapshot.active_topology.label(),
+                        snapshot.outstanding_images
+                    );
+                    self.terrain.report_xr_render_path_failure(&format!(
+                        "XR render-path switch failed: {error:#}"
+                    ));
+                }
+            }
+            self.terrain
+                .set_xr_render_path_state(Some(ui_xr_render_path_state(
+                    self.target_manager.snapshot(),
+                )));
             Ok(mclone_xr_host::OpenXrFrameLoopControl::Continue)
         }
     }
@@ -4067,6 +4466,7 @@ mod android {
         terrain_left_eye_full_frame_ms: f64,
         terrain_left_eye_sky_ms: f64,
         terrain_left_eye_opaque_ms: f64,
+        terrain_left_eye_backdrop_ms: f64,
         terrain_left_eye_translucent_ms: f64,
         terrain_left_eye_actor_ms: f64,
         terrain_left_eye_screen_effect_ms: f64,
@@ -4088,6 +4488,7 @@ mod android {
         terrain_right_eye_full_frame_ms: f64,
         terrain_right_eye_sky_ms: f64,
         terrain_right_eye_opaque_ms: f64,
+        terrain_right_eye_backdrop_ms: f64,
         terrain_right_eye_translucent_ms: f64,
         terrain_right_eye_actor_ms: f64,
         terrain_right_eye_screen_effect_ms: f64,
@@ -4294,7 +4695,7 @@ mod android {
                 self.settled_stationary,
                 self.frozen_render,
             );
-            if needs_settle && !self.record_settle_frame(rendered.summary, mode) {
+            if needs_settle && !self.record_settle_frame(rendered, mode) {
                 return false;
             }
             let flight_speed = self
@@ -4314,8 +4715,9 @@ mod android {
                 .settle_started
                 .map_or(0.0, |started| started.elapsed().as_secs_f64());
             if needs_settle {
+                let horizon = rendered.terrain_view.unwrap_or_default();
                 log::info!(
-                    "MCLONE_ANDROID_XR_PERF_SETTLED mode={} settle_seconds={:.3} settle_min_seconds={:.3} settle_frames={} settle_quiet_frames={} sections={} drawn_sections={} indices={} drawn_indices={} ready_sections={}",
+                    "MCLONE_ANDROID_XR_PERF_SETTLED mode={} settle_seconds={:.3} settle_min_seconds={:.3} settle_frames={} settle_quiet_frames={} sections={} drawn_sections={} indices={} drawn_indices={} ready_sections={} horizon_active={} horizon_target_ready={} horizon_ready_slots={} horizon_drawn_levels={} horizon_drawn_tiles={} horizon_inner_hole_culled_tiles={} horizon_frustum_culled_tiles={} horizon_far_culled_tiles={} horizon_drawn_tree_tiles={} horizon_drawn_tree_instances={} horizon_pending_vegetation_tiles={} horizon_vegetation_submitted_jobs={} horizon_vegetation_completed_jobs={} horizon_vegetation_transport_failures={} horizon_vegetation_job_failures={}",
                     mode,
                     settle_seconds,
                     ANDROID_XR_PERF_SETTLE_MIN_SECONDS,
@@ -4325,7 +4727,22 @@ mod android {
                     rendered.summary.drawn_section_count,
                     rendered.summary.index_count,
                     rendered.summary.drawn_index_count,
-                    rendered.summary.upload.traversal_ready_section_count
+                    rendered.summary.upload.traversal_ready_section_count,
+                    rendered.terrain_view.is_some(),
+                    horizon.target_ready,
+                    horizon.ready_slots,
+                    horizon.drawn_levels,
+                    horizon.drawn_tiles,
+                    horizon.inner_hole_culled_tiles,
+                    horizon.frustum_culled_tiles,
+                    horizon.far_culled_tiles,
+                    horizon.drawn_tree_tiles,
+                    horizon.drawn_tree_instances,
+                    horizon.pending_vegetation_tiles,
+                    horizon.vegetation_submitted_jobs,
+                    horizon.vegetation_completed_jobs,
+                    horizon.vegetation_transport_failures,
+                    horizon.vegetation_job_failures
                 );
             }
             log::info!(
@@ -4414,6 +4831,11 @@ mod android {
                 settle_quiet_frames: self.settle_quiet_frames,
                 start_camera: rendered.camera,
                 latest_camera: rendered.camera,
+                start_terrain_view: rendered.terrain_view,
+                latest_terrain_view: rendered.terrain_view,
+                horizon_sample_frames: 0,
+                exact_center_not_ready_frames: 0,
+                start_persistence: rendered.summary.upload.persistence_queue_metrics,
                 start_record_cache: rendered.summary.timing.record_cache_prepare.cache,
                 latest_record_cache: rendered.summary.timing.record_cache_prepare.cache,
                 record_rebuild_frames: 0,
@@ -4436,12 +4858,12 @@ mod android {
 
         fn record_settle_frame(
             &mut self,
-            summary: mclone_scene::XrTerrainFrameSummary,
+            rendered: AndroidXrRenderedFrame,
             mode: &'static str,
         ) -> bool {
             let _ = self.settle_started.get_or_insert_with(Instant::now);
             self.settle_frames += 1;
-            let quiet = android_xr_perf_settle_frame_is_quiet(summary);
+            let quiet = android_xr_perf_settle_frame_is_quiet(rendered);
             if quiet {
                 self.settle_quiet_frames += 1;
             } else {
@@ -4453,9 +4875,11 @@ mod android {
             if self.settle_frames == 1
                 || self.settle_frames % ANDROID_XR_PERF_SETTLE_PROGRESS_FRAMES == 0
             {
+                let summary = rendered.summary;
                 let upload = summary.upload;
+                let horizon = rendered.terrain_view.unwrap_or_default();
                 log::info!(
-                    "MCLONE_ANDROID_XR_PERF_SETTLE_PROGRESS mode={} settle_seconds={:.3} settle_min_seconds={:.3} settle_frames={} settle_quiet_frames={} quiet={} poll_changed={} server_cmd_q={} server_update_q={} pending_jobs_after={} pending_chunks_after={} deferred_sections={} submitted_sections={} deadline_skipped_requests={} completed_sections={} stale_sections={} uploaded_sections={} upload_removed_sections={} ready_sections={} ui_draw_rebuilds={} ui_draw_cache_hits={} ui_panel_repaints={} ui_panel_cache_hits={} ui_panel_texture_recreates={} ui_panel_composites={} sections={} drawn_sections={} drawn_indices={}",
+                    "MCLONE_ANDROID_XR_PERF_SETTLE_PROGRESS mode={} settle_seconds={:.3} settle_min_seconds={:.3} settle_frames={} settle_quiet_frames={} quiet={} poll_changed={} server_cmd_q={} server_update_q={} pending_jobs_after={} pending_chunks_after={} deferred_sections={} submitted_sections={} deadline_skipped_requests={} completed_sections={} stale_sections={} uploaded_sections={} upload_removed_sections={} ready_sections={} ui_draw_rebuilds={} ui_draw_cache_hits={} ui_panel_repaints={} ui_panel_cache_hits={} ui_panel_texture_recreates={} ui_panel_composites={} sections={} drawn_sections={} drawn_indices={} horizon_active={} horizon_target_ready={} horizon_ready_slots={} horizon_drawn_levels={} horizon_drawn_tiles={} horizon_pending_vegetation_tiles={} horizon_vegetation_submitted_jobs={} horizon_vegetation_completed_jobs={} horizon_vegetation_transport_failures={} horizon_vegetation_job_failures={}",
                     mode,
                     settle_seconds,
                     ANDROID_XR_PERF_SETTLE_MIN_SECONDS,
@@ -4483,7 +4907,17 @@ mod android {
                     summary.ui_panel.composite_count,
                     summary.section_count,
                     summary.drawn_section_count,
-                    summary.drawn_index_count
+                    summary.drawn_index_count,
+                    rendered.terrain_view.is_some(),
+                    horizon.target_ready,
+                    horizon.ready_slots,
+                    horizon.drawn_levels,
+                    horizon.drawn_tiles,
+                    horizon.pending_vegetation_tiles,
+                    horizon.vegetation_submitted_jobs,
+                    horizon.vegetation_completed_jobs,
+                    horizon.vegetation_transport_failures,
+                    horizon.vegetation_job_failures
                 );
             }
             self.settle_quiet_frames >= ANDROID_XR_PERF_SETTLE_QUIET_FRAMES
@@ -4549,6 +4983,11 @@ mod android {
         settle_quiet_frames: u64,
         start_camera: EngineCameraSnapshot,
         latest_camera: EngineCameraSnapshot,
+        start_terrain_view: Option<SceneTerrainViewDiagnostics>,
+        latest_terrain_view: Option<SceneTerrainViewDiagnostics>,
+        horizon_sample_frames: u64,
+        exact_center_not_ready_frames: u64,
+        start_persistence: mclone_scene::PersistenceQueueMetrics,
         start_record_cache: TexturedSectionRecordCacheStats,
         latest_record_cache: TexturedSectionRecordCacheStats,
         record_rebuild_frames: u64,
@@ -4603,6 +5042,13 @@ mod android {
                 .max(timing.render_mclone_frame_ms);
             self.max_render = max_render_timing(self.max_render, timing.render);
             if let Some(rendered) = rendered {
+                if let Some(terrain_view) = rendered.terrain_view {
+                    self.horizon_sample_frames = self.horizon_sample_frames.saturating_add(1);
+                    if !terrain_view.exact_center_ready {
+                        self.exact_center_not_ready_frames =
+                            self.exact_center_not_ready_frames.saturating_add(1);
+                    }
+                }
                 let record_prepare = rendered.summary.timing.record_cache_prepare;
                 if record_prepare.rebuilt {
                     self.record_rebuild_frames += 1;
@@ -4620,6 +5066,7 @@ mod android {
                 self.max_upload = max_upload_summary(self.max_upload, rendered.summary.upload);
                 self.latest_summary = rendered.summary;
                 self.latest_camera = rendered.camera;
+                self.latest_terrain_view = rendered.terrain_view;
             }
         }
 
@@ -4850,6 +5297,76 @@ mod android {
                 blocked.p95_ms,
                 blocked.p99_ms,
                 blocked.max_ms
+            );
+            let start_horizon = self.start_terrain_view.unwrap_or_default();
+            let latest_horizon = self.latest_terrain_view.unwrap_or_default();
+            log::info!(
+                "MCLONE_ANDROID_XR_PERF_HORIZON start_active={} start_target_ready={} start_ready_slots={} start_exact_columns={} start_exact_center_ready={} start_drawn_levels={} start_drawn_tiles={} start_inner_hole_culled_tiles={} start_frustum_culled_tiles={} start_far_culled_tiles={} start_tree_instances={} start_drawn_tree_tiles={} start_drawn_tree_instances={} start_pending_vegetation_tiles={} start_vegetation_submitted_jobs={} start_vegetation_completed_jobs={} latest_active={} latest_target_ready={} latest_ready_slots={} latest_exact_columns={} latest_exact_center_ready={} horizon_sample_frames={} exact_center_not_ready_frames={} latest_drawn_levels={} latest_drawn_tiles={} latest_inner_hole_culled_tiles={} latest_frustum_culled_tiles={} latest_far_culled_tiles={} latest_tree_instances={} latest_drawn_tree_tiles={} latest_drawn_tree_instances={} latest_pending_vegetation_tiles={} latest_vegetation_submitted_jobs={} latest_vegetation_completed_jobs={} latest_vegetation_transport_failures={} latest_vegetation_job_failures={}",
+                self.start_terrain_view.is_some(),
+                start_horizon.target_ready,
+                start_horizon.ready_slots,
+                start_horizon.exact_column_count,
+                start_horizon.exact_center_ready,
+                start_horizon.drawn_levels,
+                start_horizon.drawn_tiles,
+                start_horizon.inner_hole_culled_tiles,
+                start_horizon.frustum_culled_tiles,
+                start_horizon.far_culled_tiles,
+                start_horizon.tree_instance_count,
+                start_horizon.drawn_tree_tiles,
+                start_horizon.drawn_tree_instances,
+                start_horizon.pending_vegetation_tiles,
+                start_horizon.vegetation_submitted_jobs,
+                start_horizon.vegetation_completed_jobs,
+                self.latest_terrain_view.is_some(),
+                latest_horizon.target_ready,
+                latest_horizon.ready_slots,
+                latest_horizon.exact_column_count,
+                latest_horizon.exact_center_ready,
+                self.horizon_sample_frames,
+                self.exact_center_not_ready_frames,
+                latest_horizon.drawn_levels,
+                latest_horizon.drawn_tiles,
+                latest_horizon.inner_hole_culled_tiles,
+                latest_horizon.frustum_culled_tiles,
+                latest_horizon.far_culled_tiles,
+                latest_horizon.tree_instance_count,
+                latest_horizon.drawn_tree_tiles,
+                latest_horizon.drawn_tree_instances,
+                latest_horizon.pending_vegetation_tiles,
+                latest_horizon.vegetation_submitted_jobs,
+                latest_horizon.vegetation_completed_jobs,
+                latest_horizon.vegetation_transport_failures,
+                latest_horizon.vegetation_job_failures
+            );
+            let latest_persistence = latest_upload.persistence_queue_metrics;
+            let max_persistence = self.max_upload.persistence_queue_metrics;
+            log::info!(
+                "MCLONE_ANDROID_XR_PERF_PERSISTENCE start_foreground={} start_durable_requests={} start_durable_bytes={} start_cache_requests={} start_cache_bytes={} latest_foreground={} latest_durable_requests={} latest_durable_bytes={} latest_cache_requests={} latest_cache_bytes={} latest_retained_entries={} latest_retained_bytes={} max_foreground={} max_durable_requests={} max_durable_bytes={} max_cache_requests={} max_cache_bytes={} high_water_foreground={} high_water_durable_requests={} high_water_durable_bytes={} high_water_cache_requests={} high_water_cache_bytes={} cancelled_requests={} skipped_cache_writes={}",
+                self.start_persistence.foreground_requests,
+                self.start_persistence.durable_write_requests,
+                self.start_persistence.durable_write_bytes,
+                self.start_persistence.cache_write_requests,
+                self.start_persistence.cache_write_bytes,
+                latest_persistence.foreground_requests,
+                latest_persistence.durable_write_requests,
+                latest_persistence.durable_write_bytes,
+                latest_persistence.cache_write_requests,
+                latest_persistence.cache_write_bytes,
+                latest_persistence.retained_record_cache_entries,
+                latest_persistence.retained_record_cache_bytes,
+                max_persistence.foreground_requests,
+                max_persistence.durable_write_requests,
+                max_persistence.durable_write_bytes,
+                max_persistence.cache_write_requests,
+                max_persistence.cache_write_bytes,
+                latest_persistence.high_water_foreground_requests,
+                latest_persistence.high_water_durable_write_requests,
+                latest_persistence.high_water_durable_write_bytes,
+                latest_persistence.high_water_cache_write_requests,
+                latest_persistence.high_water_cache_write_bytes,
+                latest_persistence.cancelled_requests,
+                latest_persistence.skipped_cache_writes
             );
             if !self.detail.is_full() {
                 log::info!(
@@ -5104,10 +5621,11 @@ mod android {
                 self.max_render.terrain_right_eye_translucent_sort_ms
             );
             log::info!(
-                "MCLONE_ANDROID_XR_PERF_TERRAIN_EYE_SPLIT max_left_full_frame_ms={:.3} max_left_sky_ms={:.3} max_left_opaque_ms={:.3} max_left_translucent_ms={:.3} max_left_actor_ms={:.3} max_left_screen_effect_ms={:.3} max_left_gui_ms={:.3} max_left_xr_fade_ms={:.3} max_left_xr_selection_ms={:.3} max_left_xr_world_lines_ms={:.3} max_left_xr_world_panel_ms={:.3} max_left_encoder_finish_ms={:.3} max_right_full_frame_ms={:.3} max_right_sky_ms={:.3} max_right_opaque_ms={:.3} max_right_translucent_ms={:.3} max_right_actor_ms={:.3} max_right_screen_effect_ms={:.3} max_right_gui_ms={:.3} max_right_xr_fade_ms={:.3} max_right_xr_selection_ms={:.3} max_right_xr_world_lines_ms={:.3} max_right_xr_world_panel_ms={:.3} max_right_encoder_finish_ms={:.3}",
+                "MCLONE_ANDROID_XR_PERF_TERRAIN_EYE_SPLIT max_left_full_frame_ms={:.3} max_left_sky_ms={:.3} max_left_opaque_ms={:.3} max_left_backdrop_ms={:.3} max_left_translucent_ms={:.3} max_left_actor_ms={:.3} max_left_screen_effect_ms={:.3} max_left_gui_ms={:.3} max_left_xr_fade_ms={:.3} max_left_xr_selection_ms={:.3} max_left_xr_world_lines_ms={:.3} max_left_xr_world_panel_ms={:.3} max_left_encoder_finish_ms={:.3} max_right_full_frame_ms={:.3} max_right_sky_ms={:.3} max_right_opaque_ms={:.3} max_right_backdrop_ms={:.3} max_right_translucent_ms={:.3} max_right_actor_ms={:.3} max_right_screen_effect_ms={:.3} max_right_gui_ms={:.3} max_right_xr_fade_ms={:.3} max_right_xr_selection_ms={:.3} max_right_xr_world_lines_ms={:.3} max_right_xr_world_panel_ms={:.3} max_right_encoder_finish_ms={:.3}",
                 self.max_render.terrain_left_eye_full_frame_ms,
                 self.max_render.terrain_left_eye_sky_ms,
                 self.max_render.terrain_left_eye_opaque_ms,
+                self.max_render.terrain_left_eye_backdrop_ms,
                 self.max_render.terrain_left_eye_translucent_ms,
                 self.max_render.terrain_left_eye_actor_ms,
                 self.max_render.terrain_left_eye_screen_effect_ms,
@@ -5120,6 +5638,7 @@ mod android {
                 self.max_render.terrain_right_eye_full_frame_ms,
                 self.max_render.terrain_right_eye_sky_ms,
                 self.max_render.terrain_right_eye_opaque_ms,
+                self.max_render.terrain_right_eye_backdrop_ms,
                 self.max_render.terrain_right_eye_translucent_ms,
                 self.max_render.terrain_right_eye_actor_ms,
                 self.max_render.terrain_right_eye_screen_effect_ms,
@@ -5302,6 +5821,45 @@ mod android {
                 self.max_upload.poll_scheduler_worldgen_mailbox_pending_jobs,
                 self.max_upload
                     .poll_scheduler_light_mailbox_pending_statuses
+            );
+            log::info!(
+                "MCLONE_ANDROID_XR_PERF_LIGHT_OWNERSHIP max_player_promotion_desired={} max_player_promotion_queued={} max_player_promotion_active={} player_promotion_max_active={} player_promotion_cancelled_before_admission={} latest_player_promotion_desired={} latest_player_promotion_queued={} latest_player_promotion_active={} max_light_demand_queued={} light_demands_cancelled={} light_statuses_stale={} latest_light_demand_queued={} max_completed_job_records_retained={} latest_completed_job_records_retained={} max_recent_job_summaries_retained={} latest_recent_job_summaries_retained={}",
+                self.max_upload.poll_scheduler_player_promotion_desired,
+                self.max_upload.poll_scheduler_player_promotion_queued,
+                self.max_upload.poll_scheduler_player_promotion_active,
+                self.max_upload.poll_scheduler_player_promotion_max_active,
+                self.max_upload
+                    .poll_scheduler_player_promotion_cancelled_before_admission,
+                latest_upload.poll_scheduler_player_promotion_desired,
+                latest_upload.poll_scheduler_player_promotion_queued,
+                latest_upload.poll_scheduler_player_promotion_active,
+                self.max_upload.poll_scheduler_light_demand_queued,
+                self.max_upload.poll_scheduler_light_demands_cancelled,
+                self.max_upload.poll_scheduler_light_statuses_stale,
+                latest_upload.poll_scheduler_light_demand_queued,
+                self.max_upload
+                    .poll_scheduler_completed_job_records_retained,
+                latest_upload.poll_scheduler_completed_job_records_retained,
+                self.max_upload.poll_scheduler_recent_job_summaries_retained,
+                latest_upload.poll_scheduler_recent_job_summaries_retained
+            );
+            log::info!(
+                "MCLONE_ANDROID_XR_PERF_LIGHT_MAILBOX max_admitted_statuses={} max_admitted_owned_bytes={} capacity_high_water_bytes={} max_batch_unique_input_chunks={} max_batch_input_bytes={} max_completed_owned_bytes={} admission_rejections={} oversize_admissions={} cancelled_statuses={} latest_admitted_statuses={} latest_admitted_owned_bytes={} max_retained_light_chunks={} latest_retained_light_chunks={}",
+                self.max_upload.poll_light_mailbox_admitted_statuses,
+                self.max_upload.poll_light_mailbox_admitted_owned_bytes,
+                self.max_upload.poll_light_mailbox_max_admitted_owned_bytes,
+                self.max_upload
+                    .poll_light_mailbox_max_batch_unique_input_chunks,
+                self.max_upload.poll_light_mailbox_max_batch_input_bytes,
+                self.max_upload.poll_light_mailbox_max_completed_owned_bytes,
+                self.max_upload.poll_light_mailbox_admission_rejections,
+                self.max_upload.poll_light_mailbox_oversize_admissions,
+                self.max_upload.poll_light_mailbox_cancelled_statuses,
+                latest_upload.poll_light_mailbox_admitted_statuses,
+                latest_upload.poll_light_mailbox_admitted_owned_bytes,
+                self.max_upload
+                    .poll_light_mailbox_retained_light_chunk_count,
+                latest_upload.poll_light_mailbox_retained_light_chunk_count
             );
             log::info!(
                 "MCLONE_ANDROID_XR_PERF_COMPILE_MAX pending_chunks_before={} pending_chunks_after={} pending_jobs_before={} pending_jobs_after={} max_pending_jobs={} available_slots_before={} available_slots_after={} neighbor_ready_sections={} near_exception_sections={} deferred_sections={} submitted_sections={} deadline_skipped_requests={} accepted_results={} queued_completed_results={} completed_sections={} stale_sections={} visibility_graph_builds={} visibility_graph_total_ms={:.3} visibility_graph_worst_ms={:.3}",
@@ -6128,6 +6686,9 @@ mod android {
             terrain_left_eye_opaque_ms: a
                 .terrain_left_eye_opaque_ms
                 .max(b.terrain_left_eye_opaque_ms),
+            terrain_left_eye_backdrop_ms: a
+                .terrain_left_eye_backdrop_ms
+                .max(b.terrain_left_eye_backdrop_ms),
             terrain_left_eye_translucent_ms: a
                 .terrain_left_eye_translucent_ms
                 .max(b.terrain_left_eye_translucent_ms),
@@ -6183,6 +6744,9 @@ mod android {
             terrain_right_eye_opaque_ms: a
                 .terrain_right_eye_opaque_ms
                 .max(b.terrain_right_eye_opaque_ms),
+            terrain_right_eye_backdrop_ms: a
+                .terrain_right_eye_backdrop_ms
+                .max(b.terrain_right_eye_backdrop_ms),
             terrain_right_eye_translucent_ms: a
                 .terrain_right_eye_translucent_ms
                 .max(b.terrain_right_eye_translucent_ms),
@@ -6271,15 +6835,23 @@ mod android {
             || summary.upload_removed_section_count > 0
     }
 
-    fn android_xr_perf_settle_frame_is_quiet(summary: mclone_scene::XrTerrainFrameSummary) -> bool {
-        let upload = summary.upload;
+    fn android_xr_perf_settle_frame_is_quiet(rendered: AndroidXrRenderedFrame) -> bool {
+        let upload = rendered.summary.upload;
+        let horizon_ready = rendered.terrain_view.is_none_or(|horizon| {
+            horizon.target_ready
+                && horizon.pending_vegetation_tiles == 0
+                && horizon.vegetation_submitted_jobs == horizon.vegetation_completed_jobs
+                && horizon.vegetation_transport_failures == 0
+                && horizon.vegetation_job_failures == 0
+        });
         !terrain_upload_summary_has_work(upload)
             && upload.server_command_queue_depth == 0
             && upload.server_update_queue_depth == 0
             && upload.pending_compile_jobs_after == 0
-            && summary.ui_draw_cache.rebuild_count == 0
-            && summary.ui_panel.repaint_count == 0
-            && summary.ui_panel.texture_recreate_count == 0
+            && rendered.summary.ui_draw_cache.rebuild_count == 0
+            && rendered.summary.ui_panel.repaint_count == 0
+            && rendered.summary.ui_panel.texture_recreate_count == 0
+            && horizon_ready
     }
 
     fn max_upload_summary(
@@ -6489,6 +7061,66 @@ mod android {
             poll_scheduler_light_mailbox_pending_statuses: a
                 .poll_scheduler_light_mailbox_pending_statuses
                 .max(b.poll_scheduler_light_mailbox_pending_statuses),
+            poll_scheduler_player_promotion_desired: a
+                .poll_scheduler_player_promotion_desired
+                .max(b.poll_scheduler_player_promotion_desired),
+            poll_scheduler_player_promotion_queued: a
+                .poll_scheduler_player_promotion_queued
+                .max(b.poll_scheduler_player_promotion_queued),
+            poll_scheduler_player_promotion_active: a
+                .poll_scheduler_player_promotion_active
+                .max(b.poll_scheduler_player_promotion_active),
+            poll_scheduler_player_promotion_max_active: a
+                .poll_scheduler_player_promotion_max_active
+                .max(b.poll_scheduler_player_promotion_max_active),
+            poll_scheduler_player_promotion_cancelled_before_admission: a
+                .poll_scheduler_player_promotion_cancelled_before_admission
+                .max(b.poll_scheduler_player_promotion_cancelled_before_admission),
+            poll_scheduler_light_demand_queued: a
+                .poll_scheduler_light_demand_queued
+                .max(b.poll_scheduler_light_demand_queued),
+            poll_scheduler_light_demands_cancelled: a
+                .poll_scheduler_light_demands_cancelled
+                .max(b.poll_scheduler_light_demands_cancelled),
+            poll_scheduler_light_statuses_stale: a
+                .poll_scheduler_light_statuses_stale
+                .max(b.poll_scheduler_light_statuses_stale),
+            poll_scheduler_completed_job_records_retained: a
+                .poll_scheduler_completed_job_records_retained
+                .max(b.poll_scheduler_completed_job_records_retained),
+            poll_scheduler_recent_job_summaries_retained: a
+                .poll_scheduler_recent_job_summaries_retained
+                .max(b.poll_scheduler_recent_job_summaries_retained),
+            poll_light_mailbox_admitted_statuses: a
+                .poll_light_mailbox_admitted_statuses
+                .max(b.poll_light_mailbox_admitted_statuses),
+            poll_light_mailbox_admitted_owned_bytes: a
+                .poll_light_mailbox_admitted_owned_bytes
+                .max(b.poll_light_mailbox_admitted_owned_bytes),
+            poll_light_mailbox_max_admitted_owned_bytes: a
+                .poll_light_mailbox_max_admitted_owned_bytes
+                .max(b.poll_light_mailbox_max_admitted_owned_bytes),
+            poll_light_mailbox_max_batch_unique_input_chunks: a
+                .poll_light_mailbox_max_batch_unique_input_chunks
+                .max(b.poll_light_mailbox_max_batch_unique_input_chunks),
+            poll_light_mailbox_max_batch_input_bytes: a
+                .poll_light_mailbox_max_batch_input_bytes
+                .max(b.poll_light_mailbox_max_batch_input_bytes),
+            poll_light_mailbox_max_completed_owned_bytes: a
+                .poll_light_mailbox_max_completed_owned_bytes
+                .max(b.poll_light_mailbox_max_completed_owned_bytes),
+            poll_light_mailbox_admission_rejections: a
+                .poll_light_mailbox_admission_rejections
+                .max(b.poll_light_mailbox_admission_rejections),
+            poll_light_mailbox_oversize_admissions: a
+                .poll_light_mailbox_oversize_admissions
+                .max(b.poll_light_mailbox_oversize_admissions),
+            poll_light_mailbox_cancelled_statuses: a
+                .poll_light_mailbox_cancelled_statuses
+                .max(b.poll_light_mailbox_cancelled_statuses),
+            poll_light_mailbox_retained_light_chunk_count: a
+                .poll_light_mailbox_retained_light_chunk_count
+                .max(b.poll_light_mailbox_retained_light_chunk_count),
             poll_updates: a.poll_updates.max(b.poll_updates),
             poll_snapshot_updates: a.poll_snapshot_updates.max(b.poll_snapshot_updates),
             poll_section_block_updates: a
@@ -6513,6 +7145,10 @@ mod android {
             server_pending_publications: a
                 .server_pending_publications
                 .max(b.server_pending_publications),
+            persistence_queue_metrics: max_persistence_queue_metrics(
+                a.persistence_queue_metrics,
+                b.persistence_queue_metrics,
+            ),
             runner_frame_metrics: if a.runner_frame_metrics.total_request_us
                 >= b.runner_frame_metrics.total_request_us
             {
@@ -6680,6 +7316,42 @@ mod android {
             visibility_graph_total_ms: a.visibility_graph_total_ms.max(b.visibility_graph_total_ms),
             visibility_graph_worst_ms: a.visibility_graph_worst_ms.max(b.visibility_graph_worst_ms),
             record_cache: max_record_cache_stats(a.record_cache, b.record_cache),
+        }
+    }
+
+    fn max_persistence_queue_metrics(
+        a: mclone_scene::PersistenceQueueMetrics,
+        b: mclone_scene::PersistenceQueueMetrics,
+    ) -> mclone_scene::PersistenceQueueMetrics {
+        mclone_scene::PersistenceQueueMetrics {
+            foreground_requests: a.foreground_requests.max(b.foreground_requests),
+            durable_write_requests: a.durable_write_requests.max(b.durable_write_requests),
+            durable_write_bytes: a.durable_write_bytes.max(b.durable_write_bytes),
+            cache_write_requests: a.cache_write_requests.max(b.cache_write_requests),
+            cache_write_bytes: a.cache_write_bytes.max(b.cache_write_bytes),
+            retained_record_cache_entries: a
+                .retained_record_cache_entries
+                .max(b.retained_record_cache_entries),
+            retained_record_cache_bytes: a
+                .retained_record_cache_bytes
+                .max(b.retained_record_cache_bytes),
+            high_water_foreground_requests: a
+                .high_water_foreground_requests
+                .max(b.high_water_foreground_requests),
+            high_water_durable_write_requests: a
+                .high_water_durable_write_requests
+                .max(b.high_water_durable_write_requests),
+            high_water_durable_write_bytes: a
+                .high_water_durable_write_bytes
+                .max(b.high_water_durable_write_bytes),
+            high_water_cache_write_requests: a
+                .high_water_cache_write_requests
+                .max(b.high_water_cache_write_requests),
+            high_water_cache_write_bytes: a
+                .high_water_cache_write_bytes
+                .max(b.high_water_cache_write_bytes),
+            cancelled_requests: a.cancelled_requests.max(b.cancelled_requests),
+            skipped_cache_writes: a.skipped_cache_writes.max(b.skipped_cache_writes),
         }
     }
 
@@ -6852,6 +7524,7 @@ mod android {
         Ok(AndroidXrRenderedFrame {
             summary: frame_summary,
             camera: terrain.camera_snapshot(),
+            terrain_view: terrain.terrain_view_diagnostics(),
             timing,
         })
     }
@@ -6929,6 +7602,91 @@ mod android {
         Ok(AndroidXrRenderedFrame {
             summary: frame_summary,
             camera: terrain.camera_snapshot(),
+            terrain_view: terrain.terrain_view_diagnostics(),
+            timing,
+        })
+    }
+
+    fn render_android_xr_array_per_eye_frame(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        frame: &mut mclone_xr_host::OpenXrRenderFrame<'_, graphics_vulkan::AppGraphics>,
+        stage: &xr::Space,
+        stereo_target: &mut graphics_vulkan::OpenXrStereoState,
+        depth: &mut ChunkMultiviewDepthTarget,
+        terrain: &mut AndroidXrTerrainState,
+        input: &XrInputFrame,
+        automation: Option<XrFrameLocomotionAutomation>,
+        fixed_render_view_pose: Option<XrStartupViewPose>,
+    ) -> Result<AndroidXrRenderedFrame> {
+        let mut timing = AndroidXrRenderFrameTiming::default();
+        let locate_views_start = Instant::now();
+        let stereo_views = mclone_xr_host::locate_stereo_views(
+            frame.session(),
+            stage,
+            frame.predicted_display_time(),
+        )?;
+        timing.locate_views_ms = elapsed_ms(locate_views_start);
+        let scene_views = [
+            mclone_xr_host::xr_view_from_openxr(&stereo_views.left)?,
+            mclone_xr_host::xr_view_from_openxr(&stereo_views.right)?,
+        ];
+        let eye_fovs = [
+            mclone_xr_host::xr_fov_from_openxr(stereo_views.left.fov),
+            mclone_xr_host::xr_fov_from_openxr(stereo_views.right.fov),
+        ];
+        let locomotion_start = Instant::now();
+        let locomotion = terrain
+            .apply_frame_locomotion(input, scene_views, automation)
+            .context("apply Android XR array-per-eye frame locomotion")?;
+        timing.locomotion_ms = elapsed_ms(locomotion_start);
+        copy_locomotion_timing(&mut timing, locomotion.timing);
+
+        let target_width = stereo_target.width;
+        let target_height = stereo_target.height;
+        if depth.width != target_width || depth.height != target_height {
+            *depth = ChunkMultiviewDepthTarget::new(device, target_width, target_height);
+        }
+        let acquire_start = Instant::now();
+        let target =
+            acquire_stereo_target(stereo_target).context("acquire array-per-eye OpenXR image")?;
+        timing.acquire_left_ms = elapsed_ms(acquire_start);
+        let terrain_render_start = Instant::now();
+        let frame_summary = terrain.render_xr_scene_frame(
+            device,
+            queue,
+            scene_views,
+            eye_fovs,
+            locomotion.frozen_render,
+            fixed_render_view_pose,
+            XrSceneFrameTarget::PerEye {
+                left: XrTerrainEyeTarget {
+                    color_view: target.color_left_view(),
+                    depth: &depth.left,
+                    size: [target_width, target_height],
+                },
+                right: XrTerrainEyeTarget {
+                    color_view: target.color_right_view(),
+                    depth: &depth.right,
+                    size: [target_width, target_height],
+                },
+            },
+        );
+        timing.terrain_render_frame_ms = elapsed_ms(terrain_render_start);
+        let release_start = Instant::now();
+        let release_result = target.release();
+        timing.release_eyes_ms = elapsed_ms(release_start);
+        let frame_summary = frame_summary?;
+        copy_terrain_frame_timing(&mut timing, frame_summary.timing);
+        release_result?;
+
+        let end_frame_start = Instant::now();
+        frame.submit_stereo_array_projection(stage, stereo_views, stereo_target)?;
+        timing.end_frame_ms = elapsed_ms(end_frame_start);
+        Ok(AndroidXrRenderedFrame {
+            summary: frame_summary,
+            camera: terrain.camera_snapshot(),
+            terrain_view: terrain.terrain_view_diagnostics(),
             timing,
         })
     }
@@ -7084,6 +7842,7 @@ mod android {
         timing.terrain_left_eye_full_frame_ms = scene_timing.left_eye_render.full_frame_ms;
         timing.terrain_left_eye_sky_ms = scene_timing.left_eye_render.sky_ms;
         timing.terrain_left_eye_opaque_ms = scene_timing.left_eye_render.terrain_opaque_ms;
+        timing.terrain_left_eye_backdrop_ms = scene_timing.left_eye_render.terrain_backdrop_ms;
         timing.terrain_left_eye_translucent_ms =
             scene_timing.left_eye_render.terrain_translucent_ms;
         timing.terrain_left_eye_actor_ms = scene_timing.left_eye_render.actor_ms;
@@ -7109,6 +7868,7 @@ mod android {
         timing.terrain_right_eye_full_frame_ms = scene_timing.right_eye_render.full_frame_ms;
         timing.terrain_right_eye_sky_ms = scene_timing.right_eye_render.sky_ms;
         timing.terrain_right_eye_opaque_ms = scene_timing.right_eye_render.terrain_opaque_ms;
+        timing.terrain_right_eye_backdrop_ms = scene_timing.right_eye_render.terrain_backdrop_ms;
         timing.terrain_right_eye_translucent_ms =
             scene_timing.right_eye_render.terrain_translucent_ms;
         timing.terrain_right_eye_actor_ms = scene_timing.right_eye_render.actor_ms;

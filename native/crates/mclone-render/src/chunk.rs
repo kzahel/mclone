@@ -1301,7 +1301,8 @@ fn cull_textured_sections(
     options: TexturedSectionRenderOptions,
     scratch: &mut CullScratch,
 ) -> TexturedSectionCullingResult {
-    let frustum = ClipFrustum::from_render_view(render_view, options.topology);
+    let frustum = ClipFrustum::from_render_view(render_view, options.topology)
+        .with_max_distance(options.fog.far_cull_distance());
     cull_textured_sections_with_frustum(prepared, render_view, options, scratch, &frustum)
 }
 
@@ -1455,8 +1456,12 @@ fn cull_textured_sections_stereo_union(
     options: [TexturedSectionRenderOptions; 2],
     scratch: &mut CullScratch,
 ) -> TexturedSectionStereoCullingResult {
-    let frustums =
-        render_views.map(|view| ClipFrustum::from_render_view(view, options[0].topology));
+    let frustums = [
+        ClipFrustum::from_render_view(render_views[0], options[0].topology)
+            .with_max_distance(options[0].fog.far_cull_distance()),
+        ClipFrustum::from_render_view(render_views[1], options[1].topology)
+            .with_max_distance(options[1].fog.far_cull_distance()),
+    ];
     cull_textured_sections_stereo_union_with_frustums(
         prepared,
         render_views,
@@ -1854,6 +1859,7 @@ struct ClipFrustum {
     view_projection: Mat4,
     camera_position: Vec3,
     topology: HorizontalTopology,
+    max_distance: Option<f32>,
 }
 
 trait RenderSectionFrustum {
@@ -1866,7 +1872,13 @@ impl ClipFrustum {
             view_projection: render_view.view_projection,
             camera_position: render_view.camera_position,
             topology,
+            max_distance: None,
         }
+    }
+
+    fn with_max_distance(mut self, max_distance: Option<f32>) -> Self {
+        self.max_distance = max_distance;
+        self
     }
 
     fn is_aabb_visible(&self, min: Vec3, max: Vec3) -> bool {
@@ -1879,6 +1891,16 @@ impl ClipFrustum {
 impl RenderSectionFrustum for ClipFrustum {
     fn is_render_section_visible(&self, key: RenderSectionKey) -> bool {
         let center = render_section_center_in(key, self.camera_position, self.topology);
+        if self.max_distance.is_some_and(|max_distance| {
+            let half_diagonal = (MESH_CHUNK_WIDTH as f32)
+                .hypot(RENDER_SECTION_HEIGHT as f32)
+                .hypot(MESH_CHUNK_WIDTH as f32)
+                * 0.5
+                + BUSHY_LEAF_CARD_OVERHANG;
+            center.distance(self.camera_position) - half_diagonal > max_distance
+        }) {
+            return false;
+        }
         let half = Vec3::new(
             MESH_CHUNK_WIDTH as f32 * 0.5,
             RENDER_SECTION_HEIGHT as f32 * 0.5,
@@ -2911,11 +2933,35 @@ impl ChunkDepthTarget {
     pub fn texture(&self) -> &wgpu::Texture {
         &self.texture
     }
+
+    fn from_texture_layer(
+        texture: &wgpu::Texture,
+        width: u32,
+        height: u32,
+        layer: u32,
+        label: &'static str,
+    ) -> Self {
+        let view = texture.create_view(&wgpu::TextureViewDescriptor {
+            label: Some(label),
+            dimension: Some(wgpu::TextureViewDimension::D2),
+            base_array_layer: layer,
+            array_layer_count: Some(1),
+            ..Default::default()
+        });
+        Self {
+            texture: texture.clone(),
+            view,
+            width,
+            height,
+        }
+    }
 }
 
 pub struct ChunkMultiviewDepthTarget {
     _texture: wgpu::Texture,
     pub view: wgpu::TextureView,
+    pub left: ChunkDepthTarget,
+    pub right: ChunkDepthTarget,
     pub width: u32,
     pub height: u32,
 }
@@ -2945,9 +2991,25 @@ impl ChunkMultiviewDepthTarget {
             array_layer_count: Some(2),
             ..Default::default()
         });
+        let left = ChunkDepthTarget::from_texture_layer(
+            &texture,
+            width,
+            height,
+            0,
+            "mclone_chunk_multiview_depth_left_view",
+        );
+        let right = ChunkDepthTarget::from_texture_layer(
+            &texture,
+            width,
+            height,
+            1,
+            "mclone_chunk_multiview_depth_right_view",
+        );
         Self {
             _texture: texture,
             view,
+            left,
+            right,
             width,
             height,
         }
@@ -3904,7 +3966,8 @@ impl SelectedPlacedMultiviewRenderer<'_> {
 }
 
 fn textured_shader_source(template: &str) -> String {
-    mclone_render_color::inject_target_color_transfer_wgsl(template)
+    let template = crate::fog::inject_fog_wgsl(template);
+    mclone_render_color::inject_target_color_transfer_wgsl(&template)
         .expect("textured chunk WGSL has one target-color transfer marker")
 }
 
@@ -7191,7 +7254,7 @@ fn uniform_bytes(
             0.0
         },
         options.sky_darken.clamp(0.0, 1.0),
-        if options.fog.enabled { 1.0 } else { 0.0 },
+        options.fog.shader_options(),
         color_transform,
     ];
     for (index, value) in render_options.into_iter().enumerate() {
@@ -7203,7 +7266,7 @@ fn uniform_bytes(
         camera_position[0],
         camera_position[1],
         camera_position[2],
-        0.0,
+        options.fog.ground_base_y,
     ]
     .into_iter()
     .enumerate()
@@ -7215,7 +7278,7 @@ fn uniform_bytes(
         options.fog.color[0],
         options.fog.color[1],
         options.fog.color[2],
-        1.0,
+        options.fog.max_opacity,
     ]
     .into_iter()
     .enumerate()
@@ -7235,9 +7298,10 @@ fn uniform_bytes(
             .period_chunks()
             .map_or(0.0, |period| period as f32 * MESH_CHUNK_WIDTH as f32),
     ];
+    let fog_distances = options.fog.shader_distances();
     for (index, value) in [
-        options.fog.start,
-        options.fog.end,
+        fog_distances[0],
+        fog_distances[1],
         topology_period_blocks[0],
         topology_period_blocks[1],
     ]
@@ -7514,7 +7578,7 @@ mod tests {
         for source in [mono, multiview] {
             assert!(source.contains("input.position - uniforms.source_anchor_scale.xyz"));
             assert!(source.contains("output.composition_position = composition_position;"));
-            assert!(source.contains("uniforms.camera_position.xyz"));
+            assert!(source.contains("uniforms.camera_position,"));
             assert!(!source.contains("clip_plane"));
         }
     }
@@ -8081,7 +8145,10 @@ mod tests {
             wgpu::TextureFormat::Rgba8Unorm,
         );
 
-        assert_eq!(f32::from_ne_bytes(bytes[72..76].try_into().unwrap()), 1.0);
+        assert_eq!(
+            f32::from_ne_bytes(bytes[72..76].try_into().unwrap()).to_bits() & 3,
+            crate::fog::RenderFogMode::Linear as u32
+        );
         assert_eq!(f32::from_ne_bytes(bytes[80..84].try_into().unwrap()), 1.0);
         assert_eq!(f32::from_ne_bytes(bytes[84..88].try_into().unwrap()), 2.0);
         assert_eq!(f32::from_ne_bytes(bytes[88..92].try_into().unwrap()), 3.0);

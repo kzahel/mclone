@@ -12,7 +12,8 @@ use mclone_core::ChunkSnapshot;
 
 /// Slice 0 observed a maximum live backlog of 295 items.  Keep more than an
 /// order of magnitude of headroom while retaining a hard, testable bound.
-pub const DEFAULT_DEFERRED_DROP_MAX_ITEMS: usize = 4_096;
+pub const DEFAULT_DEFERRED_DROP_MAX_ITEMS: usize =
+    mclone_client::DEFAULT_DEFERRED_CHUNK_DROP_MAX_ITEMS;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct DeferredDropBacklog {

@@ -6,11 +6,12 @@ use crate::client_session_policy::{
 };
 use mclone_input::TouchControlsMode;
 use mclone_ui::{
-    DebugActorTool, GameAuxiliarySplitMode, GameCollisionMode, GameFramePacingMode,
-    GameGrassDetail, GameLeafDetail, GameLocalPlayGuestInput, GameLocalPlayLayout,
-    GameLocalPlayState, GameMovementMode, GamePlayerModel, GameScenarioId, GameSimulationCadence,
-    GameStorageAction, GameTerrainPresentationMode, GameTouchSettings, GameTravelAssistMode,
-    GameTurnMode, GameUiAction, GameUiRenderState, GameWorldRenderScaleMode, GameXrTurnMode,
+    DebugActorTool, GameAuxiliarySplitMode, GameCollisionMode, GameFogSettings,
+    GameFramePacingMode, GameGrassDetail, GameLeafDetail, GameLocalPlayGuestInput,
+    GameLocalPlayLayout, GameLocalPlayState, GameMovementMode, GamePlayerModel, GameScenarioId,
+    GameSimulationCadence, GameStorageAction, GameTerrainPresentation, GameTouchSettings,
+    GameTravelAssistMode, GameTurnMode, GameUiAction, GameUiRenderState, GameWorldRenderScaleMode,
+    GameXrRenderMode, GameXrRenderPathState, GameXrRenderTransitionState, GameXrTurnMode,
 };
 
 use crate::asset_pack_ui::{ClientAssetPackController, ClientAssetPackEffect};
@@ -158,6 +159,7 @@ impl ClientExperienceController {
             | GameUiAction::SetLeafDetail(_)
             | GameUiAction::SetGrassDetail(_)
             | GameUiAction::SetTerrainPresentation(_)
+            | GameUiAction::SetFogSettings(_)
             | GameUiAction::ToggleFullbright
             | GameUiAction::TogglePlayerCollisionBox
             | GameUiAction::ToggleFirstPersonPlayer
@@ -176,6 +178,7 @@ impl ClientExperienceController {
             | GameUiAction::CycleFramePacing
             | GameUiAction::CycleFpsCap
             | GameUiAction::SetWorldRenderScaleMode(_)
+            | GameUiAction::SetXrRenderMode(_)
             | GameUiAction::SetRenderDistance(_)
             | GameUiAction::SetFlySpeed(_)
             | GameUiAction::SetMovementSpeed(_)
@@ -361,6 +364,7 @@ pub struct ClientExperienceSettingsProfile {
     pub leaf_detail: ClientExperienceCapabilityStatus,
     pub grass_detail: ClientExperienceCapabilityStatus,
     pub terrain_presentation: ClientExperienceCapabilityStatus,
+    pub fog: ClientExperienceCapabilityStatus,
     pub fullbright: ClientExperienceCapabilityStatus,
     pub player_collision_box: ClientExperienceCapabilityStatus,
     pub first_person_player: ClientExperienceCapabilityStatus,
@@ -376,6 +380,7 @@ pub struct ClientExperienceSettingsProfile {
     pub frame_pacing: ClientExperienceCapabilityStatus,
     pub fps_cap: ClientExperienceCapabilityStatus,
     pub world_render_scale: ClientExperienceCapabilityStatus,
+    pub xr_render_mode: ClientExperienceCapabilityStatus,
     pub render_distance: ClientExperienceCapabilityStatus,
     pub fly_speed: ClientExperienceCapabilityStatus,
     pub movement_speed: ClientExperienceCapabilityStatus,
@@ -397,6 +402,7 @@ impl ClientExperienceSettingsProfile {
             leaf_detail: ClientExperienceCapabilityStatus::Supported,
             grass_detail: ClientExperienceCapabilityStatus::Supported,
             terrain_presentation: ClientExperienceCapabilityStatus::Supported,
+            fog: ClientExperienceCapabilityStatus::Supported,
             fullbright: ClientExperienceCapabilityStatus::Supported,
             player_collision_box: ClientExperienceCapabilityStatus::Supported,
             first_person_player: ClientExperienceCapabilityStatus::Supported,
@@ -412,6 +418,7 @@ impl ClientExperienceSettingsProfile {
             frame_pacing: ClientExperienceCapabilityStatus::Supported,
             fps_cap: ClientExperienceCapabilityStatus::Supported,
             world_render_scale: ClientExperienceCapabilityStatus::Supported,
+            xr_render_mode: ClientExperienceCapabilityStatus::Supported,
             render_distance: ClientExperienceCapabilityStatus::Supported,
             fly_speed: ClientExperienceCapabilityStatus::Supported,
             movement_speed: ClientExperienceCapabilityStatus::Supported,
@@ -430,6 +437,7 @@ impl ClientExperienceSettingsProfile {
             ClientExperienceActionKind::SetLeafDetail => self.leaf_detail,
             ClientExperienceActionKind::SetGrassDetail => self.grass_detail,
             ClientExperienceActionKind::SetTerrainPresentation => self.terrain_presentation,
+            ClientExperienceActionKind::SetFogSettings => self.fog,
             ClientExperienceActionKind::ToggleFullbright => self.fullbright,
             ClientExperienceActionKind::TogglePlayerCollisionBox => self.player_collision_box,
             ClientExperienceActionKind::ToggleFirstPersonPlayer => self.first_person_player,
@@ -445,6 +453,7 @@ impl ClientExperienceSettingsProfile {
             ClientExperienceActionKind::CycleFramePacing => self.frame_pacing,
             ClientExperienceActionKind::CycleFpsCap => self.fps_cap,
             ClientExperienceActionKind::SetWorldRenderScaleMode => self.world_render_scale,
+            ClientExperienceActionKind::SetXrRenderMode => self.xr_render_mode,
             ClientExperienceActionKind::SetRenderDistance => self.render_distance,
             ClientExperienceActionKind::SetFlySpeed => self.fly_speed,
             ClientExperienceActionKind::SetMovementSpeed => self.movement_speed,
@@ -472,13 +481,14 @@ impl ClientExperienceSettingsProfile {
     ) -> [(
         ClientExperienceFeatureCapability,
         ClientExperienceCapabilityStatus,
-    ); 17] {
+    ); 18] {
         use ClientExperienceFeatureCapability as F;
         [
             (F::SectionOcclusion, self.section_occlusion),
             (F::LeafDetail, self.leaf_detail),
             (F::GrassDetail, self.grass_detail),
             (F::TerrainPresentation, self.terrain_presentation),
+            (F::Fog, self.fog),
             (F::Fullbright, self.fullbright),
             (F::PlayerCollisionBox, self.player_collision_box),
             (F::FirstPersonPlayer, self.first_person_player),
@@ -504,6 +514,7 @@ pub enum ClientExperienceFeatureCapability {
     LeafDetail,
     GrassDetail,
     TerrainPresentation,
+    Fog,
     Fullbright,
     PlayerCollisionBox,
     FirstPersonPlayer,
@@ -545,6 +556,7 @@ pub fn desktop_native_client_experience_profile() -> ClientExperienceProfile {
     settings.xr_turn = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
     settings.touch_look = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
     settings.touch_controls = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
+    settings.xr_render_mode = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
     ClientExperienceProfile::new(settings)
 }
 
@@ -579,6 +591,9 @@ pub fn android_flat_native_client_experience_profile() -> ClientExperienceProfil
     settings.world_render_scale = ClientExperienceCapabilityStatus::Unsupported(
         "World render scale is fixed on flat Android",
     );
+    settings.xr_render_mode = ClientExperienceCapabilityStatus::Unsupported(
+        "XR render path is unavailable on flat Android",
+    );
     ClientExperienceProfile::new(settings)
 }
 
@@ -596,6 +611,7 @@ pub fn web_client_experience_profile() -> ClientExperienceProfile {
     settings.frame_pacing = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
     settings.fps_cap = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
     settings.world_render_scale = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
+    settings.xr_render_mode = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
     settings.frame_pipeline_overlay =
         ClientExperienceCapabilityStatus::Unsupported(WEB_FRAME_PIPELINE_OVERLAY_REASON);
     settings.debug_diagnostics =
@@ -771,20 +787,19 @@ impl ClientExperienceSettingsController {
                     .setting_effects
                     .push(ClientExperienceSettingEffect::SetGrassDetail(detail));
             }
-            GameUiAction::SetTerrainPresentation(mode) => {
-                let Some(current) = self.state.terrain_presentation.as_mut() else {
-                    effects.capability_projection.push(
-                        kind,
-                        ClientExperienceCapabilityStatus::Unsupported(
-                            "Composed terrain is unavailable for this world or render mode",
-                        ),
-                    );
-                    return effects;
-                };
-                *current = mode;
+            GameUiAction::SetTerrainPresentation(presentation) => {
+                self.state.terrain_presentation = presentation;
+                effects.setting_effects.push(
+                    ClientExperienceSettingEffect::SetTerrainPresentation(presentation),
+                );
+            }
+            GameUiAction::SetFogSettings(settings) => {
+                self.state.fog = settings.normalized();
                 effects
                     .setting_effects
-                    .push(ClientExperienceSettingEffect::SetTerrainPresentation(mode));
+                    .push(ClientExperienceSettingEffect::SetFogSettings(
+                        self.state.fog,
+                    ));
             }
             GameUiAction::ToggleFullbright => {
                 self.state.force_fullbright = !self.state.force_fullbright;
@@ -965,6 +980,37 @@ impl ClientExperienceSettingsController {
                     .setting_effects
                     .push(ClientExperienceSettingEffect::SetWorldRenderScaleMode(mode));
             }
+            GameUiAction::SetXrRenderMode(mode) => {
+                let Some(mut state) = self.state.xr_render_path else {
+                    effects.capability_projection.push(
+                        kind,
+                        ClientExperienceCapabilityStatus::Unsupported(
+                            "XR render path is unavailable for this profile",
+                        ),
+                    );
+                    return effects;
+                };
+                if !state.supported_modes.contains(mode) {
+                    effects
+                        .rejections
+                        .push(ClientExperienceActionRejection::invalid(
+                            kind,
+                            "The selected XR render path is unsupported",
+                        ));
+                    return effects;
+                }
+                state.requested_mode = mode;
+                state.pending_mode = (mode != state.active_mode).then_some(mode);
+                state.transition_state = if state.pending_mode.is_some() {
+                    GameXrRenderTransitionState::Pending
+                } else {
+                    GameXrRenderTransitionState::Idle
+                };
+                self.state.xr_render_path = Some(state);
+                effects
+                    .setting_effects
+                    .push(ClientExperienceSettingEffect::SetXrRenderMode(mode));
+            }
             GameUiAction::SetRenderDistance(render_distance) => {
                 self.state.render_distance = self.state.clamp_render_distance(render_distance);
                 effects
@@ -1069,6 +1115,7 @@ impl ClientExperienceSettingsController {
                 ClientExperienceActionKind::SetTerrainPresentation,
                 profile.terrain_presentation,
             ),
+            (ClientExperienceActionKind::SetFogSettings, profile.fog),
             (
                 ClientExperienceActionKind::ToggleFullbright,
                 profile.fullbright,
@@ -1121,6 +1168,10 @@ impl ClientExperienceSettingsController {
                 profile.world_render_scale,
             ),
             (
+                ClientExperienceActionKind::SetXrRenderMode,
+                profile.xr_render_mode,
+            ),
+            (
                 ClientExperienceActionKind::SetRenderDistance,
                 profile.render_distance,
             ),
@@ -1150,15 +1201,6 @@ impl ClientExperienceSettingsController {
                 ClientExperienceActionKind::ToggleCrosshair,
                 ClientExperienceCapabilityStatus::Unsupported(
                     "Crosshair visibility is unavailable for this profile",
-                ),
-            );
-        }
-        if profile.terrain_presentation.is_supported() && self.state.terrain_presentation.is_none()
-        {
-            projection.push(
-                ClientExperienceActionKind::SetTerrainPresentation,
-                ClientExperienceCapabilityStatus::Unsupported(
-                    "Composed terrain is unavailable for this world or render mode",
                 ),
             );
         }
@@ -1251,7 +1293,8 @@ pub struct ClientExperienceSettingsState {
     pub section_occlusion_culling: bool,
     pub leaf_detail: GameLeafDetail,
     pub grass_detail: GameGrassDetail,
-    pub terrain_presentation: Option<GameTerrainPresentationMode>,
+    pub terrain_presentation: GameTerrainPresentation,
+    pub fog: GameFogSettings,
     pub force_fullbright: bool,
     pub player_collision_box_visible: bool,
     pub first_person_player_visible: bool,
@@ -1274,6 +1317,7 @@ pub struct ClientExperienceSettingsState {
     pub max_movement_speed_multiplier: f32,
     pub frame_pacing_mode: GameFramePacingMode,
     pub fps_cap: u32,
+    pub xr_render_path: Option<GameXrRenderPathState>,
     pub server_cadence: Option<GameSimulationCadence>,
     pub touch_controls_mode: Option<TouchControlsMode>,
     pub touch_settings: Option<GameTouchSettings>,
@@ -1295,6 +1339,7 @@ impl From<GameUiRenderState> for ClientExperienceSettingsState {
             leaf_detail: state.leaf_detail,
             grass_detail: state.grass_detail,
             terrain_presentation: state.terrain_presentation,
+            fog: state.fog.normalized(),
             force_fullbright: state.force_fullbright,
             player_collision_box_visible: state.player_collision_box_visible,
             first_person_player_visible: state.first_person_player_visible,
@@ -1323,6 +1368,7 @@ impl From<GameUiRenderState> for ClientExperienceSettingsState {
             max_movement_speed_multiplier: state.max_movement_speed_multiplier,
             frame_pacing_mode: state.frame_pacing_mode,
             fps_cap: state.fps_cap,
+            xr_render_path: state.xr_render_path,
             server_cadence: state.server_cadence,
             touch_controls_mode: state.touch_controls_mode,
             touch_settings: state.touch_settings,
@@ -1339,6 +1385,7 @@ impl ClientExperienceSettingsState {
         state.leaf_detail = self.leaf_detail;
         state.grass_detail = self.grass_detail;
         state.terrain_presentation = self.terrain_presentation;
+        state.fog = self.fog.normalized();
         state.force_fullbright = self.force_fullbright;
         state.player_collision_box_visible = self.player_collision_box_visible;
         state.first_person_player_visible = self.first_person_player_visible;
@@ -1366,6 +1413,7 @@ impl ClientExperienceSettingsState {
         state.max_movement_speed_multiplier = self.max_movement_speed_multiplier;
         state.frame_pacing_mode = self.frame_pacing_mode;
         state.fps_cap = self.fps_cap;
+        state.xr_render_path = self.xr_render_path;
         state.server_cadence = self.server_cadence;
         state.touch_controls_mode = self.touch_controls_mode;
         state.touch_settings = self.touch_settings;
@@ -1545,7 +1593,8 @@ pub enum ClientExperienceSettingEffect {
     SetSectionOcclusionCulling(bool),
     SetLeafDetail(GameLeafDetail),
     SetGrassDetail(GameGrassDetail),
-    SetTerrainPresentation(GameTerrainPresentationMode),
+    SetTerrainPresentation(GameTerrainPresentation),
+    SetFogSettings(GameFogSettings),
     SetFullbright(bool),
     SetPlayerCollisionBoxVisible(bool),
     SetFirstPersonPlayerVisible(bool),
@@ -1565,6 +1614,7 @@ pub enum ClientExperienceSettingEffect {
     CycleFramePacing,
     CycleFpsCap,
     SetWorldRenderScaleMode(GameWorldRenderScaleMode),
+    SetXrRenderMode(GameXrRenderMode),
     SetRenderDistance(u32),
     SetFlySpeedMultiplier(f32),
     SetMovementSpeedMultiplier(f32),
@@ -1638,6 +1688,7 @@ pub enum ClientExperienceActionKind {
     SetLeafDetail,
     SetGrassDetail,
     SetTerrainPresentation,
+    SetFogSettings,
     ToggleFullbright,
     TogglePlayerCollisionBox,
     ToggleFirstPersonPlayer,
@@ -1656,6 +1707,7 @@ pub enum ClientExperienceActionKind {
     CycleFramePacing,
     CycleFpsCap,
     SetWorldRenderScaleMode,
+    SetXrRenderMode,
     SetRenderDistance,
     SetFlySpeed,
     SetMovementSpeed,
@@ -1726,6 +1778,7 @@ pub fn client_experience_action_kind(action: GameUiAction) -> ClientExperienceAc
         GameUiAction::SetTerrainPresentation(_) => {
             ClientExperienceActionKind::SetTerrainPresentation
         }
+        GameUiAction::SetFogSettings(_) => ClientExperienceActionKind::SetFogSettings,
         GameUiAction::ToggleFullbright => ClientExperienceActionKind::ToggleFullbright,
         GameUiAction::TogglePlayerCollisionBox => {
             ClientExperienceActionKind::TogglePlayerCollisionBox
@@ -1752,6 +1805,7 @@ pub fn client_experience_action_kind(action: GameUiAction) -> ClientExperienceAc
         GameUiAction::SetWorldRenderScaleMode(_) => {
             ClientExperienceActionKind::SetWorldRenderScaleMode
         }
+        GameUiAction::SetXrRenderMode(_) => ClientExperienceActionKind::SetXrRenderMode,
         GameUiAction::SetRenderDistance(_) => ClientExperienceActionKind::SetRenderDistance,
         GameUiAction::SetFlySpeed(_) => ClientExperienceActionKind::SetFlySpeed,
         GameUiAction::SetMovementSpeed(_) => ClientExperienceActionKind::SetMovementSpeed,
@@ -1803,6 +1857,7 @@ pub const fn classify_client_experience_action_kind(
         | ClientExperienceActionKind::SetLeafDetail
         | ClientExperienceActionKind::SetGrassDetail
         | ClientExperienceActionKind::SetTerrainPresentation
+        | ClientExperienceActionKind::SetFogSettings
         | ClientExperienceActionKind::ToggleFullbright
         | ClientExperienceActionKind::TogglePlayerCollisionBox
         | ClientExperienceActionKind::ToggleFirstPersonPlayer
@@ -1825,6 +1880,7 @@ pub const fn classify_client_experience_action_kind(
         | ClientExperienceActionKind::CycleFramePacing
         | ClientExperienceActionKind::CycleFpsCap
         | ClientExperienceActionKind::SetWorldRenderScaleMode
+        | ClientExperienceActionKind::SetXrRenderMode
         | ClientExperienceActionKind::SetRenderDistance
         | ClientExperienceActionKind::SetTouchLookSensitivity
         | ClientExperienceActionKind::SetTouchControlsMode
@@ -2093,6 +2149,7 @@ mod tests {
             GameUiAction::CycleFramePacing,
             GameUiAction::CycleFpsCap,
             GameUiAction::SetWorldRenderScaleMode(GameWorldRenderScaleMode::Automatic),
+            GameUiAction::SetXrRenderMode(GameXrRenderMode::ArrayPerEye),
             GameUiAction::SetRenderDistance(8),
             GameUiAction::SetFlySpeed(2.0),
             GameUiAction::SetMovementSpeed(2.0),
@@ -2102,7 +2159,7 @@ mod tests {
             GameUiAction::Quit,
         ];
 
-        assert_eq!(samples.len(), 63);
+        assert_eq!(samples.len(), 61);
         for sample in samples {
             let _ = classify_game_ui_action(sample);
         }
@@ -2338,22 +2395,36 @@ mod tests {
             )]
         );
 
-        let mut state = settings.state();
-        state.terrain_presentation = Some(GameTerrainPresentationMode::ExactOnly);
-        settings.set_state(state);
         let effects = settings.apply_ui_action(
-            GameUiAction::SetTerrainPresentation(GameTerrainPresentationMode::Composed),
+            GameUiAction::SetTerrainPresentation(GameTerrainPresentation::Experimental),
             ClientExperienceSettingsProfile::default(),
         );
         assert_eq!(
             settings.state().terrain_presentation,
-            Some(GameTerrainPresentationMode::Composed)
+            GameTerrainPresentation::Experimental
         );
         assert_eq!(
             effects.setting_effects,
             vec![ClientExperienceSettingEffect::SetTerrainPresentation(
-                GameTerrainPresentationMode::Composed
+                GameTerrainPresentation::Experimental
             )]
+        );
+
+        let requested_fog = GameFogSettings {
+            visibility_blocks: f32::INFINITY,
+            max_opacity: 0.25,
+            far_cull: true,
+            ..GameFogSettings::default()
+        };
+        let expected_fog = requested_fog.normalized();
+        let effects = settings.apply_ui_action(
+            GameUiAction::SetFogSettings(requested_fog),
+            ClientExperienceSettingsProfile::default(),
+        );
+        assert_eq!(settings.state().fog, expected_fog);
+        assert_eq!(
+            effects.setting_effects,
+            vec![ClientExperienceSettingEffect::SetFogSettings(expected_fog)]
         );
 
         let effects = settings.apply_ui_action(
@@ -2842,6 +2913,37 @@ mod tests {
                 ),
             }]
         );
+    }
+
+    #[test]
+    fn xr_render_mode_request_stays_pending_until_host_confirmation() {
+        let mut settings = ClientExperienceSettingsController::new(ClientExperienceSettingsState {
+            xr_render_path: Some(GameXrRenderPathState::new(
+                mclone_ui::GameXrRenderModeSet::ALL,
+                GameXrRenderMode::DualPerEye,
+                None,
+                GameXrRenderMode::DualPerEye,
+                GameXrRenderTransitionState::Idle,
+            )),
+            ..ClientExperienceSettingsState::default()
+        });
+
+        let effects = settings.apply_ui_action(
+            GameUiAction::SetXrRenderMode(GameXrRenderMode::ArrayPerEye),
+            xr_native_client_experience_profile().settings,
+        );
+
+        assert_eq!(
+            effects.setting_effects,
+            vec![ClientExperienceSettingEffect::SetXrRenderMode(
+                GameXrRenderMode::ArrayPerEye
+            )]
+        );
+        let state = settings.state().xr_render_path.expect("XR path state");
+        assert_eq!(state.active_mode, GameXrRenderMode::DualPerEye);
+        assert_eq!(state.requested_mode, GameXrRenderMode::ArrayPerEye);
+        assert_eq!(state.pending_mode, Some(GameXrRenderMode::ArrayPerEye));
+        assert_eq!(state.transition_state, GameXrRenderTransitionState::Pending);
     }
 
     #[test]

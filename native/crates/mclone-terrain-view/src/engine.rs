@@ -254,6 +254,31 @@ impl TerrainViewEngine {
         Ok(stats)
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub fn encode_multiview_to_target(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: TerrainHorizonRenderTarget<'_>,
+        presentation: TerrainHorizonPresentation,
+        exact: Option<(&TerrainPreparedExactFrame, TerrainExactCoverageMode)>,
+        tree_ownership: Option<&BoundedRepresentationOwnershipSnapshot<McloneTreeOccurrenceId>>,
+    ) -> Result<TerrainHorizonFrameStats, String> {
+        self.apply_exact_and_ownership(device, queue, exact, tree_ownership)?;
+        let stats = self.renderer.encode_multiview_to_target(
+            device,
+            queue,
+            encoder,
+            target,
+            self.config.width,
+            self.config.height,
+            presentation,
+        )?;
+        self.last_stats = Some(stats);
+        Ok(stats)
+    }
+
     pub const fn last_stats(&self) -> Option<TerrainHorizonFrameStats> {
         self.last_stats
     }

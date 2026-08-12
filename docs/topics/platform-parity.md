@@ -142,6 +142,14 @@ burn-down.
 > an 8BitDo SN30 Pro in XInput mode passed in-game operator acceptance;
 > hotplug/reconnect and other controller modes remain physical acceptance
 > items.
+> Refreshed on 2026-07-27 after Tactical 274 added one persisted Distant
+> Terrain control to the shared Graphics menu and scene settings dispatcher.
+> Desktop and headed-browser composed pixels pass; the default per-eye XR path
+> now uses the clipmap-derived far projection and passes synthetic stereo
+> capture. Flat Android, Android XR, and desktop XR compile through their real
+> target lanes, while physical Android/headset pixel and performance evidence
+> remains open. Optional full-frame multiview is not the default XR path and
+> still lacks a procedural-horizon renderer.
 > When a slice closes a gap, update the affected cell **and** link the tactical.
 > If a cell and the code disagree, the code wins — fix the cell.
 
@@ -207,6 +215,7 @@ A cell is a **parity gap** when it is not ✅ and its class targets it above.
 | Feature | desktop-flat | offscreen-flat | desktop-XR | flat-Android | Android-XR | web/WASM |
 |---|:--:|:--:|:--:|:--:|:--:|:--:|
 | World render (textured terrain) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Distant terrain (experimental Graphics control) | ✅ (shared menu + inspected pixels) | ✅ (shared scene + inspected pixels) | ◐ (shared menu/default per-eye path compiled; headset check pending) | ◐ (shared menu/APK; device pixels pending) | ◐ (shared menu/default per-eye path/APK; headset check pending) | ✅ (shared menu + headed WebGPU pixels) |
 | Lighting (sky+block, render integ.) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Day/night + sky | ✅ | ✅ | ✅ | ◐ (frozen) | ✅ | ✅ |
 | Player movement + collision | ✅ | ◐ (perf/scripted paths; no real host loop) | ✅ | ✅ (shared touch + AVD swipe) | ✅ | ✅ |

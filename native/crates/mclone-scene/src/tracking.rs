@@ -168,6 +168,14 @@ pub fn fixed_startup_view_pose_render_views(
     eye_fovs: [XrFov; 2],
     far: f32,
 ) -> Result<[ChunkRenderView; 2]> {
+    fixed_startup_view_pose_render_views_with_far(view_pose, eye_fovs, far)
+}
+
+pub fn fixed_startup_view_pose_render_views_with_far(
+    view_pose: XrStartupViewPose,
+    eye_fovs: [XrFov; 2],
+    far: f32,
+) -> Result<[ChunkRenderView; 2]> {
     let yaw_radians = view_pose.yaw_degrees.to_radians();
     if !yaw_radians.is_finite() {
         bail!("invalid XR fixed render view yaw {}", view_pose.yaw_degrees);
@@ -310,10 +318,7 @@ impl McloneSceneHost {
                 .local_participant
                 .presentation_camera_snapshot(),
         )?;
-        let far = crate::terrain_view::scene_terrain_projection_far_distance(
-            self.active_world.scene.startup.terrain_presentation,
-            XR_FAR,
-        );
+        let far = self.terrain_projection_far_distance(XR_FAR);
         Ok([
             xr_view_to_chunk_render_view(&views[0], transform, XR_NEAR, far)?,
             xr_view_to_chunk_render_view(&views[1], transform, XR_NEAR, far)?,

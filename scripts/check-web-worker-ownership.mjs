@@ -84,13 +84,13 @@ const moduleRegistry = {
     responsibilities: ["non-production shared-Wasm-memory capability proof"],
   },
   "mclone-terrain-vegetation-worker.ts": {
-    family: "terrain-workers",
+    family: "render-workers",
     baselineLines: 51,
     workerEntry: true,
     workerConstruction: false,
     responsibilities: [
       "browser Wasm module loading",
-      "opaque worker-resident Rust vegetation-actor forwarding",
+      "opaque worker-resident Rust terrain-vegetation actor forwarding",
     ],
   },
   "mclone-web-app.ts": {

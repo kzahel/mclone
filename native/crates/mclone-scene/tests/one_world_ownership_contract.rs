@@ -113,6 +113,8 @@ const SCENE_HOST_FIELDS: &[&str] = &[
     "asset_pack_preference_error",
     "graphics_preference_storage",
     "graphics_preference_error",
+    "terrain_presentation_preference",
+    "fog_settings",
     "pending_leaf_detail",
     "pending_restored_asset_pack_selection",
     "external_asset_pack_preparation",
@@ -139,6 +141,8 @@ const SCENE_HOST_FIELDS: &[&str] = &[
     "ui",
     "menu_overlay_cache",
     "status_overlay",
+    "xr_render_path_state",
+    "pending_xr_render_mode_request",
     "sky",
     "screen_effects",
     "terrain_view",
@@ -188,7 +192,7 @@ fn host_has_one_active_and_one_optional_concrete_drawable_slot() {
     assert_eq!(slot_fields, DRAWABLE_WORLD_SLOT_FIELDS);
     assert_eq!(slot_fields.len(), 25);
     assert_eq!(host_fields, SCENE_HOST_FIELDS);
-    assert_eq!(host_fields.len(), 92);
+    assert_eq!(host_fields.len(), 96);
     assert_eq!(host.matches("active_world: DrawableWorldSlot").count(), 1);
     assert_eq!(
         host.matches("standby_world: Option<DrawableWorldSlot>")
@@ -264,6 +268,9 @@ fn ordinary_frame_paths_keep_explicit_active_only_and_preview_branches() {
     assert!(multiview.contains(".render_prepared_multiview_stereo_draw_phase_with_options("));
     assert!(multiview.contains("let preview_frame = self"));
     assert!(multiview.contains(".render_placed_prepared_multiview_stereo_draw_with_options("));
+    assert!(multiview.contains("self.terrain_view"));
+    assert!(multiview.contains(".render_multiview("));
+    assert!(multiview.contains("render XR procedural horizon multiview"));
 
     for path in [mono, stereo, eye, multiview] {
         for absent in ["HashMap<WorldInstanceId", "Vec<DrawableWorldSlot>"] {

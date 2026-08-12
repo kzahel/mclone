@@ -18,7 +18,7 @@ use mclone_core::ChunkPos;
 use mclone_protocol::ChunkView;
 
 use super::support::{apply_interest_and_poll, wait_for_scheduler_completion};
-use crate::ChunkScheduler;
+use crate::{ChunkScheduler, MAX_RECENT_COMPLETED_JOB_SUMMARIES, WorldGenerationProfile};
 
 const RADIUS: u32 = 2;
 const STEPS: i32 = 24;
@@ -66,8 +66,21 @@ fn run_movement_soak(seed: i64) -> (Vec<usize>, Vec<usize>) {
             scheduler.wait_for_light_idle(Duration::from_secs(30)),
             "light worker did not acknowledge idle sync"
         );
+        let scheduler_metrics = scheduler.metrics();
+        let mailbox_metrics = scheduler.light_status_mailbox_metrics();
+        assert_eq!(scheduler.full_job_record_count(), 0);
+        assert!(
+            scheduler.recent_completed_job_summary_count() <= MAX_RECENT_COMPLETED_JOB_SUMMARIES
+        );
+        assert!(scheduler_metrics.player_promotion_max_active <= 4);
+        assert_eq!(scheduler_metrics.light_ticket_count, 0);
+        assert_eq!(scheduler_metrics.light_ticket_conservation_failures, 0);
+        assert_eq!(mailbox_metrics.admitted_statuses, 0);
+        assert_eq!(mailbox_metrics.admitted_owned_bytes, 0);
+        assert!(mailbox_metrics.max_pending_statuses <= 18);
+        assert!(mailbox_metrics.max_admitted_owned_bytes <= 64 * 1024 * 1024);
         holders.push(scheduler.holder_count());
-        retained.push(scheduler.metrics().retained_light_world_chunks);
+        retained.push(scheduler_metrics.retained_light_world_chunks);
     }
     (holders, retained)
 }
@@ -168,4 +181,43 @@ fn movement_soak_keeps_retained_light_memory_bounded() {
         "loaded/retained trajectories must be geometry-driven and seed-independent; a \
          divergence means eviction is freeing a terrain-dependent set"
     );
+}
+
+#[test]
+fn long_movement_prunes_full_jobs_and_bounds_recent_summaries() {
+    let mut scheduler = ChunkScheduler::new(12_345);
+    scheduler
+        .set_world_generation_profile(WorldGenerationProfile::FlatGrassV1)
+        .unwrap();
+    scheduler.set_lighting_enabled(false);
+
+    let steps = MAX_RECENT_COMPLETED_JOB_SUMMARIES + 16;
+    for index in 0..steps {
+        apply_interest_and_poll(
+            &mut scheduler,
+            ChunkView {
+                center: ChunkPos::new((index * 4) as i32, 0),
+                render_distance: 0,
+                chunk_tracking_radius: 0,
+            },
+        );
+        scheduler.process_pending_unloads(usize::MAX).unwrap();
+        assert_eq!(
+            scheduler.full_job_record_count(),
+            0,
+            "completed full job survived step {index}"
+        );
+        assert!(
+            scheduler.recent_completed_job_summary_count() <= MAX_RECENT_COMPLETED_JOB_SUMMARIES
+        );
+    }
+
+    let metrics = scheduler.metrics();
+    assert!(metrics.completed_jobs >= steps);
+    assert_eq!(metrics.completed_job_records_retained, 0);
+    assert_eq!(
+        metrics.recent_job_summaries_retained,
+        MAX_RECENT_COMPLETED_JOB_SUMMARIES
+    );
+    assert_eq!(scheduler.job_count(), MAX_RECENT_COMPLETED_JOB_SUMMARIES);
 }

@@ -23,8 +23,28 @@ persistence, and the non-instanced thousand-chicken baseline. Exact rounded
 tessellation is now closed by completed Tactical
 [`200`](../tactical/200-box-only-figure-authoring.md), which makes boxes the
 only canonical/promotable vocabulary and migrates the current catalog while
-retaining explicit schema-v1 legacy compatibility. Instancing, box-part LOD,
-GPU pose evaluation, and a disk cache remain deferred.
+retaining explicit schema-v1 legacy compatibility.
+
+Commit `41fc9fae` completed capability-driven production admission on
+2026-07-28. Every stable entity figure with a successfully prepared resource,
+including cow and upright bear, now uses the prepared renderer instead of a
+player/chicken name whitelist. Exact unchanged actor inputs also reuse their
+world-local model/palette state without repeating pose evaluation or GPU
+writes. Native mono, synthetic stereo/full-frame multiview, Android XR build,
+and production browser WebGPU proofs pass. The new high-count benchmark shows
+the prepared route is `15.9x` faster for ten animated cows and `38.0x` faster
+for 100 on the current Linux/Radeon 880M host. Physical Quest remeasurement is
+pending.
+
+Commit `32fcffaf` completed per-figure instancing on the same date. Compatible
+actors now share one draw while retaining independent actor transforms, light,
+opacity, and body-part palettes, so unrelated animation phases remain fully
+instanced. Affine palette/actor packing and startup-precomputed evaluation
+channels reduce upload and CPU pose work. The clean 1,000-animated-cow lane
+improved from `9.184ms` to `1.939ms` average and from 1,000 draws to one.
+Box-part LOD, GPU pose evaluation, and a disk cache remain deferred. Ongoing
+actor performance evidence and ordering live in
+[`actor-rendering-performance.md`](actor-rendering-performance.md).
 
 The 2026-07-22 card follow-up deliberately broadens that completed policy to
 boxes plus fixed finite planes for genuinely planar details. Two-sided cards
@@ -46,9 +66,9 @@ so this follow-up does not claim a fresh browser screenshot.
 
 ## Scope
 
-This topic tracks the evolution from the current CPU-baked combined
-actor mesh to a startup-prepared figure pipeline with static GPU geometry,
-rigid-part animation, shared instances, and generated figure LODs.
+This topic tracks the evolution from the CPU-baked combined actor mesh to the
+current startup-prepared figure pipeline with static GPU geometry and
+rigid-part animation, then toward shared instances and generated figure LODs.
 
 It covers the contract between the Asset Lab authoring format, persisted
 semantic JSON, startup figure preparation, `mclone-assets`, actor
@@ -65,9 +85,12 @@ architecture.
 
 ## Motivation
 
-The immediate performance issue is documented as HP-1 in
+Actor-specific performance evidence, memory tradeoffs, and ordered future work
+live in
+[`actor-rendering-performance.md`](actor-rendering-performance.md). The
+cross-system priority remains HP-1 in
 [`performance.md`](performance.md#hp-1-split-actor-pose-updates-from-whole-mesh-rebuilds).
-`ActorMeshCache` currently compares the complete actor list. When any actor
+The fallback `ActorMeshCache` compares the complete actor list. When any actor
 position, orientation, light, color, walk distance, or figure pose changes, it
 CPU-bakes one combined world-space mesh and uploads all vertices and indices.
 Stationary actors are rewritten because one actor moved.
@@ -92,7 +115,7 @@ not required for the current source format.
 
 ## Current Pipeline And Its Deliberate Approximations
 
-The current pipeline is:
+The authored and startup-preparation pipeline is:
 
 ```text
 tools/asset-lab/examples/<figure>/figure.ts
@@ -102,9 +125,14 @@ tools/asset-lab/examples/<figure>/figure.ts
   -> Three.js semantic preview
   -> first-party asset-pack entry
   -> mclone-assets JSON loader
-  -> mclone-render cuboid compiler
-  -> CPU-baked world-space actor mesh
+  -> mclone-assets PreparedFigure compiler
+  -> mclone-render immutable geometry + world-local actor/palette state
 ```
+
+Stable entity figure instances take that prepared branch whenever their
+figure resource exists. Player-specific local/remote identities, anonymous
+actors, debug/item shapes, and unsupported figures retain the CPU-baked
+`ActorMeshCache` fallback.
 
 The authoring/export side preserves semantic primitives for schema-v1 legacy
 compatibility, but canonical `figure()` sources now admit boxes and fixed
@@ -128,10 +156,13 @@ vocabulary. All 202 canonical and 18 legacy Asset Lab examples pass a
 discovered source-to-canonical-JSON round-trip test; examples that are not
 promoted are authoring sources and have no second file to drift against.
 
-Cow joined the promoted runtime set on 2026-07-24. Shared render-session actor
-mapping now chooses the prepared `mclone:figure/cow` rig for cow actors, so the
-authored model, material, and walk clip replace the legacy cow mesh in ordinary
-world rendering.
+Cow joined render-session figure mapping on 2026-07-24, but the prepared GPU
+resource and admission code still named only player and chicken. Cow therefore
+continued to fall through to the CPU-baked mesh despite carrying
+`mclone:figure/cow`. Commit `41fc9fae` removed both name whitelists on
+2026-07-28. Prepared-resource availability plus stable entity/figure
+capability now selects the path, so the authored cow model, material, and walk
+clip finally replace the legacy cow mesh in ordinary world rendering.
 
 Three.js uses `BoxGeometry` and `PlaneGeometry` for canonical sources. Explicit
 legacy sources still use `SphereGeometry`, `CapsuleGeometry`, and
@@ -139,7 +170,7 @@ legacy sources still use `SphereGeometry`, `CapsuleGeometry`, and
 counts. Export writes semantic JSON; it does not write the preview's final
 vertex/index data.
 
-The native bridge was intentionally narrower:
+The legacy native bridge remains intentionally narrower:
 
 - `sphere`, `capsule`, and `cylinder` compile to their cuboid bounds;
 - a box ASCII face texture becomes one thin colored overlay cuboid per texture
@@ -149,7 +180,7 @@ The native bridge was intentionally narrower:
   affected vertex; and
 - authored clip scale is parsed as source data but is not part of the current
   prepared/runtime transform;
-- all visible actors share one mutable combined mesh per drawable world.
+- all fallback actors share one mutable combined mesh per drawable world.
 
 These choices proved asset ownership, figure selection, networked appearance,
 clip import, first-person body filtering, and cross-platform actor rendering.
@@ -1077,11 +1108,12 @@ large figure straddling a light gradient will shade slightly differently
 than the CPU-baked bridge; migration pixel comparisons must treat that as a
 deliberate lighting-model change, not a regression.
 
-Actors sharing a figure can later be instanced by indexing an actor record and
-that actor's part-palette base. Instancing is desirable, but a first prepared
-figure proof may issue one draw per actor or figure/material group while the
-static-geometry and transform contracts settle. Do not couple correctness of
-the prepared renderer contract to the first batching strategy.
+Actors sharing a compatible figure are instanced by indexing an actor record
+and that actor's part-palette base. The whole static vertex/index mesh is
+shared; every vertex's `part_id` selects the correct matrix inside that
+instance's palette. Figure, LOD, material/alpha pass, and pipeline state remain
+valid bucket boundaries. Animation phase is not a bucket boundary because each
+instance indexes an independently evaluated palette.
 
 ### Presentation-rate pose evaluation
 
@@ -1150,15 +1182,84 @@ Startup-prepared figures and LOD solve different costs:
 - LOD reduces the remaining GPU vertex processing, raster pressure, and
   potentially material cost for small projected actors.
 
-As an illustration only, the current actor vertex is 40 bytes. Re-uploading
-the canonical Chicken's 336 preview vertices would be about 13 KB before
-indices, while 14 rigid 3x4 `f32` part matrices are 672 bytes. Its archived
-rounded source would have required 2,209 preview vertices and 21 matrices.
-The future prepared vertex layout and actor payload will differ, but the order
-of magnitude explains both the prepared-path and box-only-authoring gains.
+The current prepared vertex is 56 bytes. Re-uploading the canonical Chicken's
+336 preview vertices would be about 18 KB before indices, while 14 rigid 3x4
+`f32` part matrices are 672 bytes and the affine actor record is 64 bytes.
+Its archived rounded source would have required 2,209 preview vertices and 21
+matrices. The order of magnitude explains both the prepared-path and
+box-only-authoring gains.
 
 GPU part transforms do not reduce the number of vertices the GPU executes.
 That is why LOD remains valuable after CPU/upload work is removed.
+
+### 2026-07-28 production-path measurement
+
+`actor_render_perf` is a deterministic offscreen renderer scene rather than a
+simulation/spawn benchmark. It builds a visible actor grid, assigns stable
+entity identity only to the prepared A/B, advances or freezes actor
+presentation input, waits for each GPU submission, and reports renderer
+counts, timing, uploads, and memory. The packaged entry points are:
+
+```bash
+pnpm native:actor-render:smoke
+pnpm native:actor-render:perf
+```
+
+Five clean release runs on commit `41fc9fae`, Linux 7.0, Ryzen AI 9 365 with
+Radeon 880M, measured:
+
+| Workload | Path | Avg / p95 frame | Mutable bytes | Legacy upload / frame |
+|---|---|---:|---:|---:|
+| 10 animated cows | prepared | `0.208 / 0.262ms` | `1,391,776` | `0` |
+| 10 animated cows | legacy | `3.302 / 3.525ms` | `36,425,472` | `7,838,400` |
+| 100 animated cows | prepared | `0.837 / 1.015ms` | `1,767,616` | `0` |
+| 100 animated cows | legacy | `31.782 / 32.192ms` | `403,484,800` | `78,384,000` |
+
+The prepared route is `15.9x` faster at the ten-actor product count and
+`38.0x` faster at 100 actors in this isolation lane. It holds one immutable
+copy of each prepared figure and does not rebuild or upload figure topology per
+frame.
+
+At 1,000 prepared cows, animated input measured `9.184 / 9.656ms`
+average/p95, with 120,000 pose evaluations and one draw per actor per frame.
+Stationary input measured `1.290 / 1.369ms`; exact-input reuse produced
+120,000 reuse hits and zero pose evaluations, palette writes, or actor writes.
+The remaining stationary slope is primarily renderer submission/GPU work from
+1,000 non-instanced draws. This supports instancing as the next high-count
+experiment, but does not establish that it is needed for the ordinary
+ten-actor Quest workload.
+
+Commit `32fcffaf` then ran that bounded experiment with the same host and
+five-run 120/30-frame protocol:
+
+| Animated cows | Instanced avg / p95 | Avg-run range | Pose evaluation | Upload | Device poll | Draws / frame |
+|---:|---:|---:|---:|---:|---:|---:|
+| 10 | `0.145 / 0.189ms` | `0.119–0.202ms` | `0.015ms` | `0.006ms` | `0.094ms` | `1` |
+| 100 | `0.373 / 0.428ms` | `0.362–0.397ms` | `0.146ms` | `0.026ms` | `0.170ms` | `1` |
+| 1,000 | `1.939 / 2.594ms` | `1.656–2.336ms` | `1.150ms` | `0.195ms` | `0.570ms` | `1` |
+| 2,000 | `4.135 / 4.659ms` | `3.942–4.430ms` | `2.137ms` | `0.332ms` | `1.640ms` | `1` |
+
+At 1,000 cows, instancing is `4.74x` faster on average than the immediately
+preceding prepared path. The matching stationary control is
+`0.531/0.569ms`, down from `1.290/1.369ms`, with zero pose or upload work and
+one draw. Independently phased animation remains valid because the vertex
+`part_id` combines with the per-instance palette base; actors do not need to
+share an exact animation step.
+
+One thousand animated cows now write one `1,056,768`-byte affine palette
+texture region plus one `64,000`-byte actor instance buffer per frame. The old
+route issued 1,000 writes of each kind totaling `1,408,000` and `80,000`
+bytes. Pose evaluation is now the largest stable preparation component at
+approximately `1.15ms/1,000` cows. The measured experiment order and acceptance
+gates now live in
+[`actor-rendering-performance.md`](actor-rendering-performance.md); this topic
+retains the architectural requirement that GPU palette expansion and
+projected-size actor LOD remain separate from draw-call batching.
+
+The isolated lane has no terrain, server/client simulation, OpenXR runtime, or
+swapchain presentation. Its synchronous GPU wait also differs from production
+frame overlap. Use it for route attribution, scaling, and optimization
+crossover; use the physical Quest RD5 composed orbit for the product gate.
 
 ### Thousand-chicken design point
 
@@ -1175,11 +1276,12 @@ workload examples, not supported-cadence limits. GPU pose expansion can remove
 most of that upload, while generated LODs, frustum/occlusion admission, and
 conservative distance policies reduce the much larger geometry cost.
 
-Instancing remains valuable despite animation because actors share immutable
+Implemented instancing works despite animation because actors share immutable
 geometry and clip data while indexing different actor records and palette
-bases. It only batches compatible figure, LOD, material, alpha/pass, and
-pipeline state, so the implementation should report bucket fragmentation
-rather than promising one literal draw for every crowd.
+bases. It batches compatible figure, LOD, material, alpha/pass, and pipeline
+state, and the implementation reports bucket fragmentation, real draw count,
+drawn instances, and maximum instances per draw rather than promising one
+literal draw for every heterogeneous crowd.
 
 The target is adaptive rather than GPU-only: CPU palettes should remain the
 simple exact path for ordinary populations and unsupported devices; shared
@@ -1222,6 +1324,11 @@ rendering subsystem:
 - **Batch fragmentation:** figures, LODs, materials, transparency, and passes
   split instance buckets. Diagnostics must expose real draws and instances;
   correctness must not depend on one-draw crowd assumptions.
+- **Sparse mutation:** the current all-animated fast path rewrites one
+  contiguous actor region and one contiguous palette region whenever any
+  instance in a figure bucket changes. Fully unchanged buckets write nothing.
+  A measured mostly-stationary crowd may justify bounded partial range writes,
+  but many tiny queue writes must not replace the two-write dense path.
 - **GPU overhead and limits:** compute dispatches, storage buffers, barriers,
   alignment, frames in flight, and browser/mobile limits can make a crowd path
   slower for small scenes. Capability checks and the CPU evaluator remain
@@ -1315,21 +1422,26 @@ regenerable.
 
 ## Relationship To The Immediate Actor-Cache Issue
 
-The following bounded cleanup remains useful regardless of the prepared path:
+The prepared path now owns every stable entity figure for which preparation
+succeeds. Its static topology and world-local actor records bypass the
+whole-mesh fallback invalidation entirely, and exact unchanged input also
+bypasses pose evaluation and GPU writes.
+
+The following bounded cleanup remains useful for the narrower fallback:
 
 1. distinguish topology, vertex, and index updates in diagnostics;
 2. stop rebuilding and uploading unchanged indices on pose-only changes; and
 3. preserve allocation-free unchanged frames and first-eye/second-eye reuse.
 
-Stable per-actor CPU vertex spans may remain valuable for legacy cows, debug
-cubes, item actors, unsupported figure features, and an incremental fallback.
-They should not be treated as a prerequisite for prepared Asset Lab figures,
-and the project should avoid a large CPU span-cache campaign before deciding
-the prepared-figure contract.
+Stable per-actor CPU vertex spans may remain valuable for player-specific
+rendering, debug cubes, item actors, unsupported figure features, and an
+incremental fallback. They are not a prerequisite for prepared Asset Lab
+figures. The project should retain the closed Phase 0 ceiling unless physical
+measurements show that one of those remaining shapes is product-significant.
 
-The existing `ActorMeshCache` remains the production path until a prepared
-path passes visual and performance gates. A migration must allow old and new
-actor shapes to coexist without merging mutable caches across drawable worlds.
+`ActorMeshCache` is now an explicit coexistence fallback, not the ordinary cow
+route. Old and new actor shapes continue to coexist without merging mutable
+caches across drawable worlds.
 
 ## Staged Implementation Campaign
 
@@ -1402,15 +1514,15 @@ optional quality tier. Neither choice changes the persistence decision.
 - stable presentation identity now reaches renderer-neutral actor instances,
   and world-local presentation state derives continuous travel phase from
   interpolated movement instead of authoritative update steps;
-- chicken and mannequin now use asset/device-scoped immutable prepared
-  geometry with stable-ID world-local model/light/palette records, while the
-  same frame can retain legacy actors;
+- every stable entity figure with a prepared resource now uses
+  asset/device-scoped immutable geometry with stable-ID world-local
+  model/light/palette records, while the same frame can retain legacy actors;
 - direct, placed, clipped, per-eye, and multiview-aware paths are implemented;
   native mono/stereo composition pixels, no-second-eye-pose-write counters,
   the identical production browser WebGPU fixture, SQLite restart, semantic
   replacement, and the explicit thousand-chicken baseline pass; and
 - retain `ActorMeshCache` as an explicit fallback for unsupported figure,
-  debug, and item actors.
+  player-specific, anonymous, debug, and item actors.
 
 ### Box-only canonical migration (complete)
 
@@ -1424,7 +1536,8 @@ optional quality tier. Neither choice changes the persistence decision.
 
 ### Phase 4: instancing and LOD
 
-- batch actors sharing compatible figure/material/LOD state;
+- completed: batch actors sharing compatible figure/material/pass state while
+  retaining independent per-actor palettes and report bucket fragmentation;
 - generate and review bounded primitive LOD variants;
 - implement projected-size selection, hysteresis, and bounded residency;
 - validate movement, animation, composition, and XR eye consistency through
@@ -1587,13 +1700,16 @@ Closed 2026-07-16 during the pre-landing design review.
    upload? WebGPU compatibility mode permits zero vertex-stage storage
    buffers, so browser reach likely requires a uniform- or texture-backed
    fallback regardless of desktop measurement.
-6. **Batching after the proof.** When does the one-draw-per-actor proof become
-   per-figure instancing and material/LOD buckets?
+6. **Batching after the proof.** The reproducible crowd lane now shows a
+   one-draw-per-actor stationary slope and a `9.184ms` 1,000-cow animated
+   frame on the current host. Does physical Quest or a lower actor-count
+   crossover justify per-figure instancing before figure LOD?
 7. **LOD generation.** Fixed compiler tiers, authored overrides, screen-error
    targets, or a combination? Which variants stay resident?
-8. **Legacy actors.** When do remaining debug/item shapes and newly promoted
-   canonical figures join the prepared path, and how long does the CPU-baked
-   fallback remain supported?
+8. **Legacy actors.** Stable prepared-capable entity figures now join
+   automatically. How long do player-specific identities, anonymous actors,
+   debug/item shapes, and genuinely unsupported figures require the CPU-baked
+   fallback?
 9. **Animation curves.** Are linear key tracks plus quaternion interpolation
    sufficient, or do authored tangents/interpolation modes become necessary
    to bound smooth-motion error?
@@ -1680,11 +1796,14 @@ Moose/American Bison/Gemsbok Oryx, Donkey/Mallard Duck/Wild Turkey,
 Red Panda/Meerkat/Hedgehog, Beaver/Capybara/Platypus,
 Porcupine/Echidna/Armadillo, Koala/Wombat/Tasmanian Devil, and
 Bat/Opossum/Sloth content batches extend the canonical authoring roster to 71
-without changing the promoted runtime set. Instancing is now the strongest
-independent performance candidate; box-part LOD and a measured sampled/GPU
-pose path remain separate follow-ups.
+without changing the promoted runtime set.
+
+The immediate Quest gate, sparse/dense upload experiment, GPU palette-expansion
+criteria, actor LOD performance gate, and fallback cleanup order are owned by
+[`actor-rendering-performance.md`](actor-rendering-performance.md). Update that
+topic when measurements change the order; do not rebuild the actor performance
+queue in this compiler/architecture topic.
 
 Do not add a persisted compiled format or revive exact curved tessellation.
-The existing actor-record boundary keeps later instancing, LOD, and GPU crowd
-evaluation additive, while the real high-count fixture should establish their
-crossover.
+The actor-record and palette-texture boundaries keep later LOD and GPU crowd
+evaluation additive, while the high-count fixture establishes their crossover.

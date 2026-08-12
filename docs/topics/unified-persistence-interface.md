@@ -474,6 +474,22 @@ The reusable asynchronous record-executor middle is complete. The shared
 coordinator drives IndexedDB directly through owned requests/completions, and
 the web memory-mirror/external-load/dirty-record protocol no longer exists.
 
+Tactical
+[`275`](../tactical/275-bounded-persistence-streaming.md) hardened the live
+coordinator after sustained Quest travel exposed a distance-proportional
+retention risk. The native request transport and each semantic lane now have
+explicit admission limits; durable work backpressures without loss,
+discardable generated-cache work sheds beyond count/byte caps, and one pending
+write advances after at most one incoming request. Scheduler interest loss
+cancels queued chunk/entity reads, late results are discarded, and the browser
+record mirror releases decoded payloads with holder residency. Shared runner
+diagnostics publish current/high-water counts, estimated owned bytes,
+cancellations, pressure skips, and retained browser-record bytes.
+
+These limits do not choose the on-disk clean-generated policy. A later
+storage-optimized or dirty-only mode may reduce Quest world size while
+retaining the same queue, cancellation, fairness, and durable-write rules.
+
 ## Implementation Assessment
 
 The result confirms the design was feasible without converting gameplay to
@@ -541,6 +557,11 @@ Run one behavioral suite against every backend that claims the capability:
 - read-your-writes before physical completion;
 - same-key revision precedence and superseded acknowledgements;
 - cache/durable scheduling and bounded coalescing;
+- lane count/byte bounds under a blocked executor, durable backpressure without
+  loss, cache-pressure shedding, and fair write progress under continuous
+  foreground traffic;
+- cancellation before physical IO where possible, discard of unavoidable late
+  completions, and residency-linked decoded-record cache release;
 - atomic batch success and injected mid-batch failure;
 - flush as a barrier;
 - close with outstanding work and post-close rejection;

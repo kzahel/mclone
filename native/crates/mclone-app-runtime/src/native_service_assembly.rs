@@ -443,6 +443,25 @@ impl std::fmt::Debug for NativeDeferredDropService {
     }
 }
 
+fn handoff_deferred_chunk_drops(
+    client: &mut ClientRuntime,
+    service: &mut dyn DeferredDropService,
+    item_budget: usize,
+) -> usize {
+    let mut handed_off_items = 0_usize;
+    loop {
+        if handed_off_items >= item_budget {
+            break;
+        }
+        let Some((snapshot, item_count)) = client.take_deferred_chunk_drop_snapshot() else {
+            break;
+        };
+        handed_off_items = handed_off_items.saturating_add(item_count);
+        let _ = service.enqueue(snapshot, item_count);
+    }
+    handed_off_items
+}
+
 /// Startup readiness gate shared by every native startup lane (docs/tactical/167).
 ///
 /// `Playable` is the default for desktop, Android, and XR: startup differences
@@ -1117,19 +1136,11 @@ impl<R: IntegratedServerRunner> LocalIntegratedSceneRuntime<R> {
     }
 
     fn handoff_deferred_client_chunk_drops(&mut self) -> usize {
-        let mut handed_off_items = 0;
-        loop {
-            if handed_off_items >= DEFAULT_CLIENT_DEFERRED_CHUNK_DROP_ITEM_BUDGET {
-                break;
-            }
-            let Some((snapshot, item_count)) = self.core.take_deferred_client_chunk_drop_snapshot()
-            else {
-                break;
-            };
-            handed_off_items += item_count;
-            self.deferred_chunk_drops.enqueue(snapshot, item_count);
-        }
-        handed_off_items
+        handoff_deferred_chunk_drops(
+            self.core.client_mut(),
+            self.deferred_chunk_drops.as_mut(),
+            DEFAULT_CLIENT_DEFERRED_CHUNK_DROP_ITEM_BUDGET,
+        )
     }
 
     fn deferred_client_chunk_drop_backlog_items(&self) -> usize {
@@ -1450,8 +1461,25 @@ impl<R: IntegratedServerRunner> LocalIntegratedSceneRuntime<R> {
             }
             if Instant::now() >= deadline {
                 bail!(
-                    "timed out waiting for local integrated worldgen jobs after {:.3}s",
-                    timeout.as_secs_f64()
+                    "timed out waiting for local integrated worldgen jobs after {:.3}s \
+                     (pending_jobs={}, pending_publications={}, promotion={}/{}/{}, \
+                     light_demand={}, light_mailbox={}, light_tickets={}, completed_light={}, \
+                     loaded={}, visible={}, cancelled={}, stale={}, worker_cancelled={})",
+                    timeout.as_secs_f64(),
+                    diagnostics.pending_jobs,
+                    diagnostics.pending_publications,
+                    diagnostics.scheduler_metrics.player_promotion_queued,
+                    diagnostics.scheduler_metrics.player_promotion_active,
+                    diagnostics.scheduler_metrics.player_promotion_desired,
+                    diagnostics.scheduler_metrics.light_demand_queued,
+                    diagnostics.light_status_mailbox_pending_statuses,
+                    diagnostics.scheduler_metrics.light_ticket_count,
+                    diagnostics.scheduler_metrics.completed_light_statuses,
+                    diagnostics.scheduler_metrics.loaded_snapshot_chunks,
+                    diagnostics.scheduler_metrics.client_visible_chunks,
+                    diagnostics.scheduler_metrics.light_demands_cancelled,
+                    diagnostics.scheduler_metrics.light_statuses_stale,
+                    diagnostics.light_status_mailbox_metrics.cancelled_statuses,
                 );
             }
             if diagnostics.update_queue_depth == 0
@@ -3526,6 +3554,34 @@ mod tests {
         fn reconnect(&mut self) -> Result<()> {
             match *self {}
         }
+    }
+
+    #[test]
+    fn deferred_drop_handoff_outpaces_an_unload_burst() {
+        let mut client = ClientRuntime::new(mclone_client::ClientHost::LocalIntegrated);
+        let positions = (0..64)
+            .map(|chunk_x| ChunkPos::new(chunk_x, 0))
+            .collect::<Vec<_>>();
+        for pos in &positions {
+            client.apply_update(ServerUpdate::ChunkSnapshot(stone_test_snapshot(*pos)));
+        }
+        for pos in &positions {
+            client.apply_update(ServerUpdate::ChunkUnload { pos: *pos });
+        }
+        assert_eq!(client.deferred_chunk_drop_item_count(), 128);
+
+        let mut service =
+            crate::deferred_drop::BoundedDeferredDropQueue::new(DEFAULT_DEFERRED_DROP_MAX_ITEMS);
+        let handed_off = handoff_deferred_chunk_drops(
+            &mut client,
+            &mut service,
+            DEFAULT_CLIENT_DEFERRED_CHUNK_DROP_ITEM_BUDGET,
+        );
+
+        assert_eq!(handed_off, 128);
+        assert_eq!(client.deferred_chunk_drop_item_count(), 0);
+        assert_eq!(service.backlog().pending_items, 128);
+        assert_eq!(service.backlog().inline_fallback_items, 0);
     }
 
     #[test]

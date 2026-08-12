@@ -10,6 +10,12 @@ the first concrete Rust slice is
 Presentation-side point lights and dynamic shadows are a separate concern in
 [`dynamic-point-lights.md`](dynamic-point-lights.md); they must not distort this
 stored-light parity contract.
+The sustained-travel admission, cancellation, Light-ticket, and memory-bound
+campaign is now a focused sibling topic in
+[`chunk-lighting-admission-and-backpressure.md`](chunk-lighting-admission-and-backpressure.md);
+Tactical
+[`279`](../tactical/279-chunk-lighting-admission-and-backpressure.md) owns its
+implemented P0 lifecycle and physical Quest acceptance.
 This topic records where the subsystem stands now, how the next slices should
 compose, and which Java/Rust boundaries to preserve.
 
@@ -76,6 +82,14 @@ Landed pieces:
   `LevelLightEngine` in `mclone-server/src/light_world.rs`, so subsequent light
   batches reuse retained block facts and light storage instead of rebuilding the
   whole raw light world.
+- Cold Player promotion is now keyed and limited to four active positions.
+  Compact pending Light demand follows current ticket priority, every request
+  carries an exact generation/revision token and temporary Light ticket, and
+  cancellation/unload control is observed before later target compute.
+- Overlapping targets share immutable raw inputs. The Light mailbox covers
+  request, active, and undrained completion ownership with hard limits of 18
+  statuses and 64 MiB, while full completed scheduler jobs are pruned behind a
+  fixed 64-entry diagnostic ring.
 - Loaded `ChunkStatus::Light` snapshots hydrate persisted sky/block light bytes
   through `LevelLightEngine` before scheduler publication.
 - Native client and integrated-server startup now expose a diagnostic lighting
@@ -118,10 +132,14 @@ Landed pieces:
 
 Known gaps:
 
-- The native `LightStatusMailbox` is a first threaded/batched boundary, not a
-  full `ThreadedLevelLightEngine` port: no Java-shaped task prioritization,
-  cancellation, light ticket release, unload/release policy, or live update
-  queue exists yet.
+- The native `LightStatusMailbox` now has vanilla-shaped upstream admission,
+  keyed priority, cancellation, Light-ticket lifetime, unload control, shared
+  inputs, and stronger explicit memory bounds. It is still not a complete
+  `ThreadedLevelLightEngine` port: the worker has no general live light-update
+  task queue, and the retained Rust state is not yet Java's shared
+  `ChunkAccess`/`ChunkHolder` graph. The 20-minute RD7 8x Quest lane is
+  memory-clean, so solver parity and measured sky-graph throughput again take
+  priority over generic queue-capacity work.
 - Desktop startup still waits for the initial light-ready view before opening
   the window in the current native path. This avoids a sky-only first frame but
   leaves launch latency high when lighting is enabled.
@@ -161,7 +179,12 @@ closed the broad chunk-pipeline capacity pass on 2026-07-08 and handed the
 remaining fresh-startup ceiling back to lighting. The pipeline valves that could
 hide light cost have been split or fixed: retained-light replacement rechecks
 now only enqueue opacity/emission changes, publication grants are cost-derived,
-and completed light publication backlog drains under the elapsed grant. The
+completed light publication backlog drains under the elapsed grant, and
+Tactical [`279`](../tactical/279-chunk-lighting-admission-and-backpressure.md)
+now prevents obsolete continuous-travel demand from becoming an unbounded
+copied-input queue. Its physical 20-minute RD7 flight sustained matched
+Features/Light publication at about `26.46/s`, bounded Light ownership below
+10.7 MiB, and converged the complete view after stopping. The
 current server-only boundary profile still shows about `7.7ms` light compute per
 status, with `run_updates` around `6.1ms` and sky updates around `5.8ms` per
 status (`73-74%` of light compute). Batch `5` versus `9` does not materially

@@ -903,6 +903,37 @@ impl WebSceneHost {
                 report.right_resources.prepared_world.legacy_actor_count,
             ),
             (
+                "leftPreparedRecords",
+                report.left_resources.prepared_world.actor_record_count,
+            ),
+            (
+                "leftPreparedActors",
+                report.left_resources.prepared_world.prepared_actor_count,
+            ),
+            (
+                "leftLegacyActors",
+                report.left_resources.prepared_world.legacy_actor_count,
+            ),
+            (
+                "leftPreparedPoseEvaluations",
+                report.left_resources.prepared_world.pose_evaluation_count as usize,
+            ),
+            (
+                "leftPreparedPaletteWrites",
+                report.left_resources.prepared_world.palette_write_count as usize,
+            ),
+            (
+                "leftPreparedDraws",
+                report.left_resources.prepared_world.draw_count as usize,
+            ),
+            (
+                "leftUnchangedActorReuses",
+                report
+                    .left_resources
+                    .prepared_world
+                    .unchanged_actor_reuse_count as usize,
+            ),
+            (
                 "rightPreparedPoseEvaluations",
                 report.right_resources.prepared_world.pose_evaluation_count as usize,
             ),

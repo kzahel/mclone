@@ -85,6 +85,8 @@ Worldgen, rendering, and subsystem docs:
 - [`docs/creatures.md`](docs/creatures.md) — overworld creature spawning architecture
 - [`docs/topics/habitat-driven-creature-ecology.md`](docs/topics/habitat-driven-creature-ecology.md) — terrain/creature co-design, habitats, persistence, and mechanics-led content promotion
 - [`docs/topics/performance.md`](docs/topics/performance.md) — high-priority known performance issues and current pickup queue
+- [`docs/topics/actor-rendering-performance.md`](docs/topics/actor-rendering-performance.md) — actor rendering baselines, memory tradeoffs, and future optimization queue
+- [`docs/topics/xr-render-path-switching.md`](docs/topics/xr-render-path-switching.md) — live dual-eye, array per-eye, and multiview selection with one resident XR target family
 - [`docs/performance-records.md`](docs/performance-records.md) — native benchmark baselines
 - [`docs/assets-plan.md`](docs/assets-plan.md) — local Minecraft reference-asset extraction
 - [`docs/topics/asset-pack-profiles.md`](docs/topics/asset-pack-profiles.md) — first-party asset packs, provenance, and remaining distribution boundary

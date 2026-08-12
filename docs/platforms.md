@@ -20,7 +20,7 @@ offscreen flat and headset-free stereo validation hosts:
 | Target | Status | Validation shape |
 |---|---|---|
 | Desktop flat | first-class desktop target | `native/apps/mclone-native-client` owns desktop `winit`, surface acquisition/presentation, raw keyboard/mouse/touch translation, frame pacing, and desktop diagnostics. Touch reuses the shared flat menu-contact, gameplay-adapter, HUD, capability, and preference contracts; the SteamOS profile advertises the Deck touchscreen at startup while other desktops discover touch dynamically. Validated with integrated and remote sessions, locomotion, world/actor/UI rendering, persistence, chunk loading/generation, and automated touch contracts. Physical Steam Deck touchscreen acceptance is pending. |
-| Desktop OpenXR | first-class desktop XR target | `mclone-native-client --features xr` owns desktop runtime selection and OpenXR startup. Two run intents share one frame loop: the real `--desktop-xr` verb is a first-class **persistent desktop XR run** (renders the mclone world until you quit, with a 2D companion window carrying status and an OS Close control for a non-headset quit; `--no-window` drops back to headless), while `--xr-clear-smoke` / `--xr-mclone-smoke --frames N` stay the frame-bounded headless CI/liveness gates. Both a companion-window Close and the headset system menu drive one graceful OpenXR shutdown (`tactical/164`). Shared XR crates provide host/session helpers, graphics wrapping, scene alignment, semantic tracked actions, ordinary OS-gamepad merging (Apple GameController on macOS, GilRs on Linux/Windows), controller locomotion, shared world-panel menu/pointer UI, and shared New World / Join Remote scene replacement. Validated with real stereo mclone terrain on Quest 3 through VirtualDesktopXR (Windows VDXR) and the macOS WiVRn USB lane; user headset validation says the shared XR menu works mostly fine. Ordinary-gamepad and post-refactor tracked-controller hardware acceptance plus an automated replacement-menu headset click smoke remain pending. A headset mirror into the companion window is a deferred follow-up (must reuse an existing per-eye/multiview renderer, not a new per-view path). |
+| Desktop OpenXR | first-class desktop XR target | `mclone-native-client --features xr` owns desktop runtime selection and OpenXR startup. Two run intents share one frame loop: the real `--desktop-xr` verb is a first-class **persistent desktop XR run** (renders the mclone world until you quit, with a 2D companion window carrying status and an OS Close control for a non-headset quit; `--no-window` drops back to headless), while `--xr-clear-smoke` / `--xr-mclone-smoke --frames N` stay the frame-bounded headless CI/liveness gates. Both a companion-window Close and the headset system menu drive one graceful OpenXR shutdown (`tactical/164`). Shared XR crates provide host/session helpers, graphics wrapping, scene alignment, semantic tracked actions, ordinary OS-gamepad merging (Apple GameController on macOS, GilRs on Linux/Windows), controller locomotion, shared world-panel menu/pointer UI, and shared New World / Join Remote scene replacement. Validated with real stereo mclone terrain on Quest 3 through VirtualDesktopXR (Windows VDXR), macOS WiVRn USB, and Linux WiVRn USB through the native/Flatpak headless launcher; [`topics/desktop-openxr-validation.md`](topics/desktop-openxr-validation.md) owns the runtime receipts and remaining host checks. User headset validation says the shared XR menu works mostly fine. Ordinary-gamepad and post-refactor tracked-controller hardware acceptance plus an automated replacement-menu headset click smoke remain pending. A headset mirror into the companion window is a deferred follow-up (must reuse an existing per-eye/multiview renderer, not a new per-view path). |
 | Android XR / Quest standalone | first-class standalone XR target | `native/apps/mclone-android-xr-client` plus [`../android-xr/`](../android-xr/) own Quest package, Android OpenXR loader, activity glue, asset staging, launch-scoped remote-address argv, and validation. Embedded first-party packs stage under writable internal app data; external app data is a read-only discovery root for ADB-installed reference assets. The activity routes ordinary gamepad device/key/axis facts from the same Android bridge as flat Android beside semantic tracked OpenXR actions; the shared scene retains tracked/XR-only extensions and supplies pose-less head-gaze interaction fallback. Validated with all three packs, stereo terrain and actors, the pre-refactor tracked-controller path, basic locomotion, remote-dedicated play over direct LAN and through the `--adb-reverse` USB tunnel path, plus launch-scoped in-headset New World replacement smoke. Post-refactor tracked and ordinary-controller hardware acceptance plus an automated controller-click replacement-menu smoke remain pending. |
 | Flat Android | first-class mobile target | `native/apps/mclone-android-client` plus [`../android/`](../android/) own the non-XR `NativeActivity` subclass, Vulkan surface/lifecycle, startup properties, raw touch translation, and source-aware gamepad collection over the shared Mono scene host. Standard controller keys/axes route through the shared semantic session without entering `winit` as touch. Validated on the `jstorrent-tablet` AVD with real terrain/HUD pixels, shared touch movement/look plus sneak, gamepad bridge/JNI packaging, populated frame-pipeline overlay, New World replacement, and background/foreground surface rebuild. Physical controller acceptance remains open. The three sentinel lanes are `native:android:avd-smoke`, `:avd-touch-smoke`, and `:avd-session-smoke`. |
 | Web/WASM | first-class browser target | `native/apps/mclone-web-client` builds for `wasm32-unknown-unknown` and drives the shared `McloneSceneHost` through a thin rAF/canvas/DOM rim. Local worker, IndexedDB local-world, and remote WebSocket modes share that owner while browser workers, promises, WebGPU targets, mobile controls, and deployment remain platform glue. The full behavioral matrix is documented in [`native-web.md`](native-web.md). |
@@ -44,12 +44,18 @@ Additional host lane:
 | Dedicated server | active | `native/apps/mclone-dedicated-server` owns listener/CLI/process lifecycle around the shared authoritative host. TCP and direct WebSocket peers share one registry, autonomous cadence, and per-peer 64-frame / 64 MiB outbound policy. Transient and persistent SQLite-backed worlds are supported. It is not one of the five client display platforms, but it is part of the shared runtime contract. |
 
 The shared warm-world diagnostic is validated in desktop flat and synthetic
-per-eye stereo, including A-to-B-to-A selection, no-request performance, paired
-process cost, persistence, and asset/device invalidation. Full-frame multiview
-pipelines are implemented and eagerly materialized when supported, but the
-current macOS adapter does not expose `wgpu::Features::MULTIVIEW` and no Quest
-is attached. That execution receipt remains open; it is not replaced by the
-headset-free stereo lane.
+per-eye stereo, including A-to-B-to-A selection, no-request performance,
+paired process cost, persistence, and asset/device invalidation. Both OpenXR
+hosts now expose the shared transient
+`Dual per-eye | Array per-eye | Array multiview` Graphics control when their
+graphics/runtime capabilities support it. Quest standalone and Linux
+Vulkan/WiVRn completed
+`dual -> array-per-eye -> multiview -> array-per-eye -> dual` in one live
+world/session with one steady-state target family and zero outstanding images
+at every topology commit. Dual per-eye remains the default from the matched
+Quest RD5 result. Physical Metal, foveation, and lifecycle-recovery acceptance
+remain open in
+[`topics/xr-render-path-switching.md`](topics/xr-render-path-switching.md).
 
 The first live-diorama composition uses the same offscreen flat and synthetic
 stereo hosts. `pnpm native:live-diorama:smoke` rebuilds persistent authored A/B
@@ -399,8 +405,14 @@ pnpm native:xr-emulation:smoke
 pnpm native:xr:check
 pnpm native:xr:windows:smoke:connected
 pnpm native:xr:windows:mclone:connected
+pnpm native:xr:linux:wivrn:smoke
+pnpm native:xr:linux:wivrn:mclone
 # Real persistent desktop XR run (companion window; quit via window Close or headset menu)
 pnpm native:xr:mac:wivrn:desktop     # macOS WiVRn USB
+pnpm native:xr:linux:wivrn:desktop   # Linux WiVRn USB
+# Live target-family/mode cycle on WiVRn
+scripts/start-xr.sh --release --wivrn-usb --smoke mclone \
+  --xr-debug-ui graphics --xr-render-mode-cycle --frames 1000
 # scripts\start-desktop-xr.bat        # Windows VDXR (pnpm native:xr:windows:interactive)
 
 # Flat Android, SDK/AVD required
@@ -414,6 +426,7 @@ pnpm native:android:avd-session-smoke -- --skip-build
 ~/code/quest-testbed/bin/quest doctor
 pnpm native:android-xr:apk
 pnpm native:android-xr:validate --skip-build --view-pose 0,120,-96,180 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 2 --day-time 6000 --freeze-time
+pnpm native:android-xr:validate --skip-build --xr-debug-ui graphics --xr-render-mode-cycle
 MCLONE_ANDROID_XR_WAIT_SECONDS=60 pnpm native:android-xr:session-smoke
 pnpm native:android-xr:terrain-multiview-proof
 MCLONE_ANDROID_XR_WAIT_SECONDS=60 pnpm native:android-xr:validate --debug --skip-build --adb-reverse --start-server --view-pose 0,120,-96,180

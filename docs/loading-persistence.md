@@ -336,6 +336,18 @@ That means persisted light is currently not authoritative for host reload. A lig
 - Host block mutations mark the owning chunk dirty and mark published chunks for replacement snapshot publication.
 - Dirty published chunks are saved when flushed.
 - Dirty chunks are saved before eviction; clean eviction still only records adapter-local `lastEvictedAtMs`.
+- Native persistence admission is now bounded by lane: 256 foreground
+  requests, 64 durable records / 64 MiB with backpressure, and 64 discardable
+  cache records / 32 MiB with pressure skips. The storage worker advances one
+  write after at most one request, so continuous load traffic cannot starve
+  generated-cache or durable writes.
+- Interest reconciliation cancels obsolete chunk/entity reads before the
+  budgeted holder-unload pass. Late in-flight results are discarded, and the
+  browser record executor releases decoded full-record payloads when holder
+  residency ends.
+- Shared runner diagnostics expose current and high-water request counts,
+  estimated owned bytes, cancellations, cache-pressure skips, and retained
+  browser-record bytes.
 
 There is still no full vanilla `isUnsaved` equivalent across all future gameplay state. The current dirty state covers host block mutations and liquid-driven scheduled updates. Generated-clean chunks still use the same adapter-level `saveChunk(...)` call, but the host code now distinguishes cache writes from dirty durable saves before calling the adapter.
 

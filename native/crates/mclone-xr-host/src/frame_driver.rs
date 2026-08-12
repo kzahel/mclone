@@ -188,6 +188,23 @@ where
         Ok(())
     }
 
+    /// Submit two physical-eye projection views backed by layers zero and one
+    /// of one stereo-array swapchain.
+    ///
+    /// The compositor submission is identical for array-per-eye and
+    /// array-multiview rendering; only the render-pass encoding differs.
+    pub fn submit_stereo_array_projection<S>(
+        &mut self,
+        stage: &xr::Space,
+        stereo_views: XrStereoFrameViews,
+        stereo_target: &S,
+    ) -> Result<()>
+    where
+        S: XrStereoSwapchain<G> + ?Sized,
+    {
+        self.submit_multiview_projection(stage, stereo_views, stereo_target)
+    }
+
     fn ensure_not_ended(&self) -> Result<()> {
         if self.ended {
             bail!("OpenXR frame was submitted more than once");

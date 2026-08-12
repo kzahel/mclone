@@ -62,12 +62,27 @@ cross-platform proof was completed and deployed on 2026-07-25 by Tactical
 [`249`](../tactical/249-cross-platform-procedural-horizon-proof.md). Shared
 toroidal planning, a ten-level fixed-budget renderer, native tree proxies, and
 one Rust terrain-view engine now run through Explorer, Terrain Lab, and the
-live game. Android and XR performance promotion remains a later phase.
-Product scope and platform hosting are independent: the small
+opt-in live game on native and browser hosts. Android and XR promotion are now
+implemented; physical flat-Android evidence remains open. Product scope and
+platform hosting are independent: the small
 Explorer and full game may both run in the browser, while the same terrain
 system remains usable on desktop, Android, and XR. Tactical
 [`245`](../tactical/245-retire-chunk-far-lod-runtime.md) remains the completed
 removal boundary for the rejected chunk-based Far LOD system. Tactical
+[`274`](../tactical/274-all-client-distant-terrain-control.md) now owns the
+experimental all-client Graphics control, runtime preference, and default
+per-eye XR projection reach. Full-frame multiview terrain and vegetation are
+now implemented and physically accepted on Quest 3 standalone plus Linux
+Vulkan/WiVRn. The live mode remains an experimental diagnostic choice rather
+than the default because the matched Quest RD5 composed workload regresses on
+GPU.
+Focused coordinating Tactical
+[`280`](../tactical/280-xr-multiview-render-path-workstream.md) now owns
+procedural-horizon multiview, safe live XR path selection, interactive
+regression coverage, and the final disposition. Tactical
+[`278`](../tactical/278-quest-procedural-horizon-multiview.md) remains its
+renderer and Quest A/B child.
+Tactical
 [`247`](../tactical/247-standalone-world-explorer-foundation.md) supplied the
 small native proof host and shared navigation boundary for the first ring; it
 deliberately implemented no clipmap residency.
@@ -137,18 +152,21 @@ fixed low-angle review site. This is the PH-3 reusable-consumer checkpoint;
 hosted Human Review 1 accepted it on 2026-07-27. PH-3 is complete, PH-4
 shared terrain-view engine extraction plus full-game scene adoption is active
 in Tactical
-[`269`](../tactical/269-shared-terrain-engine-scene-adoption.md), and
-Android/XR performance acceptance remains later. PH-4 now has an implemented
-ordinary scene path: a source-qualified live adapter derives exact coverage
-from the active draw store's traversal-ready columns, exact opaque/cutout
-terrain establishes the ordinary reversed-Z depth, and the shared procedural
-backdrop loads and extends the same target before actors and translucent
-terrain. The
-launch override is `terrainPresentation=composed` /
-`--terrain-presentation composed`, and the live Graphics control switches the
-same shared state between `Exact Only` and `Composed`. Both paths are
-currently restricted to local `mclone-overworld-v1`; exact-only remains
-allocation-free by default.
+[`269`](../tactical/269-shared-terrain-engine-scene-adoption.md). Tactical
+[`274`](../tactical/274-all-client-distant-terrain-control.md) now owns
+Android/XR test promotion and remaining real-device evidence. PH-4 has an
+implemented ordinary scene path: a source-qualified live adapter derives exact
+coverage from the active draw store's traversal-ready columns, exact
+opaque/cutout terrain establishes the ordinary reversed-Z depth, and the
+shared procedural backdrop
+loads and extends the same target before actors and translucent terrain. The
+player-facing opt-in is now `Graphics -> Distant Terrain -> Experimental`,
+with `terrainPresentation=composed` / `--terrain-presentation composed`
+retained as explicit developer inputs. Composition is currently restricted to
+local `mclone-overworld-v1`; exact-only remains allocation-free by default. A
+stored Experimental choice reads `Experimental (Unavailable)` while an
+incompatible world is active instead of silently pretending that composition
+is live.
 Native low-angle and elevated captures show the exact foreground silhouette
 correctly occluding the surrounding procedural terrain. Native thread and
 browser Worker executors now feed the same vegetation coordinator; exact
@@ -178,8 +196,80 @@ sky-colored ring crack or stable tile-lighting grid. The browser reaches the
 same ten-level/stride-one pixels but required roughly two minutes to settle on
 the validation host, so startup and frame cost remain a separate, now
 measurable follow-up rather than justification for an implicit quality fork.
-Browser multi-flat, full-frame multiview composition, Android performance, and
-physical-headset acceptance remain PH-7/PH-8 work.
+Tactical 274 promotes the control to every shared client menu, persists it
+through the native/Android/browser graphics adapters, extends the default
+per-eye XR projection to the same clipmap-derived reach, and adds a
+target-ready synthetic stereo capture. Flat Android and Android XR APKs,
+desktop XR compilation, native flat pixels, synthetic stereo pixels, and
+headed browser pixels pass. A physical Quest 3 per-eye session then confirmed
+that the full-reach horizon is unusually compelling at altitude and remains
+usable through extended 8x-speed travel. The same session exposed a new P0:
+after returning to ground level exact terrain stopped catching up, and Horizon
+OS killed the process at a `6,621,968 kB` footprint (about `3.86 GB` RSS plus
+`2.02 GB` swap). The clipmap remains fixed at 160 resident tiles; the strongest
+source-level candidate is unbounded stale load/full-record cache-save ownership
+in the persistent exact-world mailbox under continuous movement. Tactical 274
+records the device evidence, causal audit, required owned-byte diagnostics,
+and persistent-world Quest soak. Physical flat-Android evidence remains open.
+Tactical
+[`275`](../tactical/275-bounded-persistence-streaming.md) now removes those
+known unbounded mailbox mechanisms through lane bounds, cancellation, fair
+write progress, residency-linked browser cache eviction, and owned-byte
+diagnostics. At that point the device incident remained open pending the same
+persistent Quest travel pattern with exact-center reacquisition and
+memory/queue plateaus; completed scheduler job-history and physical world-file
+growth remained separate audit items.
+Tactical
+[`277`](../tactical/277-quest-procedural-horizon-performance.md) closes that
+device incident and the first headset performance pass. Consecutive
+composed-horizon 8x flights over `6,191` and `10,319` blocks retained an
+exact-ready current center in every sampled frame, held transient persistence
+work below 30 foreground requests / 15 cache requests / about `0.61MiB`, and
+kept Quest RSS in a non-monotonic `1.03–1.22GiB` band.
+
+That closeout remains valid for bounded persistence and the RD5 five-minute
+lane, but it did not prove every shared exact-world owner under a longer RD7
+pressure test. A later planned 20-minute RD7 flight was killed after about
+12 minutes and 25 kiloblocks. The procedural horizon remained fixed-residency;
+a two-minute diagnostic isolated an unbounded copied-input initial-light
+backlog. The incident and vanilla 1.17.1 comparison live in
+[`chunk-lighting-admission-and-backpressure.md`](chunk-lighting-admission-and-backpressure.md),
+and Tactical
+[`279`](../tactical/279-chunk-lighting-admission-and-backpressure.md) now
+closes the shared scheduler/light failure and an adjacent unbounded client
+publication owner found during device acceptance. The final Quest 3 RD7 8x
+flight completed 20 minutes and 41,277 blocks normally, bounded Light
+ownership below 10.7 MiB, held the transient client payload backlog below 549
+items, and reclaimed memory throughout the run. The complete 225-chunk exact
+view converged in `17.772s` after movement stopped, and the pulled 31,960-chunk
+SQLite world passed integrity checking. This confirms that the procedural
+horizon was the feature that exposed the shared exact-world lifecycle defects,
+not their owner, and does not invalidate Tactical 277's horizon render
+measurements or Tactical 278's optional multiview experiment.
+
+The same tactical found a concrete horizon render defect: the per-eye path
+submitted all 160 resident tiles, including tiles covered by finer levels and
+outside the eye frustum. At full quality it ran at `51.91 FPS`, with
+`19.157ms` average app work and `11.906ms` Meta app GPU time. Shared
+covered/frustum culling reduced the stationary draw to 27–28 terrain tiles,
+preserved the accepted synthetic stereo capture byte-for-byte, and restored
+`72.01 FPS` with `3.1–3.2ms` average headroom.
+
+Moving tails remain slightly outside the target: composed RD5 orbit repeats
+run at `71.81 FPS` with `2.2–2.8%` over-period frames, while an 8x five-minute
+flight runs at `71.70 FPS` with `5.6%`. Meta app GPU time is only
+`4.75–5.63ms`; duplicate per-eye horizon encoding was therefore a plausible
+CPU-side target. The completed experiment now gives the procedural horizon
+and proxy vegetation immutable two-eye uniforms, multiview terrain/tree
+pipelines, stereo-union admission, and per-layer visibility masks. In the
+matched ten-actor Quest RD5 orbit, multiview saves about `2.75ms` average
+thread CPU versus dual per-eye but increases app GPU from `7.052ms` to
+`9.244ms` and app work from `14.384ms` to `17.053ms`. It remains available
+for live diagnostics but is not the default XR renderer. Tactical
+[`280`](../tactical/280-xr-multiview-render-path-workstream.md) coordinates
+the complete renderer/live-switch/regression workstream. Child Tactical
+[`278`](../tactical/278-quest-procedural-horizon-multiview.md) owns the true
+two-layer renderer and its alternating Quest comparison.
 Canonical exact generation and live authoritative render sections remain
 different truth-source adapters.
 
@@ -208,8 +298,9 @@ at their shared edge. A dedicated scalar `69x69` normal-height field keeps the
 semantic sample grid at `65x65`; the combined fixed allocation is
 `128,837,720` bytes and does not rely on a larger per-frame dispatch budget.
 The later shared-projection matrix adds `29,440` bytes across fixed terrain and
-tree uniforms; the current World Explorer reports `128,867,704` fixed bytes
-including the exact-coverage resources.
+tree uniforms. The two-eye multiview suffix adds another `44,160` bytes across
+the same fixed terrain and tree uniform set; the current allocation is
+`128,911,864` fixed bytes including the exact-coverage resources.
 Native/offscreen plus headed desktop and Pixel 7 browser closeout passed.
 Side-by-side native/browser review also found three proof-host parity gaps.
 Completed parent Tactical
@@ -818,6 +909,8 @@ milestone. The eventual acceptance set includes:
 - source/profile/world switches with stale completion rejection;
 - ring seams across coast, mountain, water, and forest cases;
 - exact-chunk admission, eviction, edits, and vegetation crossing the mask;
+- persistent-world high-speed travel where stale load/save work is cancelled
+  or bounded, current-center exact terrain reacquires, and RSS plateaus;
 - device loss and surface rebuild;
 - desktop and headed-Wayland browser evidence;
 - flat Android and Android XR scripted build/validation lanes;
@@ -873,6 +966,9 @@ and
 - [`far-lod.md`](far-lod.md) — rejected chunk system and removal boundary.
 - [`lod-native-vegetation.md`](lod-native-vegetation.md) — forest intent,
   stable tree records, exact realization, and procedural summaries.
+- [`procedural-horizon-surface-appearance.md`](procedural-horizon-surface-appearance.md)
+  — material classification, block-atlas texture, biome color, approximate
+  lighting, inland-water presentation, and measured quality boundaries.
 - [`world-view-navigation.md`](world-view-navigation.md) — shared map/orbit
   controls and Explorer-to-play product path.
 - [`tabletop-overview-mode.md`](tabletop-overview-mode.md) — active-world scale

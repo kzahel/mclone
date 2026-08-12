@@ -21,7 +21,7 @@ pub(super) use mclone_worldgen::block::{
     water_block_for_level,
 };
 pub(super) use serde_json::Value;
-pub(super) use std::collections::{BTreeMap, BTreeSet};
+pub(super) use std::collections::BTreeMap;
 pub(super) use std::{cell::RefCell, rc::Rc};
 
 #[derive(Clone, Debug, Default)]

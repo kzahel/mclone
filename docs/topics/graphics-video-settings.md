@@ -204,6 +204,28 @@ Movement, controls, audio, accessibility, and gameplay presentation may use
 their own focused preference codecs rather than turning graphics preferences
 into a catch-all file.
 
+### Implemented XR render-path experiment
+
+Coordinating Tactical
+[`280`](../tactical/280-xr-multiview-render-path-workstream.md) and lifecycle
+Tactical
+[`281`](../tactical/281-cross-platform-dynamic-xr-render-targets.md) implement
+an XR-only
+`XR Render Path: Dual Per-eye | Array Per-eye | Array Multiview` row. The row
+is capability-gated, defaults to dual per-eye, and reports host-confirmed
+requested, pending, active, rejected, and recovery state rather than only the
+last requested value. Flat desktop, flat Android, and browser profiles omit
+the row.
+
+The setting remains intentionally transient. It is an interactive
+renderer-regression and performance-comparison control, not yet a schema-1
+graphics preference. `--xr-render-mode` may select its initial value and
+`--xr-render-mode-cycle` exercises all modes through the same shared UI action,
+but neither saves it. Persistence can be reconsidered only after physical
+Metal, foveation, and lifecycle-recovery acceptance make a stored experimental
+selection safe. The 2026-07-29 Quest RD5 comparison keeps dual per-eye as the
+default; retaining all three choices does not imply that multiview is faster.
+
 ### Precedence
 
 Startup and live application should use this order:

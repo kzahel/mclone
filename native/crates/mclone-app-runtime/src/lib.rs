@@ -99,7 +99,7 @@ use mclone_render_session::{
 };
 use mclone_server::{
     ChunkLoadingProgressSnapshot, ChunkLoadingProgressStats, LightStatusMailboxMetrics,
-    ServerRunnerDiagnostics, ServerRunnerKind, WorkerFrameMetrics,
+    PersistenceQueueMetrics, ServerRunnerDiagnostics, ServerRunnerKind, WorkerFrameMetrics,
 };
 use mclone_ui::{
     BlockPaletteEntry, BlockPaletteOverlay, DebugActorTool, EMPTY_BLOCK_PALETTE_ENTRIES,
@@ -116,7 +116,12 @@ pub const DEFAULT_RENDER_CHUNK_MESH_BUDGET: usize = 1;
 pub const DEFAULT_RENDER_SECTION_COMPILE_WORKERS: usize = 1;
 pub const DEFAULT_RENDER_SECTION_COMPILE_MAX_PENDING_JOBS: usize = 4;
 pub const DEFAULT_RUNTIME_UPDATE_PUMP_BUDGET: Duration = Duration::from_millis(2);
-pub const DEFAULT_CLIENT_DEFERRED_CHUNK_DROP_ITEM_BUDGET: usize = 16;
+/// Drain enough client-owned snapshot payloads into the separately bounded
+/// destruction service to outpace one admitted unload burst. Keeping this
+/// equal to the service's item cap prevents the unbounded staging queue that a
+/// 16-item handoff created under repeated full-view churn.
+pub const DEFAULT_CLIENT_DEFERRED_CHUNK_DROP_ITEM_BUDGET: usize =
+    deferred_drop::DEFAULT_DEFERRED_DROP_MAX_ITEMS;
 // Count-cap unload bursts so many small ordered records cannot fit under the
 // elapsed frame budget and still create a large client-apply tail.
 pub const DEFAULT_RUNTIME_UPDATE_PUMP_UNLOAD_UPDATE_BUDGET: usize = 16;
@@ -1014,6 +1019,7 @@ pub struct RuntimePollDiagnostics {
     pub server_update_queue_bytes: usize,
     pub server_pending_jobs: usize,
     pub server_pending_publications: usize,
+    pub persistence_queue_metrics: PersistenceQueueMetrics,
     pub runner_frame_metrics: WorkerFrameMetrics,
     pub worldgen_job_frame_metrics: WorkerFrameMetrics,
     pub light_status_job_frame_metrics: WorkerFrameMetrics,
@@ -1084,6 +1090,14 @@ pub struct RuntimePollDiagnostics {
     pub scheduler_pending_light_publications: usize,
     pub scheduler_worldgen_mailbox_pending_jobs: usize,
     pub scheduler_light_mailbox_pending_statuses: usize,
+    pub scheduler_player_promotion_desired: usize,
+    pub scheduler_player_promotion_queued: usize,
+    pub scheduler_player_promotion_active: usize,
+    pub scheduler_player_promotion_max_active: usize,
+    pub scheduler_player_promotion_cancelled_before_admission: u64,
+    pub scheduler_light_demand_queued: usize,
+    pub scheduler_light_demands_cancelled: u64,
+    pub scheduler_light_statuses_stale: u64,
     pub block_tick_ms: f64,
     pub fluid_tick_ms: f64,
     pub fluid_event_apply_ms: f64,
@@ -1114,6 +1128,8 @@ pub struct RuntimePollDiagnostics {
     pub mixed_updates: usize,
     pub scheduler_pending_jobs: usize,
     pub scheduler_completed_jobs: usize,
+    pub scheduler_completed_job_records_retained: usize,
+    pub scheduler_recent_job_summaries_retained: usize,
     pub scheduler_dirty_chunks: usize,
     pub scheduler_loaded_snapshot_chunks: usize,
     pub scheduler_client_visible_chunks: usize,
@@ -2930,6 +2946,7 @@ impl SingleViewRuntime {
         diagnostics.server_update_queue_bytes = runner_diagnostics.update_queue_bytes;
         diagnostics.server_pending_jobs = runner_diagnostics.pending_jobs;
         diagnostics.server_pending_publications = runner_diagnostics.pending_publications;
+        diagnostics.persistence_queue_metrics = runner_diagnostics.persistence_queue_metrics;
         diagnostics.runner_frame_metrics = runner_diagnostics.runner_frame_metrics;
         diagnostics.worldgen_job_frame_metrics = runner_diagnostics.worldgen_job_frame_metrics;
         diagnostics.light_status_job_frame_metrics =
@@ -3032,6 +3049,25 @@ impl SingleViewRuntime {
             runner_diagnostics.worldgen_mailbox_pending_jobs;
         diagnostics.scheduler_light_mailbox_pending_statuses =
             runner_diagnostics.light_status_mailbox_pending_statuses;
+        diagnostics.scheduler_player_promotion_desired = runner_diagnostics
+            .scheduler_metrics
+            .player_promotion_desired;
+        diagnostics.scheduler_player_promotion_queued =
+            runner_diagnostics.scheduler_metrics.player_promotion_queued;
+        diagnostics.scheduler_player_promotion_active =
+            runner_diagnostics.scheduler_metrics.player_promotion_active;
+        diagnostics.scheduler_player_promotion_max_active = runner_diagnostics
+            .scheduler_metrics
+            .player_promotion_max_active;
+        diagnostics.scheduler_player_promotion_cancelled_before_admission = runner_diagnostics
+            .scheduler_metrics
+            .player_promotion_cancelled_before_admission;
+        diagnostics.scheduler_light_demand_queued =
+            runner_diagnostics.scheduler_metrics.light_demand_queued;
+        diagnostics.scheduler_light_demands_cancelled =
+            runner_diagnostics.scheduler_metrics.light_demands_cancelled;
+        diagnostics.scheduler_light_statuses_stale =
+            runner_diagnostics.scheduler_metrics.light_statuses_stale;
         diagnostics.block_tick_ms = micros_to_ms(tick.timing.block_tick_us);
         diagnostics.fluid_tick_ms = micros_to_ms(tick.timing.fluid_tick_us);
         diagnostics.fluid_event_apply_ms = micros_to_ms(tick.timing.fluid_event_apply_us);
@@ -3042,6 +3078,12 @@ impl SingleViewRuntime {
         diagnostics.entity_tick_ms = micros_to_ms(tick.timing.entity_tick_us);
         diagnostics.scheduler_pending_jobs = runner_diagnostics.scheduler_metrics.pending_jobs;
         diagnostics.scheduler_completed_jobs = runner_diagnostics.scheduler_metrics.completed_jobs;
+        diagnostics.scheduler_completed_job_records_retained = runner_diagnostics
+            .scheduler_metrics
+            .completed_job_records_retained;
+        diagnostics.scheduler_recent_job_summaries_retained = runner_diagnostics
+            .scheduler_metrics
+            .recent_job_summaries_retained;
         diagnostics.scheduler_dirty_chunks = runner_diagnostics.scheduler_metrics.dirty_chunks;
         diagnostics.scheduler_loaded_snapshot_chunks =
             runner_diagnostics.scheduler_metrics.loaded_snapshot_chunks;

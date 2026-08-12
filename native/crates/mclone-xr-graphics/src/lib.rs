@@ -36,19 +36,19 @@ pub mod vulkan {
     }
 
     pub struct VulkanEyeSwapchain {
-        swapchain: xr::Swapchain<AppGraphics>,
+        textures: Vec<wgpu::Texture>,
         #[allow(dead_code)]
         foveation_profile: Option<xr::FoveationProfileFB>,
-        textures: Vec<wgpu::Texture>,
+        swapchain: xr::Swapchain<AppGraphics>,
         width: u32,
         height: u32,
     }
 
     pub struct VulkanStereoSwapchain {
-        swapchain: xr::Swapchain<AppGraphics>,
+        textures: Vec<wgpu::Texture>,
         #[allow(dead_code)]
         foveation_profile: Option<xr::FoveationProfileFB>,
-        textures: Vec<wgpu::Texture>,
+        swapchain: xr::Swapchain<AppGraphics>,
         width: u32,
         height: u32,
         array_size: u32,
@@ -265,6 +265,12 @@ pub mod vulkan {
         let mut enabled_extensions = exposed_adapter
             .adapter
             .required_device_extensions(required_features);
+        ensure_timeline_semaphore_extension_for_vulkan_1_1(
+            &vk_instance,
+            vk_physical_device,
+            vk_target_version,
+            &mut enabled_extensions,
+        )?;
         if required_features.contains(wgpu::Features::MULTIVIEW)
             && multiview_diagnostics.device_khr_multiview_extension
             && !enabled_extensions.contains(&vk::KHR_MULTIVIEW_NAME)
@@ -429,6 +435,32 @@ pub mod vulkan {
             features |= wgpu::Features::MULTIVIEW;
         }
         features
+    }
+
+    fn ensure_timeline_semaphore_extension_for_vulkan_1_1(
+        vk_instance: &ash::Instance,
+        vk_physical_device: vk::PhysicalDevice,
+        vk_target_version: u32,
+        enabled_extensions: &mut Vec<&'static CStr>,
+    ) -> Result<()> {
+        if vk_target_version >= vk::API_VERSION_1_2
+            || enabled_extensions.contains(&vk::KHR_TIMELINE_SEMAPHORE_NAME)
+        {
+            return Ok(());
+        }
+
+        let available_extensions =
+            unsafe { vk_instance.enumerate_device_extension_properties(vk_physical_device) }
+                .context("enumerate OpenXR Vulkan device extensions for timeline semaphore")?;
+        if extension_properties_contain(&available_extensions, vk::KHR_TIMELINE_SEMAPHORE_NAME) {
+            // wgpu-hal classifies promoted features from the physical device's
+            // API version. The OpenXR instance intentionally targets Vulkan
+            // 1.1, though, so a loader may expose only the KHR entry points.
+            // Listing the extension makes wgpu-hal use those entry points
+            // instead of calling absent Vulkan 1.2 core functions.
+            enabled_extensions.push(vk::KHR_TIMELINE_SEMAPHORE_NAME);
+        }
+        Ok(())
     }
 
     pub fn create_eye_swapchain(
@@ -645,7 +677,10 @@ pub mod vulkan {
                     memory_flags: wgpu::hal::MemoryFlags::empty(),
                     view_formats: vec![],
                 },
-                None,
+                // OpenXR owns the swapchain image. A drop guard tells wgpu-hal
+                // to retire only its wrapper instead of calling
+                // vkDestroyImage on the runtime-owned handle.
+                Some(Box::new(|| {})),
             )
         };
         unsafe {

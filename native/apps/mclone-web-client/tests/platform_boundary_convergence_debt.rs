@@ -198,10 +198,8 @@ fn test_only_coarse_operation_is_a_boundary_fixpoint() {
     assert!(!WEB_APP.contains("TestOnlyRemote"));
 
     // These exact pins make sibling ABI growth a deliberate review event.
-    // Smoke-only hooks live on explicit smoke types. The product host has 38
-    // mechanical exports after composed terrain added its reproducible camera
-    // framing receipt at the existing browser diagnostics boundary.
-    assert!(WEB_SCENE_HOST.contains("#[wasm_bindgen(js_name = frameTerrainComposition)]"));
+    // Smoke-only hooks live on explicit smoke types, leaving the product host
+    // with 38 mechanical exports.
     assert_eq!(
         wasm_export_count(WEB_SCENE_HOST, "#[wasm_bindgen]\nimpl WebSceneHost {"),
         38

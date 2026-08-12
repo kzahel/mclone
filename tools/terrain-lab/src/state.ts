@@ -22,6 +22,7 @@ export type StreamedPlanAtlasTopology = "plane" | "cylinder-x" | "torus";
 export type SemanticTerrainSubstrate = "flat" | "quiet";
 export type SemanticTerrainFeatures = "range" | "basin" | "combined";
 export type SemanticTerrainCorrection = "regional" | "local";
+export type SemanticTerrainVerticalScale = "1x" | "8x" | "24x";
 export type TerrainLabPane =
   | "runtime"
   | "canonical"
@@ -99,6 +100,7 @@ export interface TerrainLabState {
   semanticFeatures: SemanticTerrainFeatures;
   semanticTopology: StreamedPlanAtlasTopology;
   semanticCorrection: SemanticTerrainCorrection;
+  semanticVerticalScale: SemanticTerrainVerticalScale;
   semanticGuidesVisible: boolean;
 }
 
@@ -152,6 +154,7 @@ export const DEFAULT_TERRAIN_LAB_STATE: TerrainLabState = {
   semanticFeatures: "combined",
   semanticTopology: "plane",
   semanticCorrection: "local",
+  semanticVerticalScale: "1x",
   semanticGuidesVisible: true,
 };
 
@@ -210,6 +213,11 @@ const SEMANTIC_FEATURES = new Set<SemanticTerrainFeatures>([
 const SEMANTIC_CORRECTIONS = new Set<SemanticTerrainCorrection>([
   "regional",
   "local",
+]);
+const SEMANTIC_VERTICAL_SCALES = new Set<SemanticTerrainVerticalScale>([
+  "1x",
+  "8x",
+  "24x",
 ]);
 const SURFACE_QUALITIES = new Set<TerrainLabSurfaceQuality>(["basic", "inferred"]);
 const PANES = new Set<TerrainLabPane>([
@@ -357,6 +365,9 @@ export function parseTerrainLabState(
     semanticCorrection:
       validMember(params.get("semanticCorrection"), SEMANTIC_CORRECTIONS)
       ?? fallback.semanticCorrection,
+    semanticVerticalScale:
+      validMember(params.get("semanticVertical"), SEMANTIC_VERTICAL_SCALES)
+      ?? fallback.semanticVerticalScale,
     semanticGuidesVisible:
       validBoolean(params.get("semanticGuides"))
       ?? fallback.semanticGuidesVisible,
@@ -412,6 +423,7 @@ export function terrainLabSearch(
   params.set("semanticFeatures", state.semanticFeatures);
   params.set("semanticTopology", state.semanticTopology);
   params.set("semanticCorrection", state.semanticCorrection);
+  params.set("semanticVertical", state.semanticVerticalScale);
   params.set("semanticGuides", state.semanticGuidesVisible ? "1" : "0");
   if (reviewCamera) {
     params.set("reviewYaw", String(reviewCamera.yaw));

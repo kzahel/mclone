@@ -8,6 +8,7 @@ pub use interactive_input::{
     MonoInputDisposition, MonoInteractiveInputRouter, XrControllerInputDisposition,
     XrControllerInputRouter,
 };
+pub use mclone_server::PersistenceQueueMetrics;
 pub use player_movement::{
     DEFAULT_PLAYER_MOVEMENT_MAX_CATCH_UP_STEPS, DEFAULT_PLAYER_MOVEMENT_RATE_HZ,
     PlayerMovementAdvance, PlayerMovementCadenceConfig, PlayerMovementCommand,
@@ -145,7 +146,7 @@ use mclone_render::chunk::{
 use mclone_render::entity::{
     ActorDrawResources, ActorFigureSet, ActorInstance, ActorInstanceId, ActorRenderStats,
 };
-use mclone_render::fog::RenderFog;
+use mclone_render::fog::{RenderFog, RenderFogMode};
 use mclone_render::gui::{
     GuiRenderOptions, GuiRenderer, WorldGuiLine, WorldGuiPanel, WorldGuiPanelRenderStats,
     WorldGuiRenderer,
@@ -185,12 +186,13 @@ use mclone_server::{SimulationCadenceConfig, WorkerFrameMetrics};
 use mclone_ui::{
     Color, DEFAULT_JOIN_REMOTE_ADDR, DebugActorTool, DebugOverlay, FlatHotbarOverlay, FlatHud,
     FlatHudDebugOverlay, Font, GameAuxiliarySplitMode, GameCollisionMode, GameDeathCause,
-    GameFlatPresentationState, GameFramePacingMode, GameGrassDetail, GameLeafDetail,
-    GameLocalPlayControllerFamily, GameLocalPlayGuestInput, GameLocalPlayState, GameMovementMode,
-    GamePlayerModel, GameScreen, GameSimulationCadence, GameTerrainPresentationMode,
+    GameFlatPresentationState, GameFogSettings, GameFramePacingMode, GameGrassDetail,
+    GameLeafDetail, GameLocalPlayControllerFamily, GameLocalPlayGuestInput, GameLocalPlayState,
+    GameMovementMode, GamePlayerModel, GameScreen, GameSimulationCadence, GameTerrainPresentation,
     GameTouchSettings, GameTravelAssistMode, GameTurnMode, GameUiAction, GameUiHost,
-    GameUiRenderState, GameWorldRenderScaleMode, GameXrTurnMode, GamepadHudOverlay, GuiDrawList,
-    GuiKey, GuiScale, LoadingProgressOverlay, Point, Rect, StatusOverlay, StorageProfileBackend,
+    GameUiRenderState, GameWorldRenderScaleMode, GameXrRenderMode, GameXrRenderPathState,
+    GameXrRenderTransitionState, GameXrTurnMode, GamepadHudOverlay, GuiDrawList, GuiKey, GuiScale,
+    LoadingProgressOverlay, Point, Rect, StatusOverlay, StorageProfileBackend,
     StorageProfileUiState, TouchOverlay, UiDebugSnapshot, UiDrawCacheStats, UiPanelRevision,
     WorldCatalogUiStatus, render_loading_progress_overlay, render_status_overlay,
 };
@@ -242,6 +244,32 @@ pub(crate) const fn game_grass_detail(detail: GrassQuality) -> GameGrassDetail {
         GrassQuality::Sparse => GameGrassDetail::Sparse,
         GrassQuality::Lush => GameGrassDetail::Lush,
         GrassQuality::Ultra => GameGrassDetail::Ultra,
+    }
+}
+
+pub(crate) const fn engine_terrain_presentation(
+    presentation: GameTerrainPresentation,
+) -> mclone_app_runtime::startup_args::TerrainPresentationMode {
+    match presentation {
+        GameTerrainPresentation::ExactOnly => {
+            mclone_app_runtime::startup_args::TerrainPresentationMode::ExactOnly
+        }
+        GameTerrainPresentation::Experimental => {
+            mclone_app_runtime::startup_args::TerrainPresentationMode::Composed
+        }
+    }
+}
+
+pub(crate) const fn game_terrain_presentation(
+    mode: mclone_app_runtime::startup_args::TerrainPresentationMode,
+) -> GameTerrainPresentation {
+    match mode {
+        mclone_app_runtime::startup_args::TerrainPresentationMode::ExactOnly => {
+            GameTerrainPresentation::ExactOnly
+        }
+        mclone_app_runtime::startup_args::TerrainPresentationMode::Composed => {
+            GameTerrainPresentation::Experimental
+        }
     }
 }
 
@@ -1121,6 +1149,8 @@ pub struct McloneSceneHost {
     asset_pack_preference_error: Option<String>,
     graphics_preference_storage: Option<Box<dyn ClientGraphicsPreferenceStorage>>,
     graphics_preference_error: Option<String>,
+    terrain_presentation_preference: GameTerrainPresentation,
+    fog_settings: GameFogSettings,
     pending_leaf_detail: Option<mclone_mesh::LeafDetail>,
     pending_restored_asset_pack_selection:
         Option<(AssetPackSelection, mclone_assets::TexturePresentation)>,
@@ -1155,6 +1185,8 @@ pub struct McloneSceneHost {
     ui: GameUiHost,
     menu_overlay_cache: XrMenuPanelOverlayCache,
     status_overlay: StatusOverlay,
+    xr_render_path_state: Option<GameXrRenderPathState>,
+    pending_xr_render_mode_request: Option<GameXrRenderMode>,
     sky: SkyRenderer,
     screen_effects: ScreenEffectsRenderer,
     terrain_view: Option<terrain_view::SceneTerrainViewState>,
@@ -1540,11 +1572,11 @@ impl McloneSceneHost {
         self.sync_player_lifecycle_ui();
         let mut timing = XrTerrainFrameTiming::default();
         let render_views_start = self.services.clock.now();
-        let far = crate::terrain_view::scene_terrain_projection_far_distance(
-            self.active_world.scene.startup.terrain_presentation,
-            XR_FAR,
-        );
-        let render_views = fixed_startup_view_pose_render_views(view_pose, eye_fovs, far)?;
+        let render_views = fixed_startup_view_pose_render_views_with_far(
+            view_pose,
+            eye_fovs,
+            self.terrain_projection_far_distance(XR_FAR),
+        )?;
         timing.render_views_ms = elapsed_ms(self.services.clock.elapsed_since(render_views_start));
         self.render_prepared_frame(
             device,
@@ -1584,11 +1616,11 @@ impl McloneSceneHost {
         self.sync_player_lifecycle_ui();
         let mut timing = XrTerrainFrameTiming::default();
         let render_views_start = self.services.clock.now();
-        let far = crate::terrain_view::scene_terrain_projection_far_distance(
-            self.active_world.scene.startup.terrain_presentation,
-            XR_FAR,
-        );
-        let render_views = fixed_startup_view_pose_render_views(view_pose, eye_fovs, far)?;
+        let render_views = fixed_startup_view_pose_render_views_with_far(
+            view_pose,
+            eye_fovs,
+            self.terrain_projection_far_distance(XR_FAR),
+        )?;
         timing.render_views_ms = elapsed_ms(self.services.clock.elapsed_since(render_views_start));
         self.render_prepared_frame_multiview(
             device,
@@ -1988,6 +2020,15 @@ impl McloneSceneHost {
             frame_deadline,
             &mut timing,
         )?;
+        let terrain_view_enabled = self.prepare_terrain_view_for_frame(
+            device,
+            queue,
+            [
+                f64::from(center_position.x),
+                f64::from(center_position.y),
+                f64::from(center_position.z),
+            ],
+        )?;
         let multiview = self
             .render_prepared_terrain_multiview_frame_with_upload_inner(
                 device,
@@ -1998,6 +2039,7 @@ impl McloneSceneHost {
                 true,
                 true,
                 true,
+                terrain_view_enabled,
                 Some(&mut timing),
             )
             .context("render XR full-frame multiview")?;
@@ -2437,7 +2479,7 @@ impl McloneSceneHost {
         let terrain_options = underwater_overlays.map(|overlay| {
             let fog = overlay
                 .map(|overlay| RenderFog::underwater_with_water_vision(overlay.water_vision))
-                .unwrap_or_default();
+                .unwrap_or(base_options.fog);
             base_options.with_fog(fog)
         });
         (terrain_views, terrain_options, underwater_overlays)
@@ -2653,6 +2695,7 @@ impl McloneSceneHost {
                     depth_view: &target.depth.view,
                     size: target.size,
                     render_view,
+                    fog: render_options.fog,
                     view_slot,
                 })?;
         }
@@ -2777,6 +2820,7 @@ impl McloneSceneHost {
             include_sky,
             include_actors,
             include_overlays,
+            false,
             None,
         )
     }
@@ -2798,6 +2842,7 @@ impl McloneSceneHost {
             false,
             false,
             false,
+            false,
             None,
         )
     }
@@ -2812,6 +2857,7 @@ impl McloneSceneHost {
         include_sky: bool,
         include_actors: bool,
         include_overlays: bool,
+        terrain_view_enabled: bool,
         mut timing: Option<&mut XrTerrainFrameTiming>,
     ) -> Result<XrTerrainMultiviewFrameSummary> {
         let (terrain_views, mut terrain_options, underwater_overlays) =
@@ -2931,7 +2977,8 @@ impl McloneSceneHost {
             });
         let split_translucent_terrain = (include_actors && !actor_instances.is_empty())
             || opaque_world_gate.is_some()
-            || preview_frame.is_some();
+            || preview_frame.is_some()
+            || terrain_view_enabled;
         let terrain_phase = if split_translucent_terrain {
             TexturedSectionRenderPhase::Opaque
         } else {
@@ -2951,6 +2998,22 @@ impl McloneSceneHost {
                 terrain_phase,
             )
             .context("render XR terrain multiview chunks")?;
+        if terrain_view_enabled {
+            self.terrain_view
+                .as_mut()
+                .expect("enabled scene terrain view remains initialized")
+                .render_multiview(
+                    device,
+                    queue,
+                    &mut encoder,
+                    target.color_view,
+                    &target.depth.view,
+                    target.size,
+                    terrain_views,
+                    terrain_options[0].fog,
+                )
+                .context("render XR procedural horizon multiview")?;
+        }
         if let Some(timing) = timing.as_deref_mut() {
             timing.multiview_terrain_ms =
                 elapsed_ms(self.services.clock.elapsed_since(terrain_start));
@@ -5179,6 +5242,7 @@ impl McloneSceneHost {
                 full_frame_ms,
                 sky_ms: frame_timing.sky_ms,
                 terrain_opaque_ms: frame_timing.terrain_opaque_ms,
+                terrain_backdrop_ms: frame_timing.terrain_backdrop_ms,
                 terrain_translucent_ms: frame_timing.terrain_translucent_ms,
                 prepare_ms,
                 cull_ms: frame_timing.terrain_cull_ms,
@@ -5502,6 +5566,7 @@ impl McloneSceneHost {
 
     fn effective_render_options(&self, camera_position: Vec3) -> TexturedSectionRenderOptions {
         let mut options = self.render_options;
+        options.fog = self.open_air_fog();
         options.grass_time_seconds = grass_presentation_time_seconds(self.services.clock.now());
         options.grass_interactors =
             grass_interactors_from_actors(Some(self.active_world.camera.feet_position()), &[]);
@@ -5516,6 +5581,54 @@ impl McloneSceneHost {
             options.section_occlusion_culling = false;
         }
         options
+    }
+
+    fn open_air_fog(&self) -> RenderFog {
+        let settings = self.fog_settings.normalized();
+        let mode = match settings.mode {
+            mclone_ui::GameFogMode::Off => RenderFogMode::Off,
+            mclone_ui::GameFogMode::Classic => RenderFogMode::Linear,
+            mclone_ui::GameFogMode::Natural => RenderFogMode::Exponential,
+            mclone_ui::GameFogMode::GroundHaze => RenderFogMode::GroundHaze,
+        };
+        let clear = self.sky_clear_color();
+        let sky_color = [clear.r as f32, clear.g as f32, clear.b as f32];
+        let color = match settings.color_mode {
+            mclone_ui::GameFogColorMode::Sky => sky_color,
+            mclone_ui::GameFogColorMode::Neutral => {
+                let luminance =
+                    sky_color[0] * 0.2126 + sky_color[1] * 0.7152 + sky_color[2] * 0.0722;
+                [luminance; 3]
+            }
+            mclone_ui::GameFogColorMode::Warm => [
+                (sky_color[0] * 1.12).min(1.0),
+                sky_color[1] * 0.98,
+                sky_color[2] * 0.82,
+            ],
+            mclone_ui::GameFogColorMode::Cool => [
+                sky_color[0] * 0.85,
+                sky_color[1],
+                (sky_color[2] * 1.12).min(1.0),
+            ],
+            mclone_ui::GameFogColorMode::Custom => settings.custom_color,
+        };
+        let exact_corner_coverage =
+            self.active_world.scene.render_distance as f32 * 16.0 * std::f32::consts::SQRT_2;
+        let coverage_end = self.terrain_projection_far_distance(exact_corner_coverage.max(32.0));
+        RenderFog::open_air(
+            mode,
+            color,
+            settings.visibility_blocks,
+            settings.classic_start,
+            coverage_end,
+            settings.coverage_guard,
+            settings.guard_start,
+            settings.ground_base_y,
+            settings.ground_falloff_blocks,
+            settings.max_opacity,
+            settings.exponential_squared,
+            settings.far_cull,
+        )
     }
 }
 
@@ -7490,6 +7603,14 @@ mod tests {
         assert!((center - Vec3::from_array(view_pose.position)).length() < 1.0e-6);
         assert!((yaw_from_forward(forward).unwrap() - std::f32::consts::FRAC_PI_2).abs() < 1.0e-6);
         assert!(forward.y.abs() < 1.0e-6);
+        assert_eq!(render_views[0].z_far, XR_FAR);
+        assert_eq!(render_views[1].z_far, XR_FAR);
+
+        let extended =
+            fixed_startup_view_pose_render_views_with_far(view_pose, [fov, fov], 140_000.0)
+                .unwrap();
+        assert_eq!(extended[0].z_far, 140_000.0);
+        assert_eq!(extended[1].z_far, 140_000.0);
     }
 
     #[test]

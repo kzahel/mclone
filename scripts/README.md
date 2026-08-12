@@ -4,6 +4,25 @@ This directory contains developer and user-facing launch helpers. The entries
 below are the click-to-run scripts intended for interactive app testing on this
 Windows workstation.
 
+## Linux Desktop OpenXR
+
+On Linux, an attached authorized Quest can drive the official WiVRn server
+headlessly over USB:
+
+```bash
+pnpm native:xr:linux:wivrn:check
+pnpm native:xr:linux:wivrn:smoke
+pnpm native:xr:linux:wivrn:mclone
+```
+
+The launcher prefers a native `wivrn-server` and falls back to the
+`io.github.wivrn.wivrn` Flatpak. It discovers the Android SDK's `adb`, checks
+that the Flatpak and selected Quest WiVRn client versions match, installs the
+USB reverse tunnel, waits for the connection, and restores the headset
+afterward. See [`../docs/linux-setup.md`](../docs/linux-setup.md) for setup and
+[`../docs/topics/desktop-openxr-validation.md`](../docs/topics/desktop-openxr-validation.md)
+for current evidence.
+
 ## Interactive Click-To-Test
 
 Double-click `scripts\start-desktop-xr.bat` to start the desktop OpenXR mclone
