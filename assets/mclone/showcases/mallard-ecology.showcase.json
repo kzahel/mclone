@@ -1,0 +1,124 @@
+{
+  "schemaVersion": 1,
+  "id": "mallard-ecology",
+  "title": "Mallard Ecology",
+  "revision": 1,
+  "baseTerrain": "authored-island-v1",
+  "seed": 17502,
+  "dayTime": 6000,
+  "freezeTime": true,
+  "entry": {
+    "feet": [7.5, 66.0, 8.5],
+    "lookAt": [2.5, 65.2, 8.5]
+  },
+  "blockPatches": [
+    {
+      "position": [0, 65, 8],
+      "block": "minecraft:lily_pad",
+      "liveInstantiation": "minecraft-waterlily-patch"
+    }
+  ],
+  "entities": [
+    {
+      "id": "parent-a",
+      "position": [0.5, 64.88, 7.5],
+      "yRotDegrees": 90.0,
+      "onGround": false,
+      "liveInstantiation": "mclone-mallard-natural-spawn",
+      "state": {
+        "kind": "mallard",
+        "ageTicks": 2400,
+        "parents": [null, null],
+        "eggTime": 8000,
+        "featherTime": 2400,
+        "callTime": 200
+      }
+    },
+    {
+      "id": "parent-b",
+      "position": [0.5, 64.88, 9.5],
+      "yRotDegrees": 90.0,
+      "onGround": false,
+      "liveInstantiation": "mclone-mallard-natural-spawn",
+      "state": {
+        "kind": "mallard",
+        "ageTicks": 2400,
+        "parents": [null, null],
+        "eggTime": 8000,
+        "featherTime": 2400,
+        "callTime": 200
+      }
+    },
+    {
+      "id": "duckling",
+      "position": [2.5, 65.0, 7.5],
+      "yRotDegrees": -35.0,
+      "onGround": true,
+      "liveInstantiation": "mclone-mallard-attended-hatch",
+      "state": {
+        "kind": "mallard",
+        "ageTicks": 320,
+        "parents": ["parent-a", "parent-b"],
+        "eggTime": 8000,
+        "featherTime": 2400,
+        "callTime": 200
+      }
+    },
+    {
+      "id": "nest",
+      "position": [5.5, 66.0, 11.5],
+      "yRotDegrees": 0.0,
+      "onGround": true,
+      "liveInstantiation": "mclone-mallard-nest-placement",
+      "state": {
+        "kind": "mallard-nest",
+        "incubationProgress": 1200,
+        "incubationRequired": 2400,
+        "parents": ["parent-a", "parent-b"]
+      }
+    }
+  ],
+  "player": {
+    "selectedHotbarSlot": 0,
+    "inventory": [
+      {
+        "slot": 0,
+        "item": "mclone:mallard_egg",
+        "count": 2,
+        "liveInstantiation": "mclone-mallard-egg-laying"
+      },
+      {
+        "slot": 1,
+        "item": "mclone:mallard_feather",
+        "count": 1,
+        "liveInstantiation": "mclone-mallard-feather-shedding"
+      }
+    ],
+    "observations": [
+      {
+        "kind": "seen",
+        "liveInstantiation": "mclone-mallard-field-guide-observation"
+      },
+      {
+        "kind": "heard-call",
+        "liveInstantiation": "mclone-mallard-field-guide-observation"
+      },
+      {
+        "kind": "found-feather",
+        "liveInstantiation": "mclone-mallard-field-guide-observation"
+      },
+      {
+        "kind": "found-track",
+        "liveInstantiation": "mclone-mallard-field-guide-observation"
+      },
+      {
+        "kind": "found-nest",
+        "liveInstantiation": "mclone-mallard-field-guide-observation"
+      },
+      {
+        "kind": "witnessed-hatch",
+        "liveInstantiation": "mclone-mallard-field-guide-observation"
+      }
+    ]
+  }
+}

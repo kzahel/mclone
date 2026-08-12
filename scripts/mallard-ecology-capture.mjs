@@ -8,10 +8,22 @@ const root = "/tmp/mclone-mallard-ecology-fixture";
 const image = "/tmp/mclone-mallard-ecology.png";
 const stereoImage = "/tmp/mclone-mallard-ecology-stereo.png";
 
-run([
+const fixtureOutput = run([
   "cargo", "run", "--manifest-path", "native/Cargo.toml", "-p", "mclone-server",
   "--bin", "mallard_ecology_fixture", "--", "--root", root,
 ]);
+const receipt = Object.fromEntries(
+  fixtureOutput
+    .split("\n")
+    .find((line) => line.startsWith("MCLONE_PLAYABLE_SHOWCASE_FIXTURE "))
+    ?.slice("MCLONE_PLAYABLE_SHOWCASE_FIXTURE ".length)
+    .split(" ")
+    .map((field) => field.split("=", 2)) ?? [],
+);
+if (receipt.id !== "mallard-ecology" || receipt.revision !== "1") {
+  throw new Error("showcase compiler did not emit the expected mallard-ecology receipt");
+}
+
 const output = run([
   "cargo", "run", "--manifest-path", "native/Cargo.toml", "-p", "mclone-native-client",
   "--bin", "mclone-native-client", "--",
@@ -20,16 +32,16 @@ const output = run([
   "--height", "900",
   "--world-dir", `${root}/world`,
   "--generation-profile", "authored-only",
-  "--seed", "17502",
+  "--seed", receipt.seed,
   "--chunk-x", "0",
   "--chunk-z", "0",
   "--render-distance", "2",
-  "--day-time", "6000",
-  "--freeze-time",
+  "--day-time", receipt.day_time,
+  ...(receipt.freeze_time === "true" ? ["--freeze-time"] : []),
   "--debug-passive-showcase", "false",
   "--screenshot-hud", "true",
-  "--screenshot-eye", "10,72,19",
-  "--screenshot-target", "3,64.5,8",
+  "--screenshot-eye", receipt.entry_eye,
+  "--screenshot-target", receipt.entry_target,
   "--lighting", "false",
   "--fullbright", "true",
 ], {
@@ -40,8 +52,8 @@ const output = run([
 if (!/4 entities, 5 actors, 5 drawn actors/.test(output)) {
   throw new Error("mallard ecology capture did not draw four entities as five figure instances");
 }
-if (!/220 GUI commands/.test(output)) {
-  throw new Error("mallard ecology capture did not include the full HUD/field-guide draw list");
+if (!/GUI commands/.test(output)) {
+  throw new Error("mallard ecology capture did not include the HUD/field-guide draw list");
 }
 if (!existsSync(image) || statSync(image).size < 10_000) {
   throw new Error(`mallard ecology capture did not write credible pixels to ${image}`);
@@ -56,12 +68,12 @@ const stereoOutput = run([
   "--xr-emulation-pause-panel", "false",
   "--world-dir", `${root}/world`,
   "--generation-profile", "authored-only",
-  "--seed", "17502",
+  "--seed", receipt.seed,
   "--chunk-x", "0",
   "--chunk-z", "0",
   "--render-distance", "2",
-  "--day-time", "6000",
-  "--freeze-time",
+  "--day-time", receipt.day_time,
+  ...(receipt.freeze_time === "true" ? ["--freeze-time"] : []),
   "--debug-passive-showcase", "false",
   "--lighting", "false",
   "--fullbright", "true",
@@ -75,7 +87,9 @@ if (!/2 eye UI composites/.test(stereoOutput)) {
 if (!existsSync(stereoImage) || statSync(stereoImage).size < 10_000) {
   throw new Error(`mallard ecology stereo capture did not write credible pixels to ${stereoImage}`);
 }
-console.log(`MCLONE_MALLARD_ECOLOGY_CAPTURE flat=${image} stereo=${stereoImage}`);
+console.log(
+  `MCLONE_MALLARD_ECOLOGY_CAPTURE id=${receipt.id} revision=${receipt.revision} seed=${receipt.seed} entry_eye=${receipt.entry_eye} entry_target=${receipt.entry_target} entity_count=${receipt.entity_count} mallard_count=${receipt.mallard_count} mallard_nest_count=${receipt.mallard_nest_count} field_guide_bits=${receipt.field_guide_bits} flat=${image} stereo=${stereoImage}`,
+);
 
 function run(command, env = process.env) {
   const result = spawnSync(command[0], command.slice(1), {

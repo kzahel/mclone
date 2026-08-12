@@ -31,6 +31,7 @@ mod physics_runtime;
 #[cfg(feature = "physics")]
 mod physics_terrain;
 mod placement;
+mod playable_showcase;
 mod player;
 mod player_chunk_tracking;
 mod player_lifecycle;
@@ -125,6 +126,11 @@ pub use persistence::{
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use persistence::{SQLITE_WORLD_DATABASE_FILE, SqliteWorldStore, WORLD_WRITER_LOCK_FILE};
+pub use playable_showcase::{
+    LIVE_INSTANTIATION_EVIDENCE, LiveInstantiationEvidence, PLAYABLE_SHOWCASE_SCHEMA_VERSION,
+    PlayableShowcaseError, PlayableShowcaseId, PlayableShowcaseManifest,
+    playable_showcase_manifest, playable_showcase_memory_store, write_playable_showcase_to_store,
+};
 pub use player_chunk_tracking::{
     DimensionInterestSource, ObserverChunkTrackingDiagnostics, ObserverId,
     ObserverSimulationInterest, PlayerChunkTrackingDiagnostics,
