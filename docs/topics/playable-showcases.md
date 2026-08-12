@@ -232,6 +232,15 @@ The repaired local run observed `11.1524` units while its subject moved `11.2`
 blocks. This prevents a moving actor with a visually restarted or frozen leg
 loop from passing on displacement alone.
 
+Phone review then exposed a second acceptance gap: touch-capable clients use
+larger hotbar hit targets, but those slots showed only `1` through `9` because
+their overlay had not received the canonical inventory. The shared HUD now
+projects the ordinary hotbar contents into the touch layout. The reusable Web
+runner accepts `--mobile-showcase`, verifies visible touch controls at a
+390x844 CSS-pixel viewport, and writes distinct mobile showcase captures.
+`pnpm native:web:deer-showcase-mobile-smoke` is required when the reviewed
+mechanic depends on touch-only controls or inventory selection.
+
 The first public probe encountered the prior cached `app.html` and rejected it
 because that binary knew only `mallard-ecology`. Verification resumed only
 after the HTML version, JavaScript, and Wasm payload matched the new publish.

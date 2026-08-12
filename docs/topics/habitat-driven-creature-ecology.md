@@ -405,6 +405,12 @@ event, and no ambient soundtrack pretends that a flock exists.
   both `11.2` blocks of entity displacement and more than `0.5` units of
   rendered deer locomotion advance. The local correction observed `11.1524`
   units of phase advance over its 80-tick behavior window.
+- Phone review also found the spear unusable in practice because the larger
+  touch hotbar hid its inventory contents behind slot numbers. Touch and
+  desktop now present one canonical inventory through different-sized layouts;
+  the inspected phone-sized deer capture shows selected `SP` beside the visible
+  `ATK` control. A dedicated mobile showcase smoke now prevents desktop-only
+  review from accepting this interaction path again.
 - Deer hoofprints are intentionally absent. Human review rejected rigid track
   figures and did not find tracks valuable enough to block the chapter. Any
   future tracking mechanic must justify itself first, then use the shared

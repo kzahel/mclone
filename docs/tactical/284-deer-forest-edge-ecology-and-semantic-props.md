@@ -847,6 +847,24 @@ world-generation change into one opaque commit.
   locomotion advance; all 13 actor tests, 173 scene tests, and the browser Wasm
   compile passed.
 
+### 2026-08-12 — Phone spear presentation correction
+
+- Human phone review saw only touch hotbar numbers `1` through `9`, while the
+  desktop layout showed the slot-1 starter spear as `SP`. These were two HUD
+  layouts over the same selection input, but the touch overlay had no inventory
+  stacks and therefore rendered its empty-slot fallback everywhere.
+- The shared HUD now projects canonical selection, icons, item stacks, and
+  counts into whichever hotbar layout is active. Browser, Android, and native
+  platform adapters continue to own only touch contacts and visibility. A UI
+  regression requires the touch layout to show `SP` rather than `1` for the
+  same slot-1 spear.
+- Added a reusable `--mobile-showcase` runner mode and named local/deployed deer
+  commands. The local phone-sized run passed the full 80-tick deer behavior
+  gate, required visible touch controls, and produced an inspected 780x1688
+  device-pixel capture showing selected `SP` next to `ATK`. The complete UI and
+  scene suites, Web Wasm check, desktop app check, and scripted Android APK
+  build pass.
+
 The chapter is complete. Its remaining surface-trace idea is a separately
 justified capability, not unfinished deer content. The next ecology chapter
 should select a creature whose signature behavior demands a different habitat
