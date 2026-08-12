@@ -551,6 +551,18 @@ world-generation change into one opaque commit.
   human acceptance, the next slice may replace those visuals through the
   shared prepared prop path and must then delete the superseded procedural
   builders.
+- Review content commit `dc6817b5` deployed successfully as Cloudflare worker
+  version `7fba684d-a0c1-4390-ac1a-ce21c70bb303`. The production manifest was
+  fetched after deployment and matched `202` actors, `3` semantic props, and
+  `0` live-instantiated props; all three semantic SHA-256 identities and
+  `review_only` statuses matched the committed catalogue.
+- Production captures were taken from the exact interactive review URLs:
+  [nest](https://mclone.kzahel.com/animals/?view=props&figure=mallard_nest&camera=three-quarter),
+  [feather](https://mclone.kzahel.com/animals/?view=props&figure=mallard_feather&camera=top),
+  and
+  [tracks](https://mclone.kzahel.com/animals/?view=props&figure=mallard_tracks&camera=top).
+  Each showed `Packed review candidate`, `Review only`, and the expected use
+  and anchor. Those URLs are the Human Review 1 acceptance surface.
 
 For later slices, continue to record commit IDs, asset review paths,
 deterministic habitat/population measurements, focused and workspace tests,
