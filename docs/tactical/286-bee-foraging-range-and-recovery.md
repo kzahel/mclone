@@ -1,6 +1,7 @@
 # Tactical 286: Bee Foraging Range and Recovery
 
-Status: **active 2026-08-12.**
+Status: **implementation and local validation complete 2026-08-12; exact
+public deployment pending.**
 
 Topics:
 
@@ -99,3 +100,36 @@ ordinary gameplay with no recipe scripts or fixture-specific AI.
 7. Commit, push, deploy the exact revision, rerun both public gates, and share
    the same transient URL and new screenshots.
 
+## Execution Record
+
+- `7e8e8832` recorded the human-rejected behavior and replacement contract
+  before changing implementation.
+- `06b0bdde` removes nearest-only selection from shared bee AI. Stable colony
+  member ordering assigns near, middle, and far distance bands; selection is
+  deterministic but random within real loaded flowers, and the immediately
+  previous flower is excluded while an alternative exists.
+- Hover now moves between bounded points around home. Long trips stage through
+  elevated lateral cruise points. Six consecutive clipped movement requests
+  produce a collision-checked side-and-up recovery point, and overlong trips
+  return home instead of remaining indefinitely stuck.
+- Focused server tests prove all three distance bands, previous-flower
+  avoidance, completion over a five-block obstruction, and ordinary persistent
+  trip/colony state. The complete server suite passes `657` tests; workspace
+  all-target checks and formatting pass.
+- Recipe revision 2 moves the initial outbound and returning bees farther into
+  the existing meadow without adding any script or behavior field. Native flat
+  and stereo captures draw the same four semantic actors; their inspected
+  SHA-256 digests are
+  `b6afc00fd8125d6ff886e437ab7a9e37a70af2a73a749099911a69dc24a95224`
+  and
+  `b308a1778a413bcc9c40512d8280cf4d4ee8aba6b364168f5ecb153b19c991dd`.
+- Local headed desktop and phone gates sample 19 poses over 360 ticks. Bee
+  travel is `20.20`, `22.83`, and `21.23` blocks; maximum colony radii are
+  `7.42`, `15.39`, and `12.40`; every longest near-stationary streak is one
+  sample; all three named clips appear; one pollination block update occurs;
+  and every browser persistence count is zero. Phone still places one real
+  hotel through slot nine and `USE`.
+- Inspected local Web desktop and phone screenshots have SHA-256
+  `c881c5e71b9d54cb0469ceb556362bc3fb69618312973382c6971104562e7515`
+  and
+  `86f8b654142acbea0cd1de5b10cde1fca3bcc3494d7403a73d08527390d22468`.

@@ -446,10 +446,20 @@ event, and no ambient soundtrack pretends that a flock exists.
   bee, nest, forage, pollen return, pollination, and wax. Spatial buzz events
   originate from actual bees and suppress redundant members of one colony.
 - The transient `bee-pollination` review world proves those same mechanisms.
-  Its local desktop and phone gates observe 80 ticks, useful movement and
-  named clips, real flower mutation, 5/6 notes, and zero IndexedDB records.
-  The phone gate also taps the ninth item slot and uses it to create a real
-  hotel. The temporary play link is
+  Human review rejected revision 1's behavioral evidence: nearest-flower
+  choice kept the colony clustered, repeated one flower, and straight
+  collision clipping could leave a bee visibly stuck. Tactical
+  [`286`](../tactical/286-bee-foraging-range-and-recovery.md) replaces that
+  live behavior with stable colony-member near/middle/far forage bands,
+  immediate-repeat avoidance, moving hover and elevated cruise waypoints,
+  progress recovery, and bounded trip abandonment.
+- Revision 2's local desktop and phone gates sample every bee over 360 ticks.
+  Each traveled `20.20`-`22.83` blocks; colony radii reached `7.42`, `15.39`,
+  and `12.40` blocks; no bee remained nearly stationary for more than one
+  20-tick sample; `hover`, `fly`, and `forage` all appeared; pollination
+  changed a real block; and notes reached 5/6. The phone gate also taps the
+  ninth item slot and creates a real hotel. Both leave zero IndexedDB records.
+  The temporary play link remains
   `https://mclone.kzahel.com/app.html?showcase=bee-pollination`.
 
 ## Known Gaps and Recommended Next Work

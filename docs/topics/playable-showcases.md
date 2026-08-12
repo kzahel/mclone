@@ -290,6 +290,31 @@ Both report the exact recipe seed/camera, 5/6 notes, real pollination, and no
 browser persistence; phone additionally reports selected slot nine and one
 authoritative placed hotel.
 
+Human interactive review then rejected that behavioral acceptance. The three
+bees remained close to home, one appeared stuck, and another repeatedly used
+the closest flower. The implementation and 80-tick gate allowed exactly that:
+target selection was nearest-only, straight collision clipping had no recovery,
+and only one of three bees needed useful displacement. The revision-1 pixels,
+input, pollination, and transient-storage evidence remain valid, but its motion
+claim is withdrawn.
+
+Tactical [`286`](../tactical/286-bee-foraging-range-and-recovery.md) makes
+revision 2 the corrected behavioral scene. Shared live AI assigns stable
+near/middle/far forage bands within a colony, chooses randomly among real
+flowers in the band, excludes the previous flower when an alternative exists,
+uses moving hover and elevated lateral cruise waypoints, and recovers repeated
+collision clipping through checked escape points. The recipe only moves the
+initial outbound and returning bees farther into the same meadow; none of the
+new logic is showcase-specific.
+
+The stronger desktop and phone gate samples 19 poses over 360 authoritative
+ticks. All three bees accumulated useful path length (`20.20`, `22.83`, and
+`21.23` blocks), reached distinct maximum colony radii (`7.42`, `15.39`, and
+`12.40` blocks), and had a longest near-stationary streak of one 20-tick
+sample. It observed `hover`, `fly`, and `forage`, one real pollination block
+update, 5/6 notes, and zero records in all eight browser stores. The phone path
+still selects slot nine and places one authoritative hotel through `USE`.
+
 ## Code and Documentation Map
 
 - `assets/mclone/showcases/`: readable showcase recipes
@@ -320,6 +345,9 @@ authoritative placed hotel.
   rejected baseline, shared AI correction, wetland revision, and timed proof
 - [`../tactical/283-mallard-waterline-presentation.md`](../tactical/283-mallard-waterline-presentation.md):
   replicated swim-state repair and shared waterline presentation proof
+- [`../tactical/286-bee-foraging-range-and-recovery.md`](../tactical/286-bee-foraging-range-and-recovery.md):
+  rejected bee baseline, distributed forage, collision recovery, and the
+  longer all-bee behavior gate
 
 ## Recommended Next Work
 
