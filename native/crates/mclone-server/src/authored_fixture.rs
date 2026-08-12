@@ -42,6 +42,7 @@ pub const AUTHORED_LOBBY_CHICKEN_PERSISTENT_ID: EntityPersistentId =
 pub enum AuthoredWorldFixtureKind {
     Table,
     Island,
+    MallardWetland,
     LobbyTableV2,
     LobbyIslandV2,
 }
@@ -51,6 +52,7 @@ impl AuthoredWorldFixtureKind {
         match self {
             Self::Table => "live-diorama-table-a-v1",
             Self::Island => "live-diorama-island-b-v1",
+            Self::MallardWetland => "mallard-wetland-v1",
             Self::LobbyTableV2 => "lobby-table-a-v2",
             Self::LobbyIslandV2 => "lobby-island-b-v2",
         }
@@ -60,6 +62,7 @@ impl AuthoredWorldFixtureKind {
         match self {
             Self::Table => "table-a",
             Self::Island => "island-b",
+            Self::MallardWetland => "mallard-wetland-v1",
             Self::LobbyTableV2 => "lobby-table-a-v2",
             Self::LobbyIslandV2 => "lobby-island-b-v2",
         }
@@ -69,6 +72,7 @@ impl AuthoredWorldFixtureKind {
         match self {
             Self::Table | Self::LobbyTableV2 => 17_501,
             Self::Island | Self::LobbyIslandV2 => 17_502,
+            Self::MallardWetland => 17_503,
         }
     }
 
@@ -76,6 +80,7 @@ impl AuthoredWorldFixtureKind {
         match self {
             Self::Table | Self::LobbyTableV2 => [6.5, 64.0, 7.5],
             Self::Island | Self::LobbyIslandV2 => [7.5, 66.0, 7.5],
+            Self::MallardWetland => [8.5, 65.0, 18.5],
         }
     }
 
@@ -86,6 +91,7 @@ impl AuthoredWorldFixtureKind {
             // surface instead of making it coplanar and depth-unstable.
             Self::Table | Self::LobbyTableV2 => [8.0, 65.03125, 8.0],
             Self::Island | Self::LobbyIslandV2 => [8.5, 65.0, 8.5],
+            Self::MallardWetland => [8.5, 64.88, 7.5],
         }
     }
 
@@ -97,6 +103,7 @@ impl AuthoredWorldFixtureKind {
         match self {
             Self::Table | Self::LobbyTableV2 => self.preview_anchor(),
             Self::Island | Self::LobbyIslandV2 => [4.0, 67.03125, 8.0],
+            Self::MallardWetland => self.preview_anchor(),
         }
     }
 
@@ -106,6 +113,7 @@ impl AuthoredWorldFixtureKind {
             // A visible grass block inside the source region and ordinary
             // debug-creative reach of the fixture's accepted spawn.
             Self::Island | Self::LobbyIslandV2 => [5, 65, 8],
+            Self::MallardWetland => [8, 64, 18],
         }
     }
 
@@ -192,6 +200,9 @@ pub fn authored_world_fixture_records(
                     author_island_chunk(&mut buffer);
                 }
                 AuthoredWorldFixtureKind::Island | AuthoredWorldFixtureKind::LobbyIslandV2 => {}
+                AuthoredWorldFixtureKind::MallardWetland => {
+                    author_mallard_wetland_chunk(&mut buffer)
+                }
             }
             chunks.insert(pos, GeneratedChunk::from_mutable_buffer(buffer));
         }
@@ -441,6 +452,33 @@ fn author_island_chunk(chunk: &mut MutableChunkBlockBuffer) {
     }
 }
 
+fn author_mallard_wetland_chunk(chunk: &mut MutableChunkBlockBuffer) {
+    for local_z in 0..16 {
+        for local_x in 0..16 {
+            let world_x = chunk.chunk_x * 16 + local_x;
+            let world_z = chunk.chunk_z * 16 + local_z;
+            for y in 59..=61 {
+                chunk.set_block_at_y(local_x, y, local_z, STONE);
+            }
+            chunk.set_block_at_y(local_x, 62, local_z, DIRT);
+            chunk.set_block_at_y(local_x, 63, local_z, DIRT);
+
+            // A long, one-block-deep pond gives retained flock destinations
+            // room to read while keeping every bank reachable on foot. The
+            // integer ellipse is exact across chunk boundaries.
+            let dx = world_x - 8;
+            let dz = world_z - 3;
+            let shallow_pond = dx * dx * 81 + dz * dz * 576 <= 46_656;
+            chunk.set_block_at_y(
+                local_x,
+                64,
+                local_z,
+                if shallow_pond { WATER } else { GRASS_BLOCK },
+            );
+        }
+    }
+}
+
 fn authored_lobby_island_entities() -> EntityChunkRecord {
     EntityChunkRecord::new(
         AUTHORED_WORLD_FIXTURE_CENTER,
@@ -491,6 +529,7 @@ mod tests {
         for kind in [
             AuthoredWorldFixtureKind::Table,
             AuthoredWorldFixtureKind::Island,
+            AuthoredWorldFixtureKind::MallardWetland,
             AuthoredWorldFixtureKind::LobbyTableV2,
             AuthoredWorldFixtureKind::LobbyIslandV2,
         ] {

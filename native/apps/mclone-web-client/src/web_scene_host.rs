@@ -3361,6 +3361,71 @@ impl WebSceneHost {
                         .filter(|entity| entity.kind == mclone_protocol::EntityKind::MallardNest)
                         .count() as f64,
                 )?;
+                let mallards = client
+                    .entity_snapshots()
+                    .filter(|entity| entity.kind == mclone_protocol::EntityKind::Mallard)
+                    .collect::<Vec<_>>();
+                report_set_string(
+                    &object,
+                    "mallardEntityIds",
+                    &mallards
+                        .iter()
+                        .map(|entity| entity.id.0.to_string())
+                        .collect::<Vec<_>>()
+                        .join(","),
+                )?;
+                report_set_string(
+                    &object,
+                    "mallardPositions",
+                    &mallards
+                        .iter()
+                        .map(|entity| {
+                            format!(
+                                "{:.4},{:.4},{:.4}",
+                                entity.position.x, entity.position.y, entity.position.z
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join(";"),
+                )?;
+                report_set_string(
+                    &object,
+                    "mallardYawDegrees",
+                    &mallards
+                        .iter()
+                        .map(|entity| format!("{:.3}", entity.y_rot_degrees))
+                        .collect::<Vec<_>>()
+                        .join(","),
+                )?;
+                report_set_string(
+                    &object,
+                    "mallardTickCounts",
+                    &mallards
+                        .iter()
+                        .map(|entity| entity.tick_count.to_string())
+                        .collect::<Vec<_>>()
+                        .join(","),
+                )?;
+                report_set_number(
+                    &object,
+                    "mallardWaterCount",
+                    mallards
+                        .iter()
+                        .filter(|entity| entity.mallard.is_some_and(|mallard| mallard.in_water))
+                        .count() as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "mallardDucklingCount",
+                    mallards
+                        .iter()
+                        .filter(|entity| {
+                            entity.mallard.is_some_and(|mallard| {
+                                mallard.life_stage == mclone_protocol::MallardLifeStage::Duckling
+                            })
+                        })
+                        .count() as f64,
+                )?;
                 report_set_number(
                     &object,
                     "mallardFieldGuideBits",

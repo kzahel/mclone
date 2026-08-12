@@ -796,13 +796,14 @@ async function run() {
               return state?.startupReady === true
                 && state.streamingSettled === true
                 && state.pendingCompileJobCount === 0
-                && state.entityCount === state.showcaseEntityCount
-                && state.mallardCount === state.showcaseMallardCount
-                && state.mallardNestCount === state.showcaseMallardNestCount
-                && state.mallardFieldGuideBits === state.showcaseFieldGuideBits
+                && state.entityCount >= state.showcaseEntityCount
+                && state.mallardCount >= state.showcaseMallardCount
+                && state.mallardNestCount <= state.showcaseMallardNestCount
+                && (state.mallardFieldGuideBits & state.showcaseFieldGuideBits)
+                  === state.showcaseFieldGuideBits
                 && state.dayTime === 6000
-                && state.mallardEggHotbarCount === 2
-                && state.mallardFeatherHotbarCount === 1
+                && state.mallardEggHotbarCount === 0
+                && state.mallardFeatherHotbarCount === 0
                 && state.actorCount >= 4
                 && state.drawnActorCount >= 4;
             },
@@ -812,6 +813,70 @@ async function run() {
         } catch (error) {
           const state = await page.evaluate(() => globalThis.__mcloneWebApp?.state ?? null);
           throw new Error(`showcase did not settle: ${error instanceof Error ? error.message : String(error)}\nstate=${JSON.stringify(state, null, 2)}`);
+        }
+        const behaviorStart = await page.evaluate(
+          () => globalThis.__mcloneWebApp?.state?.lastReport ?? null,
+        );
+        try {
+          await page.waitForFunction(
+            (startTickCounts) => {
+              const state = globalThis.__mcloneWebApp?.state?.lastReport;
+              const startTicks = String(startTickCounts ?? "").split(",").map(Number);
+              const currentTicks = String(state?.mallardTickCounts ?? "").split(",").map(Number);
+              return startTicks.length === 3
+                && currentTicks.length >= 3
+                && startTicks.every((tick, index) => currentTicks[index] >= tick + 80);
+            },
+            behaviorStart.mallardTickCounts,
+            { timeout: 35_000 },
+          );
+        } catch (error) {
+          const state = await page.evaluate(
+            () => globalThis.__mcloneWebApp?.state?.lastReport ?? null,
+          );
+          throw new Error(`showcase behavior clock did not advance: ${error instanceof Error ? error.message : String(error)}\nstartTicks=${behaviorStart.mallardTickCounts}\ncurrentTicks=${state?.mallardTickCounts}\ncurrentMallards=${state?.mallardCount}\ncurrentNest=${state?.mallardNestCount}\ncurrentFieldGuide=${state?.mallardFieldGuideBits}`);
+        }
+        const behaviorEnd = await page.evaluate(
+          () => globalThis.__mcloneWebApp?.state?.lastReport ?? null,
+        );
+        const parsePositions = (value) => String(value ?? "")
+          .split(";")
+          .filter(Boolean)
+          .map((position) => position.split(",").map(Number));
+        const startIds = String(behaviorStart.mallardEntityIds ?? "").split(",");
+        const endIds = String(behaviorEnd.mallardEntityIds ?? "").split(",");
+        const startPositions = parsePositions(behaviorStart.mallardPositions);
+        const endPositions = parsePositions(behaviorEnd.mallardPositions);
+        const mallardDisplacement = startIds.map((id, index) => {
+          const endIndex = endIds.indexOf(id);
+          const start = startPositions[index];
+          const end = endPositions[endIndex];
+          if (!start || !end) return Number.NaN;
+          return Math.hypot(end[0] - start[0], end[2] - start[2]);
+        });
+        const behaviorProbe = {
+          elapsedTicks: String(behaviorEnd.mallardTickCounts ?? "")
+            .split(",")
+            .map((tick, index) => Number(tick) - Number(String(behaviorStart.mallardTickCounts ?? "").split(",")[index])),
+          mallardDisplacement,
+          initialWaterCount: Number(behaviorStart.mallardWaterCount),
+          finalWaterCount: Number(behaviorEnd.mallardWaterCount),
+          initialDucklingCount: Number(behaviorStart.mallardDucklingCount),
+          finalDucklingCount: Number(behaviorEnd.mallardDucklingCount),
+          initialFieldGuideBits: Number(behaviorStart.mallardFieldGuideBits),
+          finalFieldGuideBits: Number(behaviorEnd.mallardFieldGuideBits),
+        };
+        if (
+          mallardDisplacement.length !== 3
+          || mallardDisplacement.some((distance) => !Number.isFinite(distance) || distance < 1.5)
+          || behaviorProbe.finalDucklingCount < 2
+          || (behaviorProbe.finalFieldGuideBits & 32) !== 32
+        ) {
+          throw new Error(`showcase behavior window failed:\n${JSON.stringify({
+            behaviorStart,
+            behaviorEnd,
+            behaviorProbe,
+          }, null, 2)}`);
         }
         await page.evaluate(() => globalThis.__mcloneWebApp?.pauseRendering?.());
         await page.waitForFunction(
@@ -867,14 +932,13 @@ async function run() {
           pageErrors.length > 0
           || canvasPixels.distinctInteriorColorCount < 2
           || result?.showcaseId !== showcase
-          || result?.showcaseRevision !== 1
-          || result?.activeWorldSeedText !== "17502"
+          || result?.showcaseRevision !== 2
+          || result?.activeWorldSeedText !== "17503"
           || result?.generationProfile !== "authored-only"
           || result?.dayTime !== 6000
-          || result?.entityCount !== 4
-          || result?.mallardCount !== 3
-          || result?.mallardNestCount !== 1
-          || result?.mallardFieldGuideBits !== 63
+          || result?.mallardCount < 4
+          || result?.mallardNestCount !== 0
+          || result?.mallardFieldGuideBits === 1
           || String(result?.showcaseEntryEye) !== `${result.cameraX},${result.cameraY},${result.cameraZ}`
           || Object.values(worldRecordCounts).some((count) => count !== 0)
         ) {
@@ -892,6 +956,7 @@ async function run() {
           canvasScreenshotPath,
           canvasPixels,
           worldRecordCounts,
+          behaviorProbe,
           result,
         }, null, 2));
         return;

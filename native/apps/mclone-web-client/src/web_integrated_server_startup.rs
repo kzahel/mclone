@@ -290,6 +290,7 @@ const fn authored_fixture_tag(fixture: Option<AuthoredWorldFixtureKind>) -> u8 {
         Some(AuthoredWorldFixtureKind::Island) => 2,
         Some(AuthoredWorldFixtureKind::LobbyTableV2) => 3,
         Some(AuthoredWorldFixtureKind::LobbyIslandV2) => 4,
+        Some(AuthoredWorldFixtureKind::MallardWetland) => 5,
     }
 }
 
@@ -300,6 +301,7 @@ fn authored_fixture_from_tag(tag: u8) -> Result<Option<AuthoredWorldFixtureKind>
         2 => Ok(Some(AuthoredWorldFixtureKind::Island)),
         3 => Ok(Some(AuthoredWorldFixtureKind::LobbyTableV2)),
         4 => Ok(Some(AuthoredWorldFixtureKind::LobbyIslandV2)),
+        5 => Ok(Some(AuthoredWorldFixtureKind::MallardWetland)),
         _ => Err(format!(
             "integrated-server startup frame has unknown authored fixture {tag}"
         )),

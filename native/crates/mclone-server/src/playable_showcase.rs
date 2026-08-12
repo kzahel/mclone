@@ -688,12 +688,14 @@ struct PlayableShowcaseRecipe {
 #[serde(rename_all = "kebab-case")]
 enum ShowcaseBaseTerrain {
     AuthoredIslandV1,
+    MallardWetlandV1,
 }
 
 impl ShowcaseBaseTerrain {
     const fn fixture_kind(self) -> AuthoredWorldFixtureKind {
         match self {
             Self::AuthoredIslandV1 => AuthoredWorldFixtureKind::Island,
+            Self::MallardWetlandV1 => AuthoredWorldFixtureKind::MallardWetland,
         }
     }
 }
@@ -823,7 +825,7 @@ mod tests {
         assert_eq!(first_manifest.mallard_nest_count, 1);
         assert_eq!(
             first_manifest.field_guide_bits,
-            MallardFieldGuideProgress::KNOWN_MASK
+            MallardObservationKind::Seen.bit()
         );
         assert_eq!(first.world_metadata().unwrap().day_time, 6_000);
         assert!(first.world_metadata().unwrap().do_daylight_cycle);
@@ -840,19 +842,17 @@ mod tests {
         let second_entities = second.entity_chunk(ChunkPos::new(0, 0)).unwrap();
         assert_eq!(first_entities, second_entities);
         assert_eq!(first_entities.entities.len(), 4);
-        assert_eq!(
+        assert!(
             first
                 .player(&PlayerRecordKey::from_profile_id(identity.profile_id))
                 .unwrap()
-                .inventory[0],
-            Some(ItemStackSnapshot {
-                kind: ItemKind::MallardEgg,
-                count: 2,
-            })
+                .inventory
+                .iter()
+                .all(Option::is_none)
         );
 
         let center = first.chunk(ChunkPos::new(0, 0)).unwrap();
-        let pos = BlockPos::new(7, 65, 0);
+        let pos = BlockPos::new(8, 65, 11);
         let section = center
             .snapshot
             .sections

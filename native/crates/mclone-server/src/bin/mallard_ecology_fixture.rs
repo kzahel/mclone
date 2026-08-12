@@ -23,7 +23,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     // The existing authored-fixture builder owns guarded rebuild/removal of
     // the disposable SQLite directory. The shared showcase compiler then
     // writes the same recipe used by Web's fresh in-memory store.
-    write_authored_world_fixture_dir(&world_dir, AuthoredWorldFixtureKind::Island)?;
+    write_authored_world_fixture_dir(&world_dir, AuthoredWorldFixtureKind::MallardWetland)?;
     write_profile(&profile_path)?;
     let mut store = SqliteWorldStore::open_world_dir(&world_dir)?;
     let manifest = write_playable_showcase_to_store(

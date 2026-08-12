@@ -2,18 +2,38 @@
   "schemaVersion": 1,
   "id": "mallard-ecology",
   "title": "Mallard Ecology",
-  "revision": 1,
-  "baseTerrain": "authored-island-v1",
-  "seed": 17502,
+  "revision": 2,
+  "baseTerrain": "mallard-wetland-v1",
+  "seed": 17503,
   "dayTime": 6000,
   "freezeTime": true,
   "entry": {
-    "feet": [8.5, 66.0, 7.5],
-    "lookAt": [8.0, 65.0, 1.5]
+    "feet": [8.5, 65.0, 18.5],
+    "lookAt": [8.0, 64.9, 7.5]
   },
   "blockPatches": [
     {
-      "position": [7, 65, 0],
+      "position": [8, 65, 11],
+      "block": "minecraft:lily_pad",
+      "liveInstantiation": "minecraft-waterlily-patch"
+    },
+    {
+      "position": [3, 65, 8],
+      "block": "minecraft:lily_pad",
+      "liveInstantiation": "minecraft-waterlily-patch"
+    },
+    {
+      "position": [13, 65, 7],
+      "block": "minecraft:lily_pad",
+      "liveInstantiation": "minecraft-waterlily-patch"
+    },
+    {
+      "position": [-3, 65, 2],
+      "block": "minecraft:lily_pad",
+      "liveInstantiation": "minecraft-waterlily-patch"
+    },
+    {
+      "position": [19, 65, 3],
       "block": "minecraft:lily_pad",
       "liveInstantiation": "minecraft-waterlily-patch"
     }
@@ -21,58 +41,58 @@
   "entities": [
     {
       "id": "parent-a",
-      "position": [7.5, 64.88, 0.5],
-      "yRotDegrees": 90.0,
+      "position": [6.5, 64.88, 10.5],
+      "yRotDegrees": 25.0,
       "onGround": false,
       "liveInstantiation": "mclone-mallard-natural-spawn",
       "state": {
         "kind": "mallard",
         "ageTicks": 2400,
         "parents": [null, null],
-        "eggTime": 8000,
-        "featherTime": 2400,
-        "callTime": 200
+        "eggTime": 300,
+        "featherTime": 200,
+        "callTime": 80
       }
     },
     {
       "id": "parent-b",
-      "position": [9.5, 64.88, 0.5],
-      "yRotDegrees": 90.0,
+      "position": [9.5, 64.88, 10.5],
+      "yRotDegrees": -25.0,
       "onGround": false,
       "liveInstantiation": "mclone-mallard-natural-spawn",
       "state": {
         "kind": "mallard",
         "ageTicks": 2400,
         "parents": [null, null],
-        "eggTime": 8000,
-        "featherTime": 2400,
-        "callTime": 200
+        "eggTime": 360,
+        "featherTime": 240,
+        "callTime": 120
       }
     },
     {
       "id": "duckling",
-      "position": [8.5, 65.0, 2.5],
+      "position": [8.5, 64.88, 7.5],
       "yRotDegrees": -35.0,
-      "onGround": true,
+      "onGround": false,
       "liveInstantiation": "mclone-mallard-attended-hatch",
       "state": {
         "kind": "mallard",
         "ageTicks": 320,
         "parents": ["parent-a", "parent-b"],
         "eggTime": 8000,
-        "featherTime": 2400,
-        "callTime": 200
+        "featherTime": 480,
+        "callTime": 180
       }
     },
     {
       "id": "nest",
-      "position": [6.5, 66.0, 4.5],
+      "position": [8.5, 65.0, 13.5],
       "yRotDegrees": 0.0,
       "onGround": true,
       "liveInstantiation": "mclone-mallard-nest-placement",
       "state": {
         "kind": "mallard-nest",
-        "incubationProgress": 1200,
+        "incubationProgress": 2320,
         "incubationRequired": 2400,
         "parents": ["parent-a", "parent-b"]
       }
@@ -80,43 +100,10 @@
   ],
   "player": {
     "selectedHotbarSlot": 0,
-    "inventory": [
-      {
-        "slot": 0,
-        "item": "mclone:mallard_egg",
-        "count": 2,
-        "liveInstantiation": "mclone-mallard-egg-laying"
-      },
-      {
-        "slot": 1,
-        "item": "mclone:mallard_feather",
-        "count": 1,
-        "liveInstantiation": "mclone-mallard-feather-shedding"
-      }
-    ],
+    "inventory": [],
     "observations": [
       {
         "kind": "seen",
-        "liveInstantiation": "mclone-mallard-field-guide-observation"
-      },
-      {
-        "kind": "heard-call",
-        "liveInstantiation": "mclone-mallard-field-guide-observation"
-      },
-      {
-        "kind": "found-feather",
-        "liveInstantiation": "mclone-mallard-field-guide-observation"
-      },
-      {
-        "kind": "found-track",
-        "liveInstantiation": "mclone-mallard-field-guide-observation"
-      },
-      {
-        "kind": "found-nest",
-        "liveInstantiation": "mclone-mallard-field-guide-observation"
-      },
-      {
-        "kind": "witnessed-hatch",
         "liveInstantiation": "mclone-mallard-field-guide-observation"
       }
     ]
