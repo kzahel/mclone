@@ -7,8 +7,8 @@ use mclone_core::{
 #[cfg(feature = "physics-engine")]
 use mclone_protocol::EntityRotation;
 use mclone_protocol::{
-    EntityId, EntityKind, EntityPersistentId, ItemKind, ItemStackSnapshot, MallardLifeStage,
-    MallardNestSnapshotData, MallardSnapshotData,
+    EntityId, EntityKind, EntityPersistentId, ItemKind, ItemStackSnapshot, MallardCallCue,
+    MallardLifeStage, MallardNestSnapshotData, MallardSnapshotData, MallardTrackCue,
 };
 
 use crate::persistence::{
@@ -39,6 +39,9 @@ const ITEM_MOVED_BLOCK_MERGE_INTERVAL_TICKS: u64 = 2;
 const ENTITY_PERSISTENT_ID_MOST: u64 = 0x6d63_6c6f_6e65_0001;
 pub(crate) const MALLARD_NEST_INCUBATION_REQUIRED_TICKS: u32 = 2_400;
 const MALLARD_NEST_ATTENDANCE_RADIUS_SQR: f64 = 8.0 * 8.0;
+const MALLARD_CALL_AUDIBLE_RADIUS: f32 = 24.0;
+const MALLARD_CALL_FLOCK_SUPPRESSION_RADIUS_SQR: f64 = 12.0 * 12.0;
+const MALLARD_TRACK_SPACING_SQR: f64 = 2.0 * 2.0;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct MallardNestRuntimeState {
@@ -61,6 +64,11 @@ pub(crate) struct ServerEntityStore {
     mobs: BTreeMap<EntityId, MobRuntimeState>,
     items: BTreeMap<EntityId, ItemEntityRuntimeState>,
     mallard_nests: BTreeMap<EntityId, MallardNestRuntimeState>,
+    mallard_last_tracks: BTreeMap<EntityId, Vec3d>,
+    pending_mallard_calls: Vec<MallardCallCue>,
+    pending_mallard_tracks: Vec<MallardTrackCue>,
+    hatched_mallard_positions: Vec<Vec3d>,
+    mallard_cue_sequence: u64,
     persistent_ids: BTreeMap<EntityId, EntityPersistentId>,
     volatile_entities: BTreeSet<EntityId>,
     tick_list: ServerEntityTickList,
@@ -498,6 +506,18 @@ impl ServerEntityStore {
         ))
     }
 
+    pub(crate) fn drain_mallard_calls(&mut self) -> Vec<MallardCallCue> {
+        std::mem::take(&mut self.pending_mallard_calls)
+    }
+
+    pub(crate) fn drain_mallard_tracks(&mut self) -> Vec<MallardTrackCue> {
+        std::mem::take(&mut self.pending_mallard_tracks)
+    }
+
+    pub(crate) fn drain_hatched_mallard_positions(&mut self) -> Vec<Vec3d> {
+        std::mem::take(&mut self.hatched_mallard_positions)
+    }
+
     pub(crate) fn ensure_persistent_passive_mob(
         &mut self,
         persistent_id: EntityPersistentId,
@@ -639,6 +659,17 @@ impl ServerEntityStore {
         mob.set_mallard_egg_time_for_test(egg_time);
     }
 
+    #[cfg(test)]
+    pub(crate) fn set_mallard_trace_times_for_test(
+        &mut self,
+        id: EntityId,
+        feather_time: i32,
+        call_time: i32,
+    ) {
+        let mob = self.mobs.get_mut(&id).expect("test mallard mob state");
+        mob.set_mallard_trace_times_for_test(feather_time, call_time);
+    }
+
     pub(crate) fn tick_stationary<F>(
         &mut self,
         entity_ticking_chunks: &[ChunkPos],
@@ -681,6 +712,9 @@ impl ServerEntityStore {
             .collect::<Vec<_>>();
         let mut updated = Vec::new();
         let mut egg_spawns = Vec::new();
+        let mut feather_spawns = Vec::new();
+        let mut call_candidates = Vec::new();
+        let mut track_candidates = Vec::new();
         let mut merge_due_ids = Vec::new();
         let mut removed_ids = Vec::new();
         let mut hatched_nests = Vec::new();
@@ -688,6 +722,7 @@ impl ServerEntityStore {
             let id = *id;
             if let Some(entity) = self.entities.get_mut(&id) {
                 if let Some(mob) = self.mobs.get_mut(&id) {
+                    let previous_position = entity.position;
                     let flockmates = if entity.kind == EntityKind::Mallard {
                         mallard_positions
                             .iter()
@@ -714,6 +749,27 @@ impl ServerEntityStore {
                         .extend((0..mallard_egg_count).map(|_| {
                             (ItemKind::MallardEgg, entity.position, entity.y_rot_degrees)
                         }));
+                    if entity.kind == EntityKind::Mallard
+                        && mob.take_mallard_due_feather(mallard_habitat)
+                    {
+                        feather_spawns.push((entity.position, entity.y_rot_degrees));
+                    }
+                    if entity.kind == EntityKind::Mallard && mob.take_mallard_due_call() {
+                        call_candidates.push((entity.id, entity.position));
+                    }
+                    if entity.kind == EntityKind::Mallard
+                        && entity.on_ground
+                        && !mob.mallard_in_water()
+                        && squared_distance_xz(previous_position, entity.position) > 1.0e-8
+                        && mallard_habitat
+                    {
+                        track_candidates.push((
+                            entity.id,
+                            entity.persistent_id,
+                            entity.position,
+                            entity.y_rot_degrees,
+                        ));
+                    }
                     if entity.kind == EntityKind::Mallard {
                         let life_stage =
                             mob.mallard_life_stage().unwrap_or(MallardLifeStage::Adult);
@@ -804,6 +860,7 @@ impl ServerEntityStore {
                 updated.push(removed);
             }
             updated.push(self.insert_mallard_duckling(position, y_rot_degrees, parents));
+            self.hatched_mallard_positions.push(position);
         }
         updated.extend(self.merge_item_entities(&merge_due_ids));
         for (kind, position, y_rot_degrees) in egg_spawns {
@@ -812,6 +869,52 @@ impl ServerEntityStore {
                 position,
                 y_rot_degrees,
             ));
+        }
+        for (position, y_rot_degrees) in feather_spawns {
+            updated.push(self.insert_item_entity(
+                ItemStackSnapshot {
+                    kind: ItemKind::MallardFeather,
+                    count: 1,
+                },
+                position,
+                y_rot_degrees,
+            ));
+        }
+        let mut admitted_calls: Vec<Vec3d> = Vec::new();
+        for (source, position) in call_candidates {
+            if admitted_calls.iter().any(|admitted| {
+                squared_distance_xz(*admitted, position)
+                    <= MALLARD_CALL_FLOCK_SUPPRESSION_RADIUS_SQR
+            }) {
+                continue;
+            }
+            admitted_calls.push(position);
+            self.mallard_cue_sequence = self.mallard_cue_sequence.wrapping_add(1);
+            self.pending_mallard_calls.push(MallardCallCue {
+                source,
+                position,
+                sequence: self.mallard_cue_sequence,
+                audible_radius: MALLARD_CALL_AUDIBLE_RADIUS,
+            });
+        }
+        for (source, persistent_id, position, y_rot_degrees) in track_candidates {
+            if self
+                .mallard_last_tracks
+                .get(&source)
+                .is_some_and(|previous| {
+                    squared_distance_xz(*previous, position) < MALLARD_TRACK_SPACING_SQR
+                })
+            {
+                continue;
+            }
+            self.mallard_last_tracks.insert(source, position);
+            self.mallard_cue_sequence = self.mallard_cue_sequence.wrapping_add(1);
+            self.pending_mallard_tracks.push(MallardTrackCue {
+                source: persistent_id,
+                position,
+                y_rot_degrees,
+                sequence: self.mallard_cue_sequence,
+            });
         }
         updated
     }
@@ -981,6 +1084,7 @@ impl ServerEntityStore {
         self.mobs.remove(&id);
         self.items.remove(&id);
         self.mallard_nests.remove(&id);
+        self.mallard_last_tracks.remove(&id);
         self.persistent_ids.remove(&id);
         self.volatile_entities.remove(&id);
         self.provisional_debug_passive_showcase_ids.remove(&id);
@@ -2330,6 +2434,36 @@ mod tests {
         store.entities.get_mut(&left).unwrap().tick_count = 500;
         store.tick_stationary(&[ChunkPos::new(0, 0)], &[], broad_shallow_water);
         assert!(store.state(left).unwrap().position.x < 6.5);
+    }
+
+    #[test]
+    fn mallard_calls_are_flock_suppressed_and_feathers_are_collectible_entities() {
+        let mut store = ServerEntityStore::default();
+        let first =
+            store.insert_passive_mob_for_test(EntityKind::Mallard, Vec3d::new(4.5, 64.0, 4.5), 0.0);
+        let second =
+            store.insert_passive_mob_for_test(EntityKind::Mallard, Vec3d::new(5.5, 64.0, 4.5), 0.0);
+        store.set_mallard_trace_times_for_test(first, 0, 0);
+        store.set_mallard_trace_times_for_test(second, 0, 0);
+
+        store.tick_stationary(&[ChunkPos::new(0, 0)], &[], covered_wetland_ground);
+
+        let calls = store.drain_mallard_calls();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].audible_radius, MALLARD_CALL_AUDIBLE_RADIUS);
+        let feathers = store
+            .states()
+            .into_iter()
+            .filter(|entity| {
+                entity.item_stack
+                    == Some(ItemStackSnapshot {
+                        kind: ItemKind::MallardFeather,
+                        count: 1,
+                    })
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(feathers.len(), 2);
+        assert!(store.drain_mallard_calls().is_empty());
     }
 
     #[test]

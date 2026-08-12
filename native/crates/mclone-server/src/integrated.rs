@@ -19,12 +19,12 @@ use mclone_protocol::EntityRotation;
 use mclone_protocol::{
     AcceptTeleportCommand, ChunkView, ClientCommand, ClientEphemeralMessage, ClientIdentity,
     DebugActorKind, DebugHotbarItem, DimensionKey, EffectiveEphemeralTransport, EntityKind,
-    InteractionHand, ItemKind, MovePlayerCommand, PlayerActionCommand, PlayerActionKind,
-    PlayerAppearance, PlayerDamageCause, PlayerLifeState, PlayerModelKind, PlayerProfileId,
-    PlayerStatistics, RealmId, SequencedMovePlayerCommand, ServerUpdate, SessionCapabilities,
-    SessionConfiguration, SetCarriedItemCommand, SetDebugHotbarSlotCommand,
-    SetPlayerAppearanceCommand, StatisticKey, UseItemOnCommand, sequence_is_newer,
-    validate_body_pose_sample,
+    InteractionHand, ItemKind, MallardCallCue, MallardObservationKind, MallardTrackCue,
+    MovePlayerCommand, PlayerActionCommand, PlayerActionKind, PlayerAppearance, PlayerDamageCause,
+    PlayerLifeState, PlayerModelKind, PlayerProfileId, PlayerStatistics, RealmId,
+    SequencedMovePlayerCommand, ServerUpdate, SessionCapabilities, SessionConfiguration,
+    SetCarriedItemCommand, SetDebugHotbarSlotCommand, SetPlayerAppearanceCommand, StatisticKey,
+    UseItemOnCommand, sequence_is_newer, validate_body_pose_sample,
 };
 use mclone_worldgen::biome::{OverworldBiomeSource, get_layered_biome_by_id};
 use mclone_worldgen::block::{AIR, RawBlockId, block_name, generated_block_state_id};
@@ -2469,6 +2469,7 @@ impl RealmServer {
         let item_pickup_targets = self.item_pickup_targets();
         let players = &mut self.players;
         let mut dirty_inventories = BTreeSet::new();
+        let mut feather_collectors = BTreeSet::new();
         entity_updates.extend(self.active_dimension.entities.collect_item_entities(
             &item_pickup_targets,
             |player_id, stack| {
@@ -2476,6 +2477,9 @@ impl RealmServer {
                     let result = player.inventory.add_item_stack(stack);
                     if result.accepted_count > 0 {
                         dirty_inventories.insert(player_id);
+                        if stack.kind == ItemKind::MallardFeather {
+                            feather_collectors.insert(player_id);
+                        }
                     }
                     result.remaining
                 })
@@ -2491,6 +2495,21 @@ impl RealmServer {
                     .queue_update_for_player(player_id, ServerUpdate::PlayerInventory { hotbar });
             }
         }
+        for player_id in feather_collectors {
+            self.observe_mallard(player_id, MallardObservationKind::FoundFeather);
+        }
+        let mallard_calls = self.active_dimension.entities.drain_mallard_calls();
+        let mallard_tracks = self.active_dimension.entities.drain_mallard_tracks();
+        let mallard_hatches = self
+            .active_dimension
+            .entities
+            .drain_hatched_mallard_positions();
+        self.route_mallard_ecology_cues(
+            &entity_updates,
+            mallard_calls,
+            mallard_tracks,
+            mallard_hatches,
+        );
         let entity_tick_us = simulation_timing_elapsed_us(entity_tick_start);
 
         let physics_tick_start = simulation_timing_start();
@@ -4308,6 +4327,76 @@ impl RealmServer {
             ));
         }
         self.route_entity_updates(routes);
+    }
+
+    fn route_mallard_ecology_cues(
+        &mut self,
+        entity_updates: &[ServerEntityState],
+        calls: Vec<MallardCallCue>,
+        tracks: Vec<MallardTrackCue>,
+        hatches: Vec<Vec3d>,
+    ) {
+        for entity in entity_updates.iter().filter(|entity| entity.alive) {
+            let observation = match entity.kind {
+                EntityKind::Mallard => Some((MallardObservationKind::Seen, 16.0)),
+                EntityKind::MallardNest => Some((MallardObservationKind::FoundNest, 10.0)),
+                _ => None,
+            };
+            if let Some((observation, radius)) = observation {
+                for player_id in self.mallard_players_in_range(entity.position, radius) {
+                    self.observe_mallard(player_id, observation);
+                }
+            }
+        }
+        for cue in calls {
+            for player_id in
+                self.mallard_players_in_range(cue.position, f64::from(cue.audible_radius))
+            {
+                self.chunk_tracking
+                    .queue_update_for_player(player_id, ServerUpdate::MallardCall(cue));
+                self.observe_mallard(player_id, MallardObservationKind::HeardCall);
+            }
+        }
+        for cue in tracks {
+            for player_id in self.mallard_players_in_range(cue.position, 8.0) {
+                self.chunk_tracking
+                    .queue_update_for_player(player_id, ServerUpdate::MallardTrack(cue));
+                self.observe_mallard(player_id, MallardObservationKind::FoundTrack);
+            }
+        }
+        for position in hatches {
+            for player_id in self.mallard_players_in_range(position, 16.0) {
+                self.observe_mallard(player_id, MallardObservationKind::WitnessedHatch);
+            }
+        }
+    }
+
+    fn mallard_players_in_range(&self, position: Vec3d, radius: f64) -> Vec<ServerPlayerId> {
+        let radius_sqr = radius * radius;
+        let topology = self.active_dimension.definition.topology;
+        self.players
+            .iter()
+            .filter(|(_, player)| player.dimension == self.active_dimension.key)
+            .filter_map(|(player_id, player)| {
+                let player_position = player.state.position();
+                let lifted = topology.nearest_position_lift(position, player_position);
+                let delta = lifted.subtract(player_position);
+                (delta.length_sqr() <= radius_sqr).then_some(player_id)
+            })
+            .collect()
+    }
+
+    fn observe_mallard(&mut self, player_id: ServerPlayerId, observation: MallardObservationKind) {
+        let Some(progress) = self.players.get_mut(player_id).and_then(|player| {
+            player
+                .mallard_field_guide
+                .observe(observation)
+                .then_some(player.mallard_field_guide)
+        }) else {
+            return;
+        };
+        self.chunk_tracking
+            .queue_update_for_player(player_id, ServerUpdate::MallardFieldGuide(progress));
     }
 
     fn mark_entity_updates_dirty(&mut self, subjects: &[ServerEntityState]) {

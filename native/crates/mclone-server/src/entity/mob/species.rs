@@ -282,6 +282,29 @@ impl MallardRuntimeState {
         }
     }
 
+    pub(super) fn take_due_feather(
+        &mut self,
+        habitat_suitable: bool,
+        random: &mut SimpleRandomSource,
+    ) -> bool {
+        if self.life_stage() != MallardLifeStage::Adult
+            || self.feather_time > 0
+            || !habitat_suitable
+        {
+            return false;
+        }
+        self.feather_time = next_mallard_feather_time(random);
+        true
+    }
+
+    pub(super) fn take_due_call(&mut self, random: &mut SimpleRandomSource) -> bool {
+        if self.life_stage() != MallardLifeStage::Adult || self.call_time > 0 {
+            return false;
+        }
+        self.call_time = next_mallard_call_time(random);
+        true
+    }
+
     pub(super) fn take_due_egg(
         &mut self,
         habitat_suitable: bool,
@@ -297,6 +320,12 @@ impl MallardRuntimeState {
     #[cfg(test)]
     pub(super) fn set_egg_time_for_test(&mut self, egg_time: i32) {
         self.egg_time = egg_time;
+    }
+
+    #[cfg(test)]
+    pub(super) fn set_trace_times_for_test(&mut self, feather_time: i32, call_time: i32) {
+        self.feather_time = feather_time;
+        self.call_time = call_time;
     }
 }
 

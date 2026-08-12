@@ -509,12 +509,32 @@ impl MobRuntimeState {
             .unwrap_or(0)
     }
 
+    pub(crate) fn take_mallard_due_feather(&mut self, habitat_suitable: bool) -> bool {
+        self.species
+            .mallard_mut()
+            .is_some_and(|mallard| mallard.take_due_feather(habitat_suitable, &mut self.random))
+    }
+
+    pub(crate) fn take_mallard_due_call(&mut self) -> bool {
+        self.species
+            .mallard_mut()
+            .is_some_and(|mallard| mallard.take_due_call(&mut self.random))
+    }
+
     #[cfg(test)]
     pub(crate) fn set_mallard_egg_time_for_test(&mut self, egg_time: i32) {
         let Some(mallard) = self.species.mallard_mut() else {
             panic!("test expected mallard species state");
         };
         mallard.set_egg_time_for_test(egg_time);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_mallard_trace_times_for_test(&mut self, feather_time: i32, call_time: i32) {
+        let Some(mallard) = self.species.mallard_mut() else {
+            panic!("test expected mallard species state");
+        };
+        mallard.set_trace_times_for_test(feather_time, call_time);
     }
 }
 
