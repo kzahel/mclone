@@ -3593,6 +3593,27 @@ impl WebSceneHost {
                 )?;
                 report_set_string(
                     &object,
+                    "beeColonyPositions",
+                    &client
+                        .entity_snapshots()
+                        .filter(|entity| {
+                            matches!(
+                                entity.kind,
+                                mclone_protocol::EntityKind::BeeNest
+                                    | mclone_protocol::EntityKind::BeeHotel
+                            )
+                        })
+                        .map(|entity| {
+                            format!(
+                                "{:.4},{:.4},{:.4}",
+                                entity.position.x, entity.position.y, entity.position.z
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join(";"),
+                )?;
+                report_set_string(
+                    &object,
                     "beeEntityIds",
                     &bees
                         .iter()

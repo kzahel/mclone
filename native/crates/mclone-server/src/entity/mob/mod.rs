@@ -71,6 +71,12 @@ const BEE_FLIGHT_SPEED: f64 = 0.075;
 const BEE_MAX_TURN_DEGREES: f32 = 20.0;
 const BEE_FORAGE_TICKS: u32 = 36;
 const BEE_NEST_TICKS: u32 = 24;
+const BEE_HOVER_TICKS: u32 = 36;
+const BEE_FLOWER_SEARCH_RADIUS: i32 = 22;
+const BEE_MIN_FORAGE_DISTANCE_SQR: f64 = 3.5 * 3.5;
+const BEE_MAX_TRAVEL_TICKS: u32 = 520;
+const BEE_STALL_RECOVERY_TICKS: u16 = 6;
+const BEE_PROGRESS_DISTANCE_SQR: f64 = 0.008 * 0.008;
 pub(crate) const DEER_FALL_PRESENTATION_TICKS: u32 = 30;
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -167,6 +173,12 @@ pub(crate) struct MobRuntimeState {
     mallard_seek_shore_next: bool,
     deer_habitat_intent: Option<DeerHabitatIntent>,
     bee_target: Option<Vec3d>,
+    bee_route_destination: Option<Vec3d>,
+    bee_route_recovery: bool,
+    bee_stall_ticks: u16,
+    bee_trip_sequence: u32,
+    bee_foraging_band: usize,
+    bee_last_flower: Option<BlockPos>,
     bee_flower: Option<BlockPos>,
     bee_home_position: Option<Vec3d>,
     bee_completed_deposit: Option<BlockPos>,
@@ -229,6 +241,12 @@ impl MobRuntimeState {
             mallard_seek_shore_next: false,
             deer_habitat_intent: None,
             bee_target: None,
+            bee_route_destination: None,
+            bee_route_recovery: false,
+            bee_stall_ticks: 0,
+            bee_trip_sequence: 0,
+            bee_foraging_band: 0,
+            bee_last_flower: None,
             bee_flower: None,
             bee_home_position: None,
             bee_completed_deposit: None,
@@ -298,6 +316,12 @@ impl MobRuntimeState {
             mallard_seek_shore_next: false,
             deer_habitat_intent: None,
             bee_target: None,
+            bee_route_destination: None,
+            bee_route_recovery: false,
+            bee_stall_ticks: 0,
+            bee_trip_sequence: 0,
+            bee_foraging_band: 0,
+            bee_last_flower: None,
             bee_flower,
             bee_home_position: None,
             bee_completed_deposit: None,
@@ -311,6 +335,9 @@ impl MobRuntimeState {
         self.mallard_habitat_intent = None;
         self.deer_habitat_intent = None;
         self.bee_target = None;
+        self.bee_route_destination = None;
+        self.bee_route_recovery = false;
+        self.bee_stall_ticks = 0;
         self.bee_flower = None;
         self.bee_completed_deposit = None;
     }
@@ -393,6 +420,10 @@ impl MobRuntimeState {
 
     pub(crate) fn set_bee_home_position(&mut self, position: Option<Vec3d>) {
         self.bee_home_position = position;
+    }
+
+    pub(crate) fn set_bee_foraging_band(&mut self, band: usize) {
+        self.bee_foraging_band = band % 3;
     }
 
     pub(crate) fn take_bee_completed_deposit(&mut self) -> Option<BlockPos> {
@@ -752,11 +783,31 @@ impl MobRuntimeState {
         };
         bee.advance_behavior_tick();
         let mut behavior = bee.behavior();
-        if behavior == mclone_protocol::BeeBehavior::Hover && bee.behavior_ticks() >= 24 {
-            self.bee_flower = nearest_bee_flower(entity.position, block_state_at);
+        if behavior == mclone_protocol::BeeBehavior::Hover
+            && bee.behavior_ticks() >= BEE_HOVER_TICKS + entity.id.0 as u32 % 24
+        {
+            self.bee_trip_sequence = self.bee_trip_sequence.wrapping_add(1);
+            self.bee_flower = select_bee_flower(
+                self.bee_home_position.unwrap_or(entity.position),
+                self.bee_foraging_band,
+                self.bee_last_flower,
+                &mut self.random,
+                block_state_at,
+            );
             bee.set_flower(self.bee_flower);
             if let Some(flower) = self.bee_flower {
-                self.bee_target = Some(bee_flower_target(flower));
+                let destination = bee_flower_target(flower);
+                let target = bee_cruise_target(
+                    entity,
+                    destination,
+                    self.bee_trip_sequence,
+                    false,
+                    block_state_at,
+                );
+                self.bee_route_destination = Some(destination);
+                self.bee_route_recovery = target != destination;
+                self.bee_stall_ticks = 0;
+                self.bee_target = Some(target);
                 behavior = mclone_protocol::BeeBehavior::FlyToFlower;
                 bee.set_behavior(behavior);
             }
@@ -767,23 +818,57 @@ impl MobRuntimeState {
             bee.set_carrying_pollen(true);
             behavior = mclone_protocol::BeeBehavior::ReturnHome;
             bee.set_behavior(behavior);
-            self.bee_target = self.bee_home_position.map(bee_home_target);
+            if let Some(home) = self.bee_home_position.map(bee_home_target) {
+                let target =
+                    bee_cruise_target(entity, home, self.bee_trip_sequence, true, block_state_at);
+                self.bee_route_destination = Some(home);
+                self.bee_route_recovery = target != home;
+                self.bee_stall_ticks = 0;
+                self.bee_target = Some(target);
+            }
         }
         if behavior == mclone_protocol::BeeBehavior::AtNest
             && bee.behavior_ticks() >= BEE_NEST_TICKS
         {
             if bee.carrying_pollen() {
-                self.bee_completed_deposit = Some(
-                    self.bee_flower
-                        .unwrap_or_else(|| BlockPos::containing(entity.position)),
-                );
+                let completed_flower = self
+                    .bee_flower
+                    .unwrap_or_else(|| BlockPos::containing(entity.position));
+                self.bee_completed_deposit = Some(completed_flower);
+                self.bee_last_flower = Some(completed_flower);
             }
             bee.set_carrying_pollen(false);
             bee.set_behavior(mclone_protocol::BeeBehavior::Hover);
             behavior = mclone_protocol::BeeBehavior::Hover;
-            self.bee_target = self.bee_home_position.map(bee_home_target);
+            self.bee_target = self
+                .bee_home_position
+                .map(|home| bee_hover_target(home, entity.persistent_id, self.bee_trip_sequence));
+            self.bee_route_destination = None;
+            self.bee_route_recovery = false;
             self.bee_flower = None;
             bee.set_flower(None);
+        }
+
+        if matches!(
+            behavior,
+            mclone_protocol::BeeBehavior::FlyToFlower | mclone_protocol::BeeBehavior::ReturnHome
+        ) && bee.behavior_ticks() >= BEE_MAX_TRAVEL_TICKS
+        {
+            if behavior == mclone_protocol::BeeBehavior::FlyToFlower {
+                self.bee_last_flower = self.bee_flower.take();
+                bee.set_flower(None);
+                bee.set_carrying_pollen(false);
+            }
+            behavior = mclone_protocol::BeeBehavior::ReturnHome;
+            bee.set_behavior(behavior);
+            if let Some(home) = self.bee_home_position.map(bee_home_target) {
+                let target =
+                    bee_cruise_target(entity, home, self.bee_trip_sequence, true, block_state_at);
+                self.bee_route_destination = Some(home);
+                self.bee_route_recovery = target != home;
+                self.bee_stall_ticks = 0;
+                self.bee_target = Some(target);
+            }
         }
 
         if matches!(
@@ -797,27 +882,70 @@ impl MobRuntimeState {
                     mclone_protocol::BeeBehavior::FlyToFlower => {
                         self.bee_flower.map(bee_flower_target)
                     }
-                    _ => self.bee_home_position.map(bee_home_target),
+                    mclone_protocol::BeeBehavior::ReturnHome => {
+                        self.bee_home_position.map(bee_home_target)
+                    }
+                    mclone_protocol::BeeBehavior::Hover => self.bee_home_position.map(|home| {
+                        bee_hover_target(home, entity.persistent_id, self.bee_trip_sequence)
+                    }),
+                    _ => None,
                 };
+                self.bee_route_destination = matches!(
+                    behavior,
+                    mclone_protocol::BeeBehavior::FlyToFlower
+                        | mclone_protocol::BeeBehavior::ReturnHome
+                )
+                .then_some(self.bee_target)
+                .flatten();
+                self.bee_route_recovery = false;
             }
             if let Some(target) = self.bee_target {
-                if bee_move_toward(entity, target, block_state_at) {
-                    match behavior {
-                        mclone_protocol::BeeBehavior::FlyToFlower => {
-                            bee.set_behavior(mclone_protocol::BeeBehavior::Forage);
-                            behavior = mclone_protocol::BeeBehavior::Forage;
-                            self.bee_target = None;
+                let outcome = bee_move_toward(entity, target, block_state_at);
+                self.bee_stall_ticks = if outcome.progressed {
+                    0
+                } else {
+                    self.bee_stall_ticks.saturating_add(1)
+                };
+                if outcome.reached {
+                    if self.bee_route_recovery {
+                        self.bee_target = self.bee_route_destination;
+                        self.bee_route_recovery = false;
+                    } else {
+                        match behavior {
+                            mclone_protocol::BeeBehavior::FlyToFlower => {
+                                bee.set_behavior(mclone_protocol::BeeBehavior::Forage);
+                                behavior = mclone_protocol::BeeBehavior::Forage;
+                                self.bee_target = None;
+                            }
+                            mclone_protocol::BeeBehavior::ReturnHome => {
+                                bee.set_behavior(mclone_protocol::BeeBehavior::AtNest);
+                                behavior = mclone_protocol::BeeBehavior::AtNest;
+                                self.bee_target = None;
+                            }
+                            mclone_protocol::BeeBehavior::Hover => {
+                                self.bee_trip_sequence = self.bee_trip_sequence.wrapping_add(1);
+                                self.bee_target = self.bee_home_position.map(|home| {
+                                    bee_hover_target(
+                                        home,
+                                        entity.persistent_id,
+                                        self.bee_trip_sequence,
+                                    )
+                                });
+                            }
+                            _ => {}
                         }
-                        mclone_protocol::BeeBehavior::ReturnHome => {
-                            bee.set_behavior(mclone_protocol::BeeBehavior::AtNest);
-                            behavior = mclone_protocol::BeeBehavior::AtNest;
-                            self.bee_target = None;
-                        }
-                        mclone_protocol::BeeBehavior::Hover => {
-                            self.bee_target = None;
-                        }
-                        _ => {}
                     }
+                    self.bee_stall_ticks = 0;
+                } else if self.bee_stall_ticks >= BEE_STALL_RECOVERY_TICKS {
+                    self.bee_target = Some(bee_recovery_target(
+                        entity,
+                        self.bee_route_destination.unwrap_or(target),
+                        self.bee_trip_sequence,
+                        &mut self.random,
+                        block_state_at,
+                    ));
+                    self.bee_route_recovery = true;
+                    self.bee_stall_ticks = 0;
                 }
             }
         }
@@ -1665,30 +1793,50 @@ where
     fallback
 }
 
-fn nearest_bee_flower<F>(position: Vec3d, blocks: &F) -> Option<BlockPos>
+fn select_bee_flower<F>(
+    home: Vec3d,
+    preferred_band: usize,
+    previous: Option<BlockPos>,
+    random: &mut SimpleRandomSource,
+    blocks: &F,
+) -> Option<BlockPos>
 where
     F: Fn(BlockPos) -> Option<BlockStateId>,
 {
-    let center = BlockPos::containing(position);
-    let mut best = None;
+    let center = BlockPos::containing(home);
+    let mut candidates: [Vec<BlockPos>; 3] = std::array::from_fn(|_| Vec::new());
     for dy in -4..=4 {
-        for dx in -10..=10 {
-            for dz in -10..=10 {
-                if dx * dx + dz * dz > 100 {
+        for dx in -BEE_FLOWER_SEARCH_RADIUS..=BEE_FLOWER_SEARCH_RADIUS {
+            for dz in -BEE_FLOWER_SEARCH_RADIUS..=BEE_FLOWER_SEARCH_RADIUS {
+                let horizontal_distance_sqr = f64::from(dx * dx + dz * dz);
+                if horizontal_distance_sqr > f64::from(BEE_FLOWER_SEARCH_RADIUS.pow(2)) {
                     continue;
                 }
                 let pos = center.offset(dx, dy, dz);
-                if !blocks(pos).is_some_and(is_flower_state) {
+                if Some(pos) == previous || !blocks(pos).is_some_and(is_flower_state) {
                     continue;
                 }
-                let distance = position.distance_to_sqr(bee_flower_target(pos));
-                if best.is_none_or(|(_, best_distance)| distance < best_distance) {
-                    best = Some((pos, distance));
+                let band = if horizontal_distance_sqr < 8.0 * 8.0 {
+                    0
+                } else if horizontal_distance_sqr < 14.0 * 14.0 {
+                    1
+                } else {
+                    2
+                };
+                if horizontal_distance_sqr >= BEE_MIN_FORAGE_DISTANCE_SQR {
+                    candidates[band].push(pos);
                 }
             }
         }
     }
-    best.map(|(pos, _)| pos)
+    for offset in 0..3 {
+        let band = (preferred_band + offset) % 3;
+        if !candidates[band].is_empty() {
+            let index = random.next_int_bound(candidates[band].len() as i32) as usize;
+            return Some(candidates[band][index]);
+        }
+    }
+    previous.filter(|pos| blocks(*pos).is_some_and(is_flower_state))
 }
 
 fn is_flower_state(state: BlockStateId) -> bool {
@@ -1711,14 +1859,116 @@ fn bee_home_target(home: Vec3d) -> Vec3d {
     home.add(Vec3d::new(0.0, 0.62, 0.0))
 }
 
-fn bee_move_toward<F>(entity: &mut ServerEntityState, target: Vec3d, blocks: &F) -> bool
+fn bee_hover_target(home: Vec3d, identity: EntityPersistentId, sequence: u32) -> Vec3d {
+    let phase = ((identity.least ^ u64::from(sequence).wrapping_mul(0x9e37_79b9)) % 16) as f64
+        * std::f64::consts::TAU
+        / 16.0;
+    home.add(Vec3d::new(
+        phase.cos() * 1.35,
+        1.1 + (phase * 2.0).sin() * 0.32,
+        phase.sin() * 1.35,
+    ))
+}
+
+fn bee_cruise_target<F>(
+    entity: &ServerEntityState,
+    destination: Vec3d,
+    sequence: u32,
+    returning: bool,
+    blocks: &F,
+) -> Vec3d
+where
+    F: Fn(BlockPos) -> Option<BlockStateId>,
+{
+    let displacement = destination.subtract(entity.position);
+    let horizontal_length =
+        (displacement.x * displacement.x + displacement.z * displacement.z).sqrt();
+    if horizontal_length < 5.0 {
+        return destination;
+    }
+    let direction_x = displacement.x / horizontal_length;
+    let direction_z = displacement.z / horizontal_length;
+    let side = if (entity.persistent_id.least ^ u64::from(sequence) ^ u64::from(returning)) & 1 == 0
+    {
+        1.0
+    } else {
+        -1.0
+    };
+    let candidate = Vec3d::new(
+        entity.position.x + displacement.x * 0.48 - direction_z * 1.4 * side,
+        entity.position.y.max(destination.y) + 1.5 + f64::from(sequence % 3) * 0.35,
+        entity.position.z + displacement.z * 0.48 + direction_x * 1.4 * side,
+    );
+    bee_waypoint_is_clear(entity, candidate, blocks)
+        .then_some(candidate)
+        .unwrap_or(destination)
+}
+
+fn bee_recovery_target<F>(
+    entity: &ServerEntityState,
+    destination: Vec3d,
+    sequence: u32,
+    random: &mut SimpleRandomSource,
+    blocks: &F,
+) -> Vec3d
+where
+    F: Fn(BlockPos) -> Option<BlockStateId>,
+{
+    let displacement = destination.subtract(entity.position);
+    let horizontal_length = (displacement.x * displacement.x + displacement.z * displacement.z)
+        .sqrt()
+        .max(1.0e-6);
+    let direction_x = displacement.x / horizontal_length;
+    let direction_z = displacement.z / horizontal_length;
+    let preferred_side = if (u64::from(sequence) ^ entity.persistent_id.least) & 1 == 0 {
+        1.0
+    } else {
+        -1.0
+    };
+    for side in [preferred_side, -preferred_side] {
+        for lift in [1.0, 1.8, 2.8] {
+            let advance = 0.9 + random.next_double() * 0.5;
+            let candidate = entity.position.add(Vec3d::new(
+                direction_x * advance - direction_z * 1.25 * side,
+                lift,
+                direction_z * advance + direction_x * 1.25 * side,
+            ));
+            if bee_waypoint_is_clear(entity, candidate, blocks) {
+                return candidate;
+            }
+        }
+    }
+    entity.position.add(Vec3d::new(0.0, 2.8, 0.0))
+}
+
+fn bee_waypoint_is_clear<F>(entity: &ServerEntityState, target: Vec3d, blocks: &F) -> bool
+where
+    F: Fn(BlockPos) -> Option<BlockStateId>,
+{
+    let feet = BlockPos::containing(target);
+    let head = BlockPos::containing(target.add(Vec3d::new(0.0, f64::from(entity.height), 0.0)));
+    [feet, head]
+        .into_iter()
+        .all(|pos| blocks(pos).is_some_and(|state| block_collision_aabb(state, pos).is_none()))
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct BeeMoveOutcome {
+    reached: bool,
+    progressed: bool,
+}
+
+fn bee_move_toward<F>(entity: &mut ServerEntityState, target: Vec3d, blocks: &F) -> BeeMoveOutcome
 where
     F: Fn(BlockPos) -> Option<BlockStateId>,
 {
     let displacement = target.subtract(entity.position);
     let distance_sqr = displacement.length_sqr();
     if distance_sqr <= BEE_TARGET_REACHED_DISTANCE_SQR {
-        return true;
+        return BeeMoveOutcome {
+            reached: true,
+            progressed: true,
+        };
     }
     let requested = displacement.scale(BEE_FLIGHT_SPEED / distance_sqr.sqrt());
     let bounding_box = collision_aabb_for_feet_position(
@@ -1734,7 +1984,10 @@ where
         entity.y_rot_degrees =
             rotate_degrees_towards(entity.y_rot_degrees, wanted_y_rot, BEE_MAX_TURN_DEGREES);
     }
-    false
+    BeeMoveOutcome {
+        reached: false,
+        progressed: traveled.length_sqr() >= BEE_PROGRESS_DISTANCE_SQR,
+    }
 }
 
 fn set_bee_animation(entity: &mut ServerEntityState, behavior: mclone_protocol::BeeBehavior) {
@@ -1753,7 +2006,9 @@ fn set_bee_animation(entity: &mut ServerEntityState, behavior: mclone_protocol::
         ),
     };
     let previous = entity.animation;
-    if previous.is_some_and(|animation| animation.clip == clip) {
+    if previous
+        .is_some_and(|animation| animation.clip == clip && animation.phase_source == phase_source)
+    {
         return;
     }
     let epoch = previous.map_or(0, |animation| animation.epoch.wrapping_add(1));
@@ -2384,6 +2639,35 @@ mod tests {
         assert_eq!(
             first.next_random_int_bound(10_000),
             second.next_random_int_bound(10_000)
+        );
+    }
+
+    #[test]
+    fn bee_flower_selection_avoids_the_previous_flower_when_an_alternative_exists() {
+        let flower_state = generated_block_state_id(DANDELION);
+        let air_state = generated_block_state_id(mclone_worldgen::block::AIR);
+        let previous = BlockPos::new(4, 64, 0);
+        let alternative = BlockPos::new(5, 64, 0);
+        let blocks = |pos| {
+            Some(
+                if matches!(pos, value if value == previous || value == alternative) {
+                    flower_state
+                } else {
+                    air_state
+                },
+            )
+        };
+        let mut random = SimpleRandomSource::new(42);
+
+        assert_eq!(
+            select_bee_flower(
+                Vec3d::new(0.5, 64.0, 0.5),
+                0,
+                Some(previous),
+                &mut random,
+                &blocks,
+            ),
+            Some(alternative)
         );
     }
 

@@ -840,27 +840,41 @@ async function run() {
         const behaviorStart = await page.evaluate(
           () => globalThis.__mcloneWebApp?.state?.lastReport ?? null,
         );
+        const beeBehaviorSamples = beeShowcase ? [behaviorStart] : [];
         try {
-          await page.waitForFunction(
-            ({ startTickCounts, subject }) => {
-              const state = globalThis.__mcloneWebApp?.state?.lastReport;
-              const startTicks = String(startTickCounts ?? "").split(",").map(Number);
-              const currentTicks = String(state?.[`${subject}TickCounts`])
-                .split(",").map(Number);
-              return startTicks.length === 3
-                && currentTicks.length >= 3
-                && startTicks.every((tick, index) => currentTicks[index] >= tick + 80);
-            },
-            {
-              startTickCounts: beeShowcase
-                ? behaviorStart.beeTickCounts
-                : deerShowcase
-                  ? behaviorStart.deerTickCounts
-                  : behaviorStart.mallardTickCounts,
-              subject: beeShowcase ? "bee" : deerShowcase ? "deer" : "mallard",
-            },
-            { timeout: 35_000 },
-          );
+          const sampleCount = beeShowcase ? 18 : 1;
+          let priorSample = behaviorStart;
+          for (let sampleIndex = 0; sampleIndex < sampleCount; sampleIndex += 1) {
+            await page.waitForFunction(
+              ({ startTickCounts, subject, tickAdvance }) => {
+                const state = globalThis.__mcloneWebApp?.state?.lastReport;
+                const startTicks = String(startTickCounts ?? "").split(",").map(Number);
+                const currentTicks = String(state?.[`${subject}TickCounts`])
+                  .split(",").map(Number);
+                return startTicks.length === 3
+                  && currentTicks.length >= 3
+                  && startTicks.every(
+                    (tick, index) => currentTicks[index] >= tick + tickAdvance,
+                  );
+              },
+              {
+                startTickCounts: beeShowcase
+                  ? priorSample.beeTickCounts
+                  : deerShowcase
+                    ? priorSample.deerTickCounts
+                    : priorSample.mallardTickCounts,
+                subject: beeShowcase ? "bee" : deerShowcase ? "deer" : "mallard",
+                tickAdvance: beeShowcase ? 20 : 80,
+              },
+              { timeout: 35_000 },
+            );
+            if (beeShowcase) {
+              priorSample = await page.evaluate(
+                () => globalThis.__mcloneWebApp?.state?.lastReport ?? null,
+              );
+              beeBehaviorSamples.push(priorSample);
+            }
+          }
         } catch (error) {
           const state = await page.evaluate(
             () => globalThis.__mcloneWebApp?.state?.lastReport ?? null,
@@ -950,15 +964,67 @@ async function run() {
           }
         }
         if (beeShowcase) {
-          const clips = `${behaviorStart.beeAnimationClips},${behaviorEnd.beeAnimationClips}`;
+          const sampleIds = String(behaviorStart.beeEntityIds ?? "").split(",");
+          const colony = parsePositions(behaviorStart.beeColonyPositions)[0];
+          const travelByBee = sampleIds.map(() => 0);
+          const maxRadiusByBee = sampleIds.map(() => 0);
+          const minRadiusByBee = sampleIds.map(() => Number.POSITIVE_INFINITY);
+          const stationaryStreakByBee = sampleIds.map(() => 0);
+          const longestStationaryStreakByBee = sampleIds.map(() => 0);
+          const sampledClips = new Set();
+          for (let sampleNumber = 0; sampleNumber < beeBehaviorSamples.length; sampleNumber += 1) {
+            const sample = beeBehaviorSamples[sampleNumber];
+            const ids = String(sample.beeEntityIds ?? "").split(",");
+            const positions = parsePositions(sample.beePositions);
+            String(sample.beeAnimationClips ?? "").split(",").forEach((clip) => sampledClips.add(clip));
+            for (let index = 0; index < sampleIds.length; index += 1) {
+              const sampleIndex = ids.indexOf(sampleIds[index]);
+              const position = positions[sampleIndex];
+              if (!position || !colony) continue;
+              const radius = Math.hypot(position[0] - colony[0], position[2] - colony[2]);
+              maxRadiusByBee[index] = Math.max(maxRadiusByBee[index], radius);
+              minRadiusByBee[index] = Math.min(minRadiusByBee[index], radius);
+              if (sampleNumber > 0) {
+                const prior = beeBehaviorSamples[sampleNumber - 1];
+                const priorIds = String(prior.beeEntityIds ?? "").split(",");
+                const priorPosition = parsePositions(prior.beePositions)[priorIds.indexOf(sampleIds[index])];
+                if (priorPosition) {
+                  const step = Math.hypot(
+                    position[0] - priorPosition[0],
+                    position[1] - priorPosition[1],
+                    position[2] - priorPosition[2],
+                  );
+                  travelByBee[index] += step;
+                  if (step < 0.08) {
+                    stationaryStreakByBee[index] += 1;
+                    longestStationaryStreakByBee[index] = Math.max(
+                      longestStationaryStreakByBee[index],
+                      stationaryStreakByBee[index],
+                    );
+                  } else {
+                    stationaryStreakByBee[index] = 0;
+                  }
+                }
+              }
+            }
+          }
+          Object.assign(behaviorProbe, {
+            beeTravelByBee: travelByBee,
+            beeMaxRadiusByBee: maxRadiusByBee,
+            beeMinRadiusByBee: minRadiusByBee,
+            beeLongestStationaryStreakByBee: longestStationaryStreakByBee,
+            beeSampledClips: [...sampledClips],
+          });
           if (
             subjectDisplacement.length !== 3
-            || !subjectDisplacement.some(
-              (distance) => Number.isFinite(distance) && distance > 0.5,
-            )
-            || !/forage/.test(clips)
-            || !/fly/.test(clips)
+            || travelByBee.some((distance) => !Number.isFinite(distance) || distance < 5)
+            || maxRadiusByBee.filter((radius) => radius >= 9).length < 2
+            || Math.max(...maxRadiusByBee) - Math.min(...maxRadiusByBee) < 3
+            || longestStationaryStreakByBee.some((count) => count > 4)
+            || !sampledClips.has("forage")
+            || !sampledClips.has("fly")
             || (behaviorProbe.finalFieldGuideBits & 16) !== 16
+            || Number(behaviorEnd.sectionBlockUpdateCount) < 1
           ) {
             throw new Error(`bee showcase behavior window failed:\n${JSON.stringify({
               behaviorStart,
@@ -1066,7 +1132,7 @@ async function run() {
           pageErrors.length > 0
           || canvasPixels.distinctInteriorColorCount < 2
           || result?.showcaseId !== showcase
-          || result?.showcaseRevision !== (deerShowcase || beeShowcase ? 1 : 2)
+          || result?.showcaseRevision !== (beeShowcase ? 2 : deerShowcase ? 1 : 2)
           || result?.activeWorldSeedText !== (beeShowcase ? "17505" : deerShowcase ? "17504" : "17503")
           || result?.generationProfile !== "authored-only"
           || result?.dayTime !== 6000

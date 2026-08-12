@@ -1032,6 +1032,21 @@ impl ServerEntityStore {
                     .map(|entity| (entity.persistent_id, entity.position))
             })
             .collect::<BTreeMap<_, _>>();
+        let mut bee_colony_members = BTreeMap::<EntityPersistentId, Vec<EntityPersistentId>>::new();
+        for (id, mob) in &self.mobs {
+            let Some(entity) = self.entities.get(id).filter(|entity| entity.alive) else {
+                continue;
+            };
+            if let Some(home) = mob.bee_home() {
+                bee_colony_members
+                    .entry(home)
+                    .or_default()
+                    .push(entity.persistent_id);
+            }
+        }
+        for members in bee_colony_members.values_mut() {
+            members.sort_unstable();
+        }
         let mut deer_bed_sources = self
             .deer_beds
             .values()
@@ -1058,10 +1073,17 @@ impl ServerEntityStore {
                     let previous_position = entity.position;
                     let previous_deer_behavior = entity.deer.map(|deer| deer.behavior);
                     if entity.kind == EntityKind::Bee {
+                        let home = mob.bee_home();
                         mob.set_bee_home_position(
-                            mob.bee_home()
-                                .and_then(|home| bee_home_positions.get(&home).copied()),
+                            home.and_then(|home| bee_home_positions.get(&home).copied()),
                         );
+                        let band = home
+                            .and_then(|home| bee_colony_members.get(&home))
+                            .and_then(|members| {
+                                members.iter().position(|id| *id == entity.persistent_id)
+                            })
+                            .unwrap_or(0);
+                        mob.set_bee_foraging_band(band);
                     }
                     let flockmates = if entity.kind == EntityKind::Mallard {
                         mallard_positions
@@ -3788,8 +3810,11 @@ mod tests {
         };
         let start = store.state(bee_id).unwrap().position;
         let mut pollination = None;
-        for _ in 0..300 {
-            store.tick_stationary(&[ChunkPos::new(0, 0)], &[], world);
+        let active_chunks = (-1..=1)
+            .flat_map(|x| (-1..=1).map(move |z| ChunkPos::new(x, z)))
+            .collect::<Vec<_>>();
+        for _ in 0..700 {
+            store.tick_stationary(&active_chunks, &[], world);
             if let Some(event) = store.drain_bee_pollinations().into_iter().next() {
                 pollination = Some(event);
                 break;
@@ -3826,6 +3851,109 @@ mod tests {
             .unwrap();
         assert_eq!(hydrated.bee_colonies.len(), 1);
         assert_eq!(hydrated.mobs.len(), 1);
+    }
+
+    #[test]
+    fn bee_colony_members_distribute_across_real_flower_distance_bands() {
+        let mut store = ServerEntityStore::default();
+        let colony_position = Vec3d::new(0.5, 64.0, 0.5);
+        let spawned = store
+            .spawn_persistent_bee_colony(
+                EntityKind::BeeNest,
+                colony_position,
+                0.0,
+                &[
+                    Vec3d::new(0.5, 65.0, 1.5),
+                    Vec3d::new(1.5, 65.0, 0.5),
+                    Vec3d::new(0.5, 66.0, -0.5),
+                ],
+            )
+            .unwrap();
+        let bee_ids = spawned
+            .iter()
+            .filter(|entity| entity.kind == EntityKind::Bee)
+            .map(|entity| entity.id)
+            .collect::<Vec<_>>();
+        let world = |pos: BlockPos| {
+            Some(generated_block_state_id(if pos.y <= 62 {
+                mclone_worldgen::block::DIRT
+            } else if pos.y == 63 {
+                mclone_worldgen::block::GRASS_BLOCK
+            } else if pos.y == 64 && matches!(pos.x, 4 | 10 | 18) && pos.z == 0 {
+                mclone_worldgen::block::DANDELION
+            } else {
+                mclone_worldgen::block::AIR
+            }))
+        };
+        let active_chunks = (-2..=2)
+            .flat_map(|x| (-2..=2).map(move |z| ChunkPos::new(x, z)))
+            .collect::<Vec<_>>();
+        for _ in 0..80 {
+            store.tick_stationary(&active_chunks, &[], world);
+        }
+
+        let chosen_x = bee_ids
+            .iter()
+            .map(|id| {
+                store
+                    .mobs
+                    .get(id)
+                    .and_then(MobRuntimeState::bee_save_data)
+                    .and_then(|bee| bee.flower)
+                    .expect("each colony member should select a real flower")
+                    .x
+            })
+            .collect::<BTreeSet<_>>();
+        assert_eq!(chosen_x, BTreeSet::from([4, 10, 18]));
+    }
+
+    #[test]
+    fn bee_flight_recovers_over_a_blocked_direct_route() {
+        let mut store = ServerEntityStore::default();
+        let spawned = store
+            .spawn_persistent_bee_colony(
+                EntityKind::BeeNest,
+                Vec3d::new(0.5, 64.0, 0.5),
+                0.0,
+                &[Vec3d::new(0.5, 65.0, 0.5)],
+            )
+            .unwrap();
+        let bee_id = spawned
+            .iter()
+            .find(|entity| entity.kind == EntityKind::Bee)
+            .unwrap()
+            .id;
+        let world = |pos: BlockPos| {
+            Some(generated_block_state_id(if pos.y <= 62 {
+                mclone_worldgen::block::DIRT
+            } else if pos.y == 63 {
+                mclone_worldgen::block::GRASS_BLOCK
+            } else if pos.x == 2 && (64..=68).contains(&pos.y) {
+                mclone_worldgen::block::OAK_LOG
+            } else if pos == BlockPos::new(8, 64, 0) {
+                mclone_worldgen::block::DANDELION
+            } else {
+                mclone_worldgen::block::AIR
+            }))
+        };
+        let active_chunks = (-2..=2)
+            .flat_map(|x| (-2..=2).map(move |z| ChunkPos::new(x, z)))
+            .collect::<Vec<_>>();
+        let mut max_y = f64::NEG_INFINITY;
+        let mut completed = false;
+        for _ in 0..1_200 {
+            store.tick_stationary(&active_chunks, &[], world);
+            max_y = max_y.max(store.state(bee_id).unwrap().position.y);
+            if !store.drain_bee_pollinations().is_empty() {
+                completed = true;
+                break;
+            }
+        }
+        assert!(
+            completed,
+            "blocked bee should recover and complete its trip"
+        );
+        assert!(max_y > 68.0, "bee should visibly climb over the wall");
     }
 
     #[test]

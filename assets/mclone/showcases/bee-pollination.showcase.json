@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "bee-pollination",
   "title": "Bee Pollination Meadow",
-  "revision": 1,
+  "revision": 2,
   "baseTerrain": "bee-flowering-meadow-v1",
   "seed": 17505,
   "dayTime": 6000,
@@ -44,14 +44,14 @@
     },
     {
       "id": "outbound",
-      "position": [10.5, 67.0, 9.5],
+      "position": [15.5, 67.4, 11.5],
       "yRotDegrees": 75.0,
       "onGround": false,
       "liveInstantiation": "mclone-bee-colony-member",
       "state": {
         "kind": "bee",
         "home": "wild-colony",
-        "flower": [13, 65, 8],
+        "flower": [22, 65, 15],
         "behavior": "fly-to-flower",
         "behaviorTicks": 8,
         "carryingPollen": false
@@ -59,14 +59,14 @@
     },
     {
       "id": "returning",
-      "position": [7.5, 66.0, 9.5],
+      "position": [2.5, 67.0, 7.5],
       "yRotDegrees": 155.0,
       "onGround": false,
       "liveInstantiation": "mclone-bee-colony-member",
       "state": {
         "kind": "bee",
         "home": "wild-colony",
-        "flower": [4, 65, 8],
+        "flower": [-7, 65, 5],
         "behavior": "return-home",
         "behaviorTicks": 12,
         "carryingPollen": true

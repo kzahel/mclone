@@ -1370,7 +1370,7 @@ mod tests {
         let identity = ClientIdentity::test_default();
         let (manifest, store) =
             playable_showcase_memory_store(PlayableShowcaseId::BeePollination, &identity).unwrap();
-        assert_eq!(manifest.revision, 1);
+        assert_eq!(manifest.revision, 2);
         assert_eq!(manifest.seed, 17_505);
         assert_eq!(manifest.entity_count, 4);
         assert_eq!(manifest.bee_count, 3);
