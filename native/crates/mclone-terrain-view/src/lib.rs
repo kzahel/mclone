@@ -1532,12 +1532,18 @@ mod tests {
 
     #[test]
     fn render_shader_unifies_physical_water_presentation() {
-        assert!(TERRAIN_PREVIEW_RENDER_WGSL.contains("fn water_surface_color(surface_y: f32)"));
+        assert!(
+            TERRAIN_PREVIEW_RENDER_WGSL
+                .contains("fn water_surface_color(ground_y: f32, light: f32)")
+        );
         assert!(TERRAIN_PREVIEW_RENDER_WGSL.contains("out.surface_y = sample.terrain.x"));
         assert!(TERRAIN_PREVIEW_RENDER_WGSL.contains("let physical_channel_alpha = smoothstep("));
         assert!(TERRAIN_PREVIEW_RENDER_WGSL.contains("input.river.z"));
         assert!(TERRAIN_PREVIEW_RENDER_WGSL.contains("input.river.w > 0.0"));
-        assert!(TERRAIN_PREVIEW_RENDER_WGSL.contains("water_surface_color(input.surface_y)"));
+        assert!(
+            TERRAIN_PREVIEW_RENDER_WGSL
+                .contains("water_surface_color(input.surface_y, input.light)")
+        );
         assert!(!TERRAIN_PREVIEW_RENDER_WGSL.contains("63.0 - input.position.z"));
         assert!(!TERRAIN_PREVIEW_RENDER_WGSL.contains("let river_color = mix("));
     }
