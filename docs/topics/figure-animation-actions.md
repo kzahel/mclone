@@ -6,8 +6,9 @@ Status: shared runtime playback landed 2026-08-12. Canonical figures
 carry authored defaults and clip presentation metadata, Asset Lab plays and
 completes one-shot actions explicitly, and authoritative entities now replicate
 named distance- or elapsed-phase requests through persistence and rendering.
-Deer is now the first accepted multi-action runtime asset; authoritative
-gameplay selection remains the next slice of Tactical
+Deer is now the first ordinary authoritative multi-action gameplay consumer:
+forest-edge AI and hunting select its complete reviewed action vocabulary
+through Tactical
 [`284`](../tactical/284-deer-forest-edge-ecology-and-semantic-props.md).
 
 ## Scope
@@ -120,8 +121,9 @@ responsible for rejecting missing required clips.
 
 Mallards now request their authored `waddle` clip instead of the old literal
 `walk` mapping. Existing cows, chickens, mannequins, and remote players retain
-distance-driven `walk`. A gameplay animation state machine, crossfade/layering,
-and deer behavior selection remain later slices.
+distance-driven `walk`. A general animation graph, crossfade, and layering
+remain later capabilities; they were not required for endpoint-compatible deer
+actions.
 
 The Tactical 284 deer review candidate is the first asset authored directly
 for this runtime contract. It has explicit `idle`, `walk`, `flee`, `alert`,
@@ -130,6 +132,16 @@ clips. Split upper/lower legs make feeding and bedding articulated rather than
 whole-model offsets. Tests compare evaluated part matrices at both transition
 boundaries: `lie_down` ends exactly at `bedded_idle`, and `stand_up` ends
 exactly at `idle`.
+
+The completed authoritative deer loop selects all ten clips without giving the
+renderer behavior policy. Retained travel selects distance-driven `walk` or
+`flee`; relaxed, alert, feeding/drinking, and stable rest select elapsed
+`idle`, `alert`, `graze`, or `bedded_idle`; transition epochs drive
+`lie_down`, `stand_up`, `hit`, and terminal `fall`. The same replicated epoch
+survives persistence and delayed client updates, while shared render-session
+composition evaluates it in mono, stereo, and multiview. Local and deployed
+Web behavior probes observe live `alert` and `flee` requests, and focused
+server tests cover exact bedding transitions plus the hit/fall harvest path.
 
 ## Local Acceptance Evidence
 
@@ -197,9 +209,7 @@ or a semantic figure-format change.
 
 ## Recommended Next Direction
 
-Use Tactical
-[`284`](../tactical/284-deer-forest-edge-ecology-and-semantic-props.md)'s
-accepted `mclone:deer` runtime asset to prove ordinary authoritative gameplay
-selection across idle, locomotion, and one-shot actions. Keep the existing
-Roly-poly lesson: do not extract anatomy-specific helpers until multiple
-corrected figures prove a stable common pattern.
+Keep the current direct named-clip state until another live creature proves a
+real need for crossfades, layering, interruption priority, or a reusable action
+graph. Do not extract anatomy-specific helpers from deer, frog, or Roly-poly
+until multiple gameplay consumers demonstrate the same stable requirement.

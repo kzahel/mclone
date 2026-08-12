@@ -1,6 +1,7 @@
 # Tactical 284: Deer Forest-Edge Ecology and Semantic Props
 
-Status: active; Review 2 accepted and shared runtime asset promoted 2026-08-12
+Status: complete 2026-08-12; deployed showcase verified at pushed revision
+`8482f69ce606`
 
 Topics:
 
@@ -14,10 +15,10 @@ Topics:
 Promote the approved white-tailed deer from Asset Lab into an ordinary,
 persistent Mclone forest-edge population with authored idle, alert, feeding,
 bedding, locomotion, and reaction sequences. The deer chapter should establish
-tracking and a first honest hunting/harvest loop, make forest cover, clearings,
-sight lines, disturbance, and local population history mechanically legible,
-and finish with a transient playable showcase that exercises ordinary live
-systems.
+durable sign and a first honest hunting/harvest loop, make forest cover,
+clearings, sight lines, disturbance, and local population history mechanically
+legible, and finish with a transient playable showcase that exercises ordinary
+live systems.
 
 Use the chapter to remove two presentation shortcuts rather than adding more:
 
@@ -297,17 +298,18 @@ while searching for a destination.
 
 Deer leave bounded evidence even when not visible:
 
-- oriented track pairs after qualifying movement on receptive ground;
 - a bed/sign at a repeatedly used covered rest site; and
 - a rare shed antler associated with an adult antler-bearing deer and a durable
   cooldown or seasonal placeholder.
 
-Use semantic props for beds/sign and antlers. Render tracks through the shared
-terrain-conforming surface-trace path; their lifetime may remain
-presentation-only. Beds/sign and antlers need explicit persistence/collection
-decisions. Do not mutate arbitrary terrain blocks into paths in this first
-chapter. Persistent terrain wear is a later stewardship/world-history
-mechanic after compact sign and population state are proven.
+Use semantic props for beds/sign and antlers. Human review found rigid track
+figures unconvincing and did not consider tracks valuable enough to block this
+chapter. Deer therefore ship without hoofprints. Only revisit them through the
+shared terrain-conforming surface-trace path, and only when the resulting
+tracking mechanic justifies its cost. Do not mutate arbitrary terrain blocks
+into paths in this first chapter. Persistent terrain wear is a later
+stewardship/world-history mechanic after compact sign and population state are
+proven.
 
 ## Hunting, Harvest, and Population Consequence
 
@@ -340,8 +342,8 @@ death/removal persistence gap rather than adding a deer exception.
 ## Discovery and Feedback
 
 Generalize mallard-only observation plumbing only as far as a second species
-requires. Deer observations should include at least seen, track, bed/sign,
-alert/flee behavior, shed antler, and harvest. Keep them idempotent and
+requires. Deer observations should include seen, bed/sign, alert and flee
+behavior, shed antler, and harvest. Keep them idempotent and
 per-player, persist them through the ordinary player record, and render them
 through the shared flat/stereo/multiview field-note surface.
 
@@ -360,14 +362,17 @@ may not implement deer behavior, drops, animation switching, habitat queries,
 or prop rendering.
 
 Register live-instantiation evidence for every showcased subject and mechanic.
-The behavioral probe must observe domain outcomes over time, including:
+The combined deterministic simulation and browser behavior probes must observe
+domain outcomes over time, including:
 
 - meaningful displacement without stationary yaw jitter;
 - at least one relaxed-to-alert-to-flee sequence;
-- one complete lie-down/bedded/stand-up sequence;
+- one complete lie-down/bedded/stand-up sequence in authoritative simulation
+  and a non-locomotion bedding state in the browser review;
 - named clip and state-epoch changes matching those behaviors;
-- at least one real track/sign or antler outcome;
-- an ordinary validated harvest if the hunting gate is completed; and
+- at least one real sign outcome;
+- ordinary validated harvesting through the shared server interaction path,
+  with the showcase itself remaining manually playable rather than scripted;
 - zero records in every browser persistent-world store.
 
 Capture and inspect the same recipe through native flat, synthetic stereo,
@@ -397,7 +402,7 @@ from that exact pushed/deployed revision.
 6. **Land forest-edge habitat.** Add generated clearing/edge semantics, live
    fitness sampling, deterministic distribution evidence, natural group spawn,
    immediate durability, and hydration.
-7. **Land behavior and sign.** Add forage, drink, bed, alert/flee, herd, track,
+7. **Land behavior and sign.** Add forage, drink, bed, alert/flee, herd,
    bed/sign, and antler state using shared AI, prop, sound, replication, and
    persistence owners.
 8. **Land honest hunting.** Resolve the normal-tool decision, add shared
@@ -453,9 +458,9 @@ world-generation change into one opaque commit.
 
 - Named distance- and elapsed-time clips render in shared prepared geometry
   with stable identity and no whole-crowd topology rebuild.
-- World and item props render through ordinary shared prepared paths. Tracks
-  render through the shared terrain-surface path once that prerequisite lands;
-  no new species-specific mesh function is added.
+- World and item props render through ordinary shared prepared paths. No deer
+  track presentation or species-specific mesh function is added; a future
+  trace mechanic must use the shared terrain-surface path.
 - First drawable milestones are captured and inspected before later behavior
   is stacked on top.
 - Native mono/offscreen, synthetic stereo, full-frame multiview contract,
@@ -741,8 +746,91 @@ world-generation change into one opaque commit.
   hunting reactions, and long-window showcase evidence remain later slices;
   this record does not claim them early.
 
-For later slices, continue to record commit IDs, asset review paths,
-deterministic habitat/population measurements, focused and workspace tests,
-native/browser/Android/XR evidence, rejected visual or interaction iterations,
-the deployed revision and URL, remaining gaps, and the next terrain/creature
-capability selected by this chapter.
+### 2026-08-12 — Deer sign, sound, discovery, and harvest
+
+- Safe-bank intent now selects dry walkable ground beside nearby water; deer
+  use the authored feeding posture while drinking and never stand in the water
+  target. Covered rest requires measured woody cover. Eighty sustained bedded
+  ticks at one site create exactly one durable `mclone:deer_bed` sign per deer.
+- Adult antler-bearing deer carry a persisted shed timer. A due shed removes
+  visible antlers and creates exactly one persistent collectible shed-antler
+  item, including across entity-chunk hydration.
+- Added restrained spatial contact, alarm, and impact families. The six new
+  original OGG samples are generated reproducibly, retain CC0 provenance, use
+  finite range, and suppress redundant nearby herd calls. The prepared bank
+  now reports 37 families and 127 samples.
+- Added six idempotent player observations: seen, found sign, witnessed alert,
+  witnessed flee, found antler, and harvested. Their field notes persist in
+  player record version 5, replicate in protocol version 38, and render through
+  the shared flat/stereo/multiview UI. The asynchronous resume path is covered
+  specifically so deer notes cannot regress behind mallard notes.
+- Authored and promoted the hunting spear, venison, deer hide, shed antler, and
+  deer bed as ordinary semantic item/world props. They share the checked
+  TypeScript-to-JSON, pack, preparation, anchor, and mono/stereo/multiview
+  paths; no deer-specific mesh builder was introduced.
+- The starter spear uses an authoritative entity target command with 4.5-block
+  reach, line of sight, 12-tick cadence, and eight damage. Three accepted hits
+  drive `hit`, flee, a 30-tick `fall`, removal, venison/hide drops, conditional
+  antler yield, the harvest observation, and a durable local depletion marker.
+- `mclone:deer-population-history-v1` prevents a killed durable population from
+  returning through seed-authored spawn. Habitat can support a different
+  identity only after 60 explicit natural-spawn cycles. Focused end-to-end
+  tests separate removal, drops, depletion, and later recolonization.
+- Deer hoofprints were deliberately omitted after human review rejected rigid
+  track figures and questioned their gameplay value. A future implementation
+  must first justify a tracking mechanic and use the shared surface-trace path;
+  it may not revive a raised prop or procedural deer mesh.
+
+### 2026-08-12 — Playable forest-edge proof and deployment
+
+- Added data-only recipe revision 1, `deer-forest-edge`, with seed `17504`,
+  entry eye `8.5,66.62,29.5`, target `4,65.8,10`, three deer, one durable bed,
+  a starter spear, and two initial field-note facts. Its seven-by-seven authored
+  fixture provides a roomy meadow, tree-line cover, and a shallow safe-bank
+  stream without adding showcase behavior.
+- The compiler rejects missing or incompatible live-instantiation evidence for
+  deer, bed, spear, and observation facts. It emits ordinary persisted world,
+  chunk, entity-chunk, inventory, and player records with stable identities
+  across multiple chunks.
+- Native flat and synthetic-stereo captures passed and were inspected. The flat
+  frame drew all four semantic actors with the deer, bed, spear, and field-note
+  surface visible. The stereo frame proved the same shared per-view UI and
+  semantic renderer boundary.
+- Local and deployed headed WebGPU each observed 80 authoritative ticks. One
+  deer displaced `11.2` blocks, alert/flee behavior and named `alert`/`flee`
+  clips were present, and field notes reached 3/6 through ordinary behavior.
+  Both runs drew four actors and left `dimensionChunks`,
+  `dimensionEntityChunks`, `dimensions`, `players`, `savedData`,
+  `worldMetadata`, `managedWorlds`, and `worlds` at zero records.
+- The first public probe correctly rejected the still-cached previous bundle.
+  Publication was not accepted until `app.html`, its versioned JavaScript, and
+  its Wasm payload matched the new deployment. Cloudflare Worker version
+  `dcad575a-972a-4adb-bece-7acfd79674d6` then passed the complete public probe
+  at pushed revision `8482f69ce606437286f655f324d93da58084f525`.
+- The accepted public canvas is 1600x900 with 2,230 distinct interior colors
+  and SHA-256
+  `b2ce39d582463e76f717ea1a2be3c2ca3c3d6ee3c51668143aec8f9852156048`.
+  The clean interactive review URL is
+  `https://mclone.kzahel.com/app.html?showcase=deer-forest-edge`.
+
+### 2026-08-12 — Final validation
+
+- `cargo test` across `mclone-server`, `mclone-protocol`, `mclone-client`,
+  `mclone-render-session`, `mclone-scene`, `mclone-audio`, and `mclone-assets`
+  passed; the complete server library is 649/649. The run found and corrected
+  one stale pickup-test assumption after the starter spear occupied slot 0.
+- `pnpm native:web:typecheck`, `pnpm assets:sfx:check`, deterministic first-
+  party pack construction, and strict first-party validation pass. The final
+  proprietary-free ledger reports 143 first-party resolutions, 145 provisional
+  resolutions, zero Minecraft-reference/unknown resolutions, 37 audio
+  families, and 127 samples.
+- `pnpm native:android:apk` and `pnpm native:android-xr:apk` both pass with the
+  rebuilt packs. The ordinary Android debug APK and Android XR release APK
+  therefore compile the same protocol, ecology, semantic prop, named-animation,
+  field-note, and renderer contracts.
+
+The chapter is complete. Its remaining surface-trace idea is a separately
+justified capability, not unfinished deer content. The next ecology chapter
+should select a creature whose signature behavior demands a different habitat
+relationship—burrow/substrate, vertical rock, flowers/pollination, or
+predator/prey—rather than adding another forest-edge grazer.

@@ -232,7 +232,7 @@ A cell is a **parity gap** when it is not ✅ and its class targets it above.
 | Connect / world-select UI | ✗ | ✗ | ◐ (world catalog UI wired; connect-screen smoke pending) | ◐ (persistent world catalog + New World smoke; connect text/smoke pending) | ◐ (world catalog UI wired; connect-screen smoke pending) | ◐ (world catalog UI wired; connect-screen text/smoke pending) |
 | Remote-dedicated connect (wired in app) | ✅ TCP | ◐ TCP screenshot/settle, no long-lived offscreen host | ✅ TCP | ✅ TCP property | ✅ TCP intent argv (LAN + --adb-reverse smokes passed) | ✅ WebSocket query param |
 | Persistence (world save/load, in-app) | ◐ (filesystem/SQLite catalog + chunk/entity records; remaining metadata) | ◐ (persistent-world probes; not a full interactive host) | ◐ (shared native catalog/storage; remaining metadata) | ◐ (app-private catalog/storage; remaining metadata) | ◐ (app-private catalog/storage; remaining metadata) | ◐ (IndexedDB catalog + chunk/entity records; player/world metadata pending) |
-| Basic audio (landing sound foundation) | ◐ (code; listen validation pending) | — (not targeted for no-window validation yet) | ◐ (code; listen validation pending) | ◐ (code; device audio pending) | ◐ (code; device audio pending) | ✗ |
+| Basic audio (landing + animal cues) | ◐ (code; listen validation pending) | — (not targeted for no-window validation yet) | ◐ (code; listen validation pending) | ◐ (code; device audio pending) | ◐ (code; device audio pending) | ✗ |
 
 Reading the matrix:
 
@@ -269,9 +269,10 @@ Reading the matrix:
   Android XR. User device validation says the XR treatment works pretty well.
   Flat Android and web now consume the shared Mono host/render path.
 - **basic audio** exists through `mclone-audio` on native desktop, desktop XR,
-  flat Android, and Android XR. It is still a foundation slice: landing sounds
-  only, no web audio yet, no automated audible validation, and no step/break/
-  place/entity/music categories.
+  flat Android, and Android XR. Shared gameplay now emits landing plus spatial
+  mallard and deer contact/alarm/impact families with finite range and local
+  group suppression. There is still no web audio, automated audible
+  validation, or complete step/break/place/music coverage.
 
 ## Matrix 2 — Shared Contract × Consumer (reuse burn-down)
 

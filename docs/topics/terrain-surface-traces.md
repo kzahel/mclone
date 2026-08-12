@@ -53,13 +53,19 @@ record stays neutral and does not bake one renderer technique into gameplay.
   in-world pixels and behavioral equivalence, with no hidden fallback retaining
   the old visual.
 
-## Deer Dependency
+## Deer Decision
 
-Deer tracks in Tactical 284 should consume this path rather than add a deer
-mesh function or revive `trace_prop` in Asset Lab. Deer bed/sign and shed
-antlers remain ordinary durable world/item semantic props because they have
-meaningful 3D form and interaction identity. This distinction keeps one rigid
-asset pipeline without forcing every mark on terrain into it.
+Tactical 284 completed deer without hoofprints. Human review rejected a rigid
+track figure as the wrong visual abstraction and did not consider tracks
+valuable enough to block the ecology chapter. A future deer tracking mechanic
+may consume this path only after its gameplay value is clear; ambient
+hoofprints alone do not justify implementing the renderer. It must not add a
+deer mesh function or revive `trace_prop` in Asset Lab.
+
+Deer bed/sign and shed antlers remain ordinary durable world/item semantic
+props because they have meaningful 3D form and interaction identity. This
+distinction keeps one rigid asset pipeline without forcing every mark on
+terrain into it.
 
 Persistent trail wear, snow or mud deformation, accumulated grazing history,
 and terrain material mutation are later world-history concerns. They should

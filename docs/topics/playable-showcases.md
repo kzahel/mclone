@@ -2,12 +2,12 @@
 
 Topic: `playable-showcases`
 
-Status: implemented and first publicly verified 2026-08-12. The first
-showcase, `mallard-ecology`, compiles one checked-in data recipe into an
-ordinary transient tiny save and opens at a fixed camera through the shared
-native and Web game path. Human review rejected its first static island as a
-behavior demo; revision 2 now uses a multi-chunk wetland and requires a live
-motion/hatching/discovery window before the automated review passes.
+Status: implemented with two publicly verified showcases 2026-08-12.
+`mallard-ecology` proves a wetland motion/hatching/discovery loop;
+`deer-forest-edge` proves a contrasting multi-chunk habitat, authoritative
+named actions, durable sign, field notes, and an ordinary hunting tool. Both
+compile checked data recipes into transient tiny saves through the shared
+native and Web game path.
 
 ## Purpose
 
@@ -25,6 +25,7 @@ The first public link is:
 
 ```text
 https://mclone.kzahel.com/app.html?showcase=mallard-ecology
+https://mclone.kzahel.com/app.html?showcase=deer-forest-edge
 ```
 
 Opening it compiles a fresh in-memory world in the browser process. No world is
@@ -147,6 +148,14 @@ pnpm native:web:showcase-smoke
 pnpm native:web:showcase-deployed-smoke
 ```
 
+The deer commands are:
+
+```bash
+pnpm native:deer-forest-edge:capture
+pnpm native:web:deer-showcase-smoke
+pnpm native:web:deer-showcase-deployed-smoke
+```
+
 Captures belong under `/tmp`. The deployed smoke must confirm the recipe ID and
 revision, seed, entry camera, entity composition, gameplay facts, credible
 pixels, and zero records in every browser persistent-world store.
@@ -194,12 +203,41 @@ swimming mallards at both ends of the 80-tick window, and its inspected canvas
 digest is
 `d6967d161f532f532ec7c374432a25a6bb3eaca228a0ed4493fc563681e0201a`.
 
+Tactical
+[`284`](../tactical/284-deer-forest-edge-ecology-and-semantic-props.md) adds
+recipe revision 1, seed `17504`, entry eye `8.5,66.62,29.5`, and entry target
+`4,65.8,10`. The recipe contains three deer, one durable bed sign, one starter
+hunting spear, and two initial deer observations across the existing
+seven-by-seven authored-fixture envelope.
+
+Its typed evidence registry binds those facts to ordinary natural forest-edge
+spawning, repeated-rest sign production, starter spear inventory, and player
+field-note producers. Post-hydration behavior, named clips, sound, damage,
+drops, and field-note advancement are shared live mechanics; the recipe has no
+script or showcase-specific update.
+
+Local and public headed Web acceptance each observed 80 authoritative ticks.
+One deer displaced `11.2` blocks, the herd presented `alert` and `flee` states
+and clips, field notes reached 3/6, four semantic actors drew, and all eight
+browser world stores remained empty. Exact pushed revision
+`8482f69ce606437286f655f324d93da58084f525` passed Worker version
+`dcad575a-972a-4adb-bece-7acfd79674d6`; the inspected 1600x900 canvas digest is
+`b2ce39d582463e76f717ea1a2be3c2ca3c3d6ee3c51668143aec8f9852156048`.
+
+The first public probe encountered the prior cached `app.html` and rejected it
+because that binary knew only `mallard-ecology`. Verification resumed only
+after the HTML version, JavaScript, and Wasm payload matched the new publish.
+This is expected evidence that a successful deploy process is not itself the
+acceptance gate.
+
 ## Code and Documentation Map
 
 - `assets/mclone/showcases/`: readable showcase recipes
 - `native/crates/mclone-server/src/playable_showcase.rs`: schema, evidence
   registry, validation, deterministic compilation, and unit tests
 - `native/crates/mclone-server/src/bin/mallard_ecology_fixture.rs`: native
+  tiny-save materialization receipt
+- `native/crates/mclone-server/src/bin/deer_forest_edge_fixture.rs`: deer
   tiny-save materialization receipt
 - `native/apps/mclone-web-client/src/web_canvas.rs`: URL selection and strict
   transient/conflict policy
@@ -208,6 +246,8 @@ digest is
 - `native/apps/mclone-web-client/scripts/browser-smoke.mjs`: local and deployed
   browser state, persistence, and pixel proof
 - `scripts/mallard-ecology-capture.mjs`: native flat/stereo receipt and capture
+- `scripts/deer-forest-edge-capture.mjs`: deer native flat/stereo receipt and
+  capture
 - [`habitat-driven-creature-ecology.md`](habitat-driven-creature-ecology.md):
   ordinary mallard habitat and gameplay contract
 - [`../tactical/280-playable-showcase-links.md`](../tactical/280-playable-showcase-links.md):
@@ -219,9 +259,11 @@ digest is
 
 ## Recommended Next Work
 
-- Generalize the capture command's expected receipt from the catalogue manifest
-  when a second showcase creates real demand; avoid speculative framework work.
 - Promote a contrasting creature whose live mechanic requires a new terrain
   capability, then decide whether it merits a second focused showcase.
+- Generalize repeated capture assertions only where the two existing
+  showcases now demonstrate a stable common shape. Keep species-specific
+  behavioral outcomes explicit rather than flattening them into elapsed-time
+  or actor-count checks.
 - Keep deployed URLs as review links, not a permanent menu or public catalogue,
   until there is a product reason and an explicit lifecycle policy for one.

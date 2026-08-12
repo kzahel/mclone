@@ -51,6 +51,15 @@ Minecraft-reference/unknown entries, two deliberate suppressions, and two
 optional missing colormaps. Generated Fallback Only stays silent; Mclone
 Original supplies the distributable audio bank.
 
+Post-closeout extension (2026-08-12): the deer ecology chapter adds the
+required `mclone:deer` actor; hunting spear, venison, deer hide, shed antler,
+and deer bed semantic props; and six original CC0 deer samples across contact,
+alarm, and impact families. Direct semantic props are also present in
+Generated Fallback so reference-first browser selection retains engine-owned
+gameplay resources. Strict preparation now reports 13 semantic actor/prop
+resources, 37 audio families, 127 audio samples, 143 first-party resolutions,
+145 provisional resolutions, and zero Minecraft-reference/unknown resolutions.
+
 Scope: client-side discovery, selection, composition, provenance, preparation,
 and replacement of visual/audio asset packs. This topic owns the product truth
 behind “Minecraft reference assets are disabled” and the continuing path from

@@ -2,8 +2,8 @@
 
 Topic: `habitat-driven-creature-ecology`
 
-Status: active direction with its biome-habitat foundation and first complete
-original creature-life chapter landed through 2026-08-12. Tactical
+Status: active direction with its biome-habitat foundation and two complete
+original creature-life chapters landed through 2026-08-12. Tactical
 [`277`](../tactical/277-habitat-driven-creature-ecology-foundation.md) binds
 natural cow/chicken habitat to generated chunk biomes and proves immediate
 durability across persistent chunk unload/reload. Rich habitat fitness and
@@ -19,12 +19,13 @@ interactive Web review. The continuing showcase contract lives separately in
 Tactical [`282`](../tactical/282-mallard-behavioral-showcase.md) turns the
 first rejected static review into shared retained habitat intent, stable
 movement-derived orientation, a roomier wetland, and time-window evidence.
-Planned coordinating Tactical
-[`284`](../tactical/284-deer-forest-edge-ecology-and-semantic-props.md) selects
-deer as the contrasting second original chapter: forest edges, authored
-multi-state behavior, sign, hunting/depletion, and semantic props should force
-the next terrain and gameplay capabilities instead of cloning the wetland
-loop.
+Tactical
+[`284`](../tactical/284-deer-forest-edge-ecology-and-semantic-props.md)
+completes deer as the contrasting second original chapter: generated
+forest-edge intent, live habitat fitness, authored multi-state behavior,
+durable sign, hunting/depletion, spatial calls, field notes, and semantic
+props force new terrain and gameplay capabilities instead of cloning the
+wetland loop.
 
 ## Scope
 
@@ -374,14 +375,39 @@ event, and no ambient soundtrack pretends that a flock exists.
   propagate alarm. Separation/cohesion bands keep the group loose, while
   stale destination expiry and displacement-derived turning avoid the
   stationary-spin failure found in the first mallard showcase.
+- Deer now choose dry walkable drinking banks beside water and bed only under
+  measured woody cover. Repeated rest produces one durable semantic bed sign;
+  persisted adult-antler timers can produce one collectible semantic shed
+  antler without duplication across hydration.
+- Contact, alarm, and impact cues originate from authoritative deer state,
+  carry finite range, and suppress redundant local-herd events. Six original
+  CC0 samples extend the reproducible first-party sound bank to 37 families
+  and 127 samples.
+- A normal starter hunting spear sends an authoritative targeted attack with
+  reach, line-of-sight, and cadence validation. Accepted damage selects the
+  authored `hit`, flee, and terminal `fall` clips before ordinary venison,
+  hide, and conditional antler drops. A persisted local history keeps the
+  killed identity absent and permits a different identity only after 60
+  natural-spawn cycles.
+- Six deer observations—seen, sign, alert, flee, shed antler, and harvest—are
+  idempotent per-player facts persisted and rendered through the same flat,
+  stereo, and multiview field-note surface as mallard discovery.
+- The `deer-forest-edge` data recipe is the second bounded tiny-save review.
+  Local and public headed WebGPU each observed one deer travel `11.2` blocks
+  over 80 ticks, alert/flee clips, field-note progress to 3/6, four drawn
+  semantic actors, and zero records in every browser world store. The verified
+  temporary play link is
+  `https://mclone.kzahel.com/app.html?showcase=deer-forest-edge`.
+- Deer hoofprints are intentionally absent. Human review rejected rigid track
+  figures and did not find tracks valuable enough to block the chapter. Any
+  future tracking mechanic must justify itself first, then use the shared
+  terrain-conforming surface-trace path rather than add raised deer geometry.
 
 ## Known Gaps and Recommended Next Work
 
 - Generalize the proven wetland and forest-edge samples into a public habitat
   query/fitness record above raw biome IDs once a third habitat provides a
   second real consumer of the abstraction.
-- Add death/removal persistence coverage and prevent local population
-  resurrection through seed-time decoration.
 - Build a first stewardship choice around mallards—food attraction, protected
   nesting cover, or restrained hunting—using the now-shared inventory,
   interaction, lineage, and persistence contracts.
@@ -389,13 +415,16 @@ event, and no ambient soundtrack pretends that a flock exists.
   entities are correct; do not use them to weaken visible-entity continuity.
 - Feed animal paths, grazing sites, nests, and water access back into terrain
   and structure planning as evidence-bearing landscape history.
-- Replace raised track meshes with the bounded shared terrain-conforming
-  surface path in [`terrain-surface-traces.md`](terrain-surface-traces.md)
-  before deer introduces hoofprints.
-- Complete the live deer chapter with authoritative forage, bedding,
-  alert/flee, sign, hunting/harvest, discoveries, and the bounded showcase in
-  Tactical
-  [`284`](../tactical/284-deer-forest-edge-ecology-and-semantic-props.md).
+- If tracking becomes a real player mechanic, replace the existing raised
+  mallard track visual through the bounded shared path in
+  [`terrain-surface-traces.md`](terrain-surface-traces.md). Do not add deer
+  hoofprints merely as ambient decoration.
+- Select a third creature around a genuinely different habitat capability.
+  Strong candidates are a burrowing animal that makes soil depth/substrate
+  matter, a pollinator that makes flowering patches and crop yield matter, or
+  a cliff animal that makes connected steep/rocky surfaces navigable. Use that
+  chapter to decide whether habitat fitness is ready to become a public shared
+  record.
 
 ## Code and Documentation Map
 

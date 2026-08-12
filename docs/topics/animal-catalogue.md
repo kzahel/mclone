@@ -19,9 +19,10 @@ player, chicken, upright bear, and cow in the first-party pack, bringing the
 catalogue's Runtime-only filter to five entries. Human Review 2 of Tactical
 284 subsequently accepted deer, bringing the filter to six entries and making
 its exact ten-clip semantic JSON a required shared runtime asset. Ordinary
-world instantiation remains separately gated by the deer ecology work. The
-promotion itself remains
-owned by the shared figure/runtime pipeline rather than this browser topic.
+forest-edge spawning, persistent state, authoritative actions, and hunting now
+instantiate that asset through completed Tactical 284. The promotion itself
+remains owned by the shared figure/runtime pipeline rather than this browser
+topic.
 
 ## Scope
 
@@ -461,9 +462,10 @@ splitting or upload batching as measurement-led deployment improvements rather
 than catalogue correctness work.
 
 Tactical
-[`284`](../tactical/284-deer-forest-edge-ecology-and-semantic-props.md) will
-generalize the underlying Asset Lab promotion machinery to typed semantic
-props while keeping this public catalogue creature-focused. Deer should gain
-explicit source metadata and complete behavior/action review when it is
-materially revised and promoted; nests, tracks, feathers, and antlers must not
-inflate creature inventory or inherit creature-only filters.
+[`284`](../tactical/284-deer-forest-edge-ecology-and-semantic-props.md)
+generalized the underlying Asset Lab promotion machinery to typed semantic
+props while keeping this public catalogue creature-focused. Seven live props
+now reuse its review machinery without inflating creature inventory or
+inheriting creature-only filters. Future creature promotions should retain the
+same separation between catalogue/asset acceptance and ordinary live-world
+instantiation evidence.
