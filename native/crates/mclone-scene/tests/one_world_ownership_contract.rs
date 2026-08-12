@@ -69,6 +69,7 @@ const DRAWABLE_WORLD_SLOT_FIELDS: &[&str] = &[
     "footsteps",
     "pending_interaction_sounds",
     "interaction_sound_sequence",
+    "mallard_tracks",
     "local_guest_preview",
     "draw",
     "actors",
@@ -185,7 +186,7 @@ fn host_has_one_active_and_one_optional_concrete_drawable_slot() {
     let slot_fields = field_names(slot);
     let host_fields = field_names(host);
     assert_eq!(slot_fields, DRAWABLE_WORLD_SLOT_FIELDS);
-    assert_eq!(slot_fields.len(), 24);
+    assert_eq!(slot_fields.len(), 25);
     assert_eq!(host_fields, SCENE_HOST_FIELDS);
     assert_eq!(host_fields.len(), 92);
     assert_eq!(host.matches("active_world: DrawableWorldSlot").count(), 1);
