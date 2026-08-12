@@ -511,7 +511,11 @@ fn advance_actors(actors: &mut [ActorInstance], frame_index: usize, motion: Moti
     for actor in actors {
         actor.feet_position.x += direction * 0.0025;
         if let Some(animation) = actor.animation.as_mut() {
-            animation.distance += 0.035;
+            if let mclone_render::entity::ActorAnimationPhase::Distance(distance) =
+                &mut animation.phase
+            {
+                *distance += 0.035;
+            }
         }
         if let Some(flap) = actor.chicken_wing_flap_radians.as_mut() {
             *flap = (*flap + 0.17).sin() * 0.8;

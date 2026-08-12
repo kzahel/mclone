@@ -732,6 +732,7 @@ pub(crate) fn persistent_passive_actor_identity_summary(
                     | EntityKind::Chicken
                     | EntityKind::Mallard
                     | EntityKind::Deer
+                    | EntityKind::Bee
                     | EntityKind::Mannequin
             )
         })
@@ -746,10 +747,14 @@ pub(crate) fn persistent_passive_actor_identity_summary(
                 EntityKind::Mannequin => 3,
                 EntityKind::Mallard => 4,
                 EntityKind::Deer => 5,
+                EntityKind::Bee => 6,
                 EntityKind::DebugCube
                 | EntityKind::Item
                 | EntityKind::MallardNest
                 | EntityKind::DeerBed => {
+                    unreachable!("filtered above")
+                }
+                EntityKind::BeeNest | EntityKind::BeeHotel => {
                     unreachable!("filtered above")
                 }
             };

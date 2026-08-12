@@ -3375,6 +3375,7 @@ pub struct FlatHud {
     pub player_statistics: Option<PlayerStatisticsHud>,
     pub mallard_field_guide: Option<MallardFieldGuideHud>,
     pub deer_field_guide: Option<DeerFieldGuideHud>,
+    pub bee_field_guide: Option<BeeFieldGuideHud>,
     pub debug: Option<FlatHudDebugOverlay>,
     pub frame_pipeline: Option<FramePipelineHudOverlay>,
 }
@@ -3393,6 +3394,7 @@ impl FlatHud {
             player_statistics: None,
             mallard_field_guide: None,
             deer_field_guide: None,
+            bee_field_guide: None,
             debug: None,
             frame_pipeline: None,
         }
@@ -3423,6 +3425,7 @@ impl FlatHud {
             || (self.world_hud_visible && self.player_statistics.is_some())
             || (self.world_hud_visible && self.mallard_field_guide.is_some())
             || (self.world_hud_visible && self.deer_field_guide.is_some())
+            || (self.world_hud_visible && self.bee_field_guide.is_some())
             || self
                 .debug
                 .as_ref()
@@ -3560,6 +3563,7 @@ pub(crate) fn render_flat_hud_transient_layers(
             && hud.player_statistics.is_none()
             && hud.mallard_field_guide.is_none())
             && hud.deer_field_guide.is_none()
+            && hud.bee_field_guide.is_none()
     {
         return;
     }
@@ -3640,6 +3644,28 @@ pub(crate) fn render_flat_hud_transient_layers(
             },
         );
     }
+    if let Some(guide) = hud.bee_field_guide.filter(|guide| guide.discovered > 0) {
+        let rows_above_hotbar = selected_item_rows
+            + u8::from(hud.player_health.is_some())
+            + u8::from(hud.player_statistics.is_some())
+            + u8::from(
+                hud.mallard_field_guide
+                    .is_some_and(|mallard| mallard.discovered > 0),
+            )
+            + u8::from(hud.deer_field_guide.is_some_and(|deer| deer.discovered > 0));
+        let y = hotbar_top - 14.0 * (f32::from(rows_above_hotbar) + 1.0);
+        Font::default().draw_centered_atlas(
+            draw,
+            &format!("Bee field notes {}/{}", guide.discovered, guide.total),
+            scale.width * 0.5,
+            y.max(4.0),
+            if guide.complete {
+                Color::rgba(255, 214, 82, 255)
+            } else {
+                Color::rgba(255, 203, 64, 255)
+            },
+        );
+    }
 }
 
 fn render_player_health(draw: &mut GuiDrawList, center_x: f32, y: f32, health: PlayerHealthHud) {
@@ -3696,6 +3722,13 @@ pub struct MallardFieldGuideHud {
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct DeerFieldGuideHud {
+    pub discovered: u32,
+    pub total: u32,
+    pub complete: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct BeeFieldGuideHud {
     pub discovered: u32,
     pub total: u32,
     pub complete: bool,
@@ -4571,6 +4604,8 @@ const fn item_kind_hotbar_label(kind: mclone_protocol::ItemKind) -> &'static str
         mclone_protocol::ItemKind::Venison => "V",
         mclone_protocol::ItemKind::DeerHide => "DH",
         mclone_protocol::ItemKind::ShedAntler => "A",
+        mclone_protocol::ItemKind::BeeHotel => "BH",
+        mclone_protocol::ItemKind::Beeswax => "BW",
     }
 }
 
@@ -4583,6 +4618,8 @@ const fn item_kind_display_name(kind: mclone_protocol::ItemKind) -> &'static str
         mclone_protocol::ItemKind::Venison => "Venison",
         mclone_protocol::ItemKind::DeerHide => "Deer hide",
         mclone_protocol::ItemKind::ShedAntler => "Shed antler",
+        mclone_protocol::ItemKind::BeeHotel => "Bee hotel",
+        mclone_protocol::ItemKind::Beeswax => "Beeswax",
     }
 }
 

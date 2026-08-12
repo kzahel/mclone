@@ -1251,6 +1251,28 @@
       "upstream_path": "Audio/handleCoins2.ogg"
     },
     {
+      "bytes": 6616,
+      "families": [
+        "mclone:bee_buzz",
+        "mclone:mallard_call"
+      ],
+      "path": "assets/mclone/sounds/mclone-original/bee_buzz_00.ogg",
+      "sha256": "75fbca9b8b3d4c974ffe859ba31b3d73bed0d5e83c3658dab950dc7e2748ca49",
+      "source_pack": "mclone-original",
+      "upstream_path": "tools/minecraft_assets/generate_bee_sounds.sh"
+    },
+    {
+      "bytes": 6385,
+      "families": [
+        "mclone:bee_buzz",
+        "mclone:mallard_call"
+      ],
+      "path": "assets/mclone/sounds/mclone-original/bee_buzz_01.ogg",
+      "sha256": "a8f82c523598852148d4a9e127fcd32ffa6cc7b0da9b474180b88058d08884bd",
+      "source_pack": "mclone-original",
+      "upstream_path": "tools/minecraft_assets/generate_bee_sounds.sh"
+    },
+    {
       "bytes": 4857,
       "families": [
         "mclone:deer_alarm",
@@ -1339,5 +1361,5 @@
   ],
   "license": "CC0-1.0",
   "schema_version": 1,
-  "selected_file_count": 127
+  "selected_file_count": 129
 }

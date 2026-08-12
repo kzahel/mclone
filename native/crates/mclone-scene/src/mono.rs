@@ -1708,6 +1708,29 @@ impl McloneSceneHost {
                 return Ok(MonoWorldActionStatus::SubmittedEntity { target });
             }
         }
+        if action == FlatInputAction::Use {
+            let camera = self.active_world.camera.snapshot();
+            let direction = mclone_client::view_vector(camera.yaw_radians, camera.pitch_radians);
+            let entity_target = self.active_world.runtime.as_ref().and_then(|runtime| {
+                self.active_world.interaction.target_bee_colony(
+                    runtime.client(),
+                    camera.eye,
+                    direction,
+                )
+            });
+            if let Some(target) = entity_target {
+                let command = self
+                    .active_world
+                    .interaction
+                    .interact_entity_command(target);
+                self.active_world
+                    .runtime
+                    .as_mut()
+                    .expect("runtime presence checked")
+                    .send_gameplay_command(command)?;
+                return Ok(MonoWorldActionStatus::SubmittedEntity { target });
+            }
+        }
         let Some(target) = self.current_mono_block_target() else {
             return Ok(MonoWorldActionStatus::NoTarget);
         };
@@ -2835,6 +2858,12 @@ impl McloneSceneHost {
             discovered: deer_guide.discovered_count(),
             total: mclone_protocol::DEER_FIELD_GUIDE_OBSERVATION_COUNT,
             complete: deer_guide.is_complete(),
+        });
+        let bee_guide = runtime.client().bee_field_guide();
+        hud.bee_field_guide = Some(mclone_ui::BeeFieldGuideHud {
+            discovered: bee_guide.discovered_count(),
+            total: mclone_protocol::BEE_FIELD_GUIDE_OBSERVATION_COUNT,
+            complete: bee_guide.is_complete(),
         });
         hud.touch = context.touch_overlay;
         hud.frame_pipeline = self

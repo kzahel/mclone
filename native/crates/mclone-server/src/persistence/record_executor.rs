@@ -1305,6 +1305,7 @@ mod tests {
             statistics: PlayerStatistics::default(),
             mallard_field_guide: mclone_protocol::MallardFieldGuideProgress::default(),
             deer_field_guide: mclone_protocol::DeerFieldGuideProgress::default(),
+            bee_field_guide: mclone_protocol::BeeFieldGuideProgress::default(),
             health: 20.0,
             pending_death_cause: None,
         }

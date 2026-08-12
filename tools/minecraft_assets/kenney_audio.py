@@ -108,6 +108,8 @@ SELECTED_FILES = {
     "interface": INTERFACE_FILES,
 }
 LOCAL_FILES = [
+    "bee_buzz_00.ogg",
+    "bee_buzz_01.ogg",
     "deer_alarm_00.ogg",
     "deer_alarm_01.ogg",
     "deer_contact_00.ogg",
@@ -192,6 +194,17 @@ FAMILIES = [
         "variants": [
             f"assets/mclone/sounds/mclone-original/{filename}"
             for filename in LOCAL_FILES
+        ],
+    },
+    {
+        "key": "mclone:bee_buzz",
+        "gain": 0.38,
+        "pitch_min": 0.94,
+        "pitch_max": 1.08,
+        "no_immediate_repeat": True,
+        "variants": [
+            f"assets/mclone/sounds/mclone-original/bee_buzz_{index:02}.ogg"
+            for index in range(2)
         ],
     },
     {
@@ -317,7 +330,11 @@ def provenance_payload() -> dict[str, Any]:
                 "upstream_path": (
                     "tools/minecraft_assets/generate_mallard_calls.sh"
                     if filename.startswith("mallard_")
-                    else "tools/minecraft_assets/generate_deer_sounds.sh"
+                    else (
+                        "tools/minecraft_assets/generate_bee_sounds.sh"
+                        if filename.startswith("bee_")
+                        else "tools/minecraft_assets/generate_deer_sounds.sh"
+                    )
                 ),
                 "path": path,
                 "bytes": source.stat().st_size,

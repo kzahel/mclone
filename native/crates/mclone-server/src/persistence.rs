@@ -76,14 +76,16 @@ const ANIMATED_ENTITY_CHUNK_RECORD_VERSION: u32 = 4;
 const DEER_ENTITY_CHUNK_RECORD_VERSION: u32 = 5;
 const DEER_BED_ENTITY_CHUNK_RECORD_VERSION: u32 = 6;
 const DEER_ANTLER_SHED_ENTITY_CHUNK_RECORD_VERSION: u32 = 7;
+const BEE_ENTITY_CHUNK_RECORD_VERSION: u32 = 8;
 const DEER_ANTLER_SHED_LEGACY_REMAINING_TICKS: i32 = 36_000;
-pub const ENTITY_CHUNK_RECORD_VERSION: u32 = 7;
+pub const ENTITY_CHUNK_RECORD_VERSION: u32 = 8;
 const LEGACY_PLAYER_RECORD_VERSION: u32 = 1;
 const STATISTICS_PLAYER_RECORD_VERSION: u32 = 2;
 const PLAYER_LIFE_RECORD_VERSION: u32 = 3;
 const INVENTORY_AND_MALLARD_PLAYER_RECORD_VERSION: u32 = 4;
 const DEER_FIELD_GUIDE_PLAYER_RECORD_VERSION: u32 = 5;
-pub const PLAYER_RECORD_VERSION: u32 = 5;
+const BEE_FIELD_GUIDE_PLAYER_RECORD_VERSION: u32 = 6;
+pub const PLAYER_RECORD_VERSION: u32 = 6;
 pub const DIMENSION_RECORD_VERSION: u32 = 2;
 pub const WORLD_METADATA_VERSION: u32 = 3;
 pub const WORLD_METADATA_TARGET_MINECRAFT_VERSION: &str = "1.17.1";
@@ -520,6 +522,19 @@ pub enum EntitySavePayload {
     DeerBed {
         source: EntityPersistentId,
     },
+    Bee {
+        home: EntityPersistentId,
+        flower: Option<BlockPos>,
+        behavior: mclone_protocol::BeeBehavior,
+        behavior_ticks: u32,
+        carrying_pollen: bool,
+    },
+    BeeColony {
+        colonized: bool,
+        stored_work: u32,
+        work_capacity: u32,
+        spread_cooldown: u32,
+    },
     Item {
         stack: ItemStackSaveRecord,
         age: u64,
@@ -552,6 +567,8 @@ impl From<ItemStackSnapshot> for ItemStackSaveRecord {
             mclone_protocol::ItemKind::Venison => "mclone:venison",
             mclone_protocol::ItemKind::DeerHide => "mclone:deer_hide",
             mclone_protocol::ItemKind::ShedAntler => "mclone:shed_antler",
+            mclone_protocol::ItemKind::BeeHotel => "mclone:bee_hotel",
+            mclone_protocol::ItemKind::Beeswax => "mclone:beeswax",
         };
         Self::new(kind, stack.count)
     }
@@ -610,6 +627,7 @@ pub struct PlayerRecord {
     pub statistics: PlayerStatistics,
     pub mallard_field_guide: mclone_protocol::MallardFieldGuideProgress,
     pub deer_field_guide: mclone_protocol::DeerFieldGuideProgress,
+    pub bee_field_guide: mclone_protocol::BeeFieldGuideProgress,
     pub health: f32,
     pub pending_death_cause: Option<PlayerDamageCause>,
 }
@@ -637,6 +655,7 @@ impl PlayerRecord {
             statistics: PlayerStatistics::default(),
             mallard_field_guide: mclone_protocol::MallardFieldGuideProgress::default(),
             deer_field_guide: mclone_protocol::DeerFieldGuideProgress::default(),
+            bee_field_guide: mclone_protocol::BeeFieldGuideProgress::default(),
             health: DEFAULT_PLAYER_MAX_HEALTH,
             pending_death_cause: None,
         }
@@ -5780,6 +5799,7 @@ fn write_player_record(writer: &mut impl Write, record: &PlayerRecord) -> ChunkS
     write_player_statistics(writer, &record.statistics)?;
     write_u32(writer, record.mallard_field_guide.bits())?;
     write_u32(writer, record.deer_field_guide.bits())?;
+    write_u32(writer, record.bee_field_guide.bits())?;
     write_f32(writer, record.health)?;
     write_player_damage_cause(writer, record.pending_death_cause)?;
     writer.flush()?;
@@ -6186,6 +6206,11 @@ fn read_player_record(reader: &mut impl Read) -> ChunkStoreResult<PlayerRecord> 
         } else {
             mclone_protocol::DeerFieldGuideProgress::default()
         },
+        bee_field_guide: if codec_version >= BEE_FIELD_GUIDE_PLAYER_RECORD_VERSION {
+            mclone_protocol::BeeFieldGuideProgress::from_bits_retain(read_u32(reader)?)
+        } else {
+            mclone_protocol::BeeFieldGuideProgress::default()
+        },
         health: if codec_version >= PLAYER_LIFE_RECORD_VERSION {
             read_f32(reader)?
         } else {
@@ -6428,6 +6453,47 @@ fn write_entity_save_payload(
             write_u64(writer, source.most)?;
             write_u64(writer, source.least)
         }
+        EntitySavePayload::Bee {
+            home,
+            flower,
+            behavior,
+            behavior_ticks,
+            carrying_pollen,
+        } => {
+            write_u8(writer, 8)?;
+            write_u64(writer, home.most)?;
+            write_u64(writer, home.least)?;
+            write_bool(writer, flower.is_some())?;
+            if let Some(flower) = flower {
+                write_i32(writer, flower.x)?;
+                write_i32(writer, flower.y)?;
+                write_i32(writer, flower.z)?;
+            }
+            write_u8(
+                writer,
+                match behavior {
+                    mclone_protocol::BeeBehavior::Hover => 0,
+                    mclone_protocol::BeeBehavior::FlyToFlower => 1,
+                    mclone_protocol::BeeBehavior::Forage => 2,
+                    mclone_protocol::BeeBehavior::ReturnHome => 3,
+                    mclone_protocol::BeeBehavior::AtNest => 4,
+                },
+            )?;
+            write_u32(writer, *behavior_ticks)?;
+            write_bool(writer, *carrying_pollen)
+        }
+        EntitySavePayload::BeeColony {
+            colonized,
+            stored_work,
+            work_capacity,
+            spread_cooldown,
+        } => {
+            write_u8(writer, 9)?;
+            write_bool(writer, *colonized)?;
+            write_u32(writer, *stored_work)?;
+            write_u32(writer, *work_capacity)?;
+            write_u32(writer, *spread_cooldown)
+        }
         EntitySavePayload::Item {
             stack,
             age,
@@ -6564,6 +6630,54 @@ fn read_entity_save_payload(
                 source: EntityPersistentId::new(read_u64(reader)?, read_u64(reader)?),
             })
         }
+        8 if codec_version >= BEE_ENTITY_CHUNK_RECORD_VERSION => {
+            let home = EntityPersistentId::new(read_u64(reader)?, read_u64(reader)?);
+            let flower = if read_bool(reader)? {
+                Some(BlockPos::new(
+                    read_i32(reader)?,
+                    read_i32(reader)?,
+                    read_i32(reader)?,
+                ))
+            } else {
+                None
+            };
+            let behavior = match read_u8(reader)? {
+                0 => mclone_protocol::BeeBehavior::Hover,
+                1 => mclone_protocol::BeeBehavior::FlyToFlower,
+                2 => mclone_protocol::BeeBehavior::Forage,
+                3 => mclone_protocol::BeeBehavior::ReturnHome,
+                4 => mclone_protocol::BeeBehavior::AtNest,
+                value => {
+                    return Err(ChunkStoreError::InvalidData(format!(
+                        "unknown bee behavior {value}"
+                    )));
+                }
+            };
+            Ok(EntitySavePayload::Bee {
+                home,
+                flower,
+                behavior,
+                behavior_ticks: read_u32(reader)?,
+                carrying_pollen: read_bool(reader)?,
+            })
+        }
+        9 if codec_version >= BEE_ENTITY_CHUNK_RECORD_VERSION => {
+            let colonized = read_bool(reader)?;
+            let stored_work = read_u32(reader)?;
+            let work_capacity = read_u32(reader)?;
+            let spread_cooldown = read_u32(reader)?;
+            if work_capacity == 0 || stored_work > work_capacity {
+                return Err(ChunkStoreError::InvalidData(
+                    "invalid bee colony work state".to_owned(),
+                ));
+            }
+            Ok(EntitySavePayload::BeeColony {
+                colonized,
+                stored_work,
+                work_capacity,
+                spread_cooldown,
+            })
+        }
         value => Err(ChunkStoreError::InvalidData(format!(
             "unknown entity save payload kind {value}"
         ))),
@@ -6623,6 +6737,8 @@ fn write_optional_item_stack_snapshot(
             mclone_protocol::ItemKind::Venison => 4,
             mclone_protocol::ItemKind::DeerHide => 5,
             mclone_protocol::ItemKind::ShedAntler => 6,
+            mclone_protocol::ItemKind::BeeHotel => 7,
+            mclone_protocol::ItemKind::Beeswax => 8,
         };
         write_u8(writer, kind)?;
         write_u8(writer, stack.count)?;
@@ -6644,6 +6760,8 @@ fn read_optional_item_stack_snapshot(
         4 => mclone_protocol::ItemKind::Venison,
         5 => mclone_protocol::ItemKind::DeerHide,
         6 => mclone_protocol::ItemKind::ShedAntler,
+        7 => mclone_protocol::ItemKind::BeeHotel,
+        8 => mclone_protocol::ItemKind::Beeswax,
         value => {
             return Err(ChunkStoreError::InvalidData(format!(
                 "unknown player inventory item kind {value}"
@@ -8917,6 +9035,7 @@ mod tests {
                 0b101011,
             ),
             deer_field_guide: mclone_protocol::DeerFieldGuideProgress::from_bits_retain(0b110101),
+            bee_field_guide: mclone_protocol::BeeFieldGuideProgress::from_bits_retain(0b101101),
             health: 13.5,
             pending_death_cause: None,
         }

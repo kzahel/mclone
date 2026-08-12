@@ -8,7 +8,7 @@ use mclone_blocks::{
     collision_aabb_for_feet_position,
 };
 use mclone_core::{Aabb, AnimationClipId, AnimationState, BlockPos, BlockStateId, Vec3d};
-use mclone_protocol::{EntityId, EntityKind};
+use mclone_protocol::{EntityId, EntityKind, EntityPersistentId};
 use mclone_worldgen::block::{
     ACACIA_LEAVES, ACACIA_LOG, BIRCH_LEAVES, BIRCH_LOG, DANDELION, DARK_OAK_LEAVES, DARK_OAK_LOG,
     FERN, GRASS, LARGE_FERN_LOWER, LARGE_FERN_UPPER, OAK_LEAVES, OAK_LOG, POPPY, SPRUCE_LEAVES,
@@ -33,7 +33,7 @@ pub(crate) use navigation::BlockPathType;
 use navigation::GroundPathNavigation;
 use species::MobSpeciesState;
 pub(crate) use species::{
-    DeerRuntimeSaveData, MALLARD_GROWTH_REQUIRED_TICKS, MallardRuntimeSaveData,
+    BeeRuntimeSaveData, DeerRuntimeSaveData, MALLARD_GROWTH_REQUIRED_TICKS, MallardRuntimeSaveData,
 };
 
 const PLAYER_EYE_HEIGHT: f64 = 1.62;
@@ -66,6 +66,11 @@ const DEER_FLEE_MAX_TURN_DEGREES: f32 = 18.0;
 const DEER_HABITAT_SEARCH_RADIUS: i32 = 9;
 const DEER_HERD_COHESION_DISTANCE_SQR: f64 = 12.0 * 12.0;
 const DEER_HERD_SEPARATION_DISTANCE_SQR: f64 = 1.75 * 1.75;
+const BEE_TARGET_REACHED_DISTANCE_SQR: f64 = 0.28 * 0.28;
+const BEE_FLIGHT_SPEED: f64 = 0.075;
+const BEE_MAX_TURN_DEGREES: f32 = 20.0;
+const BEE_FORAGE_TICKS: u32 = 36;
+const BEE_NEST_TICKS: u32 = 24;
 pub(crate) const DEER_FALL_PRESENTATION_TICKS: u32 = 30;
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -161,6 +166,10 @@ pub(crate) struct MobRuntimeState {
     mallard_habitat_intent: Option<MallardHabitatIntent>,
     mallard_seek_shore_next: bool,
     deer_habitat_intent: Option<DeerHabitatIntent>,
+    bee_target: Option<Vec3d>,
+    bee_flower: Option<BlockPos>,
+    bee_home_position: Option<Vec3d>,
+    bee_completed_deposit: Option<BlockPos>,
 }
 
 impl MobRuntimeState {
@@ -188,11 +197,14 @@ impl MobRuntimeState {
             EntityKind::Chicken => passive::register_chicken_goals(&mut goal_selector),
             EntityKind::Mallard => passive::register_mallard_goals(&mut goal_selector),
             EntityKind::Deer => passive::register_cow_goals(&mut goal_selector),
+            EntityKind::Bee => {}
             EntityKind::Mannequin => passive::register_mannequin_goals(&mut goal_selector),
             EntityKind::DebugCube
             | EntityKind::Item
             | EntityKind::MallardNest
-            | EntityKind::DeerBed => {}
+            | EntityKind::DeerBed
+            | EntityKind::BeeNest
+            | EntityKind::BeeHotel => {}
         }
         let attributes = MobAttributes::from_metadata(metadata);
 
@@ -216,6 +228,10 @@ impl MobRuntimeState {
             mallard_habitat_intent: None,
             mallard_seek_shore_next: false,
             deer_habitat_intent: None,
+            bee_target: None,
+            bee_flower: None,
+            bee_home_position: None,
+            bee_completed_deposit: None,
         }
     }
 
@@ -228,6 +244,7 @@ impl MobRuntimeState {
         egg_time: Option<i32>,
         mallard: Option<MallardRuntimeSaveData>,
         deer: Option<DeerRuntimeSaveData>,
+        bee: Option<BeeRuntimeSaveData>,
     ) -> Self {
         debug_assert!(
             metadata.is_passive_mob(),
@@ -239,8 +256,9 @@ impl MobRuntimeState {
         }
 
         let mut random = SimpleRandomSource::new(mob_random_seed(id, metadata.kind));
+        let bee_flower = bee.and_then(|saved| saved.flower);
         let species =
-            MobSpeciesState::from_saved(metadata.kind, &mut random, egg_time, mallard, deer);
+            MobSpeciesState::from_saved(metadata.kind, &mut random, egg_time, mallard, deer, bee);
 
         let mut goal_selector = GoalSelector::default();
         match metadata.kind {
@@ -248,11 +266,14 @@ impl MobRuntimeState {
             EntityKind::Chicken => passive::register_chicken_goals(&mut goal_selector),
             EntityKind::Mallard => passive::register_mallard_goals(&mut goal_selector),
             EntityKind::Deer => passive::register_cow_goals(&mut goal_selector),
+            EntityKind::Bee => {}
             EntityKind::Mannequin => passive::register_mannequin_goals(&mut goal_selector),
             EntityKind::DebugCube
             | EntityKind::Item
             | EntityKind::MallardNest
-            | EntityKind::DeerBed => {}
+            | EntityKind::DeerBed
+            | EntityKind::BeeNest
+            | EntityKind::BeeHotel => {}
         }
         let attributes = MobAttributes::from_metadata(metadata);
 
@@ -276,6 +297,10 @@ impl MobRuntimeState {
             mallard_habitat_intent: None,
             mallard_seek_shore_next: false,
             deer_habitat_intent: None,
+            bee_target: None,
+            bee_flower,
+            bee_home_position: None,
+            bee_completed_deposit: None,
         }
     }
 
@@ -285,6 +310,9 @@ impl MobRuntimeState {
         self.y_head_rot_degrees = entity.y_rot_degrees;
         self.mallard_habitat_intent = None;
         self.deer_habitat_intent = None;
+        self.bee_target = None;
+        self.bee_flower = None;
+        self.bee_completed_deposit = None;
     }
 
     pub(crate) const fn no_action_time(&self) -> u32 {
@@ -353,6 +381,22 @@ impl MobRuntimeState {
 
     pub(crate) fn deer_behavior(&self) -> Option<mclone_protocol::DeerBehavior> {
         self.species.deer().map(|deer| deer.behavior())
+    }
+
+    pub(crate) fn bee_save_data(&self) -> Option<BeeRuntimeSaveData> {
+        self.species.bee().map(|bee| bee.save_data())
+    }
+
+    pub(crate) fn bee_home(&self) -> Option<EntityPersistentId> {
+        self.species.bee().map(|bee| bee.home())
+    }
+
+    pub(crate) fn set_bee_home_position(&mut self, position: Option<Vec3d>) {
+        self.bee_home_position = position;
+    }
+
+    pub(crate) fn take_bee_completed_deposit(&mut self) -> Option<BlockPos> {
+        self.bee_completed_deposit.take()
     }
 
     pub(crate) fn damage_deer(&mut self, entity: &mut ServerEntityState, damage: u8) -> bool {
@@ -438,6 +482,11 @@ impl MobRuntimeState {
 
         if entity.kind == EntityKind::Deer {
             self.tick_deer(entity, nearby_players, herdmates, block_state_at);
+            return;
+        }
+
+        if entity.kind == EntityKind::Bee {
+            self.tick_bee(entity, block_state_at);
             return;
         }
 
@@ -692,6 +741,90 @@ impl MobRuntimeState {
             .deer_mut()
             .expect("test expected deer species state")
             .set_behavior(behavior);
+    }
+
+    fn tick_bee<F>(&mut self, entity: &mut ServerEntityState, block_state_at: &F)
+    where
+        F: Fn(BlockPos) -> Option<BlockStateId>,
+    {
+        let Some(bee) = self.species.bee_mut() else {
+            return;
+        };
+        bee.advance_behavior_tick();
+        let mut behavior = bee.behavior();
+        if behavior == mclone_protocol::BeeBehavior::Hover && bee.behavior_ticks() >= 24 {
+            self.bee_flower = nearest_bee_flower(entity.position, block_state_at);
+            bee.set_flower(self.bee_flower);
+            if let Some(flower) = self.bee_flower {
+                self.bee_target = Some(bee_flower_target(flower));
+                behavior = mclone_protocol::BeeBehavior::FlyToFlower;
+                bee.set_behavior(behavior);
+            }
+        }
+        if behavior == mclone_protocol::BeeBehavior::Forage
+            && bee.behavior_ticks() >= BEE_FORAGE_TICKS
+        {
+            bee.set_carrying_pollen(true);
+            behavior = mclone_protocol::BeeBehavior::ReturnHome;
+            bee.set_behavior(behavior);
+            self.bee_target = self.bee_home_position.map(bee_home_target);
+        }
+        if behavior == mclone_protocol::BeeBehavior::AtNest
+            && bee.behavior_ticks() >= BEE_NEST_TICKS
+        {
+            if bee.carrying_pollen() {
+                self.bee_completed_deposit = Some(
+                    self.bee_flower
+                        .unwrap_or_else(|| BlockPos::containing(entity.position)),
+                );
+            }
+            bee.set_carrying_pollen(false);
+            bee.set_behavior(mclone_protocol::BeeBehavior::Hover);
+            behavior = mclone_protocol::BeeBehavior::Hover;
+            self.bee_target = self.bee_home_position.map(bee_home_target);
+            self.bee_flower = None;
+            bee.set_flower(None);
+        }
+
+        if matches!(
+            behavior,
+            mclone_protocol::BeeBehavior::FlyToFlower
+                | mclone_protocol::BeeBehavior::ReturnHome
+                | mclone_protocol::BeeBehavior::Hover
+        ) {
+            if self.bee_target.is_none() {
+                self.bee_target = match behavior {
+                    mclone_protocol::BeeBehavior::FlyToFlower => {
+                        self.bee_flower.map(bee_flower_target)
+                    }
+                    _ => self.bee_home_position.map(bee_home_target),
+                };
+            }
+            if let Some(target) = self.bee_target {
+                if bee_move_toward(entity, target, block_state_at) {
+                    match behavior {
+                        mclone_protocol::BeeBehavior::FlyToFlower => {
+                            bee.set_behavior(mclone_protocol::BeeBehavior::Forage);
+                            behavior = mclone_protocol::BeeBehavior::Forage;
+                            self.bee_target = None;
+                        }
+                        mclone_protocol::BeeBehavior::ReturnHome => {
+                            bee.set_behavior(mclone_protocol::BeeBehavior::AtNest);
+                            behavior = mclone_protocol::BeeBehavior::AtNest;
+                            self.bee_target = None;
+                        }
+                        mclone_protocol::BeeBehavior::Hover => {
+                            self.bee_target = None;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        set_bee_animation(entity, behavior);
+        entity.on_ground = false;
+        self.on_ground = false;
+        self.delta_movement = Vec3d::ZERO;
     }
 
     fn tick_mallard_water_or_shore<F>(
@@ -1532,6 +1665,106 @@ where
     fallback
 }
 
+fn nearest_bee_flower<F>(position: Vec3d, blocks: &F) -> Option<BlockPos>
+where
+    F: Fn(BlockPos) -> Option<BlockStateId>,
+{
+    let center = BlockPos::containing(position);
+    let mut best = None;
+    for dy in -4..=4 {
+        for dx in -10..=10 {
+            for dz in -10..=10 {
+                if dx * dx + dz * dz > 100 {
+                    continue;
+                }
+                let pos = center.offset(dx, dy, dz);
+                if !blocks(pos).is_some_and(is_flower_state) {
+                    continue;
+                }
+                let distance = position.distance_to_sqr(bee_flower_target(pos));
+                if best.is_none_or(|(_, best_distance)| distance < best_distance) {
+                    best = Some((pos, distance));
+                }
+            }
+        }
+    }
+    best.map(|(pos, _)| pos)
+}
+
+fn is_flower_state(state: BlockStateId) -> bool {
+    matches!(
+        state,
+        value if value == generated_block_state_id(DANDELION)
+            || value == generated_block_state_id(POPPY)
+    )
+}
+
+fn bee_flower_target(pos: BlockPos) -> Vec3d {
+    Vec3d::new(
+        f64::from(pos.x) + 0.5,
+        f64::from(pos.y) + 0.82,
+        f64::from(pos.z) + 0.5,
+    )
+}
+
+fn bee_home_target(home: Vec3d) -> Vec3d {
+    home.add(Vec3d::new(0.0, 0.62, 0.0))
+}
+
+fn bee_move_toward<F>(entity: &mut ServerEntityState, target: Vec3d, blocks: &F) -> bool
+where
+    F: Fn(BlockPos) -> Option<BlockStateId>,
+{
+    let displacement = target.subtract(entity.position);
+    let distance_sqr = displacement.length_sqr();
+    if distance_sqr <= BEE_TARGET_REACHED_DISTANCE_SQR {
+        return true;
+    }
+    let requested = displacement.scale(BEE_FLIGHT_SPEED / distance_sqr.sqrt());
+    let bounding_box = collision_aabb_for_feet_position(
+        entity.position,
+        f64::from(entity.width),
+        f64::from(entity.height),
+    );
+    let traveled = collide_mob_movement(blocks, bounding_box, requested, 0.0, false);
+    entity.position = entity.position.add(traveled);
+    let horizontal_sqr = traveled.x * traveled.x + traveled.z * traveled.z;
+    if horizontal_sqr > 1.0e-8 {
+        let wanted_y_rot = (-traveled.x).atan2(traveled.z).to_degrees() as f32;
+        entity.y_rot_degrees =
+            rotate_degrees_towards(entity.y_rot_degrees, wanted_y_rot, BEE_MAX_TURN_DEGREES);
+    }
+    false
+}
+
+fn set_bee_animation(entity: &mut ServerEntityState, behavior: mclone_protocol::BeeBehavior) {
+    let (clip, phase_source) = match behavior {
+        mclone_protocol::BeeBehavior::Hover | mclone_protocol::BeeBehavior::AtNest => (
+            AnimationClipId::from_static("hover"),
+            mclone_core::AnimationPhaseSource::Elapsed,
+        ),
+        mclone_protocol::BeeBehavior::FlyToFlower | mclone_protocol::BeeBehavior::ReturnHome => (
+            AnimationClipId::from_static("fly"),
+            mclone_core::AnimationPhaseSource::Distance,
+        ),
+        mclone_protocol::BeeBehavior::Forage => (
+            AnimationClipId::from_static("forage"),
+            mclone_core::AnimationPhaseSource::Elapsed,
+        ),
+    };
+    let previous = entity.animation;
+    if previous.is_some_and(|animation| animation.clip == clip) {
+        return;
+    }
+    let epoch = previous.map_or(0, |animation| animation.epoch.wrapping_add(1));
+    entity.animation = Some(match phase_source {
+        mclone_core::AnimationPhaseSource::Distance => AnimationState::distance(clip, epoch),
+        mclone_core::AnimationPhaseSource::Elapsed => {
+            AnimationState::elapsed(clip, epoch, entity.tick_count)
+        }
+    });
+}
+
 fn deer_herd_target(position: Vec3d, herdmate: Vec3d) -> Option<DeerHabitatIntent> {
     let distance_sqr = position.distance_to_sqr(herdmate);
     let direction = herdmate.subtract(position);
@@ -1939,6 +2172,9 @@ fn mob_random_seed(id: EntityId, kind: EntityKind) -> i64 {
         EntityKind::DebugCube => 0x00c0_00ff_u64,
         EntityKind::MallardNest => 0x00c0_0006_u64,
         EntityKind::DeerBed => 0x00c0_0008_u64,
+        EntityKind::Bee => 0x00c0_0009_u64,
+        EntityKind::BeeNest => 0x00c0_000a_u64,
+        EntityKind::BeeHotel => 0x00c0_000b_u64,
     };
     let mixed = id.0.wrapping_mul(0x9e37_79b9_7f4a_7c15).rotate_left(17) ^ kind_id;
     mixed as i64

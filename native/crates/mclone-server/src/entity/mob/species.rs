@@ -1,7 +1,7 @@
 use mclone_core::Vec3d;
 use mclone_protocol::{
-    DeerBehavior, DeerLifeStage, DeerSex, DeerSnapshotData, EntityKind, EntityPersistentId,
-    MallardLifeStage,
+    BeeBehavior, DeerBehavior, DeerLifeStage, DeerSex, DeerSnapshotData, EntityKind,
+    EntityPersistentId, MallardLifeStage,
 };
 use mclone_worldgen::prng::SimpleRandomSource;
 
@@ -38,12 +38,22 @@ pub(crate) struct MallardRuntimeSaveData {
     pub(crate) call_time: i32,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct BeeRuntimeSaveData {
+    pub(crate) home: EntityPersistentId,
+    pub(crate) flower: Option<mclone_core::BlockPos>,
+    pub(crate) behavior: BeeBehavior,
+    pub(crate) behavior_ticks: u32,
+    pub(crate) carrying_pollen: bool,
+}
+
 #[derive(Debug, PartialEq)]
 pub(super) enum MobSpeciesState {
     Cow,
     Chicken(ChickenRuntimeState),
     Mallard(MallardRuntimeState),
     Deer(DeerRuntimeState),
+    Bee(BeeRuntimeState),
 }
 
 impl MobSpeciesState {
@@ -53,10 +63,22 @@ impl MobSpeciesState {
             EntityKind::Chicken => Self::Chicken(ChickenRuntimeState::new(random)),
             EntityKind::Mallard => Self::Mallard(MallardRuntimeState::new(random)),
             EntityKind::Deer => Self::Deer(DeerRuntimeState::new(random)),
+            EntityKind::Bee => {
+                debug_assert!(false, "bee spawn requires a durable colony home");
+                Self::Bee(BeeRuntimeState::from_saved(BeeRuntimeSaveData {
+                    home: EntityPersistentId::new(0, 0),
+                    flower: None,
+                    behavior: BeeBehavior::Hover,
+                    behavior_ticks: 0,
+                    carrying_pollen: false,
+                }))
+            }
             EntityKind::DebugCube
             | EntityKind::Item
             | EntityKind::MallardNest
-            | EntityKind::DeerBed => {
+            | EntityKind::DeerBed
+            | EntityKind::BeeNest
+            | EntityKind::BeeHotel => {
                 debug_assert!(false, "non-mob entities do not use mob species state");
                 Self::Cow
             }
@@ -69,6 +91,7 @@ impl MobSpeciesState {
         egg_time: Option<i32>,
         mallard: Option<MallardRuntimeSaveData>,
         deer: Option<DeerRuntimeSaveData>,
+        bee: Option<BeeRuntimeSaveData>,
     ) -> Self {
         match kind {
             EntityKind::Cow | EntityKind::Mannequin => Self::Cow,
@@ -87,10 +110,21 @@ impl MobSpeciesState {
             EntityKind::Deer => Self::Deer(DeerRuntimeState::from_saved(
                 deer.unwrap_or_else(|| DeerRuntimeState::new(random).save_data()),
             )),
+            EntityKind::Bee => Self::Bee(BeeRuntimeState::from_saved(bee.unwrap_or(
+                BeeRuntimeSaveData {
+                    home: EntityPersistentId::new(0, 0),
+                    flower: None,
+                    behavior: BeeBehavior::Hover,
+                    behavior_ticks: 0,
+                    carrying_pollen: false,
+                },
+            ))),
             EntityKind::DebugCube
             | EntityKind::Item
             | EntityKind::MallardNest
-            | EntityKind::DeerBed => {
+            | EntityKind::DeerBed
+            | EntityKind::BeeNest
+            | EntityKind::BeeHotel => {
                 debug_assert!(false, "non-mob entities do not use mob species state");
                 Self::Cow
             }
@@ -108,6 +142,7 @@ impl MobSpeciesState {
             Self::Chicken(chicken) => chicken.ai_step(on_ground, delta_movement, random),
             Self::Mallard(mallard) => mallard.ai_step(),
             Self::Deer(_) => {}
+            Self::Bee(_) => {}
         }
     }
 
@@ -117,6 +152,7 @@ impl MobSpeciesState {
             Self::Chicken(chicken) => Some(chicken),
             Self::Mallard(_) => None,
             Self::Deer(_) => None,
+            Self::Bee(_) => None,
         }
     }
 
@@ -126,35 +162,104 @@ impl MobSpeciesState {
             Self::Chicken(chicken) => Some(chicken),
             Self::Mallard(_) => None,
             Self::Deer(_) => None,
+            Self::Bee(_) => None,
         }
     }
 
     pub(super) fn mallard(&self) -> Option<&MallardRuntimeState> {
         match self {
             Self::Mallard(mallard) => Some(mallard),
-            Self::Cow | Self::Chicken(_) | Self::Deer(_) => None,
+            Self::Cow | Self::Chicken(_) | Self::Deer(_) | Self::Bee(_) => None,
         }
     }
 
     pub(super) fn mallard_mut(&mut self) -> Option<&mut MallardRuntimeState> {
         match self {
             Self::Mallard(mallard) => Some(mallard),
-            Self::Cow | Self::Chicken(_) | Self::Deer(_) => None,
+            Self::Cow | Self::Chicken(_) | Self::Deer(_) | Self::Bee(_) => None,
         }
     }
 
     pub(super) fn deer(&self) -> Option<&DeerRuntimeState> {
         match self {
             Self::Deer(deer) => Some(deer),
-            Self::Cow | Self::Chicken(_) | Self::Mallard(_) => None,
+            Self::Cow | Self::Chicken(_) | Self::Mallard(_) | Self::Bee(_) => None,
         }
     }
 
     pub(super) fn deer_mut(&mut self) -> Option<&mut DeerRuntimeState> {
         match self {
             Self::Deer(deer) => Some(deer),
-            Self::Cow | Self::Chicken(_) | Self::Mallard(_) => None,
+            Self::Cow | Self::Chicken(_) | Self::Mallard(_) | Self::Bee(_) => None,
         }
+    }
+
+    pub(super) fn bee(&self) -> Option<&BeeRuntimeState> {
+        match self {
+            Self::Bee(bee) => Some(bee),
+            Self::Cow | Self::Chicken(_) | Self::Mallard(_) | Self::Deer(_) => None,
+        }
+    }
+
+    pub(super) fn bee_mut(&mut self) -> Option<&mut BeeRuntimeState> {
+        match self {
+            Self::Bee(bee) => Some(bee),
+            Self::Cow | Self::Chicken(_) | Self::Mallard(_) | Self::Deer(_) => None,
+        }
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub(super) struct BeeRuntimeState {
+    saved: BeeRuntimeSaveData,
+}
+
+impl BeeRuntimeState {
+    pub(super) const fn from_saved(saved: BeeRuntimeSaveData) -> Self {
+        Self { saved }
+    }
+
+    pub(super) const fn save_data(&self) -> BeeRuntimeSaveData {
+        self.saved
+    }
+
+    pub(super) const fn behavior(&self) -> BeeBehavior {
+        self.saved.behavior
+    }
+
+    pub(super) const fn behavior_ticks(&self) -> u32 {
+        self.saved.behavior_ticks
+    }
+
+    pub(super) const fn home(&self) -> EntityPersistentId {
+        self.saved.home
+    }
+
+    pub(super) const fn carrying_pollen(&self) -> bool {
+        self.saved.carrying_pollen
+    }
+
+    pub(super) const fn flower(&self) -> Option<mclone_core::BlockPos> {
+        self.saved.flower
+    }
+
+    pub(super) fn set_flower(&mut self, flower: Option<mclone_core::BlockPos>) {
+        self.saved.flower = flower;
+    }
+
+    pub(super) fn advance_behavior_tick(&mut self) {
+        self.saved.behavior_ticks = self.saved.behavior_ticks.saturating_add(1);
+    }
+
+    pub(super) fn set_behavior(&mut self, behavior: BeeBehavior) {
+        if self.saved.behavior != behavior {
+            self.saved.behavior = behavior;
+            self.saved.behavior_ticks = 0;
+        }
+    }
+
+    pub(super) fn set_carrying_pollen(&mut self, carrying: bool) {
+        self.saved.carrying_pollen = carrying;
     }
 }
 

@@ -3,8 +3,9 @@ use std::fmt;
 
 use mclone_core::{ChunkPos, Vec3d};
 use mclone_protocol::{
-    ClientIdentity, DeerFieldGuideProgress, DimensionKey, MallardFieldGuideProgress,
-    PlayerAppearance, PlayerDamageCause, PlayerStatistics, PlayerVitals, SessionCapabilities,
+    BeeFieldGuideProgress, ClientIdentity, DeerFieldGuideProgress, DimensionKey,
+    MallardFieldGuideProgress, PlayerAppearance, PlayerDamageCause, PlayerStatistics, PlayerVitals,
+    SessionCapabilities,
 };
 
 use crate::inventory::ServerInventory;
@@ -54,6 +55,7 @@ pub(crate) struct ServerPlayerEntry {
     pub(crate) statistics: PlayerStatistics,
     pub(crate) mallard_field_guide: MallardFieldGuideProgress,
     pub(crate) deer_field_guide: DeerFieldGuideProgress,
+    pub(crate) bee_field_guide: BeeFieldGuideProgress,
     pub(crate) vitals: PlayerVitals,
     pub(crate) pending_death_cause: Option<PlayerDamageCause>,
     pub(crate) life_epoch: u32,
@@ -80,6 +82,7 @@ impl Default for ServerPlayerEntry {
             statistics: PlayerStatistics::default(),
             mallard_field_guide: MallardFieldGuideProgress::default(),
             deer_field_guide: DeerFieldGuideProgress::default(),
+            bee_field_guide: BeeFieldGuideProgress::default(),
             vitals: PlayerVitals::default(),
             pending_death_cause: None,
             life_epoch: 0,

@@ -588,9 +588,13 @@ pub(crate) fn xr_field_guide_panel_height_blocks() -> f32 {
 pub(crate) fn xr_field_guide_draw(
     mallard: mclone_protocol::MallardFieldGuideProgress,
     deer: mclone_protocol::DeerFieldGuideProgress,
+    bee: mclone_protocol::BeeFieldGuideProgress,
 ) -> GuiDrawList {
     let mut draw = GuiDrawList::new();
-    if mallard.discovered_count() == 0 && deer.discovered_count() == 0 {
+    if mallard.discovered_count() == 0
+        && deer.discovered_count() == 0
+        && bee.discovered_count() == 0
+    {
         return draw;
     }
     let scale = GuiScale::from_pixels(
@@ -621,6 +625,16 @@ pub(crate) fn xr_field_guide_draw(
                 mclone_protocol::DEER_FIELD_GUIDE_OBSERVATION_COUNT
             ),
             deer.is_complete(),
+        ));
+    }
+    if bee.discovered_count() > 0 {
+        labels.push((
+            format!(
+                "BEE NOTES {}/{}",
+                bee.discovered_count(),
+                mclone_protocol::BEE_FIELD_GUIDE_OBSERVATION_COUNT
+            ),
+            bee.is_complete(),
         ));
     }
     let line_height = font.glyph_height() * 3.0 + 8.0;
@@ -1344,6 +1358,25 @@ impl McloneSceneHost {
             );
             edges.attack = false;
         }
+        if edges.use_item
+            && let Some(target) = self.current_xr_bee_colony_interaction_target()
+        {
+            let command = self
+                .active_world
+                .interaction
+                .interact_entity_command(target);
+            if let Some(runtime) = &mut self.active_world.runtime {
+                runtime
+                    .send_gameplay_command(command)
+                    .context("failed to send XR entity use command")?;
+            }
+            log::info!(
+                "XR bee colony use submitted to entity {} at distance {:.2}",
+                target.id.0,
+                target.distance
+            );
+            edges.use_item = false;
+        }
         if !edges.any() {
             return Ok(());
         }
@@ -1486,6 +1519,22 @@ impl McloneSceneHost {
                 .ok()?;
         let (ray_origin, ray_direction) = self.current_xr_interaction_ray(transform)?;
         self.active_world.interaction.target_entity(
+            runtime.client(),
+            vec3d_from_glam(ray_origin),
+            vec3d_from_glam(ray_direction),
+        )
+    }
+
+    pub(crate) fn current_xr_bee_colony_interaction_target(
+        &self,
+    ) -> Option<EntityInteractionTarget> {
+        let runtime = self.active_world.runtime.as_ref()?;
+        let origin = self.tracking_origin?;
+        let transform =
+            XrStageToWorld::from_tracking_origin(origin, self.active_world.camera.snapshot())
+                .ok()?;
+        let (ray_origin, ray_direction) = self.current_xr_interaction_ray(transform)?;
+        self.active_world.interaction.target_bee_colony(
             runtime.client(),
             vec3d_from_glam(ray_origin),
             vec3d_from_glam(ray_direction),

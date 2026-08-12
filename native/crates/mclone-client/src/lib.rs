@@ -27,12 +27,12 @@ use mclone_core::{
     PackedLightSection, SECTION_HEIGHT, local_block_coord, obfuscate_biome_zoom_seed,
 };
 use mclone_protocol::{
-    ChunkView, ClientCommand, DeerFieldGuideProgress, DeerSoundCue, DimensionKey, DisconnectReason,
-    DisconnectReasonCode, EntityId, EntitySnapshot, EntityUpdate, ItemStackSnapshot,
-    MallardCallCue, MallardFieldGuideProgress, MallardNestSnapshotData, MallardSnapshotData,
-    MallardTrackCue, PlayerLifeState, PlayerPositionUpdate, PlayerStatistics, RemotePlayerId,
-    RemotePlayerUpdate, SectionBlockUpdate, ServerEphemeralMessage, ServerUpdate,
-    SessionConfiguration, validate_body_pose_sample,
+    BeeFieldGuideProgress, BeeSoundCue, ChunkView, ClientCommand, DeerFieldGuideProgress,
+    DeerSoundCue, DimensionKey, DisconnectReason, DisconnectReasonCode, EntityId, EntitySnapshot,
+    EntityUpdate, ItemStackSnapshot, MallardCallCue, MallardFieldGuideProgress,
+    MallardNestSnapshotData, MallardSnapshotData, MallardTrackCue, PlayerLifeState,
+    PlayerPositionUpdate, PlayerStatistics, RemotePlayerId, RemotePlayerUpdate, SectionBlockUpdate,
+    ServerEphemeralMessage, ServerUpdate, SessionConfiguration, validate_body_pose_sample,
 };
 
 pub use actor::{
@@ -118,8 +118,10 @@ pub struct ClientRuntime {
     player_inventory: [Option<ItemStackSnapshot>; mclone_protocol::HOTBAR_SLOT_COUNT_USIZE],
     mallard_field_guide: MallardFieldGuideProgress,
     deer_field_guide: DeerFieldGuideProgress,
+    bee_field_guide: BeeFieldGuideProgress,
     mallard_calls: VecDeque<MallardCallCue>,
     deer_sounds: VecDeque<DeerSoundCue>,
+    bee_sounds: VecDeque<BeeSoundCue>,
     mallard_tracks: VecDeque<MallardTrackCue>,
     player_life: PlayerLifeState,
     player_position_updates: VecDeque<PlayerPositionUpdate>,
@@ -156,8 +158,10 @@ impl ClientRuntime {
             player_inventory: [None; mclone_protocol::HOTBAR_SLOT_COUNT_USIZE],
             mallard_field_guide: MallardFieldGuideProgress::default(),
             deer_field_guide: DeerFieldGuideProgress::default(),
+            bee_field_guide: BeeFieldGuideProgress::default(),
             mallard_calls: VecDeque::new(),
             deer_sounds: VecDeque::new(),
+            bee_sounds: VecDeque::new(),
             mallard_tracks: VecDeque::new(),
             player_life: PlayerLifeState::default(),
             player_position_updates: VecDeque::new(),
@@ -350,6 +354,10 @@ impl ClientRuntime {
             ServerUpdate::DeerFieldGuide(progress) => {
                 self.deer_field_guide = progress;
             }
+            ServerUpdate::BeeFieldGuide(progress) => {
+                self.bee_field_guide = progress;
+            }
+            ServerUpdate::BeeSound(cue) => self.bee_sounds.push_back(cue),
             ServerUpdate::DeerSound(cue) => self.deer_sounds.push_back(cue),
             ServerUpdate::MallardCall(cue) => self.mallard_calls.push_back(cue),
             ServerUpdate::MallardTrack(cue) => self.mallard_tracks.push_back(cue),
@@ -459,12 +467,20 @@ impl ClientRuntime {
         self.deer_field_guide
     }
 
+    pub const fn bee_field_guide(&self) -> BeeFieldGuideProgress {
+        self.bee_field_guide
+    }
+
     pub fn drain_mallard_calls(&mut self) -> impl Iterator<Item = MallardCallCue> + '_ {
         self.mallard_calls.drain(..)
     }
 
     pub fn drain_deer_sounds(&mut self) -> impl Iterator<Item = DeerSoundCue> + '_ {
         self.deer_sounds.drain(..)
+    }
+
+    pub fn drain_bee_sounds(&mut self) -> impl Iterator<Item = BeeSoundCue> + '_ {
+        self.bee_sounds.drain(..)
     }
 
     pub fn drain_mallard_tracks(&mut self) -> impl Iterator<Item = MallardTrackCue> + '_ {

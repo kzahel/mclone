@@ -10,8 +10,8 @@ use mclone_worldgen::prng::SimpleRandomSource;
 use super::biome_tables::{MobSpawnEntry, farm_animal_spawns_for_biome};
 use super::dry_run::{SurfaceProbeFailure, top_motion_blocking_no_leaves_feet_y};
 use super::habitat::{
-    ForestEdgeHabitatFailure, WetlandHabitatFailure, sample_forest_edge_habitat,
-    sample_wetland_habitat,
+    FloweringHabitatFailure, ForestEdgeHabitatFailure, WetlandHabitatFailure,
+    sample_flowering_habitat, sample_forest_edge_habitat, sample_wetland_habitat,
 };
 use super::placements::{check_farm_animal_natural_spawn, check_land_creature_natural_spawn};
 
@@ -31,6 +31,8 @@ const DEER_GROUP_MAX_SIZE: usize = 4;
 const DEER_GROUP_MEMBER_RADIUS: i32 = 7;
 const DEER_GROUP_MEMBER_ATTEMPTS: usize = 10;
 const DEER_RECENT_DISTURBANCE_RADIUS: f64 = 32.0;
+const BEE_COLONY_MIN_SIZE: usize = 2;
+const BEE_COLONY_MAX_SIZE: usize = 3;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum CreatureSpawnProfile {
@@ -57,6 +59,9 @@ pub(crate) struct CreatureSpawnDiagnostics {
     pub(crate) forest_edge_habitats_detected: usize,
     pub(crate) blocked_missing_forest_edge_data: usize,
     pub(crate) deer_groups_spawned: usize,
+    pub(crate) flowering_habitats_detected: usize,
+    pub(crate) blocked_missing_flowering_data: usize,
+    pub(crate) bee_colonies_spawned: usize,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -66,10 +71,18 @@ pub(crate) struct CreatureSpawnRequest {
     pub(crate) y_rot_degrees: f32,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct BeeColonySpawnRequest {
+    pub(crate) position: Vec3d,
+    pub(crate) y_rot_degrees: f32,
+    pub(crate) bees: Vec<Vec3d>,
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct CreatureSpawnResult {
     pub(crate) diagnostics: CreatureSpawnDiagnostics,
     pub(crate) requests: Vec<CreatureSpawnRequest>,
+    pub(crate) bee_colonies: Vec<BeeColonySpawnRequest>,
 }
 
 pub(crate) fn plan_creature_spawns<F, B, L, E>(
@@ -96,6 +109,7 @@ where
             ..CreatureSpawnDiagnostics::default()
         },
         requests: Vec::new(),
+        bee_colonies: Vec::new(),
     };
     let mut fallback_requests = Vec::new();
 
@@ -109,7 +123,7 @@ where
 
         for _ in 0..CREATURE_SPAWN_ATTEMPTS_PER_CHUNK {
             if result.diagnostics.attempts >= CREATURE_SPAWN_MAX_ATTEMPTS_PER_TICK
-                || result.requests.len() >= effective_max_spawns
+                || planned_spawn_count(&result) >= effective_max_spawns
             {
                 break;
             }
@@ -136,10 +150,35 @@ where
             }
 
             if profile == CreatureSpawnProfile::McloneOverworld {
+                match flowering_sample_from_raw(pos, &mut block_at) {
+                    Ok(sample)
+                        if sample.suitable()
+                            && sample.woody_cover_columns > 0
+                            && result.bee_colonies.is_empty() =>
+                    {
+                        result.diagnostics.flowering_habitats_detected += 1;
+                        let remaining = effective_max_spawns - planned_spawn_count(&result);
+                        if remaining >= BEE_COLONY_MIN_SIZE {
+                            let size = (BEE_COLONY_MIN_SIZE
+                                + random.next_int_bound(
+                                    (BEE_COLONY_MAX_SIZE - BEE_COLONY_MIN_SIZE + 1) as i32,
+                                ) as usize)
+                                .min(remaining);
+                            result.bee_colonies.push(plan_bee_colony(pos, size, random));
+                            result.diagnostics.bee_colonies_spawned += 1;
+                            continue;
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(FloweringHabitatFailure::MissingBlockData) => {
+                        result.diagnostics.blocked_missing_flowering_data += 1;
+                        continue;
+                    }
+                }
                 match wetland_sample_from_raw(pos, &mut block_at) {
                     Ok(sample) if sample.suitable() => {
                         result.diagnostics.wetland_habitats_detected += 1;
-                        let remaining = effective_max_spawns - result.requests.len();
+                        let remaining = effective_max_spawns - planned_spawn_count(&result);
                         let requested_size = MALLARD_FLOCK_MIN_SIZE
                             + random.next_int_bound(
                                 (MALLARD_FLOCK_MAX_SIZE - MALLARD_FLOCK_MIN_SIZE + 1) as i32,
@@ -179,7 +218,7 @@ where
                     ) {
                         Ok(sample) if sample.suitable() => {
                             result.diagnostics.forest_edge_habitats_detected += 1;
-                            let remaining = effective_max_spawns - result.requests.len();
+                            let remaining = effective_max_spawns - planned_spawn_count(&result);
                             if remaining < DEER_GROUP_MIN_SIZE {
                                 result.diagnostics.blocked_world_predicate += 1;
                                 continue;
@@ -268,24 +307,74 @@ where
         }
 
         if result.diagnostics.attempts >= CREATURE_SPAWN_MAX_ATTEMPTS_PER_TICK
-            || result.requests.len() >= effective_max_spawns
+            || planned_spawn_count(&result) >= effective_max_spawns
         {
             break;
         }
     }
 
     if profile == CreatureSpawnProfile::McloneOverworld
-        && result.requests.len() < effective_max_spawns
+        && planned_spawn_count(&result) < effective_max_spawns
     {
-        let remaining = effective_max_spawns - result.requests.len();
+        let remaining = effective_max_spawns - planned_spawn_count(&result);
         result
             .requests
             .extend(fallback_requests.into_iter().take(remaining));
     }
 
-    result.diagnostics.spawned = result.requests.len();
-    result.diagnostics.spawn_budget_exhausted = result.requests.len() >= effective_max_spawns;
+    let bee_count = result
+        .bee_colonies
+        .iter()
+        .map(|colony| colony.bees.len())
+        .sum::<usize>();
+    result.diagnostics.spawned = result.requests.len() + bee_count;
+    result.diagnostics.spawn_budget_exhausted = result.diagnostics.spawned >= effective_max_spawns;
     result
+}
+
+fn planned_spawn_count(result: &CreatureSpawnResult) -> usize {
+    result.requests.len()
+        + result
+            .bee_colonies
+            .iter()
+            .map(|colony| colony.bees.len())
+            .sum::<usize>()
+}
+
+fn flowering_sample_from_raw(
+    pos: BlockPos,
+    block_at: &mut impl FnMut(BlockPos) -> Option<RawBlockId>,
+) -> Result<super::habitat::FloweringHabitatSample, FloweringHabitatFailure> {
+    sample_flowering_habitat(pos, &mut |sample_pos| {
+        block_at(sample_pos).map(generated_block_state_id)
+    })
+}
+
+fn plan_bee_colony(
+    anchor: BlockPos,
+    size: usize,
+    random: &mut SimpleRandomSource,
+) -> BeeColonySpawnRequest {
+    let position = Vec3d::new(
+        f64::from(anchor.x) + 0.5,
+        f64::from(anchor.y),
+        f64::from(anchor.z) + 0.5,
+    );
+    let bees = (0..size)
+        .map(|index| {
+            let angle = (index as f64 / size as f64) * std::f64::consts::TAU;
+            position.add(Vec3d::new(
+                angle.sin() * 1.4,
+                0.9 + 0.25 * index as f64,
+                angle.cos() * 1.4,
+            ))
+        })
+        .collect();
+    BeeColonySpawnRequest {
+        position,
+        y_rot_degrees: random.next_float() * 360.0,
+        bees,
+    }
 }
 
 fn plan_deer_group(
@@ -579,6 +668,20 @@ mod tests {
         })
     }
 
+    fn flowering_meadow_block_at(pos: BlockPos) -> Option<RawBlockId> {
+        Some(if pos.y <= 62 {
+            DIRT
+        } else if pos.y == 63 {
+            GRASS_BLOCK
+        } else if pos.y == 64 && (pos.x + pos.z).rem_euclid(3) == 0 {
+            mclone_worldgen::block::DANDELION
+        } else if pos.y == 66 && pos.x.rem_euclid(5) == 0 {
+            mclone_worldgen::block::OAK_LOG
+        } else {
+            AIR
+        })
+    }
+
     #[test]
     fn creature_spawns_from_supported_biome_and_valid_surface() {
         let chunks = BTreeSet::from([ChunkPos::new(0, 0)]);
@@ -801,6 +904,50 @@ mod tests {
         );
         assert!(result.diagnostics.forest_edge_habitats_detected > 0);
         assert!((1..=2).contains(&result.diagnostics.deer_groups_spawned));
+    }
+
+    #[test]
+    fn mclone_flowering_habitat_admits_one_bounded_bee_colony() {
+        let chunks = BTreeSet::from([ChunkPos::new(0, 0)]);
+        let plains = get_layered_biome_by_id(1);
+        let mut random = SimpleRandomSource::new(12_345);
+
+        let result = plan_creature_spawns(
+            &chunks,
+            &[Vec3d::new(80.0, 64.0, 8.0)],
+            4,
+            CreatureSpawnProfile::McloneOverworld,
+            &mut random,
+            flowering_meadow_block_at,
+            |_| Some(plains),
+            |_| Some(15),
+            |_| None,
+        );
+
+        assert_eq!(result.bee_colonies.len(), 1);
+        assert!((2..=3).contains(&result.bee_colonies[0].bees.len()));
+        assert_eq!(result.diagnostics.bee_colonies_spawned, 1);
+        assert!(result.diagnostics.flowering_habitats_detected >= 1);
+        assert!(result.requests.iter().all(|request| {
+            !matches!(
+                request.kind,
+                EntityKind::Mallard | EntityKind::Deer | EntityKind::Bee
+            )
+        }));
+
+        let mut reference_random = SimpleRandomSource::new(12_345);
+        let reference = plan_creature_spawns(
+            &chunks,
+            &[Vec3d::new(80.0, 64.0, 8.0)],
+            4,
+            CreatureSpawnProfile::ReferenceFarmAnimals,
+            &mut reference_random,
+            flowering_meadow_block_at,
+            |_| Some(plains),
+            |_| Some(15),
+            |_| None,
+        );
+        assert!(reference.bee_colonies.is_empty());
     }
 
     #[test]

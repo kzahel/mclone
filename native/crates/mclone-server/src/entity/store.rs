@@ -7,9 +7,9 @@ use mclone_core::{
 #[cfg(feature = "physics-engine")]
 use mclone_protocol::EntityRotation;
 use mclone_protocol::{
-    DeerSoundCue, DeerSoundKind, EntityId, EntityKind, EntityPersistentId, ItemKind,
-    ItemStackSnapshot, MallardCallCue, MallardLifeStage, MallardNestSnapshotData,
-    MallardSnapshotData, MallardTrackCue,
+    BeeBehavior, BeeSoundCue, DeerSoundCue, DeerSoundKind, EntityId, EntityKind,
+    EntityPersistentId, ItemKind, ItemStackSnapshot, MallardCallCue, MallardLifeStage,
+    MallardNestSnapshotData, MallardSnapshotData, MallardTrackCue,
 };
 
 use crate::persistence::{
@@ -22,8 +22,8 @@ use super::ServerEntityState;
 use super::item::{ITEM_ENTITY_LIFETIME_TICKS, ItemEntityRuntimeState};
 use super::metadata::{EntityMetadata, PASSIVE_MOB_KINDS};
 use super::mob::{
-    DeerHerdmateTarget, DeerRuntimeSaveData, MALLARD_GROWTH_REQUIRED_TICKS, MallardFlockmateTarget,
-    MallardRuntimeSaveData, MobPlayerTarget, MobRuntimeState,
+    BeeRuntimeSaveData, DeerHerdmateTarget, DeerRuntimeSaveData, MALLARD_GROWTH_REQUIRED_TICKS,
+    MallardFlockmateTarget, MallardRuntimeSaveData, MobPlayerTarget, MobRuntimeState,
 };
 use super::spawning::habitat::sample_wetland_habitat;
 use super::spawning::mob_category::MobCategory;
@@ -39,6 +39,10 @@ const ITEM_STATIONARY_MERGE_INTERVAL_TICKS: u64 = 40;
 const ITEM_MOVED_BLOCK_MERGE_INTERVAL_TICKS: u64 = 2;
 const ENTITY_PERSISTENT_ID_MOST: u64 = 0x6d63_6c6f_6e65_0001;
 pub(crate) const MALLARD_NEST_INCUBATION_REQUIRED_TICKS: u32 = 2_400;
+pub(crate) const BEE_COLONY_WORK_CAPACITY: u32 = 4;
+const BEE_POLLINATION_COOLDOWN_TICKS: u32 = 200;
+const BEE_BUZZ_AUDIBLE_RADIUS: f32 = 14.0;
+const BEE_BUZZ_COLONY_SUPPRESSION_RADIUS_SQR: f64 = 12.0 * 12.0;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct DeerAttackResult {
@@ -64,6 +68,21 @@ struct DeerBedRuntimeState {
     source: EntityPersistentId,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct BeeColonyRuntimeState {
+    colonized: bool,
+    stored_work: u32,
+    work_capacity: u32,
+    spread_cooldown: u32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct BeePollinationEvent {
+    pub(crate) source_flower: BlockPos,
+    pub(crate) colony: EntityPersistentId,
+    pub(crate) position: Vec3d,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct ItemPickupTarget {
     pub(crate) player_id: ServerPlayerId,
@@ -78,14 +97,18 @@ pub(crate) struct ServerEntityStore {
     items: BTreeMap<EntityId, ItemEntityRuntimeState>,
     mallard_nests: BTreeMap<EntityId, MallardNestRuntimeState>,
     deer_beds: BTreeMap<EntityId, DeerBedRuntimeState>,
+    bee_colonies: BTreeMap<EntityId, BeeColonyRuntimeState>,
     deer_bedded_site_ticks: BTreeMap<EntityPersistentId, (BlockPos, u32)>,
     mallard_last_tracks: BTreeMap<EntityId, Vec3d>,
     pending_mallard_calls: Vec<MallardCallCue>,
     pending_mallard_tracks: Vec<MallardTrackCue>,
     pending_deer_sounds: Vec<DeerSoundCue>,
+    pending_bee_sounds: Vec<BeeSoundCue>,
+    pending_bee_pollinations: Vec<BeePollinationEvent>,
     hatched_mallard_positions: Vec<Vec3d>,
     mallard_cue_sequence: u64,
     deer_cue_sequence: u64,
+    bee_cue_sequence: u64,
     persistent_ids: BTreeMap<EntityId, EntityPersistentId>,
     volatile_entities: BTreeSet<EntityId>,
     tick_list: ServerEntityTickList,
@@ -484,6 +507,183 @@ impl ServerEntityStore {
         self.insert_passive_mob(id, kind, position, y_rot_degrees)
     }
 
+    pub(crate) fn spawn_persistent_bee_colony(
+        &mut self,
+        kind: EntityKind,
+        position: Vec3d,
+        y_rot_degrees: f32,
+        bee_positions: &[Vec3d],
+    ) -> Option<Vec<ServerEntityState>> {
+        if !matches!(kind, EntityKind::BeeNest | EntityKind::BeeHotel)
+            || self.has_bee_colony_near(position, 12.0)
+        {
+            return None;
+        }
+        let position = self.topology.canonicalize_position(position)?;
+        let colony_id = self.allocate_entity_id();
+        let colony_persistent_id = self.allocate_persistent_id();
+        let colony = self.insert_bee_colony_with_persistent_id(
+            colony_id,
+            colony_persistent_id,
+            kind,
+            position,
+            y_rot_degrees,
+            BeeColonyRuntimeState {
+                colonized: true,
+                stored_work: 0,
+                work_capacity: BEE_COLONY_WORK_CAPACITY,
+                spread_cooldown: 0,
+            },
+        );
+        let mut spawned = vec![colony];
+        for bee_position in bee_positions.iter().copied().take(3) {
+            let bee_position = self.topology.canonicalize_position(bee_position)?;
+            let id = self.allocate_entity_id();
+            let persistent_id = self.allocate_persistent_id();
+            spawned.push(self.insert_bee_with_runtime(
+                id,
+                persistent_id,
+                bee_position,
+                y_rot_degrees,
+                BeeRuntimeSaveData {
+                    home: colony_persistent_id,
+                    flower: None,
+                    behavior: BeeBehavior::Hover,
+                    behavior_ticks: 0,
+                    carrying_pollen: false,
+                },
+            ));
+        }
+        Some(spawned)
+    }
+
+    pub(crate) fn place_empty_bee_hotel<F>(
+        &mut self,
+        position: Vec3d,
+        y_rot_degrees: f32,
+        block_state_at: F,
+    ) -> Option<ServerEntityState>
+    where
+        F: Fn(BlockPos) -> Option<BlockStateId>,
+    {
+        let position = self.topology.canonicalize_position(position)?;
+        if self.has_bee_colony_near(position, 12.0)
+            || !is_valid_bee_colony_site(position, &block_state_at)
+        {
+            return None;
+        }
+        let id = self.allocate_entity_id();
+        let persistent_id = self.allocate_persistent_id();
+        Some(self.insert_bee_colony_with_persistent_id(
+            id,
+            persistent_id,
+            EntityKind::BeeHotel,
+            position,
+            y_rot_degrees,
+            BeeColonyRuntimeState {
+                colonized: false,
+                stored_work: 0,
+                work_capacity: BEE_COLONY_WORK_CAPACITY,
+                spread_cooldown: 0,
+            },
+        ))
+    }
+
+    pub(crate) fn has_bee_colony_near(&self, position: Vec3d, radius: f64) -> bool {
+        let radius_sqr = radius * radius;
+        self.bee_colonies.keys().any(|id| {
+            self.entities.get(id).is_some_and(|entity| {
+                entity.alive
+                    && self
+                        .topology
+                        .nearest_position_lift(entity.position, position)
+                        .distance_to_sqr(position)
+                        <= radius_sqr
+            })
+        })
+    }
+
+    pub(crate) fn empty_bee_hotels(&self) -> Vec<ServerEntityState> {
+        self.bee_colonies
+            .iter()
+            .filter_map(|(id, colony)| {
+                self.entities
+                    .get(id)
+                    .copied()
+                    .map(|entity| (entity, colony))
+            })
+            .filter(|(entity, colony)| {
+                entity.alive && entity.kind == EntityKind::BeeHotel && !colony.colonized
+            })
+            .map(|(entity, _)| entity)
+            .collect()
+    }
+
+    pub(crate) fn colonize_bee_hotel(
+        &mut self,
+        id: EntityId,
+        count: usize,
+    ) -> Vec<ServerEntityState> {
+        let Some(hotel) = self.entities.get(&id).copied().filter(|entity| {
+            entity.alive
+                && entity.kind == EntityKind::BeeHotel
+                && self.bee_colonies.contains_key(&entity.id)
+        }) else {
+            return Vec::new();
+        };
+        let Some(colony) = self.bee_colonies.get_mut(&id) else {
+            return Vec::new();
+        };
+        if colony.colonized {
+            return Vec::new();
+        }
+        colony.colonized = true;
+        (0..count.min(3))
+            .map(|index| {
+                let angle = index as f64 * std::f64::consts::TAU / count.max(1) as f64;
+                let id = self.allocate_entity_id();
+                let persistent_id = self.allocate_persistent_id();
+                self.insert_bee_with_runtime(
+                    id,
+                    persistent_id,
+                    hotel.position.add(Vec3d::new(
+                        angle.sin() * 1.2,
+                        0.8 + index as f64 * 0.2,
+                        angle.cos() * 1.2,
+                    )),
+                    hotel.y_rot_degrees,
+                    BeeRuntimeSaveData {
+                        home: hotel.persistent_id,
+                        flower: None,
+                        behavior: BeeBehavior::Hover,
+                        behavior_ticks: 0,
+                        carrying_pollen: false,
+                    },
+                )
+            })
+            .collect()
+    }
+
+    pub(crate) fn harvest_beeswax(&mut self, id: EntityId) -> Option<Vec<ServerEntityState>> {
+        let colony = self.bee_colonies.get_mut(&id)?;
+        if colony.stored_work < colony.work_capacity {
+            return None;
+        }
+        colony.stored_work = 0;
+        let entity = *self.entities.get(&id)?;
+        Some(vec![
+            entity,
+            self.insert_item_entity(
+                ItemStackSnapshot {
+                    kind: ItemKind::Beeswax,
+                    count: 1,
+                },
+                entity.position.add(Vec3d::new(0.0, 0.5, 0.0)),
+                entity.y_rot_degrees,
+            ),
+        ])
+    }
+
     pub(crate) fn place_mallard_nest<F>(
         &mut self,
         position: Vec3d,
@@ -533,6 +733,14 @@ impl ServerEntityStore {
 
     pub(crate) fn drain_deer_sounds(&mut self) -> Vec<DeerSoundCue> {
         std::mem::take(&mut self.pending_deer_sounds)
+    }
+
+    pub(crate) fn drain_bee_sounds(&mut self) -> Vec<BeeSoundCue> {
+        std::mem::take(&mut self.pending_bee_sounds)
+    }
+
+    pub(crate) fn drain_bee_pollinations(&mut self) -> Vec<BeePollinationEvent> {
+        std::mem::take(&mut self.pending_bee_pollinations)
     }
 
     pub(crate) fn drain_hatched_mallard_positions(&mut self) -> Vec<Vec3d> {
@@ -675,6 +883,33 @@ impl ServerEntityStore {
             .min_by(|(_, left), (_, right)| left.total_cmp(right))
     }
 
+    pub(crate) fn targeted_bee_colony(
+        &self,
+        from: Vec3d,
+        to: Vec3d,
+    ) -> Option<(ServerEntityState, f64)> {
+        self.bee_colonies
+            .keys()
+            .filter_map(|id| self.entities.get(id).copied())
+            .filter(|entity| entity.alive)
+            .filter_map(|mut entity| {
+                entity.position = self.topology.nearest_position_lift(entity.position, from);
+                let center =
+                    entity
+                        .position
+                        .add(Vec3d::new(0.0, f64::from(entity.height) * 0.5, 0.0));
+                Aabb::of_size(
+                    center,
+                    f64::from(entity.width) + 0.3,
+                    f64::from(entity.height) + 0.3,
+                    f64::from(entity.width) + 0.3,
+                )
+                .ray_intersection_fraction(from, to)
+                .map(|fraction| (entity, fraction))
+            })
+            .min_by(|(_, left), (_, right)| left.total_cmp(right))
+    }
+
     pub(crate) fn on_block_changed(&mut self, pos: BlockPos) -> usize {
         let mut affected_mobs = 0;
         for (id, mob) in &mut self.mobs {
@@ -788,6 +1023,15 @@ impl ServerEntityStore {
             .filter(|entity| entity.alive && entity.kind == EntityKind::Deer)
             .map(|entity| (entity.id, entity.position, entity.deer.unwrap().behavior))
             .collect::<Vec<_>>();
+        let bee_home_positions = self
+            .bee_colonies
+            .keys()
+            .filter_map(|id| {
+                self.entities
+                    .get(id)
+                    .map(|entity| (entity.persistent_id, entity.position))
+            })
+            .collect::<BTreeMap<_, _>>();
         let mut deer_bed_sources = self
             .deer_beds
             .values()
@@ -805,12 +1049,20 @@ impl ServerEntityStore {
         let mut deer_bed_spawns = Vec::new();
         let mut antler_spawns = Vec::new();
         let mut deer_sound_candidates = Vec::new();
+        let mut bee_deposits = Vec::new();
+        let mut bee_sound_candidates = Vec::new();
         for id in &ticking_ids {
             let id = *id;
             if let Some(entity) = self.entities.get_mut(&id) {
                 if let Some(mob) = self.mobs.get_mut(&id) {
                     let previous_position = entity.position;
                     let previous_deer_behavior = entity.deer.map(|deer| deer.behavior);
+                    if entity.kind == EntityKind::Bee {
+                        mob.set_bee_home_position(
+                            mob.bee_home()
+                                .and_then(|home| bee_home_positions.get(&home).copied()),
+                        );
+                    }
                     let flockmates = if entity.kind == EntityKind::Mallard {
                         mallard_positions
                             .iter()
@@ -947,6 +1199,16 @@ impl ServerEntityStore {
                             ));
                         }
                     }
+                    if entity.kind == EntityKind::Bee {
+                        if let (Some(home), Some(source_flower)) =
+                            (mob.bee_home(), mob.take_bee_completed_deposit())
+                        {
+                            bee_deposits.push((home, source_flower, entity.position));
+                        }
+                        if entity.tick_count % 120 == id.0 % 120 {
+                            bee_sound_candidates.push((id, entity.position));
+                        }
+                    }
                 }
                 if let Some(nest) = self.mallard_nests.get_mut(&id) {
                     let habitat_valid =
@@ -984,6 +1246,9 @@ impl ServerEntityStore {
                             nest.parents,
                         ));
                     }
+                }
+                if let Some(colony) = self.bee_colonies.get_mut(&id) {
+                    colony.spread_cooldown = colony.spread_cooldown.saturating_sub(1);
                 }
                 let mut item_block_changed = false;
                 let mut is_item = false;
@@ -1128,6 +1393,44 @@ impl ServerEntityStore {
                     18.0
                 },
                 kind,
+            });
+        }
+        for (home, source_flower, position) in bee_deposits {
+            let Some((colony_id, colony)) = self.bee_colonies.iter_mut().find(|(id, _)| {
+                self.entities
+                    .get(id)
+                    .is_some_and(|entity| entity.persistent_id == home)
+            }) else {
+                continue;
+            };
+            colony.stored_work = colony
+                .stored_work
+                .saturating_add(1)
+                .min(colony.work_capacity);
+            if colony.spread_cooldown == 0 {
+                colony.spread_cooldown = BEE_POLLINATION_COOLDOWN_TICKS;
+                self.pending_bee_pollinations.push(BeePollinationEvent {
+                    source_flower,
+                    colony: home,
+                    position: self.entities[colony_id].position,
+                });
+            }
+            let _ = position;
+        }
+        let mut admitted_bee_sounds = Vec::new();
+        for (source, position) in bee_sound_candidates {
+            if admitted_bee_sounds.iter().any(|admitted: &Vec3d| {
+                squared_distance_xz(*admitted, position) <= BEE_BUZZ_COLONY_SUPPRESSION_RADIUS_SQR
+            }) {
+                continue;
+            }
+            admitted_bee_sounds.push(position);
+            self.bee_cue_sequence = self.bee_cue_sequence.wrapping_add(1);
+            self.pending_bee_sounds.push(BeeSoundCue {
+                source,
+                position,
+                sequence: self.bee_cue_sequence,
+                audible_radius: BEE_BUZZ_AUDIBLE_RADIUS,
             });
         }
         updated
@@ -1299,6 +1602,7 @@ impl ServerEntityStore {
         self.items.remove(&id);
         self.mallard_nests.remove(&id);
         self.deer_beds.remove(&id);
+        self.bee_colonies.remove(&id);
         if state.kind == EntityKind::Deer {
             self.deer_bedded_site_ticks.remove(&state.persistent_id);
         }
@@ -1436,6 +1740,7 @@ impl ServerEntityStore {
                 None,
                 Some(saved),
                 None,
+                None,
             ),
         );
         self.entities.insert(id, state);
@@ -1467,6 +1772,71 @@ impl ServerEntityStore {
             attended: nest.attended,
         });
         self.mallard_nests.insert(id, nest);
+        self.entities.insert(id, state);
+        self.persistent_ids.insert(id, persistent_id);
+        state
+    }
+
+    fn insert_bee_with_runtime(
+        &mut self,
+        id: EntityId,
+        persistent_id: EntityPersistentId,
+        position: Vec3d,
+        y_rot_degrees: f32,
+        saved: BeeRuntimeSaveData,
+    ) -> ServerEntityState {
+        let metadata = EntityMetadata::BEE;
+        let state = ServerEntityState::from_metadata(
+            id,
+            persistent_id,
+            metadata,
+            position,
+            y_rot_degrees,
+            0.0,
+            None,
+            false,
+        );
+        self.mobs.insert(
+            id,
+            MobRuntimeState::from_saved(
+                id,
+                metadata,
+                false,
+                y_rot_degrees,
+                Vec3d::ZERO,
+                None,
+                None,
+                None,
+                Some(saved),
+            ),
+        );
+        self.entities.insert(id, state);
+        self.persistent_ids.insert(id, persistent_id);
+        state
+    }
+
+    fn insert_bee_colony_with_persistent_id(
+        &mut self,
+        id: EntityId,
+        persistent_id: EntityPersistentId,
+        kind: EntityKind,
+        position: Vec3d,
+        y_rot_degrees: f32,
+        colony: BeeColonyRuntimeState,
+    ) -> ServerEntityState {
+        let metadata = EntityMetadata::for_kind(kind).expect("bee colony metadata");
+        let mut state = ServerEntityState::from_metadata(
+            id,
+            persistent_id,
+            metadata,
+            position,
+            y_rot_degrees,
+            0.0,
+            None,
+            true,
+        );
+        state.animation = None;
+        self.bee_colonies.insert(id, colony);
         self.entities.insert(id, state);
         self.persistent_ids.insert(id, persistent_id);
         state
@@ -1592,6 +1962,7 @@ impl ServerEntityStore {
                 None,
                 None,
                 None,
+                None,
             )?,
             ("minecraft:chicken", EntitySavePayload::Chicken { egg_time }) => self
                 .insert_saved_passive_mob(
@@ -1600,6 +1971,7 @@ impl ServerEntityStore {
                     canonical_position,
                     EntityKind::Chicken,
                     Some(*egg_time),
+                    None,
                     None,
                     None,
                 )?,
@@ -1625,6 +1997,7 @@ impl ServerEntityStore {
                     feather_time: *feather_time,
                     call_time: *call_time,
                 }),
+                None,
                 None,
             )?,
             (
@@ -1656,7 +2029,58 @@ impl ServerEntityStore {
                     max_health: *max_health,
                     antler_shed_time: *antler_shed_time,
                 }),
+                None,
             )?,
+            (
+                "mclone:bee",
+                EntitySavePayload::Bee {
+                    home,
+                    flower,
+                    behavior,
+                    behavior_ticks,
+                    carrying_pollen,
+                },
+            ) => self.insert_saved_passive_mob(
+                id,
+                saved,
+                canonical_position,
+                EntityKind::Bee,
+                None,
+                None,
+                None,
+                Some(BeeRuntimeSaveData {
+                    home: *home,
+                    flower: *flower,
+                    behavior: *behavior,
+                    behavior_ticks: *behavior_ticks,
+                    carrying_pollen: *carrying_pollen,
+                }),
+            )?,
+            (
+                "mclone:bee_nest" | "mclone:bee_hotel",
+                EntitySavePayload::BeeColony {
+                    colonized,
+                    stored_work,
+                    work_capacity,
+                    spread_cooldown,
+                },
+            ) => self.insert_bee_colony_with_persistent_id(
+                id,
+                saved.persistent_id,
+                if saved.kind == "mclone:bee_nest" {
+                    EntityKind::BeeNest
+                } else {
+                    EntityKind::BeeHotel
+                },
+                canonical_position,
+                saved.y_rot_degrees,
+                BeeColonyRuntimeState {
+                    colonized: *colonized,
+                    stored_work: *stored_work,
+                    work_capacity: *work_capacity,
+                    spread_cooldown: *spread_cooldown,
+                },
+            ),
             (
                 "mclone:mallard_nest",
                 EntitySavePayload::MallardNest {
@@ -1689,6 +2113,7 @@ impl ServerEntityStore {
                 saved,
                 canonical_position,
                 EntityKind::Mannequin,
+                None,
                 None,
                 None,
                 None,
@@ -1733,6 +2158,7 @@ impl ServerEntityStore {
         chicken_egg_time: Option<i32>,
         mallard: Option<MallardRuntimeSaveData>,
         deer: Option<DeerRuntimeSaveData>,
+        bee: Option<BeeRuntimeSaveData>,
     ) -> ChunkStoreResult<ServerEntityState> {
         let metadata = EntityMetadata::for_kind(kind).ok_or_else(|| {
             ChunkStoreError::InvalidData(format!("entity kind {kind:?} has no metadata"))
@@ -1756,6 +2182,7 @@ impl ServerEntityStore {
             chicken_egg_time,
             mallard,
             deer,
+            bee,
         );
         let mut state = state;
         if kind == EntityKind::Mallard {
@@ -1866,6 +2293,25 @@ impl ServerEntityStore {
             EntityKind::DeerBed => EntitySavePayload::DeerBed {
                 source: self.deer_beds.get(&entity.id)?.source,
             },
+            EntityKind::Bee => {
+                let bee = self.mobs.get(&entity.id)?.bee_save_data()?;
+                EntitySavePayload::Bee {
+                    home: bee.home,
+                    flower: bee.flower,
+                    behavior: bee.behavior,
+                    behavior_ticks: bee.behavior_ticks,
+                    carrying_pollen: bee.carrying_pollen,
+                }
+            }
+            EntityKind::BeeNest | EntityKind::BeeHotel => {
+                let colony = self.bee_colonies.get(&entity.id)?;
+                EntitySavePayload::BeeColony {
+                    colonized: colony.colonized,
+                    stored_work: colony.stored_work,
+                    work_capacity: colony.work_capacity,
+                    spread_cooldown: colony.spread_cooldown,
+                }
+            }
             EntityKind::Mannequin => EntitySavePayload::Mannequin,
             EntityKind::Item => EntitySavePayload::Item {
                 stack: entity.item_stack.map(ItemStackSaveRecord::from)?,
@@ -2028,6 +2474,9 @@ fn entity_kind_code(kind: EntityKind) -> Option<&'static str> {
         EntityKind::MallardNest => Some("mclone:mallard_nest"),
         EntityKind::Deer => Some("mclone:deer"),
         EntityKind::DeerBed => Some("mclone:deer_bed"),
+        EntityKind::Bee => Some("mclone:bee"),
+        EntityKind::BeeNest => Some("mclone:bee_nest"),
+        EntityKind::BeeHotel => Some("mclone:bee_hotel"),
         EntityKind::Mannequin => Some("mclone:mannequin"),
         EntityKind::Item => Some("minecraft:item"),
         EntityKind::DebugCube => None,
@@ -2045,6 +2494,8 @@ fn item_stack_snapshot_from_save(
         "mclone:venison" => ItemKind::Venison,
         "mclone:deer_hide" => ItemKind::DeerHide,
         "mclone:shed_antler" => ItemKind::ShedAntler,
+        "mclone:bee_hotel" => ItemKind::BeeHotel,
+        "mclone:beeswax" => ItemKind::Beeswax,
         kind => {
             return Err(ChunkStoreError::InvalidData(format!(
                 "unsupported item stack kind {kind:?}"
@@ -2081,6 +2532,19 @@ fn is_valid_mallard_nest_site(
             .is_ok_and(|sample| sample.suitable() && sample.cover_blocks > 0)
 }
 
+fn is_valid_bee_colony_site(
+    position: Vec3d,
+    block_state_at: &impl Fn(BlockPos) -> Option<BlockStateId>,
+) -> bool {
+    let feet = BlockPos::containing(position);
+    let support = feet.offset(0, -1, 0);
+    [feet, feet.offset(0, 1, 0)].into_iter().all(|pos| {
+        block_state_at(pos)
+            .is_some_and(|state| mclone_blocks::block_collision_aabb(state, pos).is_none())
+    }) && block_state_at(support)
+        .is_some_and(|state| mclone_blocks::block_collision_aabb(state, support).is_some())
+}
+
 fn squared_distance_xz(left: Vec3d, right: Vec3d) -> f64 {
     let dx = left.x - right.x;
     let dz = left.z - right.z;
@@ -2090,6 +2554,7 @@ fn squared_distance_xz(left: Vec3d, right: Vec3d) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mclone_worldgen::block::generated_block_state_id;
 
     #[test]
     fn periodic_store_canonicalizes_entity_pose_and_chunk_ownership() {
@@ -3291,6 +3756,95 @@ mod tests {
                 .chicken_pending_egg_lays_for_test(),
             Some(0)
         );
+    }
+
+    #[test]
+    fn bee_colony_forages_returns_persists_and_produces_bounded_work() {
+        let mut store = ServerEntityStore::default();
+        let colony_position = Vec3d::new(0.5, 64.0, 0.5);
+        let spawned = store
+            .spawn_persistent_bee_colony(
+                EntityKind::BeeNest,
+                colony_position,
+                0.0,
+                &[Vec3d::new(0.5, 65.0, 1.5)],
+            )
+            .unwrap();
+        let bee_id = spawned
+            .iter()
+            .find(|entity| entity.kind == EntityKind::Bee)
+            .unwrap()
+            .id;
+        let world = |pos: BlockPos| {
+            Some(generated_block_state_id(if pos.y <= 62 {
+                mclone_worldgen::block::DIRT
+            } else if pos.y == 63 {
+                mclone_worldgen::block::GRASS_BLOCK
+            } else if pos == BlockPos::new(4, 64, 0) {
+                mclone_worldgen::block::DANDELION
+            } else {
+                mclone_worldgen::block::AIR
+            }))
+        };
+        let start = store.state(bee_id).unwrap().position;
+        let mut pollination = None;
+        for _ in 0..300 {
+            store.tick_stationary(&[ChunkPos::new(0, 0)], &[], world);
+            if let Some(event) = store.drain_bee_pollinations().into_iter().next() {
+                pollination = Some(event);
+                break;
+            }
+        }
+        let event = pollination.unwrap_or_else(|| {
+            panic!(
+                "bee should complete a flower-to-colony trip: state={:?} runtime={:?}",
+                store.state(bee_id),
+                store
+                    .mobs
+                    .get(&bee_id)
+                    .and_then(MobRuntimeState::bee_save_data)
+            )
+        });
+        assert_eq!(event.source_flower, BlockPos::new(4, 64, 0));
+        assert!(store.state(bee_id).unwrap().position.distance_to_sqr(start) > 1.0);
+        let records = [ChunkPos::new(0, 0)]
+            .into_iter()
+            .flat_map(|pos| store.entity_chunk_record(pos, 1).entities)
+            .collect::<Vec<_>>();
+        assert!(records.iter().any(|record| matches!(
+            record.payload,
+            EntitySavePayload::Bee { home, .. } if home == event.colony
+        )));
+        assert!(records.iter().any(|record| matches!(
+            record.payload,
+            EntitySavePayload::BeeColony { stored_work: 1, .. }
+        )));
+
+        let mut hydrated = ServerEntityStore::default();
+        hydrated
+            .hydrate_entity_chunk_record(&EntityChunkRecord::new(ChunkPos::new(0, 0), 1, records))
+            .unwrap();
+        assert_eq!(hydrated.bee_colonies.len(), 1);
+        assert_eq!(hydrated.mobs.len(), 1);
+    }
+
+    #[test]
+    fn worked_bee_colony_yields_one_beeswax_and_resets_work() {
+        let mut store = ServerEntityStore::default();
+        let spawned = store
+            .spawn_persistent_bee_colony(EntityKind::BeeNest, Vec3d::new(0.5, 64.0, 0.5), 0.0, &[])
+            .unwrap();
+        let colony_id = spawned[0].id;
+        store.bee_colonies.get_mut(&colony_id).unwrap().stored_work = BEE_COLONY_WORK_CAPACITY;
+        let updates = store.harvest_beeswax(colony_id).unwrap();
+        assert!(updates.iter().any(|entity| {
+            entity.item_stack
+                == Some(ItemStackSnapshot {
+                    kind: ItemKind::Beeswax,
+                    count: 1,
+                })
+        }));
+        assert!(store.harvest_beeswax(colony_id).is_none());
     }
 
     #[test]

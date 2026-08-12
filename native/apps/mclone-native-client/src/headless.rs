@@ -1737,9 +1737,18 @@ mod tests {
                 mclone_assets::default_player_figure_id()
             )
         );
-        assert_eq!(actors[0].animation.unwrap().distance, 0.75);
-        assert_eq!(actors[1].animation.unwrap().distance, 1.875);
-        assert_eq!(actors[2].animation.unwrap().distance, 1.125);
+        assert_eq!(
+            actors[0].animation.unwrap().phase,
+            mclone_render::entity::ActorAnimationPhase::Distance(0.75)
+        );
+        assert_eq!(
+            actors[1].animation.unwrap().phase,
+            mclone_render::entity::ActorAnimationPhase::Distance(1.875)
+        );
+        assert_eq!(
+            actors[2].animation.unwrap().phase,
+            mclone_render::entity::ActorAnimationPhase::Distance(1.125)
+        );
         assert_eq!(actors[2].chicken_wing_flap_radians, Some(0.45));
         assert!(actors[0].feet_position.z < actors[1].feet_position.z);
         assert!(actors[1].feet_position.z < actors[2].feet_position.z);

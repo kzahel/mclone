@@ -5,8 +5,8 @@ use mclone_core::{
 };
 use mclone_protocol::{
     AttackEntityCommand, ClientCommand, DebugHotbarItem, EntityId, EntityKind,
-    HOTBAR_SLOT_COUNT_USIZE, InteractionHand, ItemKind, PlayerActionCommand, PlayerActionKind,
-    UseItemOnCommand,
+    HOTBAR_SLOT_COUNT_USIZE, InteractEntityCommand, InteractionHand, ItemKind, PlayerActionCommand,
+    PlayerActionKind, UseItemOnCommand,
 };
 
 use crate::{
@@ -159,6 +159,67 @@ impl ClientInteractionController {
 
     pub const fn attack_entity_command(&self, target: EntityInteractionTarget) -> ClientCommand {
         ClientCommand::AttackEntity(AttackEntityCommand { target: target.id })
+    }
+
+    pub fn target_bee_colony(
+        &self,
+        client: &ClientRuntime,
+        eye_position: Vec3d,
+        view_vector: Vec3d,
+    ) -> Option<EntityInteractionTarget> {
+        self.target_entity_matching(client, eye_position, view_vector, |entity| {
+            matches!(entity.kind, EntityKind::BeeNest | EntityKind::BeeHotel)
+        })
+    }
+
+    fn target_entity_matching(
+        &self,
+        client: &ClientRuntime,
+        eye_position: Vec3d,
+        view_vector: Vec3d,
+        predicate: impl Fn(&mclone_protocol::EntitySnapshot) -> bool,
+    ) -> Option<EntityInteractionTarget> {
+        let direction_length = view_vector.length_sqr().sqrt();
+        if !eye_position.is_finite() || direction_length <= f64::EPSILON {
+            return None;
+        }
+        let direction = view_vector.scale(direction_length.recip());
+        let to = eye_position.add(direction.scale(self.pick_range));
+        let block_distance = client
+            .clip_blocks(eye_position, to)
+            .location
+            .distance_to_sqr(eye_position)
+            .sqrt();
+        client
+            .entity_snapshots()
+            .filter(|entity| predicate(entity))
+            .filter_map(|entity| {
+                let position = client
+                    .topology()
+                    .nearest_position_lift(entity.position, eye_position);
+                let box_center = position.add(Vec3d::new(0.0, f64::from(entity.height) * 0.5, 0.0));
+                let bounds = Aabb::of_size(
+                    box_center,
+                    f64::from(entity.width) + 0.3,
+                    f64::from(entity.height) + 0.3,
+                    f64::from(entity.width) + 0.3,
+                );
+                let fraction = bounds.ray_intersection_fraction(eye_position, to)?;
+                let distance = fraction * self.pick_range;
+                (distance <= block_distance + 1.0e-6).then_some(EntityInteractionTarget {
+                    id: entity.id,
+                    position,
+                    distance,
+                })
+            })
+            .min_by(|left, right| left.distance.total_cmp(&right.distance))
+    }
+
+    pub const fn interact_entity_command(&self, target: EntityInteractionTarget) -> ClientCommand {
+        ClientCommand::InteractEntity(InteractEntityCommand {
+            target: target.id,
+            hand: InteractionHand::MainHand,
+        })
     }
 
     pub fn target_from_hit(

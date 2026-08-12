@@ -10,7 +10,7 @@ use crate::block::{
 };
 use crate::feature::{
     ConfiguredFeature, DecorationStep, FeatureRegion, FeatureWorld, PlacedFeature,
-    RandomPatchConfiguration, RandomPatchStateProvider,
+    RandomPatchConfiguration, RandomPatchStateProvider, WeightedBlockState,
     apply_feature_table_to_region_with_index_offset_timed, flower_patch, grass_patch,
 };
 use crate::levelgen::profile::PLAINS_BIOME_ID;
@@ -25,7 +25,12 @@ use super::biomes::{
 };
 use super::fields::{McloneOverworldSampler, McloneOverworldSamplingTopology};
 
-pub const MCLONE_OVERWORLD_DECORATION_REVISION: &str = "mclone-overworld-v1-decoration-15";
+pub const MCLONE_OVERWORLD_DECORATION_REVISION: &str = "mclone-overworld-v1-decoration-16";
+
+const WILDFLOWER_STATES: [WeightedBlockState; 2] = [
+    WeightedBlockState::new(DANDELION, 2),
+    WeightedBlockState::new(POPPY, 1),
+];
 
 const MCLONE_OVERWORLD_DECORATION_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_6465_6331);
 const MCLONE_OVERWORLD_RIVER_ROCK_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_726f_636b);
@@ -385,6 +390,7 @@ fn open_lowland_features() -> &'static [PlacedFeature] {
                 grass_patch(GRASS, 4),
                 occasional_flower_patch(DANDELION, 3),
                 occasional_flower_patch(POPPY, 5),
+                coherent_wildflower_patch(7),
             ]
         })
         .as_slice()
@@ -398,6 +404,7 @@ fn wooded_upland_features() -> &'static [PlacedFeature] {
                 grass_patch(GRASS, 2),
                 occasional_flower_patch(DANDELION, 4),
                 occasional_flower_patch(POPPY, 6),
+                coherent_wildflower_patch(9),
             ]
         })
         .as_slice()
@@ -532,6 +539,35 @@ fn occasional_flower_patch(block_id: RawBlockId, rarity: i32) -> PlacedFeature {
     patch
 }
 
+fn coherent_wildflower_patch(rarity: i32) -> PlacedFeature {
+    let mut patch = PlacedFeature::new(
+        DecorationStep::VegetalDecoration,
+        ConfiguredFeature::random_patch(RandomPatchConfiguration {
+            state: DANDELION,
+            weighted_states: &WILDFLOWER_STATES,
+            state_provider: RandomPatchStateProvider::Weighted,
+            tries: 42,
+            xspread: 4,
+            yspread: 2,
+            zspread: 4,
+            project: true,
+            can_replace: false,
+            double_plant: false,
+            column_height: None,
+            need_water: false,
+            place_on: &[GRASS_BLOCK],
+        }),
+        vec![
+            ConfiguredDecorator::square(),
+            ConfiguredDecorator::heightmap_spread_double(HeightmapType::MotionBlocking),
+        ],
+    );
+    patch
+        .decorators
+        .insert(0, ConfiguredDecorator::chance(rarity));
+    patch
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -541,7 +577,7 @@ mod tests {
     fn mclone_tables_own_temperate_conifer_and_steppe_language() {
         assert_eq!(
             feature_table(PLAINS_BIOME_ID, McloneOverworldSteppeBand::Outside).len(),
-            3
+            4
         );
         assert_eq!(
             feature_table(

@@ -165,6 +165,8 @@ fn item_random_seed(id: EntityId, stack: ItemStackSnapshot) -> i64 {
         mclone_protocol::ItemKind::Venison => 0x0000_0005_u64,
         mclone_protocol::ItemKind::DeerHide => 0x0000_0006_u64,
         mclone_protocol::ItemKind::ShedAntler => 0x0000_0007_u64,
+        mclone_protocol::ItemKind::BeeHotel => 0x0000_0008_u64,
+        mclone_protocol::ItemKind::Beeswax => 0x0000_0009_u64,
     };
     (id.0.wrapping_mul(0xbf58_476d_1ce4_e5b9).rotate_left(23) ^ item_id ^ u64::from(stack.count))
         as i64

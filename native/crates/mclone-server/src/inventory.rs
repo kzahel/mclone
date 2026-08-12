@@ -31,6 +31,10 @@ impl Default for ServerInventory {
             kind: mclone_protocol::ItemKind::HuntingSpear,
             count: 1,
         });
+        item_stacks[6] = Some(ItemStackSnapshot {
+            kind: mclone_protocol::ItemKind::BeeHotel,
+            count: 1,
+        });
         Self {
             items: DEFAULT_DEBUG_HOTBAR,
             item_stacks,

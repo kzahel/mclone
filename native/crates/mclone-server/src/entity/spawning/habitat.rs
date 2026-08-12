@@ -13,9 +13,45 @@ use mclone_worldgen::levelgen::McloneForestEdgeIntentSample;
 pub(crate) const WETLAND_HABITAT_RADIUS: i32 = 6;
 const WETLAND_HABITAT_MIN_WATER_COLUMNS: u16 = 2;
 pub(crate) const FOREST_EDGE_HABITAT_RADIUS: i32 = 6;
+pub(crate) const FLOWERING_HABITAT_RADIUS: i32 = 6;
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) struct HabitatFitness {
+    pub(crate) forage: u8,
+    pub(crate) shelter: u8,
+    pub(crate) substrate: u8,
+    pub(crate) open_space: u8,
+    pub(crate) continuity: u8,
+    pub(crate) overall: u8,
+}
+
+impl HabitatFitness {
+    fn from_dimensions(
+        forage: u8,
+        shelter: u8,
+        substrate: u8,
+        open_space: u8,
+        continuity: u8,
+    ) -> Self {
+        Self {
+            forage,
+            shelter,
+            substrate,
+            open_space,
+            continuity,
+            overall: ((u16::from(forage)
+                + u16::from(shelter)
+                + u16::from(substrate)
+                + u16::from(open_space)
+                + u16::from(continuity))
+                / 5) as u8,
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct ForestEdgeHabitatSample {
+    pub(crate) fitness: HabitatFitness,
     pub(crate) generated: McloneForestEdgeIntentSample,
     pub(crate) woody_cover_blocks: u16,
     pub(crate) browse_blocks: u16,
@@ -54,6 +90,7 @@ pub(crate) fn sample_forest_edge_habitat(
     let grass_floor =
         block_at(feet.below()).ok_or(ForestEdgeHabitatFailure::MissingBlockData)? == GRASS_BLOCK;
     let mut sample = ForestEdgeHabitatSample {
+        fitness: HabitatFitness::default(),
         generated,
         woody_cover_blocks: 0,
         browse_blocks: 0,
@@ -133,6 +170,13 @@ pub(crate) fn sample_forest_edge_habitat(
             }
         }
     }
+    sample.fitness = HabitatFitness::from_dimensions(
+        score(sample.browse_blocks, 8),
+        score(sample.woody_cover_blocks, 8),
+        u8::from(sample.grass_floor) * 100,
+        score(sample.open_sight_columns, 12),
+        100_u8.saturating_sub(sample.max_floor_step.saturating_mul(34)),
+    );
     Ok(sample)
 }
 
@@ -183,6 +227,7 @@ fn is_water(raw: RawBlockId) -> bool {
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) struct WetlandHabitatSample {
+    pub(crate) fitness: HabitatFitness,
     pub(crate) water_columns: u16,
     pub(crate) shallow_water_columns: u16,
     pub(crate) cover_blocks: u16,
@@ -248,7 +293,122 @@ pub(crate) fn sample_wetland_habitat(
                 .saturating_add(u16::from(column_has_shallow_water));
         }
     }
+    sample.fitness = HabitatFitness::from_dimensions(
+        score(sample.cover_blocks, 6),
+        score(sample.cover_blocks, 4),
+        u8::from(sample.grass_floor) * 100,
+        score(sample.shallow_water_columns, 6),
+        score(sample.water_columns, 10),
+    );
     Ok(sample)
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) struct FloweringHabitatSample {
+    pub(crate) fitness: HabitatFitness,
+    pub(crate) flower_blocks: u16,
+    pub(crate) grass_substrate_columns: u16,
+    pub(crate) woody_cover_columns: u16,
+    pub(crate) open_flight_columns: u16,
+    pub(crate) max_floor_step: u8,
+}
+
+impl FloweringHabitatSample {
+    pub(crate) const fn suitable(self) -> bool {
+        self.flower_blocks >= 4
+            && self.grass_substrate_columns >= 8
+            && self.open_flight_columns >= 8
+            && self.max_floor_step <= 2
+            && self.fitness.overall >= 45
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum FloweringHabitatFailure {
+    MissingBlockData,
+}
+
+pub(crate) fn sample_flowering_habitat(
+    feet: BlockPos,
+    block_state_at: &mut impl FnMut(BlockPos) -> Option<BlockStateId>,
+) -> Result<FloweringHabitatSample, FloweringHabitatFailure> {
+    let grass = generated_block_state_id(GRASS_BLOCK);
+    let dandelion = generated_block_state_id(DANDELION);
+    let poppy = generated_block_state_id(POPPY);
+    let mut sample = FloweringHabitatSample::default();
+    for dx in -FLOWERING_HABITAT_RADIUS..=FLOWERING_HABITAT_RADIUS {
+        for dz in -FLOWERING_HABITAT_RADIUS..=FLOWERING_HABITAT_RADIUS {
+            if dx.abs() + dz.abs() > FLOWERING_HABITAT_RADIUS {
+                continue;
+            }
+            let ground = block_state_at(feet.offset(dx, -1, dz))
+                .ok_or(FloweringHabitatFailure::MissingBlockData)?;
+            let body = block_state_at(feet.offset(dx, 0, dz))
+                .ok_or(FloweringHabitatFailure::MissingBlockData)?;
+            let head = block_state_at(feet.offset(dx, 1, dz))
+                .ok_or(FloweringHabitatFailure::MissingBlockData)?;
+            sample.grass_substrate_columns = sample
+                .grass_substrate_columns
+                .saturating_add(u16::from(ground == grass));
+            sample.flower_blocks = sample
+                .flower_blocks
+                .saturating_add(u16::from(body == dandelion || body == poppy));
+            sample.open_flight_columns = sample.open_flight_columns.saturating_add(u16::from(
+                block_collision_aabb(body, feet.offset(dx, 0, dz)).is_none()
+                    && block_collision_aabb(head, feet.offset(dx, 1, dz)).is_none(),
+            ));
+            let mut woody = false;
+            for dy in -1..=4 {
+                let state = block_state_at(feet.offset(dx, dy, dz))
+                    .ok_or(FloweringHabitatFailure::MissingBlockData)?;
+                woody |= is_woody_state(state);
+            }
+            sample.woody_cover_columns =
+                sample.woody_cover_columns.saturating_add(u16::from(woody));
+        }
+    }
+    for (dx, dz) in [(3, 0), (-3, 0), (0, 3), (0, -3)] {
+        let mut step = 3;
+        for dy in [0_i32, 1, -1, 2, -2] {
+            if block_state_at(feet.offset(dx, dy - 1, dz))
+                .ok_or(FloweringHabitatFailure::MissingBlockData)?
+                == grass
+            {
+                step = dy.unsigned_abs().min(3) as u8;
+                break;
+            }
+        }
+        sample.max_floor_step = sample.max_floor_step.max(step);
+    }
+    sample.fitness = HabitatFitness::from_dimensions(
+        score(sample.flower_blocks, 8),
+        score(sample.woody_cover_columns, 4),
+        score(sample.grass_substrate_columns, 16),
+        score(sample.open_flight_columns, 20),
+        100_u8.saturating_sub(sample.max_floor_step.saturating_mul(34)),
+    );
+    Ok(sample)
+}
+
+fn is_woody_state(state: BlockStateId) -> bool {
+    [
+        OAK_LOG,
+        OAK_LEAVES,
+        BIRCH_LOG,
+        BIRCH_LEAVES,
+        SPRUCE_LOG,
+        SPRUCE_LEAVES,
+        DARK_OAK_LOG,
+        DARK_OAK_LEAVES,
+        ACACIA_LOG,
+        ACACIA_LEAVES,
+    ]
+    .into_iter()
+    .any(|raw| state == generated_block_state_id(raw))
+}
+
+fn score(value: u16, full: u16) -> u8 {
+    (value.saturating_mul(100) / full.max(1)).min(100) as u8
 }
 
 #[cfg(test)]
@@ -355,5 +515,41 @@ mod tests {
             sample_forest_edge_habitat(BlockPos::new(0, 64, 0), generated, true, &mut edge)
                 .unwrap();
         assert!(!disturbed.suitable());
+    }
+
+    #[test]
+    fn flowering_habitat_is_driven_by_live_flowers_and_clear_air() {
+        let flowering = |pos: BlockPos| {
+            Some(generated_block_state_id(if pos.y <= 62 {
+                DIRT
+            } else if pos.y == 63 {
+                GRASS_BLOCK
+            } else if pos.y == 64 && (pos.x + pos.z).rem_euclid(3) == 0 {
+                DANDELION
+            } else if pos.y == 66 && pos.x == 5 {
+                OAK_LOG
+            } else {
+                AIR
+            }))
+        };
+        let mut flowering_sample = flowering;
+        let sample =
+            sample_flowering_habitat(BlockPos::new(0, 64, 0), &mut flowering_sample).unwrap();
+        assert!(sample.suitable());
+        assert!(sample.flower_blocks >= 4);
+        assert!(sample.fitness.forage > 0);
+
+        let sparse = sample_flowering_habitat(BlockPos::new(0, 64, 0), &mut |pos| {
+            flowering(pos).map(|state| {
+                if state == generated_block_state_id(DANDELION) {
+                    generated_block_state_id(AIR)
+                } else {
+                    state
+                }
+            })
+        })
+        .unwrap();
+        assert!(!sparse.suitable());
+        assert_eq!(sparse.fitness.forage, 0);
     }
 }

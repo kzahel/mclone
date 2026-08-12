@@ -2,6 +2,94 @@ use mclone_core::Vec3d;
 
 use crate::{EntityId, EntityPersistentId};
 
+pub const BEE_FIELD_GUIDE_OBSERVATION_COUNT: u32 = 6;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BeeBehavior {
+    Hover,
+    FlyToFlower,
+    Forage,
+    ReturnHome,
+    AtNest,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BeeObservationKind {
+    Seen,
+    FoundNest,
+    WitnessedForage,
+    WitnessedReturn,
+    WitnessedPollination,
+    CollectedBeeswax,
+}
+
+impl BeeObservationKind {
+    pub const ALL: [Self; BEE_FIELD_GUIDE_OBSERVATION_COUNT as usize] = [
+        Self::Seen,
+        Self::FoundNest,
+        Self::WitnessedForage,
+        Self::WitnessedReturn,
+        Self::WitnessedPollination,
+        Self::CollectedBeeswax,
+    ];
+
+    pub const fn bit(self) -> u32 {
+        1 << match self {
+            Self::Seen => 0,
+            Self::FoundNest => 1,
+            Self::WitnessedForage => 2,
+            Self::WitnessedReturn => 3,
+            Self::WitnessedPollination => 4,
+            Self::CollectedBeeswax => 5,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct BeeFieldGuideProgress {
+    observations: u32,
+}
+
+impl BeeFieldGuideProgress {
+    pub const KNOWN_MASK: u32 = (1 << BEE_FIELD_GUIDE_OBSERVATION_COUNT) - 1;
+
+    pub const fn from_bits_retain(bits: u32) -> Self {
+        Self {
+            observations: bits & Self::KNOWN_MASK,
+        }
+    }
+
+    pub const fn bits(self) -> u32 {
+        self.observations
+    }
+
+    pub const fn contains(self, observation: BeeObservationKind) -> bool {
+        self.observations & observation.bit() != 0
+    }
+
+    pub fn observe(&mut self, observation: BeeObservationKind) -> bool {
+        let before = self.observations;
+        self.observations |= observation.bit();
+        self.observations != before
+    }
+
+    pub const fn discovered_count(self) -> u32 {
+        self.observations.count_ones()
+    }
+
+    pub const fn is_complete(self) -> bool {
+        self.observations == Self::KNOWN_MASK
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BeeSoundCue {
+    pub source: EntityId,
+    pub position: Vec3d,
+    pub sequence: u64,
+    pub audible_radius: f32,
+}
+
 pub const DEER_FIELD_GUIDE_OBSERVATION_COUNT: u32 = 6;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

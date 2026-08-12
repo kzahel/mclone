@@ -103,6 +103,33 @@ impl EntityMetadata {
         client_tracking_range: 10,
     };
 
+    pub(crate) const BEE: Self = Self {
+        kind: EntityKind::Bee,
+        category: EntityCategory::Creature,
+        dimensions: EntityDimensions::scalable(0.46, 0.42),
+        standing_eye_height: StandingEyeHeight::HeightScale(0.5),
+        movement_speed: 0.34,
+        client_tracking_range: 10,
+    };
+
+    pub(crate) const BEE_NEST: Self = Self {
+        kind: EntityKind::BeeNest,
+        category: EntityCategory::Misc,
+        dimensions: EntityDimensions::scalable(1.05, 0.8),
+        standing_eye_height: StandingEyeHeight::HeightScale(0.5),
+        movement_speed: 0.0,
+        client_tracking_range: 10,
+    };
+
+    pub(crate) const BEE_HOTEL: Self = Self {
+        kind: EntityKind::BeeHotel,
+        category: EntityCategory::Misc,
+        dimensions: EntityDimensions::scalable(1.02, 1.34),
+        standing_eye_height: StandingEyeHeight::HeightScale(0.5),
+        movement_speed: 0.0,
+        client_tracking_range: 10,
+    };
+
     pub(crate) const MANNEQUIN: Self = Self {
         kind: EntityKind::Mannequin,
         category: EntityCategory::Creature,
@@ -129,6 +156,9 @@ impl EntityMetadata {
             EntityKind::MallardNest => Some(Self::MALLARD_NEST),
             EntityKind::Deer => Some(Self::DEER),
             EntityKind::DeerBed => Some(Self::DEER_BED),
+            EntityKind::Bee => Some(Self::BEE),
+            EntityKind::BeeNest => Some(Self::BEE_NEST),
+            EntityKind::BeeHotel => Some(Self::BEE_HOTEL),
             EntityKind::Mannequin => Some(Self::MANNEQUIN),
             EntityKind::Item => Some(Self::ITEM),
             EntityKind::DebugCube => None,
@@ -146,6 +176,7 @@ impl EntityMetadata {
                 | EntityKind::Chicken
                 | EntityKind::Mallard
                 | EntityKind::Deer
+                | EntityKind::Bee
                 | EntityKind::Mannequin
         )
     }

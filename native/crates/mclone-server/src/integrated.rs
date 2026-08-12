@@ -20,15 +20,18 @@ use mclone_protocol::EntityRotation;
 use mclone_protocol::{
     AcceptTeleportCommand, AttackEntityCommand, ChunkView, ClientCommand, ClientEphemeralMessage,
     ClientIdentity, DebugActorKind, DebugHotbarItem, DimensionKey, EffectiveEphemeralTransport,
-    EntityKind, InteractionHand, ItemKind, MallardCallCue, MallardObservationKind, MallardTrackCue,
-    MovePlayerCommand, PlayerActionCommand, PlayerActionKind, PlayerAppearance, PlayerDamageCause,
-    PlayerLifeState, PlayerModelKind, PlayerProfileId, PlayerStatistics, RealmId,
-    SequencedMovePlayerCommand, ServerUpdate, SessionCapabilities, SessionConfiguration,
-    SetCarriedItemCommand, SetDebugHotbarSlotCommand, SetPlayerAppearanceCommand, StatisticKey,
-    UseItemOnCommand, sequence_is_newer, validate_body_pose_sample,
+    EntityKind, InteractEntityCommand, InteractionHand, ItemKind, MallardCallCue,
+    MallardObservationKind, MallardTrackCue, MovePlayerCommand, PlayerActionCommand,
+    PlayerActionKind, PlayerAppearance, PlayerDamageCause, PlayerLifeState, PlayerModelKind,
+    PlayerProfileId, PlayerStatistics, RealmId, SequencedMovePlayerCommand, ServerUpdate,
+    SessionCapabilities, SessionConfiguration, SetCarriedItemCommand, SetDebugHotbarSlotCommand,
+    SetPlayerAppearanceCommand, StatisticKey, UseItemOnCommand, sequence_is_newer,
+    validate_body_pose_sample,
 };
 use mclone_worldgen::biome::{OverworldBiomeSource, get_layered_biome_by_id};
-use mclone_worldgen::block::{AIR, RawBlockId, block_name, generated_block_state_id};
+use mclone_worldgen::block::{
+    AIR, DANDELION, GRASS_BLOCK, POPPY, RawBlockId, block_name, generated_block_state_id,
+};
 use mclone_worldgen::levelgen::{
     McloneOverworldSamplingTopology, McloneOverworldVegetationPlanCache, McloneVegetationSource,
 };
@@ -133,6 +136,7 @@ const DEFAULT_PHYSICS_STEP_DT_SECONDS: f64 = 1.0 / 60.0;
 const DEER_HUNTING_SPEAR_REACH: f64 = 4.5;
 const DEER_HUNTING_SPEAR_DAMAGE: u8 = 8;
 const DEER_HUNTING_SPEAR_COOLDOWN_TICKS: u64 = 12;
+const BEE_COLONY_INTERACTION_REACH: f64 = 4.5;
 const NATURAL_SPAWN_TICK_SEED_MULTIPLIER: i64 = 6_364_136_223_846_793_005;
 
 fn session_configuration(
@@ -1980,6 +1984,7 @@ impl RealmServer {
             player.statistics = record.statistics.clone();
             player.mallard_field_guide = record.mallard_field_guide;
             player.deer_field_guide = record.deer_field_guide;
+            player.bee_field_guide = record.bee_field_guide;
             player.vitals = mclone_protocol::PlayerVitals::new(
                 record.health,
                 mclone_protocol::DEFAULT_PLAYER_MAX_HEALTH,
@@ -1997,6 +2002,7 @@ impl RealmServer {
         let inventory = player.inventory.hotbar_item_stacks();
         let mallard_field_guide = player.mallard_field_guide;
         let deer_field_guide = player.deer_field_guide;
+        let bee_field_guide = player.bee_field_guide;
         self.chunk_tracking.queue_update_for_player(
             player_id,
             ServerUpdate::PlayerExperience { total_experience },
@@ -2015,6 +2021,8 @@ impl RealmServer {
         );
         self.chunk_tracking
             .queue_update_for_player(player_id, ServerUpdate::DeerFieldGuide(deer_field_guide));
+        self.chunk_tracking
+            .queue_update_for_player(player_id, ServerUpdate::BeeFieldGuide(bee_field_guide));
         let life = player_life_state(
             self.players
                 .get(player_id)
@@ -2234,6 +2242,9 @@ impl RealmServer {
             }
             ClientCommand::AttackEntity(command) => {
                 self.handle_attack_entity_for_target(target, command)
+            }
+            ClientCommand::InteractEntity(command) => {
+                self.handle_interact_entity_for_target(target, command)
             }
             ClientCommand::UseItemOn(command) => {
                 self.handle_use_item_on_for_target(target, command)
@@ -2502,6 +2513,19 @@ impl RealmServer {
         let runtime = &mut self.active_dimension;
         let scheduler = &runtime.scheduler;
         let mut entity_updates = natural_spawning_tick.spawned_entities;
+        if simulation_tick.is_multiple_of(200) {
+            let hotels = runtime.entities.empty_bee_hotels();
+            for hotel in hotels {
+                let feet = BlockPos::containing(hotel.position);
+                let mut block_at =
+                    |pos| scheduler.block_at_world(pos).map(generated_block_state_id);
+                if crate::entity::spawning::habitat::sample_flowering_habitat(feet, &mut block_at)
+                    .is_ok_and(|sample| sample.suitable())
+                {
+                    entity_updates.extend(runtime.entities.colonize_bee_hotel(hotel.id, 2));
+                }
+            }
+        }
         entity_updates.extend(runtime.entities.tick_stationary(
             &tick_report.entity_ticking_chunks,
             &mob_player_targets,
@@ -2558,6 +2582,8 @@ impl RealmServer {
         }
         let mallard_calls = self.active_dimension.entities.drain_mallard_calls();
         let deer_sounds = self.active_dimension.entities.drain_deer_sounds();
+        let bee_sounds = self.active_dimension.entities.drain_bee_sounds();
+        let bee_pollinations = self.active_dimension.entities.drain_bee_pollinations();
         let mallard_tracks = self.active_dimension.entities.drain_mallard_tracks();
         let mallard_hatches = self
             .active_dimension
@@ -2571,6 +2597,14 @@ impl RealmServer {
         );
         self.route_deer_sounds(deer_sounds);
         self.route_deer_observations(&entity_updates);
+        let pollinated_positions = self.apply_bee_pollinations(&bee_pollinations);
+        fluid_events.extend(self.scheduler.drain_pending_block_delta_events());
+        self.route_bee_ecology_cues(
+            &entity_updates,
+            bee_sounds,
+            &bee_pollinations,
+            &pollinated_positions,
+        );
         let entity_tick_us = simulation_timing_elapsed_us(entity_tick_start);
 
         let physics_tick_start = simulation_timing_start();
@@ -2798,6 +2832,27 @@ impl RealmServer {
                 );
                 live = result.diagnostics;
                 let persistent = self.scheduler.entity_chunks_supported();
+                if persistent {
+                    for colony in result.bee_colonies {
+                        if self
+                            .active_dimension
+                            .entities
+                            .has_bee_colony_near(colony.position, 12.0)
+                        {
+                            continue;
+                        }
+                        if let Some(states) =
+                            self.active_dimension.entities.spawn_persistent_bee_colony(
+                                EntityKind::BeeNest,
+                                colony.position,
+                                colony.y_rot_degrees,
+                                &colony.bees,
+                            )
+                        {
+                            spawned_entities.extend(states);
+                        }
+                    }
+                }
                 let requests = result
                     .requests
                     .into_iter()
@@ -2952,6 +3007,9 @@ impl RealmServer {
             live_wetland_habitats_detected: live.wetland_habitats_detected,
             live_blocked_missing_wetland_data: live.blocked_missing_wetland_data,
             live_mallard_flocks_spawned: live.mallard_flocks_spawned,
+            live_flowering_habitats_detected: live.flowering_habitats_detected,
+            live_blocked_missing_flowering_data: live.blocked_missing_flowering_data,
+            live_bee_colonies_spawned: live.bee_colonies_spawned,
             dry_run_chunks_checked: evaluation.dry_run.chunks_checked,
             dry_run_chunk_budget_exhausted: evaluation.dry_run.chunk_budget_exhausted,
             dry_run_positions_checked: evaluation.dry_run.positions_checked,
@@ -3786,11 +3844,60 @@ impl RealmServer {
         self.drain_chunk_updates_for_target(target)
     }
 
+    fn handle_interact_entity_for_target(
+        &mut self,
+        target: CommandTarget,
+        command: InteractEntityCommand,
+    ) -> ChunkStoreResult<Vec<ServerUpdate>> {
+        if command.hand != InteractionHand::MainHand {
+            return Ok(Vec::new());
+        }
+        let player_id = target.player_id();
+        let player = self.player_for_target(target)?;
+        let eye = player.position().add(Vec3d::new(0.0, 1.62, 0.0));
+        let direction = look_direction_from_rot(player.y_rot_degrees(), player.x_rot_degrees());
+        let to = eye.add(direction.scale(BEE_COLONY_INTERACTION_REACH));
+        let Some((targeted, hit_fraction)) =
+            self.active_dimension.entities.targeted_bee_colony(eye, to)
+        else {
+            return Ok(Vec::new());
+        };
+        if targeted.id != command.target
+            || !deer_attack_line_of_sight(eye, to, hit_fraction, |pos| {
+                self.scheduler.block_at_world(pos)
+            })
+        {
+            return Ok(Vec::new());
+        }
+        let Some(updates) = self
+            .active_dimension
+            .entities
+            .harvest_beeswax(command.target)
+        else {
+            return Ok(Vec::new());
+        };
+        self.mark_entity_updates_dirty(&updates);
+        self.reconcile_entity_subjects(updates, true);
+        self.observe_bee(
+            player_id,
+            mclone_protocol::BeeObservationKind::CollectedBeeswax,
+        );
+        self.drain_chunk_updates_for_target(target)
+    }
+
     fn handle_use_item_on_for_target(
         &mut self,
         target: CommandTarget,
         command: UseItemOnCommand,
     ) -> ChunkStoreResult<Vec<ServerUpdate>> {
+        if command.hand == InteractionHand::MainHand
+            && self
+                .inventory_for_target(target)?
+                .selected_item_stack()
+                .is_some_and(|stack| stack.kind == ItemKind::BeeHotel)
+        {
+            return self.handle_bee_hotel_use_item_on_for_target(target, command);
+        }
         if command.hand == InteractionHand::MainHand
             && self
                 .inventory_for_target(target)?
@@ -3877,6 +3984,69 @@ impl RealmServer {
         );
         self.reconcile_entity_subjects(std::iter::once(nest), true);
         self.mark_entity_updates_dirty(&[nest]);
+        let hotbar = self.inventory_for_target(target)?.hotbar_item_stacks();
+        let mut updates = self.drain_chunk_updates_for_target(target)?;
+        updates.push(ServerUpdate::PlayerInventory { hotbar });
+        Ok(updates)
+    }
+
+    fn handle_bee_hotel_use_item_on_for_target(
+        &mut self,
+        target: CommandTarget,
+        command: UseItemOnCommand,
+    ) -> ChunkStoreResult<Vec<ServerUpdate>> {
+        if !self.world_behavior_profile.allows_player_place() {
+            return Ok(Vec::new());
+        }
+        let (player_position, y_rot_degrees) = {
+            let player = self.player_for_target(target)?;
+            (player.position(), player.y_rot_degrees())
+        };
+        let context = ServerInteractionContext::debug_creative_in(
+            player_position,
+            self.active_dimension.definition.topology,
+        );
+        if !context.may_use_item_on(command.hit) {
+            return Ok(Vec::new());
+        }
+        let feet_block = command.hit.block_pos.relative(command.hit.direction);
+        if !context.may_place_at(feet_block) {
+            return Ok(Vec::new());
+        }
+        let raw_block = |pos| self.scheduler.block_at_world(pos);
+        let Ok(habitat) =
+            crate::entity::spawning::habitat::sample_flowering_habitat(feet_block, &mut |pos| {
+                raw_block(pos).map(generated_block_state_id)
+            })
+        else {
+            return Ok(Vec::new());
+        };
+        if !habitat.suitable() {
+            return Ok(Vec::new());
+        }
+        let position = Vec3d::new(
+            f64::from(feet_block.x) + 0.5,
+            f64::from(feet_block.y),
+            f64::from(feet_block.z) + 0.5,
+        );
+        let scheduler = &self.active_dimension.scheduler;
+        let Some(hotel) =
+            self.active_dimension
+                .entities
+                .place_empty_bee_hotel(position, y_rot_degrees, |pos| {
+                    scheduler
+                        .block_at_world(pos)
+                        .map(|block| BlockStateId(u32::from(block)))
+                })
+        else {
+            return Ok(Vec::new());
+        };
+        let consumed = self
+            .inventory_mut_for_target(target)?
+            .consume_selected_item(ItemKind::BeeHotel);
+        debug_assert!(consumed, "validated bee hotel disappeared before placement");
+        self.reconcile_entity_subjects(std::iter::once(hotel), true);
+        self.mark_entity_updates_dirty(&[hotel]);
         let hotbar = self.inventory_for_target(target)?.hotbar_item_stacks();
         let mut updates = self.drain_chunk_updates_for_target(target)?;
         updates.push(ServerUpdate::PlayerInventory { hotbar });
@@ -4573,6 +4743,126 @@ impl RealmServer {
         }
     }
 
+    fn apply_bee_pollinations(
+        &mut self,
+        events: &[crate::entity::BeePollinationEvent],
+    ) -> Vec<BlockPos> {
+        const OFFSETS: [(i32, i32); 24] = [
+            (2, 0),
+            (-2, 0),
+            (0, 2),
+            (0, -2),
+            (2, 1),
+            (-2, -1),
+            (1, 2),
+            (-1, -2),
+            (3, 0),
+            (-3, 0),
+            (0, 3),
+            (0, -3),
+            (3, 2),
+            (-3, -2),
+            (2, 3),
+            (-2, -3),
+            (4, 1),
+            (-4, -1),
+            (1, 4),
+            (-1, -4),
+            (4, 3),
+            (-4, -3),
+            (3, 4),
+            (-3, -4),
+        ];
+        let mut placed = Vec::new();
+        for event in events {
+            let start = (event.colony.least as usize) % OFFSETS.len();
+            let flower = match self.scheduler.block_at_world(event.source_flower) {
+                Some(DANDELION) => DANDELION,
+                Some(POPPY) => POPPY,
+                _ if event.source_flower.x.rem_euclid(2) == 0 => DANDELION,
+                _ => POPPY,
+            };
+            for index in 0..OFFSETS.len() {
+                let (dx, dz) = OFFSETS[(start + index) % OFFSETS.len()];
+                let candidate = event.source_flower.offset(dx, 0, dz);
+                if self.scheduler.block_at_world(candidate) == Some(AIR)
+                    && self.scheduler.block_at_world(candidate.below()) == Some(GRASS_BLOCK)
+                    && self.set_block_from_simulation(candidate, flower)
+                {
+                    placed.push(candidate);
+                    break;
+                }
+            }
+        }
+        placed
+    }
+
+    fn route_bee_ecology_cues(
+        &mut self,
+        entity_updates: &[ServerEntityState],
+        sounds: Vec<mclone_protocol::BeeSoundCue>,
+        pollinations: &[crate::entity::BeePollinationEvent],
+        pollinated_positions: &[BlockPos],
+    ) {
+        for entity in entity_updates.iter().filter(|entity| entity.alive) {
+            let observation = match entity.kind {
+                EntityKind::Bee => Some((mclone_protocol::BeeObservationKind::Seen, 18.0)),
+                EntityKind::BeeNest | EntityKind::BeeHotel => {
+                    Some((mclone_protocol::BeeObservationKind::FoundNest, 12.0))
+                }
+                _ => None,
+            };
+            if let Some((observation, radius)) = observation {
+                for player_id in self.mallard_players_in_range(entity.position, radius) {
+                    self.observe_bee(player_id, observation);
+                    if entity.kind == EntityKind::Bee {
+                        let clip = entity.animation.map(|animation| animation.clip);
+                        if clip == Some(mclone_core::AnimationClipId::from_static("forage")) {
+                            self.observe_bee(
+                                player_id,
+                                mclone_protocol::BeeObservationKind::WitnessedForage,
+                            );
+                        } else if clip == Some(mclone_core::AnimationClipId::from_static("fly"))
+                            && pollinations.iter().any(|event| {
+                                entity.position.distance_to_sqr(event.position) <= 8.0 * 8.0
+                            })
+                        {
+                            self.observe_bee(
+                                player_id,
+                                mclone_protocol::BeeObservationKind::WitnessedReturn,
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        for cue in sounds {
+            for player_id in
+                self.mallard_players_in_range(cue.position, f64::from(cue.audible_radius))
+            {
+                self.chunk_tracking
+                    .queue_update_for_player(player_id, ServerUpdate::BeeSound(cue));
+            }
+        }
+        for position in pollinated_positions {
+            let world_position = Vec3d::new(
+                f64::from(position.x) + 0.5,
+                f64::from(position.y),
+                f64::from(position.z) + 0.5,
+            );
+            for player_id in self.mallard_players_in_range(world_position, 20.0) {
+                self.observe_bee(
+                    player_id,
+                    mclone_protocol::BeeObservationKind::WitnessedReturn,
+                );
+                self.observe_bee(
+                    player_id,
+                    mclone_protocol::BeeObservationKind::WitnessedPollination,
+                );
+            }
+        }
+    }
+
     fn mallard_players_in_range(&self, position: Vec3d, radius: f64) -> Vec<ServerPlayerId> {
         let radius_sqr = radius * radius;
         let topology = self.active_dimension.definition.topology;
@@ -4616,6 +4906,23 @@ impl RealmServer {
         };
         self.chunk_tracking
             .queue_update_for_player(player_id, ServerUpdate::DeerFieldGuide(progress));
+    }
+
+    fn observe_bee(
+        &mut self,
+        player_id: ServerPlayerId,
+        observation: mclone_protocol::BeeObservationKind,
+    ) {
+        let Some(progress) = self.players.get_mut(player_id).and_then(|player| {
+            player
+                .bee_field_guide
+                .observe(observation)
+                .then_some(player.bee_field_guide)
+        }) else {
+            return;
+        };
+        self.chunk_tracking
+            .queue_update_for_player(player_id, ServerUpdate::BeeFieldGuide(progress));
     }
 
     fn mark_entity_updates_dirty(&mut self, subjects: &[ServerEntityState]) {
@@ -5145,6 +5452,7 @@ impl RealmServer {
             player.statistics = record.statistics.clone();
             player.mallard_field_guide = record.mallard_field_guide;
             player.deer_field_guide = record.deer_field_guide;
+            player.bee_field_guide = record.bee_field_guide;
             player.vitals = mclone_protocol::PlayerVitals::new(
                 record.health,
                 mclone_protocol::DEFAULT_PLAYER_MAX_HEALTH,
@@ -5158,6 +5466,7 @@ impl RealmServer {
             let inventory = player.inventory.hotbar_item_stacks();
             let mallard_field_guide = player.mallard_field_guide;
             let deer_field_guide = player.deer_field_guide;
+            let bee_field_guide = player.bee_field_guide;
             let life = player_life_state(player);
             self.chunk_tracking.queue_update_for_player(
                 player_id,
@@ -5179,6 +5488,8 @@ impl RealmServer {
             );
             self.chunk_tracking
                 .queue_update_for_player(player_id, ServerUpdate::DeerFieldGuide(deer_field_guide));
+            self.chunk_tracking
+                .queue_update_for_player(player_id, ServerUpdate::BeeFieldGuide(bee_field_guide));
             self.chunk_tracking
                 .queue_update_for_player(player_id, ServerUpdate::PlayerLife(life));
             let center = self
@@ -6326,6 +6637,7 @@ fn player_record_from_entry(
         record.statistics = player.statistics.clone();
         record.mallard_field_guide = player.mallard_field_guide;
         record.deer_field_guide = player.deer_field_guide;
+        record.bee_field_guide = player.bee_field_guide;
         record.health = player.vitals.health();
         record.pending_death_cause = player.pending_death_cause;
         return Some(record);
@@ -6363,6 +6675,7 @@ fn player_record_from_current_state_with_revision(
         statistics: player.statistics.clone(),
         mallard_field_guide: player.mallard_field_guide,
         deer_field_guide: player.deer_field_guide,
+        bee_field_guide: player.bee_field_guide,
         health: player.vitals.health(),
         pending_death_cause: player.pending_death_cause,
     })

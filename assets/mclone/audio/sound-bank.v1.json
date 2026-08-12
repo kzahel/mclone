@@ -1,6 +1,17 @@
 {
   "families": [
     {
+      "gain": 0.38,
+      "key": "mclone:bee_buzz",
+      "no_immediate_repeat": true,
+      "pitch_max": 1.08,
+      "pitch_min": 0.94,
+      "variants": [
+        "assets/mclone/sounds/mclone-original/bee_buzz_00.ogg",
+        "assets/mclone/sounds/mclone-original/bee_buzz_01.ogg"
+      ]
+    },
+    {
       "gain": 0.64,
       "key": "mclone:break_glass",
       "no_immediate_repeat": true,
@@ -349,6 +360,8 @@
       "pitch_max": 1.04,
       "pitch_min": 0.96,
       "variants": [
+        "assets/mclone/sounds/mclone-original/bee_buzz_00.ogg",
+        "assets/mclone/sounds/mclone-original/bee_buzz_01.ogg",
         "assets/mclone/sounds/mclone-original/deer_alarm_00.ogg",
         "assets/mclone/sounds/mclone-original/deer_alarm_01.ogg",
         "assets/mclone/sounds/mclone-original/deer_contact_00.ogg",
@@ -494,5 +507,5 @@
   ],
   "license": "CC0-1.0",
   "schema_version": 1,
-  "selected_file_count": 127
+  "selected_file_count": 129
 }
