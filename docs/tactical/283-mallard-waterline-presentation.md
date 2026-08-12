@@ -1,6 +1,6 @@
 # Tactical 283: Mallard Waterline Presentation
 
-Status: **implementation and local acceptance complete; public deployment pending 2026-08-12**
+Status: **complete 2026-08-12**
 
 Topic:
 
@@ -96,4 +96,20 @@ Local acceptance evidence:
 - `pnpm native:mallard-ecology:capture`: passed; the inspected flat and stereo
   pixels put feet below the surface and retain the breast/body above it.
 
-The exact push/deploy receipt and public screenshot remain pending.
+Public acceptance evidence:
+
+- Exact pushed revision `acee62056fcbf85b4a99acbb59af3df784d46a7a`
+  deployed in 114 seconds as Cloudflare version
+  `686af29e-70ea-4496-b0ba-6d695fdd6585`.
+- `pnpm native:web:showcase-deployed-smoke` passed with three authoritative
+  swimming mallards at both ends of the 80-tick window. The original three
+  still displaced `3.3299`, `2.2050`, and `3.5938` blocks, the nest hatched,
+  ducklings increased from one to two, and field notes advanced from 2/6 to
+  5/6.
+- All eight persistent-world store counts remained zero. The inspected
+  1600x900 public canvas visibly places the waterline through the lower legs,
+  below the body, and has SHA-256
+  `d6967d161f532f532ec7c374432a25a6bb3eaca228a0ed4493fc563681e0201a`.
+
+The correction is therefore live in the same resettable public showcase and
+in the ordinary shared mallard presentation path.

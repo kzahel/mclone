@@ -185,6 +185,15 @@ browser world stores remained empty. Exact pushed revision
 inspected 1600x900 canvas digest was
 `c9e0ee0e64f507ab21b844650bbc099306a772090f61136e4761f33c12c040dc`.
 
+Tactical [`283`](../tactical/283-mallard-waterline-presentation.md) followed
+human review of those pixels: the ducks moved correctly but stood on the water
+because incremental mallard metadata was dropped by the ordinary client
+replica. Exact deployed revision `acee6205` repairs that contract and applies a
+shared swim-only visual waterline. Its stricter public gate reports three
+swimming mallards at both ends of the 80-tick window, and its inspected canvas
+digest is
+`d6967d161f532f532ec7c374432a25a6bb3eaca228a0ed4493fc563681e0201a`.
+
 ## Code and Documentation Map
 
 - `assets/mclone/showcases/`: readable showcase recipes
@@ -205,6 +214,8 @@ inspected 1600x900 canvas digest was
   first implementation execution record
 - [`../tactical/282-mallard-behavioral-showcase.md`](../tactical/282-mallard-behavioral-showcase.md):
   rejected baseline, shared AI correction, wetland revision, and timed proof
+- [`../tactical/283-mallard-waterline-presentation.md`](../tactical/283-mallard-waterline-presentation.md):
+  replicated swim-state repair and shared waterline presentation proof
 
 ## Recommended Next Work
 

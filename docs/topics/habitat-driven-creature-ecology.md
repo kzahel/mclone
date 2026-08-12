@@ -329,6 +329,10 @@ event, and no ambient soundtrack pretends that a flock exists.
   covers incremental swim/life-stage/nest metadata, a render-session regression
   covers the species-specific model offset, and local flat, stereo, and headed
   Web pixels show submerged feet with the breast and body above water.
+- The exact deployed revision `acee6205` reports three swimming mallards at
+  both ends of its behavioral window. Its inspected public pixels retain the
+  full accepted ecology sequence while placing the waterline through the lower
+  legs instead of under the feet.
 
 ## Known Gaps and Recommended Next Work
 
