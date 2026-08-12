@@ -160,8 +160,8 @@ const showcaseArgIndex = process.argv.indexOf("--showcase");
 const showcase = showcaseArgIndex >= 0
   ? String(process.argv[showcaseArgIndex + 1] ?? "")
   : "";
-if (showcase && !["mallard-ecology", "deer-forest-edge"].includes(showcase)) {
-  throw new Error(`--showcase requires mallard-ecology or deer-forest-edge; got ${showcase}`);
+if (showcase && !["mallard-ecology", "deer-forest-edge", "bee-pollination"].includes(showcase)) {
+  throw new Error(`--showcase requires mallard-ecology, deer-forest-edge, or bee-pollination; got ${showcase}`);
 }
 const deployedBaseUrlArgIndex = process.argv.indexOf("--deployed-base-url");
 const deployedBaseUrl = deployedBaseUrlArgIndex >= 0
@@ -798,15 +798,22 @@ async function run() {
       const canvas = page.locator("#mclone-canvas");
       if (showcase) {
         const deerShowcase = showcase === "deer-forest-edge";
+        const beeShowcase = showcase === "bee-pollination";
         try {
           await page.waitForFunction(
-            (deerShowcase) => {
+            ({ deerShowcase, beeShowcase }) => {
               const state = globalThis.__mcloneWebApp?.state;
               return state?.startupReady === true
                 && state.streamingSettled === true
                 && state.pendingCompileJobCount === 0
                 && state.entityCount >= state.showcaseEntityCount
-                && (deerShowcase
+                && (beeShowcase
+                  ? state.beeCount >= state.showcaseBeeCount
+                    && state.beeNestCount >= state.showcaseBeeNestCount
+                    && state.beeHotelCount >= state.showcaseBeeHotelCount
+                    && (state.beeFieldGuideBits & state.showcaseBeeFieldGuideBits)
+                      === state.showcaseBeeFieldGuideBits
+                  : deerShowcase
                   ? state.deerCount >= state.showcaseDeerCount
                     && state.deerBedCount >= state.showcaseDeerBedCount
                     && (state.deerFieldGuideBits & state.showcaseDeerFieldGuideBits)
@@ -816,14 +823,14 @@ async function run() {
                     && (state.mallardFieldGuideBits & state.showcaseFieldGuideBits)
                       === state.showcaseFieldGuideBits)
                 && state.dayTime === 6000
-                && (deerShowcase || (
+                && (deerShowcase || beeShowcase || (
                   state.mallardEggHotbarCount === 0
                   && state.mallardFeatherHotbarCount === 0
                 ))
                 && state.actorCount >= 4
                 && state.drawnActorCount >= 4;
             },
-            deerShowcase,
+            { deerShowcase, beeShowcase },
             { timeout: 60_000 },
           );
         } catch (error) {
@@ -835,21 +842,22 @@ async function run() {
         );
         try {
           await page.waitForFunction(
-            ({ startTickCounts, deerShowcase }) => {
+            ({ startTickCounts, subject }) => {
               const state = globalThis.__mcloneWebApp?.state?.lastReport;
               const startTicks = String(startTickCounts ?? "").split(",").map(Number);
-              const currentTicks = String(
-                deerShowcase ? state?.deerTickCounts : state?.mallardTickCounts,
-              ).split(",").map(Number);
+              const currentTicks = String(state?.[`${subject}TickCounts`])
+                .split(",").map(Number);
               return startTicks.length === 3
                 && currentTicks.length >= 3
                 && startTicks.every((tick, index) => currentTicks[index] >= tick + 80);
             },
             {
-              startTickCounts: deerShowcase
-                ? behaviorStart.deerTickCounts
-                : behaviorStart.mallardTickCounts,
-              deerShowcase,
+              startTickCounts: beeShowcase
+                ? behaviorStart.beeTickCounts
+                : deerShowcase
+                  ? behaviorStart.deerTickCounts
+                  : behaviorStart.mallardTickCounts,
+              subject: beeShowcase ? "bee" : deerShowcase ? "deer" : "mallard",
             },
             { timeout: 35_000 },
           );
@@ -867,7 +875,7 @@ async function run() {
           .split(";")
           .filter(Boolean)
           .map((position) => position.split(",").map(Number));
-        const subject = deerShowcase ? "deer" : "mallard";
+        const subject = beeShowcase ? "bee" : deerShowcase ? "deer" : "mallard";
         const startIds = String(behaviorStart[`${subject}EntityIds`] ?? "").split(",");
         const endIds = String(behaviorEnd[`${subject}EntityIds`] ?? "").split(",");
         const startPositions = parsePositions(behaviorStart[`${subject}Positions`]);
@@ -908,7 +916,7 @@ async function run() {
           finalFieldGuideBits: Number(behaviorEnd[`${subject}FieldGuideBits`]),
           deerWalkAnimationDistanceAdvance,
         };
-        if (!deerShowcase && (
+        if (!deerShowcase && !beeShowcase && (
           subjectDisplacement.length !== 3
           || subjectDisplacement.some((distance) => !Number.isFinite(distance) || distance < 1.5)
           || behaviorProbe.initialWaterCount < 1
@@ -941,6 +949,24 @@ async function run() {
             }, null, 2)}`);
           }
         }
+        if (beeShowcase) {
+          const clips = `${behaviorStart.beeAnimationClips},${behaviorEnd.beeAnimationClips}`;
+          if (
+            subjectDisplacement.length !== 3
+            || !subjectDisplacement.some(
+              (distance) => Number.isFinite(distance) && distance > 0.5,
+            )
+            || !/forage/.test(clips)
+            || !/fly/.test(clips)
+            || (behaviorProbe.finalFieldGuideBits & 16) !== 16
+          ) {
+            throw new Error(`bee showcase behavior window failed:\n${JSON.stringify({
+              behaviorStart,
+              behaviorEnd,
+              displacement: subjectDisplacement,
+            }, null, 2)}`);
+          }
+        }
         await page.evaluate(() => globalThis.__mcloneWebApp?.pauseRendering?.());
         await page.waitForFunction(
           () => globalThis.__mcloneWebApp?.state?.tickFrameBusy === false,
@@ -962,6 +988,51 @@ async function run() {
           timeout: 60_000,
         });
         const canvasPixels = analyzePng(canvasPng);
+        let mobileBeeUseProbe = null;
+        if (mobileShowcase && beeShowcase) {
+          await page.evaluate(() => globalThis.__mcloneWebApp?.resumeRendering?.());
+          await dispatchTouchHotbarSlotPointerEvent(page, 8, "pointerdown", {
+            pointerId: 91,
+            buttons: 1,
+          });
+          await dispatchTouchHotbarSlotPointerEvent(page, 8, "pointerup", {
+            pointerId: 91,
+            buttons: 0,
+          });
+          await page.waitForFunction(
+            () => globalThis.__mcloneWebApp?.state?.selectedHotbarSlot === 8
+              && globalThis.__mcloneWebApp?.state?.touchPointerActiveCount === 0,
+            undefined,
+            { timeout: 10_000 },
+          );
+          const use = await exerciseTouchInteractionButton(page, "use", "place", 92);
+          await page.waitForFunction(
+            () => Number(globalThis.__mcloneWebApp?.state?.lastReport?.beeHotelCount) >= 1,
+            undefined,
+            { timeout: 10_000 },
+          );
+          const beeHotelCount = await page.evaluate(
+            () => Number(globalThis.__mcloneWebApp?.state?.lastReport?.beeHotelCount) || 0,
+          );
+          mobileBeeUseProbe = {
+            ok: use.ok
+              && beeHotelCount >= 1
+              && await page.evaluate(
+                () => globalThis.__mcloneWebApp?.state?.selectedHotbarSlot === 8,
+              ),
+            selectedHotbarSlot: await page.evaluate(
+              () => globalThis.__mcloneWebApp?.state?.selectedHotbarSlot,
+            ),
+            beeHotelCount,
+            use,
+          };
+          await page.evaluate(() => globalThis.__mcloneWebApp?.pauseRendering?.());
+          await page.waitForFunction(
+            () => globalThis.__mcloneWebApp?.state?.tickFrameBusy === false,
+            undefined,
+            { timeout: 10_000 },
+          );
+        }
         const worldRecordCounts = await page.evaluate(async () => {
           const stores = [
             "dimensionChunks",
@@ -995,17 +1066,22 @@ async function run() {
           pageErrors.length > 0
           || canvasPixels.distinctInteriorColorCount < 2
           || result?.showcaseId !== showcase
-          || result?.showcaseRevision !== (deerShowcase ? 1 : 2)
-          || result?.activeWorldSeedText !== (deerShowcase ? "17504" : "17503")
+          || result?.showcaseRevision !== (deerShowcase || beeShowcase ? 1 : 2)
+          || result?.activeWorldSeedText !== (beeShowcase ? "17505" : deerShowcase ? "17504" : "17503")
           || result?.generationProfile !== "authored-only"
           || result?.dayTime !== 6000
-          || (deerShowcase
+          || (beeShowcase
+            ? result?.beeCount < 3
+              || result?.beeNestCount < 1
+              || (result?.beeFieldGuideBits & 16) !== 16
+            : deerShowcase
             ? result?.deerCount < 3 || result?.deerBedCount < 1 || result?.deerFieldGuideBits < 3
             : result?.mallardCount < 4
               || result?.mallardNestCount !== 0
               || result?.mallardFieldGuideBits === 1)
           || String(result?.showcaseEntryEye) !== `${result.cameraX},${result.cameraY},${result.cameraZ}`
           || (mobileShowcase && result?.touchControlsVisible !== true)
+          || (mobileShowcase && beeShowcase && mobileBeeUseProbe?.ok !== true)
           || Object.values(worldRecordCounts).some((count) => count !== 0)
         ) {
           throw new Error(`browser playable-showcase probe failed:\n${JSON.stringify({
@@ -1023,6 +1099,7 @@ async function run() {
           canvasPixels,
           worldRecordCounts,
           behaviorProbe,
+          mobileBeeUseProbe,
           result,
         }, null, 2));
         return;
@@ -7508,6 +7585,41 @@ async function dispatchTouchButtonPointerEvent(page, key, type, options) {
       }));
     },
     { key, type, options },
+  );
+}
+
+/**
+ * @param {Page} page
+ * @param {number} slot
+ * @param {string} type
+ * @param {{ pointerId: number, buttons: number }} options
+ */
+async function dispatchTouchHotbarSlotPointerEvent(page, slot, type, options) {
+  await page.evaluate(
+    ({ slot, type, options }) => {
+      if (!Number.isInteger(slot) || slot < 0 || slot > 8) {
+        throw new Error(`invalid native touch hotbar slot ${slot}`);
+      }
+      const canvas = /** @type {HTMLElement} */ (document.getElementById("mclone-canvas"));
+      const rect = canvas.getBoundingClientRect();
+      const size = 28;
+      const gap = 4;
+      const totalWidth = size * 9 + gap * 8;
+      const x0 = Math.max(4, (rect.width - totalWidth) * 0.5);
+      const y = Math.max(58, rect.height - 98);
+      canvas.dispatchEvent(new PointerEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        pointerId: options.pointerId,
+        pointerType: "touch",
+        isPrimary: true,
+        clientX: rect.left + x0 + slot * (size + gap) + size * 0.5,
+        clientY: rect.top + y + size * 0.5,
+        button: 0,
+        buttons: options.buttons,
+      }));
+    },
+    { slot, type, options },
   );
 }
 

@@ -4,9 +4,9 @@ use std::fmt;
 
 use mclone_core::{ChunkPos, ChunkRevision, Vec3d, block_to_chunk_coord, block_to_section_coord};
 use mclone_protocol::{
-    ClientIdentity, DeerBehavior, DeerFieldGuideProgress, DeerLifeStage, DeerObservationKind,
-    DeerSex, DimensionKey, EntityRotation, ItemKind, ItemStackSnapshot, MallardFieldGuideProgress,
-    MallardObservationKind,
+    BeeBehavior, BeeFieldGuideProgress, BeeObservationKind, ClientIdentity, DeerBehavior,
+    DeerFieldGuideProgress, DeerLifeStage, DeerObservationKind, DeerSex, DimensionKey,
+    EntityRotation, ItemKind, ItemStackSnapshot, MallardFieldGuideProgress, MallardObservationKind,
 };
 use mclone_worldgen::block::{LILY_PAD, generated_block_state_id};
 use serde::Deserialize;
@@ -36,20 +36,30 @@ const DEER_FOREST_EDGE_RECIPE: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../../assets/mclone/showcases/deer-forest-edge.showcase.json"
 ));
+const BEE_POLLINATION_RECIPE: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../../assets/mclone/showcases/bee-pollination.showcase.json"
+));
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum PlayableShowcaseId {
     MallardEcology,
     DeerForestEdge,
+    BeePollination,
 }
 
 impl PlayableShowcaseId {
-    pub const ALL: [Self; 2] = [Self::MallardEcology, Self::DeerForestEdge];
+    pub const ALL: [Self; 3] = [
+        Self::MallardEcology,
+        Self::DeerForestEdge,
+        Self::BeePollination,
+    ];
 
     pub const fn label(self) -> &'static str {
         match self {
             Self::MallardEcology => "mallard-ecology",
             Self::DeerForestEdge => "deer-forest-edge",
+            Self::BeePollination => "bee-pollination",
         }
     }
 
@@ -57,8 +67,9 @@ impl PlayableShowcaseId {
         match value {
             "mallard-ecology" => Ok(Self::MallardEcology),
             "deer-forest-edge" => Ok(Self::DeerForestEdge),
+            "bee-pollination" => Ok(Self::BeePollination),
             _ => Err(PlayableShowcaseError::invalid(format!(
-                "unknown playable showcase `{value}`; expected mallard-ecology or deer-forest-edge"
+                "unknown playable showcase `{value}`; expected mallard-ecology, deer-forest-edge, or bee-pollination"
             ))),
         }
     }
@@ -67,6 +78,7 @@ impl PlayableShowcaseId {
         match self {
             Self::MallardEcology => MALLARD_ECOLOGY_RECIPE,
             Self::DeerForestEdge => DEER_FOREST_EDGE_RECIPE,
+            Self::BeePollination => BEE_POLLINATION_RECIPE,
         }
     }
 }
@@ -91,6 +103,10 @@ pub struct PlayableShowcaseManifest {
     pub deer_count: usize,
     pub deer_bed_count: usize,
     pub deer_field_guide_bits: u32,
+    pub bee_count: usize,
+    pub bee_nest_count: usize,
+    pub bee_hotel_count: usize,
+    pub bee_field_guide_bits: u32,
 }
 
 #[derive(Debug)]
@@ -133,6 +149,11 @@ enum LiveInstantiationSubject {
     DeerBed,
     HuntingSpear,
     DeerObservation,
+    Bee,
+    BeeNest,
+    BeeHotel,
+    Beeswax,
+    BeeObservation,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -209,6 +230,36 @@ pub const LIVE_INSTANTIATION_EVIDENCE: &[LiveInstantiationEvidence] = &[
         ordinary_producer: "ordinary proximity, sound, trace, pickup, nest, and hatch observation paths",
         contract: "mclone-server::integrated::observe_mallard",
         subject: LiveInstantiationSubject::MallardObservation,
+    },
+    LiveInstantiationEvidence {
+        id: "mclone-bee-natural-colony",
+        ordinary_producer: "flowering-habitat-qualified passive natural spawning",
+        contract: "mclone-server::entity::spawning::live::tests::mclone_flowering_habitat_admits_one_bounded_bee_colony",
+        subject: LiveInstantiationSubject::BeeNest,
+    },
+    LiveInstantiationEvidence {
+        id: "mclone-bee-colony-member",
+        ordinary_producer: "persistent natural or managed bee colony occupancy",
+        contract: "mclone-server::entity::store::tests::bee_colony_forages_returns_persists_and_produces_bounded_work",
+        subject: LiveInstantiationSubject::Bee,
+    },
+    LiveInstantiationEvidence {
+        id: "mclone-bee-hotel-placement",
+        ordinary_producer: "using a bee hotel on a supported flowering-habitat site",
+        contract: "mclone-server::integrated::handle_bee_hotel_use_item_on_for_target",
+        subject: LiveInstantiationSubject::BeeHotel,
+    },
+    LiveInstantiationEvidence {
+        id: "mclone-bee-beeswax-harvest",
+        ordinary_producer: "authoritative use of a fully worked colony",
+        contract: "mclone-server::entity::store::tests::worked_bee_colony_yields_one_beeswax_and_resets_work",
+        subject: LiveInstantiationSubject::Beeswax,
+    },
+    LiveInstantiationEvidence {
+        id: "mclone-bee-field-guide-observation",
+        ordinary_producer: "ordinary bee proximity, behavior, pollination, and harvest observation paths",
+        contract: "mclone-server::integrated::route_bee_ecology_cues",
+        subject: LiveInstantiationSubject::BeeObservation,
     },
 ];
 
@@ -370,6 +421,9 @@ fn validate_recipe(
             ShowcaseEntityState::MallardNest { .. } => LiveInstantiationSubject::MallardNest,
             ShowcaseEntityState::Deer { .. } => LiveInstantiationSubject::Deer,
             ShowcaseEntityState::DeerBed { .. } => LiveInstantiationSubject::DeerBed,
+            ShowcaseEntityState::Bee { .. } => LiveInstantiationSubject::Bee,
+            ShowcaseEntityState::BeeNest { .. } => LiveInstantiationSubject::BeeNest,
+            ShowcaseEntityState::BeeHotel { .. } => LiveInstantiationSubject::BeeHotel,
         };
         validate_evidence(&entity.live_instantiation, expected)?;
     }
@@ -427,6 +481,34 @@ fn validate_recipe(
                 entity.id
             )));
         }
+        if let ShowcaseEntityState::Bee { home, flower, .. } = &entity.state {
+            if !entity_ids.contains(home.as_str()) {
+                return Err(PlayableShowcaseError::invalid(format!(
+                    "showcase bee `{}` references missing colony `{home}`",
+                    entity.id
+                )));
+            }
+            if let Some(flower) = flower {
+                validate_block_position(*flower)?;
+            }
+        }
+        if let ShowcaseEntityState::BeeNest {
+            stored_work,
+            work_capacity,
+            ..
+        }
+        | ShowcaseEntityState::BeeHotel {
+            stored_work,
+            work_capacity,
+            ..
+        } = &entity.state
+            && (*work_capacity == 0 || stored_work > work_capacity)
+        {
+            return Err(PlayableShowcaseError::invalid(format!(
+                "showcase bee colony `{}` has invalid work {stored_work}/{work_capacity}",
+                entity.id
+            )));
+        }
     }
 
     if recipe.player.selected_hotbar_slot >= 9 {
@@ -446,6 +528,8 @@ fn validate_recipe(
             "mclone:mallard_egg" => LiveInstantiationSubject::MallardEggItem,
             "mclone:mallard_feather" => LiveInstantiationSubject::MallardFeatherItem,
             "mclone:hunting_spear" => LiveInstantiationSubject::HuntingSpear,
+            "mclone:bee_hotel" => LiveInstantiationSubject::BeeHotel,
+            "mclone:beeswax" => LiveInstantiationSubject::Beeswax,
             value => {
                 return Err(PlayableShowcaseError::invalid(format!(
                     "showcase inventory item `{value}` is not in the bounded item allowlist"
@@ -466,6 +550,8 @@ fn validate_recipe(
             &observation.live_instantiation,
             if observation.kind.deer_protocol_kind().is_some() {
                 LiveInstantiationSubject::DeerObservation
+            } else if observation.kind.bee_protocol_kind().is_some() {
+                LiveInstantiationSubject::BeeObservation
             } else {
                 LiveInstantiationSubject::MallardObservation
             },
@@ -623,12 +709,49 @@ fn write_entities(
                     .get(source.as_str())
                     .expect("validated deer bed source"),
             },
+            ShowcaseEntityState::Bee {
+                home,
+                flower,
+                behavior,
+                behavior_ticks,
+                carrying_pollen,
+            } => EntitySavePayload::Bee {
+                home: *persistent_ids
+                    .get(home.as_str())
+                    .expect("validated bee colony reference"),
+                flower: flower.map(|position| {
+                    mclone_core::BlockPos::new(position[0], position[1], position[2])
+                }),
+                behavior: behavior.protocol(),
+                behavior_ticks: *behavior_ticks,
+                carrying_pollen: *carrying_pollen,
+            },
+            ShowcaseEntityState::BeeNest {
+                colonized,
+                stored_work,
+                work_capacity,
+                spread_cooldown,
+            }
+            | ShowcaseEntityState::BeeHotel {
+                colonized,
+                stored_work,
+                work_capacity,
+                spread_cooldown,
+            } => EntitySavePayload::BeeColony {
+                colonized: *colonized,
+                stored_work: *stored_work,
+                work_capacity: *work_capacity,
+                spread_cooldown: *spread_cooldown,
+            },
         };
         let kind = match &recipe.state {
             ShowcaseEntityState::Mallard { .. } => "mclone:mallard",
             ShowcaseEntityState::MallardNest { .. } => "mclone:mallard_nest",
             ShowcaseEntityState::Deer { .. } => "mclone:deer",
             ShowcaseEntityState::DeerBed { .. } => "mclone:deer_bed",
+            ShowcaseEntityState::Bee { .. } => "mclone:bee",
+            ShowcaseEntityState::BeeNest { .. } => "mclone:bee_nest",
+            ShowcaseEntityState::BeeHotel { .. } => "mclone:bee_hotel",
         };
         let position = Vec3d::new(recipe.position[0], recipe.position[1], recipe.position[2]);
         chunks
@@ -682,6 +805,8 @@ fn write_player(
             "mclone:mallard_egg" => ItemKind::MallardEgg,
             "mclone:mallard_feather" => ItemKind::MallardFeather,
             "mclone:hunting_spear" => ItemKind::HuntingSpear,
+            "mclone:bee_hotel" => ItemKind::BeeHotel,
+            "mclone:beeswax" => ItemKind::Beeswax,
             _ => unreachable!("validated inventory item"),
         };
         player.inventory[usize::from(item.slot)] = Some(ItemStackSnapshot {
@@ -695,6 +820,9 @@ fn write_player(
         }
         if let Some(kind) = observation.kind.deer_protocol_kind() {
             player.deer_field_guide.observe(kind);
+        }
+        if let Some(kind) = observation.kind.bee_protocol_kind() {
+            player.bee_field_guide.observe(kind);
         }
     }
     store.save_player(&player)?;
@@ -739,12 +867,16 @@ fn manifest_from_recipe(
 ) -> PlayableShowcaseManifest {
     let mut guide = MallardFieldGuideProgress::default();
     let mut deer_guide = DeerFieldGuideProgress::default();
+    let mut bee_guide = BeeFieldGuideProgress::default();
     for observation in &recipe.player.observations {
         if let Some(kind) = observation.kind.mallard_protocol_kind() {
             guide.observe(kind);
         }
         if let Some(kind) = observation.kind.deer_protocol_kind() {
             deer_guide.observe(kind);
+        }
+        if let Some(kind) = observation.kind.bee_protocol_kind() {
+            bee_guide.observe(kind);
         }
     }
     PlayableShowcaseManifest {
@@ -786,6 +918,22 @@ fn manifest_from_recipe(
             .filter(|entity| matches!(&entity.state, ShowcaseEntityState::DeerBed { .. }))
             .count(),
         deer_field_guide_bits: deer_guide.bits(),
+        bee_count: recipe
+            .entities
+            .iter()
+            .filter(|entity| matches!(&entity.state, ShowcaseEntityState::Bee { .. }))
+            .count(),
+        bee_nest_count: recipe
+            .entities
+            .iter()
+            .filter(|entity| matches!(&entity.state, ShowcaseEntityState::BeeNest { .. }))
+            .count(),
+        bee_hotel_count: recipe
+            .entities
+            .iter()
+            .filter(|entity| matches!(&entity.state, ShowcaseEntityState::BeeHotel { .. }))
+            .count(),
+        bee_field_guide_bits: bee_guide.bits(),
     }
 }
 
@@ -812,6 +960,7 @@ enum ShowcaseBaseTerrain {
     AuthoredIslandV1,
     MallardWetlandV1,
     DeerForestEdgeV1,
+    BeeFloweringMeadowV1,
 }
 
 impl ShowcaseBaseTerrain {
@@ -820,6 +969,7 @@ impl ShowcaseBaseTerrain {
             Self::AuthoredIslandV1 => AuthoredWorldFixtureKind::Island,
             Self::MallardWetlandV1 => AuthoredWorldFixtureKind::MallardWetland,
             Self::DeerForestEdgeV1 => AuthoredWorldFixtureKind::DeerForestEdge,
+            Self::BeeFloweringMeadowV1 => AuthoredWorldFixtureKind::BeeFloweringMeadow,
         }
     }
 }
@@ -888,6 +1038,55 @@ enum ShowcaseEntityState {
     DeerBed {
         source: String,
     },
+    Bee {
+        home: String,
+        flower: Option<[i32; 3]>,
+        behavior: ShowcaseBeeBehavior,
+        #[serde(rename = "behaviorTicks")]
+        behavior_ticks: u32,
+        #[serde(rename = "carryingPollen")]
+        carrying_pollen: bool,
+    },
+    BeeNest {
+        colonized: bool,
+        #[serde(rename = "storedWork")]
+        stored_work: u32,
+        #[serde(rename = "workCapacity")]
+        work_capacity: u32,
+        #[serde(rename = "spreadCooldown")]
+        spread_cooldown: u32,
+    },
+    BeeHotel {
+        colonized: bool,
+        #[serde(rename = "storedWork")]
+        stored_work: u32,
+        #[serde(rename = "workCapacity")]
+        work_capacity: u32,
+        #[serde(rename = "spreadCooldown")]
+        spread_cooldown: u32,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+enum ShowcaseBeeBehavior {
+    Hover,
+    FlyToFlower,
+    Forage,
+    ReturnHome,
+    AtNest,
+}
+
+impl ShowcaseBeeBehavior {
+    const fn protocol(self) -> BeeBehavior {
+        match self {
+            Self::Hover => BeeBehavior::Hover,
+            Self::FlyToFlower => BeeBehavior::FlyToFlower,
+            Self::Forage => BeeBehavior::Forage,
+            Self::ReturnHome => BeeBehavior::ReturnHome,
+            Self::AtNest => BeeBehavior::AtNest,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
@@ -960,7 +1159,11 @@ impl ShowcaseEntityState {
     fn parents(&self) -> [Option<&str>; 2] {
         let parents = match self {
             Self::Mallard { parents, .. } | Self::MallardNest { parents, .. } => parents,
-            Self::Deer { .. } | Self::DeerBed { .. } => return [None, None],
+            Self::Deer { .. }
+            | Self::DeerBed { .. }
+            | Self::Bee { .. }
+            | Self::BeeNest { .. }
+            | Self::BeeHotel { .. } => return [None, None],
         };
         [parents[0].as_deref(), parents[1].as_deref()]
     }
@@ -998,6 +1201,12 @@ enum ShowcaseObservationKind {
     DeerWitnessedFlee,
     DeerFoundAntler,
     DeerHarvested,
+    BeeSeen,
+    BeeFoundNest,
+    BeeWitnessedForage,
+    BeeWitnessedReturn,
+    BeeWitnessedPollination,
+    BeeCollectedBeeswax,
 }
 
 impl ShowcaseObservationKind {
@@ -1021,6 +1230,18 @@ impl ShowcaseObservationKind {
             Self::DeerWitnessedFlee => DeerObservationKind::WitnessedFlee,
             Self::DeerFoundAntler => DeerObservationKind::FoundAntler,
             Self::DeerHarvested => DeerObservationKind::Harvested,
+            _ => return None,
+        })
+    }
+
+    const fn bee_protocol_kind(self) -> Option<BeeObservationKind> {
+        Some(match self {
+            Self::BeeSeen => BeeObservationKind::Seen,
+            Self::BeeFoundNest => BeeObservationKind::FoundNest,
+            Self::BeeWitnessedForage => BeeObservationKind::WitnessedForage,
+            Self::BeeWitnessedReturn => BeeObservationKind::WitnessedReturn,
+            Self::BeeWitnessedPollination => BeeObservationKind::WitnessedPollination,
+            Self::BeeCollectedBeeswax => BeeObservationKind::CollectedBeeswax,
             _ => return None,
         })
     }
@@ -1142,6 +1363,54 @@ mod tests {
             player.deer_field_guide.bits(),
             manifest.deer_field_guide_bits
         );
+    }
+
+    #[test]
+    fn bee_pollination_recipe_is_data_only_and_deterministic() {
+        let identity = ClientIdentity::test_default();
+        let (manifest, store) =
+            playable_showcase_memory_store(PlayableShowcaseId::BeePollination, &identity).unwrap();
+        assert_eq!(manifest.revision, 1);
+        assert_eq!(manifest.seed, 17_505);
+        assert_eq!(manifest.entity_count, 4);
+        assert_eq!(manifest.bee_count, 3);
+        assert_eq!(manifest.bee_nest_count, 1);
+        assert_eq!(manifest.bee_hotel_count, 0);
+        assert_eq!(
+            manifest.bee_field_guide_bits,
+            BeeObservationKind::Seen.bit() | BeeObservationKind::FoundNest.bit()
+        );
+        let entities = store.entity_chunk(ChunkPos::new(0, 0)).unwrap();
+        assert_eq!(
+            entities
+                .entities
+                .iter()
+                .filter(|entity| entity.kind == "mclone:bee")
+                .count(),
+            3
+        );
+        assert!(entities.entities.iter().any(|entity| {
+            entity.kind == "mclone:bee_nest"
+                && matches!(
+                    entity.payload,
+                    EntitySavePayload::BeeColony {
+                        colonized: true,
+                        stored_work: 2,
+                        ..
+                    }
+                )
+        }));
+        let player = store
+            .player(&PlayerRecordKey::from_profile_id(identity.profile_id))
+            .unwrap();
+        assert_eq!(
+            player.inventory[8],
+            Some(ItemStackSnapshot {
+                kind: ItemKind::BeeHotel,
+                count: 1,
+            })
+        );
+        assert_eq!(player.bee_field_guide.bits(), manifest.bee_field_guide_bits);
     }
 
     #[test]

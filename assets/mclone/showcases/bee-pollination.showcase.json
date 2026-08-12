@@ -1,0 +1,97 @@
+{
+  "schemaVersion": 1,
+  "id": "bee-pollination",
+  "title": "Bee Pollination Meadow",
+  "revision": 1,
+  "baseTerrain": "bee-flowering-meadow-v1",
+  "seed": 17505,
+  "dayTime": 6000,
+  "freezeTime": true,
+  "entry": {
+    "feet": [8.5, 65.0, 24.5],
+    "lookAt": [8.0, 66.0, 8.5]
+  },
+  "blockPatches": [],
+  "entities": [
+    {
+      "id": "wild-colony",
+      "position": [8.5, 65.0, 8.5],
+      "yRotDegrees": 0.0,
+      "onGround": true,
+      "liveInstantiation": "mclone-bee-natural-colony",
+      "state": {
+        "kind": "bee-nest",
+        "colonized": true,
+        "storedWork": 2,
+        "workCapacity": 4,
+        "spreadCooldown": 0
+      }
+    },
+    {
+      "id": "forager",
+      "position": [4.5, 65.82, 8.5],
+      "yRotDegrees": -90.0,
+      "onGround": false,
+      "liveInstantiation": "mclone-bee-colony-member",
+      "state": {
+        "kind": "bee",
+        "home": "wild-colony",
+        "flower": [4, 65, 8],
+        "behavior": "forage",
+        "behaviorTicks": 20,
+        "carryingPollen": false
+      }
+    },
+    {
+      "id": "outbound",
+      "position": [10.5, 67.0, 9.5],
+      "yRotDegrees": 75.0,
+      "onGround": false,
+      "liveInstantiation": "mclone-bee-colony-member",
+      "state": {
+        "kind": "bee",
+        "home": "wild-colony",
+        "flower": [13, 65, 8],
+        "behavior": "fly-to-flower",
+        "behaviorTicks": 8,
+        "carryingPollen": false
+      }
+    },
+    {
+      "id": "returning",
+      "position": [7.5, 66.0, 9.5],
+      "yRotDegrees": 155.0,
+      "onGround": false,
+      "liveInstantiation": "mclone-bee-colony-member",
+      "state": {
+        "kind": "bee",
+        "home": "wild-colony",
+        "flower": [4, 65, 8],
+        "behavior": "return-home",
+        "behaviorTicks": 12,
+        "carryingPollen": true
+      }
+    }
+  ],
+  "player": {
+    "selectedHotbarSlot": 8,
+    "inventory": [
+      {
+        "slot": 8,
+        "item": "mclone:bee_hotel",
+        "count": 1,
+        "liveInstantiation": "mclone-bee-hotel-placement"
+      }
+    ],
+    "observations": [
+      {
+        "kind": "bee-seen",
+        "liveInstantiation": "mclone-bee-field-guide-observation"
+      },
+      {
+        "kind": "bee-found-nest",
+        "liveInstantiation": "mclone-bee-field-guide-observation"
+      }
+    ]
+  }
+}

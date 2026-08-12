@@ -3570,6 +3570,83 @@ impl WebSceneHost {
                     "deerFieldGuideCount",
                     f64::from(client.deer_field_guide().discovered_count()),
                 )?;
+                let bees = client
+                    .entity_snapshots()
+                    .filter(|entity| entity.kind == mclone_protocol::EntityKind::Bee)
+                    .collect::<Vec<_>>();
+                report_set_number(&object, "beeCount", bees.len() as f64)?;
+                report_set_number(
+                    &object,
+                    "beeNestCount",
+                    client
+                        .entity_snapshots()
+                        .filter(|entity| entity.kind == mclone_protocol::EntityKind::BeeNest)
+                        .count() as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "beeHotelCount",
+                    client
+                        .entity_snapshots()
+                        .filter(|entity| entity.kind == mclone_protocol::EntityKind::BeeHotel)
+                        .count() as f64,
+                )?;
+                report_set_string(
+                    &object,
+                    "beeEntityIds",
+                    &bees
+                        .iter()
+                        .map(|entity| entity.id.0.to_string())
+                        .collect::<Vec<_>>()
+                        .join(","),
+                )?;
+                report_set_string(
+                    &object,
+                    "beePositions",
+                    &bees
+                        .iter()
+                        .map(|entity| {
+                            format!(
+                                "{:.4},{:.4},{:.4}",
+                                entity.position.x, entity.position.y, entity.position.z
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join(";"),
+                )?;
+                report_set_string(
+                    &object,
+                    "beeTickCounts",
+                    &bees
+                        .iter()
+                        .map(|entity| entity.tick_count.to_string())
+                        .collect::<Vec<_>>()
+                        .join(","),
+                )?;
+                report_set_string(
+                    &object,
+                    "beeAnimationClips",
+                    &bees
+                        .iter()
+                        .map(|entity| {
+                            entity.animation.map_or_else(
+                                || "none".to_owned(),
+                                |animation| animation.clip.to_string(),
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join(","),
+                )?;
+                report_set_number(
+                    &object,
+                    "beeFieldGuideBits",
+                    f64::from(client.bee_field_guide().bits()),
+                )?;
+                report_set_number(
+                    &object,
+                    "beeFieldGuideCount",
+                    f64::from(client.bee_field_guide().discovered_count()),
+                )?;
                 report_set_number(
                     &object,
                     "mallardEggHotbarCount",
@@ -3952,6 +4029,9 @@ impl WebSceneHost {
                             mclone_protocol::EntityKind::MallardNest => "mallardNest",
                             mclone_protocol::EntityKind::Deer => "deer",
                             mclone_protocol::EntityKind::DeerBed => "deerBed",
+                            mclone_protocol::EntityKind::Bee => "bee",
+                            mclone_protocol::EntityKind::BeeNest => "beeNest",
+                            mclone_protocol::EntityKind::BeeHotel => "beeHotel",
                             mclone_protocol::EntityKind::Mannequin => "mannequin",
                             mclone_protocol::EntityKind::DebugCube => "debugCube",
                             mclone_protocol::EntityKind::Item => "item",
@@ -4041,6 +4121,9 @@ impl WebSceneHost {
                             mclone_protocol::EntityKind::MallardNest => "mallardNest",
                             mclone_protocol::EntityKind::Deer => "deer",
                             mclone_protocol::EntityKind::DeerBed => "deerBed",
+                            mclone_protocol::EntityKind::Bee => "bee",
+                            mclone_protocol::EntityKind::BeeNest => "beeNest",
+                            mclone_protocol::EntityKind::BeeHotel => "beeHotel",
                             mclone_protocol::EntityKind::Mannequin => "mannequin",
                             mclone_protocol::EntityKind::DebugCube => "debugCube",
                             mclone_protocol::EntityKind::Item => "item",
@@ -4931,20 +5014,25 @@ fn find_interaction_surface(host: &McloneSceneHost) -> Option<BlockPos> {
     let camera = host.camera_frame_state().camera;
     let base_x = camera.eye.x.floor() as i32;
     let base_z = camera.eye.z.floor() as i32;
-    for dz in -8..=8 {
-        for dx in -8..=8 {
-            let x = base_x + dx;
-            let z = base_z + dz;
-            let Some(y) = host.mono_highest_non_air_block_y_at_world(x, z) else {
-                continue;
-            };
-            let pos = BlockPos::new(x, y, z);
-            if host
-                .mono_client()
-                .and_then(|client| client.block_state_at_block_pos(pos))
-                .is_some()
-            {
-                return Some(pos);
+    for radius in 0_i32..=8 {
+        for dz in -radius..=radius {
+            for dx in -radius..=radius {
+                if dx.abs().max(dz.abs()) != radius {
+                    continue;
+                }
+                let x = base_x + dx;
+                let z = base_z + dz;
+                let Some(y) = host.mono_highest_non_air_block_y_at_world(x, z) else {
+                    continue;
+                };
+                let pos = BlockPos::new(x, y, z);
+                if host
+                    .mono_client()
+                    .and_then(|client| client.block_state_at_block_pos(pos))
+                    .is_some()
+                {
+                    return Some(pos);
+                }
             }
         }
     }

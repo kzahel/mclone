@@ -44,6 +44,7 @@ pub enum AuthoredWorldFixtureKind {
     Island,
     MallardWetland,
     DeerForestEdge,
+    BeeFloweringMeadow,
     LobbyTableV2,
     LobbyIslandV2,
 }
@@ -55,6 +56,7 @@ impl AuthoredWorldFixtureKind {
             Self::Island => "live-diorama-island-b-v1",
             Self::MallardWetland => "mallard-wetland-v1",
             Self::DeerForestEdge => "deer-forest-edge-v1",
+            Self::BeeFloweringMeadow => "bee-flowering-meadow-v1",
             Self::LobbyTableV2 => "lobby-table-a-v2",
             Self::LobbyIslandV2 => "lobby-island-b-v2",
         }
@@ -66,6 +68,7 @@ impl AuthoredWorldFixtureKind {
             Self::Island => "island-b",
             Self::MallardWetland => "mallard-wetland-v1",
             Self::DeerForestEdge => "deer-forest-edge-v1",
+            Self::BeeFloweringMeadow => "bee-flowering-meadow-v1",
             Self::LobbyTableV2 => "lobby-table-a-v2",
             Self::LobbyIslandV2 => "lobby-island-b-v2",
         }
@@ -77,6 +80,7 @@ impl AuthoredWorldFixtureKind {
             Self::Island | Self::LobbyIslandV2 => 17_502,
             Self::MallardWetland => 17_503,
             Self::DeerForestEdge => 17_504,
+            Self::BeeFloweringMeadow => 17_505,
         }
     }
 
@@ -86,6 +90,7 @@ impl AuthoredWorldFixtureKind {
             Self::Island | Self::LobbyIslandV2 => [7.5, 66.0, 7.5],
             Self::MallardWetland => [8.5, 65.0, 18.5],
             Self::DeerForestEdge => [8.5, 65.0, 29.5],
+            Self::BeeFloweringMeadow => [8.5, 65.0, 24.5],
         }
     }
 
@@ -98,6 +103,7 @@ impl AuthoredWorldFixtureKind {
             Self::Island | Self::LobbyIslandV2 => [8.5, 65.0, 8.5],
             Self::MallardWetland => [8.5, 64.88, 7.5],
             Self::DeerForestEdge => [8.5, 65.0, 8.5],
+            Self::BeeFloweringMeadow => [8.5, 65.0, 8.5],
         }
     }
 
@@ -111,6 +117,7 @@ impl AuthoredWorldFixtureKind {
             Self::Island | Self::LobbyIslandV2 => [4.0, 67.03125, 8.0],
             Self::MallardWetland => self.preview_anchor(),
             Self::DeerForestEdge => self.preview_anchor(),
+            Self::BeeFloweringMeadow => self.preview_anchor(),
         }
     }
 
@@ -122,6 +129,7 @@ impl AuthoredWorldFixtureKind {
             Self::Island | Self::LobbyIslandV2 => [5, 65, 8],
             Self::MallardWetland => [8, 64, 18],
             Self::DeerForestEdge => [8, 64, 29],
+            Self::BeeFloweringMeadow => [8, 64, 24],
         }
     }
 
@@ -213,6 +221,9 @@ pub fn authored_world_fixture_records(
                 }
                 AuthoredWorldFixtureKind::DeerForestEdge => {
                     author_deer_forest_edge_chunk(&mut buffer)
+                }
+                AuthoredWorldFixtureKind::BeeFloweringMeadow => {
+                    author_bee_flowering_meadow_chunk(&mut buffer)
                 }
             }
             chunks.insert(pos, GeneratedChunk::from_mutable_buffer(buffer));
@@ -563,6 +574,77 @@ fn author_deer_forest_edge_chunk(chunk: &mut MutableChunkBlockBuffer) {
     }
 }
 
+fn author_bee_flowering_meadow_chunk(chunk: &mut MutableChunkBlockBuffer) {
+    use mclone_worldgen::block::{DANDELION, OAK_LEAVES, OAK_LOG, POPPY};
+
+    for local_z in 0..16 {
+        for local_x in 0..16 {
+            let world_x = chunk.chunk_x * 16 + local_x;
+            let world_z = chunk.chunk_z * 16 + local_z;
+            for y in 59..=62 {
+                chunk.set_block_at_y(local_x, y, local_z, STONE);
+            }
+            chunk.set_block_at_y(local_x, 63, local_z, DIRT);
+            chunk.set_block_at_y(local_x, 64, local_z, GRASS_BLOCK);
+
+            let in_patch = [(4, 8), (13, 8), (8, 17), (-7, 5), (22, 15)]
+                .into_iter()
+                .any(|(center_x, center_z)| {
+                    let dx = world_x - center_x;
+                    let dz = world_z - center_z;
+                    dx * dx + dz * dz <= 18
+                });
+            let flower_cell = (world_x * 17 + world_z * 31).rem_euclid(7) <= 2;
+            if in_patch && flower_cell {
+                chunk.set_block_at_y(
+                    local_x,
+                    65,
+                    local_z,
+                    if (world_x + world_z).rem_euclid(3) == 0 {
+                        POPPY
+                    } else {
+                        DANDELION
+                    },
+                );
+            }
+        }
+    }
+
+    // Sparse perimeter trees provide real woody shelter while leaving a broad
+    // central flight corridor and an unobstructed south-facing review view.
+    for (x, z) in [(-7, -1), (23, 1), (-10, 18), (26, 22), (8, -10)] {
+        if block_to_chunk_coord(x) != chunk.chunk_x || block_to_chunk_coord(z) != chunk.chunk_z {
+            continue;
+        }
+        let local_x = x.rem_euclid(16);
+        let local_z = z.rem_euclid(16);
+        for y in 65..=68 {
+            chunk.set_block_at_y(local_x, y, local_z, OAK_LOG);
+        }
+        for dz in -2_i32..=2 {
+            for dx in -2_i32..=2 {
+                if dx.abs() + dz.abs() > 3 {
+                    continue;
+                }
+                for y in 68..=70 {
+                    let leaf_x = x + dx;
+                    let leaf_z = z + dz;
+                    if block_to_chunk_coord(leaf_x) == chunk.chunk_x
+                        && block_to_chunk_coord(leaf_z) == chunk.chunk_z
+                    {
+                        chunk.set_block_at_y(
+                            leaf_x.rem_euclid(16),
+                            y,
+                            leaf_z.rem_euclid(16),
+                            OAK_LEAVES,
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
 fn authored_lobby_island_entities() -> EntityChunkRecord {
     EntityChunkRecord::new(
         AUTHORED_WORLD_FIXTURE_CENTER,
@@ -617,6 +699,7 @@ mod tests {
             AuthoredWorldFixtureKind::Island,
             AuthoredWorldFixtureKind::MallardWetland,
             AuthoredWorldFixtureKind::DeerForestEdge,
+            AuthoredWorldFixtureKind::BeeFloweringMeadow,
             AuthoredWorldFixtureKind::LobbyTableV2,
             AuthoredWorldFixtureKind::LobbyIslandV2,
         ] {

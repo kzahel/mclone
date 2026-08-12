@@ -292,6 +292,7 @@ const fn authored_fixture_tag(fixture: Option<AuthoredWorldFixtureKind>) -> u8 {
         Some(AuthoredWorldFixtureKind::LobbyIslandV2) => 4,
         Some(AuthoredWorldFixtureKind::MallardWetland) => 5,
         Some(AuthoredWorldFixtureKind::DeerForestEdge) => 6,
+        Some(AuthoredWorldFixtureKind::BeeFloweringMeadow) => 7,
     }
 }
 
@@ -304,6 +305,7 @@ fn authored_fixture_from_tag(tag: u8) -> Result<Option<AuthoredWorldFixtureKind>
         4 => Ok(Some(AuthoredWorldFixtureKind::LobbyIslandV2)),
         5 => Ok(Some(AuthoredWorldFixtureKind::MallardWetland)),
         6 => Ok(Some(AuthoredWorldFixtureKind::DeerForestEdge)),
+        7 => Ok(Some(AuthoredWorldFixtureKind::BeeFloweringMeadow)),
         _ => Err(format!(
             "integrated-server startup frame has unknown authored fixture {tag}"
         )),
@@ -315,6 +317,7 @@ const fn playable_showcase_tag(showcase: Option<mclone_server::PlayableShowcaseI
         None => 0,
         Some(mclone_server::PlayableShowcaseId::MallardEcology) => 1,
         Some(mclone_server::PlayableShowcaseId::DeerForestEdge) => 2,
+        Some(mclone_server::PlayableShowcaseId::BeePollination) => 3,
     }
 }
 
@@ -325,6 +328,7 @@ fn playable_showcase_from_tag(
         0 => Ok(None),
         1 => Ok(Some(mclone_server::PlayableShowcaseId::MallardEcology)),
         2 => Ok(Some(mclone_server::PlayableShowcaseId::DeerForestEdge)),
+        3 => Ok(Some(mclone_server::PlayableShowcaseId::BeePollination)),
         _ => Err(format!(
             "integrated-server startup frame has unknown playable showcase {tag}"
         )),

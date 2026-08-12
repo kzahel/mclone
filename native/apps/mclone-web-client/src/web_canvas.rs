@@ -280,6 +280,34 @@ impl WebStartupConfig {
             .and_then(|showcase| playable_showcase_manifest(showcase).ok())
             .map(|manifest| manifest.deer_field_guide_bits)
     }
+
+    #[wasm_bindgen(getter, js_name = showcaseBeeCount)]
+    pub fn showcase_bee_count(&self) -> Option<u32> {
+        self.showcase
+            .and_then(|showcase| playable_showcase_manifest(showcase).ok())
+            .and_then(|manifest| u32::try_from(manifest.bee_count).ok())
+    }
+
+    #[wasm_bindgen(getter, js_name = showcaseBeeNestCount)]
+    pub fn showcase_bee_nest_count(&self) -> Option<u32> {
+        self.showcase
+            .and_then(|showcase| playable_showcase_manifest(showcase).ok())
+            .and_then(|manifest| u32::try_from(manifest.bee_nest_count).ok())
+    }
+
+    #[wasm_bindgen(getter, js_name = showcaseBeeHotelCount)]
+    pub fn showcase_bee_hotel_count(&self) -> Option<u32> {
+        self.showcase
+            .and_then(|showcase| playable_showcase_manifest(showcase).ok())
+            .and_then(|manifest| u32::try_from(manifest.bee_hotel_count).ok())
+    }
+
+    #[wasm_bindgen(getter, js_name = showcaseBeeFieldGuideBits)]
+    pub fn showcase_bee_field_guide_bits(&self) -> Option<u32> {
+        self.showcase
+            .and_then(|showcase| playable_showcase_manifest(showcase).ok())
+            .map(|manifest| manifest.bee_field_guide_bits)
+    }
 }
 
 fn format_coordinates(value: [f64; 3]) -> String {
