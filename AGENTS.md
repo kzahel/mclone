@@ -63,6 +63,40 @@ filename's slug in its `Topic:` trailers. This is a convention, not a one-to-one
 requirement: a durable topic may exist without an active commit series, and a
 small commit series may not warrant a durable topic doc.
 
+## Playable showcase guardrails
+
+Before creating or changing a playable showcase, read
+[`docs/topics/playable-showcases.md`](docs/topics/playable-showcases.md). A
+showcase is a bounded data-authored tiny save for screenshot and interactive
+review, not a game mode, scenario scripting system, or alternate content
+runtime.
+
+- Put composition in `assets/mclone/showcases/` and compile it through the
+  shared `mclone-server` showcase/persistence path. Platform adapters may only
+  select the recipe and provide transient host storage.
+- Showcase data may establish ordinary saved initial state. Never add
+  showcase-specific branches to simulation, AI, interaction, protocol, UI,
+  audio, rendering, or world generation.
+- Every showcased non-base-terrain gameplay fact must declare a compatible
+  typed `liveInstantiation` evidence ID. The registry entry must name an
+  ordinary live-world producer and a focused test or production-contract
+  anchor. Unknown or incompatible evidence must fail validation.
+- A showcased behavior or fact must also be obtainable through the real game.
+  Land that shared producer and its tests before or with the showcase. Do not
+  mark the tactical complete while the showcase is the only instantiation
+  path, and update/remove evidence when its live producer changes.
+- Keep the schema deny-unknown-fields, narrowly allowlisted, and hard-bounded.
+  Do not add scripts, triggers, timers, update loops, arbitrary commands, or a
+  large block palette. If dynamic behavior is needed, implement the real
+  gameplay mechanic; if a recipe needs substantially broader machinery, stop
+  and reassess whether it is still a showcase.
+- Reuse one shared recipe and compiler across native, Web, flat, and XR paths.
+  Validate exact recipe/seed/camera/state receipts, inspect native and Web
+  pixels under `/tmp`, deploy the exact pushed revision, run the deployed
+  smoke, and inspect its screenshot before sharing the clean public URL.
+- Web showcase links must remain fresh and non-persistent. Verification must
+  assert that every IndexedDB world-record store stays empty.
+
 ## Implementation routing
 
 ### LOD terminology and routing

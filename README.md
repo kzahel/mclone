@@ -84,6 +84,7 @@ Worldgen, rendering, and subsystem docs:
 - [`docs/entity-architecture.md`](docs/entity-architecture.md) — entity/mob runtime boundaries
 - [`docs/creatures.md`](docs/creatures.md) — overworld creature spawning architecture
 - [`docs/topics/habitat-driven-creature-ecology.md`](docs/topics/habitat-driven-creature-ecology.md) — terrain/creature co-design, habitats, persistence, and mechanics-led content promotion
+- [`docs/topics/playable-showcases.md`](docs/topics/playable-showcases.md) — bounded tiny-save screenshot/play links and live-instantiation guardrails
 - [`docs/topics/performance.md`](docs/topics/performance.md) — high-priority known performance issues and current pickup queue
 - [`docs/topics/actor-rendering-performance.md`](docs/topics/actor-rendering-performance.md) — actor rendering baselines, memory tradeoffs, and future optimization queue
 - [`docs/topics/xr-render-path-switching.md`](docs/topics/xr-render-path-switching.md) — live dual-eye, array per-eye, and multiview selection with one resident XR target family

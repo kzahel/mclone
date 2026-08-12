@@ -1,6 +1,6 @@
 # Tactical 280: Playable Showcase Links
 
-Status: **active 2026-08-12**
+Status: **complete 2026-08-12**
 
 Topic:
 
@@ -104,4 +104,51 @@ world tests and review concerns.
 
 ## Execution Record
 
-Pending implementation and evidence.
+Implemented in the `playable-showcases` commit series and integrated with the
+concurrently published XR/terrain work at `ccc711fd`.
+
+- Added schema-v1 `mallard-ecology.showcase.json`, the shared typed compiler,
+  deterministic stable entity identities, and ordinary persistence-record
+  output. The recipe is limited to one authored island, 256 block patches, 64
+  entities, narrow fact allowlists, and deny-unknown-fields parsing.
+- Added the typed live-instantiation registry. Every lily pad, mallard life
+  stage, nest, inventory item, and observation in the recipe must identify a
+  compatible ordinary producer and contract anchor; unknown and mismatched
+  evidence fails validation.
+- Added strict `?showcase=mallard-ecology` browser entry, worker-side shared
+  compilation, transient storage enforcement, and conflict rejection.
+- Replaced bespoke native mallard capture authoring with the same recipe and
+  added exact native/Web receipt assertions plus a public deployed smoke.
+- Preserved the shared multiview/fog/render and newer persistence/scheduler
+  contracts when merging the concurrent upstream history. The showcase added
+  no entity-tick, gameplay, renderer, protocol, audio, or UI mode.
+
+Acceptance evidence:
+
+- `cargo test -p mclone-server playable_showcase`: 4 passed.
+- `cargo test -p mclone-server frozen_day_time`: 1 passed.
+- affected `cargo check`: passed for server, app runtime, render, scene, Web,
+  and UI crates.
+- `pnpm native:mallard-ecology:capture`: passed; flat and synthetic-stereo
+  pixels inspected under `/tmp`.
+- `pnpm native:web:showcase-smoke`: passed; local Web pixels inspected.
+- Cloudflare deployed `ccc711fd` as version
+  `24430e36-a47d-4c45-8102-eae90a6f4e3f`.
+- `pnpm native:web:showcase-deployed-smoke`: passed against
+  `https://mclone.kzahel.com`; public pixels inspected.
+- Local and deployed Web screenshots were byte-identical with SHA-256
+  `ebe04116774cdf19cfa8c9fb092f4e1a0a432bee918a111ab6c5d3f6157836ea`.
+- Both Web receipts reported recipe revision 1, seed `17502`, eye
+  `8.5,67.62,7.5`, target `8,65,1.5`, four entities, three mallards, one nest,
+  six field notes, two eggs, and one feather. All eight IndexedDB world-store
+  counts remained zero.
+
+The verified clean review URL is:
+
+```text
+https://mclone.kzahel.com/app.html?showcase=mallard-ecology
+```
+
+The durable workflow and guardrails now live in
+[`../topics/playable-showcases.md`](../topics/playable-showcases.md) and
+`AGENTS.md`.

@@ -21,6 +21,20 @@ implies an explicit session request. `?startInWorld=false` forces title entry.
 The browser adapter normalizes those URL facts into the same shared
 `ClientEntryResolution` used by the other clients.
 
+A named playable showcase is a stricter direct-entry request. For example:
+
+```text
+https://mclone.kzahel.com/app.html?showcase=mallard-ecology
+```
+
+The `showcase` parameter selects a shared, checked-in tiny-save recipe and owns
+its seed, generation profile, time, topology, and entry camera. It always uses
+a fresh transient in-memory store and rejects `worldId`, persistent storage,
+remote destinations, or conflicting world/camera parameters. Refresh resets
+the scene. See
+[`topics/playable-showcases.md`](topics/playable-showcases.md) for the recipe,
+live-instantiation, and anti-sprawl contract.
+
 The procedural-horizon game integration remains an explicit review option.
 For a local `mclone-overworld-v1` session, add
 `terrainPresentation=composed`; `exact-only` is the protected default and
@@ -127,6 +141,12 @@ pnpm native:web:serve
 
 # Validate the interactive browser app with Playwright screenshots in /tmp.
 pnpm native:web:app-smoke
+
+# Compile and capture the first playable showcase locally, then verify the
+# already-deployed public URL. Both commands assert exact state, credible
+# pixels, and zero browser persistent-world records.
+pnpm native:web:showcase-smoke
+pnpm native:web:showcase-deployed-smoke
 
 # Prove that an ordinary URL renders title with no active session or world.
 pnpm native:web:menu-smoke

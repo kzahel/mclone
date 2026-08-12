@@ -11,7 +11,11 @@ mechanics-led species promotion is now proven by Tactical
 [`278`](../tactical/278-mallard-wetland-ecology-loop.md), beginning with a
 mallard wetland loop, and Tactical
 [`279`](../tactical/279-mallard-life-and-discovery.md), completing mallard life,
-evidence, and discovery mechanics.
+evidence, and discovery mechanics. Tactical
+[`280`](../tactical/280-playable-showcase-links.md) now packages those ordinary
+live mechanics as a bounded transient tiny save for matched screenshot and
+interactive Web review. The continuing showcase contract lives separately in
+[`playable-showcases.md`](playable-showcases.md).
 
 ## Scope
 
@@ -292,6 +296,12 @@ event, and no ambient soundtrack pretends that a flock exists.
   icons, and a completed six-part field-guide entry. The inspected
   [stereo capture](</tmp/mclone-mallard-ecology-stereo.png>) projects the guide
   legibly into both eyes through the shared world-GUI renderer.
+- The `mallard-ecology` data recipe requires registered ordinary-game evidence
+  for its lily pad, adults, duckling, nest, egg, feather, and observations. Its
+  local and deployed Web captures are pixel-identical, share the native seed,
+  entry pose, entity composition, and guide receipt, and leave all IndexedDB
+  world stores empty. The verified temporary play link is
+  `https://mclone.kzahel.com/app.html?showcase=mallard-ecology`.
 
 ## Known Gaps and Recommended Next Work
 
@@ -325,5 +335,7 @@ event, and no ambient soundtrack pretends that a flock exists.
 - [`../entity-architecture.md`](../entity-architecture.md): shared entity
   ownership and persistence architecture
 - [`animal-catalogue.md`](animal-catalogue.md): Creature Lab catalogue status
+- [`playable-showcases.md`](playable-showcases.md): bounded tiny-save review
+  links and enforced live-instantiation evidence
 - [`mclone-overworld-breadth.md`](mclone-overworld-breadth.md): original
   terrain/ecology breadth ledger
