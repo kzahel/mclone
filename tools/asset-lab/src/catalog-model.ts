@@ -9,6 +9,15 @@ import {
   type CreatureMetadata,
   validateCreatureMetadata,
 } from "./creature-metadata";
+import {
+  SEMANTIC_ASSET_ANCHORS,
+  SEMANTIC_ASSET_USES,
+  SEMANTIC_INSTANTIATION_STATUSES,
+  semanticAssetAnchorForUse,
+  type SemanticAssetAnchor,
+  type SemanticAssetUse,
+  type SemanticInstantiationStatus,
+} from "./semantic-assets";
 
 export interface AnimalCatalogClip {
   durationSeconds: number;
@@ -23,13 +32,14 @@ export interface AnimalCatalogClip {
 
 export interface AnimalCatalogFigure {
   alphaModes: FigureAlphaMode[];
+  anchor: SemanticAssetAnchor;
   clipCount: number;
   clips: AnimalCatalogClip[];
-  defaultClip: string;
+  defaultClip?: string;
   jsonPath: string;
   label: string;
   materialCount: number;
-  metadata: CreatureMetadata;
+  metadata?: CreatureMetadata;
   name: string;
   partCount: number;
   runtimePromotion?: AnimalCatalogRuntimePromotion;
@@ -37,11 +47,15 @@ export interface AnimalCatalogFigure {
   semanticSha256: string;
   textureCount: number;
   thumbnailPath: string;
+  use: SemanticAssetUse;
 }
 
 export interface AnimalCatalogRuntimePromotion {
-  figureId: string;
+  anchor: SemanticAssetAnchor;
+  assetId: string;
+  instantiation: SemanticInstantiationStatus;
   jsonPath: string;
+  use: SemanticAssetUse;
 }
 
 export interface AnimalCatalogDocument {
@@ -53,6 +67,10 @@ export interface AnimalCatalogDocument {
     clips: number;
     parts: number;
     runtimePromotedFigures: number;
+    runtimePromotedProps: number;
+    liveInstantiatedProps: number;
+    semanticPropParts: number;
+    semanticProps: number;
   };
 }
 
@@ -65,13 +83,18 @@ export function parseAnimalCatalog(value: unknown, sourceLabel: string): AnimalC
   }
 
   const figures = value.figures.map((figure, index) => parseCatalogFigure(figure, sourceLabel, index));
-  if (value.summary.canonicalFigures !== figures.length) {
+  const actorFigures = figures.filter((figure) => figure.use === "actor");
+  const semanticProps = figures.filter((figure) => figure.use !== "actor");
+  if (
+    value.summary.canonicalFigures !== actorFigures.length
+    || value.summary.semanticProps !== semanticProps.length
+  ) {
     throw new Error(
-      `Animal catalogue '${sourceLabel}' expected ${value.summary.canonicalFigures} figures but contains ${figures.length}`,
+      `Animal catalogue '${sourceLabel}' figure/prop summary does not match its ${figures.length} entries`,
     );
   }
   const names = new Set<string>();
-  const runtimeFigureIds = new Set<string>();
+  const runtimeAssetIds = new Set<string>();
   const runtimePaths = new Set<string>();
   for (const figure of figures) {
     if (names.has(figure.name)) {
@@ -79,9 +102,9 @@ export function parseAnimalCatalog(value: unknown, sourceLabel: string): AnimalC
     }
     names.add(figure.name);
     if (figure.runtimePromotion) {
-      if (runtimeFigureIds.has(figure.runtimePromotion.figureId)) {
+      if (runtimeAssetIds.has(figure.runtimePromotion.assetId)) {
         throw new Error(
-          `Animal catalogue '${sourceLabel}' contains duplicate runtime figure ID '${figure.runtimePromotion.figureId}'`,
+          `Animal catalogue '${sourceLabel}' contains duplicate runtime asset ID '${figure.runtimePromotion.assetId}'`,
         );
       }
       if (runtimePaths.has(figure.runtimePromotion.jsonPath)) {
@@ -89,13 +112,22 @@ export function parseAnimalCatalog(value: unknown, sourceLabel: string): AnimalC
           `Animal catalogue '${sourceLabel}' contains duplicate runtime path '${figure.runtimePromotion.jsonPath}'`,
         );
       }
-      runtimeFigureIds.add(figure.runtimePromotion.figureId);
+      runtimeAssetIds.add(figure.runtimePromotion.assetId);
       runtimePaths.add(figure.runtimePromotion.jsonPath);
     }
   }
-  if (value.summary.runtimePromotedFigures !== runtimeFigureIds.size) {
+  const runtimePromotedFigures = actorFigures.filter((figure) => figure.runtimePromotion !== undefined).length;
+  const runtimePromotedProps = semanticProps.filter((figure) => figure.runtimePromotion !== undefined).length;
+  const liveInstantiatedProps = semanticProps.filter(
+    (figure) => figure.runtimePromotion?.instantiation === "live_gameplay",
+  ).length;
+  if (
+    value.summary.runtimePromotedFigures !== runtimePromotedFigures
+    || value.summary.runtimePromotedProps !== runtimePromotedProps
+    || value.summary.liveInstantiatedProps !== liveInstantiatedProps
+  ) {
     throw new Error(
-      `Animal catalogue '${sourceLabel}' expected ${value.summary.runtimePromotedFigures} runtime-promoted figures but contains ${runtimeFigureIds.size}`,
+      `Animal catalogue '${sourceLabel}' runtime-promotion summary does not match its entries`,
     );
   }
 
@@ -145,12 +177,19 @@ function parseCatalogFigure(value: unknown, sourceLabel: string, index: number):
     || !Array.isArray(value.alphaModes)
     || value.alphaModes.length === 0
     || !value.alphaModes.every(isFigureAlphaMode)
-    || !isSafeName(value.defaultClip)
+    || !isSemanticAssetUse(value.use)
+    || !isSemanticAssetAnchor(value.anchor)
+    || semanticAssetAnchorForUse(value.use) !== value.anchor
+    || (value.defaultClip !== undefined && !isSafeName(value.defaultClip))
   ) {
     throw new Error(`Animal catalogue '${sourceLabel}' has an invalid figure at index ${index}`);
   }
   const clips = value.clips.map((clip, clipIndex) => parseCatalogClip(clip, sourceLabel, index, clipIndex));
-  if (value.clipCount !== clips.length || !clips.some((clip) => clip.name === value.defaultClip)) {
+  if (
+    value.clipCount !== clips.length
+    || (clips.length === 0 && value.defaultClip !== undefined)
+    || (clips.length > 0 && !clips.some((clip) => clip.name === value.defaultClip))
+  ) {
     throw new Error(`Animal catalogue '${sourceLabel}' has inconsistent clips for '${value.name}'`);
   }
   const clipNames = new Set(clips.map((clip) => clip.name));
@@ -167,7 +206,19 @@ function parseCatalogFigure(value: unknown, sourceLabel: string, index: number):
   const runtimePromotion = value.runtimePromotion === undefined
     ? undefined
     : parseRuntimePromotion(value.runtimePromotion, sourceLabel, index);
-  const metadataErrors = validateCreatureMetadata(value.metadata, `figure ${index} metadata`);
+  if (
+    runtimePromotion !== undefined
+    && (runtimePromotion.use !== value.use || runtimePromotion.anchor !== value.anchor)
+  ) {
+    throw new Error(
+      `Animal catalogue '${sourceLabel}' promotion use/anchor disagrees with '${value.name}'`,
+    );
+  }
+  const metadataErrors = value.use === "actor"
+    ? validateCreatureMetadata(value.metadata, `figure ${index} metadata`)
+    : value.metadata === undefined
+      ? []
+      : [`figure ${index} metadata must be absent for semantic props`];
   if (metadataErrors.length > 0) {
     throw new Error(
       `Animal catalogue '${sourceLabel}' has invalid creature metadata for '${value.name}':\n`
@@ -176,13 +227,16 @@ function parseCatalogFigure(value: unknown, sourceLabel: string, index: number):
   }
   return {
     alphaModes: [...value.alphaModes] as FigureAlphaMode[],
+    anchor: value.anchor,
     clipCount: value.clipCount,
     clips,
-    defaultClip: value.defaultClip,
+    ...(value.defaultClip === undefined ? {} : { defaultClip: value.defaultClip }),
     jsonPath: value.jsonPath,
     label: value.label,
     materialCount: value.materialCount,
-    metadata: cloneCreatureMetadata(value.metadata as CreatureMetadata),
+    ...(value.use === "actor"
+      ? { metadata: cloneCreatureMetadata(value.metadata as CreatureMetadata) }
+      : {}),
     name: value.name,
     partCount: value.partCount,
     ...(runtimePromotion === undefined ? {} : { runtimePromotion }),
@@ -190,6 +244,7 @@ function parseCatalogFigure(value: unknown, sourceLabel: string, index: number):
     semanticSha256: value.semanticSha256,
     textureCount: value.textureCount,
     thumbnailPath: value.thumbnailPath,
+    use: value.use,
   };
 }
 
@@ -200,17 +255,27 @@ function parseRuntimePromotion(
 ): AnimalCatalogRuntimePromotion {
   if (
     !isRecord(value)
-    || typeof value.figureId !== "string"
-    || !/^[a-z0-9._-]+:[a-z0-9._/-]+$/u.test(value.figureId)
+    || typeof value.assetId !== "string"
+    || !/^[a-z0-9._-]+:[a-z0-9._/-]+$/u.test(value.assetId)
     || typeof value.jsonPath !== "string"
     || !value.jsonPath.startsWith("assets/mclone/figures/")
     || !isRelativeArtifactPath(value.jsonPath, ".figure.json")
+    || !isSemanticAssetUse(value.use)
+    || !isSemanticAssetAnchor(value.anchor)
+    || semanticAssetAnchorForUse(value.use) !== value.anchor
+    || !isSemanticInstantiationStatus(value.instantiation)
   ) {
     throw new Error(
       `Animal catalogue '${sourceLabel}' has invalid runtime promotion metadata at figure ${figureIndex}`,
     );
   }
-  return { figureId: value.figureId, jsonPath: value.jsonPath };
+  return {
+    anchor: value.anchor,
+    assetId: value.assetId,
+    instantiation: value.instantiation,
+    jsonPath: value.jsonPath,
+    use: value.use,
+  };
 }
 
 function parseCatalogClip(
@@ -267,7 +332,24 @@ function isCatalogSummary(value: unknown): value is AnimalCatalogDocument["summa
     && isNonnegativeInteger(value.canonicalFigures)
     && isNonnegativeInteger(value.clips)
     && isNonnegativeInteger(value.parts)
-    && isNonnegativeInteger(value.runtimePromotedFigures);
+    && isNonnegativeInteger(value.runtimePromotedFigures)
+    && isNonnegativeInteger(value.runtimePromotedProps)
+    && isNonnegativeInteger(value.liveInstantiatedProps)
+    && isNonnegativeInteger(value.semanticPropParts)
+    && isNonnegativeInteger(value.semanticProps);
+}
+
+function isSemanticAssetUse(value: unknown): value is SemanticAssetUse {
+  return typeof value === "string" && (SEMANTIC_ASSET_USES as readonly string[]).includes(value);
+}
+
+function isSemanticAssetAnchor(value: unknown): value is SemanticAssetAnchor {
+  return typeof value === "string" && (SEMANTIC_ASSET_ANCHORS as readonly string[]).includes(value);
+}
+
+function isSemanticInstantiationStatus(value: unknown): value is SemanticInstantiationStatus {
+  return typeof value === "string"
+    && (SEMANTIC_INSTANTIATION_STATUSES as readonly string[]).includes(value);
 }
 
 function isLocomotionKind(value: unknown): value is LocomotionKind {

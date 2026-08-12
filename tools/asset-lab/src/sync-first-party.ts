@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { assertCanonicalFigure } from "./dsl";
-import { FIRST_PARTY_FIGURES } from "./first-party-figures";
+import { FIRST_PARTY_SEMANTIC_ASSETS } from "./first-party-figures";
 import { loadFigureJsonDocument } from "./load";
 import { repositoryRoot } from "./vite-figure-path";
 
@@ -9,29 +9,29 @@ const write = parseArgs(process.argv.slice(2));
 await assertNoUnownedOutputs();
 
 const stale: string[] = [];
-for (const figure of FIRST_PARTY_FIGURES) {
-  const document = await loadFigureJsonDocument(figure.sourcePath);
+for (const semanticAsset of FIRST_PARTY_SEMANTIC_ASSETS) {
+  const document = await loadFigureJsonDocument(semanticAsset.sourcePath);
   assertCanonicalFigure(document.asset);
-  if (document.asset.name !== figure.name) {
+  if (document.asset.name !== semanticAsset.name) {
     throw new Error(
-      `First-party source '${relative(figure.sourcePath)}' exports '${document.asset.name}', expected '${figure.name}'`,
+      `First-party source '${relative(semanticAsset.sourcePath)}' exports '${document.asset.name}', expected '${semanticAsset.name}'`,
     );
   }
 
-  const current = await readIfPresent(figure.outputPath);
+  const current = await readIfPresent(semanticAsset.outputPath);
   if (current === document.json) {
-    console.log(`Current ${relative(figure.outputPath)}`);
+    console.log(`Current ${relative(semanticAsset.outputPath)}`);
     continue;
   }
 
   if (!write) {
-    stale.push(relative(figure.outputPath));
+    stale.push(relative(semanticAsset.outputPath));
     continue;
   }
 
-  await fs.mkdir(path.dirname(figure.outputPath), { recursive: true });
-  await fs.writeFile(figure.outputPath, document.json, "utf8");
-  console.log(`Wrote ${relative(figure.outputPath)} from ${relative(figure.sourcePath)}`);
+  await fs.mkdir(path.dirname(semanticAsset.outputPath), { recursive: true });
+  await fs.writeFile(semanticAsset.outputPath, document.json, "utf8");
+  console.log(`Wrote ${relative(semanticAsset.outputPath)} from ${relative(semanticAsset.sourcePath)}`);
 }
 
 if (stale.length > 0) {
@@ -53,14 +53,14 @@ function parseArgs(argv: string[]): boolean {
 
 async function assertNoUnownedOutputs(): Promise<void> {
   const outputDir = path.join(repositoryRoot, "assets", "mclone", "figures");
-  const owned = new Set(FIRST_PARTY_FIGURES.map((figure) => path.basename(figure.outputPath)));
+  const owned = new Set(FIRST_PARTY_SEMANTIC_ASSETS.map((asset) => path.basename(asset.outputPath)));
   const entries = await fs.readdir(outputDir, { withFileTypes: true });
   const unowned = entries
     .filter((entry) => entry.isFile() && entry.name.endsWith(".figure.json") && !owned.has(entry.name))
     .map((entry) => relative(path.join(outputDir, entry.name)));
   if (unowned.length > 0) {
     throw new Error(
-      `Promoted figure JSON has no declared TypeScript source:\n${unowned.map((entry) => `- ${entry}`).join("\n")}`,
+      `Promoted semantic JSON has no declared TypeScript source:\n${unowned.map((entry) => `- ${entry}`).join("\n")}`,
     );
   }
 }

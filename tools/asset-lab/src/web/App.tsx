@@ -10,6 +10,7 @@ import {
   type HabitatFilter,
   type MotionFilter,
   type PromotionFilter,
+  catalogueViewFromUrl,
   useAnimalCatalogueStore,
 } from "./store";
 
@@ -72,6 +73,8 @@ const dispositionOptions: Array<{ label: string; value: DispositionFilter }> = [
 ];
 
 export function App(): JSX.Element {
+  const catalogueView = catalogueViewFromUrl();
+  const isPropView = catalogueView === "props";
   const bodyPlanFilter = useAnimalCatalogueStore((state) => state.bodyPlanFilter);
   const catalog = useAnimalCatalogueStore((state) => state.catalog);
   const dispositionFilter = useAnimalCatalogueStore((state) => state.dispositionFilter);
@@ -138,6 +141,7 @@ export function App(): JSX.Element {
     dispositionFilter,
     motionFilter,
     promotionFilter,
+    catalogueView,
   );
   const selectedFigure = catalog?.figures.find((figure) => figure.name === selectedFigureName);
   const activeClipName = selectedFigure?.clips.some((clip) => clip.name === selectedClipName)
@@ -149,15 +153,28 @@ export function App(): JSX.Element {
       <header className="topBar">
         <div className="brandBlock">
           <div className="eyebrow">Mclone Asset Lab</div>
-          <h1>Creature Catalogue</h1>
+          <h1>{isPropView ? "Semantic Prop Review" : "Creature Catalogue"}</h1>
         </div>
         <div className="summaryStrip" aria-label="Catalogue summary">
-          <SummaryItem label="figures" value={catalog?.summary.canonicalFigures ?? 0} />
-          <SummaryItem label="clips" value={catalog?.summary.clips ?? 0} />
-          <SummaryItem label="parts" value={catalog?.summary.parts ?? 0} />
-          <SummaryItem label="runtime" value={catalog?.summary.runtimePromotedFigures ?? 0} />
+          {isPropView ? (
+            <>
+              <SummaryItem label="props" value={catalog?.summary.semanticProps ?? 0} />
+              <SummaryItem label="parts" value={catalog?.summary.semanticPropParts ?? 0} />
+              <SummaryItem label="live" value={catalog?.summary.liveInstantiatedProps ?? 0} />
+            </>
+          ) : (
+            <>
+              <SummaryItem label="figures" value={catalog?.summary.canonicalFigures ?? 0} />
+              <SummaryItem label="clips" value={catalog?.summary.clips ?? 0} />
+              <SummaryItem label="parts" value={catalog?.summary.parts ?? 0} />
+              <SummaryItem label="runtime" value={catalog?.summary.runtimePromotedFigures ?? 0} />
+            </>
+          )}
         </div>
         <div className="topActions">
+          <a className="siteLink" href={isPropView ? "./" : "?view=props"}>
+            {isPropView ? "Creature catalogue" : "Prop review"}
+          </a>
           <a className="siteLink" href="/">Mclone home</a>
           <button type="button" className="themeButton" onClick={toggleTheme}>
             {themeMode === "dark" ? "Light" : "Dark"}
@@ -168,7 +185,7 @@ export function App(): JSX.Element {
       {error ? <div className="errorBanner" role="alert">{error}</div> : null}
 
       <main className="workbench">
-        <aside className="catalogSidebar" aria-label="Creature catalogue">
+        <aside className="catalogSidebar" aria-label={isPropView ? "Semantic prop review" : "Creature catalogue"}>
           <div className="catalogControls">
             <label>
               <span>Search</span>
@@ -176,10 +193,10 @@ export function App(): JSX.Element {
                 type="search"
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                placeholder="creature, theme, clip"
+                placeholder={isPropView ? "prop, use, anchor" : "creature, theme, clip"}
               />
             </label>
-            <label>
+            {!isPropView ? <><label>
               <span>Group</span>
               <select
                 value={groupFilter}
@@ -244,12 +261,14 @@ export function App(): JSX.Element {
                   <option key={option.value} value={option.value}>{option.label}</option>
                 ))}
               </select>
-            </label>
+            </label></> : null}
             <div className="resultCount" aria-live="polite">
-              {figures.length} figure{figures.length === 1 ? "" : "s"}
+              {figures.length} {isPropView
+                ? `prop${figures.length === 1 ? "" : "s"}`
+                : `figure${figures.length === 1 ? "" : "s"}`}
             </div>
           </div>
-          <div className="catalogList" aria-label="Canonical creatures">
+          <div className="catalogList" aria-label={isPropView ? "Canonical semantic props" : "Canonical creatures"}>
             {figures.map((figure) => (
               <button
                 type="button"
@@ -257,10 +276,12 @@ export function App(): JSX.Element {
                 className={figure.name === selectedFigureName ? "catalogRow selected" : "catalogRow"}
                 data-catalog-name={figure.name}
                 data-runtime-promoted={figure.runtimePromotion === undefined ? "false" : "true"}
-                data-groups={figure.metadata.groups.join(" ")}
-                data-body-plans={figure.metadata.bodyPlans.join(" ")}
-                data-habitats={figure.metadata.habitats.join(" ")}
-                data-disposition={figure.metadata.disposition}
+                data-groups={figure.metadata?.groups.join(" ")}
+                data-body-plans={figure.metadata?.bodyPlans.join(" ")}
+                data-habitats={figure.metadata?.habitats.join(" ")}
+                data-disposition={figure.metadata?.disposition}
+                data-semantic-use={figure.use}
+                data-semantic-anchor={figure.anchor}
                 aria-current={figure.name === selectedFigureName ? "true" : undefined}
                 onClick={() => selectFigure(figure.name)}
               >
@@ -268,9 +289,15 @@ export function App(): JSX.Element {
                 <span className="catalogRowText">
                   <span className="catalogRowHeading">
                     <strong>{figure.label}</strong>
-                    {figure.runtimePromotion ? <span className="promotionBadge">Runtime</span> : null}
+                    {figure.runtimePromotion ? (
+                      <span className="promotionBadge">
+                        {figure.runtimePromotion.instantiation === "live_gameplay" ? "Live" : "Review"}
+                      </span>
+                    ) : null}
                   </span>
-                  <span>{formatTag(figure.metadata.groups[0] ?? "other")} · {motionLabel(figure)} · {figure.partCount} parts</span>
+                  <span>{figure.use === "actor"
+                    ? `${formatTag(figure.metadata?.groups[0] ?? "other")} · ${motionLabel(figure)} · ${figure.partCount} parts`
+                    : `${formatTag(figure.use)} · ${formatTag(figure.anchor)} · ${figure.partCount} parts`}</span>
                 </span>
               </button>
             ))}
@@ -282,7 +309,7 @@ export function App(): JSX.Element {
         </aside>
 
         <div className="viewerColumn">
-          {selectedFigure && activeClipName ? (
+          {selectedFigure ? (
             <FigureViewer
               key={selectedFigure.name}
               clipName={activeClipName}
@@ -298,7 +325,7 @@ export function App(): JSX.Element {
         </div>
 
         <aside className="inspector" aria-label="Figure details">
-          {selectedFigure && activeClipName ? (
+          {selectedFigure ? (
             <FigureInspector figure={selectedFigure} clipName={activeClipName} />
           ) : (
             <div className="inspectorNote">Select a figure to inspect its semantic facts.</div>
@@ -313,14 +340,14 @@ function FigureInspector({
   figure,
   clipName,
 }: {
-  clipName: string;
+  clipName: string | undefined;
   figure: AnimalCatalogFigure;
 }): JSX.Element {
   const clip = figure.clips.find((entry) => entry.name === clipName);
   return (
     <div className="inspectorStack">
       <section>
-        <div className="eyebrow">Figure details</div>
+        <div className="eyebrow">{figure.use === "actor" ? "Figure details" : "Prop details"}</div>
         <h2>{figure.label}</h2>
         <code>{figure.name}</code>
       </section>
@@ -330,22 +357,30 @@ function FigureInspector({
         <Fact label="Textures" value={figure.textureCount} />
         <Fact label="Clips" value={figure.clipCount} />
       </section>
-      <section className="inspectorSection classificationSection">
-        <h3>Classification</h3>
-        <MetadataTags label="Groups" values={figure.metadata.groups} />
-        <MetadataTags label="Body" values={figure.metadata.bodyPlans} />
-        <MetadataTags label="Habitat" values={figure.metadata.habitats} />
-        <MetadataTags label="Disposition" values={[figure.metadata.disposition]} />
-        <MetadataTags label="Scale" values={[figure.metadata.scale]} />
-        {figure.metadata.themes && figure.metadata.themes.length > 0
-          ? <MetadataTags label="Themes" values={figure.metadata.themes} />
-          : null}
-      </section>
+      {figure.metadata ? (
+        <section className="inspectorSection classificationSection">
+          <h3>Classification</h3>
+          <MetadataTags label="Groups" values={figure.metadata.groups} />
+          <MetadataTags label="Body" values={figure.metadata.bodyPlans} />
+          <MetadataTags label="Habitat" values={figure.metadata.habitats} />
+          <MetadataTags label="Disposition" values={[figure.metadata.disposition]} />
+          <MetadataTags label="Scale" values={[figure.metadata.scale]} />
+          {figure.metadata.themes && figure.metadata.themes.length > 0
+            ? <MetadataTags label="Themes" values={figure.metadata.themes} />
+            : null}
+        </section>
+      ) : (
+        <section className="inspectorSection classificationSection">
+          <h3>Prop contract</h3>
+          <MetadataTags label="Use" values={[figure.use]} />
+          <MetadataTags label="Anchor" values={[figure.anchor]} />
+        </section>
+      )}
       <section className="inspectorSection renderingSection">
         <h3>Rendering</h3>
         <MetadataTags label="Alpha" values={figure.alphaModes} />
       </section>
-      <section className="inspectorSection">
+      {clip ? <section className="inspectorSection">
         <h3>Active animation</h3>
         <dl>
           <div><dt>Clip</dt><dd>{clip?.name ?? "—"}</dd></div>
@@ -357,7 +392,12 @@ function FigureInspector({
           <div><dt>Motion</dt><dd>{clip?.locomotionKind ?? "custom"}</dd></div>
           <div><dt>After</dt><dd>{clip?.nextClip ?? (clip?.loop ? "repeat" : "hold final pose")}</dd></div>
         </dl>
-      </section>
+      </section> : (
+        <section className="inspectorSection">
+          <h3>Static presentation</h3>
+          <p>This semantic asset has no authored animation clips.</p>
+        </section>
+      )}
       <section className="inspectorSection">
         <h3>Semantic source</h3>
         <p>
@@ -367,14 +407,24 @@ function FigureInspector({
         <code className="hashLine">{figure.semanticSha256}</code>
       </section>
       {figure.runtimePromotion ? (
-        <section className="inspectorSection callout promotionStatus runtimePromoted">
-          <h3>Runtime promoted</h3>
+        <section className={`inspectorSection callout promotionStatus ${
+          figure.runtimePromotion.instantiation === "live_gameplay"
+            ? "runtimePromoted"
+            : "assetLabOnly"
+        }`}>
+          <h3>{figure.runtimePromotion.instantiation === "live_gameplay"
+            ? "Live gameplay asset"
+            : "Packed review candidate"}</h3>
           <p>
-            This checked semantic figure ships in the game asset pack and is
-            available through the shared Rust actor-figure registry.
+            {figure.runtimePromotion.instantiation === "live_gameplay"
+              ? "This checked semantic asset ships in the game asset pack and has an ordinary live gameplay instantiation."
+              : "This checked semantic asset ships in the first-party pack for review, but has no live gameplay instantiation yet. Human acceptance is required before migration."}
           </p>
           <dl className="promotionMetadata">
-            <div><dt>Figure ID</dt><dd><code>{figure.runtimePromotion.figureId}</code></dd></div>
+            <div><dt>Asset ID</dt><dd><code>{figure.runtimePromotion.assetId}</code></dd></div>
+            <div><dt>Use</dt><dd>{formatTag(figure.runtimePromotion.use)}</dd></div>
+            <div><dt>Anchor</dt><dd>{formatTag(figure.runtimePromotion.anchor)}</dd></div>
+            <div><dt>Instantiation</dt><dd>{formatTag(figure.runtimePromotion.instantiation)}</dd></div>
             <div><dt>Packed JSON</dt><dd><code>{figure.runtimePromotion.jsonPath}</code></dd></div>
           </dl>
         </section>
@@ -419,18 +469,26 @@ function filterFigures(
   dispositionFilter: DispositionFilter,
   motionFilter: MotionFilter,
   promotionFilter: PromotionFilter,
+  catalogueView: "actors" | "props",
 ): AnimalCatalogFigure[] {
   const query = search.trim().toLocaleLowerCase();
   return figures.filter((figure) => {
+    if (catalogueView === "props" ? figure.use === "actor" : figure.use !== "actor") {
+      return false;
+    }
+    const metadata = figure.metadata;
+    if (figure.use === "actor" && metadata === undefined) {
+      return false;
+    }
     const motionKinds = new Set(figure.clips.flatMap((clip) =>
       clip.locomotionKind === undefined ? [] : [clip.locomotionKind]
     ));
     const hasAction = figure.clips.some((clip) => clip.role === "action");
-    const matchesGroup = groupFilter === "all" || figure.metadata.groups.includes(groupFilter);
-    const matchesBodyPlan = bodyPlanFilter === "all" || figure.metadata.bodyPlans.includes(bodyPlanFilter);
-    const matchesHabitat = habitatFilter === "all" || figure.metadata.habitats.includes(habitatFilter);
+    const matchesGroup = groupFilter === "all" || metadata?.groups.includes(groupFilter) === true;
+    const matchesBodyPlan = bodyPlanFilter === "all" || metadata?.bodyPlans.includes(bodyPlanFilter) === true;
+    const matchesHabitat = habitatFilter === "all" || metadata?.habitats.includes(habitatFilter) === true;
     const matchesDisposition = dispositionFilter === "all"
-      || figure.metadata.disposition === dispositionFilter;
+      || metadata?.disposition === dispositionFilter;
     const matchesMotion = motionFilter === "all"
       || (motionFilter === "action"
         ? hasAction
@@ -462,15 +520,17 @@ function filterFigures(
       ...figure.clips.map((clip) => clip.role),
       ...figure.clips.flatMap((clip) => clip.nextClip === undefined ? [] : [clip.nextClip]),
       ...motionKinds,
-      ...figure.metadata.groups,
-      ...figure.metadata.bodyPlans,
-      ...figure.metadata.habitats,
+      ...(metadata?.groups ?? []),
+      ...(metadata?.bodyPlans ?? []),
+      ...(metadata?.habitats ?? []),
       ...figure.alphaModes,
-      figure.metadata.disposition,
-      figure.metadata.scale,
-      ...(figure.metadata.themes ?? []),
+      metadata?.disposition ?? "",
+      metadata?.scale ?? "",
+      ...(metadata?.themes ?? []),
+      figure.use,
+      figure.anchor,
       ...(figure.runtimePromotion
-        ? ["runtime", "promoted", figure.runtimePromotion.figureId, figure.runtimePromotion.jsonPath]
+        ? ["runtime", "promoted", figure.runtimePromotion.assetId, figure.runtimePromotion.jsonPath]
         : ["asset lab only"]),
     ].join(" ").toLocaleLowerCase();
     return haystack.includes(query);
@@ -478,7 +538,7 @@ function filterFigures(
 }
 
 function formatTag(value: string): string {
-  return value.replaceAll("-", " ").replace(/^./u, (letter) => letter.toUpperCase());
+  return value.replaceAll(/[-_]/gu, " ").replace(/^./u, (letter) => letter.toUpperCase());
 }
 
 function motionLabel(figure: AnimalCatalogFigure): string {

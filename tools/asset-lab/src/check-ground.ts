@@ -1,5 +1,5 @@
 import path from "node:path";
-import { discoverCanonicalFigureSources } from "./discover-figures";
+import { discoverCanonicalFigureSources, discoverCanonicalPropSources } from "./discover-figures";
 import {
   evaluateFigureGrounding,
   formatGroundIssue,
@@ -7,7 +7,7 @@ import {
 import { loadFigureJsonDocument } from "./load";
 import { assetLabRoot } from "./vite-figure-path";
 
-const sourcePaths = await discoverCanonicalFigureSources();
+const sourcePaths = [...await discoverCanonicalFigureSources(), ...await discoverCanonicalPropSources()];
 const verbose = process.argv.includes("--verbose");
 let baselineCount = 0;
 let acknowledgedCount = 0;

@@ -76,12 +76,27 @@ presentation, and `mclone-render`. It does not change authoritative entity
 simulation, protocol identity, AI, or spawning. Those remain owned by the
 entity/runtime architecture.
 
-Planned coordinating Tactical
-[`284`](../tactical/284-deer-forest-edge-ecology-and-semantic-props.md) will
-exercise the same semantic/prepared machinery for explicitly typed world,
-item, and trace props, beginning with the mallard nest, feather, and tracks.
-That is a generalization of asset use and anchoring, not a parallel prop
-compiler or permission to move gameplay state into asset metadata.
+Coordinating Tactical
+[`284`](../tactical/284-deer-forest-edge-ecology-and-semantic-props.md) now
+exercises the same semantic/prepared machinery for explicitly typed world,
+item, and trace props. The first review gate promotes authored mallard nest,
+feather, and track sources with checked use/anchor metadata, generated JSON,
+first-party pack inventory, shared Rust preparation tests, and an isolated
+`/animals/?view=props` web review mode. The normal Creature Catalogue remains
+actor-only. This is a generalization of asset use and anchoring, not a parallel
+prop compiler or permission to move gameplay state into asset metadata.
+
+Promotion metadata also distinguishes `live_gameplay` from `review_only`.
+First-party packing alone cannot satisfy live-instantiation evidence: the
+three current prop candidates report `review_only` and the review surface
+reports zero live props until ordinary gameplay presentation lands.
+
+The current live mallard procedural prop meshes deliberately remain in place
+until the review assets are accepted. Prop JSON is classified as
+`SemanticProp`, never inserted into `FIRST_PARTY_ACTOR_FIGURE_IDS`, and is not
+yet instantiated by gameplay. The next accepted slice must route ordinary
+world/item/trace presentation through shared prepared resources, compare live
+pixels and behavior, then remove the three superseded procedural builders.
 
 The architectural target and `mclone-assets` compiler ownership are selected,
 while optimization thresholds and later LOD policy remain open. The purpose of
@@ -1816,7 +1831,7 @@ The actor-record and palette-texture boundaries keep later LOD and GPU crowd
 evaluation additive, while the high-count fixture establishes their crossover.
 Tactical
 [`284`](../tactical/284-deer-forest-edge-ecology-and-semantic-props.md) owns the
-next content-driven compiler use: semantic prop promotion plus a checked Deer
-figure with named runtime animation. Preserve one source/JSON/compiler path and
-delete superseded procedural mallard prop geometry only after shared prepared
-pixels are accepted.
+next content-driven compiler use. Its semantic mallard props are awaiting the
+first human asset review; after acceptance, migrate their live presentation
+through shared prepared resources and delete superseded procedural geometry.
+The later gate is the checked Deer figure with named runtime animation.

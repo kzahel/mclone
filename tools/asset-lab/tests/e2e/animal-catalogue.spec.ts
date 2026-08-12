@@ -16,7 +16,7 @@ test("browses hash-checked figures with animation and camera controls", async ({
   await expect(page).toHaveURL(/figure=king_cobra/);
   await expect(page.locator(".catalogRow.selected")).toHaveAttribute("data-catalog-name", "king_cobra");
   await expect(page.locator(".summaryItem").first()).toContainText("202");
-  await expect(page.locator(".summaryItem").filter({ hasText: "runtime" })).toContainText("3");
+  await expect(page.locator(".summaryItem").filter({ hasText: "runtime" })).toContainText("5");
   await expect(page.locator(".promotionStatus")).toContainText("Asset Lab only");
 
   const firstTime = Number(await canvas.getAttribute("data-time"));
@@ -46,13 +46,15 @@ test("browses hash-checked figures with animation and camera controls", async ({
 
   const promotionFilter = page.getByRole("combobox", { name: "Runtime status" });
   await promotionFilter.selectOption("runtime");
-  await expect(page.locator(".resultCount")).toHaveText("3 figures");
+  await expect(page.locator(".resultCount")).toHaveText("5 figures");
   await expect(page.locator("[data-catalog-name='player']")).toBeVisible();
+  await expect(page.locator("[data-catalog-name='cow']")).toBeVisible();
   await expect(page.locator("[data-catalog-name='chicken']")).toBeVisible();
+  await expect(page.locator("[data-catalog-name='mallard_duck']")).toBeVisible();
   await expect(page.locator("[data-catalog-name='upright_bear']")).toBeVisible();
   await expect(page.locator("[data-runtime-promoted='false']")).toHaveCount(0);
   await page.locator("[data-catalog-name='chicken']").click();
-  await expect(page.locator(".promotionStatus")).toContainText("Runtime promoted");
+  await expect(page.locator(".promotionStatus")).toContainText("Live gameplay asset");
   await expect(page.locator(".promotionStatus")).toContainText("mclone:chicken");
   await expect(page.locator(".promotionStatus")).toContainText("assets/mclone/figures/chicken.figure.json");
   await promotionFilter.selectOption("asset-lab");
@@ -73,6 +75,51 @@ test("browses hash-checked figures with animation and camera controls", async ({
   await page.getByRole("button", { name: "Dark" }).click();
   await expect(page.locator(".appShell")).toHaveAttribute("data-theme", "dark");
   await page.screenshot({ path: "/tmp/mclone-animal-catalogue-desktop.png", fullPage: true });
+  expect(browserErrors).toEqual([]);
+});
+
+test("reviews static semantic props without polluting the creature catalogue", async ({ page }) => {
+  const browserErrors: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") {
+      browserErrors.push(message.text());
+    }
+  });
+  page.on("pageerror", (error) => browserErrors.push(error.stack ?? error.message));
+
+  await page.goto("/animals/?view=props&figure=mallard_nest");
+  await expect(page.getByRole("heading", { name: "Semantic Prop Review" })).toBeVisible();
+  await expect(page.locator(".resultCount")).toHaveText("3 props");
+  await expect(page.locator("canvas[data-figure='mallard_nest']")).toBeVisible();
+  await expect(page.getByText("Static semantic asset · no animation clips")).toBeVisible();
+  await expect(page.locator(".classificationSection")).toContainText("World prop");
+  await expect(page.locator(".classificationSection")).toContainText("Ground");
+  await expect(page.locator(".promotionStatus")).toContainText("mclone:mallard_nest");
+  await expect(page.locator(".promotionStatus")).toContainText("Packed review candidate");
+  await expect(page.locator(".promotionStatus")).toContainText("no live gameplay instantiation yet");
+  await expect(page.locator(".summaryItem").filter({ hasText: "live" })).toContainText("0");
+  await expect(page.getByRole("combobox", { name: "Group" })).toHaveCount(0);
+  await expect(page.locator("[data-catalog-name='chicken']")).toHaveCount(0);
+  await page.screenshot({ path: "/tmp/mclone-semantic-props-nest.png", fullPage: true });
+
+  await page.locator("[data-catalog-name='mallard_feather']").click();
+  await expect(page.locator("canvas[data-figure='mallard_feather']")).toBeVisible();
+  await expect(page.locator(".classificationSection")).toContainText("Item center");
+  await page.getByRole("button", { name: "Top" }).click();
+  await expect(page).toHaveURL(/camera=top/);
+  await page.screenshot({ path: "/tmp/mclone-semantic-props-feather.png", fullPage: true });
+
+  await page.locator("[data-catalog-name='mallard_tracks']").click();
+  await expect(page.locator("canvas[data-figure='mallard_tracks']")).toBeVisible();
+  await expect(page.locator(".classificationSection")).toContainText("Surface trace");
+  await page.getByRole("button", { name: "Top" }).click();
+  await page.screenshot({ path: "/tmp/mclone-semantic-props-tracks.png", fullPage: true });
+
+  await page.goto("/animals/?figure=mallard_nest");
+  await expect(page.getByRole("heading", { name: "Creature Catalogue" })).toBeVisible();
+  await expect(page.locator(".resultCount")).toHaveText("202 figures");
+  await expect(page.locator("[data-catalog-name='mallard_nest']")).toHaveCount(0);
+  await expect(page.locator("canvas[data-figure='chicken']")).toBeVisible();
   expect(browserErrors).toEqual([]);
 });
 

@@ -75,6 +75,7 @@ const fn consumer_name(consumer: AssetConsumerKind) -> &'static str {
     match consumer {
         AssetConsumerKind::ActorTexture => "actor_texture",
         AssetConsumerKind::ActorFigure => "actor_figure",
+        AssetConsumerKind::SemanticProp => "semantic_prop",
         AssetConsumerKind::ScreenEffect => "screen_effect",
         AssetConsumerKind::TerrainColorMap => "terrain_color_map",
         AssetConsumerKind::Audio => "audio",

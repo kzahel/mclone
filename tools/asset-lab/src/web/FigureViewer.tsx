@@ -6,7 +6,7 @@ import { FigureViewportController, type CameraPreset } from "../viewport";
 import { assetUrl, type ThemeMode } from "./store";
 
 interface FigureViewerProps {
-  clipName: string;
+  clipName: string | undefined;
   figure: AnimalCatalogFigure;
   onSelectClip: (clipName: string) => void;
   themeMode: ThemeMode;
@@ -65,8 +65,11 @@ export function FigureViewer({
         if (!viewport) {
           throw new Error("The interactive viewport is unavailable");
         }
-        const activeClip = asset.clips[clipName] ? clipName : figure.defaultClip;
+        const activeClip = clipName !== undefined && asset.clips[clipName]
+          ? clipName
+          : figure.defaultClip;
         viewport.setAsset(asset, activeClip);
+        viewport.setCameraPreset(cameraPresetFromUrl());
         viewport.setPlaybackSpeed(speed);
         viewport.setPlaying(playing);
         loadedFigureRef.current = figure.name;
@@ -89,7 +92,7 @@ export function FigureViewer({
       return;
     }
     const viewport = viewportRef.current;
-    if (viewport?.getClipName() !== clipName) {
+    if (clipName !== undefined && viewport?.getClipName() !== clipName) {
       viewport?.setClip(clipName);
     }
     if (viewport) {
@@ -131,6 +134,9 @@ export function FigureViewer({
 
   const setCamera = (preset: CameraPreset): void => {
     viewportRef.current?.setCameraPreset(preset);
+    const url = new URL(window.location.href);
+    url.searchParams.set("camera", preset);
+    window.history.replaceState(null, "", url);
   };
 
   const activateClip = (nextClipName: string, shouldPlay: boolean): void => {
@@ -155,7 +161,7 @@ export function FigureViewer({
     <section className="viewerPanel" aria-label={`${figure.label} interactive viewer`}>
       <div className="viewerHeader">
         <div>
-          <div className="eyebrow">Canonical figure</div>
+          <div className="eyebrow">Canonical {figure.use === "actor" ? "figure" : "semantic prop"}</div>
           <h2>{figure.label}</h2>
         </div>
         <div className="cameraActions" aria-label="Camera views">
@@ -174,7 +180,7 @@ export function FigureViewer({
         <div className="gestureHint">Drag to orbit · right-drag to pan · scroll to zoom</div>
       </div>
 
-      <div className="animationControls" aria-label="Animation controls">
+      {clipName !== undefined ? <div className="animationControls" aria-label="Animation controls">
         <button
           className="playButton"
           type="button"
@@ -236,7 +242,9 @@ export function FigureViewer({
             <option value={2}>2×</option>
           </select>
         </label>
-      </div>
+      </div> : (
+        <div className="animationControls staticAssetNote">Static semantic asset · no animation clips</div>
+      )}
       {actionClips.length > 0 ? (
         <div className="actionControls" aria-label="Special animation actions">
           <span>Actions</span>
@@ -283,7 +291,7 @@ async function loadSemanticFigure(
   return parseFigureAssetJson(json, figure.jsonPath);
 }
 
-function clipDurationFromManifest(figure: AnimalCatalogFigure, clipName: string): number {
+function clipDurationFromManifest(figure: AnimalCatalogFigure, clipName?: string): number {
   return figure.clips.find((clip) => clip.name === clipName)?.durationSeconds ?? 0;
 }
 
@@ -293,4 +301,12 @@ function viewportBackground(themeMode: ThemeMode): string {
 
 function formatSeconds(value: number): string {
   return `${value.toFixed(2)}s`;
+}
+
+function cameraPresetFromUrl(): CameraPreset {
+  const requested = new URLSearchParams(window.location.search).get("camera");
+  return requested === "front" || requested === "right" || requested === "top"
+    || requested === "three-quarter"
+    ? requested
+    : "three-quarter";
 }

@@ -55,10 +55,25 @@ the build host, while visitors fetch parsed, validated, hash-checked semantic
 JSON. Deprecated rounded sources under `legacy-examples/` are excluded, and
 catalogue presence does not imply promotion into the runtime asset pack.
 
+Promoted static semantic props use the same generated JSON, validation,
+thumbnail, viewport, and pack path without entering creature counts or
+classification filters. Open the deliberately separate review mode with
+`/animals/?view=props`; adding a source under `props/` is rejected unless the
+checked promotion registry declares its exact `world_prop`, `item_prop`, or
+`trace_prop` use and matching `ground`, `item_center`, or `surface_trace`
+anchor. Props may have zero clips; the viewer presents them explicitly as
+static assets instead of requiring a fake idle animation.
+
+Promotion also records `live_gameplay` or `review_only` instantiation status.
+Packing a review candidate is not proof that ordinary gameplay creates or
+renders it. The prop review summary reports live instantiation separately, and
+an asset may move to `live_gameplay` only with ordinary runtime evidence.
+
 The generated manifest derives runtime-promotion status from
 `src/first-party-figures.ts`, the checked mapping that owns promoted semantic
 JSON. The UI shows the promoted count, offers a runtime-status filter, badges
-promoted rows, and displays their runtime figure ID and packed JSON path. React
+promoted rows, and displays their runtime asset ID, use, anchor, and packed
+JSON path. React
 does not maintain a second promotion list.
 
 Canonical sources can declare typed creature classification through the DSL's
@@ -113,7 +128,7 @@ they are review output, not a persisted asset format.
 ## Source and generated JSON
 
 Asset files use the DSL from `src/dsl.ts`. A `figure.ts` file is the only
-human- or AI-authored source for a promoted figure. Its schema-v1 JSON is a
+human- or AI-authored source for a promoted actor or prop. Its schema-v1 JSON is a
 generated semantic snapshot and must not be edited directly.
 
 Canonical sources use `figure()` with boxes and fixed finite planes. Boxes
@@ -131,7 +146,7 @@ validates it, and gives only that parsed result to Three.js. Preview, sheet,
 smoke, and video commands also accept a `figure.json` path directly. The viewer
 never renders the live module object through a shortcut.
 
-The three checked runtime figures are mapped to their sources by
+The checked runtime actors and props are mapped to their sources by
 `src/first-party-figures.ts`. Regenerate them and review the diff with:
 
 ```sh
@@ -141,10 +156,11 @@ pnpm asset-lab:figures:check
 
 The check fails for stale or missing output and for any promoted
 `assets/mclone/figures/*.figure.json` without a declared TypeScript source.
-After a checked figure changes, refresh and verify the normal asset-pack lock.
-`asset-lab:test` also discovers and executes every Asset Lab example through
-the serialize/reparse boundary, including examples that are not promoted into
-checked runtime JSON.
+After a checked semantic asset changes, refresh and verify the normal
+first-party asset packs. `asset-lab:test` discovers and executes every Asset
+Lab creature example plus checked prop sources through the serialize/reparse,
+geometry, ground, and surface boundaries. The public Creature Catalogue still
+discovers the full creature roster independently of prop review.
 
 Canonical figures also pass a rest-pose geometry connectivity gate. The check
 transforms every box and an analysis-only epsilon-thick bound for every plane

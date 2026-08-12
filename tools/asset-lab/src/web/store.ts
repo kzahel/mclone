@@ -27,6 +27,7 @@ export type BodyPlanFilter = "all" | CreatureBodyPlan;
 export type HabitatFilter = "all" | CreatureHabitat;
 export type DispositionFilter = "all" | CreatureDisposition;
 export type ThemeMode = "light" | "dark";
+export type CatalogueView = "actors" | "props";
 
 interface AnimalCatalogueState {
   bodyPlanFilter: BodyPlanFilter;
@@ -119,8 +120,9 @@ export const useAnimalCatalogueStore = create<AnimalCatalogueState>((set, get) =
     if (!figure) {
       return;
     }
-    set({ selectedClipName: figure.defaultClip, selectedFigureName: figure.name });
-    updateUrl(figure.name, figure.defaultClip, "push");
+    const clipName = figure.defaultClip ?? null;
+    set({ selectedClipName: clipName, selectedFigureName: figure.name });
+    updateUrl(figure.name, clipName, "push");
   },
 
   selectClip(clipName) {
@@ -180,33 +182,45 @@ export function assetUrl(path: string): string {
 }
 
 function selectionFromUrl(catalog: AnimalCatalogDocument): {
-  clipName: string;
+  clipName: string | null;
   figure: AnimalCatalogFigure;
 } {
   const params = new URLSearchParams(window.location.search);
+  const view = catalogueViewFromUrl();
+  const visible = catalog.figures.filter((entry) =>
+    view === "props" ? entry.use !== "actor" : entry.use === "actor"
+  );
   const requestedFigure = params.get("figure");
-  const figure = catalog.figures.find((entry) => entry.name === requestedFigure)
-    ?? catalog.figures.find((entry) => entry.name === "chicken")
-    ?? catalog.figures[0];
+  const figure = visible.find((entry) => entry.name === requestedFigure)
+    ?? visible.find((entry) => entry.name === "chicken")
+    ?? visible[0];
   if (!figure) {
     throw new Error("The deployed animal catalogue is empty");
   }
   const requestedClip = params.get("clip");
   const clipName = figure.clips.some((clip) => clip.name === requestedClip)
     ? requestedClip as string
-    : figure.defaultClip;
+    : figure.defaultClip ?? null;
   return { clipName, figure };
 }
 
-function updateUrl(figureName: string, clipName: string, mode: "push" | "replace"): void {
+function updateUrl(figureName: string, clipName: string | null, mode: "push" | "replace"): void {
   const url = new URL(window.location.href);
   url.searchParams.set("figure", figureName);
-  url.searchParams.set("clip", clipName);
+  if (clipName === null) {
+    url.searchParams.delete("clip");
+  } else {
+    url.searchParams.set("clip", clipName);
+  }
   if (mode === "push") {
     window.history.pushState(null, "", url);
   } else {
     window.history.replaceState(null, "", url);
   }
+}
+
+export function catalogueViewFromUrl(): CatalogueView {
+  return new URLSearchParams(window.location.search).get("view") === "props" ? "props" : "actors";
 }
 
 function systemThemeMode(): ThemeMode {

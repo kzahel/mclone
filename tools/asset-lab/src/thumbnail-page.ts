@@ -26,7 +26,8 @@ viewport.setPlaying(false);
 
 window.assetLabRenderThumbnail = async (figureJson, sourceLabel, requestedClip) => {
   const asset = parseFigureAssetJson(figureJson, sourceLabel);
-  const clipName = requestedClip ?? chooseDefaultClip(Object.keys(asset.clips));
+  const clipNames = Object.keys(asset.clips);
+  const clipName = requestedClip ?? (clipNames.length > 0 ? chooseDefaultClip(clipNames) : undefined);
   viewport.setAsset(asset, clipName);
   viewport.setPlaying(false);
   const duration = viewport.getDuration();

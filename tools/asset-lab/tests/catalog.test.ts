@@ -23,6 +23,7 @@ test("builds deterministic canonical JSON catalogue artifacts", async () => {
     const catalog = await buildWebCatalog({ outRoot, sourcePaths, thumbnails: false });
     assert.equal(catalog.schemaVersion, 1);
     assert.equal(catalog.summary.canonicalFigures, 3);
+    assert.equal(catalog.summary.semanticProps, 0);
     assert.equal(catalog.summary.runtimePromotedFigures, 1);
     assert.deepEqual(
       catalog.figures.map((figure) => figure.name),
@@ -38,8 +39,11 @@ test("builds deterministic canonical JSON catalogue artifacts", async () => {
       scale: "medium",
     });
     assert.deepEqual(catalog.figures[0]?.runtimePromotion, {
-      figureId: "mclone:chicken",
+      anchor: "feet",
+      assetId: "mclone:chicken",
+      instantiation: "live_gameplay",
       jsonPath: "assets/mclone/figures/chicken.figure.json",
+      use: "actor",
     });
     assert.equal(catalog.figures[1]?.defaultClip, "slither");
     assert.equal(catalog.figures[1]?.runtimePromotion, undefined);
@@ -67,7 +71,7 @@ test("builds deterministic canonical JSON catalogue artifacts", async () => {
     inconsistentSummary.summary.runtimePromotedFigures = 0;
     assert.throws(
       () => parseAnimalCatalog(inconsistentSummary, "inconsistent catalogue"),
-      /expected 0 runtime-promoted figures but contains 1/,
+      /runtime-promotion summary does not match its entries/,
     );
     const unsafeRuntimePath = structuredClone(catalog);
     const chickenPromotion = unsafeRuntimePath.figures[0]?.runtimePromotion;
@@ -78,7 +82,7 @@ test("builds deterministic canonical JSON catalogue artifacts", async () => {
       /invalid runtime promotion metadata/,
     );
     const invalidMetadata = structuredClone(catalog);
-    (invalidMetadata.figures[0]!.metadata.groups as unknown as string[])[0] = "machine";
+    (invalidMetadata.figures[0]!.metadata!.groups as unknown as string[])[0] = "machine";
     assert.throws(
       () => parseAnimalCatalog(invalidMetadata, "invalid metadata catalogue"),
       /invalid creature metadata.*groups entry 0 'machine' is invalid/s,
@@ -95,6 +99,47 @@ test("builds deterministic canonical JSON catalogue artifacts", async () => {
       assert.equal(createHash("sha256").update(json).digest("hex"), figure.semanticSha256);
       await assert.rejects(fs.access(path.join(outRoot, figure.thumbnailPath)));
     }
+  } finally {
+    await fs.rm(tempRoot, { force: true, recursive: true });
+  }
+});
+
+test("builds checked static semantic props without creature metadata", async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "mclone-prop-catalog-"));
+  try {
+    const catalog = await buildWebCatalog({
+      outRoot: path.join(tempRoot, "output"),
+      sourcePaths: [
+        path.join(assetLabRoot, "props/mallard_nest/figure.ts"),
+        path.join(assetLabRoot, "props/mallard_feather/figure.ts"),
+        path.join(assetLabRoot, "props/mallard_tracks/figure.ts"),
+      ],
+      thumbnails: false,
+    });
+    assert.equal(catalog.summary.canonicalFigures, 0);
+    assert.equal(catalog.summary.semanticProps, 3);
+    assert.equal(catalog.summary.runtimePromotedProps, 3);
+    assert.equal(catalog.summary.liveInstantiatedProps, 0);
+    assert.ok(catalog.figures.every((entry) => entry.clipCount === 0));
+    assert.ok(catalog.figures.every((entry) => entry.defaultClip === undefined));
+    assert.ok(catalog.figures.every((entry) => entry.metadata === undefined));
+    assert.ok(catalog.figures.every(
+      (entry) => entry.runtimePromotion?.instantiation === "review_only",
+    ));
+    assert.deepEqual(
+      catalog.figures.map(({ anchor, name, use }) => ({ anchor, name, use })),
+      [
+        { anchor: "item_center", name: "mallard_feather", use: "item_prop" },
+        { anchor: "ground", name: "mallard_nest", use: "world_prop" },
+        { anchor: "surface_trace", name: "mallard_tracks", use: "trace_prop" },
+      ],
+    );
+    const malformed = structuredClone(catalog);
+    malformed.figures[0]!.anchor = "ground";
+    assert.throws(
+      () => parseAnimalCatalog(malformed, "mismatched prop catalogue"),
+      /invalid figure at index 0/,
+    );
   } finally {
     await fs.rm(tempRoot, { force: true, recursive: true });
   }

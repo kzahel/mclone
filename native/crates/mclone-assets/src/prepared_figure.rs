@@ -2148,6 +2148,12 @@ mod tests {
         include_str!("../../../../assets/mclone/figures/chicken.figure.json");
     const UPRIGHT_BEAR_FIGURE_JSON: &str =
         include_str!("../../../../assets/mclone/figures/upright_bear.figure.json");
+    const MALLARD_NEST_FIGURE_JSON: &str =
+        include_str!("../../../../assets/mclone/figures/mallard_nest.figure.json");
+    const MALLARD_FEATHER_FIGURE_JSON: &str =
+        include_str!("../../../../assets/mclone/figures/mallard_feather.figure.json");
+    const MALLARD_TRACKS_FIGURE_JSON: &str =
+        include_str!("../../../../assets/mclone/figures/mallard_tracks.figure.json");
 
     #[test]
     fn prepares_player_as_static_box_geometry() {
@@ -3010,6 +3016,23 @@ mod tests {
             prepared_bear,
             prepare_figure_asset(&bear).expect("repeat bear preparation")
         );
+    }
+
+    #[test]
+    fn promoted_static_props_prepare_through_the_shared_compiler() {
+        for (json, expected_name, expected_parts) in [
+            (MALLARD_NEST_FIGURE_JSON, "mallard_nest", 15),
+            (MALLARD_FEATHER_FIGURE_JSON, "mallard_feather", 7),
+            (MALLARD_TRACKS_FIGURE_JSON, "mallard_tracks", 8),
+        ] {
+            let asset: FigureAsset = serde_json::from_str(json).unwrap();
+            let prepared = prepare_figure_asset(&asset).unwrap();
+            assert_eq!(prepared.name, expected_name);
+            assert_eq!(prepared.parts.len(), expected_parts);
+            assert_eq!(prepared.diagnostics.box_primitive_count, expected_parts);
+            assert!(prepared.clips.is_empty());
+            assert_eq!(prepared, prepare_figure_asset(&asset).unwrap());
+        }
     }
 
     #[test]

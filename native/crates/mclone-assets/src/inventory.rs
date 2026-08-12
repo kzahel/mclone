@@ -27,6 +27,7 @@ pub struct FirstPartyBlockVisual {
 pub enum AssetConsumerKind {
     ActorTexture,
     ActorFigure,
+    SemanticProp,
     ScreenEffect,
     TerrainColorMap,
     Audio,
@@ -91,7 +92,9 @@ pub fn canonical_first_party_asset_inventory() -> CanonicalFirstPartyAssetInvent
 }
 
 fn direct_asset_requirements() -> Vec<CanonicalAssetRequirement> {
-    use AssetConsumerKind::{ActorFigure, ActorTexture, Audio, ScreenEffect, TerrainColorMap};
+    use AssetConsumerKind::{
+        ActorFigure, ActorTexture, Audio, ScreenEffect, SemanticProp, TerrainColorMap,
+    };
     use AssetRequirementPolicy::{Optional, Required, Suppressible};
 
     [
@@ -123,6 +126,21 @@ fn direct_asset_requirements() -> Vec<CanonicalAssetRequirement> {
         (
             "assets/mclone/figures/mallard_duck.figure.json",
             ActorFigure,
+            Required,
+        ),
+        (
+            "assets/mclone/figures/mallard_nest.figure.json",
+            SemanticProp,
+            Required,
+        ),
+        (
+            "assets/mclone/figures/mallard_feather.figure.json",
+            SemanticProp,
+            Required,
+        ),
+        (
+            "assets/mclone/figures/mallard_tracks.figure.json",
+            SemanticProp,
             Required,
         ),
         (
@@ -271,6 +289,9 @@ mod tests {
         for required in [
             "assets/minecraft/textures/entity/cow/cow.png",
             "assets/mclone/figures/player.figure.json",
+            "assets/mclone/figures/mallard_nest.figure.json",
+            "assets/mclone/figures/mallard_feather.figure.json",
+            "assets/mclone/figures/mallard_tracks.figure.json",
             "assets/minecraft/textures/misc/underwater.png",
             "assets/minecraft/sounds/damage/fallsmall.ogg",
         ] {

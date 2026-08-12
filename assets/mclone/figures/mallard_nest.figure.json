@@ -1,0 +1,372 @@
+{
+  "schemaVersion": 1,
+  "name": "mallard_nest",
+  "materials": {
+    "reed_dark": {
+      "color": "#60452b"
+    },
+    "reed": {
+      "color": "#947044"
+    },
+    "reed_light": {
+      "color": "#b2915c"
+    },
+    "lining": {
+      "color": "#746642"
+    },
+    "egg_shadow": {
+      "color": "#a9ab8c"
+    },
+    "egg": {
+      "color": "#d9d9b4"
+    },
+    "egg_light": {
+      "color": "#ededce"
+    }
+  },
+  "textures": {
+    "woven_top": {
+      "palette": {
+        "d": "#60452b",
+        "r": "#947044",
+        "l": "#b2915c"
+      },
+      "pixels": [
+        "drldrldr",
+        "rldrldrl",
+        "ldrldrld",
+        "drldrldr",
+        "rldrldrl",
+        "ldrldrld"
+      ]
+    }
+  },
+  "parts": [
+    {
+      "name": "woven_base",
+      "at": [
+        0,
+        0.04,
+        0
+      ],
+      "material": "reed_dark",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.9,
+          0.08,
+          0.7
+        ],
+        "faces": {
+          "up": {
+            "texture": "woven_top"
+          }
+        }
+      }
+    },
+    {
+      "name": "soft_lining",
+      "at": [
+        0,
+        0.095,
+        0
+      ],
+      "material": "lining",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.58,
+          0.07,
+          0.42
+        ]
+      }
+    },
+    {
+      "name": "rim_north",
+      "at": [
+        0,
+        0.135,
+        -0.31
+      ],
+      "rot": [
+        0,
+        0,
+        0
+      ],
+      "material": "reed",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.48,
+          0.13,
+          0.12
+        ]
+      }
+    },
+    {
+      "name": "rim_south",
+      "at": [
+        0,
+        0.145,
+        0.31
+      ],
+      "rot": [
+        0,
+        0,
+        0
+      ],
+      "material": "reed_light",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.48,
+          0.15,
+          0.12
+        ]
+      }
+    },
+    {
+      "name": "rim_west",
+      "at": [
+        -0.39,
+        0.13,
+        0
+      ],
+      "rot": [
+        0,
+        0,
+        0
+      ],
+      "material": "reed_light",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.1,
+          0.12,
+          0.34
+        ]
+      }
+    },
+    {
+      "name": "rim_east",
+      "at": [
+        0.39,
+        0.15,
+        0
+      ],
+      "rot": [
+        0,
+        0,
+        0
+      ],
+      "material": "reed",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.1,
+          0.16,
+          0.34
+        ]
+      }
+    },
+    {
+      "name": "rim_north_west",
+      "at": [
+        -0.29,
+        0.15,
+        -0.24
+      ],
+      "rot": [
+        0,
+        -43,
+        0
+      ],
+      "material": "reed_dark",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.36,
+          0.12,
+          0.11
+        ]
+      }
+    },
+    {
+      "name": "rim_north_east",
+      "at": [
+        0.29,
+        0.14,
+        -0.24
+      ],
+      "rot": [
+        0,
+        43,
+        0
+      ],
+      "material": "reed_light",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.36,
+          0.11,
+          0.11
+        ]
+      }
+    },
+    {
+      "name": "rim_south_west",
+      "at": [
+        -0.29,
+        0.16,
+        0.24
+      ],
+      "rot": [
+        0,
+        43,
+        0
+      ],
+      "material": "reed",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.36,
+          0.14,
+          0.11
+        ]
+      }
+    },
+    {
+      "name": "rim_south_east",
+      "at": [
+        0.29,
+        0.145,
+        0.24
+      ],
+      "rot": [
+        0,
+        -43,
+        0
+      ],
+      "material": "reed_dark",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.36,
+          0.12,
+          0.11
+        ]
+      }
+    },
+    {
+      "name": "crossed_reed_a",
+      "at": [
+        -0.22,
+        0.215,
+        -0.29
+      ],
+      "rot": [
+        0,
+        -18,
+        4
+      ],
+      "material": "reed_light",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.42,
+          0.055,
+          0.07
+        ]
+      }
+    },
+    {
+      "name": "crossed_reed_b",
+      "at": [
+        0.22,
+        0.225,
+        0.29
+      ],
+      "rot": [
+        0,
+        16,
+        -3
+      ],
+      "material": "reed_dark",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.42,
+          0.05,
+          0.07
+        ]
+      }
+    },
+    {
+      "name": "egg_base",
+      "at": [
+        0.04,
+        0.17,
+        -0.015
+      ],
+      "rot": [
+        0,
+        -8,
+        0
+      ],
+      "material": "egg_shadow",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.2,
+          0.14,
+          0.18
+        ]
+      }
+    },
+    {
+      "name": "egg_middle",
+      "at": [
+        0.04,
+        0.265,
+        -0.015
+      ],
+      "rot": [
+        0,
+        -8,
+        0
+      ],
+      "material": "egg",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.25,
+          0.17,
+          0.22
+        ]
+      }
+    },
+    {
+      "name": "egg_crown",
+      "at": [
+        0.04,
+        0.375,
+        -0.015
+      ],
+      "rot": [
+        0,
+        -8,
+        0
+      ],
+      "material": "egg_light",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.15,
+          0.09,
+          0.14
+        ]
+      }
+    }
+  ],
+  "clips": {}
+}

@@ -1,6 +1,6 @@
 # Tactical 284: Deer Forest-Edge Ecology and Semantic Props
 
-Status: planned coordinating tactical 2026-08-12
+Status: active; Review 1 semantic props pending 2026-08-12
 
 Topics:
 
@@ -516,7 +516,43 @@ world-generation change into one opaque commit.
 
 ## Completion Record
 
-Fill this section as slices land. Record commit IDs, asset review paths,
+### 2026-08-12 — Review 1 candidate: semantic mallard props
+
+- Generalized checked first-party promotion from actor-only records to
+  explicit `actor`, `world_prop`, `item_prop`, and `trace_prop` use with exact
+  `feet`, `ground`, `item_center`, and `surface_trace` anchors. Incompatible
+  use/anchor pairs and unregistered `props/*/figure.ts` sources fail catalogue
+  generation.
+- Promotion separately records `live_gameplay` versus `review_only`
+  instantiation. All three candidates are visibly and machine-readably
+  `review_only`; packing them is not treated as evidence that the live game
+  creates them.
+- Authored static canonical `mallard_nest`, `mallard_feather`, and
+  `mallard_tracks` sources. Generated runtime JSON is checked for drift and
+  classified as `SemanticProp` in the first-party Rust inventory; it is not
+  admitted to the live actor registry.
+- Added a bounded `?view=props` mode to the existing Asset Lab deployment.
+  Default `/animals/` counts and filters remain the 202-figure creature
+  catalogue. The prop mode shows only three checked assets and supports static
+  sources without fake animation clips.
+- The semantic and native preparation gates pass: 32 Asset Lab tests, 205
+  discovered canonical sources across actor and prop validation, one reasoned
+  disconnected track-pair component, six exact joined-imprint surface
+  exceptions, 76 `mclone-assets` unit tests after the prop preparation proof,
+  and five browser catalogue/review tests. First-party authored, fallback, and
+  diagnostic packs stage successfully.
+- Two visual iterations were inspected. The first nest read as a rectangular
+  tray and the first heel pads were oversized; the candidate uses an octagonal
+  woven rim and compact heel marks. The feather retains a strong blue
+  speculum for item-scale recognition.
+- This is intentionally a review stop. Live mallard nest, feather, and track
+  visuals still use the accepted procedural meshes. No gameplay, persistence,
+  collection, observation, or creature-instantiation behavior changed. After
+  human acceptance, the next slice may replace those visuals through the
+  shared prepared prop path and must then delete the superseded procedural
+  builders.
+
+For later slices, continue to record commit IDs, asset review paths,
 deterministic habitat/population measurements, focused and workspace tests,
 native/browser/Android/XR evidence, rejected visual or interaction iterations,
 the deployed revision and URL, remaining gaps, and the next terrain/creature
