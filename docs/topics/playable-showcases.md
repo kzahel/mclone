@@ -315,6 +315,15 @@ sample. It observed `hover`, `fly`, and `forage`, one real pollination block
 update, 5/6 notes, and zero records in all eight browser stores. The phone path
 still selects slot nine and places one authoritative hotel through `USE`.
 
+Exact pushed behavioral revision
+`fe7eb06d43046012297b225b36fee258e79f675e` deployed as Worker version
+`6a212f1b-3aa0-4646-a248-8931ab24e232`. Public desktop and phone gates
+reproduced those measurements exactly. The inspected public desktop and phone
+canvas digests are
+`5480fee7aef944d351a0193112ac778d53e58f53fe441a1b405c5f7402d78578`
+and
+`bbbf89ca53f1f52052da570a634412fce308c1c7b14dea9631ba0a0cd78b8029`.
+
 ## Code and Documentation Map
 
 - `assets/mclone/showcases/`: readable showcase recipes

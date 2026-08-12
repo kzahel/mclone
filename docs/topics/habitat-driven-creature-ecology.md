@@ -453,7 +453,8 @@ event, and no ambient soundtrack pretends that a flock exists.
   live behavior with stable colony-member near/middle/far forage bands,
   immediate-repeat avoidance, moving hover and elevated cruise waypoints,
   progress recovery, and bounded trip abandonment.
-- Revision 2's local desktop and phone gates sample every bee over 360 ticks.
+- Revision 2's local and exact-revision public desktop and phone gates sample
+  every bee over 360 ticks and reproduce the same deterministic measurements.
   Each traveled `20.20`-`22.83` blocks; colony radii reached `7.42`, `15.39`,
   and `12.40` blocks; no bee remained nearly stationary for more than one
   20-tick sample; `hover`, `fly`, and `forage` all appeared; pollination

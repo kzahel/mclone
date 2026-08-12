@@ -1,7 +1,7 @@
 # Tactical 286: Bee Foraging Range and Recovery
 
-Status: **implementation and local validation complete 2026-08-12; exact
-public deployment pending.**
+Status: **complete 2026-08-12; corrected live behavior and exact public
+desktop/phone evidence accepted.**
 
 Topics:
 
@@ -133,3 +133,16 @@ ordinary gameplay with no recipe scripts or fixture-specific AI.
   `c881c5e71b9d54cb0469ceb556362bc3fb69618312973382c6971104562e7515`
   and
   `86f8b654142acbea0cd1de5b10cde1fca3bcc3494d7403a73d08527390d22468`.
+- Exact pushed behavioral revision
+  `fe7eb06d43046012297b225b36fee258e79f675e` deployed as Worker version
+  `6a212f1b-3aa0-4646-a248-8931ab24e232`. Its public desktop and phone gates
+  reproduce the local 360-tick measurements exactly, including all-bee
+  travel, the three distinct colony radii, one-sample maximum stationary
+  streaks, all three animation clips, one pollination update, and zero
+  browser-world records. The phone path also places one authoritative hotel.
+- The inspected public desktop and phone screenshots have SHA-256
+  `5480fee7aef944d351a0193112ac778d53e58f53fe441a1b405c5f7402d78578`
+  and
+  `bbbf89ca53f1f52052da570a634412fce308c1c7b14dea9631ba0a0cd78b8029`.
+  They show three bees occupying near, middle, and far parts of the meadow
+  rather than clustering at the hotel.
