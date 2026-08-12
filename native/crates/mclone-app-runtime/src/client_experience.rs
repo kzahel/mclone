@@ -2159,7 +2159,7 @@ mod tests {
             GameUiAction::Quit,
         ];
 
-        assert_eq!(samples.len(), 61);
+        assert_eq!(samples.len(), 64);
         for sample in samples {
             let _ = classify_game_ui_action(sample);
         }
