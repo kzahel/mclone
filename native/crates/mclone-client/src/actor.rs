@@ -267,7 +267,6 @@ impl ActorTrack {
             self.rendered.kind,
             ActorPresentationKind::Entity(EntityKind::Chicken)
         ) {
-            self.derived = ActorDerivedAnimationState::default();
             self.rendered.chicken_wing_flap_radians = None;
         }
     }
@@ -575,6 +574,17 @@ mod tests {
         }
     }
 
+    fn deer_actor(id: u64, x: f64) -> ActorPresentation {
+        ActorPresentation {
+            kind: ActorPresentationKind::Entity(EntityKind::Deer),
+            animation: Some(AnimationState::distance(
+                AnimationClipId::from_static("flee"),
+                0,
+            )),
+            ..mannequin_actor(id, x)
+        }
+    }
+
     #[test]
     fn actor_presentation_converts_remote_player_update() {
         let update = RemotePlayerUpdate {
@@ -848,6 +858,25 @@ mod tests {
             state.presentations()[0].walk_animation_distance,
             phase_before_reconcile
         );
+    }
+
+    #[test]
+    fn deer_travel_phase_survives_repeated_authoritative_reconciliation() {
+        let mut state = ActorInterpolationState::from_authoritative([deer_actor(1, 0.0)]);
+
+        for x in 1..=8 {
+            state.reconcile_authoritative([deer_actor(1, f64::from(x))]);
+            state.step(
+                1.0,
+                ActorInterpolationConfig {
+                    half_life_seconds: 0.0,
+                },
+            );
+        }
+
+        let presented = state.presentations()[0];
+        assert_eq!(presented.feet_position.x, 8.0);
+        assert_eq!(presented.walk_animation_distance, 8.0);
     }
 
     #[test]

@@ -472,6 +472,14 @@ impl McloneSceneHost {
             .map(|runtime| runtime.client())
     }
 
+    /// Return the actor presentations last advanced for the mono render path.
+    ///
+    /// This is presentation evidence for diagnostics and acceptance probes; it
+    /// does not reconcile authoritative state or advance animation clocks.
+    pub fn mono_actor_presentations(&self) -> Vec<ActorPresentation> {
+        self.active_world.actor_interpolation.presentations()
+    }
+
     pub fn mono_highest_non_air_block_y_at_world(&self, world_x: i32, world_z: i32) -> Option<i32> {
         self.active_world
             .runtime

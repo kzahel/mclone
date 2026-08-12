@@ -3526,6 +3526,39 @@ impl WebSceneHost {
                         .collect::<Vec<_>>()
                         .join(","),
                 )?;
+                let deer_presentations = host
+                    .mono_actor_presentations()
+                    .into_iter()
+                    .filter_map(|presentation| {
+                        let mclone_client::ActorPresentationId::Entity(entity_id) = presentation.id
+                        else {
+                            return None;
+                        };
+                        (presentation.kind
+                            == mclone_client::ActorPresentationKind::Entity(
+                                mclone_protocol::EntityKind::Deer,
+                            ))
+                        .then_some((entity_id, presentation.walk_animation_distance))
+                    })
+                    .collect::<Vec<_>>();
+                report_set_string(
+                    &object,
+                    "deerPresentationEntityIds",
+                    &deer_presentations
+                        .iter()
+                        .map(|(entity_id, _)| entity_id.0.to_string())
+                        .collect::<Vec<_>>()
+                        .join(","),
+                )?;
+                report_set_string(
+                    &object,
+                    "deerWalkAnimationDistances",
+                    &deer_presentations
+                        .iter()
+                        .map(|(_, distance)| format!("{distance:.4}"))
+                        .collect::<Vec<_>>()
+                        .join(","),
+                )?;
                 report_set_number(
                     &object,
                     "deerFieldGuideBits",

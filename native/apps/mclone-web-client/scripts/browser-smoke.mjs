@@ -871,6 +871,22 @@ async function run() {
           if (!start || !end) return Number.NaN;
           return Math.hypot(end[0] - start[0], end[2] - start[2]);
         });
+        const startDeerPresentationIds = String(
+          behaviorStart.deerPresentationEntityIds ?? "",
+        ).split(",");
+        const endDeerPresentationIds = String(
+          behaviorEnd.deerPresentationEntityIds ?? "",
+        ).split(",");
+        const startDeerWalkDistances = String(
+          behaviorStart.deerWalkAnimationDistances ?? "",
+        ).split(",").map(Number);
+        const endDeerWalkDistances = String(
+          behaviorEnd.deerWalkAnimationDistances ?? "",
+        ).split(",").map(Number);
+        const deerWalkAnimationDistanceAdvance = startDeerPresentationIds.map((id, index) => {
+          const endIndex = endDeerPresentationIds.indexOf(id);
+          return endDeerWalkDistances[endIndex] - startDeerWalkDistances[index];
+        });
         const behaviorProbe = {
           elapsedTicks: String(behaviorEnd[`${subject}TickCounts`] ?? "")
             .split(",")
@@ -882,6 +898,7 @@ async function run() {
           finalDucklingCount: Number(behaviorEnd.mallardDucklingCount),
           initialFieldGuideBits: Number(behaviorStart[`${subject}FieldGuideBits`]),
           finalFieldGuideBits: Number(behaviorEnd[`${subject}FieldGuideBits`]),
+          deerWalkAnimationDistanceAdvance,
         };
         if (!deerShowcase && (
           subjectDisplacement.length !== 3
@@ -903,6 +920,9 @@ async function run() {
           if (
             subjectDisplacement.length !== 3
             || !subjectDisplacement.some((distance) => Number.isFinite(distance) && distance > 0.5)
+            || !deerWalkAnimationDistanceAdvance.some(
+              (distance) => Number.isFinite(distance) && distance > 0.5,
+            )
             || !/(lie_down|bedded_idle|stand_up)/.test(clips)
             || !/(Alert|Flee)/.test(behaviors)
           ) {
