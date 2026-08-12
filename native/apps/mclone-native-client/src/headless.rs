@@ -1696,12 +1696,19 @@ mod tests {
         );
         assert_eq!(
             actors[4].shape,
+            mclone_render::entity::ActorInstanceShape::Figure(
+                mclone_assets::mallard_duck_figure_id()
+            )
+        );
+        assert_eq!(
+            actors[5].shape,
             mclone_render::entity::ActorInstanceShape::ItemEgg
         );
         assert!(actors[0].feet_position.x < actors[1].feet_position.x);
         assert!(actors[1].feet_position.x < actors[2].feet_position.x);
         assert!(actors[2].feet_position.x < actors[3].feet_position.x);
         assert!(actors[3].feet_position.x < actors[4].feet_position.x);
+        assert!(actors[4].feet_position.x < actors[5].feet_position.x);
     }
 
     #[test]
