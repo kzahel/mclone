@@ -63,6 +63,11 @@ pub(crate) struct MobPlayerTarget {
     pub(crate) eye_y: f64,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct MallardFlockmateTarget {
+    pub(crate) position: Vec3d,
+}
+
 impl MobPlayerTarget {
     pub(crate) fn from_position(position: Vec3d) -> Self {
         Self {
@@ -89,6 +94,7 @@ pub(crate) struct MobRuntimeState {
     move_control: MoveControl,
     jump_control: JumpControl,
     look_control: LookControl,
+    mallard_in_water: bool,
 }
 
 impl MobRuntimeState {
@@ -136,6 +142,7 @@ impl MobRuntimeState {
             move_control: MoveControl::default(),
             jump_control: JumpControl::default(),
             look_control: LookControl::default(),
+            mallard_in_water: false,
         }
     }
 
@@ -186,6 +193,7 @@ impl MobRuntimeState {
             move_control: MoveControl::default(),
             jump_control: JumpControl::default(),
             look_control: LookControl::default(),
+            mallard_in_water: false,
         }
     }
 
@@ -251,6 +259,10 @@ impl MobRuntimeState {
         self.species.mallard().map(|mallard| mallard.life_stage())
     }
 
+    pub(crate) const fn mallard_in_water(&self) -> bool {
+        self.mallard_in_water
+    }
+
     pub(crate) fn available_goal_count(&self) -> usize {
         self.goal_selector.available_goal_count()
     }
@@ -283,12 +295,22 @@ impl MobRuntimeState {
         &mut self,
         entity: &mut ServerEntityState,
         nearby_players: &[MobPlayerTarget],
+        flockmates: &[MallardFlockmateTarget],
         block_state_at: &F,
     ) where
         F: Fn(BlockPos) -> Option<BlockStateId>,
     {
         self.on_ground = entity.on_ground;
         self.y_body_rot_degrees = entity.y_rot_degrees;
+
+        if entity.kind == EntityKind::Mallard
+            && self.tick_mallard_water_or_shore(entity, flockmates, block_state_at)
+        {
+            self.species
+                .ai_step(self.on_ground, &mut self.delta_movement, &mut self.random);
+            return;
+        }
+        self.mallard_in_water = false;
 
         let random = std::mem::replace(&mut self.random, SimpleRandomSource::new(0));
         let navigation = std::mem::take(&mut self.navigation);
@@ -333,6 +355,90 @@ impl MobRuntimeState {
         self.move_control = context.move_control;
         self.jump_control = context.jump_control;
         self.look_control = context.look_control;
+    }
+
+    fn tick_mallard_water_or_shore<F>(
+        &mut self,
+        entity: &mut ServerEntityState,
+        flockmates: &[MallardFlockmateTarget],
+        block_state_at: &F,
+    ) -> bool
+    where
+        F: Fn(BlockPos) -> Option<BlockStateId>,
+    {
+        let water = mallard_water_occupancy(entity.position, block_state_at);
+        let seek_shore = entity.tick_count % 600 >= 440;
+        let habitat_target = if seek_shore {
+            nearest_mallard_shore(entity.position, block_state_at)
+        } else {
+            nearest_shallow_water_surface(entity.position, block_state_at)
+        };
+        if water.is_none() && habitat_target.is_none() {
+            return false;
+        }
+
+        let mut target = habitat_target.unwrap_or(entity.position);
+        if let Some(flockmate) = nearest_flockmate(entity.position, flockmates) {
+            let dx = flockmate.position.x - entity.position.x;
+            let dz = flockmate.position.z - entity.position.z;
+            let distance_sqr = dx * dx + dz * dz;
+            if distance_sqr < 1.5 * 1.5 && distance_sqr > 1.0e-8 {
+                target = Vec3d::new(entity.position.x - dx, target.y, entity.position.z - dz);
+            } else if distance_sqr > 3.5 * 3.5 && distance_sqr < 10.0 * 10.0 {
+                target = Vec3d::new(flockmate.position.x, target.y, flockmate.position.z);
+            }
+        }
+
+        let dx = target.x - entity.position.x;
+        let dz = target.z - entity.position.z;
+        let horizontal_length = (dx * dx + dz * dz).sqrt();
+        let speed = if water.is_some() { 0.045 } else { 0.035 };
+        let (move_x, move_z) = if horizontal_length > 1.0e-6 {
+            (
+                dx / horizontal_length * speed,
+                dz / horizontal_length * speed,
+            )
+        } else {
+            (0.0, 0.0)
+        };
+        let move_y = water.map_or(-MOB_GRAVITY, |surface_y| {
+            (surface_y - entity.position.y).clamp(-0.045, 0.045)
+        });
+        let requested = Vec3d::new(move_x, move_y, move_z);
+        let bounding_box = collision_aabb_for_feet_position(
+            entity.position,
+            f64::from(entity.width),
+            f64::from(entity.height),
+        );
+        let traveled = collide_mob_movement(
+            block_state_at,
+            bounding_box,
+            requested,
+            self.attributes.max_up_step,
+            entity.on_ground,
+        );
+        entity.position = entity.position.add(traveled);
+        if horizontal_length > 1.0e-6 {
+            entity.y_rot_degrees = (-dx).atan2(dz).to_degrees() as f32;
+            self.y_body_rot_degrees = entity.y_rot_degrees;
+            self.y_head_rot_degrees = entity.y_rot_degrees;
+        }
+        self.mallard_in_water = mallard_water_occupancy(entity.position, block_state_at).is_some();
+        entity.on_ground =
+            !self.mallard_in_water && collide_movement_result(requested, traveled).on_ground;
+        self.on_ground = entity.on_ground;
+        self.delta_movement = if self.mallard_in_water {
+            Vec3d::new(traveled.x * 0.8, traveled.y * 0.6, traveled.z * 0.8)
+        } else {
+            mob_delta_after_travel(
+                requested,
+                traveled,
+                entity.on_ground,
+                mob_block_friction(block_state_at, entity.position),
+                mob_block_speed_factor(block_state_at, entity.position),
+            )
+        };
+        true
     }
 
     #[cfg(test)]
@@ -797,6 +903,117 @@ fn mob_block_jump_factor(
     }
 }
 
+fn mallard_water_occupancy(
+    position: Vec3d,
+    block_state_at: &dyn Fn(BlockPos) -> Option<BlockStateId>,
+) -> Option<f64> {
+    let feet = BlockPos::containing(position);
+    (block_state_at(feet).is_some_and(|state| block_fluid_kind(state) == BlockFluidKind::Water))
+        .then_some(f64::from(feet.y) + 0.88)
+}
+
+fn nearest_shallow_water_surface(
+    position: Vec3d,
+    block_state_at: &dyn Fn(BlockPos) -> Option<BlockStateId>,
+) -> Option<Vec3d> {
+    let center = BlockPos::containing(position);
+    (0_i32..=6)
+        .flat_map(|radius| {
+            (-radius..=radius).flat_map(move |dx| {
+                (-radius..=radius)
+                    .filter(move |dz| dx.abs() + dz.abs() == radius)
+                    .map(move |dz| (dx, dz))
+            })
+        })
+        .find_map(|(dx, dz)| {
+            (-1..=1).find_map(|dy| {
+                let water = center.offset(dx, dy, dz);
+                let state = block_state_at(water)?;
+                if block_fluid_kind(state) != BlockFluidKind::Water {
+                    return None;
+                }
+                let shallow = (1..=2).any(|depth| {
+                    let bed = water.offset(0, -depth, 0);
+                    block_state_at(bed)
+                        .and_then(|state| mclone_blocks::block_collision_aabb(state, bed))
+                        .is_some()
+                });
+                shallow.then_some(Vec3d::new(
+                    f64::from(water.x) + 0.5,
+                    f64::from(water.y) + 0.88,
+                    f64::from(water.z) + 0.5,
+                ))
+            })
+        })
+}
+
+fn nearest_mallard_shore(
+    position: Vec3d,
+    block_state_at: &dyn Fn(BlockPos) -> Option<BlockStateId>,
+) -> Option<Vec3d> {
+    let center = BlockPos::containing(position);
+    (1_i32..=6).find_map(|radius| {
+        (-radius..=radius).find_map(|dx| {
+            (-radius..=radius)
+                .filter(|dz| dx.abs() + dz.abs() == radius)
+                .find_map(|dz| {
+                    (-1..=1).find_map(|dy| {
+                        let feet = center.offset(dx, dy, dz);
+                        let floor = feet.offset(0, -1, 0);
+                        let space_clear = block_state_at(feet).is_some_and(|state| {
+                            mclone_blocks::block_collision_aabb(state, feet).is_none()
+                        });
+                        let stable_floor = block_state_at(floor).is_some_and(|state| {
+                            mclone_blocks::block_collision_aabb(state, floor).is_some()
+                        });
+                        let near_water = [
+                            mclone_core::Direction::North,
+                            mclone_core::Direction::South,
+                            mclone_core::Direction::West,
+                            mclone_core::Direction::East,
+                        ]
+                        .iter()
+                        .any(|direction| {
+                            let water = feet.relative(*direction);
+                            block_state_at(water).is_some_and(|state| {
+                                block_fluid_kind(state) == BlockFluidKind::Water
+                            })
+                        });
+                        (space_clear && stable_floor && near_water).then_some(Vec3d::new(
+                            f64::from(feet.x) + 0.5,
+                            f64::from(feet.y),
+                            f64::from(feet.z) + 0.5,
+                        ))
+                    })
+                })
+        })
+    })
+}
+
+fn nearest_flockmate(
+    position: Vec3d,
+    flockmates: &[MallardFlockmateTarget],
+) -> Option<MallardFlockmateTarget> {
+    flockmates
+        .iter()
+        .copied()
+        .filter(|target| {
+            let dx = target.position.x - position.x;
+            let dz = target.position.z - position.z;
+            dx * dx + dz * dz > 1.0e-8
+        })
+        .min_by(|left, right| {
+            squared_horizontal_distance(position, left.position)
+                .total_cmp(&squared_horizontal_distance(position, right.position))
+        })
+}
+
+fn squared_horizontal_distance(left: Vec3d, right: Vec3d) -> f64 {
+    let dx = left.x - right.x;
+    let dz = left.z - right.z;
+    dx * dx + dz * dz
+}
+
 fn block_pos_below_that_affects_movement(position: Vec3d) -> BlockPos {
     BlockPos::containing(Vec3d::new(position.x, position.y - 0.5000001, position.z))
 }
@@ -1045,7 +1262,7 @@ mod tests {
             true,
         );
 
-        mob.tick_entity(&mut entity, &[], &no_blocks);
+        mob.tick_entity(&mut entity, &[], &[], &no_blocks);
 
         let expected = ((-MOB_GRAVITY * MOB_VERTICAL_DRAG - MOB_GRAVITY) * MOB_VERTICAL_DRAG) * 0.6;
         assert!(!entity.on_ground);
@@ -1070,7 +1287,7 @@ mod tests {
         );
         mob.set_chicken_egg_time_for_test(1);
 
-        mob.tick_entity(&mut entity, &[], &flat_ground);
+        mob.tick_entity(&mut entity, &[], &[], &flat_ground);
 
         let egg_time = mob
             .chicken_egg_time_for_test()

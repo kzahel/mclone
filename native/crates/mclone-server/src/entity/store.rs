@@ -21,7 +21,8 @@ use super::ServerEntityState;
 use super::item::{ITEM_ENTITY_LIFETIME_TICKS, ItemEntityRuntimeState};
 use super::metadata::{EntityMetadata, PASSIVE_MOB_KINDS};
 use super::mob::{
-    MALLARD_GROWTH_REQUIRED_TICKS, MallardRuntimeSaveData, MobPlayerTarget, MobRuntimeState,
+    MALLARD_GROWTH_REQUIRED_TICKS, MallardFlockmateTarget, MallardRuntimeSaveData, MobPlayerTarget,
+    MobRuntimeState,
 };
 use super::spawning::habitat::sample_wetland_habitat;
 use super::spawning::mob_category::MobCategory;
@@ -672,6 +673,12 @@ impl ServerEntityStore {
             })
             .map(|entity| (entity.persistent_id, entity.position))
             .collect::<Vec<_>>();
+        let mallard_positions = self
+            .entities
+            .values()
+            .filter(|entity| entity.alive && entity.kind == EntityKind::Mallard)
+            .map(|entity| (entity.id, entity.position))
+            .collect::<Vec<_>>();
         let mut updated = Vec::new();
         let mut egg_spawns = Vec::new();
         let mut merge_due_ids = Vec::new();
@@ -681,7 +688,20 @@ impl ServerEntityStore {
             let id = *id;
             if let Some(entity) = self.entities.get_mut(&id) {
                 if let Some(mob) = self.mobs.get_mut(&id) {
-                    mob.tick_entity(entity, nearby_players, &block_state_at);
+                    let flockmates = if entity.kind == EntityKind::Mallard {
+                        mallard_positions
+                            .iter()
+                            .filter(|(candidate_id, _)| *candidate_id != id)
+                            .map(|(_, position)| MallardFlockmateTarget {
+                                position: self
+                                    .topology
+                                    .nearest_position_lift(*position, entity.position),
+                            })
+                            .collect::<Vec<_>>()
+                    } else {
+                        Vec::new()
+                    };
+                    mob.tick_entity(entity, nearby_players, &flockmates, &block_state_at);
                     let chicken_egg_count = mob.take_chicken_pending_egg_lays();
                     egg_spawns.extend(
                         (0..chicken_egg_count)
@@ -699,7 +719,7 @@ impl ServerEntityStore {
                             mob.mallard_life_stage().unwrap_or(MallardLifeStage::Adult);
                         entity.mallard = Some(MallardSnapshotData {
                             life_stage,
-                            in_water: false,
+                            in_water: mob.mallard_in_water(),
                         });
                         let scale = if life_stage == MallardLifeStage::Duckling {
                             0.58
@@ -1694,6 +1714,21 @@ mod tests {
         Some(generated_block_state_id(raw))
     }
 
+    fn broad_shallow_water(pos: BlockPos) -> Option<BlockStateId> {
+        use mclone_worldgen::block::{AIR, DIRT, GRASS_BLOCK, WATER, generated_block_state_id};
+
+        let raw = if pos.y <= 62 {
+            DIRT
+        } else if pos.y == 63 {
+            GRASS_BLOCK
+        } else if pos.y == 64 && (1..=12).contains(&pos.x) {
+            WATER
+        } else {
+            AIR
+        };
+        Some(generated_block_state_id(raw))
+    }
+
     fn dry_grass_ground(pos: BlockPos) -> Option<BlockStateId> {
         use mclone_worldgen::block::{AIR, GRASS_BLOCK, generated_block_state_id};
 
@@ -2267,6 +2302,34 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn mallards_float_cohere_separate_and_take_a_shore_phase() {
+        let mut store = ServerEntityStore::default();
+        let left =
+            store.insert_passive_mob_for_test(EntityKind::Mallard, Vec3d::new(3.5, 64.2, 4.5), 0.0);
+        let right =
+            store.insert_passive_mob_for_test(EntityKind::Mallard, Vec3d::new(8.5, 64.2, 4.5), 0.0);
+
+        store.tick_stationary(&[ChunkPos::new(0, 0)], &[], broad_shallow_water);
+        let left_after = store.state(left).unwrap();
+        let right_after = store.state(right).unwrap();
+        assert!(left_after.mallard.unwrap().in_water);
+        assert!(left_after.position.y > 64.2);
+        assert!(left_after.position.x > 3.5);
+        assert!(right_after.position.x < 8.5);
+
+        store.entities.get_mut(&right).unwrap().position = Vec3d::new(3.8, 64.2, 4.5);
+        let before_separation = store.state(left).unwrap().position.x;
+        store.tick_stationary(&[ChunkPos::new(0, 0)], &[], broad_shallow_water);
+        assert!(store.state(left).unwrap().position.x < before_separation);
+
+        store.remove_entity(right);
+        store.entities.get_mut(&left).unwrap().position = Vec3d::new(6.5, 64.2, 4.5);
+        store.entities.get_mut(&left).unwrap().tick_count = 500;
+        store.tick_stationary(&[ChunkPos::new(0, 0)], &[], broad_shallow_water);
+        assert!(store.state(left).unwrap().position.x < 6.5);
     }
 
     #[test]
