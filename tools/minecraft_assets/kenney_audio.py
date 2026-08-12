@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Import and verify Mclone's allowlisted Kenney CC0 sound bank."""
+"""Import and verify Mclone's allowlisted first-party CC0 sound bank."""
 
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ASSET_ROOT = REPO_ROOT / "assets"
 SOUND_ROOT = ASSET_ROOT / "mclone/sounds/kenney"
+LOCAL_SOUND_ROOT = ASSET_ROOT / "mclone/sounds/mclone-original"
 AUDIO_ROOT = ASSET_ROOT / "mclone/audio"
 CATALOG_PATH = AUDIO_ROOT / "sound-bank.v1.json"
 PROVENANCE_PATH = AUDIO_ROOT / "provenance.v1.json"
@@ -106,6 +107,7 @@ SELECTED_FILES = {
     "rpg": RPG_FILES,
     "interface": INTERFACE_FILES,
 }
+LOCAL_FILES = ["mallard_call_00.ogg", "mallard_call_01.ogg"]
 
 
 def family(
@@ -172,6 +174,17 @@ FAMILIES = [
         1.03,
     ),
     family("mclone:item_pickup", "rpg", ["handleCoins.ogg", "handleCoins2.ogg"], 0.52, 0.97, 1.05),
+    {
+        "key": "mclone:mallard_call",
+        "gain": 0.72,
+        "pitch_min": 0.96,
+        "pitch_max": 1.04,
+        "no_immediate_repeat": True,
+        "variants": [
+            f"assets/mclone/sounds/mclone-original/{filename}"
+            for filename in LOCAL_FILES
+        ],
+    },
     family(
         "mclone:wood_creak",
         "rpg",
@@ -208,7 +221,7 @@ def catalog_payload() -> dict[str, Any]:
     return {
         "schema_version": 1,
         "license": "CC0-1.0",
-        "selected_file_count": sum(len(files) for files in SELECTED_FILES.values()),
+        "selected_file_count": len(expected_sound_paths()),
         "families": sorted(FAMILIES, key=lambda entry: entry["key"]),
     }
 
@@ -253,6 +266,19 @@ def provenance_payload() -> dict[str, Any]:
                     "families": uses.get(path, []),
                 }
             )
+    for filename in LOCAL_FILES:
+        path = f"assets/mclone/sounds/mclone-original/{filename}"
+        source = REPO_ROOT / path
+        files.append(
+            {
+                "source_pack": "mclone-original",
+                "upstream_path": "tools/minecraft_assets/generate_mallard_calls.sh",
+                "path": path,
+                "bytes": source.stat().st_size,
+                "sha256": sha256_file(source),
+                "families": uses.get(path, []),
+            }
+        )
     return {
         "schema_version": 1,
         "license": "CC0-1.0",
@@ -267,6 +293,9 @@ def expected_sound_paths() -> set[str]:
         asset_path(pack, filename)
         for pack, filenames in SELECTED_FILES.items()
         for filename in filenames
+    } | {
+        f"assets/mclone/sounds/mclone-original/{filename}"
+        for filename in LOCAL_FILES
     }
 
 
@@ -274,8 +303,8 @@ def validate_static_contract() -> None:
     selected_count = sum(len(files) for files in SELECTED_FILES.values())
     if len(IMPACT_FILES) != 95 or len(RPG_FILES) != 19 or len(INTERFACE_FILES) != 5:
         raise SystemExit("Kenney source-pack selection counts changed")
-    if selected_count != 119 or len(expected_sound_paths()) != 119:
-        raise SystemExit("Kenney selection must contain exactly 119 unique files")
+    if selected_count != 119 or len(expected_sound_paths()) != 121:
+        raise SystemExit("Sound selection must contain 119 Kenney and 2 original files")
     selected = expected_sound_paths()
     referenced = {
         path
@@ -331,7 +360,8 @@ def validate_repo() -> None:
     validate_static_contract()
     actual = {
         str(path.relative_to(REPO_ROOT))
-        for path in SOUND_ROOT.rglob("*.ogg")
+        for root in (SOUND_ROOT, LOCAL_SOUND_ROOT)
+        for path in root.rglob("*.ogg")
         if path.is_file()
     }
     expected = expected_sound_paths()
@@ -364,6 +394,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("check", help="Verify checked-in audio and provenance")
+    commands.add_parser(
+        "refresh-local", help="Refresh manifests after regenerating local CC0 sounds"
+    )
     importer = commands.add_parser("import", help="Import the three pinned archives")
     importer.add_argument(
         "--archive-dir",
@@ -378,9 +411,15 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "import":
         import_archives(Path(args.archive_dir).expanduser())
         print(f"[OK] imported 119 Kenney CC0 OGG files into {SOUND_ROOT}")
+    elif args.command == "refresh-local":
+        validate_static_contract()
+        CATALOG_PATH.write_bytes(canonical_json_bytes(catalog_payload()))
+        PROVENANCE_PATH.write_bytes(canonical_json_bytes(provenance_payload()))
+        validate_repo()
+        print("[OK] refreshed manifests for 2 Mclone-original CC0 sounds")
     else:
         validate_repo()
-        print(f"[OK] verified 119 Kenney CC0 OGG files in {SOUND_ROOT}")
+        print("[OK] verified 121 first-party CC0 OGG files")
     return 0
 
 

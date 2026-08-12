@@ -585,6 +585,28 @@ fn flat_hud_renders_authoritative_statistics_above_hotbar() {
 }
 
 #[test]
+fn flat_hud_renders_mallard_field_notes_and_completion_color() {
+    let scale = GuiScale::from_pixels(960, 540);
+    let mut draw = GuiDrawList::new();
+    let mut hud = FlatHud::new(resolved_flat_input(false));
+    hud.hotbar = FlatHotbarOverlay::selected(0);
+    hud.mallard_field_guide = Some(MallardFieldGuideHud {
+        discovered: 4,
+        total: 6,
+        complete: false,
+    });
+
+    render_flat_hud(scale, &mut draw, &hud);
+
+    assert!(draw.commands().iter().any(|command| matches!(
+        command,
+        GuiDrawCommand::Text { text, color, .. }
+            if text == "Mallard field notes 4/6"
+                && *color == Color::rgba(114, 206, 255, 255)
+    )));
+}
+
+#[test]
 fn flat_hud_renders_ten_authoritative_health_hearts() {
     let scale = GuiScale::from_pixels(960, 540);
     let mut draw = GuiDrawList::new();

@@ -106,8 +106,8 @@ use mclone_assets::{ActorFigureId, AssetPackCatalog, AssetPackSelection, BlockSt
 #[cfg(not(target_arch = "wasm32"))]
 use mclone_audio::PreparedAudioAssets;
 use mclone_audio::{
-    AcousticMaterial, AudioOutputCapability, PlaybackParams, SoundKey, UI_BACK, UI_CONFIRM,
-    UI_ERROR, UI_OPEN, UI_SELECT, landing_playback_for_impact,
+    AcousticMaterial, AudioOutputCapability, MALLARD_CALL, PlaybackParams, SoundKey, UI_BACK,
+    UI_CONFIRM, UI_ERROR, UI_OPEN, UI_SELECT, landing_playback_for_impact,
 };
 use mclone_client::{
     ActorInterpolationConfig, ActorInterpolationState, ActorPresentation, BlockInteractionTarget,
@@ -545,6 +545,7 @@ struct DrawableWorldSlot {
     footsteps: FootstepCadence,
     pending_interaction_sounds: VecDeque<PendingInteractionSound>,
     interaction_sound_sequence: u64,
+    mallard_tracks: VecDeque<ActiveMallardTrack>,
     /// First live consumer of the bounded local-participant foundation.
     ///
     /// This tactical keeps Guest 2 presentation-only until the live session
@@ -568,6 +569,14 @@ const FOOTSTEP_STRIDE_BLOCKS: f64 = 1.65;
 const MAX_FOOTSTEP_FRAME_DISTANCE: f64 = 1.0;
 const MAX_PENDING_INTERACTION_SOUNDS: usize = 16;
 const INTERACTION_SOUND_TIMEOUT: Duration = Duration::from_secs(2);
+const MALLARD_TRACK_LIFETIME: Duration = Duration::from_secs(12);
+const MAX_ACTIVE_MALLARD_TRACKS: usize = 48;
+
+#[derive(Clone, Copy, Debug)]
+struct ActiveMallardTrack {
+    cue: mclone_protocol::MallardTrackCue,
+    expires_at: MonotonicInstant,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct FootstepEvent {
@@ -964,6 +973,7 @@ impl DrawableWorldSlot {
             footsteps: FootstepCadence::default(),
             pending_interaction_sounds: VecDeque::new(),
             interaction_sound_sequence: 0,
+            mallard_tracks: VecDeque::new(),
             local_guest_preview: None,
             draw: install.draw,
             actors: install.actors,
@@ -3605,6 +3615,7 @@ impl McloneSceneHost {
             timing,
         )?;
         self.play_confirmed_interaction_sounds();
+        self.play_mallard_calls_and_update_tracks();
         self.sync_player_lifecycle_ui();
         self.advance_warm_world_gpu(device, camera_position, standby_deadline)?;
         self.synchronize_world_gate_state();
@@ -4416,7 +4427,7 @@ impl McloneSceneHost {
                     runtime.client(),
                     presentation_eye,
                 );
-                if self.mono_ui_context.is_some() {
+                let mut instances = if self.mono_ui_context.is_some() {
                     instances
                         .into_iter()
                         .chain(
@@ -4430,10 +4441,22 @@ impl McloneSceneHost {
                                 actor
                             }),
                         )
-                        .collect()
+                        .collect::<Vec<_>>()
                 } else {
                     instances
-                }
+                };
+                instances.extend(self.active_world.mallard_tracks.iter().map(|track| {
+                    let position = runtime
+                        .client()
+                        .topology()
+                        .nearest_position_lift(track.cue.position, presentation_eye);
+                    mclone_render::entity::ActorInstance::mallard_track(
+                        glam_vec3_from_vec3d(position),
+                        track.cue.y_rot_degrees,
+                    )
+                    .with_opacity(0.72)
+                }));
+                instances
             })
     }
 
@@ -5323,6 +5346,48 @@ impl McloneSceneHost {
         }
     }
 
+    fn play_mallard_calls_and_update_tracks(&mut self) {
+        let now = self.services.clock.now();
+        self.active_world
+            .mallard_tracks
+            .retain(|track| track.expires_at > now);
+        let listener = self.active_world.camera.snapshot().eye;
+        let Some(runtime) = self.active_world.runtime.as_mut() else {
+            return;
+        };
+        let calls = runtime.drain_mallard_calls();
+        let tracks = runtime.drain_mallard_tracks();
+        let topology = runtime.client().topology();
+        let positioned_calls = calls
+            .into_iter()
+            .map(|cue| (cue, topology.nearest_position_lift(cue.position, listener)))
+            .collect::<Vec<_>>();
+        for (cue, position) in positioned_calls {
+            let distance = position.subtract(listener).length_sqr().sqrt();
+            let gain = (1.0 - distance / f64::from(cue.audible_radius)).clamp(0.0, 1.0) as f32;
+            self.services.audio.play_with(
+                MALLARD_CALL,
+                PlaybackParams {
+                    gain,
+                    pan: self.world_sound_pan(position),
+                    seed: cue.sequence,
+                    ..PlaybackParams::default()
+                },
+            );
+        }
+        for cue in tracks {
+            if self.active_world.mallard_tracks.len() == MAX_ACTIVE_MALLARD_TRACKS {
+                self.active_world.mallard_tracks.pop_front();
+            }
+            self.active_world
+                .mallard_tracks
+                .push_back(ActiveMallardTrack {
+                    cue,
+                    expires_at: now.saturating_add(MALLARD_TRACK_LIFETIME),
+                });
+        }
+    }
+
     fn world_sound_pan(&self, position: Vec3d) -> f32 {
         let listener = self.active_world.camera.snapshot();
         let delta = position.subtract(listener.eye);
@@ -5495,6 +5560,8 @@ mod tests {
             persistent_id: mclone_protocol::EntityPersistentId::new(0, id),
             kind: mclone_protocol::EntityKind::Cow,
             item_stack: None,
+            mallard: None,
+            mallard_nest: None,
             position,
             y_rot_degrees: 0.0,
             x_rot_degrees: 0.0,

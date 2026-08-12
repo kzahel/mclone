@@ -2275,6 +2275,7 @@ struct FlatHudHotbarState {
     scale: GuiScale,
     selected_hotbar_slot: u8,
     icons: [Option<GuiTextureUv>; HOTBAR_SLOT_COUNT_USIZE],
+    item_stacks: [Option<mclone_protocol::ItemStackSnapshot>; HOTBAR_SLOT_COUNT_USIZE],
 }
 
 impl FlatHudHotbarState {
@@ -2289,6 +2290,7 @@ impl FlatHudHotbarState {
                 .selected_slot
                 .min(FLAT_HOTBAR_SLOT_COUNT.saturating_sub(1)),
             icons: hud.hotbar.icons,
+            item_stacks: hud.hotbar.item_stacks,
         })
     }
 }

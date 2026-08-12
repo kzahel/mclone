@@ -12,3 +12,4 @@ path = "src/lib.rs"
 [dependencies]
 mclone-diagnostics.workspace = true
 mclone-input.workspace = true
+mclone-protocol.workspace = true

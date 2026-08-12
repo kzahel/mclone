@@ -2960,6 +2960,7 @@ pub struct FlatHotbarOverlay {
     pub visible: bool,
     pub selected_slot: u8,
     pub icons: [Option<GuiTextureUv>; HOTBAR_SLOT_COUNT_USIZE],
+    pub item_stacks: [Option<mclone_protocol::ItemStackSnapshot>; HOTBAR_SLOT_COUNT_USIZE],
 }
 
 impl FlatHotbarOverlay {
@@ -2968,6 +2969,7 @@ impl FlatHotbarOverlay {
             visible: false,
             selected_slot: 0,
             icons: EMPTY_HOTBAR_ICONS,
+            item_stacks: [None; HOTBAR_SLOT_COUNT_USIZE],
         }
     }
 
@@ -2976,6 +2978,7 @@ impl FlatHotbarOverlay {
             visible: true,
             selected_slot,
             icons: EMPTY_HOTBAR_ICONS,
+            item_stacks: [None; HOTBAR_SLOT_COUNT_USIZE],
         }
     }
 
@@ -2987,7 +2990,16 @@ impl FlatHotbarOverlay {
             visible: true,
             selected_slot,
             icons,
+            item_stacks: [None; HOTBAR_SLOT_COUNT_USIZE],
         }
+    }
+
+    pub fn with_item_stacks(
+        mut self,
+        item_stacks: [Option<mclone_protocol::ItemStackSnapshot>; HOTBAR_SLOT_COUNT_USIZE],
+    ) -> Self {
+        self.item_stacks = item_stacks;
+        self
     }
 }
 
@@ -3046,6 +3058,7 @@ pub struct FlatHud {
     pub status: StatusOverlay,
     pub player_health: Option<PlayerHealthHud>,
     pub player_statistics: Option<PlayerStatisticsHud>,
+    pub mallard_field_guide: Option<MallardFieldGuideHud>,
     pub debug: Option<FlatHudDebugOverlay>,
     pub frame_pipeline: Option<FramePipelineHudOverlay>,
 }
@@ -3062,6 +3075,7 @@ impl FlatHud {
             status: StatusOverlay::hidden(),
             player_health: None,
             player_statistics: None,
+            mallard_field_guide: None,
             debug: None,
             frame_pipeline: None,
         }
@@ -3090,6 +3104,7 @@ impl FlatHud {
             || self.status.visible
             || (self.world_hud_visible && self.player_health.is_some())
             || (self.world_hud_visible && self.player_statistics.is_some())
+            || (self.world_hud_visible && self.mallard_field_guide.is_some())
             || self
                 .debug
                 .as_ref()
@@ -3210,7 +3225,11 @@ pub(crate) fn render_flat_hud_transient_layers(
     draw: &mut GuiDrawList,
     hud: &FlatHud,
 ) {
-    if !hud.world_hud_visible || (hud.player_health.is_none() && hud.player_statistics.is_none()) {
+    if !hud.world_hud_visible
+        || (hud.player_health.is_none()
+            && hud.player_statistics.is_none()
+            && hud.mallard_field_guide.is_none())
+    {
         return;
     }
     let touch = hud.effective_touch_overlay();
@@ -3240,6 +3259,22 @@ pub(crate) fn render_flat_hud_transient_layers(
             scale.width * 0.5,
             y.max(4.0),
             Color::rgba(128, 255, 90, 255),
+        );
+    }
+    if let Some(guide) = hud.mallard_field_guide.filter(|guide| guide.discovered > 0) {
+        let rows_above_hotbar =
+            u8::from(hud.player_health.is_some()) + u8::from(hud.player_statistics.is_some());
+        let y = hotbar_top - 14.0 * (f32::from(rows_above_hotbar) + 1.0);
+        Font::default().draw_centered_atlas(
+            draw,
+            &format!("Mallard field notes {}/{}", guide.discovered, guide.total),
+            scale.width * 0.5,
+            y.max(4.0),
+            if guide.complete {
+                Color::rgba(255, 214, 82, 255)
+            } else {
+                Color::rgba(114, 206, 255, 255)
+            },
         );
     }
 }
@@ -3287,6 +3322,13 @@ pub struct PlayerHealthHud {
 pub struct PlayerStatisticsHud {
     pub jumps: u32,
     pub successful_block_placements: u32,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct MallardFieldGuideHud {
+    pub discovered: u32,
+    pub total: u32,
+    pub complete: bool,
 }
 
 pub fn render_debug_overlay(scale: GuiScale, draw: &mut GuiDrawList, overlay: &DebugOverlay) {
@@ -3885,7 +3927,15 @@ fn render_touch_hotbar(
         if overlay.selected_hotbar_slot == slot {
             draw.outline(rect.inset(-2.0), Color::rgba(245, 250, 255, 215));
         }
-        render_hotbar_slot_contents(draw, font, rect, overlay.hotbar_icons[index], index, 20.0);
+        render_hotbar_slot_contents(
+            draw,
+            font,
+            rect,
+            overlay.hotbar_icons[index],
+            None,
+            index,
+            20.0,
+        );
     }
 }
 
@@ -3912,7 +3962,15 @@ fn render_flat_hotbar_contents(
     hotbar: FlatHotbarOverlay,
 ) {
     for (index, rect) in flat_hotbar_slot_rects(scale).into_iter().enumerate() {
-        render_hotbar_slot_contents(draw, font, rect, hotbar.icons[index], index, 16.0);
+        render_hotbar_slot_contents(
+            draw,
+            font,
+            rect,
+            hotbar.icons[index],
+            hotbar.item_stacks[index],
+            index,
+            16.0,
+        );
     }
 }
 
@@ -3921,9 +3979,34 @@ fn render_hotbar_slot_contents(
     font: &Font,
     rect: Rect,
     icon: Option<GuiTextureUv>,
+    item_stack: Option<mclone_protocol::ItemStackSnapshot>,
     index: usize,
     icon_size: f32,
 ) {
+    if let Some(stack) = item_stack {
+        let label = match stack.kind {
+            mclone_protocol::ItemKind::Egg => "E",
+            mclone_protocol::ItemKind::MallardEgg => "ME",
+            mclone_protocol::ItemKind::MallardFeather => "MF",
+        };
+        font.draw_centered_atlas(
+            draw,
+            label,
+            rect.center_x(),
+            rect.y + 4.0,
+            Color::rgba(255, 220, 112, 255),
+        );
+        if stack.count > 1 {
+            font.draw_atlas(
+                draw,
+                &stack.count.to_string(),
+                rect.x + rect.width - 7.0,
+                rect.y + rect.height - font.line_height() - 1.0,
+                Color::WHITE,
+            );
+        }
+        return;
+    }
     if let Some(icon) = icon {
         let icon_size = icon_size.min(rect.width - 4.0).min(rect.height - 4.0);
         draw.texture(

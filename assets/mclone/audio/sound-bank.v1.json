@@ -310,6 +310,17 @@
       ]
     },
     {
+      "gain": 0.72,
+      "key": "mclone:mallard_call",
+      "no_immediate_repeat": true,
+      "pitch_max": 1.04,
+      "pitch_min": 0.96,
+      "variants": [
+        "assets/mclone/sounds/mclone-original/mallard_call_00.ogg",
+        "assets/mclone/sounds/mclone-original/mallard_call_01.ogg"
+      ]
+    },
+    {
       "gain": 0.45,
       "key": "mclone:place_glass",
       "no_immediate_repeat": true,
@@ -444,5 +455,5 @@
   ],
   "license": "CC0-1.0",
   "schema_version": 1,
-  "selected_file_count": 119
+  "selected_file_count": 121
 }

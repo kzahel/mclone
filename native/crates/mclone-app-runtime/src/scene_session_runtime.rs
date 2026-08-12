@@ -418,6 +418,17 @@ impl SceneSessionRuntime {
         self.core_mut().drain_player_position_updates()
     }
 
+    pub fn drain_mallard_calls(&mut self) -> Vec<mclone_protocol::MallardCallCue> {
+        self.core_mut().client_mut().drain_mallard_calls().collect()
+    }
+
+    pub fn drain_mallard_tracks(&mut self) -> Vec<mclone_protocol::MallardTrackCue> {
+        self.core_mut()
+            .client_mut()
+            .drain_mallard_tracks()
+            .collect()
+    }
+
     pub fn promote_observer_to_player(&mut self) -> Result<()> {
         self.service.promote_observer_to_player()
     }

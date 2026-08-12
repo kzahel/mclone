@@ -2786,7 +2786,8 @@ impl McloneSceneHost {
                 self.active_world.interaction.hotbar_items(),
                 &runtime.mesh_assets().catalog,
             ),
-        );
+        )
+        .with_item_stacks(*runtime.client().player_inventory());
         hud.status = self.session_projection().status_overlay;
         let vitals = runtime.client().player_vitals();
         hud.player_health = Some(mclone_ui::PlayerHealthHud {
@@ -2797,6 +2798,12 @@ impl McloneSceneHost {
         hud.player_statistics = Some(mclone_ui::PlayerStatisticsHud {
             jumps: statistics.jump_count(),
             successful_block_placements: statistics.successful_block_placement_count(),
+        });
+        let guide = runtime.client().mallard_field_guide();
+        hud.mallard_field_guide = Some(mclone_ui::MallardFieldGuideHud {
+            discovered: guide.discovered_count(),
+            total: mclone_protocol::MALLARD_FIELD_GUIDE_OBSERVATION_COUNT,
+            complete: guide.is_complete(),
         });
         hud.touch = context.touch_overlay;
         hud.frame_pipeline = self

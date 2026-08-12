@@ -1249,9 +1249,29 @@
       "sha256": "4b857968d64f9ac9336a10ffac6694d7547e1f01566ad6857b30bc8db3ee6c32",
       "source_pack": "rpg",
       "upstream_path": "Audio/handleCoins2.ogg"
+    },
+    {
+      "bytes": 5719,
+      "families": [
+        "mclone:mallard_call"
+      ],
+      "path": "assets/mclone/sounds/mclone-original/mallard_call_00.ogg",
+      "sha256": "8a7eba33728aa64ae1c38e70c0509e8a8c165c70a3df65793c77e7a2576946e1",
+      "source_pack": "mclone-original",
+      "upstream_path": "tools/minecraft_assets/generate_mallard_calls.sh"
+    },
+    {
+      "bytes": 5750,
+      "families": [
+        "mclone:mallard_call"
+      ],
+      "path": "assets/mclone/sounds/mclone-original/mallard_call_01.ogg",
+      "sha256": "be50c35e8e2be59e1b4a1d4d33a64433b00b713d94012bc77baeccc8d811c087",
+      "source_pack": "mclone-original",
+      "upstream_path": "tools/minecraft_assets/generate_mallard_calls.sh"
     }
   ],
   "license": "CC0-1.0",
   "schema_version": 1,
-  "selected_file_count": 119
+  "selected_file_count": 121
 }

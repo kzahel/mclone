@@ -63,6 +63,7 @@ pub const IMPACT_METAL: SoundKey = SoundKey("mclone:impact_metal");
 pub const IMPACT_WOOD: SoundKey = SoundKey("mclone:impact_wood");
 pub const CLOTH_MOVE: SoundKey = SoundKey("mclone:cloth_move");
 pub const ITEM_PICKUP: SoundKey = SoundKey("mclone:item_pickup");
+pub const MALLARD_CALL: SoundKey = SoundKey("mclone:mallard_call");
 pub const WOOD_CREAK: SoundKey = SoundKey("mclone:wood_creak");
 pub const UI_BACK: SoundKey = SoundKey("mclone:ui_back");
 pub const UI_CONFIRM: SoundKey = SoundKey("mclone:ui_confirm");
@@ -98,6 +99,7 @@ const CATALOG_SOUND_KEYS: &[SoundKey] = &[
     IMPACT_WOOD,
     CLOTH_MOVE,
     ITEM_PICKUP,
+    MALLARD_CALL,
     WOOD_CREAK,
     UI_BACK,
     UI_CONFIRM,
@@ -1258,8 +1260,8 @@ mod tests {
 
         let prepared = PreparedAudioAssets::load_first_party(&source).unwrap();
 
-        assert_eq!(prepared.sound_count(), 119);
-        assert_eq!(prepared.family_count(), 33);
+        assert_eq!(prepared.sound_count(), 121);
+        assert_eq!(prepared.family_count(), 34);
     }
 
     #[test]

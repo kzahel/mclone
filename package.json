@@ -239,6 +239,7 @@
     "assets:pack:first-party:test": "node ./scripts/run-python.mjs -m unittest tools.minecraft_assets.test_first_party_pack",
     "assets:stage:first-party": "node ./scripts/run-python.mjs ./tools/minecraft_assets/first_party_pack.py stage",
     "assets:sfx:check": "node ./scripts/run-python.mjs ./tools/minecraft_assets/kenney_audio.py check",
+    "assets:sfx:mallard": "bash ./tools/minecraft_assets/generate_mallard_calls.sh && node ./scripts/run-python.mjs ./tools/minecraft_assets/kenney_audio.py refresh-local",
     "assets:sfx:import": "node ./scripts/run-python.mjs ./tools/minecraft_assets/kenney_audio.py import",
     "asset-lab:install": "pnpm --dir ./tools/asset-lab install",
     "asset-lab:typecheck": "pnpm --dir ./tools/asset-lab typecheck",

@@ -741,7 +741,9 @@ pub(crate) fn persistent_passive_actor_identity_summary(
                 EntityKind::Chicken => 2,
                 EntityKind::Mannequin => 3,
                 EntityKind::Mallard => 4,
-                EntityKind::DebugCube | EntityKind::Item => unreachable!("filtered above"),
+                EntityKind::DebugCube | EntityKind::Item | EntityKind::MallardNest => {
+                    unreachable!("filtered above")
+                }
             };
             let mut hash = 0xcbf2_9ce4_8422_2325_u64;
             for value in [persistent_id.most, persistent_id.least, kind] {

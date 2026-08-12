@@ -92,6 +92,7 @@ pub enum ActorInstanceShape {
     ItemEgg,
     MallardNest,
     MallardFeather,
+    MallardTrack,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -309,6 +310,15 @@ impl ActorInstance {
             body_color: [0.73, 0.70, 0.62, 1.0],
             accent_color: [0.16, 0.34, 0.62, 1.0],
             ..Self::item_egg(feet_position, y_rot_degrees, width, height)
+        }
+    }
+
+    pub fn mallard_track(feet_position: Vec3, y_rot_degrees: f32) -> Self {
+        Self {
+            shape: ActorInstanceShape::MallardTrack,
+            body_color: [0.20, 0.13, 0.06, 0.72],
+            accent_color: [0.12, 0.08, 0.04, 0.72],
+            ..Self::item_egg(feet_position, y_rot_degrees, 0.34, 0.015)
         }
     }
 
@@ -2090,6 +2100,9 @@ fn append_actor(
         ActorInstanceShape::MallardFeather => {
             append_mallard_feather(mesh, actor, texture_layout, atlas_size)
         }
+        ActorInstanceShape::MallardTrack => {
+            append_mallard_track(mesh, actor, texture_layout, atlas_size)
+        }
     }
     let opacity = if actor.opacity.is_finite() {
         actor.opacity.clamp(0.0, 1.0)
@@ -2748,6 +2761,35 @@ fn append_mallard_feather(
         white_uv,
         [actor.body_color; 6],
     );
+}
+
+fn append_mallard_track(
+    mesh: &mut ActorMesh,
+    actor: ActorInstance,
+    texture_layout: ActorTextureLayout,
+    atlas_size: [u32; 2],
+) {
+    let white_uv = texture_region_center_uv(texture_layout.white, atlas_size);
+    for x in [-0.11, 0.11] {
+        append_box(
+            mesh,
+            actor,
+            Vec3::new(x - 0.045, 0.002, -0.12),
+            Vec3::new(x + 0.045, 0.012, 0.10),
+            white_uv,
+            [actor.body_color; 6],
+        );
+        for toe_x in [-0.055, 0.0, 0.055] {
+            append_box(
+                mesh,
+                actor,
+                Vec3::new(x + toe_x - 0.018, 0.002, 0.06),
+                Vec3::new(x + toe_x + 0.018, 0.012, 0.19),
+                white_uv,
+                [actor.accent_color; 6],
+            );
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
