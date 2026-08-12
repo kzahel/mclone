@@ -303,6 +303,34 @@ pub fn xr_diagnostic_panel_from_render_views(render_views: [ChunkRenderView; 2])
     )
 }
 
+pub fn xr_field_guide_panel_from_render_views(render_views: [ChunkRenderView; 2]) -> WorldGuiPanel {
+    let center_position = (render_views[0].camera_position + render_views[1].camera_position) * 0.5;
+    let forward = average_unit_direction(
+        render_views[0].camera_forward,
+        render_views[1].camera_forward,
+        Vec3::NEG_Z,
+    );
+    let up = average_unit_direction(
+        render_views[0].camera_up,
+        render_views[1].camera_up,
+        Vec3::Y,
+    );
+    let right = average_unit_direction(
+        render_views[0].camera_right,
+        render_views[1].camera_right,
+        Vec3::X,
+    );
+    WorldGuiPanel::new(
+        center_position
+            + forward * XR_DIAGNOSTIC_PANEL_DISTANCE_BLOCKS
+            + up * XR_FIELD_GUIDE_PANEL_UP_OFFSET_BLOCKS,
+        right,
+        up,
+        XR_FIELD_GUIDE_PANEL_WIDTH_BLOCKS,
+        xr_field_guide_panel_height_blocks(),
+    )
+}
+
 pub fn xr_game_ui_panel_from_controllers(
     controllers: &[TrackedControllerState],
     transform: XrStageToWorld,
@@ -550,6 +578,58 @@ pub(crate) fn xr_menu_panel_height_blocks() -> f32 {
 pub(crate) fn xr_diagnostic_panel_height_blocks() -> f32 {
     XR_DIAGNOSTIC_PANEL_WIDTH_BLOCKS * XR_DIAGNOSTIC_PANEL_PIXELS[1] as f32
         / XR_DIAGNOSTIC_PANEL_PIXELS[0] as f32
+}
+
+pub(crate) fn xr_field_guide_panel_height_blocks() -> f32 {
+    XR_FIELD_GUIDE_PANEL_WIDTH_BLOCKS * XR_FIELD_GUIDE_PANEL_PIXELS[1] as f32
+        / XR_FIELD_GUIDE_PANEL_PIXELS[0] as f32
+}
+
+pub(crate) fn xr_field_guide_draw(
+    progress: mclone_protocol::MallardFieldGuideProgress,
+) -> GuiDrawList {
+    let mut draw = GuiDrawList::new();
+    let discovered = progress.discovered_count();
+    if discovered == 0 {
+        return draw;
+    }
+    let scale = GuiScale::from_pixels(
+        XR_FIELD_GUIDE_PANEL_PIXELS[0],
+        XR_FIELD_GUIDE_PANEL_PIXELS[1],
+    );
+    draw.fill(
+        Rect::new(0.0, 0.0, scale.width, scale.height),
+        Color::rgba(15, 26, 34, 190),
+    );
+    let font = Font::default();
+    let label = format!(
+        "MALLARD FIELD NOTES {discovered}/{}",
+        mclone_protocol::MALLARD_FIELD_GUIDE_OBSERVATION_COUNT
+    );
+    let color = if progress.is_complete() {
+        Color::rgba(255, 214, 82, 255)
+    } else {
+        Color::rgba(114, 206, 255, 255)
+    };
+    let text_x = (scale.width - font.width(&label) * 3.0) * 0.5;
+    let text_y = (scale.height - font.glyph_height() * 3.0) * 0.5;
+    for (index, ch) in label.chars().enumerate() {
+        if ch == ' ' {
+            continue;
+        }
+        let x = text_x + index as f32 * font.advance() * 3.0;
+        for (row, bits) in Font::glyph_rows(ch).into_iter().enumerate() {
+            for column in 0..5 {
+                if bits & (1 << (4 - column)) != 0 {
+                    draw.fill(
+                        Rect::new(x + column as f32 * 3.0, text_y + row as f32 * 3.0, 3.0, 3.0),
+                        color,
+                    );
+                }
+            }
+        }
+    }
+    draw
 }
 
 pub(crate) fn xr_game_ui_panel_height_blocks() -> f32 {

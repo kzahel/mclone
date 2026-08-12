@@ -52,7 +52,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     store.close()?;
 
     println!(
-        "MCLONE_MALLARD_ECOLOGY_FIXTURE dir={} profile={} seed={} camera_eye=12.5,69.5,18.5 camera_target=2,65,8.5",
+        "MCLONE_MALLARD_ECOLOGY_FIXTURE dir={} profile={} seed={} camera_eye=10,72,19 camera_target=3,64.5,8",
         world_dir.display(),
         profile_path.display(),
         manifest.seed,

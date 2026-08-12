@@ -184,7 +184,7 @@ use mclone_render_session::{
 use mclone_server::{SimulationCadenceConfig, WorkerFrameMetrics};
 use mclone_ui::{
     Color, DEFAULT_JOIN_REMOTE_ADDR, DebugActorTool, DebugOverlay, FlatHotbarOverlay, FlatHud,
-    FlatHudDebugOverlay, GameAuxiliarySplitMode, GameCollisionMode, GameDeathCause,
+    FlatHudDebugOverlay, Font, GameAuxiliarySplitMode, GameCollisionMode, GameDeathCause,
     GameFlatPresentationState, GameFramePacingMode, GameGrassDetail, GameLeafDetail,
     GameLocalPlayControllerFamily, GameLocalPlayGuestInput, GameLocalPlayState, GameMovementMode,
     GamePlayerModel, GameScreen, GameSimulationCadence, GameTerrainPresentationMode,
@@ -288,6 +288,9 @@ pub const XR_DIAGNOSTIC_PANEL_DISTANCE_BLOCKS: f32 = 2.25;
 pub const XR_DIAGNOSTIC_PANEL_WIDTH_BLOCKS: f32 = 1.2;
 pub const XR_DIAGNOSTIC_PANEL_RIGHT_OFFSET_BLOCKS: f32 = 0.0;
 pub const XR_DIAGNOSTIC_PANEL_UP_OFFSET_BLOCKS: f32 = -0.46;
+pub const XR_FIELD_GUIDE_PANEL_PIXELS: [u32; 2] = [504, 108];
+pub const XR_FIELD_GUIDE_PANEL_WIDTH_BLOCKS: f32 = 1.6;
+pub const XR_FIELD_GUIDE_PANEL_UP_OFFSET_BLOCKS: f32 = -0.62;
 pub const XR_MENU_CONTROLLER_RAY_LENGTH_BLOCKS: f32 = 6.0;
 pub const XR_MENU_POINTER_TRIGGER_PRESS: f32 = 0.55;
 pub const XR_MENU_POINTER_TRIGGER_RELEASE: f32 = 0.35;
@@ -3419,6 +3422,34 @@ impl McloneSceneHost {
         panel_stats.add(diagnostic_panel_stats);
         draw_cache_stats.add(diagnostic_draw_cache);
         if !self.ui.is_active() {
+            let guide = self
+                .active_world
+                .runtime
+                .as_ref()
+                .map(|runtime| runtime.client().mallard_field_guide())
+                .unwrap_or_default();
+            let draw = xr_field_guide_draw(guide);
+            if !draw.commands().is_empty() {
+                panel_stats.add(
+                    self.world_gui_overlay_renderer
+                        .render_panel_multiview_report(
+                            device,
+                            queue,
+                            encoder,
+                            overlay_target,
+                            render_views,
+                            XR_FIELD_GUIDE_PANEL_PIXELS,
+                            [
+                                XR_FIELD_GUIDE_PANEL_PIXELS[0] as f32,
+                                XR_FIELD_GUIDE_PANEL_PIXELS[1] as f32,
+                            ],
+                            &draw,
+                            xr_field_guide_panel_from_render_views(render_views),
+                            &[],
+                        )
+                        .context("render XR field-guide panel multiview")?,
+                );
+            }
             return Ok(XrWorldOverlayStats {
                 panel: panel_stats,
                 draw_cache: draw_cache_stats,
@@ -4977,6 +5008,41 @@ impl McloneSceneHost {
         xr_world_panel_ms += diagnostic_panel_start.map_or(0.0, |start| {
             elapsed_ms(self.services.clock.elapsed_since(start))
         });
+        if !ui_active {
+            let guide = self
+                .active_world
+                .runtime
+                .as_ref()
+                .map(|runtime| runtime.client().mallard_field_guide())
+                .unwrap_or_default();
+            let draw = xr_field_guide_draw(guide);
+            if !draw.commands().is_empty() {
+                let guide_start = collect_split_timing.then(|| self.services.clock.now());
+                ui_panel_stats.add(
+                    self.world_gui_overlay_renderer
+                        .render_panel_in_slot_report(
+                            device,
+                            queue,
+                            &mut encoder,
+                            RenderFrameTarget::color(target.color_view, target.size),
+                            render_view,
+                            XR_FIELD_GUIDE_PANEL_PIXELS,
+                            [
+                                XR_FIELD_GUIDE_PANEL_PIXELS[0] as f32,
+                                XR_FIELD_GUIDE_PANEL_PIXELS[1] as f32,
+                            ],
+                            &draw,
+                            xr_field_guide_panel_from_render_views([render_view; 2]),
+                            &[],
+                            view_slot,
+                        )
+                        .with_context(|| format!("render XR field-guide panel for {label} eye"))?,
+                );
+                xr_world_panel_ms += guide_start.map_or(0.0, |start| {
+                    elapsed_ms(self.services.clock.elapsed_since(start))
+                });
+            }
+        }
         if ui_active {
             if let Some(panel) = self.menu_panel_pose {
                 let world_panel_start = collect_split_timing.then(|| self.services.clock.now());
@@ -6545,6 +6611,25 @@ mod tests {
         assert!((panel.up - Vec3::Y).length() < 1.0e-6);
         assert_eq!(panel.width, XR_DIAGNOSTIC_PANEL_WIDTH_BLOCKS);
         assert_eq!(panel.height, xr_diagnostic_panel_height_blocks());
+    }
+
+    #[test]
+    fn xr_field_guide_panel_and_draw_project_discovery_progress() {
+        let left = test_render_view(Vec3::new(-0.03, 64.0, 0.0));
+        let right = test_render_view(Vec3::new(0.03, 64.0, 0.0));
+        let panel = xr_field_guide_panel_from_render_views([left, right]);
+        assert_eq!(panel.width, XR_FIELD_GUIDE_PANEL_WIDTH_BLOCKS);
+        assert_eq!(panel.height, xr_field_guide_panel_height_blocks());
+
+        assert!(
+            xr_field_guide_draw(Default::default())
+                .commands()
+                .is_empty()
+        );
+        let complete = mclone_protocol::MallardFieldGuideProgress::from_bits_retain(
+            mclone_protocol::MallardFieldGuideProgress::KNOWN_MASK,
+        );
+        assert!(!xr_field_guide_draw(complete).commands().is_empty());
     }
 
     #[test]

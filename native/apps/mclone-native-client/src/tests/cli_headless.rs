@@ -312,6 +312,8 @@ fn cli_parses_xr_emulation_screenshot_and_keyboard_input() {
         "ArrowLeft".to_owned(),
         "--xr-emulation-input-frames".to_owned(),
         "12".to_owned(),
+        "--xr-emulation-pause-panel".to_owned(),
+        "false".to_owned(),
     ])
     .unwrap();
 
@@ -329,6 +331,7 @@ fn cli_parses_xr_emulation_screenshot_and_keyboard_input() {
                     mclone_input::KeyboardKey::ArrowLeft,
                 ],
                 input_frames: 12,
+                pause_panel: false,
             },
         }
     );

@@ -326,7 +326,8 @@ pub(crate) fn run_xr_emulation_screenshot(
                 }
                 views = synthetic_stereo_views(driver.host().camera_snapshot(), size);
             }
-            if driver.host().embedded_world_preview_snapshot().is_none()
+            if options.pause_panel
+                && driver.host().embedded_world_preview_snapshot().is_none()
                 && !driver.stereo_ui_is_active()
             {
                 apply_menu_toggle(&mut driver, views)?;
@@ -355,13 +356,16 @@ pub(crate) fn run_xr_emulation_screenshot(
     if capture.eye_pixel_difference_count == 0 {
         bail!("XR emulation eyes are pixel-identical; stereo parallax was not preserved");
     }
-    if embedded_preview.is_none()
-        && (!summary.ui_active
-            || summary.gui_command_count == 0
-            || summary.ui_panel.composite_count < 2)
+    let missing_requested_ui = if options.pause_panel {
+        !summary.ui_active || summary.gui_command_count == 0
+    } else {
+        summary.ui_active
+    };
+    if embedded_preview.is_none() && (missing_requested_ui || summary.ui_panel.composite_count < 2)
     {
         bail!(
-            "XR emulation capture did not composite the active world UI into both eyes: active={} commands={} composites={}",
+            "XR emulation capture did not composite the requested world UI into both eyes: pause_panel={} active={} commands={} composites={}",
+            options.pause_panel,
             summary.ui_active,
             summary.gui_command_count,
             summary.ui_panel.composite_count

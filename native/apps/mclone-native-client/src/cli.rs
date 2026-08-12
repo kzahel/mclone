@@ -154,6 +154,7 @@ pub(crate) const DESKTOP_LOCAL_ARG_FLAGS: &[&str] = &[
     "--xr-debug-ui",
     "--xr-emulation-input-frames",
     "--xr-emulation-key",
+    "--xr-emulation-pause-panel",
     "--xr-emulation-screenshot",
     "--xr-forever",
     "--xr-mclone-smoke",
@@ -379,6 +380,9 @@ pub(crate) struct XrEmulationScreenshotOptions {
     pub(crate) render_options: TexturedSectionRenderOptions,
     pub(crate) held_keys: Vec<KeyboardKey>,
     pub(crate) input_frames: usize,
+    /// Opens the pause panel before capture. Disable this to review the
+    /// ordinary stereo gameplay HUD.
+    pub(crate) pause_panel: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -887,6 +891,8 @@ impl Cli {
         let mut xr_emulation_keys = Vec::new();
         let mut xr_emulation_input_frames = DEFAULT_XR_EMULATION_INPUT_FRAMES;
         let mut xr_emulation_input_options_explicit = false;
+        let mut xr_emulation_pause_panel = true;
+        let mut xr_emulation_pause_panel_explicit = false;
         let mut screenshot_frame_pipeline_overlay = false;
         let mut screenshot_debug_pane = false;
         let mut screenshot_worldgen_lens = None;
@@ -1352,6 +1358,11 @@ impl Cli {
                         );
                     }
                 }
+                "--xr-emulation-pause-panel" => {
+                    xr_emulation_pause_panel_explicit = true;
+                    xr_emulation_pause_panel =
+                        parse_bool_arg("--xr-emulation-pause-panel", args.next())?;
+                }
                 "--renderer-rebuild-smoke" => {
                     let path = args
                         .next()
@@ -1780,6 +1791,11 @@ impl Cli {
         {
             bail!("XR emulation input options require --xr-emulation-screenshot");
         }
+        if xr_emulation_pause_panel_explicit
+            && !matches!(mode, Some(HeadlessMode::XrEmulationScreenshot(_)))
+        {
+            bail!("--xr-emulation-pause-panel requires --xr-emulation-screenshot");
+        }
         if xr_emulation_input_options_explicit
             && xr_emulation_keys.is_empty()
             && matches!(mode, Some(HeadlessMode::XrEmulationScreenshot(_)))
@@ -2146,6 +2162,7 @@ impl Cli {
                     render_options,
                     held_keys: xr_emulation_keys,
                     input_frames: xr_emulation_input_frames,
+                    pause_panel: xr_emulation_pause_panel,
                 },
             }),
             Some(HeadlessMode::RendererRebuildSmoke(directory)) => Ok(Self::RendererRebuildSmoke {
@@ -2871,7 +2888,7 @@ fn print_help() {
            mclone-native-client --worldgen-showcase-card /tmp/mclone-worldgen-showcase [--width 640] [--height 400] [--generation-profile small-island-v1] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 16] [--day-time 6000] [--lighting true|false] [--fullbright true|false]\n\
            mclone-native-client --warm-world-swap-smoke /tmp/mclone-warm-world-swap --warm-world-standby-seed 67890 [--warm-world-standby-cadence 5/5/5] [--warm-world-cost-sample-ms 3000] [--width 1280] [--height 720] [scene/render options as --screenshot]\n\
            mclone-native-client --live-diorama-smoke /tmp/mclone-live-diorama --world-dir ./table-a --live-diorama-world-dir ./island-b [--live-diorama-scale 0.125] [--live-diorama-soak-seconds 600] [--width 960] [--height 640]\n\
-           mclone-native-client --xr-emulation-screenshot /tmp/mclone-xr-emulation.png [--width 960] [--height 960] [--xr-emulation-key KeyW] [--xr-emulation-key ArrowLeft] [--xr-emulation-input-frames 8] [scene/render options as --screenshot]\n\
+           mclone-native-client --xr-emulation-screenshot /tmp/mclone-xr-emulation.png [--width 960] [--height 960] [--xr-emulation-key KeyW] [--xr-emulation-key ArrowLeft] [--xr-emulation-input-frames 8] [--xr-emulation-pause-panel true|false] [scene/render options as --screenshot]\n\
            mclone-native-client --torch-light-probe /tmp/mclone-torch-light-probe [--width 1280] [--height 720] [--render-color-profile vanilla|stylized-bright|linear-experimental]\n\
            mclone-native-client --headless-dual-view /tmp/mclone-dual-view [--headless-dual-view-hud true|false] [--width 960] [--height 640] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--section-occlusion true|false] [--fullbright true|false]\n\
            mclone-native-client --renderer-rebuild-smoke /tmp/mclone-render-rebuild [--width 960] [--height 540] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--section-occlusion true|false] [--fullbright true|false] [--rebuild-render-scale 0.5]\n\

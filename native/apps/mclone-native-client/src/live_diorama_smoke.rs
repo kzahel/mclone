@@ -320,6 +320,7 @@ pub(crate) fn run_live_diorama_smoke(
         render_options: options.render_options,
         held_keys: Vec::new(),
         input_frames: 1,
+        pause_panel: true,
     })?;
     let stereo_preview = stereo
         .embedded_preview

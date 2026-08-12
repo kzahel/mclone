@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 const repo = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const root = "/tmp/mclone-mallard-ecology-fixture";
 const image = "/tmp/mclone-mallard-ecology.png";
+const stereoImage = "/tmp/mclone-mallard-ecology-stereo.png";
 
 run([
   "cargo", "run", "--manifest-path", "native/Cargo.toml", "-p", "mclone-server",
@@ -45,7 +46,36 @@ if (!/220 GUI commands/.test(output)) {
 if (!existsSync(image) || statSync(image).size < 10_000) {
   throw new Error(`mallard ecology capture did not write credible pixels to ${image}`);
 }
-console.log(`MCLONE_MALLARD_ECOLOGY_CAPTURE image=${image}`);
+
+const stereoOutput = run([
+  "cargo", "run", "--manifest-path", "native/Cargo.toml", "-p", "mclone-native-client",
+  "--bin", "mclone-native-client", "--",
+  "--xr-emulation-screenshot", stereoImage,
+  "--width", "960",
+  "--height", "720",
+  "--xr-emulation-pause-panel", "false",
+  "--world-dir", `${root}/world`,
+  "--generation-profile", "authored-only",
+  "--seed", "17502",
+  "--chunk-x", "0",
+  "--chunk-z", "0",
+  "--render-distance", "2",
+  "--day-time", "6000",
+  "--freeze-time",
+  "--debug-passive-showcase", "false",
+  "--lighting", "false",
+  "--fullbright", "true",
+], {
+  ...process.env,
+  MCLONE_PLAYER_PROFILE_FILE: `${root}/player-profile.v1.json`,
+});
+if (!/2 eye UI composites/.test(stereoOutput)) {
+  throw new Error("mallard ecology stereo capture did not composite the field guide into both eyes");
+}
+if (!existsSync(stereoImage) || statSync(stereoImage).size < 10_000) {
+  throw new Error(`mallard ecology stereo capture did not write credible pixels to ${stereoImage}`);
+}
+console.log(`MCLONE_MALLARD_ECOLOGY_CAPTURE flat=${image} stereo=${stereoImage}`);
 
 function run(command, env = process.env) {
   const result = spawnSync(command[0], command.slice(1), {
