@@ -160,7 +160,9 @@ menu or gameplay behavior.
   Empty slots may fall back to `1` through `9`; an occupied slot must display
   the same item abbreviation and count as the desktop-sized hotbar. This
   corrects the phone-only numbered-slot failure that hid the deer showcase's
-  slot-1 hunting spear.
+  slot-1 hunting spear. Both layouts also name the selected item above the
+  hotbar, so the compact `SP` label is explicitly identified as `Hunting
+  spear`.
 - Every flat host now admits gameplay touch only while shared capability
   resolution says controls are visible. Direct menu touch remains available
   in `Off`. In `Auto`, a later keyboard, mouse, or controller input hides and
@@ -188,8 +190,9 @@ Validation completed on 2026-07-24:
   to keyboard after Escape.
 - `pnpm native:web:deer-showcase-mobile-smoke` adds a phone-sized, touch-capable
   acceptance of the exact interactive review world. Its inspected 390x844 CSS
-  pixel capture (780x1688 device pixels) shows `SP` in selected slot 1 and the
-  adjacent `ATK`, `USE`, `UP`, and `DN` controls over the live scene.
+  pixel capture (780x1688 device pixels) shows `SP` in selected slot 1,
+  `Hunting spear` above it, and the adjacent `ATK`, `USE`, `UP`, and `DN`
+  controls over the live scene.
 - The Android touch frame and headed-browser world, active joystick, pause
   menu, and touch-options captures under `/tmp` were inspected. They show the
   shared touch controls and touch settings over live rendered terrain.

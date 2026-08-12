@@ -3548,8 +3548,15 @@ pub(crate) fn render_flat_hud_transient_layers(
     draw: &mut GuiDrawList,
     hud: &FlatHud,
 ) {
+    let selected_item = hud
+        .hotbar
+        .item_stacks
+        .get(usize::from(hud.hotbar.selected_slot))
+        .copied()
+        .flatten();
     if !hud.world_hud_visible
-        || (hud.player_health.is_none()
+        || (selected_item.is_none()
+            && hud.player_health.is_none()
             && hud.player_statistics.is_none()
             && hud.mallard_field_guide.is_none())
             && hud.deer_field_guide.is_none()
@@ -3564,7 +3571,17 @@ pub(crate) fn render_flat_hud_transient_layers(
     } else {
         scale.height - 12.0
     };
-    let health_y = (hotbar_top - 12.0).max(4.0);
+    let selected_item_rows = u8::from(selected_item.is_some());
+    if let Some(stack) = selected_item {
+        Font::default().draw_centered_atlas(
+            draw,
+            item_kind_display_name(stack.kind),
+            scale.width * 0.5,
+            (hotbar_top - 14.0).max(4.0),
+            Color::rgba(255, 220, 112, 255),
+        );
+    }
+    let health_y = (hotbar_top - 12.0 - 14.0 * f32::from(selected_item_rows)).max(4.0);
     if let Some(health) = hud.player_health {
         render_player_health(draw, scale.width * 0.5, health_y, health);
     }
@@ -3572,7 +3589,7 @@ pub(crate) fn render_flat_hud_transient_layers(
         let y = if hud.player_health.is_some() {
             health_y - 14.0
         } else {
-            hotbar_top - 14.0
+            hotbar_top - 14.0 * (f32::from(selected_item_rows) + 1.0)
         };
         Font::default().draw_centered_atlas(
             draw,
@@ -3586,8 +3603,9 @@ pub(crate) fn render_flat_hud_transient_layers(
         );
     }
     if let Some(guide) = hud.mallard_field_guide.filter(|guide| guide.discovered > 0) {
-        let rows_above_hotbar =
-            u8::from(hud.player_health.is_some()) + u8::from(hud.player_statistics.is_some());
+        let rows_above_hotbar = selected_item_rows
+            + u8::from(hud.player_health.is_some())
+            + u8::from(hud.player_statistics.is_some());
         let y = hotbar_top - 14.0 * (f32::from(rows_above_hotbar) + 1.0);
         Font::default().draw_centered_atlas(
             draw,
@@ -3602,7 +3620,8 @@ pub(crate) fn render_flat_hud_transient_layers(
         );
     }
     if let Some(guide) = hud.deer_field_guide.filter(|guide| guide.discovered > 0) {
-        let rows_above_hotbar = u8::from(hud.player_health.is_some())
+        let rows_above_hotbar = selected_item_rows
+            + u8::from(hud.player_health.is_some())
             + u8::from(hud.player_statistics.is_some())
             + u8::from(
                 hud.mallard_field_guide
@@ -4500,15 +4519,7 @@ fn render_hotbar_slot_contents(
     icon_size: f32,
 ) {
     if let Some(stack) = item_stack {
-        let label = match stack.kind {
-            mclone_protocol::ItemKind::Egg => "E",
-            mclone_protocol::ItemKind::MallardEgg => "ME",
-            mclone_protocol::ItemKind::MallardFeather => "MF",
-            mclone_protocol::ItemKind::HuntingSpear => "SP",
-            mclone_protocol::ItemKind::Venison => "V",
-            mclone_protocol::ItemKind::DeerHide => "DH",
-            mclone_protocol::ItemKind::ShedAntler => "A",
-        };
+        let label = item_kind_hotbar_label(stack.kind);
         font.draw_centered_atlas(
             draw,
             label,
@@ -4549,6 +4560,30 @@ fn render_hotbar_slot_contents(
         rect.y + ((rect.height - font.line_height()) * 0.5).floor(),
         Color::rgba(245, 250, 255, 210),
     );
+}
+
+const fn item_kind_hotbar_label(kind: mclone_protocol::ItemKind) -> &'static str {
+    match kind {
+        mclone_protocol::ItemKind::Egg => "E",
+        mclone_protocol::ItemKind::MallardEgg => "ME",
+        mclone_protocol::ItemKind::MallardFeather => "MF",
+        mclone_protocol::ItemKind::HuntingSpear => "SP",
+        mclone_protocol::ItemKind::Venison => "V",
+        mclone_protocol::ItemKind::DeerHide => "DH",
+        mclone_protocol::ItemKind::ShedAntler => "A",
+    }
+}
+
+const fn item_kind_display_name(kind: mclone_protocol::ItemKind) -> &'static str {
+    match kind {
+        mclone_protocol::ItemKind::Egg => "Egg",
+        mclone_protocol::ItemKind::MallardEgg => "Mallard egg",
+        mclone_protocol::ItemKind::MallardFeather => "Mallard feather",
+        mclone_protocol::ItemKind::HuntingSpear => "Hunting spear",
+        mclone_protocol::ItemKind::Venison => "Venison",
+        mclone_protocol::ItemKind::DeerHide => "Deer hide",
+        mclone_protocol::ItemKind::ShedAntler => "Shed antler",
+    }
 }
 
 fn render_gamepad_hud(

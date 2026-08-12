@@ -572,6 +572,10 @@ fn touch_hotbar_uses_the_same_inventory_contents_as_flat_hotbar() {
         command,
         GuiDrawCommand::Text { text, .. } if text == "SP"
     )));
+    assert!(draw.commands().iter().any(|command| matches!(
+        command,
+        GuiDrawCommand::Text { text, .. } if text == "Hunting spear"
+    )));
     assert!(!draw.commands().iter().any(|command| matches!(
         command,
         GuiDrawCommand::Text { text, .. } if text == "1"

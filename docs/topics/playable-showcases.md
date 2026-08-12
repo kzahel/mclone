@@ -238,6 +238,8 @@ their overlay had not received the canonical inventory. The shared HUD now
 projects the ordinary hotbar contents into the touch layout. The reusable Web
 runner accepts `--mobile-showcase`, verifies visible touch controls at a
 390x844 CSS-pixel viewport, and writes distinct mobile showcase captures.
+The shared HUD also writes the selected item's full name above either hotbar,
+so a compact label such as `SP` does not require prior knowledge.
 `pnpm native:web:deer-showcase-mobile-smoke` is required when the reviewed
 mechanic depends on touch-only controls or inventory selection.
 

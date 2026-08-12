@@ -857,13 +857,14 @@ world-generation change into one opaque commit.
   counts into whichever hotbar layout is active. Browser, Android, and native
   platform adapters continue to own only touch contacts and visibility. A UI
   regression requires the touch layout to show `SP` rather than `1` for the
-  same slot-1 spear.
+  same slot-1 spear. The shared transient HUD also names the selected item
+  `Hunting spear` above both hotbar layouts so the abbreviation is discoverable.
 - Added a reusable `--mobile-showcase` runner mode and named local/deployed deer
   commands. The local phone-sized run passed the full 80-tick deer behavior
   gate, required visible touch controls, and produced an inspected 780x1688
-  device-pixel capture showing selected `SP` next to `ATK`. The complete UI and
-  scene suites, Web Wasm check, desktop app check, and scripted Android APK
-  build pass.
+  device-pixel capture showing selected `SP`, `Hunting spear`, and `ATK`. The
+  complete UI and scene suites, Web Wasm check, desktop app check, and scripted
+  Android APK build pass.
 
 The chapter is complete. Its remaining surface-trace idea is a separately
 justified capability, not unfinished deer content. The next ecology chapter
