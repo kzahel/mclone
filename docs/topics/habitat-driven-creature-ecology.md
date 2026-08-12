@@ -398,6 +398,13 @@ event, and no ambient soundtrack pretends that a flock exists.
   semantic actors, and zero records in every browser world store. The verified
   temporary play link is
   `https://mclone.kzahel.com/app.html?showcase=deer-forest-edge`.
+- Post-review interactive play found that fleeing deer translated while their
+  legs stayed near the first locomotion frame. The shared client was resetting
+  all derived animation state on every non-chicken authoritative reconcile.
+  It now preserves identity-stable distance phase; the showcase gate requires
+  both `11.2` blocks of entity displacement and more than `0.5` units of
+  rendered deer locomotion advance. The local correction observed `11.1524`
+  units of phase advance over its 80-tick behavior window.
 - Deer hoofprints are intentionally absent. Human review rejected rigid track
   figures and did not find tracks valuable enough to block the chapter. Any
   future tracking mechanic must justify itself first, then use the shared

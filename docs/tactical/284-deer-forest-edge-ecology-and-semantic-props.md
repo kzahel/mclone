@@ -829,6 +829,24 @@ world-generation change into one opaque commit.
   therefore compile the same protocol, ecology, semantic prop, named-animation,
   field-note, and renderer contracts.
 
+### 2026-08-12 — Post-review locomotion correction
+
+- Interactive review caught fleeing deer translating through the world while
+  their legs stayed near the start of the loop. The server behavior and named
+  `flee` selection were correct; the shared client reset its complete derived
+  animation state on every authoritative reconcile for every non-chicken actor.
+- Reconciliation now clears only the irrelevant chicken flap presentation and
+  preserves identity-stable accumulated travel. A focused deer regression
+  applies eight movement updates and requires eight units of retained distance
+  phase, covering the repeated-update failure that the older one-reconcile test
+  missed.
+- The browser diagnostic surface reports presentation distance by stable deer
+  entity ID. The deer showcase gate now requires phase advance as well as
+  authoritative displacement, behavior, and clip selection. Its repaired local
+  80-tick run observed `11.2` blocks of movement and `11.1524` units of rendered
+  locomotion advance; all 13 actor tests, 173 scene tests, and the browser Wasm
+  compile passed.
+
 The chapter is complete. Its remaining surface-trace idea is a separately
 justified capability, not unfinished deer content. The next ecology chapter
 should select a creature whose signature behavior demands a different habitat

@@ -224,6 +224,14 @@ browser world stores remained empty. Exact pushed revision
 `dcad575a-972a-4adb-bece-7acfd79674d6`; the inspected 1600x900 canvas digest is
 `b2ce39d582463e76f717ea1a2be3c2ca3c3d6ee3c51668143aec8f9852156048`.
 
+A post-review locomotion correction strengthened the behavior gate beyond
+authoritative movement. The Web report now exposes the last presentation
+distance per stable deer entity ID, and acceptance requires at least one
+rendered distance phase to advance by more than `0.5` during the same window.
+The repaired local run observed `11.1524` units while its subject moved `11.2`
+blocks. This prevents a moving actor with a visually restarted or frozen leg
+loop from passing on displacement alone.
+
 The first public probe encountered the prior cached `app.html` and rejected it
 because that binary knew only `mallard-ecology`. Verification resumed only
 after the HTML version, JavaScript, and Wasm payload matched the new publish.

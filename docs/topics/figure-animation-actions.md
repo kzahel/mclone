@@ -143,6 +143,16 @@ composition evaluates it in mono, stereo, and multiview. Local and deployed
 Web behavior probes observe live `alert` and `flee` requests, and focused
 server tests cover exact bedding transitions plus the hit/fall harvest path.
 
+Post-review playback also protects the client-derived distance phase itself.
+An authoritative reconcile may replace replicated action metadata, but it must
+not reset accumulated presentation travel for an actor whose identity and kind
+are unchanged. The first deer showcase exposed that failure: entity positions
+advanced while each non-chicken reconcile restarted the shared derived state,
+holding fleeing legs near the beginning of their loop. A repeated-reconcile
+client regression now requires eight blocks of presented deer travel to retain
+eight units of distance phase, and the headed Web acceptance window requires
+the rendered deer phase to advance alongside authoritative displacement.
+
 ## Local Acceptance Evidence
 
 The completed slice has the following evidence:
