@@ -97,12 +97,26 @@ original Mclone ecology loop without changing the Java tables:
 - birds and distinct mallard-egg items survive chunk unload/reload and use the
   shared renderer and pickup path.
 
+Tactical [`279`](tactical/279-mallard-life-and-discovery.md) completes the
+mallard life and discovery chapter:
+
+- a carried egg can create a durable covered-shore nest whose incubation
+  pauses and resumes with live habitat and two-adult attendance;
+- the single durable hatch records parent identities and grows from a visibly
+  smaller duckling;
+- mallards float and paddle through shallow water with bounded flock cohesion
+  and separation;
+- spatial, rate-limited calls, collectible feathers, and ephemeral shore
+  tracks help players locate and read the flock; and
+- six authoritative observations persist per player and project through the
+  shared flat, stereo, and multiview UI paths.
+
 Still not landed: complete Java group attempt geometry, shared-spawn exclusion,
 all vanilla passive entity kinds, hostile/ambient/aquatic categories, despawn,
 synchronized gamerules and dedicated flags, full vanilla
 `LivingEntity.travel(...)`/`Entity.move(...)`, breeding/hunting/farming and
-drop loops, swimming/group cohesion, nests/hatching, or broad
-species-specific gameplay. The original Mclone
+drop loops beyond the mallard evidence/nest chapter, or broad species-specific
+gameplay. The original Mclone
 terrain/creature co-design direction lives in
 [`topics/habitat-driven-creature-ecology.md`](topics/habitat-driven-creature-ecology.md).
 

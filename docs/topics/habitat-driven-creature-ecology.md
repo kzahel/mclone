@@ -2,14 +2,16 @@
 
 Topic: `habitat-driven-creature-ecology`
 
-Status: active direction with its biome-habitat foundation and first original
-ecology loop complete on 2026-08-11. Tactical
+Status: active direction with its biome-habitat foundation and first complete
+original creature-life chapter landed through 2026-08-12. Tactical
 [`277`](../tactical/277-habitat-driven-creature-ecology-foundation.md) binds
 natural cow/chicken habitat to generated chunk biomes and proves immediate
 durability across persistent chunk unload/reload. Rich habitat fitness and
 mechanics-led species promotion is now proven by Tactical
 [`278`](../tactical/278-mallard-wetland-ecology-loop.md), beginning with a
-mallard wetland loop.
+mallard wetland loop, and Tactical
+[`279`](../tactical/279-mallard-life-and-discovery.md), completing mallard life,
+evidence, and discovery mechanics.
 
 ## Scope
 
@@ -231,6 +233,32 @@ Tactical 278 completes the first original terrain-creature-mechanics loop:
 - mallards and eggs use the ordinary authoritative protocol, item, pickup,
   rendering, chunk persistence, and hydration paths.
 
+## Mallard Life and Discovery Chapter
+
+Tactical 279 closes the first mechanics ladder around that habitat:
+
+- placing a carried mallard egg at a covered wetland shore creates an
+  immediately durable nest instead of a decorative block or app-local prop;
+- incubation advances only while the live habitat remains valid and two adult
+  mallards attend, pauses when either condition fails, and resumes without
+  losing progress;
+- one nest produces at most one durable duckling whose parent identities, age,
+  and growth survive unload/reload;
+- mallards float and paddle in shallow water, seek water or shore, and apply
+  bounded cohesion and separation without changing other passive mobs;
+- real mallards emit spatially attenuated, flock-suppressed contact calls and
+  shed collectible feathers under durable cooldowns;
+- recent authoritative shore movement creates locally capped, expiring track
+  figures that remain presentation evidence rather than world mutations; and
+- seen, heard, feather, track, nest, and hatch observations form an idempotent
+  per-player field-guide bitset, persisted and replicated to compact flat,
+  stereo, and multiview presentation.
+
+The design deliberately treats calls as information from actual creatures.
+Their identity, position, finite radius, sequence, and cooldown originate on
+the authoritative server; playback success is not required for the discovery
+event, and no ambient soundtrack pretends that a flock exists.
+
 ## Current Evidence
 
 - Canonical biome indexing covers X/Z quart cells, vertical quart layers,
@@ -253,25 +281,33 @@ Tactical 278 completes the first original terrain-creature-mechanics loop:
 - Generated-world integration proves a planned flock and its due egg survive
   full entity-chunk unload/reload with stable persistent IDs and fresh runtime
   IDs.
+- Nest integration covers invalid placement, egg consumption, habitat and pair
+  attendance, pause/resume, single hatch, parentage, growth, edited habitat,
+  and entity-chunk hydration.
+- Call, feather, track, and observation tests cover bounded emission, flock
+  suppression, pickup, expiry/caps, every unlock source, idempotence,
+  replication, and player-record persistence.
+- The inspected [mallard ecology capture](</tmp/mclone-mallard-ecology.png>)
+  shows two adults, their smaller duckling, a visible nest, real inventory
+  icons, and a completed six-part field-guide entry. The inspected
+  [stereo capture](</tmp/mclone-mallard-ecology-stereo.png>) projects the guide
+  legibly into both eyes through the shared world-GUI renderer.
 
 ## Known Gaps and Recommended Next Work
 
 - Define a shared habitat-query/fitness record above raw biome IDs, backed by
   Mclone climate, landform, hydrology, vegetation, and substrate semantics.
-- Extend the mallard egg into persistent nests, incubation, hatching, and
-  breeding only after ownership of nest blocks and lineage is explicit.
-- Add group cohesion and shallow-water swimming; current flocks share spawn
-  locality but remain individually navigated land animals.
-- Add field-guide discovery, calls, feathers, and nest traces so habitat can be
-  found without filling the active entity budget.
 - Add death/removal persistence coverage and prevent local population
   resurrection through seed-time decoration.
-- Add food, drops, and further collection loops only with shared inventory,
-  item, interaction, and persistence contracts.
+- Build a first stewardship choice around mallards—food attraction, protected
+  nesting cover, or restrained hunting—using the now-shared inventory,
+  interaction, lineage, and persistence contracts.
 - Explore compact unloaded population summaries after individual durable
   entities are correct; do not use them to weaken visible-entity continuity.
 - Feed animal paths, grazing sites, nests, and water access back into terrain
   and structure planning as evidence-bearing landscape history.
+- Promote a contrasting second original species whose mechanic forces a new
+  terrain capability instead of merely reusing the mallard wetland.
 
 ## Code and Documentation Map
 

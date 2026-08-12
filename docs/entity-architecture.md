@@ -130,9 +130,10 @@ The first shared ground/collision scaffold is also in place:
 - Chicken and mallard now have compact server species state behind the shared
   mob runtime. Chicken's supported passive goal tail, flap/egg timer, and
   airborne downward damping follow the current Java-shaped path. The mallard
-  owns a durable timer that stays due until a live wetland sample qualifies,
-  then emits a distinct ordinary item entity. Mallards also register a
-  higher-priority verified-shore stroll before the shared passive goal tail.
+  owns durable egg, feather, call, age, and parentage timers/state; shallow
+  water adds species-scoped buoyancy/paddling and flock steering before the
+  shared passive goal tail. A separate persistent mallard-nest entity owns its
+  egg, parents, incubation, habitat/attendance checks, and single hatch.
   Chicken egg sounds and jockey passenger behavior remain follow-ups.
 - Passive mob head yaw and body yaw are tracked separately inside the server
   mob runtime. Until a head-yaw presentation lane exists, look goals must not
@@ -291,8 +292,8 @@ collision, placement predicates, player/spawn distance exclusions, and chunk
 entity-ticking status.
 
 The current cow/chicken slice plus Mclone mallard flock path implement most of
-that shape but still lack complete Java group geometry, group cohesion,
-shared-spawn exclusion, synchronized gamerules/dedicated
+that shape but still lack complete Java group geometry, shared-spawn exclusion,
+synchronized gamerules/dedicated
 flags, every passive species, hostile categories, and the complete Java
 attempt geometry. Habitat lookup must use the active generated chunk payload;
 it must not query a seed-only biome source belonging to another profile.
@@ -326,9 +327,12 @@ Minimum durable facts:
 Chunk-addressed entity records are live for memory, SQLite, and browser
 persistence backends. Runtime IDs are reconstructed while
 `EntityPersistentId`, pose/motion, and the implemented
-cow/chicken/mallard/item payload survive hydration. Natural animals join that
-ordinary record immediately in a persistent world; transient stores use a
-separately marked volatile set. Future subtype state must remain serializable
+cow/chicken/mallard/nest/item payload survive hydration, including mallard
+parentage, growth, cooldowns, and nest incubation. Natural animals and placed
+nests join that ordinary record immediately in a persistent world; transient
+stores use a separately marked volatile set. Mallard observations live in the
+separate per-player record, while short-lived tracks remain explicitly
+per-world presentation state. Future subtype state must remain serializable
 without renderer handles or platform objects.
 
 ## Asset-Lab Figure Integration

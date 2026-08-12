@@ -1,6 +1,6 @@
 # Tactical 279: Mallard Life and Discovery
 
-Status: **active 2026-08-12**
+Status: **complete 2026-08-12**
 
 Topic:
 
@@ -139,9 +139,57 @@ from rendered pixels or audio playback success.
 - Field-guide tests prove every unlock source, idempotence, persistence,
   replication, and flat/stereo HUD projection.
 - Shared native all-target, browser/Wasm, and affected crate test gates pass.
-- Inspected pixels show a nest/duckling or paddling flock plus field-guide
-  feedback in a generated Mclone wetland.
+- Inspected pixels show a nest, adults, duckling, and field-guide feedback in
+  one deterministic wetland scene, with a second capture proving the same
+  feedback in both stereo eyes.
 
 ## Execution Record
 
-Pending implementation and evidence.
+Completed in the following topic-threaded slices:
+
+- `c290c18f` defined protocol v35, durable nest/duckling state, mallard
+  observation/call/track vocabulary, collectible egg and feather items, client
+  replication, player persistence v4, and shared renderer inputs.
+- `061788de` added explicit egg-to-nest placement, covered-wetland validation,
+  two-adult attendance, pause/resume incubation, single durable hatch,
+  parentage, growth, and unload/reload coverage.
+- `50408670` added species-scoped shallow-water buoyancy and paddling,
+  separation/cohesion steering, and safe shore fallback without changing cow
+  or chicken movement.
+- `d9ff71ed` emitted bounded real-entity calls, collectible feather evidence,
+  ephemeral shore tracks, and all six authoritative discovery sources.
+- `44cb0220` added two original CC0 mallard-call variants, spatial playback,
+  shared track figures, real item icons, and the compact flat field-note HUD.
+- `d7347fd0` added a disposable persisted ecology fixture and ordinary-client
+  capture harness. `0a74b3aa` and `cd22c5fa` kept Web diagnostics and
+  data-driven actor review exhaustive as the new entity/figure joined them.
+- `9fd3b74b` projected the field-note panel through both per-eye and multiview
+  world-GUI paths and extended the fixture to a stereo capture.
+- `f77351f2` recorded transient tracks in the exact per-world ownership lock.
+
+The deterministic `pnpm native:mallard-ecology:capture` proof persisted two
+adults in shallow water, their duckling with parent IDs, a half-incubated nest,
+and a completed player guide. The flat capture drew four entities as five
+figure instances and 220 HUD commands; the stereo capture preserved parallax
+and composited the guide twice. Both were inspected:
+
+- [flat ecology capture](</tmp/mclone-mallard-ecology.png>)
+- [stereo field-guide capture](</tmp/mclone-mallard-ecology-stereo.png>)
+
+Final validation passed:
+
+```text
+cargo test --manifest-path native/Cargo.toml
+cargo test --manifest-path native/Cargo.toml --workspace --all-targets
+pnpm native:thin-adapters:purity
+pnpm native:desktop-offscreen:smoke
+pnpm native:web:build
+pnpm native:xr-emulation:smoke
+pnpm assets:sfx:check
+pnpm native:mallard-ecology:capture
+```
+
+The desktop smoke capture was also inspected. The first full-workspace run
+caught a stale exact-field expectation in the scene ownership lock; the lock
+was updated to require `mallard_tracks` inside `DrawableWorldSlot`, and the
+complete workspace passed on rerun.
