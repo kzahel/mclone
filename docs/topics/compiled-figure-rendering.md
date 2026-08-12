@@ -76,6 +76,13 @@ presentation, and `mclone-render`. It does not change authoritative entity
 simulation, protocol identity, AI, or spawning. Those remain owned by the
 entity/runtime architecture.
 
+Planned coordinating Tactical
+[`284`](../tactical/284-deer-forest-edge-ecology-and-semantic-props.md) will
+exercise the same semantic/prepared machinery for explicitly typed world,
+item, and trace props, beginning with the mallard nest, feather, and tracks.
+That is a generalization of asset use and anchoring, not a parallel prop
+compiler or permission to move gameplay state into asset metadata.
+
 The architectural target and `mclone-assets` compiler ownership are selected,
 while optimization thresholds and later LOD policy remain open. The purpose of
 this document is to preserve current evidence and decisions, identify the
@@ -1807,3 +1814,9 @@ queue in this compiler/architecture topic.
 Do not add a persisted compiled format or revive exact curved tessellation.
 The actor-record and palette-texture boundaries keep later LOD and GPU crowd
 evaluation additive, while the high-count fixture establishes their crossover.
+Tactical
+[`284`](../tactical/284-deer-forest-edge-ecology-and-semantic-props.md) owns the
+next content-driven compiler use: semantic prop promotion plus a checked Deer
+figure with named runtime animation. Preserve one source/JSON/compiler path and
+delete superseded procedural mallard prop geometry only after shared prepared
+pixels are accepted.

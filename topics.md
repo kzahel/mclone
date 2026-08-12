@@ -253,6 +253,9 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
 - `playable-showcases` — bounded data-driven tiny-save recipes, live-game
   instantiation evidence, matched capture/browser review, and temporary hosted
   play links
+- `semantic-figure-assets` — one checked TypeScript-to-semantic-JSON asset path
+  for actor figures plus world, item, and trace props, beginning with mallard
+  prop migration and deer runtime promotion
 - `desktop-openxr-validation` — Windows VDXR and macOS/Linux WiVRn runtime
   bootstrap, headset-backed smoke evidence, Vulkan interop, and remaining
   desktop OpenXR hardware acceptance

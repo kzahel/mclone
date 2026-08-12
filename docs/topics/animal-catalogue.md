@@ -455,3 +455,11 @@ rewrite. Reconsider a workspace package only when a consumer outside
 `tools/asset-lab` needs the TypeScript viewer contract. Treat further bundle
 splitting or upload batching as measurement-led deployment improvements rather
 than catalogue correctness work.
+
+Tactical
+[`284`](../tactical/284-deer-forest-edge-ecology-and-semantic-props.md) will
+generalize the underlying Asset Lab promotion machinery to typed semantic
+props while keeping this public catalogue creature-focused. Deer should gain
+explicit source metadata and complete behavior/action review when it is
+materially revised and promoted; nests, tracks, feathers, and antlers must not
+inflate creature inventory or inherit creature-only filters.

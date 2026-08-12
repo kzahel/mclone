@@ -19,6 +19,12 @@ interactive Web review. The continuing showcase contract lives separately in
 Tactical [`282`](../tactical/282-mallard-behavioral-showcase.md) turns the
 first rejected static review into shared retained habitat intent, stable
 movement-derived orientation, a roomier wetland, and time-window evidence.
+Planned coordinating Tactical
+[`284`](../tactical/284-deer-forest-edge-ecology-and-semantic-props.md) selects
+deer as the contrasting second original chapter: forest edges, authored
+multi-state behavior, sign, hunting/depletion, and semantic props should force
+the next terrain and gameplay capabilities instead of cloning the wetland
+loop.
 
 ## Scope
 
@@ -348,7 +354,9 @@ event, and no ambient soundtrack pretends that a flock exists.
 - Feed animal paths, grazing sites, nests, and water access back into terrain
   and structure planning as evidence-bearing landscape history.
 - Promote a contrasting second original species whose mechanic forces a new
-  terrain capability instead of merely reusing the mallard wetland.
+  terrain capability instead of merely reusing the mallard wetland. Tactical
+  [`284`](../tactical/284-deer-forest-edge-ecology-and-semantic-props.md) now
+  owns that deer chapter and its reusable asset/animation prerequisites.
 
 ## Code and Documentation Map
 

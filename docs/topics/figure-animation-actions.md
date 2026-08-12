@@ -5,7 +5,9 @@ Topic: `figure-animation-actions`
 Status: locally complete and accepted 2026-07-21. Canonical figures now carry
 authored defaults and clip presentation metadata, and the Asset Lab catalogue
 plays and completes one-shot actions explicitly. General gameplay-triggered
-runtime playback remains the next engine slice.
+runtime playback remains the next engine slice and is now planned as a shared
+prerequisite of Tactical
+[`284`](../tactical/284-deer-forest-edge-ecology-and-semantic-props.md).
 
 ## Scope
 
@@ -176,6 +178,11 @@ or a semantic figure-format change.
 
 ## Recommended Next Direction
 
-Use Roly-poly as the first accepted multi-clip action figure. Do not extract a
-shared curl helper until corrected armadillo and pangolin actions demonstrate
-a stable common authoring pattern.
+Execute Tactical
+[`284`](../tactical/284-deer-forest-edge-ecology-and-semantic-props.md)'s
+renderer-neutral named-clip request with distance-driven locomotion and
+authoritative elapsed-time action/idle phases. Deer should prove ordinary
+gameplay selection, hydration continuity, and endpoint-compatible
+lie-down/bedded/stand-up sequences. Keep the existing Roly-poly lesson: do not
+extract anatomy-specific helpers until multiple corrected figures prove a
+stable common pattern.
