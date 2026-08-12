@@ -15,6 +15,7 @@ import {
   serializeFigureAsset,
 } from "../src/figure-json";
 import { loadFigureJsonDocument } from "../src/load";
+import { evaluateFigurePose } from "../src/figure-pose";
 import { assetLabRoot } from "../src/vite-figure-path";
 
 test("serializes and reparses the complete semantic figure", () => {
@@ -961,12 +962,66 @@ test("canonical and legacy examples cross the canonical JSON boundary", async ()
   }
 });
 
+test("deer authors the required action vocabulary with compatible bed transitions", async () => {
+  const sourcePath = path.join(assetLabRoot, "examples/deer/figure.ts");
+  const { asset } = await loadFigureJsonDocument(sourcePath);
+  assert.equal(asset.defaultClip, "idle");
+  assert.deepEqual(Object.keys(asset.clips).sort(), [
+    "alert",
+    "bedded_idle",
+    "fall",
+    "flee",
+    "graze",
+    "hit",
+    "idle",
+    "lie_down",
+    "stand_up",
+    "walk",
+  ]);
+  assert.equal(asset.clips.walk?.role, "locomotion");
+  assert.equal(asset.clips.flee?.role, "locomotion");
+  assert.equal(asset.clips.lie_down?.nextClip, "bedded_idle");
+  assert.equal(asset.clips.stand_up?.nextClip, "idle");
+  assert.equal(asset.clips.fall?.nextClip, undefined);
+
+  assertPoseMatricesEqual(asset, "lie_down", clipDuration(asset, "lie_down"), "bedded_idle", 0);
+  assertPoseMatricesEqual(asset, "stand_up", clipDuration(asset, "stand_up"), "idle", 0);
+});
+
 test("reports invalid direct JSON before it reaches Three.js", () => {
   assert.throws(
     () => parseFigureAssetJson("{\"schemaVersion\":1}", "broken.figure.json"),
     /Expected 'broken\.figure\.json' to contain a schema-v1 FigureAsset/,
   );
 });
+
+function clipDuration(asset: FigureAsset, clipName: string): number {
+  const clip = asset.clips[clipName];
+  assert.ok(clip, `missing deer clip '${clipName}'`);
+  return Math.max(0, ...clip.keys.map(([, time]) => time));
+}
+
+function assertPoseMatricesEqual(
+  asset: FigureAsset,
+  leftClip: string,
+  leftTime: number,
+  rightClip: string,
+  rightTime: number,
+): void {
+  const left = evaluateFigurePose(asset, { clipName: leftClip, time: leftTime });
+  const right = evaluateFigurePose(asset, { clipName: rightClip, time: rightTime });
+  assert.deepEqual([...left.keys()], [...right.keys()]);
+  for (const [partName, leftMatrix] of left) {
+    const rightMatrix = right.get(partName);
+    assert.ok(rightMatrix, `missing transition part '${partName}'`);
+    leftMatrix.elements.forEach((value, index) => {
+      assert.ok(
+        Math.abs(value - rightMatrix.elements[index]!) <= 1e-6,
+        `${leftClip} -> ${rightClip} differs at ${partName} matrix element ${index}`,
+      );
+    });
+  }
+}
 
 function tinyFigure(): FigureAsset {
   return {

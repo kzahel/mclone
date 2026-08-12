@@ -46,12 +46,6 @@ export const SURFACE_BASELINE: Readonly<Record<string, readonly string[]>> = {
     "coplanar-overlap:eye_mound_l.west|head.west",
     "coplanar-overlap:eye_mound_r.east|head.east"
   ],
-  "deer": [
-    "coplanar-overlap:hoof_bl.south|leg_bl.south",
-    "coplanar-overlap:hoof_br.south|leg_br.south",
-    "coplanar-overlap:hoof_fl.south|leg_fl.south",
-    "coplanar-overlap:hoof_fr.south|leg_fr.south"
-  ],
   "earwig": [
     "coplanar-overlap:abdomen_band_3.east|abdomen.east",
     "coplanar-overlap:abdomen_band_3.west|abdomen.west"

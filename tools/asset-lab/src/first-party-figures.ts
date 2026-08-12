@@ -26,6 +26,7 @@ export const FIRST_PARTY_SEMANTIC_ASSETS: readonly FirstPartySemanticAsset[] = [
   firstPartyActor("chicken"),
   firstPartyActor("mallard_duck"),
   firstPartyActor("upright_bear"),
+  firstPartyActor("deer", "review_only"),
   firstPartyProp("mallard_nest", "world_prop", "ground"),
   firstPartyProp("mallard_feather", "item_prop", "item_center"),
 ];
@@ -33,11 +34,14 @@ export const FIRST_PARTY_SEMANTIC_ASSETS: readonly FirstPartySemanticAsset[] = [
 export const FIRST_PARTY_FIGURES: readonly FirstPartyFigure[] =
   FIRST_PARTY_SEMANTIC_ASSETS.filter(isFirstPartyFigure);
 
-function firstPartyActor(name: string): FirstPartyFigure {
+function firstPartyActor(
+  name: string,
+  instantiation: SemanticInstantiationStatus = "live_gameplay",
+): FirstPartyFigure {
   const runtimePath = `assets/mclone/figures/${name}.figure.json`;
   return {
     anchor: "feet",
-    instantiation: "live_gameplay",
+    instantiation,
     name,
     sourcePath: path.join(assetLabRoot, "examples", name, "figure.ts"),
     outputPath: path.join(repositoryRoot, runtimePath),

@@ -1,6 +1,6 @@
 # Tactical 284: Deer Forest-Edge Ecology and Semantic Props
 
-Status: active; Review 1 accepted with tracks redirected 2026-08-12
+Status: active; Review 2 deer action candidate ready 2026-08-12
 
 Topics:
 
@@ -633,6 +633,36 @@ world-generation change into one opaque commit.
   authoritative epoch adoption, two-second elapsed sampling, and exact
   `waddle` selection. The six affected Rust crates pass 1,199 tests with 11
   existing GPU-only ignores.
+
+### 2026-08-12 — Review 2 candidate: articulated deer actions
+
+- Refined the accepted deer source in place. Each long leg now has an upper
+  segment, hinged lower shin, and hoof; the narrow body, large ears, white tail
+  flag, face, and sparse forked antlers remain recognizable from the reviewed
+  silhouette.
+- Added typed forest-edge creature classification and the complete ten-clip
+  vocabulary: elapsed `idle`, `alert`, `graze`, and `bedded_idle`; distance
+  `walk` and faster flagged `flee`; one-shot `lie_down`, `stand_up`, `hit`, and
+  terminal `fall`.
+- `lie_down` advances to `bedded_idle`; `stand_up` advances to `idle`; `fall`
+  intentionally holds its final pose. A focused semantic test evaluates every
+  part matrix and proves both bedding transition endpoints are exact.
+- The deer is a checked `review_only` actor candidate with generated semantic
+  JSON. It appears in the Creature Catalogue and ships in the review payload,
+  but the Rust live actor inventory and ordinary gameplay do not instantiate
+  it yet. Asset review cannot be mistaken for live ecology completion.
+- All 33 semantic tests, strict typecheck, drift, connected geometry, sampled
+  ground, and surface checks pass across 204 canonical semantic assets. Deer
+  needs no ground or geometry exception, and its new leg hierarchy removes
+  four inherited coplanar-surface baseline entries.
+- Ten clean multi-angle sheets were generated and inspected. The initial
+  `graze` rotation raised the head vertically and was rejected; the corrected
+  pose lowers the full neck chain and brings the muzzle to the ground. Focused
+  videos cover `flee`, `graze`, `lie_down`, and `stand_up` before human review.
+- This remains Human Review 2. No deer entity kind, spawning, AI, hunting,
+  habitat query, drop, or showcase code has landed. On acceptance, the next
+  slice promotes this exact checked asset into shared runtime lookup before
+  forest-edge terrain/habitat behavior begins.
 
 For later slices, continue to record commit IDs, asset review paths,
 deterministic habitat/population measurements, focused and workspace tests,

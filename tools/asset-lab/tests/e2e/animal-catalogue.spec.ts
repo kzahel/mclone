@@ -16,7 +16,7 @@ test("browses hash-checked figures with animation and camera controls", async ({
   await expect(page).toHaveURL(/figure=king_cobra/);
   await expect(page.locator(".catalogRow.selected")).toHaveAttribute("data-catalog-name", "king_cobra");
   await expect(page.locator(".summaryItem").first()).toContainText("202");
-  await expect(page.locator(".summaryItem").filter({ hasText: "runtime" })).toContainText("5");
+  await expect(page.locator(".summaryItem").filter({ hasText: "runtime" })).toContainText("6");
   await expect(page.locator(".promotionStatus")).toContainText("Asset Lab only");
 
   const firstTime = Number(await canvas.getAttribute("data-time"));
@@ -46,12 +46,13 @@ test("browses hash-checked figures with animation and camera controls", async ({
 
   const promotionFilter = page.getByRole("combobox", { name: "Runtime status" });
   await promotionFilter.selectOption("runtime");
-  await expect(page.locator(".resultCount")).toHaveText("5 figures");
+  await expect(page.locator(".resultCount")).toHaveText("6 figures");
   await expect(page.locator("[data-catalog-name='player']")).toBeVisible();
   await expect(page.locator("[data-catalog-name='cow']")).toBeVisible();
   await expect(page.locator("[data-catalog-name='chicken']")).toBeVisible();
   await expect(page.locator("[data-catalog-name='mallard_duck']")).toBeVisible();
   await expect(page.locator("[data-catalog-name='upright_bear']")).toBeVisible();
+  await expect(page.locator("[data-catalog-name='deer']")).toBeVisible();
   await expect(page.locator("[data-runtime-promoted='false']")).toHaveCount(0);
   await page.locator("[data-catalog-name='chicken']").click();
   await expect(page.locator(".promotionStatus")).toContainText("Live gameplay asset");

@@ -122,6 +122,14 @@ Mallards now request their authored `waddle` clip instead of the old literal
 distance-driven `walk`. A gameplay animation state machine, crossfade/layering,
 and deer behavior selection remain later slices.
 
+The Tactical 284 deer review candidate is the first asset authored directly
+for this runtime contract. It has explicit `idle`, `walk`, `flee`, `alert`,
+`graze`, `lie_down`, `bedded_idle`, `stand_up`, `hit`, and terminal `fall`
+clips. Split upper/lower legs make feeding and bedding articulated rather than
+whole-model offsets. Tests compare evaluated part matrices at both transition
+boundaries: `lie_down` ends exactly at `bedded_idle`, and `stand_up` ends
+exactly at `idle`.
+
 ## Local Acceptance Evidence
 
 The completed slice has the following evidence:
@@ -188,9 +196,8 @@ or a semantic figure-format change.
 
 ## Recommended Next Direction
 
-Finish Tactical
+After human review, promote Tactical
 [`284`](../tactical/284-deer-forest-edge-ecology-and-semantic-props.md)'s deer
-action set and use it to prove ordinary gameplay selection across
-endpoint-compatible lie-down/bedded/stand-up transitions. Keep the existing
-Roly-poly lesson: do not extract anatomy-specific helpers until multiple
-corrected figures prove a stable common pattern.
+candidate into the live actor inventory and use it to prove ordinary gameplay
+selection. Keep the existing Roly-poly lesson: do not extract anatomy-specific
+helpers until multiple corrected figures prove a stable common pattern.
