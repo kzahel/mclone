@@ -720,6 +720,27 @@ world-generation change into one opaque commit.
   637 server tests pass except one pre-existing cadence timing failure in the
   full server run; rerunning the deer/forest-edge tests passes.
 
+### 2026-08-12 — Authoritative deer action loop
+
+- Added an authoritative retained-intent deer loop in the shared entity
+  simulation. Deer now choose live browse destinations, walk and turn from
+  actual collision-resolved displacement, graze, use exact authored
+  `lie_down`/`bedded_idle`/`stand_up` transitions, and expire blocked or stale
+  travel intents instead of spinning indefinitely.
+- Nearby players first produce alert posture and then flight at closer range.
+  Flight uses a timed and distance-based release condition, chooses connected
+  woody cover in the generated escape direction, and propagates real flight
+  through the local herd without converting a single alert into an
+  ever-amplifying feedback alarm.
+- Loose-herd travel uses explicit separation and cohesion bands rather than a
+  synchronized leader target. Authoritative state selects the reviewed named
+  `idle`, `walk`, `flee`, `graze`, `alert`, `lie_down`, `bedded_idle`, and
+  `stand_up` clips; the renderer still only evaluates that request.
+- Focused deterministic tests exercise alert/flee hysteresis and complete
+  bedding transitions. Sign production, the safe-bank drinking choice,
+  hunting reactions, and long-window showcase evidence remain later slices;
+  this record does not claim them early.
+
 For later slices, continue to record commit IDs, asset review paths,
 deterministic habitat/population measurements, focused and workspace tests,
 native/browser/Android/XR evidence, rejected visual or interaction iterations,

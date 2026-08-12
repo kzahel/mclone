@@ -367,6 +367,13 @@ event, and no ambient soundtrack pretends that a flock exists.
   antlers, behavior, behavior time, and health. The renderer hides semantic
   antler parts for females, fawns, and antlerless adult males, avoiding an
   asset/runtime mismatch while keeping one reviewed canonical figure.
+- The first authoritative deer action loop now makes that forest edge
+  legible: retained live-block browse targets drive walking and grazing,
+  authored bedding transitions reach a stable rest pose, nearby players
+  cause alert and then cover-seeking flight, and a fleeing herd member can
+  propagate alarm. Separation/cohesion bands keep the group loose, while
+  stale destination expiry and displacement-derived turning avoid the
+  stationary-spin failure found in the first mallard showcase.
 
 ## Known Gaps and Recommended Next Work
 

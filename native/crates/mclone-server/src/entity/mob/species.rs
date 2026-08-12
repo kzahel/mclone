@@ -205,6 +205,27 @@ impl DeerRuntimeState {
             max_health: self.saved.max_health,
         }
     }
+
+    pub(super) const fn behavior(&self) -> DeerBehavior {
+        self.saved.behavior
+    }
+
+    pub(super) const fn behavior_ticks(&self) -> u32 {
+        self.saved.behavior_ticks
+    }
+
+    pub(super) fn advance_behavior_tick(&mut self) {
+        self.saved.behavior_ticks = self.saved.behavior_ticks.saturating_add(1);
+    }
+
+    pub(super) fn set_behavior(&mut self, behavior: DeerBehavior) -> bool {
+        if self.saved.behavior == behavior {
+            return false;
+        }
+        self.saved.behavior = behavior;
+        self.saved.behavior_ticks = 0;
+        true
+    }
 }
 
 #[derive(Debug, PartialEq)]

@@ -21,7 +21,7 @@ use super::ServerEntityState;
 use super::item::{ITEM_ENTITY_LIFETIME_TICKS, ItemEntityRuntimeState};
 use super::metadata::{EntityMetadata, PASSIVE_MOB_KINDS};
 use super::mob::{
-    DeerRuntimeSaveData, MALLARD_GROWTH_REQUIRED_TICKS, MallardFlockmateTarget,
+    DeerHerdmateTarget, DeerRuntimeSaveData, MALLARD_GROWTH_REQUIRED_TICKS, MallardFlockmateTarget,
     MallardRuntimeSaveData, MobPlayerTarget, MobRuntimeState,
 };
 use super::spawning::habitat::sample_wetland_habitat;
@@ -710,6 +710,12 @@ impl ServerEntityStore {
             .filter(|entity| entity.alive && entity.kind == EntityKind::Mallard)
             .map(|entity| (entity.id, entity.position))
             .collect::<Vec<_>>();
+        let deer_positions = self
+            .entities
+            .values()
+            .filter(|entity| entity.alive && entity.kind == EntityKind::Deer)
+            .map(|entity| (entity.id, entity.position, entity.deer.unwrap().behavior))
+            .collect::<Vec<_>>();
         let mut updated = Vec::new();
         let mut egg_spawns = Vec::new();
         let mut feather_spawns = Vec::new();
@@ -736,7 +742,27 @@ impl ServerEntityStore {
                     } else {
                         Vec::new()
                     };
-                    mob.tick_entity(entity, nearby_players, &flockmates, &block_state_at);
+                    let herdmates = if entity.kind == EntityKind::Deer {
+                        deer_positions
+                            .iter()
+                            .filter(|(candidate_id, _, _)| *candidate_id != id)
+                            .map(|(_, position, behavior)| DeerHerdmateTarget {
+                                position: self
+                                    .topology
+                                    .nearest_position_lift(*position, entity.position),
+                                behavior: *behavior,
+                            })
+                            .collect::<Vec<_>>()
+                    } else {
+                        Vec::new()
+                    };
+                    mob.tick_entity(
+                        entity,
+                        nearby_players,
+                        &flockmates,
+                        &herdmates,
+                        &block_state_at,
+                    );
                     let chicken_egg_count = mob.take_chicken_pending_egg_lays();
                     egg_spawns.extend(
                         (0..chicken_egg_count)
@@ -784,6 +810,9 @@ impl ServerEntityStore {
                         };
                         entity.width = EntityMetadata::MALLARD.dimensions.width * scale;
                         entity.height = EntityMetadata::MALLARD.dimensions.height * scale;
+                    }
+                    if entity.kind == EntityKind::Deer {
+                        entity.deer = mob.deer_snapshot_data();
                     }
                 }
                 if let Some(nest) = self.mallard_nests.get_mut(&id) {
