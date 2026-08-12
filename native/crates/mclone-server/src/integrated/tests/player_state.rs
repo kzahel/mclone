@@ -842,6 +842,9 @@ fn saved_player_pose_and_selected_slot_resume_for_stable_identity() {
     record.selected_hotbar_slot = 4;
     record.total_experience = 19;
     record.health = 13.5;
+    record
+        .deer_field_guide
+        .observe(mclone_protocol::DeerObservationKind::FoundSign);
     let mut store = MemoryWorldStore::new();
     store.save_player(&record).unwrap();
 
@@ -874,6 +877,15 @@ fn saved_player_pose_and_selected_slot_resume_for_stable_identity() {
     assert_eq!(server.inventory().selected_hotbar_slot(), 4);
     assert_eq!(server.total_experience(), 19);
     assert_eq!(server.player_vitals().health(), 13.5);
+    assert!(
+        server
+            .server()
+            .players
+            .get(server.player_id())
+            .unwrap()
+            .deer_field_guide
+            .contains(mclone_protocol::DeerObservationKind::FoundSign)
+    );
     assert_eq!(server.pending_death_cause(), None);
     let position_index = arrival_batch
         .iter()

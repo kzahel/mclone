@@ -144,6 +144,31 @@ fn direct_asset_requirements() -> Vec<CanonicalAssetRequirement> {
             Required,
         ),
         (
+            "assets/mclone/figures/hunting_spear.figure.json",
+            SemanticProp,
+            Required,
+        ),
+        (
+            "assets/mclone/figures/venison.figure.json",
+            SemanticProp,
+            Required,
+        ),
+        (
+            "assets/mclone/figures/deer_hide.figure.json",
+            SemanticProp,
+            Required,
+        ),
+        (
+            "assets/mclone/figures/shed_antler.figure.json",
+            SemanticProp,
+            Required,
+        ),
+        (
+            "assets/mclone/figures/deer_bed.figure.json",
+            SemanticProp,
+            Required,
+        ),
+        (
             "assets/minecraft/textures/misc/underwater.png",
             ScreenEffect,
             Required,
@@ -292,6 +317,11 @@ mod tests {
             "assets/mclone/figures/deer.figure.json",
             "assets/mclone/figures/mallard_nest.figure.json",
             "assets/mclone/figures/mallard_feather.figure.json",
+            "assets/mclone/figures/hunting_spear.figure.json",
+            "assets/mclone/figures/venison.figure.json",
+            "assets/mclone/figures/deer_hide.figure.json",
+            "assets/mclone/figures/shed_antler.figure.json",
+            "assets/mclone/figures/deer_bed.figure.json",
             "assets/minecraft/textures/misc/underwater.png",
             "assets/minecraft/sounds/damage/fallsmall.ogg",
         ] {

@@ -5144,6 +5144,7 @@ impl RealmServer {
             player.total_experience = record.total_experience;
             player.statistics = record.statistics.clone();
             player.mallard_field_guide = record.mallard_field_guide;
+            player.deer_field_guide = record.deer_field_guide;
             player.vitals = mclone_protocol::PlayerVitals::new(
                 record.health,
                 mclone_protocol::DEFAULT_PLAYER_MAX_HEALTH,

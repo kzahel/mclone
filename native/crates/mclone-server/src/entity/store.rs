@@ -2822,12 +2822,19 @@ mod tests {
                 })
         }));
         assert_eq!(store.state(deer).unwrap().deer.unwrap().antlered, false);
-        let second = store.tick_stationary(&[ChunkPos::new(0, 0)], &[], flat_ground);
-        assert!(!second.iter().any(|entity| {
-            entity
-                .item_stack
-                .is_some_and(|stack| stack.kind == ItemKind::ShedAntler)
-        }));
+        store.tick_stationary(&[ChunkPos::new(0, 0)], &[], flat_ground);
+        assert_eq!(
+            store
+                .states()
+                .iter()
+                .filter(|entity| {
+                    entity
+                        .item_stack
+                        .is_some_and(|stack| stack.kind == ItemKind::ShedAntler)
+                })
+                .count(),
+            1
+        );
 
         let record = store.entity_chunk_record(ChunkPos::new(0, 0), 10);
         let deer_payload = &record
@@ -2844,6 +2851,22 @@ mod tests {
                 ..
             }
         ));
+        let mut loaded = ServerEntityStore::default();
+        loaded.hydrate_entity_chunk_record(&record).unwrap();
+        loaded.tick_stationary(&[ChunkPos::new(0, 0)], &[], flat_ground);
+        assert_eq!(
+            loaded
+                .states()
+                .iter()
+                .filter(|entity| {
+                    entity
+                        .item_stack
+                        .is_some_and(|stack| stack.kind == ItemKind::ShedAntler)
+                })
+                .count(),
+            1,
+            "hydration must not schedule a second antler drop"
+        );
     }
 
     #[test]
