@@ -133,7 +133,10 @@ For behavior-focused showcases, insert a time-window gate between steps 6 and
 7. Observe ordinary replicated state without issuing commands to the subject.
 Require domain outcomes such as displacement, habitat transition, life-cycle
 change, or discovery; do not substitute elapsed wall time or a second static
-image for those outcomes.
+image for those outcomes. When presentation depends on replicated domain state,
+assert that state too: Tactical 283 added nonzero water occupancy to the
+mallard gate after the first deployed probe exposed a dropped incremental
+`in_water` update.
 
 The current first-showcase commands are:
 

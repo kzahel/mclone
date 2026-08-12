@@ -1,6 +1,6 @@
 # Tactical 283: Mallard Waterline Presentation
 
-Status: **active 2026-08-12**
+Status: **implementation and local acceptance complete; public deployment pending 2026-08-12**
 
 Topic:
 
@@ -67,4 +67,33 @@ always composes the ordinary ground pose at the water surface.
 
 ## Execution Record
 
-Pending implementation and acceptance.
+Implemented in commit `0e6d51ff`.
+
+- `ClientRuntime::apply_entity_update` now applies ordinary authoritative
+  mallard and nest update metadata to the retained entity snapshot. The
+  replica regression proves a dry adult becomes a swimming duckling and a nest
+  advances incubation/attendance without waiting for a new chunk snapshot.
+- Shared render-session composition lowers only an `in_water` mallard by 24%
+  of its final presented height. The model-only transform leaves actor
+  identity, authoritative feet, X/Z, gameplay dimensions, and dry poses
+  unchanged.
+- The browser behavior gate now requires at least one swimming mallard at both
+  ends of its existing 80-tick window. The local run reported three at each
+  boundary while retaining the accepted travel, hatch, field-note, and empty
+  persistence results.
+
+Local acceptance evidence:
+
+- `cargo test --manifest-path native/Cargo.toml -p mclone-client -p
+  mclone-render-session`: 267 passed.
+- `cargo test --manifest-path native/Cargo.toml --workspace --all-targets
+  --quiet`: passed.
+- `pnpm native:thin-adapters:purity`: passed.
+- `pnpm native:web:build`: passed.
+- `pnpm native:desktop-offscreen:smoke`: passed.
+- `pnpm native:web:showcase-smoke`: passed with three authoritative swimming
+  mallards in both observation samples; headed Web pixels were inspected.
+- `pnpm native:mallard-ecology:capture`: passed; the inspected flat and stereo
+  pixels put feet below the surface and retain the breast/body above it.
+
+The exact push/deploy receipt and public screenshot remain pending.

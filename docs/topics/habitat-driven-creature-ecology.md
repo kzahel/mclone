@@ -256,6 +256,10 @@ Tactical 279 closes the first mechanics ladder around that habitat:
   without changing other passive mobs;
 - body orientation follows realized horizontal travel at a bounded turn rate,
   so collision or arrival cannot create rapid stationary yaw jitter;
+- authoritative water occupancy now survives incremental client updates, and
+  shared actor composition sinks only the visual mallard figure by 24% of its
+  presented height so feet paddle below the surface while the body rides above
+  it; simulation, interaction, and persistence retain the original feet pose;
 - real mallards emit spatially attenuated, flock-suppressed contact calls and
   shed collectible feathers under durable cooldowns;
 - recent authoritative shore movement creates locally capped, expiring track
@@ -319,6 +323,12 @@ event, and no ambient soundtrack pretends that a flock exists.
   exact domain outcomes and displacements. Its inspected 1600x900 canvas shows
   four separated mallards across the wetland after the hatch, with the field
   guide visibly at 5/6 and an empty hotbar.
+- Tactical
+  [`283`](../tactical/283-mallard-waterline-presentation.md) corrects the
+  accepted showcase's standing-on-water presentation. A replica regression
+  covers incremental swim/life-stage/nest metadata, a render-session regression
+  covers the species-specific model offset, and local flat, stereo, and headed
+  Web pixels show submerged feet with the breast and body above water.
 
 ## Known Gaps and Recommended Next Work
 
