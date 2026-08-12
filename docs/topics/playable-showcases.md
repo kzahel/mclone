@@ -279,6 +279,17 @@ digest is
 the phone canvas digest is
 `37288b48113fbb8a695d5fd304875936154616ba15412cfc6d95c22c0eb18fdd`.
 
+Exact pushed revision `fc55614b823977fef53482af99f232c98a8b67dd`
+deployed as Worker version `8f41df27-3763-4d24-bba3-c8b20ecce1a9` and passed
+the same desktop and phone gates. The inspected public desktop and phone
+canvas digests are
+`492271b9289db3642d4486a0e611b19e9242997d1a31eff76990a1c9eb30979f`
+and
+`8f0aeb18147c50a60e1eea1921c31415d2c358e92acc88a16343b6d8621edbaf`.
+Both report the exact recipe seed/camera, 5/6 notes, real pollination, and no
+browser persistence; phone additionally reports selected slot nine and one
+authoritative placed hotel.
+
 ## Code and Documentation Map
 
 - `assets/mclone/showcases/`: readable showcase recipes

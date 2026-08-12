@@ -311,8 +311,18 @@ flowering-colony loop complete.
   bee hotel. All eight browser persistence stores stayed empty.
 - `cargo test -p mclone-server` passes all 654 tests. Protocol, client,
   render-session, audio, Asset Lab, first-party pack, showcase, habitat, and
-  local headed-WebGPU gates also pass. Final deployed revision and public
-  screenshot evidence are recorded after the publish below.
+  local headed-WebGPU gates also pass.
+- Exact pushed revision `fc55614b823977fef53482af99f232c98a8b67dd`
+  deployed as Worker version `8f41df27-3763-4d24-bba3-c8b20ecce1a9` and passed
+  both public gates. Desktop observed displacements `3.7453`, `1.2994`, and
+  `0.5013`; phone observed `3.7453`, `1.4312`, and `0.5127` plus one placed
+  hotel through touch. Both reached notes 5/6, one real pollination update,
+  four drawn actors, and zero records in every browser world store.
+- The inspected public desktop and phone captures match seed `17505` and the
+  recipe entry camera. Their canvas SHA-256 digests are
+  `492271b9289db3642d4486a0e611b19e9242997d1a31eff76990a1c9eb30979f`
+  and
+  `8f0aeb18147c50a60e1eea1921c31415d2c358e92acc88a16343b6d8621edbaf`.
 
 The intentionally deferred systems remain crop yield, recipes, honey,
 defensive combat, genetics, seasons, unloaded population summaries, and a
