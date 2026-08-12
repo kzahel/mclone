@@ -149,6 +149,7 @@
     "native:web:half-space-terrain-smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --half-space-terrain-probe",
     "native:web:actor-composition-smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --actor-composition-probe",
     "native:web:showcase-smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --showcase mallard-ecology --skip-threading",
+    "native:web:showcase-deployed-smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --deployed-base-url https://mclone.kzahel.com --showcase mallard-ecology --skip-threading",
     "native:web:lobby-runtime-smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --lobby-runtime-probe",
     "native:web:catalog-smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --catalog-ui-probe",
     "native:web:homestead-catalog-smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --catalog-ui-probe --catalog-homestead",

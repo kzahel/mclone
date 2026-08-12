@@ -163,6 +163,26 @@ const showcase = showcaseArgIndex >= 0
 if (showcase && showcase !== "mallard-ecology") {
   throw new Error(`--showcase requires mallard-ecology; got ${showcase}`);
 }
+const deployedBaseUrlArgIndex = process.argv.indexOf("--deployed-base-url");
+const deployedBaseUrl = deployedBaseUrlArgIndex >= 0
+  ? String(process.argv[deployedBaseUrlArgIndex + 1] ?? "").replace(/\/+$/, "")
+  : "";
+if (deployedBaseUrl) {
+  let parsed;
+  try {
+    parsed = new URL(deployedBaseUrl);
+  } catch {
+    throw new Error(`--deployed-base-url requires an absolute HTTP(S) URL; got ${deployedBaseUrl}`);
+  }
+  if (!/^https?:$/.test(parsed.protocol) || parsed.pathname !== "/") {
+    throw new Error(
+      `--deployed-base-url requires an origin without a path; got ${deployedBaseUrl}`,
+    );
+  }
+  if (!showcase) {
+    throw new Error("--deployed-base-url is only supported with --showcase");
+  }
+}
 if (showcase && (seed || generationProfile || starterContent || screenshotEye || worldTopology)) {
   throw new Error(
     "--showcase owns seed, generation profile, starter content, topology, and entry camera",
@@ -249,7 +269,9 @@ const screenshotPath = process.env.MCLONE_NATIVE_WEB_SMOKE_SCREENSHOT
     : halfSpaceTerrainProbe
     ? "/tmp/mclone-native-web-half-space-terrain-probe.png"
     : showcase
-    ? `/tmp/mclone-native-web-showcase-${showcase}.png`
+    ? deployedBaseUrl
+      ? `/tmp/mclone-deployed-showcase-${showcase}.png`
+      : `/tmp/mclone-native-web-showcase-${showcase}.png`
     : actorCompositionProbe
     ? "/tmp/mclone-native-web-actor-composition-probe.png"
     : lobbyRuntimeProbe
@@ -281,7 +303,9 @@ const canvasScreenshotPath = process.env.MCLONE_NATIVE_WEB_CANVAS_SCREENSHOT
     : halfSpaceTerrainProbe
     ? "/tmp/mclone-native-web-half-space-terrain-probe-canvas.png"
     : showcase
-    ? `/tmp/mclone-native-web-showcase-${showcase}-canvas.png`
+    ? deployedBaseUrl
+      ? `/tmp/mclone-deployed-showcase-${showcase}-canvas.png`
+      : `/tmp/mclone-native-web-showcase-${showcase}-canvas.png`
     : actorCompositionProbe
     ? "/tmp/mclone-native-web-actor-composition-probe-canvas.png"
     : lobbyRuntimeProbe
@@ -385,23 +409,31 @@ run().catch((error) => {
 });
 
 async function run() {
-  buildWasm();
-  buildBindgenBundle();
-  const webRoot = await buildWebGlue();
-  if (buildOnly) {
-    console.log(`bindgen output (with mclone_web_client.d.ts) ready in ${bindgenOutDir}`);
-    console.log(`staged native web root ready in ${webRoot}`);
-    return;
+  let server = null;
+  let baseUrl = deployedBaseUrl;
+  if (!deployedBaseUrl) {
+    buildWasm();
+    buildBindgenBundle();
+    const webRoot = await buildWebGlue();
+    if (buildOnly) {
+      console.log(`bindgen output (with mclone_web_client.d.ts) ready in ${bindgenOutDir}`);
+      console.log(`staged native web root ready in ${webRoot}`);
+      return;
+    }
+    server = await startServer(webRoot);
+    const address = server.address();
+    const port = address && typeof address === "object" ? address.port : 0;
+    baseUrl = `http://127.0.0.1:${port}`;
+  } else if (buildOnly || serveOnly || remoteWebSocket) {
+    throw new Error(
+      "--deployed-base-url cannot be combined with build-only, serve, or remote-WebSocket modes",
+    );
   }
-  const server = await startServer(webRoot);
   const remoteServer = remoteWebSocket ? await startNativeWebSocketServer() : null;
   const browserLaunch = resolveBrowserWebGpuLaunch();
   /** @type {import("@playwright/test").Browser | undefined} */
   let browser;
   try {
-    const address = server.address();
-    const port = address && typeof address === "object" ? address.port : 0;
-    const baseUrl = `http://127.0.0.1:${port}`;
     if (serveOnly) {
       await serveUntilStopped(baseUrl, remoteServer);
       return;
@@ -2043,7 +2075,9 @@ async function run() {
   } finally {
     await browser?.close();
     await remoteServer?.stop();
-    await new Promise((resolveClose) => server.close(resolveClose));
+    if (server) {
+      await new Promise((resolveClose) => server.close(resolveClose));
+    }
   }
 }
 
