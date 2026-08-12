@@ -728,7 +728,11 @@ pub(crate) fn persistent_passive_actor_identity_summary(
         .filter(|(_, kind)| {
             matches!(
                 kind,
-                EntityKind::Cow | EntityKind::Chicken | EntityKind::Mallard | EntityKind::Mannequin
+                EntityKind::Cow
+                    | EntityKind::Chicken
+                    | EntityKind::Mallard
+                    | EntityKind::Deer
+                    | EntityKind::Mannequin
             )
         })
         .collect::<Vec<_>>();
@@ -741,6 +745,7 @@ pub(crate) fn persistent_passive_actor_identity_summary(
                 EntityKind::Chicken => 2,
                 EntityKind::Mannequin => 3,
                 EntityKind::Mallard => 4,
+                EntityKind::Deer => 5,
                 EntityKind::DebugCube | EntityKind::Item | EntityKind::MallardNest => {
                     unreachable!("filtered above")
                 }

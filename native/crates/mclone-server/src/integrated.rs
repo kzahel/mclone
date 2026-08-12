@@ -28,6 +28,9 @@ use mclone_protocol::{
 };
 use mclone_worldgen::biome::{OverworldBiomeSource, get_layered_biome_by_id};
 use mclone_worldgen::block::{AIR, RawBlockId, block_name, generated_block_state_id};
+use mclone_worldgen::levelgen::{
+    McloneOverworldSamplingTopology, McloneOverworldVegetationPlanCache, McloneVegetationSource,
+};
 use mclone_worldgen::prng::SimpleRandomSource;
 
 #[cfg(target_arch = "wasm32")]
@@ -2724,6 +2727,17 @@ impl RealmServer {
                     as usize;
                 let mut random =
                     SimpleRandomSource::new(natural_spawn_tick_seed(self.seed, game_time));
+                let mut forest_edge_cache = (self.scheduler.world_generation_profile()
+                    == WorldGenerationProfile::McloneOverworldV1)
+                    .then(|| {
+                        let topology = McloneOverworldSamplingTopology::from_horizontal_topology(
+                            self.scheduler.topology(),
+                        )
+                        .expect("Mclone Overworld profile already validated its topology");
+                        McloneOverworldVegetationPlanCache::new(McloneVegetationSource::new(
+                            self.seed, topology,
+                        ))
+                    });
                 let result = plan_creature_spawns(
                     &evaluation.chunk_inputs.eligible_entity_ticking_chunks,
                     &evaluation.player_positions,
@@ -2743,6 +2757,11 @@ impl RealmServer {
                             .map(get_layered_biome_by_id)
                     },
                     |pos| self.scheduler.raw_brightness_at_world(pos, 0),
+                    |pos| {
+                        forest_edge_cache
+                            .as_mut()
+                            .and_then(|cache| cache.forest_edge_intent_at(pos.x, pos.z).ok())
+                    },
                 );
                 live = result.diagnostics;
                 let persistent = self.scheduler.entity_chunks_supported();

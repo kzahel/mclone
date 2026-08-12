@@ -85,6 +85,15 @@ impl EntityMetadata {
         client_tracking_range: 10,
     };
 
+    pub(crate) const DEER: Self = Self {
+        kind: EntityKind::Deer,
+        category: EntityCategory::Creature,
+        dimensions: EntityDimensions::scalable(0.9, 1.85),
+        standing_eye_height: StandingEyeHeight::Fixed(1.62),
+        movement_speed: 0.28,
+        client_tracking_range: 12,
+    };
+
     pub(crate) const MANNEQUIN: Self = Self {
         kind: EntityKind::Mannequin,
         category: EntityCategory::Creature,
@@ -109,6 +118,7 @@ impl EntityMetadata {
             EntityKind::Chicken => Some(Self::CHICKEN),
             EntityKind::Mallard => Some(Self::MALLARD),
             EntityKind::MallardNest => Some(Self::MALLARD_NEST),
+            EntityKind::Deer => Some(Self::DEER),
             EntityKind::Mannequin => Some(Self::MANNEQUIN),
             EntityKind::Item => Some(Self::ITEM),
             EntityKind::DebugCube => None,
@@ -122,7 +132,11 @@ impl EntityMetadata {
     pub(crate) const fn is_passive_mob(self) -> bool {
         matches!(
             self.kind,
-            EntityKind::Cow | EntityKind::Chicken | EntityKind::Mallard | EntityKind::Mannequin
+            EntityKind::Cow
+                | EntityKind::Chicken
+                | EntityKind::Mallard
+                | EntityKind::Deer
+                | EntityKind::Mannequin
         )
     }
 }
@@ -182,6 +196,18 @@ mod tests {
         assert_eq!(metadata.movement_speed, 0.23);
         assert!(metadata.is_passive_mob());
         assert!(!PASSIVE_MOB_KINDS.contains(&EntityKind::Mallard));
+    }
+
+    #[test]
+    fn deer_metadata_is_an_ordinary_original_creature() {
+        let metadata = EntityMetadata::for_kind(EntityKind::Deer).expect("deer metadata");
+
+        assert_eq!(metadata.category, EntityCategory::Creature);
+        assert_eq!(metadata.dimensions, EntityDimensions::scalable(0.9, 1.85));
+        assert_eq!(metadata.standing_eye_height(), 1.62);
+        assert_eq!(metadata.movement_speed, 0.28);
+        assert!(metadata.is_passive_mob());
+        assert!(!PASSIVE_MOB_KINDS.contains(&EntityKind::Deer));
     }
 
     #[test]

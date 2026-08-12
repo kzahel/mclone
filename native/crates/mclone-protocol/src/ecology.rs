@@ -2,6 +2,111 @@ use mclone_core::Vec3d;
 
 use crate::{EntityId, EntityPersistentId};
 
+pub const DEER_FIELD_GUIDE_OBSERVATION_COUNT: u32 = 6;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DeerSex {
+    Female,
+    Male,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DeerLifeStage {
+    Fawn,
+    Adult,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DeerBehavior {
+    Idle,
+    Walk,
+    Graze,
+    Alert,
+    Flee,
+    LieDown,
+    Bedded,
+    StandUp,
+    Hit,
+    Fall,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DeerSnapshotData {
+    pub sex: DeerSex,
+    pub life_stage: DeerLifeStage,
+    pub antlered: bool,
+    pub behavior: DeerBehavior,
+    pub health: u8,
+    pub max_health: u8,
+}
+
+pub type DeerUpdateData = DeerSnapshotData;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DeerObservationKind {
+    Seen,
+    FoundSign,
+    WitnessedAlert,
+    WitnessedFlee,
+    FoundAntler,
+    Harvested,
+}
+
+impl DeerObservationKind {
+    pub const ALL: [Self; DEER_FIELD_GUIDE_OBSERVATION_COUNT as usize] = [
+        Self::Seen,
+        Self::FoundSign,
+        Self::WitnessedAlert,
+        Self::WitnessedFlee,
+        Self::FoundAntler,
+        Self::Harvested,
+    ];
+
+    pub const fn bit(self) -> u32 {
+        1 << match self {
+            Self::Seen => 0,
+            Self::FoundSign => 1,
+            Self::WitnessedAlert => 2,
+            Self::WitnessedFlee => 3,
+            Self::FoundAntler => 4,
+            Self::Harvested => 5,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct DeerFieldGuideProgress {
+    observations: u32,
+}
+
+impl DeerFieldGuideProgress {
+    pub const KNOWN_MASK: u32 = (1 << DEER_FIELD_GUIDE_OBSERVATION_COUNT) - 1;
+
+    pub const fn from_bits_retain(bits: u32) -> Self {
+        Self {
+            observations: bits & Self::KNOWN_MASK,
+        }
+    }
+
+    pub const fn bits(self) -> u32 {
+        self.observations
+    }
+
+    pub const fn contains(self, observation: DeerObservationKind) -> bool {
+        self.observations & observation.bit() != 0
+    }
+
+    pub fn observe(&mut self, observation: DeerObservationKind) -> bool {
+        let before = self.observations;
+        self.observations |= observation.bit();
+        self.observations != before
+    }
+
+    pub const fn discovered_count(self) -> u32 {
+        self.observations.count_ones()
+    }
+}
+
 pub const MALLARD_FIELD_GUIDE_OBSERVATION_COUNT: u32 = 6;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

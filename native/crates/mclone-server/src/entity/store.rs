@@ -21,8 +21,8 @@ use super::ServerEntityState;
 use super::item::{ITEM_ENTITY_LIFETIME_TICKS, ItemEntityRuntimeState};
 use super::metadata::{EntityMetadata, PASSIVE_MOB_KINDS};
 use super::mob::{
-    MALLARD_GROWTH_REQUIRED_TICKS, MallardFlockmateTarget, MallardRuntimeSaveData, MobPlayerTarget,
-    MobRuntimeState,
+    DeerRuntimeSaveData, MALLARD_GROWTH_REQUIRED_TICKS, MallardFlockmateTarget,
+    MallardRuntimeSaveData, MobPlayerTarget, MobRuntimeState,
 };
 use super::spawning::habitat::sample_wetland_habitat;
 use super::spawning::mob_category::MobCategory;
@@ -1138,6 +1138,17 @@ impl ServerEntityStore {
                 in_water: false,
             });
             state
+        } else if kind == EntityKind::Deer {
+            let mut state = state;
+            state.deer = self
+                .mobs
+                .get(&id)
+                .and_then(MobRuntimeState::deer_snapshot_data);
+            if state.deer.unwrap().life_stage == mclone_protocol::DeerLifeStage::Fawn {
+                state.width *= 0.72;
+                state.height *= 0.72;
+            }
+            state
         } else {
             state
         };
@@ -1206,6 +1217,7 @@ impl ServerEntityStore {
                 Vec3d::ZERO,
                 None,
                 Some(saved),
+                None,
             ),
         );
         self.entities.insert(id, state);
@@ -1325,6 +1337,7 @@ impl ServerEntityStore {
                 EntityKind::Cow,
                 None,
                 None,
+                None,
             )?,
             ("minecraft:chicken", EntitySavePayload::Chicken { egg_time }) => self
                 .insert_saved_passive_mob(
@@ -1333,6 +1346,7 @@ impl ServerEntityStore {
                     canonical_position,
                     EntityKind::Chicken,
                     Some(*egg_time),
+                    None,
                     None,
                 )?,
             (
@@ -1356,6 +1370,35 @@ impl ServerEntityStore {
                     parents: *parents,
                     feather_time: *feather_time,
                     call_time: *call_time,
+                }),
+                None,
+            )?,
+            (
+                "mclone:deer",
+                EntitySavePayload::Deer {
+                    sex,
+                    life_stage,
+                    antlered,
+                    behavior,
+                    behavior_ticks,
+                    health,
+                    max_health,
+                },
+            ) => self.insert_saved_passive_mob(
+                id,
+                saved,
+                canonical_position,
+                EntityKind::Deer,
+                None,
+                None,
+                Some(DeerRuntimeSaveData {
+                    sex: *sex,
+                    life_stage: *life_stage,
+                    antlered: *antlered,
+                    behavior: *behavior,
+                    behavior_ticks: *behavior_ticks,
+                    health: *health,
+                    max_health: *max_health,
                 }),
             )?,
             (
@@ -1382,6 +1425,7 @@ impl ServerEntityStore {
                 saved,
                 canonical_position,
                 EntityKind::Mannequin,
+                None,
                 None,
                 None,
             )?,
@@ -1424,6 +1468,7 @@ impl ServerEntityStore {
         kind: EntityKind,
         chicken_egg_time: Option<i32>,
         mallard: Option<MallardRuntimeSaveData>,
+        deer: Option<DeerRuntimeSaveData>,
     ) -> ChunkStoreResult<ServerEntityState> {
         let metadata = EntityMetadata::for_kind(kind).ok_or_else(|| {
             ChunkStoreError::InvalidData(format!("entity kind {kind:?} has no metadata"))
@@ -1446,6 +1491,7 @@ impl ServerEntityStore {
             saved.delta_movement,
             chicken_egg_time,
             mallard,
+            deer,
         );
         let mut state = state;
         if kind == EntityKind::Mallard {
@@ -1457,6 +1503,13 @@ impl ServerEntityStore {
             if life_stage == MallardLifeStage::Duckling {
                 state.width *= 0.58;
                 state.height *= 0.58;
+            }
+        }
+        if kind == EntityKind::Deer {
+            state.deer = mob.deer_snapshot_data();
+            if state.deer.unwrap().life_stage == mclone_protocol::DeerLifeStage::Fawn {
+                state.width *= 0.72;
+                state.height *= 0.72;
             }
         }
         self.mobs.insert(id, mob);
@@ -1531,6 +1584,18 @@ impl ServerEntityStore {
                     incubation_progress: nest.incubation_progress,
                     incubation_required: nest.incubation_required,
                     parents: nest.parents,
+                }
+            }
+            EntityKind::Deer => {
+                let deer = self.mobs.get(&entity.id)?.deer_save_data()?;
+                EntitySavePayload::Deer {
+                    sex: deer.sex,
+                    life_stage: deer.life_stage,
+                    antlered: deer.antlered,
+                    behavior: deer.behavior,
+                    behavior_ticks: deer.behavior_ticks,
+                    health: deer.health,
+                    max_health: deer.max_health,
                 }
             }
             EntityKind::Mannequin => EntitySavePayload::Mannequin,
@@ -1693,6 +1758,7 @@ fn entity_kind_code(kind: EntityKind) -> Option<&'static str> {
         EntityKind::Chicken => Some("minecraft:chicken"),
         EntityKind::Mallard => Some("mclone:mallard"),
         EntityKind::MallardNest => Some("mclone:mallard_nest"),
+        EntityKind::Deer => Some("mclone:deer"),
         EntityKind::Mannequin => Some("mclone:mannequin"),
         EntityKind::Item => Some("minecraft:item"),
         EntityKind::DebugCube => None,

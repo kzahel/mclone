@@ -72,7 +72,8 @@ const WORLD_ADMISSION_LOCK_FILE: &str = ".mclone-world-admission.lock";
 pub const CHUNK_LIGHT_ALGORITHM_VERSION: u32 = 1;
 const LEGACY_ENTITY_CHUNK_RECORD_VERSION: u32 = 2;
 const MALLARD_ENTITY_CHUNK_RECORD_VERSION: u32 = 3;
-pub const ENTITY_CHUNK_RECORD_VERSION: u32 = 4;
+const ANIMATED_ENTITY_CHUNK_RECORD_VERSION: u32 = 4;
+pub const ENTITY_CHUNK_RECORD_VERSION: u32 = 5;
 const LEGACY_PLAYER_RECORD_VERSION: u32 = 1;
 const STATISTICS_PLAYER_RECORD_VERSION: u32 = 2;
 const PLAYER_LIFE_RECORD_VERSION: u32 = 3;
@@ -499,6 +500,15 @@ pub enum EntitySavePayload {
         incubation_progress: u32,
         incubation_required: u32,
         parents: [Option<EntityPersistentId>; 2],
+    },
+    Deer {
+        sex: mclone_protocol::DeerSex,
+        life_stage: mclone_protocol::DeerLifeStage,
+        antlered: bool,
+        behavior: mclone_protocol::DeerBehavior,
+        behavior_ticks: u32,
+        health: u8,
+        max_health: u8,
     },
     Item {
         stack: ItemStackSaveRecord,
@@ -6284,7 +6294,7 @@ fn read_entity_save_record(
     let x_rot_degrees = read_f32(reader)?;
     let rotation = read_optional_rotation(reader)?;
     let on_ground = read_bool(reader)?;
-    let animation = if codec_version >= ENTITY_CHUNK_RECORD_VERSION {
+    let animation = if codec_version >= ANIMATED_ENTITY_CHUNK_RECORD_VERSION {
         read_optional_animation_state(reader)?
     } else {
         None
@@ -6343,6 +6353,50 @@ fn write_entity_save_payload(
                 write_optional_entity_persistent_id(writer, *parent)?;
             }
             Ok(())
+        }
+        EntitySavePayload::Deer {
+            sex,
+            life_stage,
+            antlered,
+            behavior,
+            behavior_ticks,
+            health,
+            max_health,
+        } => {
+            write_u8(writer, 6)?;
+            write_u8(
+                writer,
+                match sex {
+                    mclone_protocol::DeerSex::Female => 0,
+                    mclone_protocol::DeerSex::Male => 1,
+                },
+            )?;
+            write_u8(
+                writer,
+                match life_stage {
+                    mclone_protocol::DeerLifeStage::Fawn => 0,
+                    mclone_protocol::DeerLifeStage::Adult => 1,
+                },
+            )?;
+            write_bool(writer, *antlered)?;
+            write_u8(
+                writer,
+                match behavior {
+                    mclone_protocol::DeerBehavior::Idle => 0,
+                    mclone_protocol::DeerBehavior::Walk => 1,
+                    mclone_protocol::DeerBehavior::Graze => 2,
+                    mclone_protocol::DeerBehavior::Alert => 3,
+                    mclone_protocol::DeerBehavior::Flee => 4,
+                    mclone_protocol::DeerBehavior::LieDown => 5,
+                    mclone_protocol::DeerBehavior::Bedded => 6,
+                    mclone_protocol::DeerBehavior::StandUp => 7,
+                    mclone_protocol::DeerBehavior::Hit => 8,
+                    mclone_protocol::DeerBehavior::Fall => 9,
+                },
+            )?;
+            write_u32(writer, *behavior_ticks)?;
+            write_u8(writer, *health)?;
+            write_u8(writer, *max_health)
         }
         EntitySavePayload::Item {
             stack,
@@ -6403,6 +6457,66 @@ fn read_entity_save_payload(
                     read_optional_entity_persistent_id(reader)?,
                     read_optional_entity_persistent_id(reader)?,
                 ],
+            })
+        }
+        6 if codec_version >= ENTITY_CHUNK_RECORD_VERSION => {
+            let sex = match read_u8(reader)? {
+                0 => mclone_protocol::DeerSex::Female,
+                1 => mclone_protocol::DeerSex::Male,
+                value => {
+                    return Err(ChunkStoreError::InvalidData(format!(
+                        "unknown deer sex {value}"
+                    )));
+                }
+            };
+            let life_stage = match read_u8(reader)? {
+                0 => mclone_protocol::DeerLifeStage::Fawn,
+                1 => mclone_protocol::DeerLifeStage::Adult,
+                value => {
+                    return Err(ChunkStoreError::InvalidData(format!(
+                        "unknown deer life stage {value}"
+                    )));
+                }
+            };
+            let antlered = read_bool(reader)?;
+            let behavior = match read_u8(reader)? {
+                0 => mclone_protocol::DeerBehavior::Idle,
+                1 => mclone_protocol::DeerBehavior::Walk,
+                2 => mclone_protocol::DeerBehavior::Graze,
+                3 => mclone_protocol::DeerBehavior::Alert,
+                4 => mclone_protocol::DeerBehavior::Flee,
+                5 => mclone_protocol::DeerBehavior::LieDown,
+                6 => mclone_protocol::DeerBehavior::Bedded,
+                7 => mclone_protocol::DeerBehavior::StandUp,
+                8 => mclone_protocol::DeerBehavior::Hit,
+                9 => mclone_protocol::DeerBehavior::Fall,
+                value => {
+                    return Err(ChunkStoreError::InvalidData(format!(
+                        "unknown deer behavior {value}"
+                    )));
+                }
+            };
+            let behavior_ticks = read_u32(reader)?;
+            let health = read_u8(reader)?;
+            let max_health = read_u8(reader)?;
+            if max_health == 0
+                || health > max_health
+                || (antlered
+                    && (sex != mclone_protocol::DeerSex::Male
+                        || life_stage != mclone_protocol::DeerLifeStage::Adult))
+            {
+                return Err(ChunkStoreError::InvalidData(
+                    "invalid deer biological state".to_owned(),
+                ));
+            }
+            Ok(EntitySavePayload::Deer {
+                sex,
+                life_stage,
+                antlered,
+                behavior,
+                behavior_ticks,
+                health,
+                max_health,
             })
         }
         value => Err(ChunkStoreError::InvalidData(format!(
@@ -7066,6 +7180,30 @@ mod tests {
                         stack: ItemStackSaveRecord::new("mclone:mallard_egg", 2),
                         age: 30,
                         pickup_delay: 0,
+                    },
+                },
+                EntitySaveRecord {
+                    persistent_id: EntityPersistentId::new(0xABCD, 0xDEED),
+                    kind: "mclone:deer".to_owned(),
+                    position: Vec3d::new(14.5, 65.0, 8.5),
+                    delta_movement: Vec3d::ZERO,
+                    y_rot_degrees: 70.0,
+                    x_rot_degrees: 0.0,
+                    rotation: None,
+                    on_ground: true,
+                    animation: Some(AnimationState::elapsed(
+                        AnimationClipId::from_static("graze"),
+                        4,
+                        2_000,
+                    )),
+                    payload: EntitySavePayload::Deer {
+                        sex: mclone_protocol::DeerSex::Male,
+                        life_stage: mclone_protocol::DeerLifeStage::Adult,
+                        antlered: true,
+                        behavior: mclone_protocol::DeerBehavior::Graze,
+                        behavior_ticks: 44,
+                        health: 18,
+                        max_health: 20,
                     },
                 },
             ],

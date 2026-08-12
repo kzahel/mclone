@@ -1,5 +1,8 @@
 use mclone_core::Vec3d;
-use mclone_protocol::{EntityKind, EntityPersistentId, MallardLifeStage};
+use mclone_protocol::{
+    DeerBehavior, DeerLifeStage, DeerSex, DeerSnapshotData, EntityKind, EntityPersistentId,
+    MallardLifeStage,
+};
 use mclone_worldgen::prng::SimpleRandomSource;
 
 const CHICKEN_EGG_TIME_MIN: i32 = 6_000;
@@ -11,6 +14,17 @@ const MALLARD_FEATHER_TIME_RANGE: i32 = 2_400;
 const MALLARD_CALL_TIME_MIN: i32 = 160;
 const MALLARD_CALL_TIME_RANGE: i32 = 320;
 pub(crate) const MALLARD_GROWTH_REQUIRED_TICKS: u32 = 2_400;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct DeerRuntimeSaveData {
+    pub(crate) sex: DeerSex,
+    pub(crate) life_stage: DeerLifeStage,
+    pub(crate) antlered: bool,
+    pub(crate) behavior: DeerBehavior,
+    pub(crate) behavior_ticks: u32,
+    pub(crate) health: u8,
+    pub(crate) max_health: u8,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct MallardRuntimeSaveData {
@@ -26,6 +40,7 @@ pub(super) enum MobSpeciesState {
     Cow,
     Chicken(ChickenRuntimeState),
     Mallard(MallardRuntimeState),
+    Deer(DeerRuntimeState),
 }
 
 impl MobSpeciesState {
@@ -34,6 +49,7 @@ impl MobSpeciesState {
             EntityKind::Cow | EntityKind::Mannequin => Self::Cow,
             EntityKind::Chicken => Self::Chicken(ChickenRuntimeState::new(random)),
             EntityKind::Mallard => Self::Mallard(MallardRuntimeState::new(random)),
+            EntityKind::Deer => Self::Deer(DeerRuntimeState::new(random)),
             EntityKind::DebugCube | EntityKind::Item | EntityKind::MallardNest => {
                 debug_assert!(false, "non-mob entities do not use mob species state");
                 Self::Cow
@@ -46,6 +62,7 @@ impl MobSpeciesState {
         random: &mut SimpleRandomSource,
         egg_time: Option<i32>,
         mallard: Option<MallardRuntimeSaveData>,
+        deer: Option<DeerRuntimeSaveData>,
     ) -> Self {
         match kind {
             EntityKind::Cow | EntityKind::Mannequin => Self::Cow,
@@ -60,6 +77,9 @@ impl MobSpeciesState {
                     feather_time: next_mallard_feather_time(random),
                     call_time: next_mallard_call_time(random),
                 }),
+            )),
+            EntityKind::Deer => Self::Deer(DeerRuntimeState::from_saved(
+                deer.unwrap_or_else(|| DeerRuntimeState::new(random).save_data()),
             )),
             EntityKind::DebugCube | EntityKind::Item | EntityKind::MallardNest => {
                 debug_assert!(false, "non-mob entities do not use mob species state");
@@ -78,6 +98,7 @@ impl MobSpeciesState {
             Self::Cow => {}
             Self::Chicken(chicken) => chicken.ai_step(on_ground, delta_movement, random),
             Self::Mallard(mallard) => mallard.ai_step(),
+            Self::Deer(_) => {}
         }
     }
 
@@ -86,6 +107,7 @@ impl MobSpeciesState {
             Self::Cow => None,
             Self::Chicken(chicken) => Some(chicken),
             Self::Mallard(_) => None,
+            Self::Deer(_) => None,
         }
     }
 
@@ -94,20 +116,93 @@ impl MobSpeciesState {
             Self::Cow => None,
             Self::Chicken(chicken) => Some(chicken),
             Self::Mallard(_) => None,
+            Self::Deer(_) => None,
         }
     }
 
     pub(super) fn mallard(&self) -> Option<&MallardRuntimeState> {
         match self {
             Self::Mallard(mallard) => Some(mallard),
-            Self::Cow | Self::Chicken(_) => None,
+            Self::Cow | Self::Chicken(_) | Self::Deer(_) => None,
         }
     }
 
     pub(super) fn mallard_mut(&mut self) -> Option<&mut MallardRuntimeState> {
         match self {
             Self::Mallard(mallard) => Some(mallard),
-            Self::Cow | Self::Chicken(_) => None,
+            Self::Cow | Self::Chicken(_) | Self::Deer(_) => None,
+        }
+    }
+
+    pub(super) fn deer(&self) -> Option<&DeerRuntimeState> {
+        match self {
+            Self::Deer(deer) => Some(deer),
+            Self::Cow | Self::Chicken(_) | Self::Mallard(_) => None,
+        }
+    }
+
+    pub(super) fn deer_mut(&mut self) -> Option<&mut DeerRuntimeState> {
+        match self {
+            Self::Deer(deer) => Some(deer),
+            Self::Cow | Self::Chicken(_) | Self::Mallard(_) => None,
+        }
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub(super) struct DeerRuntimeState {
+    saved: DeerRuntimeSaveData,
+}
+
+impl DeerRuntimeState {
+    fn new(random: &mut SimpleRandomSource) -> Self {
+        let life_stage = if random.next_int_bound(5) == 0 {
+            DeerLifeStage::Fawn
+        } else {
+            DeerLifeStage::Adult
+        };
+        let sex = if random.next_boolean() {
+            DeerSex::Female
+        } else {
+            DeerSex::Male
+        };
+        let antlered = sex == DeerSex::Male
+            && life_stage == DeerLifeStage::Adult
+            && random.next_int_bound(3) != 0;
+        let max_health = if life_stage == DeerLifeStage::Fawn {
+            12
+        } else {
+            20
+        };
+        Self {
+            saved: DeerRuntimeSaveData {
+                sex,
+                life_stage,
+                antlered,
+                behavior: DeerBehavior::Idle,
+                behavior_ticks: 0,
+                health: max_health,
+                max_health,
+            },
+        }
+    }
+
+    fn from_saved(saved: DeerRuntimeSaveData) -> Self {
+        Self { saved }
+    }
+
+    pub(super) const fn save_data(&self) -> DeerRuntimeSaveData {
+        self.saved
+    }
+
+    pub(super) const fn snapshot_data(&self) -> DeerSnapshotData {
+        DeerSnapshotData {
+            sex: self.saved.sex,
+            life_stage: self.saved.life_stage,
+            antlered: self.saved.antlered,
+            behavior: self.saved.behavior,
+            health: self.saved.health,
+            max_health: self.saved.max_health,
         }
     }
 }

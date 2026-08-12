@@ -697,6 +697,29 @@ world-generation change into one opaque commit.
   and natural group spawning remain the next part of this implementation
   slice.
 
+### 2026-08-12 — Durable forest-edge deer groups
+
+- Added `mclone:deer` as an ordinary creature kind in protocol version 37,
+  client replication, shared presentation, server metadata, creature caps,
+  and entity-chunk persistence version 5. Natural deer use the same immediate
+  durability and entity-load readiness rules as the existing passive animals.
+- Deer snapshots and save records explicitly retain female/male sex, fawn or
+  adult life stage, valid adult-male antler visibility, behavior, behavior
+  elapsed ticks, current health, and maximum health. Fawns use smaller
+  collision/presentation dimensions, and a shared semantic part-prefix
+  visibility override hides the authored antler nodes whenever replicated
+  biology says they are absent.
+- The first forest-edge habitat record combines production generator intent
+  with live grass floor, woody cover, browse, open sight columns, optional
+  nearby water, local slope, cover in the generated escape direction, and
+  current-player disturbance. It fails closed on missing live blocks and only
+  exists in the Mclone Overworld profile.
+- A qualifying site plans a bounded loose group of two to four deer through
+  the ordinary creature cap, light, collision, player-distance, and spawn
+  budget rules. Focused habitat/group tests, all 52 protocol tests, and all
+  637 server tests pass except one pre-existing cadence timing failure in the
+  full server run; rerunning the deer/forest-edge tests passes.
+
 For later slices, continue to record commit IDs, asset review paths,
 deterministic habitat/population measurements, focused and workspace tests,
 native/browser/Android/XR evidence, rejected visual or interaction iterations,

@@ -67,6 +67,7 @@ mod tests {
             item_stack: None,
             mallard: None,
             mallard_nest: None,
+            deer: None,
             animation: None,
             position: Vec3d::new(x, 64.0, z),
             y_rot_degrees: 45.0,

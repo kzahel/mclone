@@ -69,6 +69,7 @@ pub struct ActorPresentation {
     pub mallard_life_stage: Option<MallardLifeStage>,
     pub in_water: bool,
     pub mallard_nest: Option<MallardNestSnapshotData>,
+    pub deer: Option<mclone_protocol::DeerSnapshotData>,
 }
 
 impl ActorPresentation {
@@ -95,6 +96,7 @@ impl ActorPresentation {
             mallard_life_stage: None,
             in_water: false,
             mallard_nest: None,
+            deer: None,
         }
     }
 
@@ -122,6 +124,7 @@ impl ActorPresentation {
             mallard_life_stage: snapshot.mallard.map(|data| data.life_stage),
             in_water: snapshot.mallard.is_some_and(|data| data.in_water),
             mallard_nest: snapshot.mallard_nest,
+            deer: snapshot.deer,
         }
     }
 }
@@ -246,6 +249,7 @@ impl ActorTrack {
         self.rendered.mallard_life_stage = actor.mallard_life_stage;
         self.rendered.in_water = actor.in_water;
         self.rendered.mallard_nest = actor.mallard_nest;
+        self.rendered.deer = actor.deer;
         self.rendered.on_ground = actor.on_ground;
         self.rendered.width = actor.width;
         self.rendered.height = actor.height;
@@ -361,7 +365,11 @@ const fn uses_movement_derived_travel_phase(kind: ActorPresentationKind) -> bool
         kind,
         ActorPresentationKind::RemotePlayer
             | ActorPresentationKind::Entity(
-                EntityKind::Cow | EntityKind::Chicken | EntityKind::Mallard | EntityKind::Mannequin
+                EntityKind::Cow
+                    | EntityKind::Chicken
+                    | EntityKind::Mallard
+                    | EntityKind::Mannequin
+                    | EntityKind::Deer
             )
     )
 }
@@ -495,6 +503,7 @@ mod tests {
             mallard_life_stage: None,
             in_water: false,
             mallard_nest: None,
+            deer: None,
             feet_position: Vec3d::new(x, 64.0, 2.0),
             y_rot_degrees,
             x_rot_degrees: 0.0,
@@ -521,6 +530,7 @@ mod tests {
             mallard_life_stage: None,
             in_water: false,
             mallard_nest: None,
+            deer: None,
             feet_position: Vec3d::new(0.0, y, 0.0),
             y_rot_degrees: 0.0,
             x_rot_degrees: 0.0,
@@ -547,6 +557,7 @@ mod tests {
             mallard_life_stage: None,
             in_water: false,
             mallard_nest: None,
+            deer: None,
             feet_position: Vec3d::new(x, 64.0, 0.0),
             y_rot_degrees: 0.0,
             x_rot_degrees: 0.0,
@@ -585,6 +596,7 @@ mod tests {
                 mallard_life_stage: None,
                 in_water: false,
                 mallard_nest: None,
+                deer: None,
                 feet_position: update.position,
                 y_rot_degrees: update.y_rot_degrees,
                 x_rot_degrees: update.x_rot_degrees,
@@ -612,6 +624,7 @@ mod tests {
             item_stack: None,
             mallard: None,
             mallard_nest: None,
+            deer: None,
             animation: Some(AnimationState::distance(
                 AnimationClipId::from_static("walk"),
                 0,
@@ -636,6 +649,7 @@ mod tests {
                 mallard_life_stage: None,
                 in_water: false,
                 mallard_nest: None,
+                deer: None,
                 feet_position: snapshot.position,
                 y_rot_degrees: snapshot.y_rot_degrees,
                 x_rot_degrees: snapshot.x_rot_degrees,

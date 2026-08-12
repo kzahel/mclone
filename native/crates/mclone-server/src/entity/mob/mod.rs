@@ -26,7 +26,9 @@ use goals::{GoalSelector, passive};
 pub(crate) use navigation::BlockPathType;
 use navigation::GroundPathNavigation;
 use species::MobSpeciesState;
-pub(crate) use species::{MALLARD_GROWTH_REQUIRED_TICKS, MallardRuntimeSaveData};
+pub(crate) use species::{
+    DeerRuntimeSaveData, MALLARD_GROWTH_REQUIRED_TICKS, MallardRuntimeSaveData,
+};
 
 const PLAYER_EYE_HEIGHT: f64 = 1.62;
 const MOB_GRAVITY: f64 = 0.08;
@@ -142,6 +144,7 @@ impl MobRuntimeState {
             EntityKind::Cow => passive::register_cow_goals(&mut goal_selector),
             EntityKind::Chicken => passive::register_chicken_goals(&mut goal_selector),
             EntityKind::Mallard => passive::register_mallard_goals(&mut goal_selector),
+            EntityKind::Deer => passive::register_cow_goals(&mut goal_selector),
             EntityKind::Mannequin => passive::register_mannequin_goals(&mut goal_selector),
             EntityKind::DebugCube | EntityKind::Item | EntityKind::MallardNest => {}
         }
@@ -177,6 +180,7 @@ impl MobRuntimeState {
         delta_movement: Vec3d,
         egg_time: Option<i32>,
         mallard: Option<MallardRuntimeSaveData>,
+        deer: Option<DeerRuntimeSaveData>,
     ) -> Self {
         debug_assert!(
             metadata.is_passive_mob(),
@@ -188,13 +192,15 @@ impl MobRuntimeState {
         }
 
         let mut random = SimpleRandomSource::new(mob_random_seed(id, metadata.kind));
-        let species = MobSpeciesState::from_saved(metadata.kind, &mut random, egg_time, mallard);
+        let species =
+            MobSpeciesState::from_saved(metadata.kind, &mut random, egg_time, mallard, deer);
 
         let mut goal_selector = GoalSelector::default();
         match metadata.kind {
             EntityKind::Cow => passive::register_cow_goals(&mut goal_selector),
             EntityKind::Chicken => passive::register_chicken_goals(&mut goal_selector),
             EntityKind::Mallard => passive::register_mallard_goals(&mut goal_selector),
+            EntityKind::Deer => passive::register_cow_goals(&mut goal_selector),
             EntityKind::Mannequin => passive::register_mannequin_goals(&mut goal_selector),
             EntityKind::DebugCube | EntityKind::Item | EntityKind::MallardNest => {}
         }
@@ -283,6 +289,14 @@ impl MobRuntimeState {
 
     pub(crate) fn mallard_life_stage(&self) -> Option<mclone_protocol::MallardLifeStage> {
         self.species.mallard().map(|mallard| mallard.life_stage())
+    }
+
+    pub(crate) fn deer_save_data(&self) -> Option<DeerRuntimeSaveData> {
+        self.species.deer().map(|deer| deer.save_data())
+    }
+
+    pub(crate) fn deer_snapshot_data(&self) -> Option<mclone_protocol::DeerSnapshotData> {
+        self.species.deer().map(|deer| deer.snapshot_data())
     }
 
     pub(crate) const fn mallard_in_water(&self) -> bool {
@@ -1283,6 +1297,7 @@ fn mob_random_seed(id: EntityId, kind: EntityKind) -> i64 {
         EntityKind::Cow => 0x00c0_0001_u64,
         EntityKind::Chicken => 0x00c0_0002_u64,
         EntityKind::Mallard => 0x00c0_0003_u64,
+        EntityKind::Deer => 0x00c0_0007_u64,
         EntityKind::Item => 0x00c0_0003_u64,
         EntityKind::Mannequin => 0x00c0_0004_u64,
         EntityKind::DebugCube => 0x00c0_00ff_u64,

@@ -300,6 +300,21 @@ pub fn actor_instances_from_presentations_near_observer(
                     )
                     .with_packed_light(packed_light)
                 }
+                ActorPresentationKind::Entity(EntityKind::Deer) => {
+                    ActorInstance::remote_player_with_figure(
+                        glam_vec3_from_vec3d(feet_position),
+                        actor.y_rot_degrees,
+                        mclone_assets::deer_figure_id(),
+                    )
+                    .with_dimensions(actor.width, actor.height)
+                    .with_hidden_part_prefix(
+                        actor
+                            .deer
+                            .is_some_and(|deer| !deer.antlered)
+                            .then_some("antler_"),
+                    )
+                    .with_packed_light(packed_light)
+                }
                 ActorPresentationKind::Entity(EntityKind::Mannequin) => {
                     ActorInstance::remote_player(
                         glam_vec3_from_vec3d(feet_position),
@@ -420,6 +435,7 @@ pub fn actor_light_probe_height(actor: &ActorPresentation) -> f64 {
         ActorPresentationKind::Entity(EntityKind::Chicken) => f64::from(actor.height) * 0.92,
         ActorPresentationKind::Entity(EntityKind::Mallard) => f64::from(actor.height) * 0.82,
         ActorPresentationKind::Entity(EntityKind::MallardNest) => f64::from(actor.height) * 0.5,
+        ActorPresentationKind::Entity(EntityKind::Deer) => f64::from(actor.height) * 0.88,
         ActorPresentationKind::Entity(EntityKind::Mannequin) => 1.62,
         ActorPresentationKind::Entity(EntityKind::DebugCube) => f64::from(actor.height) * 0.5,
         ActorPresentationKind::Entity(EntityKind::Item) => f64::from(actor.height) * 0.5,

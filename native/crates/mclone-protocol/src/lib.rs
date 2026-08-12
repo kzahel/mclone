@@ -17,6 +17,8 @@ use mclone_core::{
 };
 
 pub use ecology::{
+    DEER_FIELD_GUIDE_OBSERVATION_COUNT, DeerBehavior, DeerFieldGuideProgress, DeerLifeStage,
+    DeerObservationKind, DeerSex, DeerSnapshotData, DeerUpdateData,
     MALLARD_FIELD_GUIDE_OBSERVATION_COUNT, MallardCallCue, MallardFieldGuideProgress,
     MallardLifeStage, MallardNestSnapshotData, MallardNestUpdateData, MallardObservationKind,
     MallardSnapshotData, MallardTrackCue, MallardUpdateData,
@@ -43,7 +45,7 @@ pub use statistics::{
     SUCCESSFUL_BLOCK_PLACEMENT_STATISTIC_VALUE_KEY, StatisticKey, StatisticKeyError,
 };
 
-pub const PROTOCOL_VERSION: u32 = 36;
+pub const PROTOCOL_VERSION: u32 = 37;
 pub const HOTBAR_SLOT_COUNT: u8 = 9;
 pub const HOTBAR_SLOT_COUNT_USIZE: usize = HOTBAR_SLOT_COUNT as usize;
 pub const MAX_PLAYER_DISPLAY_NAME_BYTES: usize = 16;
@@ -606,6 +608,7 @@ pub enum EntityKind {
     Mannequin,
     DebugCube,
     Item,
+    Deer,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -646,6 +649,7 @@ pub struct EntitySnapshot {
     pub item_stack: Option<ItemStackSnapshot>,
     pub mallard: Option<MallardSnapshotData>,
     pub mallard_nest: Option<MallardNestSnapshotData>,
+    pub deer: Option<DeerSnapshotData>,
     pub animation: Option<AnimationState>,
     pub position: Vec3d,
     pub y_rot_degrees: f32,
@@ -663,6 +667,7 @@ pub struct EntityUpdate {
     pub item_stack: Option<ItemStackSnapshot>,
     pub mallard: Option<MallardUpdateData>,
     pub mallard_nest: Option<MallardNestUpdateData>,
+    pub deer: Option<DeerUpdateData>,
     pub animation: Option<AnimationState>,
     pub position: Vec3d,
     pub y_rot_degrees: f32,
@@ -1346,6 +1351,7 @@ fn validate_entity_snapshot(snapshot: &EntitySnapshot) -> ProtocolCodecResult<()
             incubation_required: data.incubation_required,
             attended: data.attended,
         }),
+        deer: snapshot.deer,
         animation: snapshot.animation,
         position: snapshot.position,
         y_rot_degrees: snapshot.y_rot_degrees,
@@ -1387,6 +1393,11 @@ fn validate_entity_snapshot(snapshot: &EntitySnapshot) -> ProtocolCodecResult<()
             "mallard nest snapshot has inconsistent nest data",
         ));
     }
+    if (snapshot.kind == EntityKind::Deer) != snapshot.deer.is_some() {
+        return Err(ProtocolCodecError::InvalidData(
+            "deer entity snapshot has inconsistent species data",
+        ));
+    }
     Ok(())
 }
 
@@ -1417,6 +1428,16 @@ fn validate_entity_update(update: &EntityUpdate) -> ProtocolCodecResult<()> {
     {
         return Err(ProtocolCodecError::InvalidData(
             "mallard nest update has invalid incubation progress",
+        ));
+    }
+    if let Some(deer) = update.deer
+        && (deer.max_health == 0
+            || deer.health > deer.max_health
+            || (deer.antlered
+                && (deer.sex != DeerSex::Male || deer.life_stage != DeerLifeStage::Adult)))
+    {
+        return Err(ProtocolCodecError::InvalidData(
+            "deer update has invalid biological state",
         ));
     }
     if let Some(animation) = update.animation {
@@ -1569,6 +1590,7 @@ impl ByteWriter {
             EntityKind::Mannequin => 4,
             EntityKind::Mallard => 5,
             EntityKind::MallardNest => 6,
+            EntityKind::Deer => 7,
         });
     }
 
@@ -1832,6 +1854,7 @@ impl ByteWriter {
         self.write_optional_item_stack_snapshot(snapshot.item_stack);
         self.write_optional_mallard_snapshot_data(snapshot.mallard);
         self.write_optional_mallard_nest_snapshot_data(snapshot.mallard_nest);
+        self.write_optional_deer_data(snapshot.deer);
         self.write_optional_animation_state(snapshot.animation)
             .expect("validated entity animation");
         self.write_vec3d(snapshot.position);
@@ -1859,6 +1882,7 @@ impl ByteWriter {
         self.write_optional_item_stack_snapshot(update.item_stack);
         self.write_optional_mallard_update_data(update.mallard);
         self.write_optional_mallard_nest_update_data(update.mallard_nest);
+        self.write_optional_deer_data(update.deer);
         self.write_optional_animation_state(update.animation)
             .expect("validated entity animation");
         self.write_vec3d(update.position);
@@ -1898,6 +1922,35 @@ impl ByteWriter {
             self.write_u32(data.incubation_progress);
             self.write_u32(data.incubation_required);
             self.write_bool(data.attended);
+        }
+    }
+
+    fn write_optional_deer_data(&mut self, data: Option<DeerSnapshotData>) {
+        self.write_bool(data.is_some());
+        if let Some(data) = data {
+            self.write_u8(match data.sex {
+                DeerSex::Female => 0,
+                DeerSex::Male => 1,
+            });
+            self.write_u8(match data.life_stage {
+                DeerLifeStage::Fawn => 0,
+                DeerLifeStage::Adult => 1,
+            });
+            self.write_bool(data.antlered);
+            self.write_u8(match data.behavior {
+                DeerBehavior::Idle => 0,
+                DeerBehavior::Walk => 1,
+                DeerBehavior::Graze => 2,
+                DeerBehavior::Alert => 3,
+                DeerBehavior::Flee => 4,
+                DeerBehavior::LieDown => 5,
+                DeerBehavior::Bedded => 6,
+                DeerBehavior::StandUp => 7,
+                DeerBehavior::Hit => 8,
+                DeerBehavior::Fall => 9,
+            });
+            self.write_u8(data.health);
+            self.write_u8(data.max_health);
         }
     }
 
@@ -2110,6 +2163,7 @@ impl<'a> ByteReader<'a> {
             4 => Ok(EntityKind::Mannequin),
             5 => Ok(EntityKind::Mallard),
             6 => Ok(EntityKind::MallardNest),
+            7 => Ok(EntityKind::Deer),
             kind => Err(ProtocolCodecError::UnknownEntityKind(kind)),
         }
     }
@@ -2474,6 +2528,7 @@ impl<'a> ByteReader<'a> {
             item_stack: self.read_optional_item_stack_snapshot()?,
             mallard: self.read_optional_mallard_snapshot_data()?,
             mallard_nest: self.read_optional_mallard_nest_snapshot_data()?,
+            deer: self.read_optional_deer_data()?,
             animation: self.read_optional_animation_state()?,
             position: self.read_vec3d()?,
             y_rot_degrees: self.read_f32()?,
@@ -2566,6 +2621,54 @@ impl<'a> ByteReader<'a> {
             .transpose()
     }
 
+    fn read_optional_deer_data(&mut self) -> ProtocolCodecResult<Option<DeerSnapshotData>> {
+        if !self.read_bool()? {
+            return Ok(None);
+        }
+        let sex = match self.read_u8()? {
+            0 => DeerSex::Female,
+            1 => DeerSex::Male,
+            _ => return Err(ProtocolCodecError::InvalidData("unknown deer sex")),
+        };
+        let life_stage = match self.read_u8()? {
+            0 => DeerLifeStage::Fawn,
+            1 => DeerLifeStage::Adult,
+            _ => return Err(ProtocolCodecError::InvalidData("unknown deer life stage")),
+        };
+        let antlered = self.read_bool()?;
+        let behavior = match self.read_u8()? {
+            0 => DeerBehavior::Idle,
+            1 => DeerBehavior::Walk,
+            2 => DeerBehavior::Graze,
+            3 => DeerBehavior::Alert,
+            4 => DeerBehavior::Flee,
+            5 => DeerBehavior::LieDown,
+            6 => DeerBehavior::Bedded,
+            7 => DeerBehavior::StandUp,
+            8 => DeerBehavior::Hit,
+            9 => DeerBehavior::Fall,
+            _ => return Err(ProtocolCodecError::InvalidData("unknown deer behavior")),
+        };
+        let data = DeerSnapshotData {
+            sex,
+            life_stage,
+            antlered,
+            behavior,
+            health: self.read_u8()?,
+            max_health: self.read_u8()?,
+        };
+        if data.max_health == 0
+            || data.health > data.max_health
+            || (data.antlered
+                && (data.sex != DeerSex::Male || data.life_stage != DeerLifeStage::Adult))
+        {
+            return Err(ProtocolCodecError::InvalidData(
+                "deer update has invalid biological state",
+            ));
+        }
+        Ok(Some(data))
+    }
+
     fn read_optional_animation_state(&mut self) -> ProtocolCodecResult<Option<AnimationState>> {
         if !self.read_bool()? {
             return Ok(None);
@@ -2602,6 +2705,7 @@ impl<'a> ByteReader<'a> {
             item_stack: self.read_optional_item_stack_snapshot()?,
             mallard: self.read_optional_mallard_update_data()?,
             mallard_nest: self.read_optional_mallard_nest_update_data()?,
+            deer: self.read_optional_deer_data()?,
             animation: self.read_optional_animation_state()?,
             position: self.read_vec3d()?,
             y_rot_degrees: self.read_f32()?,
@@ -3099,6 +3203,7 @@ mod tests {
                 in_water: true,
             }),
             mallard_nest: None,
+            deer: None,
             animation: Some(AnimationState::elapsed(
                 AnimationClipId::from_static("alert"),
                 3,
@@ -3126,6 +3231,7 @@ mod tests {
                 in_water: false,
             }),
             mallard_nest: None,
+            deer: None,
             animation: Some(AnimationState::distance(
                 AnimationClipId::from_static("waddle"),
                 4,
@@ -3162,6 +3268,57 @@ mod tests {
     }
 
     #[test]
+    fn deer_species_state_round_trips_and_rejects_impossible_antlers() {
+        let deer = DeerSnapshotData {
+            sex: DeerSex::Male,
+            life_stage: DeerLifeStage::Adult,
+            antlered: true,
+            behavior: DeerBehavior::Alert,
+            health: 17,
+            max_health: 20,
+        };
+        let snapshot = EntitySnapshot {
+            id: EntityId(17),
+            persistent_id: EntityPersistentId::new(0x1234, 0x567a),
+            kind: EntityKind::Deer,
+            item_stack: None,
+            mallard: None,
+            mallard_nest: None,
+            deer: Some(deer),
+            animation: Some(AnimationState::elapsed(
+                AnimationClipId::from_static("alert"),
+                2,
+                40,
+            )),
+            position: Vec3d::new(4.5, 68.0, 9.5),
+            y_rot_degrees: 30.0,
+            x_rot_degrees: 0.0,
+            rotation: None,
+            on_ground: true,
+            width: 0.9,
+            height: 1.85,
+            tick_count: 44,
+        };
+        let update = ServerUpdate::EntitySnapshot(snapshot);
+        let bytes = encode_server_update(&update).unwrap();
+        assert_eq!(decode_server_update(&bytes).unwrap(), update);
+
+        let invalid = ServerUpdate::EntitySnapshot(EntitySnapshot {
+            deer: Some(DeerSnapshotData {
+                sex: DeerSex::Female,
+                ..deer
+            }),
+            ..snapshot
+        });
+        assert_eq!(
+            encode_server_update(&invalid),
+            Err(ProtocolCodecError::InvalidData(
+                "deer update has invalid biological state"
+            ))
+        );
+    }
+
+    #[test]
     fn server_update_codec_round_trips_item_entity_snapshot() {
         let snapshot = EntitySnapshot {
             id: EntityId(8),
@@ -3173,6 +3330,7 @@ mod tests {
             }),
             mallard: None,
             mallard_nest: None,
+            deer: None,
             animation: None,
             position: Vec3d::new(12.5, 64.0, -3.25),
             y_rot_degrees: 0.0,
@@ -3196,6 +3354,7 @@ mod tests {
             }),
             mallard: None,
             mallard_nest: None,
+            deer: None,
             animation: None,
             position: snapshot.position,
             y_rot_degrees: snapshot.y_rot_degrees,
@@ -3235,6 +3394,7 @@ mod tests {
             item_stack: None,
             mallard: None,
             mallard_nest: None,
+            deer: None,
             animation: None,
             position: Vec3d::new(f64::NAN, 70.0, -3.25),
             y_rot_degrees: 90.0,
@@ -3257,6 +3417,7 @@ mod tests {
             item_stack: None,
             mallard: None,
             mallard_nest: None,
+            deer: None,
             animation: None,
             position: Vec3d::new(1.0, 70.0, -3.25),
             y_rot_degrees: 90.0,
@@ -3281,6 +3442,7 @@ mod tests {
             item_stack: None,
             mallard: None,
             mallard_nest: None,
+            deer: None,
             animation: None,
             position: Vec3d::new(1.0, 70.0, -3.25),
             y_rot_degrees: 90.0,
@@ -3308,6 +3470,7 @@ mod tests {
             }),
             mallard: None,
             mallard_nest: None,
+            deer: None,
             animation: None,
             position: Vec3d::new(1.0, 70.0, -3.25),
             y_rot_degrees: 90.0,
@@ -3330,6 +3493,7 @@ mod tests {
             item_stack: None,
             mallard: None,
             mallard_nest: None,
+            deer: None,
             animation: None,
             position: Vec3d::new(1.0, 70.0, -3.25),
             y_rot_degrees: 90.0,

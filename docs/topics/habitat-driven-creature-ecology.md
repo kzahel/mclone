@@ -357,11 +357,22 @@ event, and no ambient soundtrack pretends that a flock exists.
   sites, 696 dense interiors, and 5,646 open interiors. Tests retain all three
   populations so later spawn tuning cannot silently make every forest or
   meadow an edge.
+- Ordinary `mclone:deer` entities now enter the shared creature cap and
+  immediate entity-chunk persistence path only when an Mclone forest-edge
+  candidate also passes live grass, woody cover, browse, sight-line, slope,
+  escape-cover, light, collision, distance, and current-disturbance checks.
+  The planner emits bounded two-to-four-member groups rather than isolated
+  decorative placements.
+- Deer persistence and replication retain sex, fawn/adult stage, conditional
+  antlers, behavior, behavior time, and health. The renderer hides semantic
+  antler parts for females, fawns, and antlerless adult males, avoiding an
+  asset/runtime mismatch while keeping one reviewed canonical figure.
 
 ## Known Gaps and Recommended Next Work
 
-- Define a shared habitat-query/fitness record above raw biome IDs, backed by
-  Mclone climate, landform, hydrology, vegetation, and substrate semantics.
+- Generalize the proven wetland and forest-edge samples into a public habitat
+  query/fitness record above raw biome IDs once a third habitat provides a
+  second real consumer of the abstraction.
 - Add death/removal persistence coverage and prevent local population
   resurrection through seed-time decoration.
 - Build a first stewardship choice around mallards—food attraction, protected
@@ -374,10 +385,10 @@ event, and no ambient soundtrack pretends that a flock exists.
 - Replace raised track meshes with the bounded shared terrain-conforming
   surface path in [`terrain-surface-traces.md`](terrain-surface-traces.md)
   before deer introduces hoofprints.
-- Promote a contrasting second original species whose mechanic forces a new
-  terrain capability instead of merely reusing the mallard wetland. Tactical
-  [`284`](../tactical/284-deer-forest-edge-ecology-and-semantic-props.md) now
-  owns that deer chapter and its reusable asset/animation prerequisites.
+- Complete the live deer chapter with authoritative forage, bedding,
+  alert/flee, sign, hunting/harvest, discoveries, and the bounded showcase in
+  Tactical
+  [`284`](../tactical/284-deer-forest-edge-ecology-and-semantic-props.md).
 
 ## Code and Documentation Map
 

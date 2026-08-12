@@ -4,11 +4,15 @@ use mclone_core::{BlockPos, ChunkPos, Vec3d};
 use mclone_protocol::EntityKind;
 use mclone_worldgen::biome::BiomeDefinition;
 use mclone_worldgen::block::{RawBlockId, generated_block_state_id};
+use mclone_worldgen::levelgen::McloneForestEdgeIntentSample;
 use mclone_worldgen::prng::SimpleRandomSource;
 
 use super::biome_tables::{MobSpawnEntry, farm_animal_spawns_for_biome};
 use super::dry_run::{SurfaceProbeFailure, top_motion_blocking_no_leaves_feet_y};
-use super::habitat::{WetlandHabitatFailure, sample_wetland_habitat};
+use super::habitat::{
+    ForestEdgeHabitatFailure, WetlandHabitatFailure, sample_forest_edge_habitat,
+    sample_wetland_habitat,
+};
 use super::placements::{check_farm_animal_natural_spawn, check_land_creature_natural_spawn};
 
 pub(crate) const CREATURE_SPAWN_MAX_CHUNKS_PER_TICK: usize = 8;
@@ -22,6 +26,11 @@ const MALLARD_FLOCK_MIN_SIZE: usize = 2;
 const MALLARD_FLOCK_MAX_SIZE: usize = 4;
 const MALLARD_FLOCK_MEMBER_RADIUS: i32 = 5;
 const MALLARD_FLOCK_MEMBER_ATTEMPTS: usize = 8;
+const DEER_GROUP_MIN_SIZE: usize = 2;
+const DEER_GROUP_MAX_SIZE: usize = 4;
+const DEER_GROUP_MEMBER_RADIUS: i32 = 7;
+const DEER_GROUP_MEMBER_ATTEMPTS: usize = 10;
+const DEER_RECENT_DISTURBANCE_RADIUS: f64 = 32.0;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum CreatureSpawnProfile {
@@ -45,6 +54,9 @@ pub(crate) struct CreatureSpawnDiagnostics {
     pub(crate) wetland_habitats_detected: usize,
     pub(crate) blocked_missing_wetland_data: usize,
     pub(crate) mallard_flocks_spawned: usize,
+    pub(crate) forest_edge_habitats_detected: usize,
+    pub(crate) blocked_missing_forest_edge_data: usize,
+    pub(crate) deer_groups_spawned: usize,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -60,7 +72,7 @@ pub(crate) struct CreatureSpawnResult {
     pub(crate) requests: Vec<CreatureSpawnRequest>,
 }
 
-pub(crate) fn plan_creature_spawns<F, B, L>(
+pub(crate) fn plan_creature_spawns<F, B, L, E>(
     eligible_chunks: &BTreeSet<ChunkPos>,
     player_positions: &[Vec3d],
     max_spawns: usize,
@@ -69,11 +81,13 @@ pub(crate) fn plan_creature_spawns<F, B, L>(
     mut block_at: F,
     mut biome_at: B,
     mut raw_brightness_at: L,
+    mut forest_edge_at: E,
 ) -> CreatureSpawnResult
 where
     F: FnMut(BlockPos) -> Option<RawBlockId>,
     B: FnMut(BlockPos) -> Option<BiomeDefinition>,
     L: FnMut(BlockPos) -> Option<u8>,
+    E: FnMut(BlockPos) -> Option<McloneForestEdgeIntentSample>,
 {
     let effective_max_spawns = max_spawns.min(CREATURE_SPAWN_MAX_SPAWNS_PER_TICK);
     let mut result = CreatureSpawnResult {
@@ -154,6 +168,54 @@ where
                         continue;
                     }
                 }
+
+                if let Some(generated_edge) = forest_edge_at(pos) {
+                    let recently_disturbed = is_recently_disturbed(pos, player_positions);
+                    match sample_forest_edge_habitat(
+                        pos,
+                        generated_edge,
+                        recently_disturbed,
+                        &mut block_at,
+                    ) {
+                        Ok(sample) if sample.suitable() => {
+                            result.diagnostics.forest_edge_habitats_detected += 1;
+                            let remaining = effective_max_spawns - result.requests.len();
+                            if remaining < DEER_GROUP_MIN_SIZE {
+                                result.diagnostics.blocked_world_predicate += 1;
+                                continue;
+                            }
+                            let requested_size = DEER_GROUP_MIN_SIZE
+                                + random.next_int_bound(
+                                    (DEER_GROUP_MAX_SIZE - DEER_GROUP_MIN_SIZE + 1) as i32,
+                                ) as usize;
+                            let target_size = requested_size.min(remaining);
+                            let group = plan_deer_group(
+                                pos,
+                                target_size,
+                                player_positions,
+                                random,
+                                &mut block_at,
+                                &mut raw_brightness_at,
+                                &mut forest_edge_at,
+                                &mut result.diagnostics,
+                            );
+                            if group.len() >= target_size.min(DEER_GROUP_MIN_SIZE) {
+                                result.requests.extend(group);
+                                result.diagnostics.deer_groups_spawned += 1;
+                            } else {
+                                result.diagnostics.blocked_world_predicate += 1;
+                            }
+                            continue;
+                        }
+                        Ok(_) => {}
+                        Err(ForestEdgeHabitatFailure::MissingBlockData) => {
+                            result.diagnostics.blocked_missing_block_data += 1;
+                            continue;
+                        }
+                    }
+                } else {
+                    result.diagnostics.blocked_missing_forest_edge_data += 1;
+                }
             }
 
             let Some(biome) = biome_at(pos) else {
@@ -224,6 +286,84 @@ where
     result.diagnostics.spawned = result.requests.len();
     result.diagnostics.spawn_budget_exhausted = result.requests.len() >= effective_max_spawns;
     result
+}
+
+fn plan_deer_group(
+    anchor: BlockPos,
+    target_size: usize,
+    player_positions: &[Vec3d],
+    random: &mut SimpleRandomSource,
+    block_at: &mut impl FnMut(BlockPos) -> Option<RawBlockId>,
+    raw_brightness_at: &mut impl FnMut(BlockPos) -> Option<u8>,
+    forest_edge_at: &mut impl FnMut(BlockPos) -> Option<McloneForestEdgeIntentSample>,
+    diagnostics: &mut CreatureSpawnDiagnostics,
+) -> Vec<CreatureSpawnRequest> {
+    let mut requests = Vec::with_capacity(target_size);
+    let mut accepted = BTreeSet::new();
+    let maximum_attempts = target_size.saturating_mul(DEER_GROUP_MEMBER_ATTEMPTS);
+    for member_attempt in 0..maximum_attempts {
+        if requests.len() >= target_size {
+            break;
+        }
+        let candidate = if member_attempt == 0 {
+            anchor
+        } else {
+            let x = anchor.x + random.next_int_bound(DEER_GROUP_MEMBER_RADIUS * 2 + 1)
+                - DEER_GROUP_MEMBER_RADIUS;
+            let z = anchor.z + random.next_int_bound(DEER_GROUP_MEMBER_RADIUS * 2 + 1)
+                - DEER_GROUP_MEMBER_RADIUS;
+            match top_motion_blocking_no_leaves_feet_y(x, z, block_at) {
+                Ok(feet_y) => BlockPos::new(x, feet_y, z),
+                Err(SurfaceProbeFailure::MissingBlockData) => {
+                    diagnostics.blocked_missing_block_data += 1;
+                    continue;
+                }
+                Err(SurfaceProbeFailure::NoSurface) => continue,
+            }
+        };
+        if !accepted.insert(candidate) || !is_right_distance_to_player(candidate, player_positions)
+        {
+            continue;
+        }
+        let Some(generated_edge) = forest_edge_at(candidate) else {
+            diagnostics.blocked_missing_forest_edge_data += 1;
+            continue;
+        };
+        match sample_forest_edge_habitat(
+            candidate,
+            generated_edge,
+            is_recently_disturbed(candidate, player_positions),
+            block_at,
+        ) {
+            Ok(sample) if sample.suitable() => {}
+            Ok(_) => continue,
+            Err(ForestEdgeHabitatFailure::MissingBlockData) => {
+                diagnostics.blocked_missing_block_data += 1;
+                continue;
+            }
+        }
+        if check_land_creature_natural_spawn(
+            EntityKind::Deer,
+            candidate,
+            |block_pos| block_at(block_pos),
+            |brightness_pos| raw_brightness_at(brightness_pos),
+        )
+        .is_err()
+        {
+            diagnostics.blocked_world_predicate += 1;
+            continue;
+        }
+        requests.push(CreatureSpawnRequest {
+            kind: EntityKind::Deer,
+            position: Vec3d::new(
+                f64::from(candidate.x) + 0.5,
+                f64::from(candidate.y),
+                f64::from(candidate.z) + 0.5,
+            ),
+            y_rot_degrees: random.next_float() * 360.0,
+        });
+    }
+    requests
 }
 
 fn sampled_eligible_chunks(
@@ -367,6 +507,16 @@ fn is_right_distance_to_player(pos: BlockPos, player_positions: &[Vec3d]) -> boo
     })
 }
 
+fn is_recently_disturbed(pos: BlockPos, player_positions: &[Vec3d]) -> bool {
+    let x = f64::from(pos.x) + 0.5;
+    let y = f64::from(pos.y);
+    let z = f64::from(pos.z) + 0.5;
+    player_positions.iter().any(|player| {
+        squared_distance(x, y, z, *player)
+            <= DEER_RECENT_DISTURBANCE_RADIUS * DEER_RECENT_DISTURBANCE_RADIUS
+    })
+}
+
 fn squared_distance(x: f64, y: f64, z: f64, player: Vec3d) -> f64 {
     let dx = x - player.x;
     let dy = y - player.y;
@@ -401,6 +551,34 @@ mod tests {
         })
     }
 
+    fn forest_edge_block_at(pos: BlockPos) -> Option<RawBlockId> {
+        Some(if pos.y <= 62 {
+            DIRT
+        } else if pos.y == 63 {
+            GRASS_BLOCK
+        } else if pos.y == 64 && (pos.x + pos.z).rem_euclid(5) == 0 {
+            mclone_worldgen::block::GRASS
+        } else if pos.y == 66 {
+            mclone_worldgen::block::OAK_LEAVES
+        } else {
+            AIR
+        })
+    }
+
+    fn forest_edge_intent(_: BlockPos) -> Option<McloneForestEdgeIntentSample> {
+        Some(McloneForestEdgeIntentSample {
+            local: mclone_worldgen::levelgen::McloneForestIntentSample {
+                coverage: 0.42,
+                ..mclone_worldgen::levelgen::McloneForestIntentSample::EMPTY
+            },
+            nearby_min_coverage: 0.16,
+            nearby_max_coverage: 0.72,
+            edge_contrast: 0.56,
+            clearing_direction: mclone_worldgen::levelgen::McloneForestDirection { x: -1, z: 0 },
+            cover_direction: mclone_worldgen::levelgen::McloneForestDirection { x: 1, z: 0 },
+        })
+    }
+
     #[test]
     fn creature_spawns_from_supported_biome_and_valid_surface() {
         let chunks = BTreeSet::from([ChunkPos::new(0, 0)]);
@@ -416,6 +594,7 @@ mod tests {
             grass_surface_block_at,
             |_| Some(plains),
             |_| Some(15),
+            |_| None,
         );
 
         assert_eq!(result.diagnostics.chunks_checked, 1);
@@ -448,6 +627,7 @@ mod tests {
             grass_surface_block_at,
             |_| Some(plains),
             |_| Some(15),
+            |_| None,
         );
 
         assert_eq!(result.requests, Vec::new());
@@ -473,6 +653,7 @@ mod tests {
             grass_surface_block_at,
             |_| Some(desert),
             |_| Some(15),
+            |_| None,
         );
 
         assert_eq!(result.requests, Vec::new());
@@ -496,6 +677,7 @@ mod tests {
             grass_surface_block_at,
             |_| None,
             |_| Some(15),
+            |_| None,
         );
 
         assert_eq!(result.requests, Vec::new());
@@ -521,6 +703,7 @@ mod tests {
             striped_wetland_block_at,
             |_| Some(plains),
             |_| Some(15),
+            |_| None,
         );
 
         assert!((2..=4).contains(&mclone.requests.len()));
@@ -557,6 +740,7 @@ mod tests {
             striped_wetland_block_at,
             |_| Some(plains),
             |_| Some(15),
+            |_| None,
         );
         assert!(
             reference
@@ -582,11 +766,41 @@ mod tests {
             striped_wetland_block_at,
             |_| Some(plains),
             |_| Some(15),
+            |_| None,
         );
 
         assert_eq!(result.requests.len(), 1);
         assert_eq!(result.requests[0].kind, EntityKind::Mallard);
         assert!(result.diagnostics.spawn_budget_exhausted);
+    }
+
+    #[test]
+    fn mclone_forest_edges_admit_bounded_deer_groups() {
+        let chunks = BTreeSet::from([ChunkPos::new(0, 0)]);
+        let plains = get_layered_biome_by_id(1);
+        let mut random = SimpleRandomSource::new(12_345);
+
+        let result = plan_creature_spawns(
+            &chunks,
+            &[Vec3d::new(80.0, 64.0, 8.0)],
+            4,
+            CreatureSpawnProfile::McloneOverworld,
+            &mut random,
+            forest_edge_block_at,
+            |_| Some(plains),
+            |_| Some(15),
+            forest_edge_intent,
+        );
+
+        assert!((2..=4).contains(&result.requests.len()));
+        assert!(
+            result
+                .requests
+                .iter()
+                .all(|request| request.kind == EntityKind::Deer)
+        );
+        assert!(result.diagnostics.forest_edge_habitats_detected > 0);
+        assert!((1..=2).contains(&result.diagnostics.deer_groups_spawned));
     }
 
     #[test]
@@ -610,6 +824,7 @@ mod tests {
             },
             |_| Some(plains),
             |_| Some(15),
+            |_| None,
         );
 
         assert!(result.requests.is_empty());
@@ -654,6 +869,7 @@ mod tests {
             grass_surface_block_at,
             |_| Some(plains),
             |_| Some(15),
+            |_| None,
         );
 
         assert_eq!(

@@ -75,6 +75,8 @@ pub struct ActorInstance {
     pub opacity: f32,
     pub animation: Option<ActorAnimation>,
     pub chicken_wing_flap_radians: Option<f32>,
+    /// Optional semantic part-name prefix omitted from the compiled figure.
+    pub hidden_part_prefix: Option<&'static str>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -135,6 +137,7 @@ impl ActorInstance {
             opacity: 1.0,
             animation: None,
             chicken_wing_flap_radians: None,
+            hidden_part_prefix: None,
         }
     }
 
@@ -156,6 +159,7 @@ impl ActorInstance {
             opacity: 1.0,
             animation: None,
             chicken_wing_flap_radians: None,
+            hidden_part_prefix: None,
         }
     }
 
@@ -193,6 +197,7 @@ impl ActorInstance {
             opacity: 1.0,
             animation: None,
             chicken_wing_flap_radians: None,
+            hidden_part_prefix: None,
         }
     }
 
@@ -214,6 +219,7 @@ impl ActorInstance {
             opacity: 1.0,
             animation: None,
             chicken_wing_flap_radians: None,
+            hidden_part_prefix: None,
         }
     }
 
@@ -240,6 +246,7 @@ impl ActorInstance {
             opacity: 1.0,
             animation: None,
             chicken_wing_flap_radians: None,
+            hidden_part_prefix: None,
         }
     }
 
@@ -268,6 +275,7 @@ impl ActorInstance {
             opacity: 1.0,
             animation: None,
             chicken_wing_flap_radians: None,
+            hidden_part_prefix: None,
         }
     }
 
@@ -289,6 +297,7 @@ impl ActorInstance {
             opacity: 1.0,
             animation: None,
             chicken_wing_flap_radians: None,
+            hidden_part_prefix: None,
         }
     }
 
@@ -396,6 +405,11 @@ impl ActorInstance {
 
     pub fn with_chicken_wing_flap_radians(mut self, radians: Option<f32>) -> Self {
         self.chicken_wing_flap_radians = radians.filter(|radians| radians.is_finite());
+        self
+    }
+
+    pub fn with_hidden_part_prefix(mut self, prefix: Option<&'static str>) -> Self {
+        self.hidden_part_prefix = prefix;
         self
     }
 }
@@ -2203,6 +2217,12 @@ fn append_asset_lab_figure_model(
         &mut scratch.content_matrices,
     );
     for (part_index, part) in figure.parts.iter().enumerate() {
+        if actor
+            .hidden_part_prefix
+            .is_some_and(|prefix| part.name.starts_with(prefix))
+        {
+            continue;
+        }
         let content_matrix = scratch.content_matrices[part_index];
         for cuboid in &part.cuboids {
             if actor.first_person_body_only && !cuboid.first_person_visible {

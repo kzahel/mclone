@@ -856,6 +856,7 @@ fn generated_wetland_mallard_flock_and_due_egg_survive_reload() {
                         .map(get_layered_biome_by_id)
                 },
                 |pos| server.scheduler.raw_brightness_at_world(pos, 0),
+                |_| None,
             );
             result
                 .requests
