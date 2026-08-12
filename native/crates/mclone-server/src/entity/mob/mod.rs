@@ -66,6 +66,7 @@ const DEER_FLEE_MAX_TURN_DEGREES: f32 = 18.0;
 const DEER_HABITAT_SEARCH_RADIUS: i32 = 9;
 const DEER_HERD_COHESION_DISTANCE_SQR: f64 = 12.0 * 12.0;
 const DEER_HERD_SEPARATION_DISTANCE_SQR: f64 = 1.75 * 1.75;
+pub(crate) const DEER_FALL_PRESENTATION_TICKS: u32 = 30;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct PathfindingMalusTable {
@@ -117,8 +118,17 @@ struct MallardHabitatIntent {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct DeerHabitatIntent {
+    kind: DeerHabitatKind,
     target: Vec3d,
     ticks_remaining: u16,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DeerHabitatKind {
+    Forage,
+    Water,
+    Herd,
+    Escape,
 }
 
 impl MobPlayerTarget {
@@ -179,7 +189,10 @@ impl MobRuntimeState {
             EntityKind::Mallard => passive::register_mallard_goals(&mut goal_selector),
             EntityKind::Deer => passive::register_cow_goals(&mut goal_selector),
             EntityKind::Mannequin => passive::register_mannequin_goals(&mut goal_selector),
-            EntityKind::DebugCube | EntityKind::Item | EntityKind::MallardNest => {}
+            EntityKind::DebugCube
+            | EntityKind::Item
+            | EntityKind::MallardNest
+            | EntityKind::DeerBed => {}
         }
         let attributes = MobAttributes::from_metadata(metadata);
 
@@ -236,7 +249,10 @@ impl MobRuntimeState {
             EntityKind::Mallard => passive::register_mallard_goals(&mut goal_selector),
             EntityKind::Deer => passive::register_cow_goals(&mut goal_selector),
             EntityKind::Mannequin => passive::register_mannequin_goals(&mut goal_selector),
-            EntityKind::DebugCube | EntityKind::Item | EntityKind::MallardNest => {}
+            EntityKind::DebugCube
+            | EntityKind::Item
+            | EntityKind::MallardNest
+            | EntityKind::DeerBed => {}
         }
         let attributes = MobAttributes::from_metadata(metadata);
 
@@ -337,6 +353,42 @@ impl MobRuntimeState {
 
     pub(crate) fn deer_behavior(&self) -> Option<mclone_protocol::DeerBehavior> {
         self.species.deer().map(|deer| deer.behavior())
+    }
+
+    pub(crate) fn damage_deer(&mut self, entity: &mut ServerEntityState, damage: u8) -> bool {
+        let Some(deer) = self.species.deer_mut() else {
+            return false;
+        };
+        if !deer.apply_damage(damage) {
+            return false;
+        }
+        set_deer_animation(entity, deer.behavior());
+        entity.deer = Some(deer.snapshot_data());
+        true
+    }
+
+    pub(crate) fn deer_harvest_ready(&self) -> Option<bool> {
+        self.species
+            .deer()
+            .map(|deer| deer.is_ready_for_harvest(DEER_FALL_PRESENTATION_TICKS))
+    }
+
+    pub(crate) fn deer_antlered(&self) -> Option<bool> {
+        self.species.deer().map(|deer| deer.antlered())
+    }
+
+    pub(crate) fn take_deer_due_antler_shed(&mut self) -> bool {
+        self.species
+            .deer_mut()
+            .is_some_and(|deer| deer.take_due_antler_shed())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn make_deer_antler_shed_due_for_test(&mut self) {
+        self.species
+            .deer_mut()
+            .expect("test expected deer species state")
+            .make_antler_shed_due_for_test();
     }
 
     pub(crate) const fn mallard_in_water(&self) -> bool {
@@ -485,8 +537,24 @@ impl MobRuntimeState {
         deer.advance_behavior_tick();
         let behavior = deer.behavior();
         let ticks = deer.behavior_ticks();
+        if deer.health() == 0 {
+            deer.set_behavior(mclone_protocol::DeerBehavior::Fall);
+            set_deer_animation(entity, deer.behavior());
+            self.delta_movement = Vec3d::ZERO;
+            return;
+        }
         let mut next = behavior;
-        if nearest_distance_sqr <= DEER_FLEE_RADIUS_SQR {
+        if behavior == mclone_protocol::DeerBehavior::Hit && ticks < 8 {
+            set_deer_animation(entity, behavior);
+            self.delta_movement = Vec3d::ZERO;
+            return;
+        }
+        if behavior == mclone_protocol::DeerBehavior::Hit {
+            next = mclone_protocol::DeerBehavior::Flee;
+        }
+        if behavior != mclone_protocol::DeerBehavior::Hit
+            && nearest_distance_sqr <= DEER_FLEE_RADIUS_SQR
+        {
             next = mclone_protocol::DeerBehavior::Flee;
         } else if behavior == mclone_protocol::DeerBehavior::Flee {
             if ticks >= DEER_FLEE_MIN_TICKS && nearest_distance_sqr > DEER_FLEE_RELEASE_RADIUS_SQR {
@@ -523,6 +591,9 @@ impl MobRuntimeState {
                 mclone_protocol::DeerBehavior::Graze if ticks >= 100 => {
                     mclone_protocol::DeerBehavior::Idle
                 }
+                mclone_protocol::DeerBehavior::Drink if ticks >= 80 => {
+                    mclone_protocol::DeerBehavior::Idle
+                }
                 mclone_protocol::DeerBehavior::Idle if ticks >= 80 => {
                     let herd_too_far = nearest_herdmate.is_some_and(|herdmate| {
                         entity.position.distance_to_sqr(herdmate.position)
@@ -532,7 +603,13 @@ impl MobRuntimeState {
                         mclone_protocol::DeerBehavior::Walk
                     } else {
                         match self.random.next_int_bound(8) {
-                            0 => mclone_protocol::DeerBehavior::LieDown,
+                            0 if deer_bedding_site(
+                                BlockPos::containing(entity.position),
+                                block_state_at,
+                            ) =>
+                            {
+                                mclone_protocol::DeerBehavior::LieDown
+                            }
                             1..=4 => mclone_protocol::DeerBehavior::Graze,
                             _ => mclone_protocol::DeerBehavior::Walk,
                         }
@@ -551,6 +628,17 @@ impl MobRuntimeState {
                 if self.deer_habitat_intent.is_none() {
                     self.deer_habitat_intent = nearest_herdmate
                         .and_then(|herdmate| deer_herd_target(entity.position, herdmate.position))
+                        .or_else(|| {
+                            (self.random.next_int_bound(5) == 0)
+                                .then(|| {
+                                    random_deer_safe_bank_target(
+                                        entity.position,
+                                        &mut self.random,
+                                        block_state_at,
+                                    )
+                                })
+                                .flatten()
+                        })
                         .or_else(|| {
                             random_deer_forage_target(
                                 entity.position,
@@ -578,9 +666,14 @@ impl MobRuntimeState {
 
         if let Some((target, speed)) = movement {
             if entity.position.distance_to_sqr(target) <= DEER_TARGET_REACHED_DISTANCE_SQR {
+                let reached_kind = self.deer_habitat_intent.map(|intent| intent.kind);
                 self.deer_habitat_intent = None;
                 if behavior == mclone_protocol::DeerBehavior::Walk {
-                    deer.set_behavior(mclone_protocol::DeerBehavior::Graze);
+                    deer.set_behavior(if reached_kind == Some(DeerHabitatKind::Water) {
+                        mclone_protocol::DeerBehavior::Drink
+                    } else {
+                        mclone_protocol::DeerBehavior::Graze
+                    });
                 }
             } else {
                 move_deer_toward(entity, target, speed, block_state_at);
@@ -1425,6 +1518,7 @@ where
                     f64::from(feet.z) + 0.5,
                 );
                 let intent = DeerHabitatIntent {
+                    kind: DeerHabitatKind::Forage,
                     target,
                     ticks_remaining: 240,
                 };
@@ -1465,6 +1559,7 @@ fn deer_herd_target(position: Vec3d, herdmate: Vec3d) -> Option<DeerHabitatInten
         return None;
     };
     Some(DeerHabitatIntent {
+        kind: DeerHabitatKind::Herd,
         target,
         ticks_remaining: 160,
     })
@@ -1518,6 +1613,7 @@ where
         }
     }
     DeerHabitatIntent {
+        kind: DeerHabitatKind::Escape,
         target: best.unwrap_or_else(|| {
             Vec3d::new(
                 position.x + away_x * 12.0,
@@ -1570,9 +1666,81 @@ where
         return false;
     };
     block_collision_aabb(floor, feet.below()).is_some()
-        && blocks(feet).is_some_and(|state| block_collision_aabb(state, feet).is_none())
-        && blocks(feet.offset(0, 1, 0))
-            .is_some_and(|state| block_collision_aabb(state, feet.offset(0, 1, 0)).is_none())
+        && blocks(feet).is_some_and(|state| {
+            block_fluid_kind(state) != BlockFluidKind::Water
+                && block_collision_aabb(state, feet).is_none()
+        })
+        && blocks(feet.offset(0, 1, 0)).is_some_and(|state| {
+            block_fluid_kind(state) != BlockFluidKind::Water
+                && block_collision_aabb(state, feet.offset(0, 1, 0)).is_none()
+        })
+}
+
+fn random_deer_safe_bank_target<F>(
+    position: Vec3d,
+    random: &mut SimpleRandomSource,
+    blocks: &F,
+) -> Option<DeerHabitatIntent>
+where
+    F: Fn(BlockPos) -> Option<BlockStateId>,
+{
+    let origin = BlockPos::containing(position);
+    let mut chosen = None;
+    let mut count = 0_i32;
+    for radius in 2_i32..=DEER_HABITAT_SEARCH_RADIUS {
+        for dx in -radius..=radius {
+            for dz in -radius..=radius {
+                if dx.abs() + dz.abs() != radius {
+                    continue;
+                }
+                for dy in -3..=3 {
+                    let feet = origin.offset(dx, dy, dz);
+                    if !deer_walkable_feet(feet, blocks) || !deer_bank_has_water(feet, blocks) {
+                        continue;
+                    }
+                    count += 1;
+                    if random.next_int_bound(count) == 0 {
+                        chosen = Some(DeerHabitatIntent {
+                            kind: DeerHabitatKind::Water,
+                            target: Vec3d::new(
+                                f64::from(feet.x) + 0.5,
+                                f64::from(feet.y),
+                                f64::from(feet.z) + 0.5,
+                            ),
+                            ticks_remaining: 240,
+                        });
+                    }
+                }
+            }
+        }
+    }
+    chosen
+}
+
+fn deer_bank_has_water<F>(feet: BlockPos, blocks: &F) -> bool
+where
+    F: Fn(BlockPos) -> Option<BlockStateId>,
+{
+    [
+        mclone_core::Direction::North,
+        mclone_core::Direction::South,
+        mclone_core::Direction::West,
+        mclone_core::Direction::East,
+    ]
+    .iter()
+    .any(|direction| {
+        let neighbor = feet.relative(*direction);
+        [neighbor, neighbor.below()].iter().any(|position| {
+            blocks(*position).is_some_and(|state| block_fluid_kind(state) == BlockFluidKind::Water)
+        })
+    })
+}
+
+fn deer_bedding_site<F>(feet: BlockPos, blocks: &F) -> bool
+where
+    F: Fn(BlockPos) -> Option<BlockStateId>,
+{
+    deer_walkable_feet(feet, blocks) && deer_woody_cover_near(feet, blocks) >= 4
 }
 
 fn deer_browse_near<F>(feet: BlockPos, blocks: &F) -> bool
@@ -1639,6 +1807,7 @@ fn set_deer_animation(entity: &mut ServerEntityState, behavior: mclone_protocol:
         mclone_protocol::DeerBehavior::Walk => ("walk", false),
         mclone_protocol::DeerBehavior::Flee => ("flee", false),
         mclone_protocol::DeerBehavior::Graze => ("graze", true),
+        mclone_protocol::DeerBehavior::Drink => ("graze", true),
         mclone_protocol::DeerBehavior::Alert => ("alert", true),
         mclone_protocol::DeerBehavior::LieDown => ("lie_down", true),
         mclone_protocol::DeerBehavior::Bedded => ("bedded_idle", true),
@@ -1769,6 +1938,7 @@ fn mob_random_seed(id: EntityId, kind: EntityKind) -> i64 {
         EntityKind::Mannequin => 0x00c0_0004_u64,
         EntityKind::DebugCube => 0x00c0_00ff_u64,
         EntityKind::MallardNest => 0x00c0_0006_u64,
+        EntityKind::DeerBed => 0x00c0_0008_u64,
     };
     let mixed = id.0.wrapping_mul(0x9e37_79b9_7f4a_7c15).rotate_left(17) ^ kind_id;
     mixed as i64
@@ -2081,6 +2251,54 @@ mod tests {
             Some(mclone_protocol::DeerBehavior::StandUp)
         );
         assert_eq!(entity.animation.unwrap().clip.as_str(), "stand_up");
+    }
+
+    #[test]
+    fn deer_drink_from_a_dry_bank_without_entering_water() {
+        let bank_ground = |pos: BlockPos| {
+            use mclone_worldgen::block::{AIR, GRASS_BLOCK, WATER, generated_block_state_id};
+
+            Some(generated_block_state_id(if pos.y == 63 {
+                GRASS_BLOCK
+            } else if pos.y == 64 && pos.x == 4 {
+                WATER
+            } else {
+                AIR
+            }))
+        };
+        let mut random = SimpleRandomSource::new(31);
+        let intent =
+            random_deer_safe_bank_target(Vec3d::new(0.5, 64.0, 0.5), &mut random, &bank_ground)
+                .expect("reachable dry bank beside water");
+        let feet = BlockPos::containing(intent.target);
+        assert_eq!(intent.kind, DeerHabitatKind::Water);
+        assert!(deer_walkable_feet(feet, &bank_ground));
+        assert!(deer_bank_has_water(feet, &bank_ground));
+
+        let mut mob = MobRuntimeState::from_spawn(EntityId(79), EntityMetadata::DEER, true, 0.0);
+        let mut entity = ServerEntityState::from_metadata(
+            EntityId(79),
+            mclone_protocol::EntityPersistentId::new(0, 79),
+            EntityMetadata::DEER,
+            intent.target,
+            0.0,
+            0.0,
+            None,
+            true,
+        );
+        mob.set_deer_behavior_for_test(mclone_protocol::DeerBehavior::Walk);
+        mob.deer_habitat_intent = Some(intent);
+        mob.tick_entity(&mut entity, &[], &[], &[], &bank_ground);
+
+        assert_eq!(
+            mob.deer_behavior(),
+            Some(mclone_protocol::DeerBehavior::Drink)
+        );
+        assert_eq!(entity.animation.unwrap().clip.as_str(), "graze");
+        assert!(deer_walkable_feet(
+            BlockPos::containing(entity.position),
+            &bank_ground
+        ));
     }
 
     #[test]

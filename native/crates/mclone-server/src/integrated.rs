@@ -10,6 +10,7 @@ use std::ops::{Deref, DerefMut};
 use std::path::Path;
 use std::time::Duration;
 
+use mclone_blocks::block_collision_aabb;
 use mclone_core::{
     AIR_BLOCK_STATE_ID, BlockPos, BlockStateId, ChunkPos, ChunkSnapshot, Vec3d,
     block_to_chunk_coord, obfuscate_biome_zoom_seed,
@@ -17,9 +18,9 @@ use mclone_core::{
 #[cfg(feature = "physics-engine")]
 use mclone_protocol::EntityRotation;
 use mclone_protocol::{
-    AcceptTeleportCommand, ChunkView, ClientCommand, ClientEphemeralMessage, ClientIdentity,
-    DebugActorKind, DebugHotbarItem, DimensionKey, EffectiveEphemeralTransport, EntityKind,
-    InteractionHand, ItemKind, MallardCallCue, MallardObservationKind, MallardTrackCue,
+    AcceptTeleportCommand, AttackEntityCommand, ChunkView, ClientCommand, ClientEphemeralMessage,
+    ClientIdentity, DebugActorKind, DebugHotbarItem, DimensionKey, EffectiveEphemeralTransport,
+    EntityKind, InteractionHand, ItemKind, MallardCallCue, MallardObservationKind, MallardTrackCue,
     MovePlayerCommand, PlayerActionCommand, PlayerActionKind, PlayerAppearance, PlayerDamageCause,
     PlayerLifeState, PlayerModelKind, PlayerProfileId, PlayerStatistics, RealmId,
     SequencedMovePlayerCommand, ServerUpdate, SessionCapabilities, SessionConfiguration,
@@ -35,6 +36,7 @@ use mclone_worldgen::prng::SimpleRandomSource;
 
 #[cfg(target_arch = "wasm32")]
 use crate::WasmServerJobWorkerConfig;
+use crate::deer_population::{DEER_POPULATION_HISTORY_KEY, DeerPopulationHistory};
 use crate::entity::spawning::dry_run::{
     NaturalSpawnDryRunDiagnostics, dry_run_creature_spawn_eligibility,
 };
@@ -128,6 +130,9 @@ const DEBUG_PHYSICS_CUBE_LAUNCH_SPEED: f64 = 14.0;
 const DEBUG_PHYSICS_CUBE_HALF_EXTENT: f64 = 0.5;
 const DEFAULT_PHYSICS_STEPS_PER_GAMEPLAY_TICK: u32 = 3;
 const DEFAULT_PHYSICS_STEP_DT_SECONDS: f64 = 1.0 / 60.0;
+const DEER_HUNTING_SPEAR_REACH: f64 = 4.5;
+const DEER_HUNTING_SPEAR_DAMAGE: u8 = 8;
+const DEER_HUNTING_SPEAR_COOLDOWN_TICKS: u64 = 12;
 const NATURAL_SPAWN_TICK_SEED_MULTIPLIER: i64 = 6_364_136_223_846_793_005;
 
 fn session_configuration(
@@ -177,6 +182,7 @@ pub struct DimensionRuntime {
     #[cfg(feature = "physics-engine")]
     debug_physics_player_target: Option<CommandTarget>,
     loading_progress: ChunkLoadingProgress,
+    deer_population: DeerPopulationHistory,
 }
 
 impl DimensionRuntime {
@@ -214,6 +220,7 @@ impl DimensionRuntime {
             #[cfg(feature = "physics-engine")]
             debug_physics_player_target: None,
             loading_progress,
+            deer_population: DeerPopulationHistory::default(),
         }
     }
 
@@ -1178,6 +1185,12 @@ impl RealmServer {
                 .with_starter_content(requested_starter_content)
             }
         };
+        self.active_dimension.deer_population = self
+            .scheduler
+            .load_saved_data_blocking(DEER_POPULATION_HISTORY_KEY.to_owned())?
+            .map(DeerPopulationHistory::from_saved)
+            .transpose()?
+            .unwrap_or_default();
         if !metadata_was_present || metadata_needs_migration {
             match self
                 .scheduler
@@ -1966,6 +1979,7 @@ impl RealmServer {
             player.total_experience = record.total_experience;
             player.statistics = record.statistics.clone();
             player.mallard_field_guide = record.mallard_field_guide;
+            player.deer_field_guide = record.deer_field_guide;
             player.vitals = mclone_protocol::PlayerVitals::new(
                 record.health,
                 mclone_protocol::DEFAULT_PLAYER_MAX_HEALTH,
@@ -1982,6 +1996,7 @@ impl RealmServer {
         let statistics = player.statistics.clone();
         let inventory = player.inventory.hotbar_item_stacks();
         let mallard_field_guide = player.mallard_field_guide;
+        let deer_field_guide = player.deer_field_guide;
         self.chunk_tracking.queue_update_for_player(
             player_id,
             ServerUpdate::PlayerExperience { total_experience },
@@ -1998,6 +2013,8 @@ impl RealmServer {
             player_id,
             ServerUpdate::MallardFieldGuide(mallard_field_guide),
         );
+        self.chunk_tracking
+            .queue_update_for_player(player_id, ServerUpdate::DeerFieldGuide(deer_field_guide));
         let life = player_life_state(
             self.players
                 .get(player_id)
@@ -2214,6 +2231,9 @@ impl RealmServer {
             }
             ClientCommand::PlayerAction(command) => {
                 self.handle_player_action_for_target(target, command)
+            }
+            ClientCommand::AttackEntity(command) => {
+                self.handle_attack_entity_for_target(target, command)
             }
             ClientCommand::UseItemOn(command) => {
                 self.handle_use_item_on_for_target(target, command)
@@ -2501,6 +2521,7 @@ impl RealmServer {
         let players = &mut self.players;
         let mut dirty_inventories = BTreeSet::new();
         let mut feather_collectors = BTreeSet::new();
+        let mut antler_collectors = BTreeSet::new();
         entity_updates.extend(self.active_dimension.entities.collect_item_entities(
             &item_pickup_targets,
             |player_id, stack| {
@@ -2510,6 +2531,9 @@ impl RealmServer {
                         dirty_inventories.insert(player_id);
                         if stack.kind == ItemKind::MallardFeather {
                             feather_collectors.insert(player_id);
+                        }
+                        if stack.kind == ItemKind::ShedAntler {
+                            antler_collectors.insert(player_id);
                         }
                     }
                     result.remaining
@@ -2529,7 +2553,11 @@ impl RealmServer {
         for player_id in feather_collectors {
             self.observe_mallard(player_id, MallardObservationKind::FoundFeather);
         }
+        for player_id in antler_collectors {
+            self.observe_deer(player_id, mclone_protocol::DeerObservationKind::FoundAntler);
+        }
         let mallard_calls = self.active_dimension.entities.drain_mallard_calls();
+        let deer_sounds = self.active_dimension.entities.drain_deer_sounds();
         let mallard_tracks = self.active_dimension.entities.drain_mallard_tracks();
         let mallard_hatches = self
             .active_dimension
@@ -2541,6 +2569,8 @@ impl RealmServer {
             mallard_tracks,
             mallard_hatches,
         );
+        self.route_deer_sounds(deer_sounds);
+        self.route_deer_observations(&entity_updates);
         let entity_tick_us = simulation_timing_elapsed_us(entity_tick_start);
 
         let physics_tick_start = simulation_timing_start();
@@ -2720,6 +2750,9 @@ impl RealmServer {
                 .copied()
                 .find(|category| category.category == MobCategory::Creature);
             if let Some(creature_plan) = creature_plan.filter(|category| category.should_attempt) {
+                self.active_dimension
+                    .deer_population
+                    .advance_spawn_cycle(&evaluation.chunk_inputs.eligible_entity_ticking_chunks);
                 let max_spawns = creature_plan
                     .cap
                     .saturating_sub(creature_plan.current_count)
@@ -2765,7 +2798,18 @@ impl RealmServer {
                 );
                 live = result.diagnostics;
                 let persistent = self.scheduler.entity_chunks_supported();
-                spawned_entities.extend(result.requests.into_iter().map(|request| {
+                let requests = result
+                    .requests
+                    .into_iter()
+                    .filter(|request| {
+                        request.kind != EntityKind::Deer
+                            || !self
+                                .active_dimension
+                                .deer_population
+                                .blocks_spawn(BlockPos::containing(request.position).chunk_pos())
+                    })
+                    .collect::<Vec<_>>();
+                spawned_entities.extend(requests.into_iter().map(|request| {
                     if persistent {
                         self.entities.spawn_persistent_passive_mob(
                             request.kind,
@@ -3673,6 +3717,75 @@ impl RealmServer {
         self.drain_pending_block_delta_updates_for_target(target)
     }
 
+    fn handle_attack_entity_for_target(
+        &mut self,
+        target: CommandTarget,
+        command: AttackEntityCommand,
+    ) -> ChunkStoreResult<Vec<ServerUpdate>> {
+        if !self.world_behavior_profile.allows_player_break()
+            || !self
+                .inventory_for_target(target)?
+                .selected_item_stack()
+                .is_some_and(|stack| stack.kind == ItemKind::HuntingSpear)
+        {
+            return Ok(Vec::new());
+        }
+        let player_id = target.player_id();
+        let (feet, y_rot_degrees, x_rot_degrees, last_attack) = {
+            let player = self
+                .players
+                .get(player_id)
+                .ok_or_else(|| unknown_player_error(player_id))?;
+            (
+                player.state.position(),
+                player.state.y_rot_degrees(),
+                player.state.x_rot_degrees(),
+                player.last_deer_attack_tick,
+            )
+        };
+        if last_attack.is_some_and(|tick| {
+            self.simulation_tick.saturating_sub(tick) < DEER_HUNTING_SPEAR_COOLDOWN_TICKS
+        }) {
+            return Ok(Vec::new());
+        }
+        let eye = feet.add(Vec3d::new(0.0, 1.62, 0.0));
+        let direction = look_direction_from_rot(y_rot_degrees, x_rot_degrees);
+        let to = eye.add(direction.scale(DEER_HUNTING_SPEAR_REACH));
+        let Some((targeted, hit_fraction)) = self.active_dimension.entities.targeted_deer(eye, to)
+        else {
+            return Ok(Vec::new());
+        };
+        if targeted.id != command.target
+            || !deer_attack_line_of_sight(eye, to, hit_fraction, |pos| {
+                self.scheduler.block_at_world(pos)
+            })
+        {
+            return Ok(Vec::new());
+        }
+        let before_chunk = targeted.chunk_pos();
+        let Some(result) = self
+            .active_dimension
+            .entities
+            .attack_deer(command.target, DEER_HUNTING_SPEAR_DAMAGE)
+        else {
+            return Ok(Vec::new());
+        };
+        self.players
+            .get_mut(player_id)
+            .expect("validated player disappeared during deer attack")
+            .last_deer_attack_tick = Some(self.simulation_tick);
+        self.dirty_entity_chunks.insert(before_chunk);
+        self.mark_entity_updates_dirty(&[result.state]);
+        self.reconcile_entity_subjects(std::iter::once(result.state), true);
+        if result.killed {
+            self.active_dimension
+                .deer_population
+                .deplete(result.state.chunk_pos());
+            self.observe_deer(player_id, mclone_protocol::DeerObservationKind::Harvested);
+        }
+        self.drain_chunk_updates_for_target(target)
+    }
+
     fn handle_use_item_on_for_target(
         &mut self,
         target: CommandTarget,
@@ -4418,6 +4531,48 @@ impl RealmServer {
         }
     }
 
+    fn route_deer_observations(&mut self, entity_updates: &[ServerEntityState]) {
+        for bed in entity_updates
+            .iter()
+            .filter(|entity| entity.alive && entity.kind == EntityKind::DeerBed)
+        {
+            for player_id in self.mallard_players_in_range(bed.position, 12.0) {
+                self.observe_deer(player_id, mclone_protocol::DeerObservationKind::FoundSign);
+            }
+        }
+        for entity in entity_updates
+            .iter()
+            .filter(|entity| entity.alive && entity.kind == EntityKind::Deer)
+        {
+            for player_id in self.mallard_players_in_range(entity.position, 20.0) {
+                self.observe_deer(player_id, mclone_protocol::DeerObservationKind::Seen);
+                let observation = match entity.deer.map(|deer| deer.behavior) {
+                    Some(mclone_protocol::DeerBehavior::Alert) => {
+                        Some(mclone_protocol::DeerObservationKind::WitnessedAlert)
+                    }
+                    Some(mclone_protocol::DeerBehavior::Flee) => {
+                        Some(mclone_protocol::DeerObservationKind::WitnessedFlee)
+                    }
+                    _ => None,
+                };
+                if let Some(observation) = observation {
+                    self.observe_deer(player_id, observation);
+                }
+            }
+        }
+    }
+
+    fn route_deer_sounds(&mut self, cues: Vec<mclone_protocol::DeerSoundCue>) {
+        for cue in cues {
+            for player_id in
+                self.mallard_players_in_range(cue.position, f64::from(cue.audible_radius))
+            {
+                self.chunk_tracking
+                    .queue_update_for_player(player_id, ServerUpdate::DeerSound(cue));
+            }
+        }
+    }
+
     fn mallard_players_in_range(&self, position: Vec3d, radius: f64) -> Vec<ServerPlayerId> {
         let radius_sqr = radius * radius;
         let topology = self.active_dimension.definition.topology;
@@ -4444,6 +4599,23 @@ impl RealmServer {
         };
         self.chunk_tracking
             .queue_update_for_player(player_id, ServerUpdate::MallardFieldGuide(progress));
+    }
+
+    fn observe_deer(
+        &mut self,
+        player_id: ServerPlayerId,
+        observation: mclone_protocol::DeerObservationKind,
+    ) {
+        let Some(progress) = self.players.get_mut(player_id).and_then(|player| {
+            player
+                .deer_field_guide
+                .observe(observation)
+                .then_some(player.deer_field_guide)
+        }) else {
+            return;
+        };
+        self.chunk_tracking
+            .queue_update_for_player(player_id, ServerUpdate::DeerFieldGuide(progress));
     }
 
     fn mark_entity_updates_dirty(&mut self, subjects: &[ServerEntityState]) {
@@ -4984,6 +5156,7 @@ impl RealmServer {
             let statistics = player.statistics.clone();
             let inventory = player.inventory.hotbar_item_stacks();
             let mallard_field_guide = player.mallard_field_guide;
+            let deer_field_guide = player.deer_field_guide;
             let life = player_life_state(player);
             self.chunk_tracking.queue_update_for_player(
                 player_id,
@@ -5003,6 +5176,8 @@ impl RealmServer {
                 player_id,
                 ServerUpdate::MallardFieldGuide(mallard_field_guide),
             );
+            self.chunk_tracking
+                .queue_update_for_player(player_id, ServerUpdate::DeerFieldGuide(deer_field_guide));
             self.chunk_tracking
                 .queue_update_for_player(player_id, ServerUpdate::PlayerLife(life));
             let center = self
@@ -6149,6 +6324,7 @@ fn player_record_from_entry(
         record.total_experience = player.total_experience;
         record.statistics = player.statistics.clone();
         record.mallard_field_guide = player.mallard_field_guide;
+        record.deer_field_guide = player.deer_field_guide;
         record.health = player.vitals.health();
         record.pending_death_cause = player.pending_death_cause;
         return Some(record);
@@ -6185,6 +6361,7 @@ fn player_record_from_current_state_with_revision(
         total_experience: player.total_experience,
         statistics: player.statistics.clone(),
         mallard_field_guide: player.mallard_field_guide,
+        deer_field_guide: player.deer_field_guide,
         health: player.vitals.health(),
         pending_death_cause: player.pending_death_cause,
     })
@@ -6273,12 +6450,42 @@ fn rotate_debug_physics_vector(rotation: mclone_physics::PhysicsRotation, vector
     )
 }
 
-#[cfg(feature = "physics-engine")]
 fn look_direction_from_rot(y_rot_degrees: f32, x_rot_degrees: f32) -> Vec3d {
     let yaw = f64::from(y_rot_degrees).to_radians();
     let pitch = f64::from(x_rot_degrees).to_radians();
     let pitch_cos = pitch.cos();
     Vec3d::new(-yaw.sin() * pitch_cos, -pitch.sin(), yaw.cos() * pitch_cos)
+}
+
+fn deer_attack_line_of_sight<F>(
+    from: Vec3d,
+    to: Vec3d,
+    target_fraction: f64,
+    mut block_at: F,
+) -> bool
+where
+    F: FnMut(BlockPos) -> Option<RawBlockId>,
+{
+    let endpoint = from.add(to.subtract(from).scale(target_fraction));
+    let delta = endpoint.subtract(from);
+    let distance = delta.length_sqr().sqrt();
+    let step_count = (distance / 0.1).ceil() as u32;
+    if step_count == 0 {
+        return true;
+    }
+    for step in 1..step_count {
+        let point = from.add(delta.scale(f64::from(step) / f64::from(step_count)));
+        let pos = BlockPos::containing(point);
+        let Some(block) = block_at(pos) else {
+            return false;
+        };
+        if block_collision_aabb(BlockStateId(u32::from(block)), pos)
+            .is_some_and(|bounds| bounds.contains(point))
+        {
+            return false;
+        }
+    }
+    true
 }
 
 fn runtime_chunk_target_status(scheduler: &ChunkScheduler) -> mclone_core::ChunkStatus {
@@ -6303,11 +6510,22 @@ fn save_dirty_dimension_runtime(
     let mut entity_record_builder = |pos: ChunkPos, revision: u64| {
         entity_chunk_record_for_persistence(entities, dirty_entity_chunks, pos, revision)
     };
-    let queued = runtime.scheduler.save_dirty_chunks_with_record_builders(
+    let mut queued = runtime.scheduler.save_dirty_chunks_with_record_builders(
         &mut chunk_record_builder,
         &mut entity_record_builder,
     )?;
     runtime.dirty_entity_chunks.clear();
+    if runtime.deer_population.is_dirty() {
+        let record = runtime.deer_population.saved_record()?;
+        let revision = record.revision;
+        match runtime.scheduler.save_saved_data_blocking(record)? {
+            StoreWriteOutcome::Written | StoreWriteOutcome::Superseded => {
+                runtime.deer_population.mark_saved(revision);
+                queued = queued.saturating_add(1);
+            }
+            StoreWriteOutcome::SkippedCachePressure | StoreWriteOutcome::SkippedOnClose => {}
+        }
+    }
     Ok(queued)
 }
 

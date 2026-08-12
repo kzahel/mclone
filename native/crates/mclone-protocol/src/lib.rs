@@ -18,7 +18,7 @@ use mclone_core::{
 
 pub use ecology::{
     DEER_FIELD_GUIDE_OBSERVATION_COUNT, DeerBehavior, DeerFieldGuideProgress, DeerLifeStage,
-    DeerObservationKind, DeerSex, DeerSnapshotData, DeerUpdateData,
+    DeerObservationKind, DeerSex, DeerSnapshotData, DeerSoundCue, DeerSoundKind, DeerUpdateData,
     MALLARD_FIELD_GUIDE_OBSERVATION_COUNT, MallardCallCue, MallardFieldGuideProgress,
     MallardLifeStage, MallardNestSnapshotData, MallardNestUpdateData, MallardObservationKind,
     MallardSnapshotData, MallardTrackCue, MallardUpdateData,
@@ -45,7 +45,7 @@ pub use statistics::{
     SUCCESSFUL_BLOCK_PLACEMENT_STATISTIC_VALUE_KEY, StatisticKey, StatisticKeyError,
 };
 
-pub const PROTOCOL_VERSION: u32 = 37;
+pub const PROTOCOL_VERSION: u32 = 38;
 pub const HOTBAR_SLOT_COUNT: u8 = 9;
 pub const HOTBAR_SLOT_COUNT_USIZE: usize = HOTBAR_SLOT_COUNT as usize;
 pub const MAX_PLAYER_DISPLAY_NAME_BYTES: usize = 16;
@@ -75,6 +75,7 @@ const CLIENT_COMMAND_KEEP_ALIVE: u8 = 10;
 const CLIENT_COMMAND_DISCONNECT: u8 = 11;
 const CLIENT_COMMAND_RESPAWN: u8 = 12;
 const CLIENT_COMMAND_EPHEMERAL_FALLBACK: u8 = 13;
+const CLIENT_COMMAND_ATTACK_ENTITY: u8 = 14;
 const SERVER_UPDATE_CHUNK_SNAPSHOT: u8 = 1;
 const SERVER_UPDATE_CHUNK_UNLOAD: u8 = 2;
 const SERVER_UPDATE_SECTION_BLOCK_UPDATES: u8 = 3;
@@ -100,6 +101,8 @@ const SERVER_UPDATE_PLAYER_INVENTORY: u8 = 22;
 const SERVER_UPDATE_MALLARD_FIELD_GUIDE: u8 = 23;
 const SERVER_UPDATE_MALLARD_CALL: u8 = 24;
 const SERVER_UPDATE_MALLARD_TRACK: u8 = 25;
+const SERVER_UPDATE_DEER_FIELD_GUIDE: u8 = 26;
+const SERVER_UPDATE_DEER_SOUND: u8 = 27;
 
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 pub struct SessionCapabilities(u64);
@@ -311,6 +314,7 @@ pub enum ClientCommand {
     SetDebugHotbarSlot(SetDebugHotbarSlotCommand),
     SetPlayerAppearance(SetPlayerAppearanceCommand),
     PlayerAction(PlayerActionCommand),
+    AttackEntity(AttackEntityCommand),
     UseItemOn(UseItemOnCommand),
     ShootDebugPhysicsCube,
     KeepAlive { id: u64 },
@@ -469,6 +473,11 @@ pub struct PlayerActionCommand {
     pub kind: PlayerActionKind,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct AttackEntityCommand {
+    pub target: EntityId,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct UseItemOnCommand {
     pub hand: InteractionHand,
@@ -541,6 +550,8 @@ pub enum ServerUpdate {
         hotbar: [Option<ItemStackSnapshot>; HOTBAR_SLOT_COUNT_USIZE],
     },
     MallardFieldGuide(MallardFieldGuideProgress),
+    DeerFieldGuide(DeerFieldGuideProgress),
+    DeerSound(DeerSoundCue),
     MallardCall(MallardCallCue),
     MallardTrack(MallardTrackCue),
     /// Owner-only atomic health/death snapshot.
@@ -609,6 +620,7 @@ pub enum EntityKind {
     DebugCube,
     Item,
     Deer,
+    DeerBed,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -616,6 +628,10 @@ pub enum ItemKind {
     Egg,
     MallardEgg,
     MallardFeather,
+    HuntingSpear,
+    Venison,
+    DeerHide,
+    ShedAntler,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -844,6 +860,10 @@ pub fn encode_client_command(command: &ClientCommand) -> ProtocolCodecResult<Vec
             writer.write_u8(CLIENT_COMMAND_PLAYER_ACTION);
             writer.write_player_action(command);
         }
+        ClientCommand::AttackEntity(command) => {
+            writer.write_u8(CLIENT_COMMAND_ATTACK_ENTITY);
+            writer.write_entity_id(command.target);
+        }
         ClientCommand::UseItemOn(command) => {
             writer.write_u8(CLIENT_COMMAND_USE_ITEM_ON);
             writer.write_use_item_on(command);
@@ -896,6 +916,9 @@ pub fn decode_client_command(bytes: &[u8]) -> ProtocolCodecResult<ClientCommand>
             ClientCommand::SetPlayerAppearance(reader.read_set_player_appearance()?)
         }
         CLIENT_COMMAND_PLAYER_ACTION => ClientCommand::PlayerAction(reader.read_player_action()?),
+        CLIENT_COMMAND_ATTACK_ENTITY => ClientCommand::AttackEntity(AttackEntityCommand {
+            target: reader.read_entity_id()?,
+        }),
         CLIENT_COMMAND_USE_ITEM_ON => ClientCommand::UseItemOn(reader.read_use_item_on()?),
         CLIENT_COMMAND_SHOOT_DEBUG_PHYSICS_CUBE => ClientCommand::ShootDebugPhysicsCube,
         CLIENT_COMMAND_KEEP_ALIVE => ClientCommand::KeepAlive {
@@ -1046,6 +1069,28 @@ pub fn encode_server_update(update: &ServerUpdate) -> ProtocolCodecResult<Vec<u8
         ServerUpdate::MallardFieldGuide(progress) => {
             writer.write_u8(SERVER_UPDATE_MALLARD_FIELD_GUIDE);
             writer.write_u32(progress.bits());
+        }
+        ServerUpdate::DeerFieldGuide(progress) => {
+            writer.write_u8(SERVER_UPDATE_DEER_FIELD_GUIDE);
+            writer.write_u32(progress.bits());
+        }
+        ServerUpdate::DeerSound(cue) => {
+            if !cue.position.is_finite()
+                || !cue.audible_radius.is_finite()
+                || cue.audible_radius <= 0.0
+            {
+                return Err(ProtocolCodecError::InvalidData("invalid deer sound cue"));
+            }
+            writer.write_u8(SERVER_UPDATE_DEER_SOUND);
+            writer.write_entity_id(cue.source);
+            writer.write_vec3d(cue.position);
+            writer.write_u64(cue.sequence);
+            writer.write_f32(cue.audible_radius);
+            writer.write_u8(match cue.kind {
+                DeerSoundKind::Contact => 0,
+                DeerSoundKind::Alarm => 1,
+                DeerSoundKind::Impact => 2,
+            });
         }
         ServerUpdate::MallardCall(cue) => {
             if !cue.position.is_finite()
@@ -1205,6 +1250,21 @@ pub fn decode_server_update(bytes: &[u8]) -> ProtocolCodecResult<ServerUpdate> {
         SERVER_UPDATE_MALLARD_FIELD_GUIDE => ServerUpdate::MallardFieldGuide(
             MallardFieldGuideProgress::from_bits_retain(reader.read_u32()?),
         ),
+        SERVER_UPDATE_DEER_FIELD_GUIDE => ServerUpdate::DeerFieldGuide(
+            DeerFieldGuideProgress::from_bits_retain(reader.read_u32()?),
+        ),
+        SERVER_UPDATE_DEER_SOUND => ServerUpdate::DeerSound(DeerSoundCue {
+            source: reader.read_entity_id()?,
+            position: reader.read_vec3d()?,
+            sequence: reader.read_u64()?,
+            audible_radius: reader.read_f32()?,
+            kind: match reader.read_u8()? {
+                0 => DeerSoundKind::Contact,
+                1 => DeerSoundKind::Alarm,
+                2 => DeerSoundKind::Impact,
+                _ => return Err(ProtocolCodecError::InvalidData("unknown deer sound kind")),
+            },
+        }),
         SERVER_UPDATE_MALLARD_CALL => ServerUpdate::MallardCall(MallardCallCue {
             source: reader.read_entity_id()?,
             position: reader.read_vec3d()?,
@@ -1591,6 +1651,7 @@ impl ByteWriter {
             EntityKind::Mallard => 5,
             EntityKind::MallardNest => 6,
             EntityKind::Deer => 7,
+            EntityKind::DeerBed => 8,
         });
     }
 
@@ -1599,6 +1660,10 @@ impl ByteWriter {
             ItemKind::Egg => 0,
             ItemKind::MallardEgg => 1,
             ItemKind::MallardFeather => 2,
+            ItemKind::HuntingSpear => 3,
+            ItemKind::Venison => 4,
+            ItemKind::DeerHide => 5,
+            ItemKind::ShedAntler => 6,
         });
     }
 
@@ -1941,6 +2006,7 @@ impl ByteWriter {
                 DeerBehavior::Idle => 0,
                 DeerBehavior::Walk => 1,
                 DeerBehavior::Graze => 2,
+                DeerBehavior::Drink => 10,
                 DeerBehavior::Alert => 3,
                 DeerBehavior::Flee => 4,
                 DeerBehavior::LieDown => 5,
@@ -2164,6 +2230,7 @@ impl<'a> ByteReader<'a> {
             5 => Ok(EntityKind::Mallard),
             6 => Ok(EntityKind::MallardNest),
             7 => Ok(EntityKind::Deer),
+            8 => Ok(EntityKind::DeerBed),
             kind => Err(ProtocolCodecError::UnknownEntityKind(kind)),
         }
     }
@@ -2174,6 +2241,10 @@ impl<'a> ByteReader<'a> {
             0 => Ok(ItemKind::Egg),
             1 => Ok(ItemKind::MallardEgg),
             2 => Ok(ItemKind::MallardFeather),
+            3 => Ok(ItemKind::HuntingSpear),
+            4 => Ok(ItemKind::Venison),
+            5 => Ok(ItemKind::DeerHide),
+            6 => Ok(ItemKind::ShedAntler),
             kind => Err(ProtocolCodecError::UnknownItemKind(kind)),
         }
     }
@@ -2640,6 +2711,7 @@ impl<'a> ByteReader<'a> {
             0 => DeerBehavior::Idle,
             1 => DeerBehavior::Walk,
             2 => DeerBehavior::Graze,
+            10 => DeerBehavior::Drink,
             3 => DeerBehavior::Alert,
             4 => DeerBehavior::Flee,
             5 => DeerBehavior::LieDown,
@@ -2967,6 +3039,36 @@ mod tests {
         let bytes = encode_client_command(&command).unwrap();
 
         assert_eq!(decode_client_command(&bytes).unwrap(), command);
+    }
+
+    #[test]
+    fn client_command_codec_round_trips_entity_attack() {
+        let command = ClientCommand::AttackEntity(AttackEntityCommand {
+            target: EntityId(91),
+        });
+        let bytes = encode_client_command(&command).unwrap();
+        assert_eq!(decode_client_command(&bytes).unwrap(), command);
+    }
+
+    #[test]
+    fn deer_field_guide_update_round_trips() {
+        let update =
+            ServerUpdate::DeerFieldGuide(DeerFieldGuideProgress::from_bits_retain(0b101101));
+        let bytes = encode_server_update(&update).unwrap();
+        assert_eq!(decode_server_update(&bytes).unwrap(), update);
+    }
+
+    #[test]
+    fn deer_spatial_sound_update_round_trips() {
+        let update = ServerUpdate::DeerSound(DeerSoundCue {
+            source: EntityId(42),
+            position: Vec3d::new(2.5, 64.0, -3.5),
+            sequence: 17,
+            audible_radius: 28.0,
+            kind: DeerSoundKind::Alarm,
+        });
+        let bytes = encode_server_update(&update).unwrap();
+        assert_eq!(decode_server_update(&bytes).unwrap(), update);
     }
 
     #[test]

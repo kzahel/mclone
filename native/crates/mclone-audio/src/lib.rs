@@ -64,6 +64,9 @@ pub const IMPACT_WOOD: SoundKey = SoundKey("mclone:impact_wood");
 pub const CLOTH_MOVE: SoundKey = SoundKey("mclone:cloth_move");
 pub const ITEM_PICKUP: SoundKey = SoundKey("mclone:item_pickup");
 pub const MALLARD_CALL: SoundKey = SoundKey("mclone:mallard_call");
+pub const DEER_CONTACT: SoundKey = SoundKey("mclone:deer_contact");
+pub const DEER_ALARM: SoundKey = SoundKey("mclone:deer_alarm");
+pub const DEER_IMPACT: SoundKey = SoundKey("mclone:deer_impact");
 pub const WOOD_CREAK: SoundKey = SoundKey("mclone:wood_creak");
 pub const UI_BACK: SoundKey = SoundKey("mclone:ui_back");
 pub const UI_CONFIRM: SoundKey = SoundKey("mclone:ui_confirm");
@@ -100,6 +103,9 @@ const CATALOG_SOUND_KEYS: &[SoundKey] = &[
     CLOTH_MOVE,
     ITEM_PICKUP,
     MALLARD_CALL,
+    DEER_CONTACT,
+    DEER_ALARM,
+    DEER_IMPACT,
     WOOD_CREAK,
     UI_BACK,
     UI_CONFIRM,
@@ -1260,8 +1266,8 @@ mod tests {
 
         let prepared = PreparedAudioAssets::load_first_party(&source).unwrap();
 
-        assert_eq!(prepared.sound_count(), 121);
-        assert_eq!(prepared.family_count(), 34);
+        assert_eq!(prepared.sound_count(), 127);
+        assert_eq!(prepared.family_count(), 37);
     }
 
     #[test]

@@ -7,8 +7,9 @@ use mclone_core::{
 #[cfg(feature = "physics-engine")]
 use mclone_protocol::EntityRotation;
 use mclone_protocol::{
-    EntityId, EntityKind, EntityPersistentId, ItemKind, ItemStackSnapshot, MallardCallCue,
-    MallardLifeStage, MallardNestSnapshotData, MallardSnapshotData, MallardTrackCue,
+    DeerSoundCue, DeerSoundKind, EntityId, EntityKind, EntityPersistentId, ItemKind,
+    ItemStackSnapshot, MallardCallCue, MallardLifeStage, MallardNestSnapshotData,
+    MallardSnapshotData, MallardTrackCue,
 };
 
 use crate::persistence::{
@@ -38,10 +39,17 @@ const ITEM_STATIONARY_MERGE_INTERVAL_TICKS: u64 = 40;
 const ITEM_MOVED_BLOCK_MERGE_INTERVAL_TICKS: u64 = 2;
 const ENTITY_PERSISTENT_ID_MOST: u64 = 0x6d63_6c6f_6e65_0001;
 pub(crate) const MALLARD_NEST_INCUBATION_REQUIRED_TICKS: u32 = 2_400;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct DeerAttackResult {
+    pub(crate) state: ServerEntityState,
+    pub(crate) killed: bool,
+}
 const MALLARD_NEST_ATTENDANCE_RADIUS_SQR: f64 = 8.0 * 8.0;
 const MALLARD_CALL_AUDIBLE_RADIUS: f32 = 24.0;
 const MALLARD_CALL_FLOCK_SUPPRESSION_RADIUS_SQR: f64 = 12.0 * 12.0;
 const MALLARD_TRACK_SPACING_SQR: f64 = 2.0 * 2.0;
+const DEER_SOUND_HERD_SUPPRESSION_RADIUS_SQR: f64 = 12.0 * 12.0;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct MallardNestRuntimeState {
@@ -49,6 +57,11 @@ struct MallardNestRuntimeState {
     incubation_required: u32,
     parents: [Option<EntityPersistentId>; 2],
     attended: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct DeerBedRuntimeState {
+    source: EntityPersistentId,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -64,11 +77,15 @@ pub(crate) struct ServerEntityStore {
     mobs: BTreeMap<EntityId, MobRuntimeState>,
     items: BTreeMap<EntityId, ItemEntityRuntimeState>,
     mallard_nests: BTreeMap<EntityId, MallardNestRuntimeState>,
+    deer_beds: BTreeMap<EntityId, DeerBedRuntimeState>,
+    deer_bedded_site_ticks: BTreeMap<EntityPersistentId, (BlockPos, u32)>,
     mallard_last_tracks: BTreeMap<EntityId, Vec3d>,
     pending_mallard_calls: Vec<MallardCallCue>,
     pending_mallard_tracks: Vec<MallardTrackCue>,
+    pending_deer_sounds: Vec<DeerSoundCue>,
     hatched_mallard_positions: Vec<Vec3d>,
     mallard_cue_sequence: u64,
+    deer_cue_sequence: u64,
     persistent_ids: BTreeMap<EntityId, EntityPersistentId>,
     volatile_entities: BTreeSet<EntityId>,
     tick_list: ServerEntityTickList,
@@ -514,6 +531,10 @@ impl ServerEntityStore {
         std::mem::take(&mut self.pending_mallard_tracks)
     }
 
+    pub(crate) fn drain_deer_sounds(&mut self) -> Vec<DeerSoundCue> {
+        std::mem::take(&mut self.pending_deer_sounds)
+    }
+
     pub(crate) fn drain_hatched_mallard_positions(&mut self) -> Vec<Vec3d> {
         std::mem::take(&mut self.hatched_mallard_positions)
     }
@@ -601,6 +622,57 @@ impl ServerEntityStore {
 
     pub(crate) fn is_persistent_entity(&self, id: EntityId) -> bool {
         self.persistent_ids.contains_key(&id)
+    }
+
+    pub(crate) fn attack_deer(&mut self, id: EntityId, damage: u8) -> Option<DeerAttackResult> {
+        let entity = self.entities.get_mut(&id)?;
+        if !entity.alive || entity.kind != EntityKind::Deer {
+            return None;
+        }
+        let mob = self.mobs.get_mut(&id)?;
+        if !mob.damage_deer(entity, damage) {
+            return None;
+        }
+        self.deer_cue_sequence = self.deer_cue_sequence.wrapping_add(1);
+        self.pending_deer_sounds.push(DeerSoundCue {
+            source: id,
+            position: entity.position,
+            sequence: self.deer_cue_sequence,
+            audible_radius: 20.0,
+            kind: DeerSoundKind::Impact,
+        });
+        Some(DeerAttackResult {
+            state: *entity,
+            killed: entity.deer.is_some_and(|deer| deer.health == 0),
+        })
+    }
+
+    pub(crate) fn targeted_deer(&self, from: Vec3d, to: Vec3d) -> Option<(ServerEntityState, f64)> {
+        self.entities
+            .values()
+            .copied()
+            .filter(|entity| {
+                entity.alive
+                    && entity.kind == EntityKind::Deer
+                    && entity.deer.is_some_and(|deer| deer.health > 0)
+            })
+            .filter_map(|mut entity| {
+                entity.position = self.topology.nearest_position_lift(entity.position, from);
+                let center =
+                    entity
+                        .position
+                        .add(Vec3d::new(0.0, f64::from(entity.height) * 0.5, 0.0));
+                let bounds = Aabb::of_size(
+                    center,
+                    f64::from(entity.width) + 0.2,
+                    f64::from(entity.height) + 0.2,
+                    f64::from(entity.width) + 0.2,
+                );
+                bounds
+                    .ray_intersection_fraction(from, to)
+                    .map(|fraction| (entity, fraction))
+            })
+            .min_by(|(_, left), (_, right)| left.total_cmp(right))
     }
 
     pub(crate) fn on_block_changed(&mut self, pos: BlockPos) -> usize {
@@ -716,6 +788,11 @@ impl ServerEntityStore {
             .filter(|entity| entity.alive && entity.kind == EntityKind::Deer)
             .map(|entity| (entity.id, entity.position, entity.deer.unwrap().behavior))
             .collect::<Vec<_>>();
+        let mut deer_bed_sources = self
+            .deer_beds
+            .values()
+            .map(|bed| bed.source)
+            .collect::<BTreeSet<_>>();
         let mut updated = Vec::new();
         let mut egg_spawns = Vec::new();
         let mut feather_spawns = Vec::new();
@@ -724,11 +801,16 @@ impl ServerEntityStore {
         let mut merge_due_ids = Vec::new();
         let mut removed_ids = Vec::new();
         let mut hatched_nests = Vec::new();
+        let mut deer_harvests = Vec::new();
+        let mut deer_bed_spawns = Vec::new();
+        let mut antler_spawns = Vec::new();
+        let mut deer_sound_candidates = Vec::new();
         for id in &ticking_ids {
             let id = *id;
             if let Some(entity) = self.entities.get_mut(&id) {
                 if let Some(mob) = self.mobs.get_mut(&id) {
                     let previous_position = entity.position;
+                    let previous_deer_behavior = entity.deer.map(|deer| deer.behavior);
                     let flockmates = if entity.kind == EntityKind::Mallard {
                         mallard_positions
                             .iter()
@@ -812,7 +894,58 @@ impl ServerEntityStore {
                         entity.height = EntityMetadata::MALLARD.dimensions.height * scale;
                     }
                     if entity.kind == EntityKind::Deer {
+                        if mob.take_deer_due_antler_shed() {
+                            antler_spawns.push((entity.position, entity.y_rot_degrees));
+                        }
                         entity.deer = mob.deer_snapshot_data();
+                        let deer_behavior = entity.deer.map(|deer| deer.behavior);
+                        if previous_deer_behavior != deer_behavior {
+                            let kind = match deer_behavior {
+                                Some(mclone_protocol::DeerBehavior::Alert) => {
+                                    Some(DeerSoundKind::Alarm)
+                                }
+                                Some(mclone_protocol::DeerBehavior::Graze)
+                                | Some(mclone_protocol::DeerBehavior::Drink)
+                                | Some(mclone_protocol::DeerBehavior::Walk) => {
+                                    Some(DeerSoundKind::Contact)
+                                }
+                                _ => None,
+                            };
+                            if let Some(kind) = kind {
+                                deer_sound_candidates.push((id, entity.position, kind));
+                            }
+                        }
+                        if entity.deer.is_some_and(|deer| {
+                            deer.behavior == mclone_protocol::DeerBehavior::Bedded
+                        }) && !deer_bed_sources.contains(&entity.persistent_id)
+                        {
+                            let site = BlockPos::containing(entity.position);
+                            let (recorded_site, used_ticks) = self
+                                .deer_bedded_site_ticks
+                                .entry(entity.persistent_id)
+                                .or_insert((site, 0));
+                            if *recorded_site != site {
+                                *recorded_site = site;
+                                *used_ticks = 0;
+                            }
+                            *used_ticks = used_ticks.saturating_add(1);
+                            if *used_ticks >= 80 {
+                                deer_bed_sources.insert(entity.persistent_id);
+                                deer_bed_spawns.push((
+                                    entity.persistent_id,
+                                    entity.position,
+                                    entity.y_rot_degrees,
+                                ));
+                            }
+                        }
+                        if mob.deer_harvest_ready() == Some(true) {
+                            deer_harvests.push((
+                                id,
+                                entity.position,
+                                entity.y_rot_degrees,
+                                mob.deer_antlered() == Some(true),
+                            ));
+                        }
                     }
                 }
                 if let Some(nest) = self.mallard_nests.get_mut(&id) {
@@ -891,6 +1024,37 @@ impl ServerEntityStore {
             updated.push(self.insert_mallard_duckling(position, y_rot_degrees, parents));
             self.hatched_mallard_positions.push(position);
         }
+        for (id, position, y_rot_degrees, antlered) in deer_harvests {
+            if let Some(removed) = self.remove_entity(id) {
+                updated.push(removed);
+            }
+            for (kind, count) in [
+                (ItemKind::Venison, 3),
+                (ItemKind::DeerHide, 1),
+                (ItemKind::ShedAntler, u8::from(antlered)),
+            ] {
+                if count > 0 {
+                    updated.push(self.insert_item_entity(
+                        ItemStackSnapshot { kind, count },
+                        position,
+                        y_rot_degrees,
+                    ));
+                }
+            }
+        }
+        for (source, position, y_rot_degrees) in deer_bed_spawns {
+            updated.push(self.insert_deer_bed(source, position, y_rot_degrees));
+        }
+        for (position, y_rot_degrees) in antler_spawns {
+            updated.push(self.insert_item_entity(
+                ItemStackSnapshot {
+                    kind: ItemKind::ShedAntler,
+                    count: 1,
+                },
+                position,
+                y_rot_degrees,
+            ));
+        }
         updated.extend(self.merge_item_entities(&merge_due_ids));
         for (kind, position, y_rot_degrees) in egg_spawns {
             updated.push(self.insert_item_entity(
@@ -943,6 +1107,27 @@ impl ServerEntityStore {
                 position,
                 y_rot_degrees,
                 sequence: self.mallard_cue_sequence,
+            });
+        }
+        let mut admitted_deer_sounds = Vec::new();
+        for (source, position, kind) in deer_sound_candidates {
+            if admitted_deer_sounds.iter().any(|admitted: &Vec3d| {
+                squared_distance_xz(*admitted, position) <= DEER_SOUND_HERD_SUPPRESSION_RADIUS_SQR
+            }) {
+                continue;
+            }
+            admitted_deer_sounds.push(position);
+            self.deer_cue_sequence = self.deer_cue_sequence.wrapping_add(1);
+            self.pending_deer_sounds.push(DeerSoundCue {
+                source,
+                position,
+                sequence: self.deer_cue_sequence,
+                audible_radius: if kind == DeerSoundKind::Alarm {
+                    28.0
+                } else {
+                    18.0
+                },
+                kind,
             });
         }
         updated
@@ -1113,6 +1298,10 @@ impl ServerEntityStore {
         self.mobs.remove(&id);
         self.items.remove(&id);
         self.mallard_nests.remove(&id);
+        self.deer_beds.remove(&id);
+        if state.kind == EntityKind::Deer {
+            self.deer_bedded_site_ticks.remove(&state.persistent_id);
+        }
         self.mallard_last_tracks.remove(&id);
         self.persistent_ids.remove(&id);
         self.volatile_entities.remove(&id);
@@ -1327,6 +1516,42 @@ impl ServerEntityStore {
         state
     }
 
+    fn insert_deer_bed_with_persistent_id(
+        &mut self,
+        id: EntityId,
+        persistent_id: EntityPersistentId,
+        position: Vec3d,
+        y_rot_degrees: f32,
+        source: EntityPersistentId,
+    ) -> ServerEntityState {
+        let mut state = ServerEntityState::from_metadata(
+            id,
+            persistent_id,
+            EntityMetadata::DEER_BED,
+            position,
+            y_rot_degrees,
+            0.0,
+            None,
+            true,
+        );
+        state.animation = None;
+        self.deer_beds.insert(id, DeerBedRuntimeState { source });
+        self.entities.insert(id, state);
+        self.persistent_ids.insert(id, persistent_id);
+        state
+    }
+
+    fn insert_deer_bed(
+        &mut self,
+        source: EntityPersistentId,
+        position: Vec3d,
+        y_rot_degrees: f32,
+    ) -> ServerEntityState {
+        let id = self.allocate_entity_id();
+        let persistent_id = self.allocate_persistent_id();
+        self.insert_deer_bed_with_persistent_id(id, persistent_id, position, y_rot_degrees, source)
+    }
+
     fn insert_saved_entity(
         &mut self,
         saved: &EntitySaveRecord,
@@ -1412,6 +1637,7 @@ impl ServerEntityStore {
                     behavior_ticks,
                     health,
                     max_health,
+                    antler_shed_time,
                 },
             ) => self.insert_saved_passive_mob(
                 id,
@@ -1428,6 +1654,7 @@ impl ServerEntityStore {
                     behavior_ticks: *behavior_ticks,
                     health: *health,
                     max_health: *max_health,
+                    antler_shed_time: *antler_shed_time,
                 }),
             )?,
             (
@@ -1449,6 +1676,14 @@ impl ServerEntityStore {
                     attended: false,
                 },
             ),
+            ("mclone:deer_bed", EntitySavePayload::DeerBed { source }) => self
+                .insert_deer_bed_with_persistent_id(
+                    id,
+                    saved.persistent_id,
+                    canonical_position,
+                    saved.y_rot_degrees,
+                    *source,
+                ),
             ("mclone:mannequin", EntitySavePayload::Mannequin) => self.insert_saved_passive_mob(
                 id,
                 saved,
@@ -1625,8 +1860,12 @@ impl ServerEntityStore {
                     behavior_ticks: deer.behavior_ticks,
                     health: deer.health,
                     max_health: deer.max_health,
+                    antler_shed_time: deer.antler_shed_time,
                 }
             }
+            EntityKind::DeerBed => EntitySavePayload::DeerBed {
+                source: self.deer_beds.get(&entity.id)?.source,
+            },
             EntityKind::Mannequin => EntitySavePayload::Mannequin,
             EntityKind::Item => EntitySavePayload::Item {
                 stack: entity.item_stack.map(ItemStackSaveRecord::from)?,
@@ -1788,6 +2027,7 @@ fn entity_kind_code(kind: EntityKind) -> Option<&'static str> {
         EntityKind::Mallard => Some("mclone:mallard"),
         EntityKind::MallardNest => Some("mclone:mallard_nest"),
         EntityKind::Deer => Some("mclone:deer"),
+        EntityKind::DeerBed => Some("mclone:deer_bed"),
         EntityKind::Mannequin => Some("mclone:mannequin"),
         EntityKind::Item => Some("minecraft:item"),
         EntityKind::DebugCube => None,
@@ -1801,6 +2041,10 @@ fn item_stack_snapshot_from_save(
         "minecraft:egg" => ItemKind::Egg,
         "mclone:mallard_egg" => ItemKind::MallardEgg,
         "mclone:mallard_feather" => ItemKind::MallardFeather,
+        "mclone:hunting_spear" => ItemKind::HuntingSpear,
+        "mclone:venison" => ItemKind::Venison,
+        "mclone:deer_hide" => ItemKind::DeerHide,
+        "mclone:shed_antler" => ItemKind::ShedAntler,
         kind => {
             return Err(ChunkStoreError::InvalidData(format!(
                 "unsupported item stack kind {kind:?}"
@@ -2507,6 +2751,115 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn sustained_deer_bedding_creates_one_durable_sign() {
+        let mut store = ServerEntityStore::default();
+        let deer =
+            store.insert_passive_mob_for_test(EntityKind::Deer, Vec3d::new(4.5, 64.0, 4.5), 30.0);
+        store
+            .mobs
+            .get_mut(&deer)
+            .unwrap()
+            .set_deer_behavior_for_test(mclone_protocol::DeerBehavior::Bedded);
+
+        let mut updates = Vec::new();
+        for _ in 0..80 {
+            updates = store.tick_stationary(&[ChunkPos::new(0, 0)], &[], flat_ground);
+        }
+        let bed = updates
+            .iter()
+            .find(|entity| entity.kind == EntityKind::DeerBed && entity.alive)
+            .expect("sustained bedding should leave sign");
+        assert_eq!(bed.position, Vec3d::new(4.5, 64.0, 4.5));
+
+        for _ in 0..240 {
+            store.tick_stationary(&[ChunkPos::new(0, 0)], &[], flat_ground);
+        }
+        assert_eq!(
+            store
+                .states()
+                .iter()
+                .filter(|entity| entity.kind == EntityKind::DeerBed && entity.alive)
+                .count(),
+            1
+        );
+        let record = store.entity_chunk_record(ChunkPos::new(0, 0), 9);
+        assert!(record.entities.iter().any(|record| {
+            record.kind == "mclone:deer_bed"
+                && matches!(record.payload, EntitySavePayload::DeerBed { .. })
+        }));
+        let mut loaded = ServerEntityStore::default();
+        loaded.hydrate_entity_chunk_record(&record).unwrap();
+        assert_eq!(
+            loaded
+                .states()
+                .iter()
+                .filter(|entity| entity.kind == EntityKind::DeerBed && entity.alive)
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn adult_antlers_shed_once_and_persist_as_an_item() {
+        let mut store = ServerEntityStore::default();
+        let deer =
+            store.insert_passive_mob_for_test(EntityKind::Deer, Vec3d::new(4.5, 64.0, 4.5), 0.0);
+        store
+            .mobs
+            .get_mut(&deer)
+            .unwrap()
+            .make_deer_antler_shed_due_for_test();
+
+        let first = store.tick_stationary(&[ChunkPos::new(0, 0)], &[], flat_ground);
+        assert!(first.iter().any(|entity| {
+            entity.item_stack
+                == Some(ItemStackSnapshot {
+                    kind: ItemKind::ShedAntler,
+                    count: 1,
+                })
+        }));
+        assert_eq!(store.state(deer).unwrap().deer.unwrap().antlered, false);
+        let second = store.tick_stationary(&[ChunkPos::new(0, 0)], &[], flat_ground);
+        assert!(!second.iter().any(|entity| {
+            entity
+                .item_stack
+                .is_some_and(|stack| stack.kind == ItemKind::ShedAntler)
+        }));
+
+        let record = store.entity_chunk_record(ChunkPos::new(0, 0), 10);
+        let deer_payload = &record
+            .entities
+            .iter()
+            .find(|record| record.kind == "mclone:deer")
+            .unwrap()
+            .payload;
+        assert!(matches!(
+            deer_payload,
+            EntitySavePayload::Deer {
+                antlered: false,
+                antler_shed_time: -1,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn nearby_deer_share_one_alarm_sound_without_repeating_it() {
+        let mut store = ServerEntityStore::default();
+        store.insert_passive_mob_for_test(EntityKind::Deer, Vec3d::new(0.5, 64.0, 0.5), 0.0);
+        store.insert_passive_mob_for_test(EntityKind::Deer, Vec3d::new(2.5, 64.0, 0.5), 0.0);
+        let player = MobPlayerTarget::from_position(Vec3d::new(12.5, 64.0, 0.5));
+
+        store.tick_stationary(&[ChunkPos::new(0, 0)], &[player], flat_ground);
+        let sounds = store.drain_deer_sounds();
+        assert_eq!(sounds.len(), 1);
+        assert_eq!(sounds[0].kind, DeerSoundKind::Alarm);
+
+        store.tick_stationary(&[ChunkPos::new(0, 0)], &[player], flat_ground);
+        assert!(store.drain_deer_sounds().is_empty());
     }
 
     #[test]

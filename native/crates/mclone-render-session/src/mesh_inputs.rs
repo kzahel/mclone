@@ -315,6 +315,14 @@ pub fn actor_instances_from_presentations_near_observer(
                     )
                     .with_packed_light(packed_light)
                 }
+                ActorPresentationKind::Entity(EntityKind::DeerBed) => ActorInstance::semantic_prop(
+                    glam_vec3_from_vec3d(feet_position),
+                    actor.y_rot_degrees,
+                    mclone_assets::deer_bed_figure_id(),
+                    actor.width,
+                    actor.height,
+                )
+                .with_packed_light(packed_light),
                 ActorPresentationKind::Entity(EntityKind::Mannequin) => {
                     ActorInstance::remote_player(
                         glam_vec3_from_vec3d(feet_position),
@@ -346,6 +354,25 @@ pub fn actor_instances_from_presentations_near_observer(
                         Some(ItemKind::MallardFeather) => ActorInstance::mallard_feather(
                             glam_vec3_from_vec3d(feet_position),
                             actor.y_rot_degrees,
+                            actor.width,
+                            actor.height,
+                        )
+                        .with_packed_light(packed_light),
+                        Some(
+                            kind @ (ItemKind::HuntingSpear
+                            | ItemKind::Venison
+                            | ItemKind::DeerHide
+                            | ItemKind::ShedAntler),
+                        ) => ActorInstance::semantic_prop(
+                            glam_vec3_from_vec3d(feet_position),
+                            actor.y_rot_degrees,
+                            match kind {
+                                ItemKind::HuntingSpear => mclone_assets::hunting_spear_figure_id(),
+                                ItemKind::Venison => mclone_assets::venison_figure_id(),
+                                ItemKind::DeerHide => mclone_assets::deer_hide_figure_id(),
+                                ItemKind::ShedAntler => mclone_assets::shed_antler_figure_id(),
+                                _ => unreachable!(),
+                            },
                             actor.width,
                             actor.height,
                         )
@@ -436,6 +463,7 @@ pub fn actor_light_probe_height(actor: &ActorPresentation) -> f64 {
         ActorPresentationKind::Entity(EntityKind::Mallard) => f64::from(actor.height) * 0.82,
         ActorPresentationKind::Entity(EntityKind::MallardNest) => f64::from(actor.height) * 0.5,
         ActorPresentationKind::Entity(EntityKind::Deer) => f64::from(actor.height) * 0.88,
+        ActorPresentationKind::Entity(EntityKind::DeerBed) => f64::from(actor.height) * 0.5,
         ActorPresentationKind::Entity(EntityKind::Mannequin) => 1.62,
         ActorPresentationKind::Entity(EntityKind::DebugCube) => f64::from(actor.height) * 0.5,
         ActorPresentationKind::Entity(EntityKind::Item) => f64::from(actor.height) * 0.5,

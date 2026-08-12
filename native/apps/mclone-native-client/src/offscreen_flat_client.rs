@@ -3246,7 +3246,9 @@ fn require_world_action_submitted(
         bail!("{label} did not run");
     };
     match status {
-        MonoWorldActionStatus::Submitted { .. } => Ok(()),
+        MonoWorldActionStatus::Submitted { .. } | MonoWorldActionStatus::SubmittedEntity { .. } => {
+            Ok(())
+        }
         MonoWorldActionStatus::NoRuntime => bail!("{label} had no active runtime"),
         MonoWorldActionStatus::NoTarget => bail!("{label} found no interaction target"),
         MonoWorldActionStatus::NoCommand => bail!("{label} produced no gameplay command"),

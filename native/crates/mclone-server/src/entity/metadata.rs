@@ -94,6 +94,15 @@ impl EntityMetadata {
         client_tracking_range: 12,
     };
 
+    pub(crate) const DEER_BED: Self = Self {
+        kind: EntityKind::DeerBed,
+        category: EntityCategory::Misc,
+        dimensions: EntityDimensions::scalable(0.9, 0.08),
+        standing_eye_height: StandingEyeHeight::HeightScale(0.5),
+        movement_speed: 0.0,
+        client_tracking_range: 10,
+    };
+
     pub(crate) const MANNEQUIN: Self = Self {
         kind: EntityKind::Mannequin,
         category: EntityCategory::Creature,
@@ -119,6 +128,7 @@ impl EntityMetadata {
             EntityKind::Mallard => Some(Self::MALLARD),
             EntityKind::MallardNest => Some(Self::MALLARD_NEST),
             EntityKind::Deer => Some(Self::DEER),
+            EntityKind::DeerBed => Some(Self::DEER_BED),
             EntityKind::Mannequin => Some(Self::MANNEQUIN),
             EntityKind::Item => Some(Self::ITEM),
             EntityKind::DebugCube => None,

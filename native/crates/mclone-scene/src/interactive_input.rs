@@ -1178,6 +1178,15 @@ impl MonoInteractiveInputRouter {
                     );
                     disposition.scene_changed = true;
                 }
+                MonoWorldActionStatus::SubmittedEntity { target } => {
+                    log::info!(
+                        "gameplay entity interaction {:?} submitted to entity {} at distance {:.2}",
+                        action,
+                        target.id.0,
+                        target.distance
+                    );
+                    disposition.scene_changed = true;
+                }
                 MonoWorldActionStatus::EmbeddedWorldActivationRequested => {
                     log::info!("embedded-world activation requested through {action:?}");
                     disposition.scene_changed = true;

@@ -27,18 +27,22 @@ use mclone_core::{
     PackedLightSection, SECTION_HEIGHT, local_block_coord, obfuscate_biome_zoom_seed,
 };
 use mclone_protocol::{
-    ChunkView, ClientCommand, DimensionKey, DisconnectReason, DisconnectReasonCode, EntityId,
-    EntitySnapshot, EntityUpdate, ItemStackSnapshot, MallardCallCue, MallardFieldGuideProgress,
-    MallardNestSnapshotData, MallardSnapshotData, MallardTrackCue, PlayerLifeState,
-    PlayerPositionUpdate, PlayerStatistics, RemotePlayerId, RemotePlayerUpdate, SectionBlockUpdate,
-    ServerEphemeralMessage, ServerUpdate, SessionConfiguration, validate_body_pose_sample,
+    ChunkView, ClientCommand, DeerFieldGuideProgress, DeerSoundCue, DimensionKey, DisconnectReason,
+    DisconnectReasonCode, EntityId, EntitySnapshot, EntityUpdate, ItemStackSnapshot,
+    MallardCallCue, MallardFieldGuideProgress, MallardNestSnapshotData, MallardSnapshotData,
+    MallardTrackCue, PlayerLifeState, PlayerPositionUpdate, PlayerStatistics, RemotePlayerId,
+    RemotePlayerUpdate, SectionBlockUpdate, ServerEphemeralMessage, ServerUpdate,
+    SessionConfiguration, validate_body_pose_sample,
 };
 
 pub use actor::{
     ActorAppearance, ActorInterpolationConfig, ActorInterpolationState, ActorPresentation,
     ActorPresentationId, ActorPresentationKind,
 };
-pub use interaction::{BlockInteractionTarget, CREATIVE_PICK_RANGE, ClientInteractionController};
+pub use interaction::{
+    BlockInteractionTarget, CREATIVE_PICK_RANGE, ClientInteractionController,
+    EntityInteractionTarget,
+};
 pub use inventory::ClientInventory;
 pub use player::{
     CollisionMovementResult, FlyingMovementStep, HAND_PUSH_DEFAULT_HAND_RADIUS,
@@ -113,7 +117,9 @@ pub struct ClientRuntime {
     player_statistics: PlayerStatistics,
     player_inventory: [Option<ItemStackSnapshot>; mclone_protocol::HOTBAR_SLOT_COUNT_USIZE],
     mallard_field_guide: MallardFieldGuideProgress,
+    deer_field_guide: DeerFieldGuideProgress,
     mallard_calls: VecDeque<MallardCallCue>,
+    deer_sounds: VecDeque<DeerSoundCue>,
     mallard_tracks: VecDeque<MallardTrackCue>,
     player_life: PlayerLifeState,
     player_position_updates: VecDeque<PlayerPositionUpdate>,
@@ -149,7 +155,9 @@ impl ClientRuntime {
             player_statistics: PlayerStatistics::default(),
             player_inventory: [None; mclone_protocol::HOTBAR_SLOT_COUNT_USIZE],
             mallard_field_guide: MallardFieldGuideProgress::default(),
+            deer_field_guide: DeerFieldGuideProgress::default(),
             mallard_calls: VecDeque::new(),
+            deer_sounds: VecDeque::new(),
             mallard_tracks: VecDeque::new(),
             player_life: PlayerLifeState::default(),
             player_position_updates: VecDeque::new(),
@@ -339,6 +347,10 @@ impl ClientRuntime {
             ServerUpdate::MallardFieldGuide(progress) => {
                 self.mallard_field_guide = progress;
             }
+            ServerUpdate::DeerFieldGuide(progress) => {
+                self.deer_field_guide = progress;
+            }
+            ServerUpdate::DeerSound(cue) => self.deer_sounds.push_back(cue),
             ServerUpdate::MallardCall(cue) => self.mallard_calls.push_back(cue),
             ServerUpdate::MallardTrack(cue) => self.mallard_tracks.push_back(cue),
             ServerUpdate::PlayerLife(state) => {
@@ -443,8 +455,16 @@ impl ClientRuntime {
         self.mallard_field_guide
     }
 
+    pub const fn deer_field_guide(&self) -> DeerFieldGuideProgress {
+        self.deer_field_guide
+    }
+
     pub fn drain_mallard_calls(&mut self) -> impl Iterator<Item = MallardCallCue> + '_ {
         self.mallard_calls.drain(..)
+    }
+
+    pub fn drain_deer_sounds(&mut self) -> impl Iterator<Item = DeerSoundCue> + '_ {
+        self.deer_sounds.drain(..)
     }
 
     pub fn drain_mallard_tracks(&mut self) -> impl Iterator<Item = MallardTrackCue> + '_ {

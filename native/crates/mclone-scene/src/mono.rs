@@ -203,7 +203,12 @@ pub enum MonoWorldActionStatus {
     NoCommand,
     DeniedByWorldBehavior,
     EmbeddedWorldActivationRequested,
-    Submitted { target: BlockInteractionTarget },
+    Submitted {
+        target: BlockInteractionTarget,
+    },
+    SubmittedEntity {
+        target: mclone_client::EntityInteractionTarget,
+    },
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -1677,6 +1682,24 @@ impl McloneSceneHost {
                 .expect("runtime presence checked")
                 .send_gameplay_command(command)?;
         }
+        if action == FlatInputAction::Attack {
+            let camera = self.active_world.camera.snapshot();
+            let direction = mclone_client::view_vector(camera.yaw_radians, camera.pitch_radians);
+            let entity_target = self.active_world.runtime.as_ref().and_then(|runtime| {
+                self.active_world
+                    .interaction
+                    .target_entity(runtime.client(), camera.eye, direction)
+            });
+            if let Some(target) = entity_target {
+                let command = self.active_world.interaction.attack_entity_command(target);
+                self.active_world
+                    .runtime
+                    .as_mut()
+                    .expect("runtime presence checked")
+                    .send_gameplay_command(command)?;
+                return Ok(MonoWorldActionStatus::SubmittedEntity { target });
+            }
+        }
         let Some(target) = self.current_mono_block_target() else {
             return Ok(MonoWorldActionStatus::NoTarget);
         };
@@ -2798,6 +2821,12 @@ impl McloneSceneHost {
             discovered: guide.discovered_count(),
             total: mclone_protocol::MALLARD_FIELD_GUIDE_OBSERVATION_COUNT,
             complete: guide.is_complete(),
+        });
+        let deer_guide = runtime.client().deer_field_guide();
+        hud.deer_field_guide = Some(mclone_ui::DeerFieldGuideHud {
+            discovered: deer_guide.discovered_count(),
+            total: mclone_protocol::DEER_FIELD_GUIDE_OBSERVATION_COUNT,
+            complete: deer_guide.is_complete(),
         });
         hud.touch = context.touch_overlay;
         hud.frame_pipeline = self

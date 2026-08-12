@@ -84,6 +84,39 @@
       ]
     },
     {
+      "gain": 0.74,
+      "key": "mclone:deer_alarm",
+      "no_immediate_repeat": true,
+      "pitch_max": 1.03,
+      "pitch_min": 0.97,
+      "variants": [
+        "assets/mclone/sounds/mclone-original/deer_alarm_00.ogg",
+        "assets/mclone/sounds/mclone-original/deer_alarm_01.ogg"
+      ]
+    },
+    {
+      "gain": 0.58,
+      "key": "mclone:deer_contact",
+      "no_immediate_repeat": true,
+      "pitch_max": 1.04,
+      "pitch_min": 0.96,
+      "variants": [
+        "assets/mclone/sounds/mclone-original/deer_contact_00.ogg",
+        "assets/mclone/sounds/mclone-original/deer_contact_01.ogg"
+      ]
+    },
+    {
+      "gain": 0.62,
+      "key": "mclone:deer_impact",
+      "no_immediate_repeat": true,
+      "pitch_max": 1.02,
+      "pitch_min": 0.94,
+      "variants": [
+        "assets/mclone/sounds/mclone-original/deer_impact_00.ogg",
+        "assets/mclone/sounds/mclone-original/deer_impact_01.ogg"
+      ]
+    },
+    {
       "gain": 0.45,
       "key": "mclone:footstep_carpet",
       "no_immediate_repeat": true,
@@ -316,6 +349,12 @@
       "pitch_max": 1.04,
       "pitch_min": 0.96,
       "variants": [
+        "assets/mclone/sounds/mclone-original/deer_alarm_00.ogg",
+        "assets/mclone/sounds/mclone-original/deer_alarm_01.ogg",
+        "assets/mclone/sounds/mclone-original/deer_contact_00.ogg",
+        "assets/mclone/sounds/mclone-original/deer_contact_01.ogg",
+        "assets/mclone/sounds/mclone-original/deer_impact_00.ogg",
+        "assets/mclone/sounds/mclone-original/deer_impact_01.ogg",
         "assets/mclone/sounds/mclone-original/mallard_call_00.ogg",
         "assets/mclone/sounds/mclone-original/mallard_call_01.ogg"
       ]
@@ -455,5 +494,5 @@
   ],
   "license": "CC0-1.0",
   "schema_version": 1,
-  "selected_file_count": 121
+  "selected_file_count": 127
 }

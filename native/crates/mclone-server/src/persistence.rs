@@ -73,11 +73,17 @@ pub const CHUNK_LIGHT_ALGORITHM_VERSION: u32 = 1;
 const LEGACY_ENTITY_CHUNK_RECORD_VERSION: u32 = 2;
 const MALLARD_ENTITY_CHUNK_RECORD_VERSION: u32 = 3;
 const ANIMATED_ENTITY_CHUNK_RECORD_VERSION: u32 = 4;
-pub const ENTITY_CHUNK_RECORD_VERSION: u32 = 5;
+const DEER_ENTITY_CHUNK_RECORD_VERSION: u32 = 5;
+const DEER_BED_ENTITY_CHUNK_RECORD_VERSION: u32 = 6;
+const DEER_ANTLER_SHED_ENTITY_CHUNK_RECORD_VERSION: u32 = 7;
+const DEER_ANTLER_SHED_LEGACY_REMAINING_TICKS: i32 = 36_000;
+pub const ENTITY_CHUNK_RECORD_VERSION: u32 = 7;
 const LEGACY_PLAYER_RECORD_VERSION: u32 = 1;
 const STATISTICS_PLAYER_RECORD_VERSION: u32 = 2;
 const PLAYER_LIFE_RECORD_VERSION: u32 = 3;
-pub const PLAYER_RECORD_VERSION: u32 = 4;
+const INVENTORY_AND_MALLARD_PLAYER_RECORD_VERSION: u32 = 4;
+const DEER_FIELD_GUIDE_PLAYER_RECORD_VERSION: u32 = 5;
+pub const PLAYER_RECORD_VERSION: u32 = 5;
 pub const DIMENSION_RECORD_VERSION: u32 = 2;
 pub const WORLD_METADATA_VERSION: u32 = 3;
 pub const WORLD_METADATA_TARGET_MINECRAFT_VERSION: &str = "1.17.1";
@@ -509,6 +515,10 @@ pub enum EntitySavePayload {
         behavior_ticks: u32,
         health: u8,
         max_health: u8,
+        antler_shed_time: i32,
+    },
+    DeerBed {
+        source: EntityPersistentId,
     },
     Item {
         stack: ItemStackSaveRecord,
@@ -538,6 +548,10 @@ impl From<ItemStackSnapshot> for ItemStackSaveRecord {
             mclone_protocol::ItemKind::Egg => "minecraft:egg",
             mclone_protocol::ItemKind::MallardEgg => "mclone:mallard_egg",
             mclone_protocol::ItemKind::MallardFeather => "mclone:mallard_feather",
+            mclone_protocol::ItemKind::HuntingSpear => "mclone:hunting_spear",
+            mclone_protocol::ItemKind::Venison => "mclone:venison",
+            mclone_protocol::ItemKind::DeerHide => "mclone:deer_hide",
+            mclone_protocol::ItemKind::ShedAntler => "mclone:shed_antler",
         };
         Self::new(kind, stack.count)
     }
@@ -595,6 +609,7 @@ pub struct PlayerRecord {
     pub total_experience: u64,
     pub statistics: PlayerStatistics,
     pub mallard_field_guide: mclone_protocol::MallardFieldGuideProgress,
+    pub deer_field_guide: mclone_protocol::DeerFieldGuideProgress,
     pub health: f32,
     pub pending_death_cause: Option<PlayerDamageCause>,
 }
@@ -621,6 +636,7 @@ impl PlayerRecord {
             total_experience: 0,
             statistics: PlayerStatistics::default(),
             mallard_field_guide: mclone_protocol::MallardFieldGuideProgress::default(),
+            deer_field_guide: mclone_protocol::DeerFieldGuideProgress::default(),
             health: DEFAULT_PLAYER_MAX_HEALTH,
             pending_death_cause: None,
         }
@@ -5763,6 +5779,7 @@ fn write_player_record(writer: &mut impl Write, record: &PlayerRecord) -> ChunkS
     write_u64(writer, record.total_experience)?;
     write_player_statistics(writer, &record.statistics)?;
     write_u32(writer, record.mallard_field_guide.bits())?;
+    write_u32(writer, record.deer_field_guide.bits())?;
     write_f32(writer, record.health)?;
     write_player_damage_cause(writer, record.pending_death_cause)?;
     writer.flush()?;
@@ -6144,7 +6161,7 @@ fn read_player_record(reader: &mut impl Read) -> ChunkStoreResult<PlayerRecord> 
         x_rot_degrees: read_f32(reader)?,
         on_ground: read_bool(reader)?,
         selected_hotbar_slot: read_u8(reader)?,
-        inventory: if codec_version >= PLAYER_RECORD_VERSION {
+        inventory: if codec_version >= INVENTORY_AND_MALLARD_PLAYER_RECORD_VERSION {
             let mut inventory = [None; 36];
             for stack in &mut inventory {
                 *stack = read_optional_item_stack_snapshot(reader)?;
@@ -6159,10 +6176,15 @@ fn read_player_record(reader: &mut impl Read) -> ChunkStoreResult<PlayerRecord> 
         } else {
             PlayerStatistics::default()
         },
-        mallard_field_guide: if codec_version >= PLAYER_RECORD_VERSION {
+        mallard_field_guide: if codec_version >= INVENTORY_AND_MALLARD_PLAYER_RECORD_VERSION {
             mclone_protocol::MallardFieldGuideProgress::from_bits_retain(read_u32(reader)?)
         } else {
             mclone_protocol::MallardFieldGuideProgress::default()
+        },
+        deer_field_guide: if codec_version >= DEER_FIELD_GUIDE_PLAYER_RECORD_VERSION {
+            mclone_protocol::DeerFieldGuideProgress::from_bits_retain(read_u32(reader)?)
+        } else {
+            mclone_protocol::DeerFieldGuideProgress::default()
         },
         health: if codec_version >= PLAYER_LIFE_RECORD_VERSION {
             read_f32(reader)?
@@ -6362,6 +6384,7 @@ fn write_entity_save_payload(
             behavior_ticks,
             health,
             max_health,
+            antler_shed_time,
         } => {
             write_u8(writer, 6)?;
             write_u8(
@@ -6385,6 +6408,7 @@ fn write_entity_save_payload(
                     mclone_protocol::DeerBehavior::Idle => 0,
                     mclone_protocol::DeerBehavior::Walk => 1,
                     mclone_protocol::DeerBehavior::Graze => 2,
+                    mclone_protocol::DeerBehavior::Drink => 10,
                     mclone_protocol::DeerBehavior::Alert => 3,
                     mclone_protocol::DeerBehavior::Flee => 4,
                     mclone_protocol::DeerBehavior::LieDown => 5,
@@ -6396,7 +6420,13 @@ fn write_entity_save_payload(
             )?;
             write_u32(writer, *behavior_ticks)?;
             write_u8(writer, *health)?;
-            write_u8(writer, *max_health)
+            write_u8(writer, *max_health)?;
+            write_i32(writer, *antler_shed_time)
+        }
+        EntitySavePayload::DeerBed { source } => {
+            write_u8(writer, 7)?;
+            write_u64(writer, source.most)?;
+            write_u64(writer, source.least)
         }
         EntitySavePayload::Item {
             stack,
@@ -6459,7 +6489,7 @@ fn read_entity_save_payload(
                 ],
             })
         }
-        6 if codec_version >= ENTITY_CHUNK_RECORD_VERSION => {
+        6 if codec_version >= DEER_ENTITY_CHUNK_RECORD_VERSION => {
             let sex = match read_u8(reader)? {
                 0 => mclone_protocol::DeerSex::Female,
                 1 => mclone_protocol::DeerSex::Male,
@@ -6483,6 +6513,7 @@ fn read_entity_save_payload(
                 0 => mclone_protocol::DeerBehavior::Idle,
                 1 => mclone_protocol::DeerBehavior::Walk,
                 2 => mclone_protocol::DeerBehavior::Graze,
+                10 => mclone_protocol::DeerBehavior::Drink,
                 3 => mclone_protocol::DeerBehavior::Alert,
                 4 => mclone_protocol::DeerBehavior::Flee,
                 5 => mclone_protocol::DeerBehavior::LieDown,
@@ -6499,6 +6530,14 @@ fn read_entity_save_payload(
             let behavior_ticks = read_u32(reader)?;
             let health = read_u8(reader)?;
             let max_health = read_u8(reader)?;
+            let antler_shed_time = if codec_version >= DEER_ANTLER_SHED_ENTITY_CHUNK_RECORD_VERSION
+            {
+                read_i32(reader)?
+            } else if antlered {
+                DEER_ANTLER_SHED_LEGACY_REMAINING_TICKS
+            } else {
+                -1
+            };
             if max_health == 0
                 || health > max_health
                 || (antlered
@@ -6517,6 +6556,12 @@ fn read_entity_save_payload(
                 behavior_ticks,
                 health,
                 max_health,
+                antler_shed_time,
+            })
+        }
+        7 if codec_version >= DEER_BED_ENTITY_CHUNK_RECORD_VERSION => {
+            Ok(EntitySavePayload::DeerBed {
+                source: EntityPersistentId::new(read_u64(reader)?, read_u64(reader)?),
             })
         }
         value => Err(ChunkStoreError::InvalidData(format!(
@@ -6574,6 +6619,10 @@ fn write_optional_item_stack_snapshot(
             mclone_protocol::ItemKind::Egg => 0,
             mclone_protocol::ItemKind::MallardEgg => 1,
             mclone_protocol::ItemKind::MallardFeather => 2,
+            mclone_protocol::ItemKind::HuntingSpear => 3,
+            mclone_protocol::ItemKind::Venison => 4,
+            mclone_protocol::ItemKind::DeerHide => 5,
+            mclone_protocol::ItemKind::ShedAntler => 6,
         };
         write_u8(writer, kind)?;
         write_u8(writer, stack.count)?;
@@ -6591,6 +6640,10 @@ fn read_optional_item_stack_snapshot(
         0 => mclone_protocol::ItemKind::Egg,
         1 => mclone_protocol::ItemKind::MallardEgg,
         2 => mclone_protocol::ItemKind::MallardFeather,
+        3 => mclone_protocol::ItemKind::HuntingSpear,
+        4 => mclone_protocol::ItemKind::Venison,
+        5 => mclone_protocol::ItemKind::DeerHide,
+        6 => mclone_protocol::ItemKind::ShedAntler,
         value => {
             return Err(ChunkStoreError::InvalidData(format!(
                 "unknown player inventory item kind {value}"
@@ -7204,6 +7257,7 @@ mod tests {
                         behavior_ticks: 44,
                         health: 18,
                         max_health: 20,
+                        antler_shed_time: 24_000,
                     },
                 },
             ],
@@ -8862,6 +8916,7 @@ mod tests {
             mallard_field_guide: mclone_protocol::MallardFieldGuideProgress::from_bits_retain(
                 0b101011,
             ),
+            deer_field_guide: mclone_protocol::DeerFieldGuideProgress::from_bits_retain(0b110101),
             health: 13.5,
             pending_death_cause: None,
         }

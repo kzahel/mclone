@@ -142,7 +142,7 @@ fn actor_renderer_shared_topology_and_per_world_state_are_exact() {
         "atlas: GpuActorTextureAtlas",
         "texture_layout: ActorTextureLayout",
         "atlas_size: [u32; 2]",
-        "actor_figures: ActorFigureSet",
+        "semantic_figures: SemanticFigureSet",
     ] {
         assert!(
             shared.contains(field),

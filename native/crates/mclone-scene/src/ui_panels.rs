@@ -586,11 +586,11 @@ pub(crate) fn xr_field_guide_panel_height_blocks() -> f32 {
 }
 
 pub(crate) fn xr_field_guide_draw(
-    progress: mclone_protocol::MallardFieldGuideProgress,
+    mallard: mclone_protocol::MallardFieldGuideProgress,
+    deer: mclone_protocol::DeerFieldGuideProgress,
 ) -> GuiDrawList {
     let mut draw = GuiDrawList::new();
-    let discovered = progress.discovered_count();
-    if discovered == 0 {
+    if mallard.discovered_count() == 0 && deer.discovered_count() == 0 {
         return draw;
     }
     let scale = GuiScale::from_pixels(
@@ -602,29 +602,50 @@ pub(crate) fn xr_field_guide_draw(
         Color::rgba(15, 26, 34, 190),
     );
     let font = Font::default();
-    let label = format!(
-        "MALLARD FIELD NOTES {discovered}/{}",
-        mclone_protocol::MALLARD_FIELD_GUIDE_OBSERVATION_COUNT
-    );
-    let color = if progress.is_complete() {
-        Color::rgba(255, 214, 82, 255)
-    } else {
-        Color::rgba(114, 206, 255, 255)
-    };
-    let text_x = (scale.width - font.width(&label) * 3.0) * 0.5;
-    let text_y = (scale.height - font.glyph_height() * 3.0) * 0.5;
-    for (index, ch) in label.chars().enumerate() {
-        if ch == ' ' {
-            continue;
-        }
-        let x = text_x + index as f32 * font.advance() * 3.0;
-        for (row, bits) in Font::glyph_rows(ch).into_iter().enumerate() {
-            for column in 0..5 {
-                if bits & (1 << (4 - column)) != 0 {
-                    draw.fill(
-                        Rect::new(x + column as f32 * 3.0, text_y + row as f32 * 3.0, 3.0, 3.0),
-                        color,
-                    );
+    let mut labels = Vec::new();
+    if mallard.discovered_count() > 0 {
+        labels.push((
+            format!(
+                "MALLARD NOTES {}/{}",
+                mallard.discovered_count(),
+                mclone_protocol::MALLARD_FIELD_GUIDE_OBSERVATION_COUNT
+            ),
+            mallard.is_complete(),
+        ));
+    }
+    if deer.discovered_count() > 0 {
+        labels.push((
+            format!(
+                "DEER NOTES {}/{}",
+                deer.discovered_count(),
+                mclone_protocol::DEER_FIELD_GUIDE_OBSERVATION_COUNT
+            ),
+            deer.is_complete(),
+        ));
+    }
+    let line_height = font.glyph_height() * 3.0 + 8.0;
+    let first_y = (scale.height - line_height * labels.len() as f32) * 0.5;
+    for (line, (label, complete)) in labels.into_iter().enumerate() {
+        let color = if complete {
+            Color::rgba(255, 214, 82, 255)
+        } else {
+            Color::rgba(114, 206, 255, 255)
+        };
+        let text_x = (scale.width - font.width(&label) * 3.0) * 0.5;
+        let text_y = first_y + line as f32 * line_height;
+        for (index, ch) in label.chars().enumerate() {
+            if ch == ' ' {
+                continue;
+            }
+            let x = text_x + index as f32 * font.advance() * 3.0;
+            for (row, bits) in Font::glyph_rows(ch).into_iter().enumerate() {
+                for column in 0..5 {
+                    if bits & (1 << (4 - column)) != 0 {
+                        draw.fill(
+                            Rect::new(x + column as f32 * 3.0, text_y + row as f32 * 3.0, 3.0, 3.0),
+                            color,
+                        );
+                    }
                 }
             }
         }
@@ -1307,6 +1328,25 @@ impl McloneSceneHost {
             return Ok(());
         }
         self.sync_carried_item()?;
+        if edges.attack
+            && let Some(target) = self.current_xr_entity_interaction_target()
+        {
+            let command = self.active_world.interaction.attack_entity_command(target);
+            if let Some(runtime) = &mut self.active_world.runtime {
+                runtime
+                    .send_gameplay_command(command)
+                    .context("failed to send XR entity attack command")?;
+            }
+            log::info!(
+                "XR entity attack submitted to entity {} at distance {:.2}",
+                target.id.0,
+                target.distance
+            );
+            edges.attack = false;
+        }
+        if !edges.any() {
+            return Ok(());
+        }
         let Some(target) = self.current_xr_block_interaction_target() else {
             return Ok(());
         };
@@ -1427,6 +1467,25 @@ impl McloneSceneHost {
                 .ok()?;
         let (ray_origin, ray_direction) = self.current_xr_interaction_ray(transform)?;
         self.active_world.interaction.target_block(
+            runtime.client(),
+            vec3d_from_glam(ray_origin),
+            vec3d_from_glam(ray_direction),
+        )
+    }
+
+    pub(crate) fn current_xr_entity_interaction_target(
+        &self,
+    ) -> Option<mclone_client::EntityInteractionTarget> {
+        if self.ui.is_active() {
+            return None;
+        }
+        let runtime = self.active_world.runtime.as_ref()?;
+        let origin = self.tracking_origin?;
+        let transform =
+            XrStageToWorld::from_tracking_origin(origin, self.active_world.camera.snapshot())
+                .ok()?;
+        let (ray_origin, ray_direction) = self.current_xr_interaction_ray(transform)?;
+        self.active_world.interaction.target_entity(
             runtime.client(),
             vec3d_from_glam(ray_origin),
             vec3d_from_glam(ray_direction),

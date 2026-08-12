@@ -3,8 +3,8 @@ use std::fmt;
 
 use mclone_core::{ChunkPos, Vec3d};
 use mclone_protocol::{
-    ClientIdentity, DimensionKey, MallardFieldGuideProgress, PlayerAppearance, PlayerDamageCause,
-    PlayerStatistics, PlayerVitals, SessionCapabilities,
+    ClientIdentity, DeerFieldGuideProgress, DimensionKey, MallardFieldGuideProgress,
+    PlayerAppearance, PlayerDamageCause, PlayerStatistics, PlayerVitals, SessionCapabilities,
 };
 
 use crate::inventory::ServerInventory;
@@ -53,6 +53,7 @@ pub(crate) struct ServerPlayerEntry {
     pub(crate) total_experience: u64,
     pub(crate) statistics: PlayerStatistics,
     pub(crate) mallard_field_guide: MallardFieldGuideProgress,
+    pub(crate) deer_field_guide: DeerFieldGuideProgress,
     pub(crate) vitals: PlayerVitals,
     pub(crate) pending_death_cause: Option<PlayerDamageCause>,
     pub(crate) life_epoch: u32,
@@ -61,6 +62,7 @@ pub(crate) struct ServerPlayerEntry {
     pub(crate) presentation_epoch: u32,
     pub(crate) remote_pose_sequence: u32,
     pub(crate) remote_pose_sample_time_millis: u32,
+    pub(crate) last_deer_attack_tick: Option<u64>,
 }
 
 impl Default for ServerPlayerEntry {
@@ -77,6 +79,7 @@ impl Default for ServerPlayerEntry {
             total_experience: 0,
             statistics: PlayerStatistics::default(),
             mallard_field_guide: MallardFieldGuideProgress::default(),
+            deer_field_guide: DeerFieldGuideProgress::default(),
             vitals: PlayerVitals::default(),
             pending_death_cause: None,
             life_epoch: 0,
@@ -85,6 +88,7 @@ impl Default for ServerPlayerEntry {
             presentation_epoch: 1,
             remote_pose_sequence: 0,
             remote_pose_sample_time_millis: 0,
+            last_deer_attack_tick: None,
         }
     }
 }

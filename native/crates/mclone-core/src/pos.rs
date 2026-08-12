@@ -270,6 +270,40 @@ impl Aabb {
             && self.max_y.is_finite()
             && self.max_z.is_finite()
     }
+
+    /// Returns the first normalized segment fraction where `from..to` enters
+    /// this box. A point already inside the box intersects at zero.
+    pub fn ray_intersection_fraction(self, from: Vec3d, to: Vec3d) -> Option<f64> {
+        if !self.is_finite() || !from.is_finite() || !to.is_finite() {
+            return None;
+        }
+        if self.contains(from) {
+            return Some(0.0);
+        }
+        let delta = to.subtract(from);
+        let mut enter = 0.0_f64;
+        let mut exit = 1.0_f64;
+        for (origin, movement, minimum, maximum) in [
+            (from.x, delta.x, self.min_x, self.max_x),
+            (from.y, delta.y, self.min_y, self.max_y),
+            (from.z, delta.z, self.min_z, self.max_z),
+        ] {
+            if movement.abs() <= f64::EPSILON {
+                if origin < minimum || origin > maximum {
+                    return None;
+                }
+                continue;
+            }
+            let first = (minimum - origin) / movement;
+            let second = (maximum - origin) / movement;
+            enter = enter.max(first.min(second));
+            exit = exit.min(first.max(second));
+            if enter > exit {
+                return None;
+            }
+        }
+        (enter <= 1.0 && exit >= 0.0).then_some(enter.clamp(0.0, 1.0))
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -386,5 +420,18 @@ mod tests {
             Aabb::unit_block(BlockPos::new(1, 2, 3)).expand_towards(Vec3d::new(-2.0, 0.5, 4.0));
 
         assert_eq!(aabb, Aabb::new(-1.0, 2.0, 3.0, 2.0, 3.5, 8.0));
+    }
+
+    #[test]
+    fn aabb_segment_intersection_returns_first_entry_fraction() {
+        let aabb = Aabb::unit_block(BlockPos::new(2, 3, 4));
+        assert_eq!(
+            aabb.ray_intersection_fraction(Vec3d::new(0.0, 3.5, 4.5), Vec3d::new(4.0, 3.5, 4.5),),
+            Some(0.5)
+        );
+        assert_eq!(
+            aabb.ray_intersection_fraction(Vec3d::new(0.0, 5.0, 4.5), Vec3d::new(4.0, 5.0, 4.5),),
+            None
+        );
     }
 }

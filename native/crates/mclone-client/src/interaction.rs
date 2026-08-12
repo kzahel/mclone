@@ -4,8 +4,9 @@ use mclone_core::{
     local_section_block_coord,
 };
 use mclone_protocol::{
-    ClientCommand, DebugHotbarItem, HOTBAR_SLOT_COUNT_USIZE, InteractionHand, PlayerActionCommand,
-    PlayerActionKind, UseItemOnCommand,
+    AttackEntityCommand, ClientCommand, DebugHotbarItem, EntityId, EntityKind,
+    HOTBAR_SLOT_COUNT_USIZE, InteractionHand, ItemKind, PlayerActionCommand, PlayerActionKind,
+    UseItemOnCommand,
 };
 
 use crate::{
@@ -25,6 +26,13 @@ pub struct ClientInteractionController {
 pub struct BlockInteractionTarget {
     pub hit: BlockHitResult,
     pub outline_boxes: Vec<Aabb>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EntityInteractionTarget {
+    pub id: EntityId,
+    pub position: Vec3d,
+    pub distance: f64,
 }
 
 impl Default for ClientInteractionController {
@@ -99,6 +107,58 @@ impl ClientInteractionController {
             return None;
         }
         self.target_from_hit(client, self.pick_block(client, eye_position, view_vector))
+    }
+
+    pub fn target_entity(
+        &self,
+        client: &ClientRuntime,
+        eye_position: Vec3d,
+        view_vector: Vec3d,
+    ) -> Option<EntityInteractionTarget> {
+        let selected = client.player_inventory()[usize::from(self.selected_hotbar_slot())];
+        if !selected.is_some_and(|stack| stack.kind == ItemKind::HuntingSpear) {
+            return None;
+        }
+        let direction_length = view_vector.length_sqr().sqrt();
+        if !eye_position.is_finite() || direction_length <= f64::EPSILON {
+            return None;
+        }
+        let direction = view_vector.scale(direction_length.recip());
+        let to = eye_position.add(direction.scale(self.pick_range));
+        let block_distance = client
+            .clip_blocks(eye_position, to)
+            .location
+            .distance_to_sqr(eye_position)
+            .sqrt();
+        client
+            .entity_snapshots()
+            .filter(|entity| {
+                entity.kind == EntityKind::Deer && entity.deer.is_some_and(|deer| deer.health > 0)
+            })
+            .filter_map(|entity| {
+                let position = client
+                    .topology()
+                    .nearest_position_lift(entity.position, eye_position);
+                let box_center = position.add(Vec3d::new(0.0, f64::from(entity.height) * 0.5, 0.0));
+                let bounds = Aabb::of_size(
+                    box_center,
+                    f64::from(entity.width) + 0.2,
+                    f64::from(entity.height) + 0.2,
+                    f64::from(entity.width) + 0.2,
+                );
+                let fraction = bounds.ray_intersection_fraction(eye_position, to)?;
+                let distance = fraction * self.pick_range;
+                (distance <= block_distance + 1.0e-6).then_some(EntityInteractionTarget {
+                    id: entity.id,
+                    position,
+                    distance,
+                })
+            })
+            .min_by(|left, right| left.distance.total_cmp(&right.distance))
+    }
+
+    pub const fn attack_entity_command(&self, target: EntityInteractionTarget) -> ClientCommand {
+        ClientCommand::AttackEntity(AttackEntityCommand { target: target.id })
     }
 
     pub fn target_from_hit(
@@ -538,5 +598,56 @@ mod tests {
         );
         assert_eq!(controller.ensure_has_sent_carried_item(), None);
         assert!(!controller.select_hotbar_slot(mclone_protocol::HOTBAR_SLOT_COUNT));
+    }
+
+    #[test]
+    fn hunting_spear_targets_nearest_visible_living_deer() {
+        let mut client = client_with_blocks(&[]);
+        client.apply_update(mclone_protocol::ServerUpdate::PlayerInventory {
+            hotbar: std::array::from_fn(|slot| {
+                (slot == 0).then_some(mclone_protocol::ItemStackSnapshot {
+                    kind: ItemKind::HuntingSpear,
+                    count: 1,
+                })
+            }),
+        });
+        for (id, z) in [(EntityId(9), 3.0), (EntityId(10), 4.0)] {
+            client.apply_update(mclone_protocol::ServerUpdate::EntitySnapshot(
+                mclone_protocol::EntitySnapshot {
+                    id,
+                    persistent_id: mclone_protocol::EntityPersistentId::new(0, id.0),
+                    kind: EntityKind::Deer,
+                    item_stack: None,
+                    mallard: None,
+                    mallard_nest: None,
+                    deer: Some(mclone_protocol::DeerSnapshotData {
+                        sex: mclone_protocol::DeerSex::Female,
+                        life_stage: mclone_protocol::DeerLifeStage::Adult,
+                        antlered: false,
+                        behavior: mclone_protocol::DeerBehavior::Idle,
+                        health: 20,
+                        max_health: 20,
+                    }),
+                    animation: None,
+                    position: Vec3d::new(1.5, 1.0, z),
+                    y_rot_degrees: 0.0,
+                    x_rot_degrees: 0.0,
+                    rotation: None,
+                    on_ground: true,
+                    width: 0.9,
+                    height: 1.8,
+                    tick_count: 0,
+                },
+            ));
+        }
+        let target = ClientInteractionController::new()
+            .target_entity(
+                &client,
+                Vec3d::new(1.5, 1.62, 0.5),
+                Vec3d::new(0.0, 0.0, 1.0),
+            )
+            .unwrap();
+        assert_eq!(target.id, EntityId(9));
+        assert!(target.distance < 3.0);
     }
 }

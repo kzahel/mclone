@@ -66,6 +66,8 @@ impl EngineServerUpdateReport {
                 | ServerUpdate::PlayerStatistics { .. }
                 | ServerUpdate::PlayerInventory { .. }
                 | ServerUpdate::MallardFieldGuide(_)
+                | ServerUpdate::DeerFieldGuide(_)
+                | ServerUpdate::DeerSound(_)
                 | ServerUpdate::MallardCall(_)
                 | ServerUpdate::MallardTrack(_)
                 | ServerUpdate::RemotePlayerAdd(_)
@@ -150,6 +152,8 @@ impl EngineServerUpdateDirtyBatch {
                 ServerUpdate::PlayerStatistics { .. } => {}
                 ServerUpdate::PlayerInventory { .. } => {}
                 ServerUpdate::MallardFieldGuide(_) => {}
+                ServerUpdate::DeerFieldGuide(_) => {}
+                ServerUpdate::DeerSound(_) => {}
                 ServerUpdate::MallardCall(_) => {}
                 ServerUpdate::MallardTrack(_) => {}
                 ServerUpdate::PlayerLife(_) => {}

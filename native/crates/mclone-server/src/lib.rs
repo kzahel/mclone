@@ -4,6 +4,7 @@ mod authored_fixture;
 #[cfg(test)]
 mod block_light_bridge;
 mod cadence;
+mod deer_population;
 mod dimension;
 mod distance_manager;
 mod entity;

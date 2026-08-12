@@ -746,7 +746,10 @@ pub(crate) fn persistent_passive_actor_identity_summary(
                 EntityKind::Mannequin => 3,
                 EntityKind::Mallard => 4,
                 EntityKind::Deer => 5,
-                EntityKind::DebugCube | EntityKind::Item | EntityKind::MallardNest => {
+                EntityKind::DebugCube
+                | EntityKind::Item
+                | EntityKind::MallardNest
+                | EntityKind::DeerBed => {
                     unreachable!("filtered above")
                 }
             };

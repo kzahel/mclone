@@ -26,9 +26,14 @@ pub(crate) struct ItemStackAddResult {
 
 impl Default for ServerInventory {
     fn default() -> Self {
+        let mut item_stacks = [None; PLAYER_MAIN_INVENTORY_SLOT_COUNT];
+        item_stacks[0] = Some(ItemStackSnapshot {
+            kind: mclone_protocol::ItemKind::HuntingSpear,
+            count: 1,
+        });
         Self {
             items: DEFAULT_DEBUG_HOTBAR,
-            item_stacks: [None; PLAYER_MAIN_INVENTORY_SLOT_COUNT],
+            item_stacks,
             selected: 0,
         }
     }

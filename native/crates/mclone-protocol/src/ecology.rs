@@ -21,6 +21,7 @@ pub enum DeerBehavior {
     Idle,
     Walk,
     Graze,
+    Drink,
     Alert,
     Flee,
     LieDown,
@@ -104,6 +105,10 @@ impl DeerFieldGuideProgress {
 
     pub const fn discovered_count(self) -> u32 {
         self.observations.count_ones()
+    }
+
+    pub const fn is_complete(self) -> bool {
+        self.observations == Self::KNOWN_MASK
     }
 }
 
@@ -224,4 +229,20 @@ pub struct MallardTrackCue {
     pub position: Vec3d,
     pub y_rot_degrees: f32,
     pub sequence: u64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DeerSoundKind {
+    Contact,
+    Alarm,
+    Impact,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DeerSoundCue {
+    pub source: EntityId,
+    pub position: Vec3d,
+    pub sequence: u64,
+    pub audible_radius: f32,
+    pub kind: DeerSoundKind,
 }

@@ -1251,6 +1251,72 @@
       "upstream_path": "Audio/handleCoins2.ogg"
     },
     {
+      "bytes": 4857,
+      "families": [
+        "mclone:deer_alarm",
+        "mclone:mallard_call"
+      ],
+      "path": "assets/mclone/sounds/mclone-original/deer_alarm_00.ogg",
+      "sha256": "6613e4730b6e6bb598e1081affbb9550530cf3259bb6cf2072b363089fe98768",
+      "source_pack": "mclone-original",
+      "upstream_path": "tools/minecraft_assets/generate_deer_sounds.sh"
+    },
+    {
+      "bytes": 4940,
+      "families": [
+        "mclone:deer_alarm",
+        "mclone:mallard_call"
+      ],
+      "path": "assets/mclone/sounds/mclone-original/deer_alarm_01.ogg",
+      "sha256": "0487fe31bf712d9412f5a99bd59b4fdc2262001415241ea5dd4a2df225938355",
+      "source_pack": "mclone-original",
+      "upstream_path": "tools/minecraft_assets/generate_deer_sounds.sh"
+    },
+    {
+      "bytes": 5073,
+      "families": [
+        "mclone:deer_contact",
+        "mclone:mallard_call"
+      ],
+      "path": "assets/mclone/sounds/mclone-original/deer_contact_00.ogg",
+      "sha256": "e2125e752b9b6710072a67766010f5b5d8d359727a2401ed888a7335ced3be47",
+      "source_pack": "mclone-original",
+      "upstream_path": "tools/minecraft_assets/generate_deer_sounds.sh"
+    },
+    {
+      "bytes": 5196,
+      "families": [
+        "mclone:deer_contact",
+        "mclone:mallard_call"
+      ],
+      "path": "assets/mclone/sounds/mclone-original/deer_contact_01.ogg",
+      "sha256": "5f374fec3e24cbe822480c0e37b7130b89268b9b5e6884cd5e049e06ea0f7f9f",
+      "source_pack": "mclone-original",
+      "upstream_path": "tools/minecraft_assets/generate_deer_sounds.sh"
+    },
+    {
+      "bytes": 4256,
+      "families": [
+        "mclone:deer_impact",
+        "mclone:mallard_call"
+      ],
+      "path": "assets/mclone/sounds/mclone-original/deer_impact_00.ogg",
+      "sha256": "87f958c19dedac5c6a306dc9171659b2a26930e0713ac048a6d0431aecea5647",
+      "source_pack": "mclone-original",
+      "upstream_path": "tools/minecraft_assets/generate_deer_sounds.sh"
+    },
+    {
+      "bytes": 4314,
+      "families": [
+        "mclone:deer_impact",
+        "mclone:mallard_call"
+      ],
+      "path": "assets/mclone/sounds/mclone-original/deer_impact_01.ogg",
+      "sha256": "e42d29ba9fcdfec8a7f6bfadfb1434f86a784f1c4ac21aaf50a95459608baec8",
+      "source_pack": "mclone-original",
+      "upstream_path": "tools/minecraft_assets/generate_deer_sounds.sh"
+    },
+    {
       "bytes": 5719,
       "families": [
         "mclone:mallard_call"
@@ -1273,5 +1339,5 @@
   ],
   "license": "CC0-1.0",
   "schema_version": 1,
-  "selected_file_count": 121
+  "selected_file_count": 127
 }

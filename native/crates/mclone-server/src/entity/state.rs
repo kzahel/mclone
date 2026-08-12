@@ -117,7 +117,10 @@ const fn default_animation_for_kind(kind: EntityKind) -> Option<AnimationState> 
         }
         EntityKind::Mallard => AnimationClipId::from_static("waddle"),
         EntityKind::Deer => AnimationClipId::from_static("idle"),
-        EntityKind::MallardNest | EntityKind::DebugCube | EntityKind::Item => return None,
+        EntityKind::MallardNest
+        | EntityKind::DeerBed
+        | EntityKind::DebugCube
+        | EntityKind::Item => return None,
     };
     Some(AnimationState::distance(clip, 0))
 }

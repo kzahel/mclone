@@ -30,5 +30,6 @@ than claimed wildlife recordings. Regenerate and refresh their manifests with:
 
 ```bash
 bash tools/minecraft_assets/generate_mallard_calls.sh
+bash tools/minecraft_assets/generate_deer_sounds.sh
 python3 tools/minecraft_assets/kenney_audio.py refresh-local
 ```

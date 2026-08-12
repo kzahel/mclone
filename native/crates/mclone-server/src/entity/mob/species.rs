@@ -13,6 +13,8 @@ const MALLARD_FEATHER_TIME_MIN: i32 = 2_400;
 const MALLARD_FEATHER_TIME_RANGE: i32 = 2_400;
 const MALLARD_CALL_TIME_MIN: i32 = 160;
 const MALLARD_CALL_TIME_RANGE: i32 = 320;
+const DEER_ANTLER_SHED_TIME_MIN: i32 = 36_000;
+const DEER_ANTLER_SHED_TIME_RANGE: i32 = 36_000;
 pub(crate) const MALLARD_GROWTH_REQUIRED_TICKS: u32 = 2_400;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -24,6 +26,7 @@ pub(crate) struct DeerRuntimeSaveData {
     pub(crate) behavior_ticks: u32,
     pub(crate) health: u8,
     pub(crate) max_health: u8,
+    pub(crate) antler_shed_time: i32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -50,7 +53,10 @@ impl MobSpeciesState {
             EntityKind::Chicken => Self::Chicken(ChickenRuntimeState::new(random)),
             EntityKind::Mallard => Self::Mallard(MallardRuntimeState::new(random)),
             EntityKind::Deer => Self::Deer(DeerRuntimeState::new(random)),
-            EntityKind::DebugCube | EntityKind::Item | EntityKind::MallardNest => {
+            EntityKind::DebugCube
+            | EntityKind::Item
+            | EntityKind::MallardNest
+            | EntityKind::DeerBed => {
                 debug_assert!(false, "non-mob entities do not use mob species state");
                 Self::Cow
             }
@@ -81,7 +87,10 @@ impl MobSpeciesState {
             EntityKind::Deer => Self::Deer(DeerRuntimeState::from_saved(
                 deer.unwrap_or_else(|| DeerRuntimeState::new(random).save_data()),
             )),
-            EntityKind::DebugCube | EntityKind::Item | EntityKind::MallardNest => {
+            EntityKind::DebugCube
+            | EntityKind::Item
+            | EntityKind::MallardNest
+            | EntityKind::DeerBed => {
                 debug_assert!(false, "non-mob entities do not use mob species state");
                 Self::Cow
             }
@@ -183,6 +192,11 @@ impl DeerRuntimeState {
                 behavior_ticks: 0,
                 health: max_health,
                 max_health,
+                antler_shed_time: if antlered {
+                    next_deer_antler_shed_time(random)
+                } else {
+                    -1
+                },
             },
         }
     }
@@ -210,6 +224,56 @@ impl DeerRuntimeState {
         self.saved.behavior
     }
 
+    pub(super) const fn health(&self) -> u8 {
+        self.saved.health
+    }
+
+    pub(super) fn is_ready_for_harvest(&self, fall_ticks: u32) -> bool {
+        self.saved.health == 0
+            && self.saved.behavior == DeerBehavior::Fall
+            && self.saved.behavior_ticks >= fall_ticks
+    }
+
+    pub(super) const fn antlered(&self) -> bool {
+        self.saved.antlered
+    }
+
+    pub(super) fn take_due_antler_shed(&mut self) -> bool {
+        if !self.saved.antlered || self.saved.health == 0 {
+            return false;
+        }
+        if self.saved.antler_shed_time > 0 {
+            self.saved.antler_shed_time -= 1;
+        }
+        if self.saved.antler_shed_time != 0 {
+            return false;
+        }
+        self.saved.antlered = false;
+        self.saved.antler_shed_time = -1;
+        true
+    }
+
+    #[cfg(test)]
+    pub(super) fn make_antler_shed_due_for_test(&mut self) {
+        self.saved.sex = DeerSex::Male;
+        self.saved.life_stage = DeerLifeStage::Adult;
+        self.saved.antlered = true;
+        self.saved.antler_shed_time = 1;
+    }
+
+    pub(super) fn apply_damage(&mut self, damage: u8) -> bool {
+        if self.saved.health == 0 || damage == 0 {
+            return false;
+        }
+        self.saved.health = self.saved.health.saturating_sub(damage);
+        self.set_behavior(if self.saved.health == 0 {
+            DeerBehavior::Fall
+        } else {
+            DeerBehavior::Hit
+        });
+        true
+    }
+
     pub(super) const fn behavior_ticks(&self) -> u32 {
         self.saved.behavior_ticks
     }
@@ -226,6 +290,10 @@ impl DeerRuntimeState {
         self.saved.behavior_ticks = 0;
         true
     }
+}
+
+fn next_deer_antler_shed_time(random: &mut SimpleRandomSource) -> i32 {
+    random.next_int_bound(DEER_ANTLER_SHED_TIME_RANGE) + DEER_ANTLER_SHED_TIME_MIN
 }
 
 #[derive(Debug, PartialEq)]

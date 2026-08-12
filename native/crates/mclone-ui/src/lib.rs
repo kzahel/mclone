@@ -3371,6 +3371,7 @@ pub struct FlatHud {
     pub player_health: Option<PlayerHealthHud>,
     pub player_statistics: Option<PlayerStatisticsHud>,
     pub mallard_field_guide: Option<MallardFieldGuideHud>,
+    pub deer_field_guide: Option<DeerFieldGuideHud>,
     pub debug: Option<FlatHudDebugOverlay>,
     pub frame_pipeline: Option<FramePipelineHudOverlay>,
 }
@@ -3388,6 +3389,7 @@ impl FlatHud {
             player_health: None,
             player_statistics: None,
             mallard_field_guide: None,
+            deer_field_guide: None,
             debug: None,
             frame_pipeline: None,
         }
@@ -3417,6 +3419,7 @@ impl FlatHud {
             || (self.world_hud_visible && self.player_health.is_some())
             || (self.world_hud_visible && self.player_statistics.is_some())
             || (self.world_hud_visible && self.mallard_field_guide.is_some())
+            || (self.world_hud_visible && self.deer_field_guide.is_some())
             || self
                 .debug
                 .as_ref()
@@ -3541,6 +3544,7 @@ pub(crate) fn render_flat_hud_transient_layers(
         || (hud.player_health.is_none()
             && hud.player_statistics.is_none()
             && hud.mallard_field_guide.is_none())
+            && hud.deer_field_guide.is_none()
     {
         return;
     }
@@ -3586,6 +3590,26 @@ pub(crate) fn render_flat_hud_transient_layers(
                 Color::rgba(255, 214, 82, 255)
             } else {
                 Color::rgba(114, 206, 255, 255)
+            },
+        );
+    }
+    if let Some(guide) = hud.deer_field_guide.filter(|guide| guide.discovered > 0) {
+        let rows_above_hotbar = u8::from(hud.player_health.is_some())
+            + u8::from(hud.player_statistics.is_some())
+            + u8::from(
+                hud.mallard_field_guide
+                    .is_some_and(|mallard| mallard.discovered > 0),
+            );
+        let y = hotbar_top - 14.0 * (f32::from(rows_above_hotbar) + 1.0);
+        Font::default().draw_centered_atlas(
+            draw,
+            &format!("Deer field notes {}/{}", guide.discovered, guide.total),
+            scale.width * 0.5,
+            y.max(4.0),
+            if guide.complete {
+                Color::rgba(255, 214, 82, 255)
+            } else {
+                Color::rgba(190, 219, 121, 255)
             },
         );
     }
@@ -3638,6 +3662,13 @@ pub struct PlayerStatisticsHud {
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct MallardFieldGuideHud {
+    pub discovered: u32,
+    pub total: u32,
+    pub complete: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct DeerFieldGuideHud {
     pub discovered: u32,
     pub total: u32,
     pub complete: bool,
@@ -4465,6 +4496,10 @@ fn render_hotbar_slot_contents(
             mclone_protocol::ItemKind::Egg => "E",
             mclone_protocol::ItemKind::MallardEgg => "ME",
             mclone_protocol::ItemKind::MallardFeather => "MF",
+            mclone_protocol::ItemKind::HuntingSpear => "SP",
+            mclone_protocol::ItemKind::Venison => "V",
+            mclone_protocol::ItemKind::DeerHide => "DH",
+            mclone_protocol::ItemKind::ShedAntler => "A",
         };
         font.draw_centered_atlas(
             draw,

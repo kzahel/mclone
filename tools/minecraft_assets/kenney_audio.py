@@ -107,7 +107,16 @@ SELECTED_FILES = {
     "rpg": RPG_FILES,
     "interface": INTERFACE_FILES,
 }
-LOCAL_FILES = ["mallard_call_00.ogg", "mallard_call_01.ogg"]
+LOCAL_FILES = [
+    "deer_alarm_00.ogg",
+    "deer_alarm_01.ogg",
+    "deer_contact_00.ogg",
+    "deer_contact_01.ogg",
+    "deer_impact_00.ogg",
+    "deer_impact_01.ogg",
+    "mallard_call_00.ogg",
+    "mallard_call_01.ogg",
+]
 
 
 def family(
@@ -183,6 +192,39 @@ FAMILIES = [
         "variants": [
             f"assets/mclone/sounds/mclone-original/{filename}"
             for filename in LOCAL_FILES
+        ],
+    },
+    {
+        "key": "mclone:deer_contact",
+        "gain": 0.58,
+        "pitch_min": 0.96,
+        "pitch_max": 1.04,
+        "no_immediate_repeat": True,
+        "variants": [
+            f"assets/mclone/sounds/mclone-original/deer_contact_{index:02}.ogg"
+            for index in range(2)
+        ],
+    },
+    {
+        "key": "mclone:deer_alarm",
+        "gain": 0.74,
+        "pitch_min": 0.97,
+        "pitch_max": 1.03,
+        "no_immediate_repeat": True,
+        "variants": [
+            f"assets/mclone/sounds/mclone-original/deer_alarm_{index:02}.ogg"
+            for index in range(2)
+        ],
+    },
+    {
+        "key": "mclone:deer_impact",
+        "gain": 0.62,
+        "pitch_min": 0.94,
+        "pitch_max": 1.02,
+        "no_immediate_repeat": True,
+        "variants": [
+            f"assets/mclone/sounds/mclone-original/deer_impact_{index:02}.ogg"
+            for index in range(2)
         ],
     },
     family(
@@ -272,7 +314,11 @@ def provenance_payload() -> dict[str, Any]:
         files.append(
             {
                 "source_pack": "mclone-original",
-                "upstream_path": "tools/minecraft_assets/generate_mallard_calls.sh",
+                "upstream_path": (
+                    "tools/minecraft_assets/generate_mallard_calls.sh"
+                    if filename.startswith("mallard_")
+                    else "tools/minecraft_assets/generate_deer_sounds.sh"
+                ),
                 "path": path,
                 "bytes": source.stat().st_size,
                 "sha256": sha256_file(source),
@@ -303,8 +349,10 @@ def validate_static_contract() -> None:
     selected_count = sum(len(files) for files in SELECTED_FILES.values())
     if len(IMPACT_FILES) != 95 or len(RPG_FILES) != 19 or len(INTERFACE_FILES) != 5:
         raise SystemExit("Kenney source-pack selection counts changed")
-    if selected_count != 119 or len(expected_sound_paths()) != 121:
-        raise SystemExit("Sound selection must contain 119 Kenney and 2 original files")
+    if selected_count != 119 or len(expected_sound_paths()) != 119 + len(LOCAL_FILES):
+        raise SystemExit(
+            f"Sound selection must contain 119 Kenney and {len(LOCAL_FILES)} original files"
+        )
     selected = expected_sound_paths()
     referenced = {
         path
@@ -416,7 +464,10 @@ def main(argv: list[str] | None = None) -> int:
         CATALOG_PATH.write_bytes(canonical_json_bytes(catalog_payload()))
         PROVENANCE_PATH.write_bytes(canonical_json_bytes(provenance_payload()))
         validate_repo()
-        print("[OK] refreshed manifests for 2 Mclone-original CC0 sounds")
+        print(
+            f"[OK] refreshed manifests for {len(LOCAL_FILES)} "
+            "Mclone-original CC0 sounds"
+        )
     else:
         validate_repo()
         print("[OK] verified 121 first-party CC0 OGG files")

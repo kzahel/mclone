@@ -2,6 +2,80 @@ use super::*;
 use crate::MemoryWorldStore;
 
 #[test]
+fn hunting_spear_damage_uses_fall_then_persistent_species_drops() {
+    let mut server = LocalRealmSession::new(12_345);
+    server.set_lighting_enabled(false);
+    server.set_debug_passive_showcase_enabled(false);
+    server.set_natural_spawning_enabled(false);
+    load_center_chunk(&mut server);
+    let player_id = server.player_id();
+    let player_position = server.player().position();
+    let deer_position = player_position.add(Vec3d::new(0.0, 0.0, 3.0));
+    let deer = server
+        .entities
+        .spawn_persistent_passive_mob(EntityKind::Deer, deer_position, 180.0);
+    server.mark_entity_updates_dirty(&[deer]);
+    server.reconcile_entity_subjects([deer], true);
+    server
+        .try_handle_command(ClientCommand::move_player(MovePlayerCommand::Rot {
+            y_rot_degrees: 0.0,
+            x_rot_degrees: 0.0,
+            on_ground: true,
+        }))
+        .unwrap();
+
+    for attack in 0_u64..3 {
+        server.simulation_tick = attack * DEER_HUNTING_SPEAR_COOLDOWN_TICKS;
+        server
+            .try_handle_command(ClientCommand::AttackEntity(AttackEntityCommand {
+                target: deer.id,
+            }))
+            .unwrap();
+    }
+    let fallen = server.entities.state(deer.id).unwrap();
+    assert_eq!(fallen.deer.unwrap().health, 0);
+    assert_eq!(
+        fallen.deer.unwrap().behavior,
+        mclone_protocol::DeerBehavior::Fall
+    );
+    assert_eq!(fallen.animation.unwrap().clip.as_str(), "fall");
+
+    for _ in 0..30 {
+        server.try_simulation_tick_report().unwrap();
+    }
+    assert!(server.entities.state(deer.id).is_none());
+    let states = server.entities.states();
+    assert!(states.iter().any(|entity| {
+        entity.item_stack
+            == Some(ItemStackSnapshot {
+                kind: ItemKind::Venison,
+                count: 3,
+            })
+    }));
+    assert!(states.iter().any(|entity| {
+        entity.item_stack
+            == Some(ItemStackSnapshot {
+                kind: ItemKind::DeerHide,
+                count: 1,
+            })
+    }));
+    assert!(
+        server
+            .active_dimension
+            .deer_population
+            .blocks_spawn(deer.chunk_pos())
+    );
+    assert!(
+        server
+            .players
+            .get(player_id)
+            .unwrap()
+            .deer_field_guide
+            .contains(mclone_protocol::DeerObservationKind::Harvested)
+    );
+}
+
+#[test]
 fn homestead_residents_realize_by_entity_chunk_once_with_stable_ids() {
     let definition =
         crate::DimensionDefinition::overworld(0, WorldGenerationProfile::McloneOverworldV1);
