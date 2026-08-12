@@ -10,6 +10,11 @@ Deer is now the first ordinary authoritative multi-action gameplay consumer:
 forest-edge AI and hunting select its complete reviewed action vocabulary
 through Tactical
 [`284`](../tactical/284-deer-forest-edge-ecology-and-semantic-props.md).
+Tactical [`285`](../tactical/285-bee-pollination-ecology.md) adds the first
+non-grounded live consumer: `hover` and `forage` use elapsed-time phase, while
+`fly` uses retained realized-distance phase. Authoritative bee behavior picks
+the clip; browser, mono, stereo, and multiview presentation share the same
+named request.
 
 ## Scope
 

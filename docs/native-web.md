@@ -26,6 +26,7 @@ A named playable showcase is a stricter direct-entry request. For example:
 ```text
 https://mclone.kzahel.com/app.html?showcase=mallard-ecology
 https://mclone.kzahel.com/app.html?showcase=deer-forest-edge
+https://mclone.kzahel.com/app.html?showcase=bee-pollination
 ```
 
 The `showcase` parameter selects a shared, checked-in tiny-save recipe and owns
@@ -150,6 +151,10 @@ pnpm native:web:showcase-smoke
 pnpm native:web:showcase-deployed-smoke
 pnpm native:web:deer-showcase-smoke
 pnpm native:web:deer-showcase-deployed-smoke
+pnpm native:web:bee-showcase-smoke
+pnpm native:web:bee-showcase-mobile-smoke
+pnpm native:web:bee-showcase-deployed-smoke
+pnpm native:web:bee-showcase-mobile-deployed-smoke
 
 # Prove that an ordinary URL renders title with no active session or world.
 pnpm native:web:menu-smoke

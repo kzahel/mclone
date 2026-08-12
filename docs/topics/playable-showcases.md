@@ -2,10 +2,11 @@
 
 Topic: `playable-showcases`
 
-Status: implemented with two publicly verified showcases 2026-08-12.
+Status: implemented with three publicly verified showcases 2026-08-12.
 `mallard-ecology` proves a wetland motion/hatching/discovery loop;
 `deer-forest-edge` proves a contrasting multi-chunk habitat, authoritative
-named actions, durable sign, field notes, and an ordinary hunting tool. Both
+named actions, durable sign, field notes, and an ordinary hunting tool. Bees
+add real flower mutation plus phone-tested managed-habitat placement. All three
 compile checked data recipes into transient tiny saves through the shared
 native and Web game path.
 
@@ -26,6 +27,7 @@ The first public link is:
 ```text
 https://mclone.kzahel.com/app.html?showcase=mallard-ecology
 https://mclone.kzahel.com/app.html?showcase=deer-forest-edge
+https://mclone.kzahel.com/app.html?showcase=bee-pollination
 ```
 
 Opening it compiles a fresh in-memory world in the browser process. No world is
@@ -156,6 +158,16 @@ pnpm native:web:deer-showcase-smoke
 pnpm native:web:deer-showcase-deployed-smoke
 ```
 
+The bee commands are:
+
+```bash
+pnpm native:bee-pollination:capture
+pnpm native:web:bee-showcase-smoke
+pnpm native:web:bee-showcase-mobile-smoke
+pnpm native:web:bee-showcase-deployed-smoke
+pnpm native:web:bee-showcase-mobile-deployed-smoke
+```
+
 Captures belong under `/tmp`. The deployed smoke must confirm the recipe ID and
 revision, seed, entry camera, entity composition, gameplay facts, credible
 pixels, and zero records in every browser persistent-world store.
@@ -249,6 +261,24 @@ after the HTML version, JavaScript, and Wasm payload matched the new publish.
 This is expected evidence that a successful deploy process is not itself the
 acceptance gate.
 
+Tactical [`285`](../tactical/285-bee-pollination-ecology.md) adds recipe
+revision 1, seed `17505`, entry eye `8.5,66.62,24.5`, and entry target
+`8,66,8.5`. The initial save contains three bees at different points in their
+ordinary forage loop, one natural nest, a bee hotel kit in slot nine, and two
+of six observations. The registry binds these to natural colony spawning,
+ordinary bee behavior, player hotel placement, and live field-note producers.
+
+Local headed desktop and phone gates observed all three bees over 80 ticks,
+useful displacement, `fly` and `forage` presentation, one authoritative
+pollination block update, and notes advancing from 3/6 to 5/6. Phone acceptance
+goes beyond UI visibility: it taps the ninth touch hotbar slot, dispatches the
+visible `USE` action, and waits for an authoritative bee hotel entity. Both
+lanes report zero browser-world records. The inspected local desktop canvas
+digest is
+`10de4b29ed6235f39b6cf66038008d627d393f113e509a26e91888abffaa420f`;
+the phone canvas digest is
+`37288b48113fbb8a695d5fd304875936154616ba15412cfc6d95c22c0eb18fdd`.
+
 ## Code and Documentation Map
 
 - `assets/mclone/showcases/`: readable showcase recipes
@@ -258,6 +288,8 @@ acceptance gate.
   tiny-save materialization receipt
 - `native/crates/mclone-server/src/bin/deer_forest_edge_fixture.rs`: deer
   tiny-save materialization receipt
+- `native/crates/mclone-server/src/bin/bee_pollination_fixture.rs`: bee
+  tiny-save materialization receipt
 - `native/apps/mclone-web-client/src/web_canvas.rs`: URL selection and strict
   transient/conflict policy
 - `native/apps/mclone-web-client/src/web_server_worker.rs`: worker-side shared
@@ -266,6 +298,8 @@ acceptance gate.
   browser state, persistence, and pixel proof
 - `scripts/mallard-ecology-capture.mjs`: native flat/stereo receipt and capture
 - `scripts/deer-forest-edge-capture.mjs`: deer native flat/stereo receipt and
+  capture
+- `scripts/bee-pollination-capture.mjs`: bee native flat/stereo receipt and
   capture
 - [`habitat-driven-creature-ecology.md`](habitat-driven-creature-ecology.md):
   ordinary mallard habitat and gameplay contract
@@ -278,8 +312,9 @@ acceptance gate.
 
 ## Recommended Next Work
 
-- Promote a contrasting creature whose live mechanic requires a new terrain
-  capability, then decide whether it merits a second focused showcase.
+- Add another showcase only when its mechanic requires distinct review
+  evidence; three species are enough to generalize stable plumbing without
+  turning the showcase list into a content catalogue.
 - Generalize repeated capture assertions only where the two existing
   showcases now demonstrate a stable common shape. Keep species-specific
   behavioral outcomes explicit rather than flattening them into elapsed-time

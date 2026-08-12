@@ -24,6 +24,12 @@ instantiate that asset through completed Tactical 284. The promotion itself
 remains owned by the shared figure/runtime pipeline rather than this browser
 topic.
 
+Tactical 285 promotes the approved worker bee as the seventh runtime actor.
+Its refined `hover`, `fly`, and `forage` clips are required by ordinary
+flowering-habitat colonies and remain visible through the creature-focused
+Runtime-only catalogue; four accompanying colony/item props stay in the
+separate props view.
+
 ## Scope
 
 This topic owns the browser catalogue for canonical Asset Lab figures: static

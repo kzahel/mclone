@@ -119,6 +119,13 @@ or item figures: they need the slope, depth, fade, and batching contract in
 asset was removed; the existing bounded mallard trace mechanic keeps its
 temporary procedural visual only until that shared renderer lands.
 
+Tactical [`285`](../tactical/285-bee-pollination-ecology.md) promotes the
+reviewed `mclone:bee` actor plus four more live semantic props: natural nest,
+managed hotel, carried hotel kit, and beeswax. This brings the required shared
+inventory to seven actors and eleven props. Colony occupancy, stored work,
+item counts, interaction, and persistence remain server facts; the assets own
+only checked geometry, materials, animation, semantic use, and anchoring.
+
 The architectural target and `mclone-assets` compiler ownership are selected,
 while optimization thresholds and later LOD policy remain open. The purpose of
 this document is to preserve current evidence and decisions, identify the

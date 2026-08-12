@@ -1,6 +1,6 @@
 # Tactical 285: Bee Pollination Ecology
 
-Status: **active 2026-08-12.**
+Status: **complete 2026-08-12.**
 
 Topics:
 
@@ -277,6 +277,46 @@ These are future chapters, not hidden requirements for calling the first
 flowering-colony loop complete.
 
 ## Execution Record
+
+- `4a285e10` recorded the habitat, persistence, asset, mechanics, review, and
+  deployment contract before implementation.
+- `2914a206` authored and inspected the bee's `hover`, `fly`, and `forage`
+  clips plus natural nest, managed hotel, carried kit, and beeswax props. All
+  remain ordinary semantic figures with explicit actor/world/item use and
+  anchoring.
+- `678dd635` landed the live ecology. Mclone wildflower pockets feed a shared
+  five-dimension habitat sample; suitable loaded sites create immediately
+  durable colonies and bees; and those bees fly through collision-aware 3D
+  space to real flowers, forage, return pollen, fill colony work, and spread a
+  bounded real flower. A starter hotel can be placed only in suitable habitat,
+  an empty hotel is colonized by the ordinary spawn path, and a worked colony
+  yields one collectible wax item through reach/line-of-sight-validated entity
+  use. Six persisted observations and spatial, colony-suppressed original buzz
+  samples make the loop readable.
+- The data-only `bee-pollination` recipe compiles to a fresh tiny save with
+  seed `17505`, entry eye `8.5,66.62,24.5`, entry target `8,66,8.5`, one wild
+  nest, three bees, a carried hotel, and two initial notes. Its typed evidence
+  binds every fact to natural spawning, ordinary colony AI, hotel placement,
+  or field-note production; no showcase script owns behavior.
+- Native flat and stereo capture passed with four drawn semantic actors and
+  field notes in both eyes. The inspected files have SHA-256
+  `d98cd6a51e938782dbd74272b60ff99aa421ce7231698811db882e4cd898c4c3`
+  and
+  `5b6f23bc6be3226e3f1a9221dd3a7d944db4b78e47f9ed710be7d0337d4d5c22`.
+- Local headed Web desktop and phone gates observed 80 authoritative ticks.
+  The three bees displaced `3.7453`, `1.4312`, and `0.5127` blocks, presented
+  both `fly` and `forage`, changed one real section block through pollination,
+  and advanced field notes from 3/6 to 5/6. The phone gate tapped slot nine,
+  dispatched the visible `USE` control, and observed one authoritative placed
+  bee hotel. All eight browser persistence stores stayed empty.
+- `cargo test -p mclone-server` passes all 654 tests. Protocol, client,
+  render-session, audio, Asset Lab, first-party pack, showcase, habitat, and
+  local headed-WebGPU gates also pass. Final deployed revision and public
+  screenshot evidence are recorded after the publish below.
+
+The intentionally deferred systems remain crop yield, recipes, honey,
+defensive combat, genetics, seasons, unloaded population summaries, and a
+general transparent-wing material. None is simulated by the showcase.
 
 ### Slice 0 — tactical
 

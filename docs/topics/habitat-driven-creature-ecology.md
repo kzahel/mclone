@@ -2,7 +2,7 @@
 
 Topic: `habitat-driven-creature-ecology`
 
-Status: active direction with its biome-habitat foundation and two complete
+Status: active direction with its biome-habitat foundation and three complete
 original creature-life chapters landed through 2026-08-12. Tactical
 [`277`](../tactical/277-habitat-driven-creature-ecology-foundation.md) binds
 natural cow/chicken habitat to generated chunk biomes and proves immediate
@@ -26,6 +26,11 @@ forest-edge intent, live habitat fitness, authored multi-state behavior,
 durable sign, hunting/depletion, spatial calls, field notes, and semantic
 props force new terrain and gameplay capabilities instead of cloning the
 wetland loop.
+Tactical [`285`](../tactical/285-bee-pollination-ecology.md) completes bees as
+the third chapter: a shared habitat-fitness vocabulary, generated flowering
+pockets, persistent colony-to-flower flight, real pollination, managed hotels,
+renewable wax, field notes, and spatial buzz now make terrain both cause and
+record ecological gameplay.
 
 ## Scope
 
@@ -416,12 +421,42 @@ event, and no ambient soundtrack pretends that a flock exists.
   figures and did not find tracks valuable enough to block the chapter. Any
   future tracking mechanic must justify itself first, then use the shared
   terrain-conforming surface-trace path rather than add raised deer geometry.
+- Wetland, forest-edge, and flowering samples now share a bounded
+  `HabitatFitness` record for forage, shelter, substrate, open movement space,
+  continuity, and overall quality while retaining species-specific facts and
+  thresholds. It remains server-internal until another consumer justifies a
+  public cross-crate query API.
+- Mclone decoration revision 16 creates deterministic clustered dandelion and
+  poppy pockets through its ordinary vegetation pass. The Java-1.17.1
+  reference Overworld remains unchanged. Bee spawning reads the published
+  flowers, grass, woody cover, air clearance, and slope rather than a hidden
+  bee-only noise field.
+- A suitable unoccupied site creates one persistent nest and two or three
+  individually persistent bees. Their retained state identifies the colony,
+  flower, behavior, elapsed behavior time, and pollen load. `hover -> fly ->
+  forage -> return -> at nest` uses realized 3D displacement for orientation
+  and collision-aware travel; reaching home deposits bounded colony work and
+  may spread one real supported flower under cooldown.
+- A placeable semantic bee hotel consumes its starter item only when support,
+  clearance, colony distance, and current flowering habitat pass. The ordinary
+  habitat scan later colonizes an empty hotel; occupancy is persisted on the
+  colony so unloaded resident bees cannot duplicate colonization.
+- Server-validated colony use yields one collectible beeswax entity only at
+  the work threshold, then resets that threshold. Six durable notes cover
+  bee, nest, forage, pollen return, pollination, and wax. Spatial buzz events
+  originate from actual bees and suppress redundant members of one colony.
+- The transient `bee-pollination` review world proves those same mechanisms.
+  Its local desktop and phone gates observe 80 ticks, useful movement and
+  named clips, real flower mutation, 5/6 notes, and zero IndexedDB records.
+  The phone gate also taps the ninth item slot and uses it to create a real
+  hotel. The temporary play link is
+  `https://mclone.kzahel.com/app.html?showcase=bee-pollination`.
 
 ## Known Gaps and Recommended Next Work
 
-- Generalize the proven wetland and forest-edge samples into a public habitat
-  query/fitness record above raw biome IDs once a third habitat provides a
-  second real consumer of the abstraction.
+- Decide which consumer actually needs the now-shared habitat-fitness record
+  outside server spawning before making it a public cross-crate API. Avoid a
+  generic ecology framework without a concrete query or simulation owner.
 - Build a first stewardship choice around mallards—food attraction, protected
   nesting cover, or restrained hunting—using the now-shared inventory,
   interaction, lineage, and persistence contracts.
@@ -433,12 +468,10 @@ event, and no ambient soundtrack pretends that a flock exists.
   mallard track visual through the bounded shared path in
   [`terrain-surface-traces.md`](terrain-surface-traces.md). Do not add deer
   hoofprints merely as ambient decoration.
-- Select a third creature around a genuinely different habitat capability.
-  Strong candidates are a burrowing animal that makes soil depth/substrate
-  matter, a pollinator that makes flowering patches and crop yield matter, or
-  a cliff animal that makes connected steep/rocky surfaces navigable. Use that
-  chapter to decide whether habitat fitness is ready to become a public shared
-  record.
+- Build the next chapter around either crop growth that lets bee pollination
+  affect yield, a burrower that gives soil depth/substrate durable structure,
+  or a cliff animal that requires connected steep-surface navigation. Each
+  should consume the habitat vocabulary while adding a different player loop.
 
 ## Code and Documentation Map
 

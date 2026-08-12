@@ -60,6 +60,14 @@ gameplay resources. Strict preparation now reports 13 semantic actor/prop
 resources, 37 audio families, 127 audio samples, 143 first-party resolutions,
 145 provisional resolutions, and zero Minecraft-reference/unknown resolutions.
 
+Post-closeout extension (2026-08-12): the bee ecology chapter adds the
+required `mclone:bee` actor, natural nest, managed hotel, carried hotel kit,
+and beeswax semantic props. Two reproducibly generated first-party buzz OGGs
+extend the bank to 38 families and 129 samples, with per-file hashes and their
+repository generation script recorded in the same provenance ledger. All five
+visual resources are `live_gameplay` because ordinary world spawning,
+placement, and item paths instantiate them.
+
 Scope: client-side discovery, selection, composition, provenance, preparation,
 and replacement of visual/audio asset packs. This topic owns the product truth
 behind “Minecraft reference assets are disabled” and the continuing path from
