@@ -212,6 +212,9 @@ pub struct WebIntegratedServerRunnerConfig {
     pub bindgen_wasm_url: String,
     pub world_storage: WebIntegratedServerWorldStorage,
     pub transient_authored_fixture: Option<AuthoredWorldFixtureKind>,
+    pub transient_playable_showcase: Option<mclone_server::PlayableShowcaseId>,
+    pub day_time: Option<u64>,
+    pub day_time_frozen: bool,
     pub runner_transport_kind: Option<WorkerFrameTransportKind>,
     pub runner_initial_inbound_bytes: u32,
     pub local_player_identity: ClientIdentity,
@@ -251,6 +254,9 @@ impl WebIntegratedServerRunnerConfig {
             bindgen_wasm_url: bindgen_wasm_url.into(),
             world_storage: WebIntegratedServerWorldStorage::Transient,
             transient_authored_fixture: None,
+            transient_playable_showcase: None,
+            day_time: None,
+            day_time_frozen: false,
             runner_transport_kind: None,
             runner_initial_inbound_bytes: DEFAULT_RUNNER_SHARED_RESPONSE_BYTES,
             local_player_identity: ClientIdentity::test_default(),
@@ -278,6 +284,26 @@ impl WebIntegratedServerRunnerConfig {
     pub fn with_transient_authored_fixture(mut self, fixture: AuthoredWorldFixtureKind) -> Self {
         self.world_storage = WebIntegratedServerWorldStorage::Transient;
         self.transient_authored_fixture = Some(fixture);
+        self
+    }
+
+    pub fn with_transient_playable_showcase(
+        mut self,
+        showcase: mclone_server::PlayableShowcaseId,
+    ) -> Self {
+        self.world_storage = WebIntegratedServerWorldStorage::Transient;
+        self.transient_authored_fixture = None;
+        self.transient_playable_showcase = Some(showcase);
+        self
+    }
+
+    pub const fn with_day_time(mut self, day_time: Option<u64>) -> Self {
+        self.day_time = day_time;
+        self
+    }
+
+    pub const fn with_day_time_frozen(mut self, frozen: bool) -> Self {
+        self.day_time_frozen = frozen;
         self
     }
 
@@ -687,6 +713,9 @@ impl WebIntegratedServerRunner {
             world_topology: config.world_topology,
             world_behavior_profile: config.world_behavior_profile,
             transient_authored_fixture: config.transient_authored_fixture,
+            transient_playable_showcase: config.transient_playable_showcase,
+            day_time: config.day_time,
+            day_time_frozen: config.day_time_frozen,
             freeze_scheduled_fluid_ticks: config.freeze_scheduled_fluid_ticks,
             debug_passive_showcase: config.debug_passive_showcase,
             debug_auxiliary_player_script: config.debug_auxiliary_player_script,
@@ -2292,13 +2321,23 @@ impl WebIntegratedServerStartup {
         bindgen_wasm_url: String,
     ) -> Result<WebIntegratedServerActor, JsValue> {
         let definition = web_dimension_definition_from_startup(&self.config);
-        let fixture_store = self
-            .config
-            .transient_authored_fixture
-            .map(mclone_server::authored_world_fixture_memory_store)
-            .transpose()
-            .map_err(|error| JsValue::from_str(&error.to_string()))?
-            .map(|(_, store)| store);
+        let fixture_store = if let Some(showcase) = self.config.transient_playable_showcase {
+            Some(
+                mclone_server::playable_showcase_memory_store(
+                    showcase,
+                    &self.config.local_player_identity,
+                )
+                .map_err(|error| JsValue::from_str(&error.to_string()))?
+                .1,
+            )
+        } else {
+            self.config
+                .transient_authored_fixture
+                .map(mclone_server::authored_world_fixture_memory_store)
+                .transpose()
+                .map_err(|error| JsValue::from_str(&error.to_string()))?
+                .map(|(_, store)| store)
+        };
         let server = match (fixture_store, job_worker_url.trim().is_empty()) {
             (Some(store), true) => {
                 LocalRealmSession::local_integrated_with_world_store_and_dimension_definition(
@@ -2332,7 +2371,8 @@ impl WebIntegratedServerStartup {
         };
         self.finish_startup(
             McloneWebIntegratedServerWorker::from_server(self.config.seed, server, None),
-            self.config.transient_authored_fixture.is_some(),
+            self.config.transient_authored_fixture.is_some()
+                || self.config.transient_playable_showcase.is_some(),
             false,
         )
         .map_err(|error| JsValue::from_str(&error))
@@ -2412,6 +2452,13 @@ impl WebIntegratedServerStartup {
                 .initialize_world_metadata_blocking()
                 .map_err(|error| error.to_string())?;
         }
+        if let Some(day_time) = self.config.day_time {
+            worker.server.server_mut().set_day_time(day_time);
+        }
+        worker
+            .server
+            .server_mut()
+            .set_day_time_frozen(self.config.day_time_frozen);
         if self.config.observer_only {
             worker
                 .server

@@ -156,6 +156,18 @@ const halfSpaceTerrainProbe = process.argv.includes("--half-space-terrain-probe"
   || process.env.MCLONE_NATIVE_WEB_HALF_SPACE_TERRAIN_PROBE === "1";
 const actorCompositionProbe = process.argv.includes("--actor-composition-probe")
   || process.env.MCLONE_NATIVE_WEB_ACTOR_COMPOSITION_PROBE === "1";
+const showcaseArgIndex = process.argv.indexOf("--showcase");
+const showcase = showcaseArgIndex >= 0
+  ? String(process.argv[showcaseArgIndex + 1] ?? "")
+  : "";
+if (showcase && showcase !== "mallard-ecology") {
+  throw new Error(`--showcase requires mallard-ecology; got ${showcase}`);
+}
+if (showcase && (seed || generationProfile || starterContent || screenshotEye || worldTopology)) {
+  throw new Error(
+    "--showcase owns seed, generation profile, starter content, topology, and entry camera",
+  );
+}
 const lobbyRuntimeProbe = process.argv.includes("--lobby-runtime-probe")
   || process.env.MCLONE_NATIVE_WEB_LOBBY_RUNTIME_PROBE === "1";
 const lobbyAssetReplacementProbe = process.argv.includes("--lobby-asset-replacement-probe");
@@ -204,6 +216,7 @@ const appLoop = movementPerf
   || preparedFigureProbe
   || halfSpaceTerrainProbe
   || actorCompositionProbe
+  || Boolean(showcase)
   || lobbyRuntimeProbe
   || lobbyScenarioProbe
   || remoteWebSocket
@@ -235,6 +248,8 @@ const screenshotPath = process.env.MCLONE_NATIVE_WEB_SMOKE_SCREENSHOT
     ? "/tmp/mclone-native-web-prepared-figure-probe.png"
     : halfSpaceTerrainProbe
     ? "/tmp/mclone-native-web-half-space-terrain-probe.png"
+    : showcase
+    ? `/tmp/mclone-native-web-showcase-${showcase}.png`
     : actorCompositionProbe
     ? "/tmp/mclone-native-web-actor-composition-probe.png"
     : lobbyRuntimeProbe
@@ -265,6 +280,8 @@ const canvasScreenshotPath = process.env.MCLONE_NATIVE_WEB_CANVAS_SCREENSHOT
     ? "/tmp/mclone-native-web-prepared-figure-probe-canvas.png"
     : halfSpaceTerrainProbe
     ? "/tmp/mclone-native-web-half-space-terrain-probe-canvas.png"
+    : showcase
+    ? `/tmp/mclone-native-web-showcase-${showcase}-canvas.png`
     : actorCompositionProbe
     ? "/tmp/mclone-native-web-actor-composition-probe-canvas.png"
     : lobbyRuntimeProbe
@@ -416,6 +433,8 @@ async function run() {
           isMobile: true,
           hasTouch: true,
         }
+      : showcase
+      ? { viewport: { width: 1600, height: 900 } }
       : undefined);
     const page = await context.newPage();
     await page.addInitScript(() => {
@@ -666,6 +685,7 @@ async function run() {
       if (screenshotEye) startupParameters.set("screenshotEye", screenshotEye);
       if (screenshotTarget) startupParameters.set("screenshotTarget", screenshotTarget);
       if (worldTopology) startupParameters.set("worldTopology", worldTopology);
+      if (showcase) startupParameters.set("showcase", showcase);
       const appUrl = startupParameters.size > 0
         ? `${baseAppUrl}${baseAppUrl.includes("?") ? "&" : "?"}${startupParameters}`
         : baseAppUrl;
@@ -736,6 +756,106 @@ async function run() {
         throw new Error(`native web app failed to boot:\n${JSON.stringify(bootState, null, 2)}`);
       }
       const canvas = page.locator("#mclone-canvas");
+      if (showcase) {
+        await page.waitForFunction(
+          () => {
+            const state = globalThis.__mcloneWebApp?.state;
+            return state?.startupReady === true
+              && state.streamingSettled === true
+              && state.pendingCompileJobCount === 0
+              && state.entityCount === state.showcaseEntityCount
+              && state.mallardCount === state.showcaseMallardCount
+              && state.mallardNestCount === state.showcaseMallardNestCount
+              && state.mallardFieldGuideBits === state.showcaseFieldGuideBits
+              && state.mallardEggHotbarCount === 2
+              && state.mallardFeatherHotbarCount === 1
+              && state.actorCount >= 5
+              && state.drawnActorCount >= 5;
+          },
+          undefined,
+          { timeout: 60_000 },
+        );
+        await page.evaluate(() => globalThis.__mcloneWebApp?.pauseRendering?.());
+        await page.waitForFunction(
+          () => globalThis.__mcloneWebApp?.state?.tickFrameBusy === false,
+          undefined,
+          { timeout: 10_000 },
+        );
+        const result = await page.evaluate(async () => {
+          globalThis.__mcloneWebApp?.setDebugOverlay?.(false);
+          await globalThis.__mcloneWebApp?.renderOneFrameForSmoke?.();
+          return globalThis.__mcloneWebApp?.state ?? null;
+        });
+        const pageScreenshotCaptured = await page.screenshot({
+          path: screenshotPath,
+          fullPage: false,
+          timeout: 60_000,
+        }).then(() => true, () => false);
+        const canvasPng = await canvas.screenshot({
+          path: canvasScreenshotPath,
+          timeout: 60_000,
+        });
+        const canvasPixels = analyzePng(canvasPng);
+        const worldRecordCounts = await page.evaluate(async () => {
+          const stores = [
+            "dimensionChunks",
+            "dimensionEntityChunks",
+            "dimensions",
+            "players",
+            "savedData",
+            "worldMetadata",
+            "managedWorlds",
+            "worlds",
+          ];
+          const db = await new Promise((resolve, reject) => {
+            const request = indexedDB.open("mclone-web-worlds");
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = () => reject(request.error);
+          });
+          try {
+            const present = stores.filter((store) => db.objectStoreNames.contains(store));
+            const transaction = db.transaction(present, "readonly");
+            const counts = await Promise.all(present.map((store) => new Promise((resolve, reject) => {
+              const request = transaction.objectStore(store).count();
+              request.onsuccess = () => resolve([store, request.result]);
+              request.onerror = () => reject(request.error);
+            })));
+            return Object.fromEntries(counts);
+          } finally {
+            db.close();
+          }
+        });
+        if (
+          pageErrors.length > 0
+          || canvasPixels.distinctInteriorColorCount < 2
+          || result?.showcaseId !== showcase
+          || result?.showcaseRevision !== 1
+          || result?.activeWorldSeedText !== "17502"
+          || result?.generationProfile !== "authored-only"
+          || result?.entityCount !== 4
+          || result?.mallardCount !== 3
+          || result?.mallardNestCount !== 1
+          || result?.mallardFieldGuideBits !== 63
+          || Object.values(worldRecordCounts).some((count) => count !== 0)
+        ) {
+          throw new Error(`browser playable-showcase probe failed:\n${JSON.stringify({
+            pageErrors,
+            canvasPixels,
+            worldRecordCounts,
+            result,
+          }, null, 2)}`);
+        }
+        console.log(JSON.stringify({
+          url: appUrl,
+          screenshotPath,
+          pageScreenshotCaptured,
+          canvasScreenshotPath,
+          canvasPixels,
+          worldRecordCounts,
+          result,
+        }, null, 2));
+        return;
+      }
       if (terrainCompositionProbe) {
         await page.waitForFunction(
           () => {

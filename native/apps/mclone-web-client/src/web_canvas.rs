@@ -56,7 +56,9 @@ use mclone_core::{
     AIR_BLOCK_STATE_ID, BlockStateId, CHUNK_SECTION_VOLUME, CHUNK_WIDTH, ChunkStatus,
     chunk_section_index,
 };
-use mclone_core::{AxisTopology, ChunkPos, ChunkRevision, ChunkSnapshot, HorizontalTopology};
+use mclone_core::{
+    AxisTopology, ChunkPos, ChunkRevision, ChunkSnapshot, HorizontalTopology, block_to_chunk_coord,
+};
 use mclone_mesh::{
     RenderSectionKey, TexturedMeshCatalog, TexturedRenderSectionBuildReport,
     TexturedRenderSectionMesh, TexturedRenderSectionMetadata, load_textured_terrain_assets,
@@ -75,8 +77,8 @@ use mclone_render_session::{
     summarize_textured_render_section_build_report,
 };
 use mclone_server::{
-    ChunkLoadingProgressStats, ServerRunnerKind, SimulationCadenceConfig, StarterContentDescriptor,
-    WorldGenerationProfile,
+    ChunkLoadingProgressStats, PlayableShowcaseId, ServerRunnerKind, SimulationCadenceConfig,
+    StarterContentDescriptor, WorldGenerationProfile, playable_showcase_manifest,
 };
 use mclone_ui::{GameUiAction, GuiKey, LoadingProgressOverlay};
 
@@ -92,6 +94,7 @@ const WEB_QUERY_WORLD_STORAGE: &str = "worldStorage";
 const WEB_QUERY_WORLD_ID: &str = "worldId";
 const WEB_QUERY_CLEAR_WORLD_STORAGE: &str = "clearWorldStorage";
 const WEB_QUERY_START_IN_WORLD: &str = "startInWorld";
+const WEB_QUERY_SHOWCASE: &str = "showcase";
 // 067 Stage 3: web drives the shared streaming loop at the same per-frame increment as
 // desktop (`DEFAULT_RENDER_CHUNK_MESH_BUDGET`). One small job in flight per frame; the
 // resident cache stays visible while movement fills progressively.
@@ -141,13 +144,16 @@ pub fn mclone_web_render_canvas_report(canvas: HtmlCanvasElement) -> js_sys::Pro
 
 #[wasm_bindgen]
 pub fn mclone_web_startup_options_from_query(search: String) -> Result<WebStartupConfig, JsValue> {
-    let options = parse_startup_options_from_query(&search)?;
+    let mut options = parse_startup_options_from_query(&search)?;
+    let showcase = parse_playable_showcase_from_query(&search, &mut options)?;
     let storage = parse_web_world_storage_from_query(&search, options.scene.seed)?;
-    let entry = resolve_web_client_entry(&search, &options, &storage)?;
+    validate_playable_showcase_storage_from_query(&search, showcase, &storage)?;
+    let entry = resolve_web_client_entry(&search, &options, &storage, showcase)?;
     Ok(WebStartupConfig {
         options,
         storage,
         entry,
+        showcase,
     })
 }
 
@@ -156,6 +162,7 @@ pub struct WebStartupConfig {
     options: StartupOptions,
     storage: WebWorldStorageStartupOptions,
     entry: ClientEntryResolution,
+    showcase: Option<PlayableShowcaseId>,
 }
 
 #[wasm_bindgen]
@@ -198,6 +205,64 @@ impl WebStartupConfig {
     pub fn starts_session(&self) -> bool {
         matches!(self.entry.intent, ClientEntryIntent::StartSession(_))
     }
+
+    #[wasm_bindgen(getter, js_name = showcaseId)]
+    pub fn showcase_id(&self) -> Option<String> {
+        self.showcase.map(|showcase| showcase.label().to_owned())
+    }
+
+    #[wasm_bindgen(getter, js_name = showcaseRevision)]
+    pub fn showcase_revision(&self) -> Option<u32> {
+        self.showcase
+            .and_then(|showcase| playable_showcase_manifest(showcase).ok())
+            .map(|manifest| manifest.revision)
+    }
+
+    #[wasm_bindgen(getter, js_name = showcaseEntryEye)]
+    pub fn showcase_entry_eye(&self) -> Option<String> {
+        self.showcase
+            .and_then(|showcase| playable_showcase_manifest(showcase).ok())
+            .map(|manifest| format_coordinates(manifest.entry_eye))
+    }
+
+    #[wasm_bindgen(getter, js_name = showcaseEntryTarget)]
+    pub fn showcase_entry_target(&self) -> Option<String> {
+        self.showcase
+            .and_then(|showcase| playable_showcase_manifest(showcase).ok())
+            .map(|manifest| format_coordinates(manifest.entry_look_at))
+    }
+
+    #[wasm_bindgen(getter, js_name = showcaseEntityCount)]
+    pub fn showcase_entity_count(&self) -> Option<u32> {
+        self.showcase
+            .and_then(|showcase| playable_showcase_manifest(showcase).ok())
+            .and_then(|manifest| u32::try_from(manifest.entity_count).ok())
+    }
+
+    #[wasm_bindgen(getter, js_name = showcaseMallardCount)]
+    pub fn showcase_mallard_count(&self) -> Option<u32> {
+        self.showcase
+            .and_then(|showcase| playable_showcase_manifest(showcase).ok())
+            .and_then(|manifest| u32::try_from(manifest.mallard_count).ok())
+    }
+
+    #[wasm_bindgen(getter, js_name = showcaseMallardNestCount)]
+    pub fn showcase_mallard_nest_count(&self) -> Option<u32> {
+        self.showcase
+            .and_then(|showcase| playable_showcase_manifest(showcase).ok())
+            .and_then(|manifest| u32::try_from(manifest.mallard_nest_count).ok())
+    }
+
+    #[wasm_bindgen(getter, js_name = showcaseFieldGuideBits)]
+    pub fn showcase_field_guide_bits(&self) -> Option<u32> {
+        self.showcase
+            .and_then(|showcase| playable_showcase_manifest(showcase).ok())
+            .map(|manifest| manifest.field_guide_bits)
+    }
+}
+
+fn format_coordinates(value: [f64; 3]) -> String {
+    format!("{},{},{}", value[0], value[1], value[2])
 }
 
 impl WebStartupConfig {
@@ -207,8 +272,9 @@ impl WebStartupConfig {
         StartupOptions,
         WebWorldStorageStartupOptions,
         ClientEntryResolution,
+        Option<PlayableShowcaseId>,
     ) {
-        (self.options, self.storage, self.entry)
+        (self.options, self.storage, self.entry, self.showcase)
     }
 }
 
@@ -2966,6 +3032,85 @@ fn parse_startup_options_from_query(search: &str) -> Result<StartupOptions, JsVa
     Ok(state.finish())
 }
 
+fn parse_playable_showcase_from_query(
+    search: &str,
+    options: &mut StartupOptions,
+) -> Result<Option<PlayableShowcaseId>, JsValue> {
+    let params = web_sys::UrlSearchParams::new_with_str(search).map_err(|error| {
+        JsValue::from_str(&format!(
+            "failed to parse playable showcase query string: {error:?}"
+        ))
+    })?;
+    if !params.has(WEB_QUERY_SHOWCASE) {
+        return Ok(None);
+    }
+    for key in [
+        mclone_app_runtime::startup_args::QUERY_SEED,
+        mclone_app_runtime::startup_args::QUERY_GENERATION_PROFILE,
+        mclone_app_runtime::startup_args::QUERY_STARTER_CONTENT,
+        mclone_app_runtime::startup_args::QUERY_WORLD_TOPOLOGY,
+        mclone_app_runtime::startup_args::QUERY_CHUNK_X,
+        mclone_app_runtime::startup_args::QUERY_CHUNK_Z,
+        mclone_app_runtime::startup_args::QUERY_DAY_TIME,
+        mclone_app_runtime::startup_args::QUERY_FREEZE_TIME,
+        mclone_app_runtime::startup_args::QUERY_MOVEMENT_MODE,
+        mclone_app_runtime::startup_args::QUERY_DEBUG_PASSIVE_SHOWCASE,
+        mclone_app_runtime::startup_args::QUERY_DEBUG_AUXILIARY_PLAYER_SCRIPT,
+        mclone_app_runtime::startup_args::QUERY_SCREENSHOT_EYE,
+        mclone_app_runtime::startup_args::QUERY_SCREENSHOT_TARGET,
+    ] {
+        if params.has(key) {
+            return Err(JsValue::from_str(&format!(
+                "playable showcase owns `{key}`; remove the conflicting query parameter"
+            )));
+        }
+    }
+    let raw_id = params.get(WEB_QUERY_SHOWCASE).unwrap_or_default();
+    let id = PlayableShowcaseId::parse(raw_id.trim())
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    let manifest =
+        playable_showcase_manifest(id).map_err(|error| JsValue::from_str(&error.to_string()))?;
+    options.scene.seed = manifest.seed;
+    options.scene.world_generation_profile = manifest.world_generation_profile;
+    options.scene.starter_content = StarterContentDescriptor::Wild;
+    options.scene.world_topology = HorizontalTopology::UNBOUNDED;
+    options.scene.chunk_x = block_to_chunk_coord(manifest.entry_feet[0].floor() as i32);
+    options.scene.chunk_z = block_to_chunk_coord(manifest.entry_feet[2].floor() as i32);
+    options.scene.day_time_override = Some(manifest.day_time);
+    options.scene.freeze_time = manifest.freeze_time;
+    options.scene.movement_mode = mclone_ui::GameMovementMode::Walk;
+    options.scene.debug_passive_showcase = false;
+    options.scene.debug_auxiliary_player_script = false;
+    options.camera.eye = Some(manifest.entry_eye.map(|coordinate| coordinate as f32));
+    options.camera.target = Some(manifest.entry_look_at.map(|coordinate| coordinate as f32));
+    Ok(Some(id))
+}
+
+fn validate_playable_showcase_storage_from_query(
+    search: &str,
+    showcase: Option<PlayableShowcaseId>,
+    storage: &WebWorldStorageStartupOptions,
+) -> Result<(), JsValue> {
+    if showcase.is_none() {
+        return Ok(());
+    }
+    let params = web_sys::UrlSearchParams::new_with_str(search).map_err(|error| {
+        JsValue::from_str(&format!(
+            "failed to parse playable showcase storage query string: {error:?}"
+        ))
+    })?;
+    if storage.world_storage != "transient"
+        || params.has(WEB_QUERY_WORLD_ID)
+        || params.has(WEB_QUERY_CLEAR_WORLD_STORAGE)
+        || params.has(mclone_app_runtime::startup_args::QUERY_REMOTE_WS_URL)
+    {
+        return Err(JsValue::from_str(
+            "playable showcases require transient local storage and cannot use worldId, clearWorldStorage, or remoteWsUrl",
+        ));
+    }
+    Ok(())
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct WebWorldStorageStartupOptions {
     pub(super) world_storage: String,
@@ -3007,6 +3152,7 @@ fn resolve_web_client_entry(
     search: &str,
     options: &StartupOptions,
     storage: &WebWorldStorageStartupOptions,
+    showcase: Option<PlayableShowcaseId>,
 ) -> Result<ClientEntryResolution, JsValue> {
     let params = web_sys::UrlSearchParams::new_with_str(search).map_err(|error| {
         JsValue::from_str(&format!(
@@ -3014,8 +3160,14 @@ fn resolve_web_client_entry(
         ))
     })?;
     let explicit_start = query_optional_bool(&params, WEB_QUERY_START_IN_WORLD)?;
-    let implied_session =
-        options.scene.remote_addr.is_some() || storage.world_storage == "indexeddb";
+    if showcase.is_some() && explicit_start == Some(false) {
+        return Err(JsValue::from_str(
+            "playable showcase cannot be combined with startInWorld=false",
+        ));
+    }
+    let implied_session = showcase.is_some()
+        || options.scene.remote_addr.is_some()
+        || storage.world_storage == "indexeddb";
     if !explicit_start.unwrap_or(implied_session) {
         return Ok(if explicit_start.is_some() {
             ClientEntryResolution::explicit(

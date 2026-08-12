@@ -532,6 +532,7 @@ pub struct WebSceneHost {
     shutdown_complete: bool,
     render_worker: WebRenderWorkerCoordinator,
     startup_runtime_storage: Option<WebWorldStorageStartupOptions>,
+    startup_runtime_showcase: Option<mclone_server::PlayableShowcaseId>,
     initial_asset_packs: InitialAssetPacks,
     asset_pack_file_count: usize,
     pending_asset_pack_file_count: Option<(u64, usize)>,
@@ -1913,8 +1914,14 @@ impl WebSceneHost {
         let resources = (worker_url, job_worker_url, bindgen_js_url, bindgen_wasm_url);
         if let Some(pending) = self.host_mut()?.take_external_session_start() {
             let startup_storage = self.startup_runtime_storage.take();
+            let startup_showcase = self.startup_runtime_showcase.take();
             return Ok(Some(WebSceneOperationDrain::take_scene_operation(
-                lower_runtime_start(pending, resources.clone(), startup_storage.as_ref()),
+                lower_runtime_start(
+                    pending,
+                    resources.clone(),
+                    startup_storage.as_ref(),
+                    startup_showcase,
+                ),
             )));
         }
         if self
@@ -1927,7 +1934,7 @@ impl WebSceneHost {
         }
         if let Some(pending) = self.host_mut()?.take_external_runtime_start() {
             return Ok(Some(WebSceneOperationDrain::take_scene_operation(
-                lower_runtime_start(pending, resources, None),
+                lower_runtime_start(pending, resources, None, None),
             )));
         }
         if self.host_ref()?.pending_external_catalog_operation_count() != 0
@@ -2048,6 +2055,7 @@ fn lower_runtime_start(
     pending: ExternalSceneSessionStart,
     resources: WebRuntimeResources,
     startup_storage: Option<&WebWorldStorageStartupOptions>,
+    startup_showcase: Option<mclone_server::PlayableShowcaseId>,
 ) -> WebSceneOperationEffect {
     let (worker_url, job_worker_url, bindgen_js_url, bindgen_wasm_url) = resources;
     let center = pending.scene.center();
@@ -2076,29 +2084,35 @@ fn lower_runtime_start(
             .with_world_topology(pending.scene.world_topology)
             .with_world_behavior_profile(pending.scene.world_behavior_profile)
             .with_freeze_scheduled_fluid_ticks(pending.scene.freeze_scheduled_fluid_ticks)
+            .with_day_time(pending.scene.day_time_override)
+            .with_day_time_frozen(pending.scene.freeze_time)
             .with_debug_passive_showcase(pending.scene.debug_passive_showcase)
             .with_debug_auxiliary_player_script(pending.scene.debug_auxiliary_player_script)
             .with_observer_only(observer_only);
-            config = match pending.storage_source.as_ref() {
-                Some(
-                    mclone_app_runtime::scenario_content::LobbyWorldSource::TransientAuthored(
-                        fixture,
-                    ),
-                ) => config.with_transient_authored_fixture(*fixture),
-                Some(source) => config.with_indexed_db_world(source.world_id(), false),
-                None if startup_storage
-                    .is_some_and(|storage| storage.world_storage == "indexeddb") =>
-                {
-                    let storage = startup_storage.expect("startup storage presence checked");
-                    config.with_indexed_db_world(
-                        storage.world_id.clone(),
-                        storage.clear_world_storage,
-                    )
+            config = if let Some(showcase) = startup_showcase {
+                config.with_transient_playable_showcase(showcase)
+            } else {
+                match pending.storage_source.as_ref() {
+                    Some(
+                        mclone_app_runtime::scenario_content::LobbyWorldSource::TransientAuthored(
+                            fixture,
+                        ),
+                    ) => config.with_transient_authored_fixture(*fixture),
+                    Some(source) => config.with_indexed_db_world(source.world_id(), false),
+                    None if startup_storage
+                        .is_some_and(|storage| storage.world_storage == "indexeddb") =>
+                    {
+                        let storage = startup_storage.expect("startup storage presence checked");
+                        config.with_indexed_db_world(
+                            storage.world_id.clone(),
+                            storage.clear_world_storage,
+                        )
+                    }
+                    None if id.is_some() => {
+                        config.with_indexed_db_world(id.as_ref().unwrap().as_str(), false)
+                    }
+                    None => config,
                 }
-                None if id.is_some() => {
-                    config.with_indexed_db_world(id.as_ref().unwrap().as_str(), false)
-                }
-                None => config,
             };
             WebRuntimeStartEffect::Integrated(config)
         }
@@ -2194,7 +2208,7 @@ pub async fn mclone_web_create_scene_host_with_startup(
     terrain_vegetation_transport_factory: js_sys::Function,
 ) -> Result<WebSceneHost, JsValue> {
     let initial_asset_packs = resources.into_initial_asset_packs()?;
-    let (options, storage, entry) = startup.into_parts();
+    let (options, storage, entry, showcase) = startup.into_parts();
     let scene_startup = options.scene;
     let starter_content = scene_startup.starter_content;
     let render_options = options.render_options;
@@ -2215,6 +2229,7 @@ pub async fn mclone_web_create_scene_host_with_startup(
         startup_camera,
         entry,
         storage,
+        showcase,
         bindgen_js_url,
         bindgen_wasm_url,
         render_worker_transport_factory,
@@ -2233,6 +2248,7 @@ async fn create_scene_host(
     startup_camera: mclone_app_runtime::startup_args::StartupCameraOptions,
     entry: ClientEntryResolution,
     startup_storage: WebWorldStorageStartupOptions,
+    startup_showcase: Option<mclone_server::PlayableShowcaseId>,
     bindgen_js_url: String,
     bindgen_wasm_url: String,
     render_worker_transport_factory: js_sys::Function,
@@ -2409,6 +2425,9 @@ async fn create_scene_host(
         shutdown_complete: false,
         render_worker,
         startup_runtime_storage: startup_requests_session.then_some(startup_storage),
+        startup_runtime_showcase: startup_requests_session
+            .then_some(startup_showcase)
+            .flatten(),
         initial_asset_packs,
         asset_pack_file_count,
         pending_asset_pack_file_count: None,
@@ -3293,6 +3312,55 @@ impl WebSceneHost {
             report_set_number(&object, "sunAngle", f64::from(host.mono_sun_angle()))?;
             if let Some(client) = host.mono_client() {
                 let statistics = client.player_statistics();
+                report_set_number(&object, "entityCount", client.entity_count() as f64)?;
+                report_set_number(
+                    &object,
+                    "mallardCount",
+                    client
+                        .entity_snapshots()
+                        .filter(|entity| entity.kind == mclone_protocol::EntityKind::Mallard)
+                        .count() as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "mallardNestCount",
+                    client
+                        .entity_snapshots()
+                        .filter(|entity| entity.kind == mclone_protocol::EntityKind::MallardNest)
+                        .count() as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "mallardFieldGuideBits",
+                    f64::from(client.mallard_field_guide().bits()),
+                )?;
+                report_set_number(
+                    &object,
+                    "mallardFieldGuideCount",
+                    f64::from(client.mallard_field_guide().discovered_count()),
+                )?;
+                report_set_number(
+                    &object,
+                    "mallardEggHotbarCount",
+                    client
+                        .player_inventory()
+                        .iter()
+                        .flatten()
+                        .filter(|stack| stack.kind == mclone_protocol::ItemKind::MallardEgg)
+                        .map(|stack| f64::from(stack.count))
+                        .sum(),
+                )?;
+                report_set_number(
+                    &object,
+                    "mallardFeatherHotbarCount",
+                    client
+                        .player_inventory()
+                        .iter()
+                        .flatten()
+                        .filter(|stack| stack.kind == mclone_protocol::ItemKind::MallardFeather)
+                        .map(|stack| f64::from(stack.count))
+                        .sum(),
+                )?;
                 report_set_number(
                     &object,
                     "playerJumpStatistic",

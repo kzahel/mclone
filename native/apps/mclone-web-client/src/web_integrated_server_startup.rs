@@ -6,17 +6,19 @@ use mclone_server::{
 };
 
 const STARTUP_MAGIC: [u8; 4] = *b"MCSI";
-const STARTUP_VERSION: u16 = 3;
+const STARTUP_VERSION: u16 = 4;
 const TOPOLOGY_PLANE: u8 = 0;
 const TOPOLOGY_CYLINDER_X: u8 = 1;
 const FLAG_FREEZE_SCHEDULED_FLUID_TICKS: u8 = 1 << 0;
 const FLAG_DEBUG_PASSIVE_SHOWCASE: u8 = 1 << 1;
 const FLAG_DEBUG_AUXILIARY_PLAYER_SCRIPT: u8 = 1 << 2;
 const FLAG_OBSERVER_ONLY: u8 = 1 << 3;
+const FLAG_DAY_TIME_FROZEN: u8 = 1 << 4;
 const KNOWN_FLAGS: u8 = FLAG_FREEZE_SCHEDULED_FLUID_TICKS
     | FLAG_DEBUG_PASSIVE_SHOWCASE
     | FLAG_DEBUG_AUXILIARY_PLAYER_SCRIPT
-    | FLAG_OBSERVER_ONLY;
+    | FLAG_OBSERVER_ONLY
+    | FLAG_DAY_TIME_FROZEN;
 const MAX_DISPLAY_NAME_BYTES: usize = 1_024;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -27,6 +29,9 @@ pub(crate) struct WebIntegratedServerStartupConfig {
     pub world_topology: HorizontalTopology,
     pub world_behavior_profile: WorldBehaviorProfile,
     pub transient_authored_fixture: Option<AuthoredWorldFixtureKind>,
+    pub transient_playable_showcase: Option<mclone_server::PlayableShowcaseId>,
+    pub day_time: Option<u64>,
+    pub day_time_frozen: bool,
     pub freeze_scheduled_fluid_ticks: bool,
     pub debug_passive_showcase: bool,
     pub debug_auxiliary_player_script: bool,
@@ -52,6 +57,8 @@ impl WebIntegratedServerStartupConfig {
         encode_topology(self.world_topology, &mut frame)?;
         frame.push(behavior_profile_tag(self.world_behavior_profile));
         frame.push(authored_fixture_tag(self.transient_authored_fixture));
+        frame.push(playable_showcase_tag(self.transient_playable_showcase));
+        frame.extend_from_slice(&self.day_time.unwrap_or(u64::MAX).to_le_bytes());
         let mut flags = 0;
         if self.freeze_scheduled_fluid_ticks {
             flags |= FLAG_FREEZE_SCHEDULED_FLUID_TICKS;
@@ -64,6 +71,9 @@ impl WebIntegratedServerStartupConfig {
         }
         if self.observer_only {
             flags |= FLAG_OBSERVER_ONLY;
+        }
+        if self.day_time_frozen {
+            flags |= FLAG_DAY_TIME_FROZEN;
         }
         frame.push(flags);
         frame.extend_from_slice(&light_status_batch_size.to_le_bytes());
@@ -94,6 +104,19 @@ impl WebIntegratedServerStartupConfig {
         let world_topology = decode_topology(&mut decoder)?;
         let world_behavior_profile = behavior_profile_from_tag(decoder.u8()?)?;
         let transient_authored_fixture = authored_fixture_from_tag(decoder.u8()?)?;
+        let transient_playable_showcase = if version >= 4 {
+            playable_showcase_from_tag(decoder.u8()?)?
+        } else {
+            None
+        };
+        let day_time = if version >= 4 {
+            match decoder.u64()? {
+                u64::MAX => None,
+                value => Some(value),
+            }
+        } else {
+            None
+        };
         let flags = decoder.u8()?;
         if flags & !KNOWN_FLAGS != 0 {
             return Err(format!(
@@ -129,6 +152,9 @@ impl WebIntegratedServerStartupConfig {
             world_topology,
             world_behavior_profile,
             transient_authored_fixture,
+            transient_playable_showcase,
+            day_time,
+            day_time_frozen: flags & FLAG_DAY_TIME_FROZEN != 0,
             freeze_scheduled_fluid_ticks: flags & FLAG_FREEZE_SCHEDULED_FLUID_TICKS != 0,
             debug_passive_showcase: flags & FLAG_DEBUG_PASSIVE_SHOWCASE != 0,
             debug_auxiliary_player_script: flags & FLAG_DEBUG_AUXILIARY_PLAYER_SCRIPT != 0,
@@ -157,6 +183,25 @@ impl WebIntegratedServerStartupConfig {
                 return Err(format!(
                     "authored fixture {} requires the authored-only generation profile",
                     fixture.fixture_id()
+                ));
+            }
+        }
+        if self.transient_authored_fixture.is_some() && self.transient_playable_showcase.is_some() {
+            return Err("integrated-server startup cannot select both an authored fixture and a playable showcase".to_owned());
+        }
+        if let Some(showcase) = self.transient_playable_showcase {
+            let manifest = mclone_server::playable_showcase_manifest(showcase)
+                .map_err(|error| error.to_string())?;
+            if self.seed != manifest.seed
+                || self.world_generation_profile != manifest.world_generation_profile
+            {
+                return Err(format!(
+                    "playable showcase {} requires seed {} and profile {}, got seed {} and profile {}",
+                    showcase.label(),
+                    manifest.seed,
+                    manifest.world_generation_profile.label(),
+                    self.seed,
+                    self.world_generation_profile.label(),
                 ));
             }
         }
@@ -261,6 +306,25 @@ fn authored_fixture_from_tag(tag: u8) -> Result<Option<AuthoredWorldFixtureKind>
     }
 }
 
+const fn playable_showcase_tag(showcase: Option<mclone_server::PlayableShowcaseId>) -> u8 {
+    match showcase {
+        None => 0,
+        Some(mclone_server::PlayableShowcaseId::MallardEcology) => 1,
+    }
+}
+
+fn playable_showcase_from_tag(
+    tag: u8,
+) -> Result<Option<mclone_server::PlayableShowcaseId>, String> {
+    match tag {
+        0 => Ok(None),
+        1 => Ok(Some(mclone_server::PlayableShowcaseId::MallardEcology)),
+        _ => Err(format!(
+            "integrated-server startup frame has unknown playable showcase {tag}"
+        )),
+    }
+}
+
 fn encode_topology(topology: HorizontalTopology, frame: &mut Vec<u8>) -> Result<(), String> {
     match (topology.x, topology.z) {
         (AxisTopology::Unbounded, AxisTopology::Unbounded) => frame.push(TOPOLOGY_PLANE),
@@ -352,6 +416,10 @@ impl<'a> StartupDecoder<'a> {
         Ok(i64::from_le_bytes(self.take(8)?.try_into().unwrap()))
     }
 
+    fn u64(&mut self) -> Result<u64, String> {
+        Ok(u64::from_le_bytes(self.take(8)?.try_into().unwrap()))
+    }
+
     fn finish(self) -> Result<(), String> {
         if self.cursor == self.bytes.len() {
             Ok(())
@@ -376,6 +444,9 @@ mod tests {
             world_topology: HorizontalTopology::cylinder_x(0, 32),
             world_behavior_profile: WorldBehaviorProfile::ProtectedLobby,
             transient_authored_fixture: None,
+            transient_playable_showcase: None,
+            day_time: Some(6_000),
+            day_time_frozen: true,
             freeze_scheduled_fluid_ticks: true,
             debug_passive_showcase: false,
             debug_auxiliary_player_script: true,
@@ -400,12 +471,15 @@ mod tests {
     }
 
     #[test]
-    fn version_two_startup_defaults_to_wild_start() {
+    fn version_three_startup_defaults_new_showcase_fields() {
         let mut expected = config();
-        expected.starter_content = StarterContentDescriptor::Wild;
+        expected.transient_playable_showcase = None;
+        expected.day_time = None;
+        expected.day_time_frozen = false;
         let mut frame = expected.encode().unwrap();
-        frame[4..6].copy_from_slice(&2_u16.to_le_bytes());
-        frame.remove(4 + 2 + 1);
+        frame[4..6].copy_from_slice(&3_u16.to_le_bytes());
+        let showcase_index = 4 + 2 + 1 + 1 + 1 + 4 + 1 + 1;
+        frame.drain(showcase_index..showcase_index + 1 + 8);
 
         assert_eq!(
             WebIntegratedServerStartupConfig::decode(&frame),
@@ -427,15 +501,32 @@ mod tests {
     }
 
     #[test]
+    fn startup_frame_roundtrips_transient_playable_showcase() {
+        let mut expected = config();
+        let manifest = mclone_server::playable_showcase_manifest(
+            mclone_server::PlayableShowcaseId::MallardEcology,
+        )
+        .unwrap();
+        expected.seed = manifest.seed;
+        expected.world_generation_profile = manifest.world_generation_profile;
+        expected.transient_playable_showcase = Some(manifest.id);
+        let frame = expected.encode().unwrap();
+        assert_eq!(
+            WebIntegratedServerStartupConfig::decode(&frame),
+            Ok(expected)
+        );
+    }
+
+    #[test]
     fn startup_frame_rejects_version_flags_truncation_and_trailing_data() {
         let frame = config().encode().unwrap();
 
         let mut bad_version = frame.clone();
-        bad_version[4..6].copy_from_slice(&4_u16.to_le_bytes());
+        bad_version[4..6].copy_from_slice(&5_u16.to_le_bytes());
         assert!(WebIntegratedServerStartupConfig::decode(&bad_version).is_err());
 
         let mut bad_flags = frame.clone();
-        let flags_index = 4 + 2 + 1 + 1 + 1 + 4 + 1 + 1;
+        let flags_index = 4 + 2 + 1 + 1 + 1 + 4 + 1 + 1 + 1 + 8;
         bad_flags[flags_index] |= 1 << 7;
         assert!(WebIntegratedServerStartupConfig::decode(&bad_flags).is_err());
 

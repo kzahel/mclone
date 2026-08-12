@@ -167,6 +167,30 @@ export function installWebSmokeObserver(
     observeStartup(startup): void {
       runtime.state.generationProfile = String(startup.generationProfile);
       runtime.state.worldTopology = String(startup.worldTopology);
+      runtime.state.showcaseId = startup.showcaseId == null
+        ? null
+        : String(startup.showcaseId);
+      runtime.state.showcaseRevision = startup.showcaseRevision == null
+        ? null
+        : Number(startup.showcaseRevision);
+      runtime.state.showcaseEntryEye = startup.showcaseEntryEye == null
+        ? null
+        : String(startup.showcaseEntryEye);
+      runtime.state.showcaseEntryTarget = startup.showcaseEntryTarget == null
+        ? null
+        : String(startup.showcaseEntryTarget);
+      runtime.state.showcaseEntityCount = startup.showcaseEntityCount == null
+        ? null
+        : Number(startup.showcaseEntityCount);
+      runtime.state.showcaseMallardCount = startup.showcaseMallardCount == null
+        ? null
+        : Number(startup.showcaseMallardCount);
+      runtime.state.showcaseMallardNestCount = startup.showcaseMallardNestCount == null
+        ? null
+        : Number(startup.showcaseMallardNestCount);
+      runtime.state.showcaseFieldGuideBits = startup.showcaseFieldGuideBits == null
+        ? null
+        : Number(startup.showcaseFieldGuideBits);
     },
     observeReport(report): void {
       if (!report?.ok) {
