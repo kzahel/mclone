@@ -17,7 +17,7 @@ use crate::GpuPassId;
 use crate::asset_lab_figure::ActorFigureSet;
 use crate::chunk::{ChunkRenderView, DEPTH_FORMAT, TexturedSectionRenderOptions};
 use crate::entity::{
-    ActorAnimationClip, ActorInstance, ActorInstanceId, ActorInstanceShape, ActorRenderStats,
+    ActorAnimationPhase, ActorInstance, ActorInstanceId, ActorInstanceShape, ActorRenderStats,
 };
 use crate::placement::{CompositionClip, WorldCompositionContext};
 use crate::target::RenderFrameTarget;
@@ -709,24 +709,34 @@ impl PreparedActorRecord {
         actor: ActorInstance,
         snapshot: &mut PreparedActorDrawSnapshot,
     ) -> Result<()> {
-        let animation_time = actor.animation.and_then(|animation| {
-            let clip_name = match animation.clip {
-                ActorAnimationClip::Walk => "walk",
-            };
-            figure.figure.clips.get(clip_name).map(|clip| {
-                let distance = animation.distance.max(0.0);
-                clip.locomotion
-                    .as_ref()
-                    .map_or(f64::from(distance), |locomotion| {
-                        f64::from(
-                            distance / locomotion.cycle_distance.max(f32::EPSILON)
-                                * clip.duration_seconds,
-                        )
-                    })
-            })
+        let animation = actor.animation.and_then(|animation| {
+            figure
+                .figure
+                .clips
+                .get(animation.clip.as_str())
+                .map(|clip| {
+                    let time = match animation.phase {
+                        ActorAnimationPhase::Distance(distance) => {
+                            let distance = distance.max(0.0);
+                            clip.locomotion
+                                .as_ref()
+                                .map_or(f64::from(distance), |locomotion| {
+                                    f64::from(
+                                        distance / locomotion.cycle_distance.max(f32::EPSILON)
+                                            * clip.duration_seconds,
+                                    )
+                                })
+                        }
+                        ActorAnimationPhase::ElapsedSeconds(elapsed_seconds) => {
+                            f64::from(elapsed_seconds.max(0.0))
+                        }
+                    };
+                    (animation.clip, time)
+                })
         });
-        match animation_time {
-            Some(time) => {
+        match animation {
+            Some((clip, time)) => {
+                let clip_name = clip.as_str();
                 if let (Some(wing_flap), Some([left, right])) =
                     (actor.chicken_wing_flap_radians, figure.wing_part_ids)
                 {
@@ -742,7 +752,7 @@ impl PreparedActorRecord {
                     ];
                     evaluate_prepared_figure_clip_with_part_rotation_overrides_into(
                         &figure.figure,
-                        "walk",
+                        clip_name,
                         time,
                         &overrides,
                         &mut self.pose_palette,
@@ -750,7 +760,7 @@ impl PreparedActorRecord {
                 } else {
                     evaluate_prepared_figure_clip_into(
                         &figure.figure,
-                        "walk",
+                        clip_name,
                         time,
                         &mut self.pose_palette,
                     )?;
@@ -1976,7 +1986,9 @@ mod tests {
         for actor in &mut actors {
             actor.feet_position.x += 0.01;
             if let Some(animation) = actor.animation.as_mut() {
-                animation.distance += 0.01;
+                if let ActorAnimationPhase::Distance(distance) = &mut animation.phase {
+                    *distance += 0.01;
+                }
             }
         }
         let steady_prepare_start = Instant::now();

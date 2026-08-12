@@ -612,7 +612,7 @@ impl ClientRuntime {
                 self.entities
                     .values()
                     .copied()
-                    .map(ActorPresentation::entity),
+                    .map(|snapshot| ActorPresentation::entity_at(snapshot, self.game_time)),
             )
             .collect()
     }
@@ -828,6 +828,7 @@ impl ClientRuntime {
                     attended: nest.attended,
                 });
             }
+            snapshot.animation = update.animation;
             snapshot.position = update.position;
             snapshot.y_rot_degrees = update.y_rot_degrees;
             snapshot.x_rot_degrees = update.x_rot_degrees;
@@ -1302,6 +1303,7 @@ mod tests {
             item_stack: None,
             mallard: None,
             mallard_nest: None,
+            animation: None,
             position: mclone_core::Vec3d::new(4.0, 64.0, 5.0),
             y_rot_degrees: 0.0,
             x_rot_degrees: 0.0,
@@ -1663,6 +1665,7 @@ mod tests {
             item_stack: None,
             mallard: None,
             mallard_nest: None,
+            animation: None,
             position: Vec3d::new(511.75, 64.0, 2.0),
             y_rot_degrees: 0.0,
             x_rot_degrees: 0.0,
@@ -1677,6 +1680,7 @@ mod tests {
             item_stack: None,
             mallard: None,
             mallard_nest: None,
+            animation: None,
             position: Vec3d::new(0.25, 64.0, 2.0),
             y_rot_degrees: 0.0,
             x_rot_degrees: 0.0,
@@ -1700,6 +1704,7 @@ mod tests {
             item_stack: None,
             mallard: None,
             mallard_nest: None,
+            animation: None,
             position: mclone_core::Vec3d::new(1.0, 64.0, 2.0),
             y_rot_degrees: 45.0,
             x_rot_degrees: 5.0,
@@ -1714,6 +1719,7 @@ mod tests {
             item_stack: None,
             mallard: None,
             mallard_nest: None,
+            animation: None,
             position: mclone_core::Vec3d::new(17.0, 65.0, 4.0),
             y_rot_degrees: 90.0,
             x_rot_degrees: -10.0,
@@ -1781,6 +1787,7 @@ mod tests {
                 in_water: false,
             }),
             mallard_nest: None,
+            animation: None,
             position: Vec3d::new(1.5, 64.0, 2.5),
             y_rot_degrees: 0.0,
             x_rot_degrees: 0.0,
@@ -1799,6 +1806,7 @@ mod tests {
                 in_water: true,
             }),
             mallard_nest: None,
+            animation: None,
             position: Vec3d::new(1.75, 64.88, 2.5),
             y_rot_degrees: 12.0,
             x_rot_degrees: 0.0,
@@ -1834,6 +1842,7 @@ mod tests {
                 incubation_required: 20,
                 attended: false,
             }),
+            animation: None,
             position: Vec3d::new(2.5, 65.0, 3.5),
             y_rot_degrees: 0.0,
             x_rot_degrees: 0.0,
@@ -1852,6 +1861,7 @@ mod tests {
                 incubation_required: 20,
                 attended: true,
             }),
+            animation: None,
             position: Vec3d::new(2.5, 65.0, 3.5),
             y_rot_degrees: 0.0,
             x_rot_degrees: 0.0,
@@ -1905,6 +1915,11 @@ mod tests {
                 on_ground: update.on_ground,
                 width: 0.6,
                 height: 1.8,
+                animation: Some(mclone_core::AnimationState::distance(
+                    mclone_core::AnimationClipId::from_static("walk"),
+                    0,
+                )),
+                animation_clock_tick: 0,
                 walk_animation_distance: 0.0,
                 chicken_wing_flap_radians: None,
             }]
@@ -1925,6 +1940,7 @@ mod tests {
             item_stack: None,
             mallard: None,
             mallard_nest: None,
+            animation: None,
             position: mclone_core::Vec3d::new(10.0, 64.0, -4.0),
             y_rot_degrees: -90.0,
             x_rot_degrees: 0.0,
@@ -1954,6 +1970,8 @@ mod tests {
                 on_ground: snapshot.on_ground,
                 width: snapshot.width,
                 height: snapshot.height,
+                animation: snapshot.animation,
+                animation_clock_tick: 0,
                 walk_animation_distance: 0.0,
                 chicken_wing_flap_radians: None,
             }]
@@ -1974,6 +1992,7 @@ mod tests {
             item_stack: Some(stack),
             mallard: None,
             mallard_nest: None,
+            animation: None,
             position: mclone_core::Vec3d::new(10.0, 64.0, -4.0),
             y_rot_degrees: 0.0,
             x_rot_degrees: 0.0,
@@ -2074,6 +2093,7 @@ mod tests {
             }),
             mallard: None,
             mallard_nest: None,
+            animation: None,
             position: mclone_core::Vec3d::new(1.0, 64.0, 2.0),
             y_rot_degrees: 0.0,
             x_rot_degrees: 0.0,
@@ -2092,6 +2112,7 @@ mod tests {
             }),
             mallard: None,
             mallard_nest: None,
+            animation: None,
             position: mclone_core::Vec3d::new(1.0, 64.0, 2.0),
             y_rot_degrees: 0.0,
             x_rot_degrees: 0.0,

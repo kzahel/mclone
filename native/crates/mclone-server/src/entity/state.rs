@@ -1,4 +1,4 @@
-use mclone_core::{BlockPos, ChunkPos, Vec3d};
+use mclone_core::{AnimationClipId, AnimationState, BlockPos, ChunkPos, Vec3d};
 use mclone_protocol::{
     EntityId, EntityKind, EntityPersistentId, EntityRotation, EntitySnapshot, EntityUpdate,
     ItemStackSnapshot, MallardNestSnapshotData, MallardNestUpdateData, MallardSnapshotData,
@@ -15,6 +15,7 @@ pub(crate) struct ServerEntityState {
     pub(crate) item_stack: Option<ItemStackSnapshot>,
     pub(crate) mallard: Option<MallardSnapshotData>,
     pub(crate) mallard_nest: Option<MallardNestSnapshotData>,
+    pub(crate) animation: Option<AnimationState>,
     pub(crate) position: Vec3d,
     pub(crate) y_rot_degrees: f32,
     pub(crate) x_rot_degrees: f32,
@@ -44,6 +45,7 @@ impl ServerEntityState {
             item_stack: None,
             mallard: None,
             mallard_nest: None,
+            animation: default_animation_for_kind(metadata.kind),
             position,
             y_rot_degrees,
             x_rot_degrees,
@@ -68,6 +70,7 @@ impl ServerEntityState {
             item_stack: self.item_stack,
             mallard: self.mallard,
             mallard_nest: self.mallard_nest,
+            animation: self.animation,
             position: self.position,
             y_rot_degrees: self.y_rot_degrees,
             x_rot_degrees: self.x_rot_degrees,
@@ -92,6 +95,7 @@ impl ServerEntityState {
                 incubation_required: data.incubation_required,
                 attended: data.attended,
             }),
+            animation: self.animation,
             position: self.position,
             y_rot_degrees: self.y_rot_degrees,
             x_rot_degrees: self.x_rot_degrees,
@@ -100,4 +104,15 @@ impl ServerEntityState {
             tick_count: self.tick_count,
         }
     }
+}
+
+const fn default_animation_for_kind(kind: EntityKind) -> Option<AnimationState> {
+    let clip = match kind {
+        EntityKind::Cow | EntityKind::Chicken | EntityKind::Mannequin => {
+            AnimationClipId::from_static("walk")
+        }
+        EntityKind::Mallard => AnimationClipId::from_static("waddle"),
+        EntityKind::MallardNest | EntityKind::DebugCube | EntityKind::Item => return None,
+    };
+    Some(AnimationState::distance(clip, 0))
 }

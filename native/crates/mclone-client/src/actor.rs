@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use mclone_assets::{ActorFigureId, default_player_figure_id, upright_bear_figure_id};
-use mclone_core::{HorizontalTopology, Vec3d};
+use mclone_core::{AnimationClipId, AnimationState, HorizontalTopology, Vec3d};
 use mclone_protocol::{
     EntityId, EntityKind, EntityRotation, EntitySnapshot, ItemStackSnapshot, MallardLifeStage,
     MallardNestSnapshotData, PlayerAppearance, PlayerModelKind, RemotePlayerId, RemotePlayerUpdate,
@@ -61,6 +61,9 @@ pub struct ActorPresentation {
     pub on_ground: bool,
     pub width: f32,
     pub height: f32,
+    pub animation: Option<AnimationState>,
+    /// Replicated world tick used to phase authoritative elapsed-time clips.
+    pub animation_clock_tick: u64,
     pub walk_animation_distance: f32,
     pub chicken_wing_flap_radians: Option<f32>,
     pub mallard_life_stage: Option<MallardLifeStage>,
@@ -82,6 +85,11 @@ impl ActorPresentation {
             on_ground: update.on_ground,
             width: 0.6,
             height: 1.8,
+            animation: Some(AnimationState::distance(
+                AnimationClipId::from_static("walk"),
+                0,
+            )),
+            animation_clock_tick: 0,
             walk_animation_distance,
             chicken_wing_flap_radians: None,
             mallard_life_stage: None,
@@ -91,6 +99,10 @@ impl ActorPresentation {
     }
 
     pub fn entity(snapshot: EntitySnapshot) -> Self {
+        Self::entity_at(snapshot, snapshot.tick_count)
+    }
+
+    pub fn entity_at(snapshot: EntitySnapshot, animation_clock_tick: u64) -> Self {
         Self {
             id: ActorPresentationId::Entity(snapshot.id),
             kind: ActorPresentationKind::Entity(snapshot.kind),
@@ -103,6 +115,8 @@ impl ActorPresentation {
             on_ground: snapshot.on_ground,
             width: snapshot.width,
             height: snapshot.height,
+            animation: snapshot.animation,
+            animation_clock_tick,
             walk_animation_distance: 0.0,
             chicken_wing_flap_radians: None,
             mallard_life_stage: snapshot.mallard.map(|data| data.life_stage),
@@ -235,6 +249,8 @@ impl ActorTrack {
         self.rendered.on_ground = actor.on_ground;
         self.rendered.width = actor.width;
         self.rendered.height = actor.height;
+        self.rendered.animation = actor.animation;
+        self.rendered.animation_clock_tick = actor.animation_clock_tick;
         if uses_movement_derived_travel_phase(actor.kind) {
             if actor.kind != previous_kind {
                 self.derived = ActorDerivedAnimationState::new(actor);
@@ -486,6 +502,11 @@ mod tests {
             on_ground: true,
             width: 0.6,
             height: 1.8,
+            animation: Some(AnimationState::distance(
+                AnimationClipId::from_static("walk"),
+                0,
+            )),
+            animation_clock_tick: 0,
             walk_animation_distance: 0.0,
             chicken_wing_flap_radians: None,
         }
@@ -507,6 +528,11 @@ mod tests {
             on_ground,
             width: 0.4,
             height: 0.7,
+            animation: Some(AnimationState::distance(
+                AnimationClipId::from_static("walk"),
+                0,
+            )),
+            animation_clock_tick: 0,
             walk_animation_distance: 0.0,
             chicken_wing_flap_radians: None,
         }
@@ -528,6 +554,11 @@ mod tests {
             on_ground: true,
             width: 0.6,
             height: 1.8,
+            animation: Some(AnimationState::distance(
+                AnimationClipId::from_static("walk"),
+                0,
+            )),
+            animation_clock_tick: 0,
             walk_animation_distance: 0.0,
             chicken_wing_flap_radians: None,
         }
@@ -561,6 +592,11 @@ mod tests {
                 on_ground: update.on_ground,
                 width: 0.6,
                 height: 1.8,
+                animation: Some(AnimationState::distance(
+                    AnimationClipId::from_static("walk"),
+                    0,
+                )),
+                animation_clock_tick: 0,
                 walk_animation_distance: 1.25,
                 chicken_wing_flap_radians: None,
             }
@@ -576,6 +612,10 @@ mod tests {
             item_stack: None,
             mallard: None,
             mallard_nest: None,
+            animation: Some(AnimationState::distance(
+                AnimationClipId::from_static("walk"),
+                0,
+            )),
             position: Vec3d::new(10.0, 64.0, -4.0),
             y_rot_degrees: -90.0,
             x_rot_degrees: 0.0,
@@ -603,6 +643,8 @@ mod tests {
                 on_ground: snapshot.on_ground,
                 width: snapshot.width,
                 height: snapshot.height,
+                animation: snapshot.animation,
+                animation_clock_tick: snapshot.tick_count,
                 walk_animation_distance: 0.0,
                 chicken_wing_flap_radians: None,
             }
@@ -699,6 +741,27 @@ mod tests {
         assert!(rotation.y.abs() < 1.0e-6);
         assert!((rotation.z - 0.707_106_77).abs() < 1.0e-6);
         assert!((rotation.w - 0.707_106_77).abs() < 1.0e-6);
+    }
+
+    #[test]
+    fn actor_interpolation_adopts_authoritative_action_epoch_without_local_restart() {
+        let mut initial = mannequin_actor(4, 0.0);
+        initial.animation = Some(AnimationState::elapsed(
+            AnimationClipId::from_static("lie_down"),
+            7,
+            100,
+        ));
+        initial.animation_clock_tick = 120;
+        let mut state = ActorInterpolationState::from_authoritative([initial]);
+        let mut target = initial;
+        target.feet_position.x = 1.0;
+        target.animation_clock_tick = 145;
+
+        state.reconcile_authoritative([target]);
+
+        let rendered = state.presentations()[0];
+        assert_eq!(rendered.animation, target.animation);
+        assert_eq!(rendered.animation_clock_tick, 145);
     }
 
     #[test]

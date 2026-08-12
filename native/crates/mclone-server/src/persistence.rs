@@ -20,7 +20,8 @@ use std::{
 use rusqlite::{Connection, OpenFlags, OptionalExtension, Transaction, params};
 
 use mclone_core::{
-    AxisTopology, BlockPos, ChunkPos, ChunkRevision, ChunkSnapshot, HorizontalTopology, Vec3d,
+    AnimationClipId, AnimationPhaseSource, AnimationState, AxisTopology, BlockPos, ChunkPos,
+    ChunkRevision, ChunkSnapshot, HorizontalTopology, MAX_ANIMATION_CLIP_ID_BYTES, Vec3d,
 };
 pub use mclone_protocol::EntityPersistentId;
 use mclone_protocol::{
@@ -70,7 +71,8 @@ const WORLD_ADMISSION_LOCK_FILE: &str = ".mclone-world-admission.lock";
 
 pub const CHUNK_LIGHT_ALGORITHM_VERSION: u32 = 1;
 const LEGACY_ENTITY_CHUNK_RECORD_VERSION: u32 = 2;
-pub const ENTITY_CHUNK_RECORD_VERSION: u32 = 3;
+const MALLARD_ENTITY_CHUNK_RECORD_VERSION: u32 = 3;
+pub const ENTITY_CHUNK_RECORD_VERSION: u32 = 4;
 const LEGACY_PLAYER_RECORD_VERSION: u32 = 1;
 const STATISTICS_PLAYER_RECORD_VERSION: u32 = 2;
 const PLAYER_LIFE_RECORD_VERSION: u32 = 3;
@@ -475,6 +477,7 @@ pub struct EntitySaveRecord {
     pub x_rot_degrees: f32,
     pub rotation: Option<EntityRotation>,
     pub on_ground: bool,
+    pub animation: Option<mclone_core::AnimationState>,
     pub payload: EntitySavePayload,
 }
 
@@ -6265,6 +6268,7 @@ fn write_entity_save_record(
     write_f32(writer, record.x_rot_degrees)?;
     write_optional_rotation(writer, record.rotation)?;
     write_bool(writer, record.on_ground)?;
+    write_optional_animation_state(writer, record.animation)?;
     write_entity_save_payload(writer, &record.payload)
 }
 
@@ -6280,6 +6284,11 @@ fn read_entity_save_record(
     let x_rot_degrees = read_f32(reader)?;
     let rotation = read_optional_rotation(reader)?;
     let on_ground = read_bool(reader)?;
+    let animation = if codec_version >= ENTITY_CHUNK_RECORD_VERSION {
+        read_optional_animation_state(reader)?
+    } else {
+        None
+    };
     let payload = read_entity_save_payload(reader, codec_version)?;
     Ok(EntitySaveRecord {
         persistent_id,
@@ -6290,6 +6299,7 @@ fn read_entity_save_record(
         x_rot_degrees,
         rotation,
         on_ground,
+        animation,
         payload,
     })
 }
@@ -6364,7 +6374,7 @@ fn read_entity_save_payload(
         3 => Ok(EntitySavePayload::Mannequin),
         4 => {
             let egg_time = read_i32(reader)?;
-            Ok(if codec_version >= ENTITY_CHUNK_RECORD_VERSION {
+            Ok(if codec_version >= MALLARD_ENTITY_CHUNK_RECORD_VERSION {
                 EntitySavePayload::Mallard {
                     egg_time,
                     age_ticks: read_u32(reader)?,
@@ -6385,14 +6395,16 @@ fn read_entity_save_payload(
                 }
             })
         }
-        5 if codec_version >= ENTITY_CHUNK_RECORD_VERSION => Ok(EntitySavePayload::MallardNest {
-            incubation_progress: read_u32(reader)?,
-            incubation_required: read_u32(reader)?,
-            parents: [
-                read_optional_entity_persistent_id(reader)?,
-                read_optional_entity_persistent_id(reader)?,
-            ],
-        }),
+        5 if codec_version >= MALLARD_ENTITY_CHUNK_RECORD_VERSION => {
+            Ok(EntitySavePayload::MallardNest {
+                incubation_progress: read_u32(reader)?,
+                incubation_required: read_u32(reader)?,
+                parents: [
+                    read_optional_entity_persistent_id(reader)?,
+                    read_optional_entity_persistent_id(reader)?,
+                ],
+            })
+        }
         value => Err(ChunkStoreError::InvalidData(format!(
             "unknown entity save payload kind {value}"
         ))),
@@ -6520,6 +6532,69 @@ fn read_optional_rotation(reader: &mut impl Read) -> ChunkStoreResult<Option<Ent
         z: read_f32(reader)?,
         w: read_f32(reader)?,
     }))
+}
+
+fn write_optional_animation_state(
+    writer: &mut impl Write,
+    animation: Option<AnimationState>,
+) -> ChunkStoreResult<()> {
+    let Some(animation) = animation else {
+        return write_bool(writer, false);
+    };
+    if animation.phase_source == AnimationPhaseSource::Distance && animation.start_tick != 0 {
+        return Err(ChunkStoreError::InvalidData(
+            "distance animation must not carry an elapsed start tick".to_owned(),
+        ));
+    }
+    write_bool(writer, true)?;
+    write_string(writer, animation.clip.as_str(), "animation clip id")?;
+    write_u8(
+        writer,
+        match animation.phase_source {
+            AnimationPhaseSource::Distance => 0,
+            AnimationPhaseSource::Elapsed => 1,
+        },
+    )?;
+    write_u32(writer, animation.epoch)?;
+    write_u64(writer, animation.start_tick)
+}
+
+fn read_optional_animation_state(
+    reader: &mut impl Read,
+) -> ChunkStoreResult<Option<AnimationState>> {
+    if !read_bool(reader)? {
+        return Ok(None);
+    }
+    let clip_text = read_string(reader)?;
+    if clip_text.len() > MAX_ANIMATION_CLIP_ID_BYTES {
+        return Err(ChunkStoreError::InvalidData(
+            "animation clip id exceeds maximum length".to_owned(),
+        ));
+    }
+    let clip = AnimationClipId::parse(&clip_text).map_err(|error| {
+        ChunkStoreError::InvalidData(format!("invalid animation clip id: {error}"))
+    })?;
+    let phase_source = match read_u8(reader)? {
+        0 => AnimationPhaseSource::Distance,
+        1 => AnimationPhaseSource::Elapsed,
+        _ => {
+            return Err(ChunkStoreError::InvalidData(
+                "unknown animation phase source".to_owned(),
+            ));
+        }
+    };
+    let animation = AnimationState {
+        clip,
+        phase_source,
+        epoch: read_u32(reader)?,
+        start_tick: read_u64(reader)?,
+    };
+    if phase_source == AnimationPhaseSource::Distance && animation.start_tick != 0 {
+        return Err(ChunkStoreError::InvalidData(
+            "distance animation must not carry an elapsed start tick".to_owned(),
+        ));
+    }
+    Ok(Some(animation))
 }
 
 fn write_scheduled_ticks(
@@ -6940,6 +7015,7 @@ mod tests {
                         w: 0.8660254,
                     }),
                     on_ground: false,
+                    animation: None,
                     payload: EntitySavePayload::Chicken { egg_time: 1234 },
                 },
                 EntitySaveRecord {
@@ -6951,6 +7027,7 @@ mod tests {
                     x_rot_degrees: 0.0,
                     rotation: None,
                     on_ground: true,
+                    animation: None,
                     payload: EntitySavePayload::Mannequin,
                 },
                 EntitySaveRecord {
@@ -6962,6 +7039,11 @@ mod tests {
                     x_rot_degrees: 0.0,
                     rotation: None,
                     on_ground: true,
+                    animation: Some(AnimationState::elapsed(
+                        AnimationClipId::from_static("alert"),
+                        7,
+                        1_200,
+                    )),
                     payload: EntitySavePayload::Mallard {
                         egg_time: 4321,
                         age_ticks: crate::entity::MALLARD_GROWTH_REQUIRED_TICKS,
@@ -6979,6 +7061,7 @@ mod tests {
                     x_rot_degrees: 0.0,
                     rotation: None,
                     on_ground: true,
+                    animation: None,
                     payload: EntitySavePayload::Item {
                         stack: ItemStackSaveRecord::new("mclone:mallard_egg", 2),
                         age: 30,
@@ -8602,6 +8685,7 @@ mod tests {
             x_rot_degrees: 0.0,
             rotation: None,
             on_ground: true,
+            animation: None,
             payload: EntitySavePayload::Item {
                 stack: ItemStackSaveRecord::new("minecraft:egg", 3),
                 age: 12,

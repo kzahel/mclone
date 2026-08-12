@@ -1317,7 +1317,7 @@ impl ServerEntityStore {
         }
 
         let id = self.allocate_entity_id();
-        let state = match (saved.kind.as_str(), &saved.payload) {
+        let mut state = match (saved.kind.as_str(), &saved.payload) {
             ("minecraft:cow", EntitySavePayload::Cow) => self.insert_saved_passive_mob(
                 id,
                 saved,
@@ -1407,6 +1407,8 @@ impl ServerEntityStore {
                 )));
             }
         };
+        state.animation = saved.animation.or(state.animation);
+        self.entities.insert(id, state);
         self.persistent_ids.insert(id, saved.persistent_id);
         if saved.persistent_id.most == ENTITY_PERSISTENT_ID_MOST {
             self.next_persistent_id = self.next_persistent_id.max(saved.persistent_id.least);
@@ -1548,6 +1550,7 @@ impl ServerEntityStore {
             x_rot_degrees: entity.x_rot_degrees,
             rotation: entity.rotation,
             on_ground: entity.on_ground,
+            animation: entity.animation,
             payload,
         })
     }
@@ -1595,6 +1598,9 @@ fn debug_physics_cube_state(
         persistent_id,
         kind: EntityKind::DebugCube,
         item_stack: None,
+        mallard: None,
+        mallard_nest: None,
+        animation: None,
         position,
         y_rot_degrees,
         x_rot_degrees,

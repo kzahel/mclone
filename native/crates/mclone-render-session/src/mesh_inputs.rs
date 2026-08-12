@@ -236,7 +236,6 @@ pub fn actor_instances_from_presentations_near_observer(
                                 glam_vec3_from_vec3d(feet_position),
                                 actor.y_rot_degrees,
                             )
-                            .with_walk_animation_distance(actor.walk_animation_distance)
                         },
                         |figure| {
                             ActorInstance::remote_player_with_figure(
@@ -244,7 +243,6 @@ pub fn actor_instances_from_presentations_near_observer(
                                 actor.y_rot_degrees,
                                 figure,
                             )
-                            .with_walk_animation_distance(actor.walk_animation_distance)
                         },
                     )
                     .with_packed_light(packed_light),
@@ -255,7 +253,6 @@ pub fn actor_instances_from_presentations_near_observer(
                         mclone_assets::cow_figure_id(),
                     )
                     .with_dimensions(actor.width, actor.height)
-                    .with_walk_animation_distance(actor.walk_animation_distance)
                     .with_packed_light(packed_light)
                 }
                 ActorPresentationKind::Entity(EntityKind::Chicken) => {
@@ -265,7 +262,6 @@ pub fn actor_instances_from_presentations_near_observer(
                         mclone_assets::chicken_figure_id(),
                     )
                     .with_dimensions(actor.width, actor.height)
-                    .with_walk_animation_distance(actor.walk_animation_distance)
                     .with_chicken_wing_flap_radians(actor.chicken_wing_flap_radians)
                     .with_packed_light(packed_light)
                 }
@@ -293,7 +289,6 @@ pub fn actor_instances_from_presentations_near_observer(
                         mclone_assets::mallard_duck_figure_id(),
                     )
                     .with_dimensions(presented_width, presented_height)
-                    .with_walk_animation_distance(actor.walk_animation_distance)
                     .with_packed_light(packed_light)
                 }
                 ActorPresentationKind::Entity(EntityKind::MallardNest) => {
@@ -311,7 +306,6 @@ pub fn actor_instances_from_presentations_near_observer(
                         actor.y_rot_degrees,
                     )
                     .with_dimensions(actor.width, actor.height)
-                    .with_walk_animation_distance(actor.walk_animation_distance)
                     .with_packed_light(packed_light)
                 }
                 ActorPresentationKind::Entity(EntityKind::DebugCube) => ActorInstance::debug_cube(
@@ -344,6 +338,7 @@ pub fn actor_instances_from_presentations_near_observer(
                     }
                 }
             };
+            let instance = with_presentation_animation(instance, actor);
             let id = match actor.id {
                 ActorPresentationId::RemotePlayer(id) => ActorInstanceId::RemotePlayer(id.0),
                 ActorPresentationId::Entity(id) => ActorInstanceId::Entity(id.0),
@@ -351,6 +346,29 @@ pub fn actor_instances_from_presentations_near_observer(
             instance.with_id(id)
         })
         .collect()
+}
+
+fn with_presentation_animation(
+    instance: ActorInstance,
+    actor: &ActorPresentation,
+) -> ActorInstance {
+    let Some(animation) = actor.animation else {
+        return instance;
+    };
+    match animation.phase_source {
+        mclone_core::AnimationPhaseSource::Distance => {
+            instance.with_animation_distance(animation.clip, actor.walk_animation_distance)
+        }
+        mclone_core::AnimationPhaseSource::Elapsed => {
+            let elapsed_ticks = actor
+                .animation_clock_tick
+                .saturating_sub(animation.start_tick);
+            instance.with_animation_elapsed_seconds(
+                animation.clip,
+                elapsed_ticks as f32 / LOCAL_PLAYER_TICKS_PER_SECOND as f32,
+            )
+        }
+    }
 }
 
 pub fn local_player_actor_instance(

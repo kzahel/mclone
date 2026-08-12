@@ -2,11 +2,11 @@
 
 Topic: `figure-animation-actions`
 
-Status: locally complete and accepted 2026-07-21. Canonical figures now carry
-authored defaults and clip presentation metadata, and the Asset Lab catalogue
-plays and completes one-shot actions explicitly. General gameplay-triggered
-runtime playback remains the next engine slice and is now planned as a shared
-prerequisite of Tactical
+Status: shared runtime playback landed locally 2026-08-12. Canonical figures
+carry authored defaults and clip presentation metadata, Asset Lab plays and
+completes one-shot actions explicitly, and authoritative entities now replicate
+named distance- or elapsed-phase requests through persistence and rendering.
+Deer remains the first multi-action gameplay consumer planned by Tactical
 [`284`](../tactical/284-deer-forest-edge-ecology-and-semantic-props.md).
 
 ## Scope
@@ -99,18 +99,28 @@ not add a catalogue-only looping demonstration clip.
 
 ## Shared Rust Boundary
 
-`mclone-assets` now deserializes and preserves default, role, label, and
-completion metadata in prepared figures. The current renderer still maps
-`ActorAnimationClip::Walk` directly to the `walk` string. General gameplay
-selection will replace that with a named/prepared clip request and an explicit
-time source:
+`mclone-assets` deserializes and preserves default, role, label, and completion
+metadata in prepared figures. `mclone-core` owns a compact validated clip ID
+and replicated animation state. The authoritative state contains the clip,
+phase source, epoch, and action start tick. Protocol version 36 carries that
+state on snapshots and updates; entity-chunk record version 4 persists it.
+
+Render-session maps the request to one of two explicit renderer phases:
 
 - distance-driven phase for locomotion; or
 - elapsed-time playback for actions and idle clips.
 
-The semantic/prepared contract has landed. A gameplay animation state machine,
-crossfade/layering, action replication, and arbitrary promoted-animal control
-remain later runtime slices.
+Distance phase continues from interpolated presentation displacement. Elapsed
+phase derives from replicated world time minus the persisted start tick, so a
+chunk hydration, reconnect, delayed update, or render pause does not locally
+restart the action. Renderers resolve the requested authored name directly and
+hold the rest pose if it is unavailable; first-party content validation remains
+responsible for rejecting missing required clips.
+
+Mallards now request their authored `waddle` clip instead of the old literal
+`walk` mapping. Existing cows, chickens, mannequins, and remote players retain
+distance-driven `walk`. A gameplay animation state machine, crossfade/layering,
+and deer behavior selection remain later slices.
 
 ## Local Acceptance Evidence
 
@@ -178,11 +188,9 @@ or a semantic figure-format change.
 
 ## Recommended Next Direction
 
-Execute Tactical
-[`284`](../tactical/284-deer-forest-edge-ecology-and-semantic-props.md)'s
-renderer-neutral named-clip request with distance-driven locomotion and
-authoritative elapsed-time action/idle phases. Deer should prove ordinary
-gameplay selection, hydration continuity, and endpoint-compatible
-lie-down/bedded/stand-up sequences. Keep the existing Roly-poly lesson: do not
-extract anatomy-specific helpers until multiple corrected figures prove a
-stable common pattern.
+Finish Tactical
+[`284`](../tactical/284-deer-forest-edge-ecology-and-semantic-props.md)'s deer
+action set and use it to prove ordinary gameplay selection across
+endpoint-compatible lie-down/bedded/stand-up transitions. Keep the existing
+Roly-poly lesson: do not extract anatomy-specific helpers until multiple
+corrected figures prove a stable common pattern.

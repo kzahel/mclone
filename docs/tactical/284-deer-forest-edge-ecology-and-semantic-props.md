@@ -55,9 +55,10 @@ packaged for review by the showcase system.
 - The checked promotion registry and Rust-facing IDs/paths are actor-centric.
   The public `/animals/` view is correctly creature-centric and should not
   silently classify nests, tracks, or antlers as animals.
-- Shared Rust preparation preserves arbitrary clip names and action metadata,
-  while live actor composition still reduces animation to
-  `ActorAnimationClip::Walk` and the literal `walk` clip.
+- Shared Rust preparation preserves arbitrary clip names and action metadata.
+  The live runtime now carries validated named clips with distance or
+  authoritative elapsed-time phases through persistence, protocol, client
+  presentation, and prepared rendering.
 - The mallard itself, nest, and feather use checked generated semantic JSON and
   the prepared figure renderer. The generic egg and the temporary raised
   mallard track visual remain procedural functions in
@@ -611,6 +612,27 @@ world-generation change into one opaque commit.
   the accepted movement/hatch/field-note outcomes, and left all eight browser
   persistent-world stores empty. Flat Android debug and Android XR release APK
   builds also pass with the refreshed first-party pack and shared renderer.
+
+### 2026-08-12 — Shared named-clip runtime
+
+- Replaced the renderer-local `ActorAnimationClip::Walk` enum with a compact,
+  validated shared clip ID and explicit distance/elapsed phase request.
+- Authoritative entity snapshots and updates now carry clip, phase source,
+  epoch, and start tick. Protocol version 36 and entity-chunk record version 4
+  round-trip this state; older entity records hydrate with their kind's
+  default locomotion request.
+- Client presentation preserves action epochs across interpolation and derives
+  elapsed action time from replicated world time. It never uses renderer or
+  platform time to restart authoritative actions after hydration or delay.
+- Render-session maps phase policy into the shared prepared renderer. Missing
+  named clips hold the rest pose, while required first-party clip presence is
+  an asset/content acceptance responsibility.
+- Mallards now select their real authored `waddle` clip. Existing cows,
+  chickens, mannequins, and remote players retain distance-driven `walk`.
+- Focused tests cover safe clip IDs, protocol and persistence round trips,
+  authoritative epoch adoption, two-second elapsed sampling, and exact
+  `waddle` selection. The six affected Rust crates pass 1,199 tests with 11
+  existing GPU-only ignores.
 
 For later slices, continue to record commit IDs, asset review paths,
 deterministic habitat/population measurements, focused and workspace tests,

@@ -546,6 +546,7 @@ fn write_entities(
                 x_rot_degrees: 0.0,
                 rotation: Some(EntityRotation::IDENTITY),
                 on_ground: recipe.on_ground,
+                animation: None,
                 payload,
             });
     }

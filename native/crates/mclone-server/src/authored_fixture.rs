@@ -493,6 +493,7 @@ fn authored_lobby_island_entities() -> EntityChunkRecord {
                 x_rot_degrees: 0.0,
                 rotation: Some(EntityRotation::IDENTITY),
                 on_ground: true,
+                animation: None,
                 payload: EntitySavePayload::Cow,
             },
             EntitySaveRecord {
@@ -504,6 +505,7 @@ fn authored_lobby_island_entities() -> EntityChunkRecord {
                 x_rot_degrees: 0.0,
                 rotation: Some(EntityRotation::IDENTITY),
                 on_ground: true,
+                animation: None,
                 payload: EntitySavePayload::Chicken { egg_time: 6_000 },
             },
         ],

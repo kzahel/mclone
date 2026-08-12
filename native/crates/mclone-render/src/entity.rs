@@ -5,7 +5,7 @@ use std::sync::{Arc, OnceLock};
 use anyhow::{Context, Result, bail};
 use glam::{EulerRot, Mat4, Quat, Vec3};
 use mclone_assets::{ActorFigureId, SemanticFigureId, default_player_figure_id};
-use mclone_core::Vec3d;
+use mclone_core::{AnimationClipId, Vec3d};
 use mclone_diagnostics::GpuPassId;
 
 use crate::asset_lab_figure::{CompiledFigureClip, CompiledFigureTransform};
@@ -98,13 +98,14 @@ pub enum ActorInstanceShape {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ActorAnimation {
-    pub clip: ActorAnimationClip,
-    pub distance: f32,
+    pub clip: AnimationClipId,
+    pub phase: ActorAnimationPhase,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ActorAnimationClip {
-    Walk,
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ActorAnimationPhase {
+    Distance(f32),
+    ElapsedSeconds(f32),
 }
 
 impl ActorInstance {
@@ -365,10 +366,29 @@ impl ActorInstance {
     }
 
     pub fn with_walk_animation_distance(mut self, distance: f32) -> Self {
+        self = self.with_animation_distance(AnimationClipId::from_static("walk"), distance);
+        self
+    }
+
+    pub fn with_animation_distance(mut self, clip: AnimationClipId, distance: f32) -> Self {
         if distance.is_finite() {
             self.animation = Some(ActorAnimation {
-                clip: ActorAnimationClip::Walk,
-                distance,
+                clip,
+                phase: ActorAnimationPhase::Distance(distance),
+            });
+        }
+        self
+    }
+
+    pub fn with_animation_elapsed_seconds(
+        mut self,
+        clip: AnimationClipId,
+        elapsed_seconds: f32,
+    ) -> Self {
+        if elapsed_seconds.is_finite() {
+            self.animation = Some(ActorAnimation {
+                clip,
+                phase: ActorAnimationPhase::ElapsedSeconds(elapsed_seconds.max(0.0)),
             });
         }
         self
@@ -2242,11 +2262,14 @@ fn sample_figure_part_transforms_into(
     transforms.clear();
     transforms.resize(figure.parts.len(), CompiledFigureTransform::default());
     if let Some(animation) = animation {
-        let clip = match animation.clip {
-            ActorAnimationClip::Walk => figure.clips.get("walk"),
-        };
+        let clip = figure.clips.get(animation.clip.as_str());
         if let Some(clip) = clip {
-            let time_seconds = clip_time_for_animation_distance(clip, animation.distance);
+            let time_seconds = match animation.phase {
+                ActorAnimationPhase::Distance(distance) => {
+                    clip_time_for_animation_distance(clip, distance)
+                }
+                ActorAnimationPhase::ElapsedSeconds(elapsed_seconds) => elapsed_seconds.max(0.0),
+            };
             for (part_index, keys) in &clip.tracks {
                 if *part_index < transforms.len() {
                     transforms[*part_index] = sample_clip_track(keys, time_seconds, clip);

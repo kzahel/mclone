@@ -10,8 +10,9 @@ use std::error::Error;
 use std::fmt;
 
 use mclone_core::{
-    AxisTopology, BlockHitResult, BlockPos, BlockStateId, CHUNK_WIDTH, ChunkPos, ChunkRevision,
-    ChunkSnapshot, ChunkStatus, Direction, HorizontalTopology, LIGHT_DATA_LAYER_BYTE_COUNT,
+    AnimationClipId, AnimationPhaseSource, AnimationState, AxisTopology, BlockHitResult, BlockPos,
+    BlockStateId, CHUNK_WIDTH, ChunkPos, ChunkRevision, ChunkSnapshot, ChunkStatus, Direction,
+    HorizontalTopology, LIGHT_DATA_LAYER_BYTE_COUNT, MAX_ANIMATION_CLIP_ID_BYTES,
     PackedChunkSection, PackedLightSection, SECTION_HEIGHT, Vec3d,
 };
 
@@ -42,7 +43,7 @@ pub use statistics::{
     SUCCESSFUL_BLOCK_PLACEMENT_STATISTIC_VALUE_KEY, StatisticKey, StatisticKeyError,
 };
 
-pub const PROTOCOL_VERSION: u32 = 35;
+pub const PROTOCOL_VERSION: u32 = 36;
 pub const HOTBAR_SLOT_COUNT: u8 = 9;
 pub const HOTBAR_SLOT_COUNT_USIZE: usize = HOTBAR_SLOT_COUNT as usize;
 pub const MAX_PLAYER_DISPLAY_NAME_BYTES: usize = 16;
@@ -645,6 +646,7 @@ pub struct EntitySnapshot {
     pub item_stack: Option<ItemStackSnapshot>,
     pub mallard: Option<MallardSnapshotData>,
     pub mallard_nest: Option<MallardNestSnapshotData>,
+    pub animation: Option<AnimationState>,
     pub position: Vec3d,
     pub y_rot_degrees: f32,
     pub x_rot_degrees: f32,
@@ -661,6 +663,7 @@ pub struct EntityUpdate {
     pub item_stack: Option<ItemStackSnapshot>,
     pub mallard: Option<MallardUpdateData>,
     pub mallard_nest: Option<MallardNestUpdateData>,
+    pub animation: Option<AnimationState>,
     pub position: Vec3d,
     pub y_rot_degrees: f32,
     pub x_rot_degrees: f32,
@@ -1343,6 +1346,7 @@ fn validate_entity_snapshot(snapshot: &EntitySnapshot) -> ProtocolCodecResult<()
             incubation_required: data.incubation_required,
             attended: data.attended,
         }),
+        animation: snapshot.animation,
         position: snapshot.position,
         y_rot_degrees: snapshot.y_rot_degrees,
         x_rot_degrees: snapshot.x_rot_degrees,
@@ -1414,6 +1418,15 @@ fn validate_entity_update(update: &EntityUpdate) -> ProtocolCodecResult<()> {
         return Err(ProtocolCodecError::InvalidData(
             "mallard nest update has invalid incubation progress",
         ));
+    }
+    if let Some(animation) = update.animation {
+        AnimationClipId::parse(animation.clip.as_str())
+            .map_err(|_| ProtocolCodecError::InvalidData("entity animation has invalid clip id"))?;
+        if animation.phase_source == AnimationPhaseSource::Distance && animation.start_tick != 0 {
+            return Err(ProtocolCodecError::InvalidData(
+                "distance animation must not carry an elapsed start tick",
+            ));
+        }
     }
     Ok(())
 }
@@ -1819,6 +1832,8 @@ impl ByteWriter {
         self.write_optional_item_stack_snapshot(snapshot.item_stack);
         self.write_optional_mallard_snapshot_data(snapshot.mallard);
         self.write_optional_mallard_nest_snapshot_data(snapshot.mallard_nest);
+        self.write_optional_animation_state(snapshot.animation)
+            .expect("validated entity animation");
         self.write_vec3d(snapshot.position);
         self.write_f32(snapshot.y_rot_degrees);
         self.write_f32(snapshot.x_rot_degrees);
@@ -1844,6 +1859,8 @@ impl ByteWriter {
         self.write_optional_item_stack_snapshot(update.item_stack);
         self.write_optional_mallard_update_data(update.mallard);
         self.write_optional_mallard_nest_update_data(update.mallard_nest);
+        self.write_optional_animation_state(update.animation)
+            .expect("validated entity animation");
         self.write_vec3d(update.position);
         self.write_f32(update.y_rot_degrees);
         self.write_f32(update.x_rot_degrees);
@@ -1882,6 +1899,23 @@ impl ByteWriter {
             self.write_u32(data.incubation_required);
             self.write_bool(data.attended);
         }
+    }
+
+    fn write_optional_animation_state(
+        &mut self,
+        state: Option<AnimationState>,
+    ) -> ProtocolCodecResult<()> {
+        self.write_bool(state.is_some());
+        if let Some(state) = state {
+            self.write_string("animation clip id", state.clip.as_str())?;
+            self.write_u8(match state.phase_source {
+                AnimationPhaseSource::Distance => 0,
+                AnimationPhaseSource::Elapsed => 1,
+            });
+            self.write_u32(state.epoch);
+            self.write_u64(state.start_tick);
+        }
+        Ok(())
     }
 
     fn write_optional_mallard_nest_update_data(&mut self, data: Option<MallardNestUpdateData>) {
@@ -2440,6 +2474,7 @@ impl<'a> ByteReader<'a> {
             item_stack: self.read_optional_item_stack_snapshot()?,
             mallard: self.read_optional_mallard_snapshot_data()?,
             mallard_nest: self.read_optional_mallard_nest_snapshot_data()?,
+            animation: self.read_optional_animation_state()?,
             position: self.read_vec3d()?,
             y_rot_degrees: self.read_f32()?,
             x_rot_degrees: self.read_f32()?,
@@ -2531,12 +2566,43 @@ impl<'a> ByteReader<'a> {
             .transpose()
     }
 
+    fn read_optional_animation_state(&mut self) -> ProtocolCodecResult<Option<AnimationState>> {
+        if !self.read_bool()? {
+            return Ok(None);
+        }
+        let clip = self.read_string("animation clip id", MAX_ANIMATION_CLIP_ID_BYTES)?;
+        let clip = AnimationClipId::parse(&clip)
+            .map_err(|_| ProtocolCodecError::InvalidData("entity animation has invalid clip id"))?;
+        let phase_source = match self.read_u8()? {
+            0 => AnimationPhaseSource::Distance,
+            1 => AnimationPhaseSource::Elapsed,
+            _ => {
+                return Err(ProtocolCodecError::InvalidData(
+                    "entity animation has unknown phase source",
+                ));
+            }
+        };
+        let state = AnimationState {
+            clip,
+            phase_source,
+            epoch: self.read_u32()?,
+            start_tick: self.read_u64()?,
+        };
+        if phase_source == AnimationPhaseSource::Distance && state.start_tick != 0 {
+            return Err(ProtocolCodecError::InvalidData(
+                "distance animation must not carry an elapsed start tick",
+            ));
+        }
+        Ok(Some(state))
+    }
+
     fn read_entity_update(&mut self) -> ProtocolCodecResult<EntityUpdate> {
         let update = EntityUpdate {
             id: self.read_entity_id()?,
             item_stack: self.read_optional_item_stack_snapshot()?,
             mallard: self.read_optional_mallard_update_data()?,
             mallard_nest: self.read_optional_mallard_nest_update_data()?,
+            animation: self.read_optional_animation_state()?,
             position: self.read_vec3d()?,
             y_rot_degrees: self.read_f32()?,
             x_rot_degrees: self.read_f32()?,
@@ -3033,6 +3099,11 @@ mod tests {
                 in_water: true,
             }),
             mallard_nest: None,
+            animation: Some(AnimationState::elapsed(
+                AnimationClipId::from_static("alert"),
+                3,
+                10,
+            )),
             position: Vec3d::new(12.5, 70.0, -3.25),
             y_rot_degrees: 90.0,
             x_rot_degrees: -15.0,
@@ -3055,6 +3126,10 @@ mod tests {
                 in_water: false,
             }),
             mallard_nest: None,
+            animation: Some(AnimationState::distance(
+                AnimationClipId::from_static("waddle"),
+                4,
+            )),
             position: Vec3d::new(13.5, 70.0, -3.25),
             y_rot_degrees: 45.0,
             x_rot_degrees: 0.0,
@@ -3098,6 +3173,7 @@ mod tests {
             }),
             mallard: None,
             mallard_nest: None,
+            animation: None,
             position: Vec3d::new(12.5, 64.0, -3.25),
             y_rot_degrees: 0.0,
             x_rot_degrees: 0.0,
@@ -3120,6 +3196,7 @@ mod tests {
             }),
             mallard: None,
             mallard_nest: None,
+            animation: None,
             position: snapshot.position,
             y_rot_degrees: snapshot.y_rot_degrees,
             x_rot_degrees: snapshot.x_rot_degrees,
@@ -3158,6 +3235,7 @@ mod tests {
             item_stack: None,
             mallard: None,
             mallard_nest: None,
+            animation: None,
             position: Vec3d::new(f64::NAN, 70.0, -3.25),
             y_rot_degrees: 90.0,
             x_rot_degrees: -15.0,
@@ -3179,6 +3257,7 @@ mod tests {
             item_stack: None,
             mallard: None,
             mallard_nest: None,
+            animation: None,
             position: Vec3d::new(1.0, 70.0, -3.25),
             y_rot_degrees: 90.0,
             x_rot_degrees: -15.0,
@@ -3202,6 +3281,7 @@ mod tests {
             item_stack: None,
             mallard: None,
             mallard_nest: None,
+            animation: None,
             position: Vec3d::new(1.0, 70.0, -3.25),
             y_rot_degrees: 90.0,
             x_rot_degrees: -15.0,
@@ -3228,6 +3308,7 @@ mod tests {
             }),
             mallard: None,
             mallard_nest: None,
+            animation: None,
             position: Vec3d::new(1.0, 70.0, -3.25),
             y_rot_degrees: 90.0,
             x_rot_degrees: -15.0,
@@ -3249,6 +3330,7 @@ mod tests {
             item_stack: None,
             mallard: None,
             mallard_nest: None,
+            animation: None,
             position: Vec3d::new(1.0, 70.0, -3.25),
             y_rot_degrees: 90.0,
             x_rot_degrees: -15.0,

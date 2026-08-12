@@ -1,11 +1,16 @@
 #![forbid(unsafe_code)]
 
+mod animation;
 mod bit_storage;
 mod chunk;
 mod pos;
 pub mod time;
 mod topology;
 
+pub use animation::{
+    AnimationClipId, AnimationClipIdError, AnimationPhaseSource, AnimationState,
+    MAX_ANIMATION_CLIP_ID_BYTES,
+};
 pub use bit_storage::{BitStorage, local_palette_bits_for, palette_bits_for};
 pub use chunk::{
     AIR_BLOCK_STATE_ID, BlockStateId, CHUNK_SECTION_VOLUME, CHUNK_WIDTH, ChunkPos, ChunkRevision,

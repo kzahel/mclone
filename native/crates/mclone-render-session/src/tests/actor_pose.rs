@@ -117,6 +117,11 @@ fn chicken_entity_actor_uses_chicken_figure() {
         on_ground: true,
         width: 0.4,
         height: 0.7,
+        animation: Some(mclone_core::AnimationState::distance(
+            mclone_core::AnimationClipId::from_static("walk"),
+            0,
+        )),
+        animation_clock_tick: 0,
         walk_animation_distance: 0.25,
         chicken_wing_flap_radians: Some(0.4),
     };
@@ -156,6 +161,11 @@ fn cow_entity_actor_uses_authored_cow_figure() {
         on_ground: true,
         width: 0.9,
         height: 1.4,
+        animation: Some(mclone_core::AnimationState::distance(
+            mclone_core::AnimationClipId::from_static("walk"),
+            0,
+        )),
+        animation_clock_tick: 0,
         walk_animation_distance: 0.25,
         chicken_wing_flap_radians: None,
     };
@@ -190,6 +200,11 @@ fn mallard_entity_actor_uses_authored_mallard_figure() {
         on_ground: true,
         width: 0.7,
         height: 0.75,
+        animation: Some(mclone_core::AnimationState::distance(
+            mclone_core::AnimationClipId::from_static("waddle"),
+            0,
+        )),
+        animation_clock_tick: 0,
         walk_animation_distance: 0.25,
         chicken_wing_flap_radians: None,
     };
@@ -205,6 +220,49 @@ fn mallard_entity_actor_uses_authored_mallard_figure() {
     assert_eq!(actors[0].height, 0.75);
     assert_eq!(actors[0].feet_position, Vec3::new(1.0, 64.0, 2.0));
     assert!(actors[0].animation.is_some());
+    assert_eq!(
+        actors[0].animation.expect("mallard animation").clip,
+        mclone_core::AnimationClipId::from_static("waddle")
+    );
+}
+
+#[test]
+fn elapsed_action_uses_the_replicated_world_clock_without_restarting() {
+    let client = ClientRuntime::local_integrated();
+    let presentation = ActorPresentation {
+        id: ActorPresentationId::Entity(mclone_protocol::EntityId(91)),
+        kind: ActorPresentationKind::Entity(mclone_protocol::EntityKind::Cow),
+        appearance: ActorAppearance::NONE,
+        item_stack: None,
+        mallard_life_stage: None,
+        in_water: false,
+        mallard_nest: None,
+        feet_position: Vec3d::new(1.0, 64.0, 2.0),
+        y_rot_degrees: 0.0,
+        x_rot_degrees: 0.0,
+        rotation: None,
+        on_ground: true,
+        width: 0.9,
+        height: 1.4,
+        animation: Some(mclone_core::AnimationState::elapsed(
+            mclone_core::AnimationClipId::from_static("alert"),
+            6,
+            100,
+        )),
+        animation_clock_tick: 140,
+        walk_animation_distance: 7.5,
+        chicken_wing_flap_radians: None,
+    };
+
+    let actor = actor_instances_from_presentations(&[presentation], &client)[0];
+
+    assert_eq!(
+        actor.animation,
+        Some(mclone_render::entity::ActorAnimation {
+            clip: mclone_core::AnimationClipId::from_static("alert"),
+            phase: mclone_render::entity::ActorAnimationPhase::ElapsedSeconds(2.0),
+        })
+    );
 }
 
 #[test]
@@ -225,6 +283,11 @@ fn swimming_mallard_sinks_its_figure_below_the_waterline() {
         on_ground: false,
         width: 0.7,
         height: 0.75,
+        animation: Some(mclone_core::AnimationState::distance(
+            mclone_core::AnimationClipId::from_static("waddle"),
+            0,
+        )),
+        animation_clock_tick: 0,
         walk_animation_distance: 0.25,
         chicken_wing_flap_radians: None,
     };
@@ -266,6 +329,8 @@ fn actor_instance_identity_is_stable_across_presentation_reordering() {
         on_ground: true,
         width: 0.6,
         height: 1.8,
+        animation: None,
+        animation_clock_tick: 0,
         walk_animation_distance: 0.0,
         chicken_wing_flap_radians: None,
     };
@@ -308,6 +373,8 @@ fn actor_instance_selects_the_lift_nearest_its_observer() {
         on_ground: true,
         width: 0.6,
         height: 1.8,
+        animation: None,
+        animation_clock_tick: 0,
         walk_animation_distance: 0.0,
         chicken_wing_flap_radians: None,
     };
@@ -350,6 +417,8 @@ fn item_entity_actor_uses_egg_item_shape() {
         on_ground: false,
         width: 0.25,
         height: 0.25,
+        animation: None,
+        animation_clock_tick: 0,
         walk_animation_distance: 0.0,
         chicken_wing_flap_radians: None,
     };
@@ -386,6 +455,8 @@ fn mallard_egg_item_actor_uses_egg_item_shape() {
         on_ground: false,
         width: 0.25,
         height: 0.25,
+        animation: None,
+        animation_clock_tick: 0,
         walk_animation_distance: 0.0,
         chicken_wing_flap_radians: None,
     };
@@ -420,6 +491,8 @@ fn mallard_feather_item_actor_uses_live_semantic_prop() {
         on_ground: false,
         width: 0.25,
         height: 0.25,
+        animation: None,
+        animation_clock_tick: 0,
         walk_animation_distance: 0.0,
         chicken_wing_flap_radians: None,
     };
@@ -457,6 +530,8 @@ fn mallard_nest_entity_actor_uses_live_semantic_prop() {
         on_ground: true,
         width: 0.8,
         height: 0.32,
+        animation: None,
+        animation_clock_tick: 0,
         walk_animation_distance: 0.0,
         chicken_wing_flap_radians: None,
     };
