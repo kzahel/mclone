@@ -1119,7 +1119,10 @@ mod tests {
         let source = mclone_assets::FilesystemAssetSource::new("../../..");
         let figures = load_first_party_actor_figures(&source).unwrap();
 
-        assert_eq!(figures.len(), 4);
+        assert_eq!(
+            figures.len(),
+            mclone_assets::FIRST_PARTY_ACTOR_FIGURE_IDS.len()
+        );
         for id in mclone_assets::FIRST_PARTY_ACTOR_FIGURE_IDS {
             assert!(figures.get(id).is_some(), "legacy figure {}", id.as_str());
             assert!(
