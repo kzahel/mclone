@@ -2409,31 +2409,135 @@ mod tests {
     }
 
     #[test]
-    fn mallards_float_cohere_separate_and_take_a_shore_phase() {
+    fn mallards_retain_destinations_and_move_without_stationary_yaw_jitter() {
         let mut store = ServerEntityStore::default();
-        let left =
-            store.insert_passive_mob_for_test(EntityKind::Mallard, Vec3d::new(3.5, 64.2, 4.5), 0.0);
-        let right =
-            store.insert_passive_mob_for_test(EntityKind::Mallard, Vec3d::new(8.5, 64.2, 4.5), 0.0);
+        let first =
+            store.insert_passive_mob_for_test(EntityKind::Mallard, Vec3d::new(5.5, 64.2, 4.5), 0.0);
+        let second =
+            store.insert_passive_mob_for_test(EntityKind::Mallard, Vec3d::new(7.5, 64.2, 4.5), 0.0);
+        let ticking_chunks = (-1..=1)
+            .flat_map(|x| (-1..=1).map(move |z| ChunkPos::new(x, z)))
+            .collect::<Vec<_>>();
+        let starts = [
+            store.state(first).unwrap().position,
+            store.state(second).unwrap().position,
+        ];
 
-        store.tick_stationary(&[ChunkPos::new(0, 0)], &[], broad_shallow_water);
-        let left_after = store.state(left).unwrap();
-        let right_after = store.state(right).unwrap();
-        assert!(left_after.mallard.unwrap().in_water);
-        assert!(left_after.position.y > 64.2);
-        assert!(left_after.position.x > 3.5);
-        assert!(right_after.position.x < 8.5);
+        store.tick_stationary(&ticking_chunks, &[], broad_shallow_water);
+        let (first_target, first_remaining) = store
+            .mob_state(first)
+            .and_then(MobRuntimeState::mallard_habitat_intent_for_test)
+            .expect("first mallard retained habitat intent");
+        assert!(squared_distance_xz(starts[0], first_target) >= 2.5 * 2.5);
+        store.tick_stationary(&ticking_chunks, &[], broad_shallow_water);
+        let (second_target, second_remaining) = store
+            .mob_state(first)
+            .and_then(MobRuntimeState::mallard_habitat_intent_for_test)
+            .expect("first mallard retained habitat intent on second tick");
+        assert_eq!(second_target, first_target);
+        assert_eq!(second_remaining + 1, first_remaining);
 
-        store.entities.get_mut(&right).unwrap().position = Vec3d::new(3.8, 64.2, 4.5);
-        let before_separation = store.state(left).unwrap().position.x;
-        store.tick_stationary(&[ChunkPos::new(0, 0)], &[], broad_shallow_water);
-        assert!(store.state(left).unwrap().position.x < before_separation);
+        let mut previous = [store.state(first).unwrap(), store.state(second).unwrap()];
+        let mut traveled = [0.0_f64; 2];
+        let mut water_seen = [false; 2];
+        let mut shore_seen = [false; 2];
+        let mut stationary_yaw_changes = 0_u32;
+        let mut healthy_spacing_ticks = 0_u32;
+        let mut collapsed_spacing_ticks = 0_u32;
+        let mut max_spacing = 0.0_f64;
+        let mut turn_reversals = [0_u32; 2];
+        let mut previous_turn_sign = [0_i8; 2];
+        for _ in 0..1_200 {
+            store.tick_stationary(&ticking_chunks, &[], broad_shallow_water);
+            let current = [store.state(first).unwrap(), store.state(second).unwrap()];
+            for index in 0..2 {
+                let distance_sqr =
+                    squared_distance_xz(previous[index].position, current[index].position);
+                traveled[index] += distance_sqr.sqrt();
+                let yaw_delta = wrapped_degrees_delta(
+                    previous[index].y_rot_degrees,
+                    current[index].y_rot_degrees,
+                );
+                if distance_sqr <= 1.0e-10 && yaw_delta.abs() > 1.0e-4 {
+                    stationary_yaw_changes += 1;
+                }
+                assert!(
+                    yaw_delta.abs() <= 12.001,
+                    "mallard turn exceeded bound: {yaw_delta}"
+                );
+                let sign = if yaw_delta > 1.0 {
+                    1
+                } else if yaw_delta < -1.0 {
+                    -1
+                } else {
+                    0
+                };
+                if sign != 0 && previous_turn_sign[index] != 0 && sign != previous_turn_sign[index]
+                {
+                    turn_reversals[index] += 1;
+                }
+                if sign != 0 {
+                    previous_turn_sign[index] = sign;
+                }
+                let in_water = current[index]
+                    .mallard
+                    .is_some_and(|mallard| mallard.in_water);
+                water_seen[index] |= in_water;
+                shore_seen[index] |= !in_water && current[index].on_ground;
+            }
+            let spacing = squared_distance_xz(current[0].position, current[1].position).sqrt();
+            healthy_spacing_ticks += u32::from((1.0..=12.0).contains(&spacing));
+            collapsed_spacing_ticks += u32::from(spacing < 0.8);
+            max_spacing = max_spacing.max(spacing);
+            previous = current;
+        }
 
-        store.remove_entity(right);
-        store.entities.get_mut(&left).unwrap().position = Vec3d::new(6.5, 64.2, 4.5);
-        store.entities.get_mut(&left).unwrap().tick_count = 500;
-        store.tick_stationary(&[ChunkPos::new(0, 0)], &[], broad_shallow_water);
-        assert!(store.state(left).unwrap().position.x < 6.5);
+        assert_eq!(stationary_yaw_changes, 0);
+        assert!(
+            traveled.iter().all(|distance| *distance > 12.0),
+            "traveled={traveled:?}"
+        );
+        assert!(
+            water_seen.iter().all(|seen| *seen),
+            "water_seen={water_seen:?}"
+        );
+        assert!(
+            shore_seen.iter().all(|seen| *seen),
+            "shore_seen={shore_seen:?} states={:?} intents={:?}",
+            previous,
+            [
+                store
+                    .mob_state(first)
+                    .and_then(MobRuntimeState::mallard_habitat_intent_for_test),
+                store
+                    .mob_state(second)
+                    .and_then(MobRuntimeState::mallard_habitat_intent_for_test),
+            ]
+        );
+        assert!(
+            healthy_spacing_ticks > 780,
+            "healthy_spacing_ticks={healthy_spacing_ticks}"
+        );
+        assert!(
+            collapsed_spacing_ticks < 20,
+            "collapsed_spacing_ticks={collapsed_spacing_ticks}"
+        );
+        assert!(max_spacing < 20.0, "max_spacing={max_spacing}");
+        assert!(
+            turn_reversals.iter().all(|count| *count < 80),
+            "turn_reversals={turn_reversals:?}"
+        );
+    }
+
+    fn wrapped_degrees_delta(previous: f32, current: f32) -> f32 {
+        let mut delta = (current - previous) % 360.0;
+        if delta >= 180.0 {
+            delta -= 360.0;
+        }
+        if delta < -180.0 {
+            delta += 360.0;
+        }
+        delta
     }
 
     #[test]

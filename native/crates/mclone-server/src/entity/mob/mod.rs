@@ -38,6 +38,12 @@ const MOB_GROUND_DRAG_MULTIPLIER: f64 = 0.91;
 const MOB_AIR_DRAG: f64 = 0.91;
 const MOB_FLYING_SPEED: f64 = 0.02;
 const MOB_INPUT_EPSILON_SQR: f64 = 1.0e-7;
+const MALLARD_HABITAT_SEARCH_RADIUS: i32 = 9;
+const MALLARD_MIN_DESTINATION_DISTANCE_SQR: f64 = 2.5 * 2.5;
+const MALLARD_INTENT_MIN_TICKS: u16 = 160;
+const MALLARD_INTENT_RANDOM_TICKS: i32 = 161;
+const MALLARD_TARGET_REACHED_DISTANCE_SQR: f64 = 0.35 * 0.35;
+const MALLARD_MAX_TURN_DEGREES: f32 = 12.0;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct PathfindingMalusTable {
@@ -68,6 +74,19 @@ pub(crate) struct MallardFlockmateTarget {
     pub(crate) position: Vec3d,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum MallardHabitatKind {
+    Water,
+    Shore,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct MallardHabitatIntent {
+    kind: MallardHabitatKind,
+    target: Vec3d,
+    ticks_remaining: u16,
+}
+
 impl MobPlayerTarget {
     pub(crate) fn from_position(position: Vec3d) -> Self {
         Self {
@@ -95,6 +114,8 @@ pub(crate) struct MobRuntimeState {
     jump_control: JumpControl,
     look_control: LookControl,
     mallard_in_water: bool,
+    mallard_habitat_intent: Option<MallardHabitatIntent>,
+    mallard_seek_shore_next: bool,
 }
 
 impl MobRuntimeState {
@@ -143,6 +164,8 @@ impl MobRuntimeState {
             jump_control: JumpControl::default(),
             look_control: LookControl::default(),
             mallard_in_water: false,
+            mallard_habitat_intent: None,
+            mallard_seek_shore_next: false,
         }
     }
 
@@ -194,6 +217,8 @@ impl MobRuntimeState {
             jump_control: JumpControl::default(),
             look_control: LookControl::default(),
             mallard_in_water: false,
+            mallard_habitat_intent: None,
+            mallard_seek_shore_next: false,
         }
     }
 
@@ -201,6 +226,7 @@ impl MobRuntimeState {
         self.on_ground = entity.on_ground;
         self.y_body_rot_degrees = entity.y_rot_degrees;
         self.y_head_rot_degrees = entity.y_rot_degrees;
+        self.mallard_habitat_intent = None;
     }
 
     pub(crate) const fn no_action_time(&self) -> u32 {
@@ -367,36 +393,59 @@ impl MobRuntimeState {
         F: Fn(BlockPos) -> Option<BlockStateId>,
     {
         let water = mallard_water_occupancy(entity.position, block_state_at);
-        let seek_shore = entity.tick_count % 600 >= 440;
-        let habitat_target = if seek_shore {
-            nearest_mallard_shore(entity.position, block_state_at)
-        } else {
-            nearest_shallow_water_surface(entity.position, block_state_at)
-        };
-        if water.is_none() && habitat_target.is_none() {
-            return false;
+        if self.mallard_habitat_intent.is_some_and(|intent| {
+            intent.ticks_remaining == 0 || !mallard_intent_is_valid(intent, block_state_at)
+        }) {
+            self.mallard_habitat_intent = None;
+        }
+        if let Some(intent) = self.mallard_habitat_intent.as_mut() {
+            intent.ticks_remaining = intent.ticks_remaining.saturating_sub(1);
         }
 
-        let mut target = habitat_target.unwrap_or(entity.position);
-        if let Some(flockmate) = nearest_flockmate(entity.position, flockmates) {
+        if self.mallard_habitat_intent.is_none() {
+            self.mallard_habitat_intent =
+                self.choose_mallard_habitat_intent(entity.position, water, block_state_at);
+        }
+        let Some(intent) = self.mallard_habitat_intent else {
+            return false;
+        };
+
+        let mut steer_x = intent.target.x - entity.position.x;
+        let mut steer_z = intent.target.z - entity.position.z;
+        let target_distance_sqr = steer_x * steer_x + steer_z * steer_z;
+        let target_reached = target_distance_sqr <= MALLARD_TARGET_REACHED_DISTANCE_SQR;
+        if target_reached {
+            steer_x = 0.0;
+            steer_z = 0.0;
+            if let Some(intent) = self.mallard_habitat_intent.as_mut() {
+                intent.ticks_remaining = intent.ticks_remaining.min(30);
+            }
+        } else {
+            let target_distance = target_distance_sqr.sqrt();
+            steer_x /= target_distance;
+            steer_z /= target_distance;
+        }
+        if !target_reached && let Some(flockmate) = nearest_flockmate(entity.position, flockmates) {
             let dx = flockmate.position.x - entity.position.x;
             let dz = flockmate.position.z - entity.position.z;
             let distance_sqr = dx * dx + dz * dz;
             if distance_sqr < 1.5 * 1.5 && distance_sqr > 1.0e-8 {
-                target = Vec3d::new(entity.position.x - dx, target.y, entity.position.z - dz);
-            } else if distance_sqr > 3.5 * 3.5 && distance_sqr < 10.0 * 10.0 {
-                target = Vec3d::new(flockmate.position.x, target.y, flockmate.position.z);
+                let distance = distance_sqr.sqrt();
+                steer_x -= dx / distance * 1.5;
+                steer_z -= dz / distance * 1.5;
+            } else if distance_sqr > 4.0 * 4.0 && distance_sqr < 24.0 * 24.0 {
+                let distance = distance_sqr.sqrt();
+                steer_x += dx / distance * 0.25;
+                steer_z += dz / distance * 0.25;
             }
         }
 
-        let dx = target.x - entity.position.x;
-        let dz = target.z - entity.position.z;
-        let horizontal_length = (dx * dx + dz * dz).sqrt();
+        let horizontal_length = (steer_x * steer_x + steer_z * steer_z).sqrt();
         let speed = if water.is_some() { 0.045 } else { 0.035 };
         let (move_x, move_z) = if horizontal_length > 1.0e-6 {
             (
-                dx / horizontal_length * speed,
-                dz / horizontal_length * speed,
+                steer_x / horizontal_length * speed,
+                steer_z / horizontal_length * speed,
             )
         } else {
             (0.0, 0.0)
@@ -418,8 +467,13 @@ impl MobRuntimeState {
             entity.on_ground,
         );
         entity.position = entity.position.add(traveled);
-        if horizontal_length > 1.0e-6 {
-            entity.y_rot_degrees = (-dx).atan2(dz).to_degrees() as f32;
+        if traveled.x * traveled.x + traveled.z * traveled.z > 1.0e-8 {
+            let wanted_y_rot = (-traveled.x).atan2(traveled.z).to_degrees() as f32;
+            entity.y_rot_degrees = rotate_degrees_towards(
+                entity.y_rot_degrees,
+                wanted_y_rot,
+                MALLARD_MAX_TURN_DEGREES,
+            );
             self.y_body_rot_degrees = entity.y_rot_degrees;
             self.y_head_rot_degrees = entity.y_rot_degrees;
         }
@@ -439,6 +493,53 @@ impl MobRuntimeState {
             )
         };
         true
+    }
+
+    fn choose_mallard_habitat_intent<F>(
+        &mut self,
+        position: Vec3d,
+        water: Option<f64>,
+        block_state_at: &F,
+    ) -> Option<MallardHabitatIntent>
+    where
+        F: Fn(BlockPos) -> Option<BlockStateId>,
+    {
+        let preferred_kind = if water.is_some() && self.mallard_seek_shore_next {
+            MallardHabitatKind::Shore
+        } else {
+            MallardHabitatKind::Water
+        };
+        let preferred_target = match preferred_kind {
+            MallardHabitatKind::Water => {
+                random_shallow_water_surface(position, &mut self.random, block_state_at)
+            }
+            MallardHabitatKind::Shore => {
+                random_mallard_shore(position, &mut self.random, block_state_at)
+            }
+        };
+        let (kind, target) = if let Some(target) = preferred_target {
+            (preferred_kind, target)
+        } else if preferred_kind == MallardHabitatKind::Shore {
+            (
+                MallardHabitatKind::Water,
+                random_shallow_water_surface(position, &mut self.random, block_state_at)?,
+            )
+        } else if let Some(surface_y) = water {
+            (
+                MallardHabitatKind::Water,
+                Vec3d::new(position.x, surface_y, position.z),
+            )
+        } else {
+            return None;
+        };
+
+        self.mallard_seek_shore_next = kind == MallardHabitatKind::Water;
+        Some(MallardHabitatIntent {
+            kind,
+            target,
+            ticks_remaining: MALLARD_INTENT_MIN_TICKS
+                + self.random.next_int_bound(MALLARD_INTENT_RANDOM_TICKS) as u16,
+        })
     }
 
     #[cfg(test)]
@@ -519,6 +620,12 @@ impl MobRuntimeState {
         self.species
             .mallard_mut()
             .is_some_and(|mallard| mallard.take_due_call(&mut self.random))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn mallard_habitat_intent_for_test(&self) -> Option<(Vec3d, u16)> {
+        self.mallard_habitat_intent
+            .map(|intent| (intent.target, intent.ticks_remaining))
     }
 
     #[cfg(test)]
@@ -932,82 +1039,127 @@ fn mallard_water_occupancy(
         .then_some(f64::from(feet.y) + 0.88)
 }
 
-fn nearest_shallow_water_surface(
+fn random_shallow_water_surface(
     position: Vec3d,
+    random: &mut SimpleRandomSource,
     block_state_at: &dyn Fn(BlockPos) -> Option<BlockStateId>,
 ) -> Option<Vec3d> {
     let center = BlockPos::containing(position);
-    (0_i32..=6)
-        .flat_map(|radius| {
-            (-radius..=radius).flat_map(move |dx| {
-                (-radius..=radius)
-                    .filter(move |dz| dx.abs() + dz.abs() == radius)
-                    .map(move |dz| (dx, dz))
-            })
-        })
-        .find_map(|(dx, dz)| {
-            (-1..=1).find_map(|dy| {
-                let water = center.offset(dx, dy, dz);
-                let state = block_state_at(water)?;
-                if block_fluid_kind(state) != BlockFluidKind::Water {
-                    return None;
+    let mut chosen = None;
+    let mut candidate_count = 0_i32;
+    for radius in 1_i32..=MALLARD_HABITAT_SEARCH_RADIUS {
+        for dx in -radius..=radius {
+            for dz in -radius..=radius {
+                if dx.abs() + dz.abs() != radius
+                    || f64::from(dx * dx + dz * dz) < MALLARD_MIN_DESTINATION_DISTANCE_SQR
+                {
+                    continue;
                 }
-                let shallow = (1..=2).any(|depth| {
-                    let bed = water.offset(0, -depth, 0);
-                    block_state_at(bed)
-                        .and_then(|state| mclone_blocks::block_collision_aabb(state, bed))
-                        .is_some()
-                });
-                shallow.then_some(Vec3d::new(
-                    f64::from(water.x) + 0.5,
-                    f64::from(water.y) + 0.88,
-                    f64::from(water.z) + 0.5,
-                ))
-            })
-        })
+                for dy in -1..=1 {
+                    let water = center.offset(dx, dy, dz);
+                    let Some(target) = shallow_water_surface_at(water, block_state_at) else {
+                        continue;
+                    };
+                    candidate_count += 1;
+                    if random.next_int_bound(candidate_count) == 0 {
+                        chosen = Some(target);
+                    }
+                }
+            }
+        }
+    }
+    chosen
 }
 
-fn nearest_mallard_shore(
+fn random_mallard_shore(
     position: Vec3d,
+    random: &mut SimpleRandomSource,
     block_state_at: &dyn Fn(BlockPos) -> Option<BlockStateId>,
 ) -> Option<Vec3d> {
     let center = BlockPos::containing(position);
-    (1_i32..=6).find_map(|radius| {
-        (-radius..=radius).find_map(|dx| {
-            (-radius..=radius)
-                .filter(|dz| dx.abs() + dz.abs() == radius)
-                .find_map(|dz| {
-                    (-1..=1).find_map(|dy| {
-                        let feet = center.offset(dx, dy, dz);
-                        let floor = feet.offset(0, -1, 0);
-                        let space_clear = block_state_at(feet).is_some_and(|state| {
-                            mclone_blocks::block_collision_aabb(state, feet).is_none()
-                        });
-                        let stable_floor = block_state_at(floor).is_some_and(|state| {
-                            mclone_blocks::block_collision_aabb(state, floor).is_some()
-                        });
-                        let near_water = [
-                            mclone_core::Direction::North,
-                            mclone_core::Direction::South,
-                            mclone_core::Direction::West,
-                            mclone_core::Direction::East,
-                        ]
-                        .iter()
-                        .any(|direction| {
-                            let water = feet.relative(*direction);
-                            block_state_at(water).is_some_and(|state| {
-                                block_fluid_kind(state) == BlockFluidKind::Water
-                            })
-                        });
-                        (space_clear && stable_floor && near_water).then_some(Vec3d::new(
-                            f64::from(feet.x) + 0.5,
-                            f64::from(feet.y),
-                            f64::from(feet.z) + 0.5,
-                        ))
-                    })
-                })
-        })
-    })
+    let mut chosen = None;
+    let mut candidate_count = 0_i32;
+    for radius in 1_i32..=MALLARD_HABITAT_SEARCH_RADIUS {
+        for dx in -radius..=radius {
+            for dz in -radius..=radius {
+                if dx.abs() + dz.abs() != radius {
+                    continue;
+                }
+                for dy in -1..=1 {
+                    let feet = center.offset(dx, dy, dz);
+                    let Some(target) = mallard_shore_surface_at(feet, block_state_at) else {
+                        continue;
+                    };
+                    candidate_count += 1;
+                    if random.next_int_bound(candidate_count) == 0 {
+                        chosen = Some(target);
+                    }
+                }
+            }
+        }
+    }
+    chosen
+}
+
+fn mallard_intent_is_valid(
+    intent: MallardHabitatIntent,
+    block_state_at: &dyn Fn(BlockPos) -> Option<BlockStateId>,
+) -> bool {
+    let target = BlockPos::containing(intent.target);
+    match intent.kind {
+        MallardHabitatKind::Water => shallow_water_surface_at(target, block_state_at).is_some(),
+        MallardHabitatKind::Shore => mallard_shore_surface_at(target, block_state_at).is_some(),
+    }
+}
+
+fn shallow_water_surface_at(
+    water: BlockPos,
+    block_state_at: &dyn Fn(BlockPos) -> Option<BlockStateId>,
+) -> Option<Vec3d> {
+    let state = block_state_at(water)?;
+    if block_fluid_kind(state) != BlockFluidKind::Water {
+        return None;
+    }
+    let shallow = (1..=2).any(|depth| {
+        let bed = water.offset(0, -depth, 0);
+        block_state_at(bed)
+            .and_then(|state| mclone_blocks::block_collision_aabb(state, bed))
+            .is_some()
+    });
+    shallow.then_some(Vec3d::new(
+        f64::from(water.x) + 0.5,
+        f64::from(water.y) + 0.88,
+        f64::from(water.z) + 0.5,
+    ))
+}
+
+fn mallard_shore_surface_at(
+    feet: BlockPos,
+    block_state_at: &dyn Fn(BlockPos) -> Option<BlockStateId>,
+) -> Option<Vec3d> {
+    let floor = feet.offset(0, -1, 0);
+    let space_clear = block_state_at(feet).is_some_and(|state| {
+        block_fluid_kind(state) != BlockFluidKind::Water
+            && mclone_blocks::block_collision_aabb(state, feet).is_none()
+    });
+    let stable_floor = block_state_at(floor)
+        .is_some_and(|state| mclone_blocks::block_collision_aabb(state, floor).is_some());
+    let near_water = [
+        mclone_core::Direction::North,
+        mclone_core::Direction::South,
+        mclone_core::Direction::West,
+        mclone_core::Direction::East,
+    ]
+    .iter()
+    .any(|direction| {
+        let water = feet.relative(*direction);
+        block_state_at(water).is_some_and(|state| block_fluid_kind(state) == BlockFluidKind::Water)
+    });
+    (space_clear && stable_floor && near_water).then_some(Vec3d::new(
+        f64::from(feet.x) + 0.5,
+        f64::from(feet.y),
+        f64::from(feet.z) + 0.5,
+    ))
 }
 
 fn nearest_flockmate(
@@ -1032,6 +1184,25 @@ fn squared_horizontal_distance(left: Vec3d, right: Vec3d) -> f64 {
     let dx = left.x - right.x;
     let dz = left.z - right.z;
     dx * dx + dz * dz
+}
+
+fn rotate_degrees_towards(current: f32, wanted: f32, max_delta: f32) -> f32 {
+    let mut difference = (wanted - current) % 360.0;
+    if difference >= 180.0 {
+        difference -= 360.0;
+    }
+    if difference < -180.0 {
+        difference += 360.0;
+    }
+    let mut result = current + difference.clamp(-max_delta, max_delta);
+    result %= 360.0;
+    if result >= 180.0 {
+        result -= 360.0;
+    }
+    if result < -180.0 {
+        result += 360.0;
+    }
+    result
 }
 
 fn block_pos_below_that_affects_movement(position: Vec3d) -> BlockPos {
