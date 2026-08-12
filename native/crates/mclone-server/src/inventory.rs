@@ -334,6 +334,13 @@ mod tests {
         assert_eq!(
             inventory.item_stack_in_slot(0),
             Some(ItemStackSnapshot {
+                kind: ItemKind::HuntingSpear,
+                count: 1,
+            })
+        );
+        assert_eq!(
+            inventory.item_stack_in_slot(1),
+            Some(ItemStackSnapshot {
                 kind: ItemKind::Egg,
                 count: 1,
             })
