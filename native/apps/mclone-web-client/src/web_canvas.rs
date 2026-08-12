@@ -259,6 +259,27 @@ impl WebStartupConfig {
             .and_then(|showcase| playable_showcase_manifest(showcase).ok())
             .map(|manifest| manifest.field_guide_bits)
     }
+
+    #[wasm_bindgen(getter, js_name = showcaseDeerCount)]
+    pub fn showcase_deer_count(&self) -> Option<u32> {
+        self.showcase
+            .and_then(|showcase| playable_showcase_manifest(showcase).ok())
+            .and_then(|manifest| u32::try_from(manifest.deer_count).ok())
+    }
+
+    #[wasm_bindgen(getter, js_name = showcaseDeerBedCount)]
+    pub fn showcase_deer_bed_count(&self) -> Option<u32> {
+        self.showcase
+            .and_then(|showcase| playable_showcase_manifest(showcase).ok())
+            .and_then(|manifest| u32::try_from(manifest.deer_bed_count).ok())
+    }
+
+    #[wasm_bindgen(getter, js_name = showcaseDeerFieldGuideBits)]
+    pub fn showcase_deer_field_guide_bits(&self) -> Option<u32> {
+        self.showcase
+            .and_then(|showcase| playable_showcase_manifest(showcase).ok())
+            .map(|manifest| manifest.deer_field_guide_bits)
+    }
 }
 
 fn format_coordinates(value: [f64; 3]) -> String {

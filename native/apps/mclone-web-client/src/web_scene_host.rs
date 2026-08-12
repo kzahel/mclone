@@ -1715,6 +1715,19 @@ impl WebSceneHost {
                 report_set_bool(&object, "commandSent", true).map_err(JsValue::from)?;
                 report_set_number(&object, "commandCountDelta", 1.0).map_err(JsValue::from)?;
             }
+            MonoWorldActionStatus::SubmittedEntity { target } => {
+                self.interaction_count = self.interaction_count.saturating_add(1);
+                self.command_count = self.command_count.saturating_add(1);
+                self.interaction_sent = true;
+                report_set_bool(&object, "hit", true).map_err(JsValue::from)?;
+                report_set_string(&object, "targetKind", "entity").map_err(JsValue::from)?;
+                report_set_number(&object, "targetEntityId", target.id.0 as f64)
+                    .map_err(JsValue::from)?;
+                report_set_number(&object, "targetDistance", target.distance)
+                    .map_err(JsValue::from)?;
+                report_set_bool(&object, "commandSent", true).map_err(JsValue::from)?;
+                report_set_number(&object, "commandCountDelta", 1.0).map_err(JsValue::from)?;
+            }
             MonoWorldActionStatus::DeniedByWorldBehavior => {
                 report_set_bool(&object, "hit", before_target.is_some()).map_err(JsValue::from)?;
                 report_set_bool(&object, "deniedByWorldBehavior", true).map_err(JsValue::from)?;
@@ -3436,6 +3449,93 @@ impl WebSceneHost {
                     "mallardFieldGuideCount",
                     f64::from(client.mallard_field_guide().discovered_count()),
                 )?;
+                let deer = client
+                    .entity_snapshots()
+                    .filter(|entity| entity.kind == mclone_protocol::EntityKind::Deer)
+                    .collect::<Vec<_>>();
+                report_set_number(&object, "deerCount", deer.len() as f64)?;
+                report_set_number(
+                    &object,
+                    "deerBedCount",
+                    client
+                        .entity_snapshots()
+                        .filter(|entity| entity.kind == mclone_protocol::EntityKind::DeerBed)
+                        .count() as f64,
+                )?;
+                report_set_string(
+                    &object,
+                    "deerEntityIds",
+                    &deer
+                        .iter()
+                        .map(|entity| entity.id.0.to_string())
+                        .collect::<Vec<_>>()
+                        .join(","),
+                )?;
+                report_set_string(
+                    &object,
+                    "deerPositions",
+                    &deer
+                        .iter()
+                        .map(|entity| {
+                            format!(
+                                "{:.4},{:.4},{:.4}",
+                                entity.position.x, entity.position.y, entity.position.z
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join(";"),
+                )?;
+                report_set_string(
+                    &object,
+                    "deerYawDegrees",
+                    &deer
+                        .iter()
+                        .map(|entity| format!("{:.3}", entity.y_rot_degrees))
+                        .collect::<Vec<_>>()
+                        .join(","),
+                )?;
+                report_set_string(
+                    &object,
+                    "deerTickCounts",
+                    &deer
+                        .iter()
+                        .map(|entity| entity.tick_count.to_string())
+                        .collect::<Vec<_>>()
+                        .join(","),
+                )?;
+                report_set_string(
+                    &object,
+                    "deerBehaviors",
+                    &deer
+                        .iter()
+                        .filter_map(|entity| entity.deer.map(|deer| format!("{:?}", deer.behavior)))
+                        .collect::<Vec<_>>()
+                        .join(","),
+                )?;
+                report_set_string(
+                    &object,
+                    "deerAnimationClips",
+                    &deer
+                        .iter()
+                        .map(|entity| {
+                            entity.animation.map_or_else(
+                                || "none".to_owned(),
+                                |animation| animation.clip.to_string(),
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join(","),
+                )?;
+                report_set_number(
+                    &object,
+                    "deerFieldGuideBits",
+                    f64::from(client.deer_field_guide().bits()),
+                )?;
+                report_set_number(
+                    &object,
+                    "deerFieldGuideCount",
+                    f64::from(client.deer_field_guide().discovered_count()),
+                )?;
                 report_set_number(
                     &object,
                     "mallardEggHotbarCount",
@@ -3816,6 +3916,8 @@ impl WebSceneHost {
                             mclone_protocol::EntityKind::Chicken => "chicken",
                             mclone_protocol::EntityKind::Mallard => "mallard",
                             mclone_protocol::EntityKind::MallardNest => "mallardNest",
+                            mclone_protocol::EntityKind::Deer => "deer",
+                            mclone_protocol::EntityKind::DeerBed => "deerBed",
                             mclone_protocol::EntityKind::Mannequin => "mannequin",
                             mclone_protocol::EntityKind::DebugCube => "debugCube",
                             mclone_protocol::EntityKind::Item => "item",
@@ -3903,6 +4005,8 @@ impl WebSceneHost {
                             mclone_protocol::EntityKind::Chicken => "chicken",
                             mclone_protocol::EntityKind::Mallard => "mallard",
                             mclone_protocol::EntityKind::MallardNest => "mallardNest",
+                            mclone_protocol::EntityKind::Deer => "deer",
+                            mclone_protocol::EntityKind::DeerBed => "deerBed",
                             mclone_protocol::EntityKind::Mannequin => "mannequin",
                             mclone_protocol::EntityKind::DebugCube => "debugCube",
                             mclone_protocol::EntityKind::Item => "item",

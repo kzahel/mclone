@@ -4,8 +4,9 @@ use std::fmt;
 
 use mclone_core::{ChunkPos, ChunkRevision, Vec3d, block_to_chunk_coord, block_to_section_coord};
 use mclone_protocol::{
-    ClientIdentity, DimensionKey, EntityRotation, ItemKind, ItemStackSnapshot,
-    MallardFieldGuideProgress, MallardObservationKind,
+    ClientIdentity, DeerBehavior, DeerFieldGuideProgress, DeerLifeStage, DeerObservationKind,
+    DeerSex, DimensionKey, EntityRotation, ItemKind, ItemStackSnapshot, MallardFieldGuideProgress,
+    MallardObservationKind,
 };
 use mclone_worldgen::block::{LILY_PAD, generated_block_state_id};
 use serde::Deserialize;
@@ -31,26 +32,33 @@ const MALLARD_ECOLOGY_RECIPE: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../../assets/mclone/showcases/mallard-ecology.showcase.json"
 ));
+const DEER_FOREST_EDGE_RECIPE: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../../assets/mclone/showcases/deer-forest-edge.showcase.json"
+));
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum PlayableShowcaseId {
     MallardEcology,
+    DeerForestEdge,
 }
 
 impl PlayableShowcaseId {
-    pub const ALL: [Self; 1] = [Self::MallardEcology];
+    pub const ALL: [Self; 2] = [Self::MallardEcology, Self::DeerForestEdge];
 
     pub const fn label(self) -> &'static str {
         match self {
             Self::MallardEcology => "mallard-ecology",
+            Self::DeerForestEdge => "deer-forest-edge",
         }
     }
 
     pub fn parse(value: &str) -> Result<Self, PlayableShowcaseError> {
         match value {
             "mallard-ecology" => Ok(Self::MallardEcology),
+            "deer-forest-edge" => Ok(Self::DeerForestEdge),
             _ => Err(PlayableShowcaseError::invalid(format!(
-                "unknown playable showcase `{value}`; expected mallard-ecology"
+                "unknown playable showcase `{value}`; expected mallard-ecology or deer-forest-edge"
             ))),
         }
     }
@@ -58,6 +66,7 @@ impl PlayableShowcaseId {
     const fn recipe_json(self) -> &'static str {
         match self {
             Self::MallardEcology => MALLARD_ECOLOGY_RECIPE,
+            Self::DeerForestEdge => DEER_FOREST_EDGE_RECIPE,
         }
     }
 }
@@ -79,6 +88,9 @@ pub struct PlayableShowcaseManifest {
     pub mallard_count: usize,
     pub mallard_nest_count: usize,
     pub field_guide_bits: u32,
+    pub deer_count: usize,
+    pub deer_bed_count: usize,
+    pub deer_field_guide_bits: u32,
 }
 
 #[derive(Debug)]
@@ -117,6 +129,10 @@ enum LiveInstantiationSubject {
     MallardEggItem,
     MallardFeatherItem,
     MallardObservation,
+    Deer,
+    DeerBed,
+    HuntingSpear,
+    DeerObservation,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -133,6 +149,30 @@ pub const LIVE_INSTANTIATION_EVIDENCE: &[LiveInstantiationEvidence] = &[
         ordinary_producer: "overworld waterlily random-patch feature",
         contract: "mclone-worldgen::feature::tests::placement::random_patch_places_lily_pad_on_projected_water_surface",
         subject: LiveInstantiationSubject::LilyPad,
+    },
+    LiveInstantiationEvidence {
+        id: "mclone-deer-natural-spawn",
+        ordinary_producer: "forest-edge-qualified passive natural spawning",
+        contract: "mclone-server::entity::spawning::live::tests::mclone_forest_edges_admit_bounded_deer_groups",
+        subject: LiveInstantiationSubject::Deer,
+    },
+    LiveInstantiationEvidence {
+        id: "mclone-deer-repeated-bed-sign",
+        ordinary_producer: "sustained use of a covered deer bedding site",
+        contract: "mclone-server::entity::store::tests::sustained_deer_bedding_creates_one_durable_sign",
+        subject: LiveInstantiationSubject::DeerBed,
+    },
+    LiveInstantiationEvidence {
+        id: "mclone-deer-hunting-spear",
+        ordinary_producer: "fresh ordinary Mclone-world starter inventory",
+        contract: "mclone-server::integrated::tests::entities::hunting_spear_damage_uses_fall_then_persistent_species_drops",
+        subject: LiveInstantiationSubject::HuntingSpear,
+    },
+    LiveInstantiationEvidence {
+        id: "mclone-deer-field-guide-observation",
+        ordinary_producer: "ordinary deer proximity, state, sign, pickup, and harvest observation paths",
+        contract: "mclone-server::integrated::route_deer_observations",
+        subject: LiveInstantiationSubject::DeerObservation,
     },
     LiveInstantiationEvidence {
         id: "mclone-mallard-natural-spawn",
@@ -328,6 +368,8 @@ fn validate_recipe(
             }
             ShowcaseEntityState::Mallard { .. } => LiveInstantiationSubject::AdultMallard,
             ShowcaseEntityState::MallardNest { .. } => LiveInstantiationSubject::MallardNest,
+            ShowcaseEntityState::Deer { .. } => LiveInstantiationSubject::Deer,
+            ShowcaseEntityState::DeerBed { .. } => LiveInstantiationSubject::DeerBed,
         };
         validate_evidence(&entity.live_instantiation, expected)?;
     }
@@ -358,6 +400,33 @@ fn validate_recipe(
                 entity.id
             )));
         }
+        if let ShowcaseEntityState::DeerBed { source } = &entity.state
+            && !entity_ids.contains(source.as_str())
+        {
+            return Err(PlayableShowcaseError::invalid(format!(
+                "showcase deer bed `{}` references missing source `{source}`",
+                entity.id
+            )));
+        }
+        if let ShowcaseEntityState::Deer {
+            sex,
+            life_stage,
+            antlered,
+            health,
+            max_health,
+            ..
+        } = &entity.state
+            && (*max_health == 0
+                || *health > *max_health
+                || (*antlered
+                    && (*sex != ShowcaseDeerSex::Male
+                        || *life_stage != ShowcaseDeerLifeStage::Adult)))
+        {
+            return Err(PlayableShowcaseError::invalid(format!(
+                "showcase deer `{}` has impossible biological state",
+                entity.id
+            )));
+        }
     }
 
     if recipe.player.selected_hotbar_slot >= 9 {
@@ -376,6 +445,7 @@ fn validate_recipe(
         let expected = match item.item.as_str() {
             "mclone:mallard_egg" => LiveInstantiationSubject::MallardEggItem,
             "mclone:mallard_feather" => LiveInstantiationSubject::MallardFeatherItem,
+            "mclone:hunting_spear" => LiveInstantiationSubject::HuntingSpear,
             value => {
                 return Err(PlayableShowcaseError::invalid(format!(
                     "showcase inventory item `{value}` is not in the bounded item allowlist"
@@ -394,7 +464,11 @@ fn validate_recipe(
         }
         validate_evidence(
             &observation.live_instantiation,
-            LiveInstantiationSubject::MallardObservation,
+            if observation.kind.deer_protocol_kind().is_some() {
+                LiveInstantiationSubject::DeerObservation
+            } else {
+                LiveInstantiationSubject::MallardObservation
+            },
         )?;
     }
     Ok(())
@@ -525,10 +599,36 @@ fn write_entities(
                 incubation_required: *incubation_required,
                 parents,
             },
+            ShowcaseEntityState::Deer {
+                sex,
+                life_stage,
+                antlered,
+                behavior,
+                behavior_ticks,
+                health,
+                max_health,
+                antler_shed_time,
+            } => EntitySavePayload::Deer {
+                sex: sex.protocol(),
+                life_stage: life_stage.protocol(),
+                antlered: *antlered,
+                behavior: behavior.protocol(),
+                behavior_ticks: *behavior_ticks,
+                health: *health,
+                max_health: *max_health,
+                antler_shed_time: *antler_shed_time,
+            },
+            ShowcaseEntityState::DeerBed { source } => EntitySavePayload::DeerBed {
+                source: *persistent_ids
+                    .get(source.as_str())
+                    .expect("validated deer bed source"),
+            },
         };
         let kind = match &recipe.state {
             ShowcaseEntityState::Mallard { .. } => "mclone:mallard",
             ShowcaseEntityState::MallardNest { .. } => "mclone:mallard_nest",
+            ShowcaseEntityState::Deer { .. } => "mclone:deer",
+            ShowcaseEntityState::DeerBed { .. } => "mclone:deer_bed",
         };
         let position = Vec3d::new(recipe.position[0], recipe.position[1], recipe.position[2]);
         chunks
@@ -581,6 +681,7 @@ fn write_player(
         let kind = match item.item.as_str() {
             "mclone:mallard_egg" => ItemKind::MallardEgg,
             "mclone:mallard_feather" => ItemKind::MallardFeather,
+            "mclone:hunting_spear" => ItemKind::HuntingSpear,
             _ => unreachable!("validated inventory item"),
         };
         player.inventory[usize::from(item.slot)] = Some(ItemStackSnapshot {
@@ -589,9 +690,12 @@ fn write_player(
         });
     }
     for observation in &recipe.player.observations {
-        player
-            .mallard_field_guide
-            .observe(observation.kind.protocol_kind());
+        if let Some(kind) = observation.kind.mallard_protocol_kind() {
+            player.mallard_field_guide.observe(kind);
+        }
+        if let Some(kind) = observation.kind.deer_protocol_kind() {
+            player.deer_field_guide.observe(kind);
+        }
     }
     store.save_player(&player)?;
     Ok(())
@@ -634,8 +738,14 @@ fn manifest_from_recipe(
     recipe: &PlayableShowcaseRecipe,
 ) -> PlayableShowcaseManifest {
     let mut guide = MallardFieldGuideProgress::default();
+    let mut deer_guide = DeerFieldGuideProgress::default();
     for observation in &recipe.player.observations {
-        guide.observe(observation.kind.protocol_kind());
+        if let Some(kind) = observation.kind.mallard_protocol_kind() {
+            guide.observe(kind);
+        }
+        if let Some(kind) = observation.kind.deer_protocol_kind() {
+            deer_guide.observe(kind);
+        }
     }
     PlayableShowcaseManifest {
         schema_version: recipe.schema_version,
@@ -665,6 +775,17 @@ fn manifest_from_recipe(
             .filter(|entity| matches!(&entity.state, ShowcaseEntityState::MallardNest { .. }))
             .count(),
         field_guide_bits: guide.bits(),
+        deer_count: recipe
+            .entities
+            .iter()
+            .filter(|entity| matches!(&entity.state, ShowcaseEntityState::Deer { .. }))
+            .count(),
+        deer_bed_count: recipe
+            .entities
+            .iter()
+            .filter(|entity| matches!(&entity.state, ShowcaseEntityState::DeerBed { .. }))
+            .count(),
+        deer_field_guide_bits: deer_guide.bits(),
     }
 }
 
@@ -690,6 +811,7 @@ struct PlayableShowcaseRecipe {
 enum ShowcaseBaseTerrain {
     AuthoredIslandV1,
     MallardWetlandV1,
+    DeerForestEdgeV1,
 }
 
 impl ShowcaseBaseTerrain {
@@ -697,6 +819,7 @@ impl ShowcaseBaseTerrain {
         match self {
             Self::AuthoredIslandV1 => AuthoredWorldFixtureKind::Island,
             Self::MallardWetlandV1 => AuthoredWorldFixtureKind::MallardWetland,
+            Self::DeerForestEdgeV1 => AuthoredWorldFixtureKind::DeerForestEdge,
         }
     }
 }
@@ -748,12 +871,96 @@ enum ShowcaseEntityState {
         incubation_required: u32,
         parents: [Option<String>; 2],
     },
+    Deer {
+        sex: ShowcaseDeerSex,
+        #[serde(rename = "lifeStage")]
+        life_stage: ShowcaseDeerLifeStage,
+        antlered: bool,
+        behavior: ShowcaseDeerBehavior,
+        #[serde(rename = "behaviorTicks")]
+        behavior_ticks: u32,
+        health: u8,
+        #[serde(rename = "maxHealth")]
+        max_health: u8,
+        #[serde(rename = "antlerShedTime")]
+        antler_shed_time: i32,
+    },
+    DeerBed {
+        source: String,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+enum ShowcaseDeerSex {
+    Female,
+    Male,
+}
+
+impl ShowcaseDeerSex {
+    const fn protocol(self) -> DeerSex {
+        match self {
+            Self::Female => DeerSex::Female,
+            Self::Male => DeerSex::Male,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+enum ShowcaseDeerLifeStage {
+    Fawn,
+    Adult,
+}
+
+impl ShowcaseDeerLifeStage {
+    const fn protocol(self) -> DeerLifeStage {
+        match self {
+            Self::Fawn => DeerLifeStage::Fawn,
+            Self::Adult => DeerLifeStage::Adult,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+enum ShowcaseDeerBehavior {
+    Idle,
+    Walk,
+    Graze,
+    Drink,
+    Alert,
+    Flee,
+    LieDown,
+    Bedded,
+    StandUp,
+    Hit,
+    Fall,
+}
+
+impl ShowcaseDeerBehavior {
+    const fn protocol(self) -> DeerBehavior {
+        match self {
+            Self::Idle => DeerBehavior::Idle,
+            Self::Walk => DeerBehavior::Walk,
+            Self::Graze => DeerBehavior::Graze,
+            Self::Drink => DeerBehavior::Drink,
+            Self::Alert => DeerBehavior::Alert,
+            Self::Flee => DeerBehavior::Flee,
+            Self::LieDown => DeerBehavior::LieDown,
+            Self::Bedded => DeerBehavior::Bedded,
+            Self::StandUp => DeerBehavior::StandUp,
+            Self::Hit => DeerBehavior::Hit,
+            Self::Fall => DeerBehavior::Fall,
+        }
+    }
 }
 
 impl ShowcaseEntityState {
     fn parents(&self) -> [Option<&str>; 2] {
         let parents = match self {
             Self::Mallard { parents, .. } | Self::MallardNest { parents, .. } => parents,
+            Self::Deer { .. } | Self::DeerBed { .. } => return [None, None],
         };
         [parents[0].as_deref(), parents[1].as_deref()]
     }
@@ -785,18 +992,37 @@ enum ShowcaseObservationKind {
     FoundTrack,
     FoundNest,
     WitnessedHatch,
+    DeerSeen,
+    DeerFoundSign,
+    DeerWitnessedAlert,
+    DeerWitnessedFlee,
+    DeerFoundAntler,
+    DeerHarvested,
 }
 
 impl ShowcaseObservationKind {
-    const fn protocol_kind(self) -> MallardObservationKind {
-        match self {
+    const fn mallard_protocol_kind(self) -> Option<MallardObservationKind> {
+        Some(match self {
             Self::Seen => MallardObservationKind::Seen,
             Self::HeardCall => MallardObservationKind::HeardCall,
             Self::FoundFeather => MallardObservationKind::FoundFeather,
             Self::FoundTrack => MallardObservationKind::FoundTrack,
             Self::FoundNest => MallardObservationKind::FoundNest,
             Self::WitnessedHatch => MallardObservationKind::WitnessedHatch,
-        }
+            _ => return None,
+        })
+    }
+
+    const fn deer_protocol_kind(self) -> Option<DeerObservationKind> {
+        Some(match self {
+            Self::DeerSeen => DeerObservationKind::Seen,
+            Self::DeerFoundSign => DeerObservationKind::FoundSign,
+            Self::DeerWitnessedAlert => DeerObservationKind::WitnessedAlert,
+            Self::DeerWitnessedFlee => DeerObservationKind::WitnessedFlee,
+            Self::DeerFoundAntler => DeerObservationKind::FoundAntler,
+            Self::DeerHarvested => DeerObservationKind::Harvested,
+            _ => return None,
+        })
     }
 }
 
@@ -828,6 +1054,7 @@ mod tests {
             first_manifest.field_guide_bits,
             MallardObservationKind::Seen.bit()
         );
+        assert_eq!(first_manifest.deer_count, 0);
         assert_eq!(first.world_metadata().unwrap().day_time, 6_000);
         assert!(first.world_metadata().unwrap().do_daylight_cycle);
         assert_eq!(
@@ -867,6 +1094,53 @@ mod tests {
                 pos.z.rem_euclid(16),
             )),
             generated_block_state_id(LILY_PAD)
+        );
+    }
+
+    #[test]
+    fn deer_forest_edge_recipe_is_data_only_and_deterministic() {
+        let identity = ClientIdentity::test_default();
+        let (manifest, store) =
+            playable_showcase_memory_store(PlayableShowcaseId::DeerForestEdge, &identity).unwrap();
+        assert_eq!(manifest.revision, 1);
+        assert_eq!(manifest.seed, 17_504);
+        assert_eq!(manifest.entity_count, 4);
+        assert_eq!(manifest.deer_count, 3);
+        assert_eq!(manifest.deer_bed_count, 1);
+        assert_eq!(
+            manifest.deer_field_guide_bits,
+            DeerObservationKind::Seen.bit() | DeerObservationKind::FoundSign.bit()
+        );
+        assert_eq!(
+            [
+                ChunkPos::new(-1, 0),
+                ChunkPos::new(0, 0),
+                ChunkPos::new(0, 1)
+            ]
+            .into_iter()
+            .flat_map(|chunk| store.entity_chunk(chunk).unwrap().entities.iter())
+            .filter(|entity| entity.kind == "mclone:deer")
+            .count(),
+            3
+        );
+        let bed_entities = store.entity_chunk(ChunkPos::new(-1, 0)).unwrap();
+        assert!(bed_entities.entities.iter().any(|entity| {
+            entity.kind == "mclone:deer_bed"
+                && matches!(entity.payload, EntitySavePayload::DeerBed { .. })
+        }));
+        let player = store
+            .player(&PlayerRecordKey::from_profile_id(identity.profile_id))
+            .unwrap();
+        assert_eq!(
+            player.inventory[0],
+            Some(ItemStackSnapshot {
+                kind: ItemKind::HuntingSpear,
+                count: 1,
+            })
+        );
+        assert_eq!(
+            player.deer_field_guide.bits(),
+            manifest.deer_field_guide_bits
         );
     }
 

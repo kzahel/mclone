@@ -160,8 +160,8 @@ const showcaseArgIndex = process.argv.indexOf("--showcase");
 const showcase = showcaseArgIndex >= 0
   ? String(process.argv[showcaseArgIndex + 1] ?? "")
   : "";
-if (showcase && showcase !== "mallard-ecology") {
-  throw new Error(`--showcase requires mallard-ecology; got ${showcase}`);
+if (showcase && !["mallard-ecology", "deer-forest-edge"].includes(showcase)) {
+  throw new Error(`--showcase requires mallard-ecology or deer-forest-edge; got ${showcase}`);
 }
 const deployedBaseUrlArgIndex = process.argv.indexOf("--deployed-base-url");
 const deployedBaseUrl = deployedBaseUrlArgIndex >= 0
@@ -789,25 +789,33 @@ async function run() {
       }
       const canvas = page.locator("#mclone-canvas");
       if (showcase) {
+        const deerShowcase = showcase === "deer-forest-edge";
         try {
           await page.waitForFunction(
-            () => {
+            (deerShowcase) => {
               const state = globalThis.__mcloneWebApp?.state;
               return state?.startupReady === true
                 && state.streamingSettled === true
                 && state.pendingCompileJobCount === 0
                 && state.entityCount >= state.showcaseEntityCount
-                && state.mallardCount >= state.showcaseMallardCount
-                && state.mallardNestCount <= state.showcaseMallardNestCount
-                && (state.mallardFieldGuideBits & state.showcaseFieldGuideBits)
-                  === state.showcaseFieldGuideBits
+                && (deerShowcase
+                  ? state.deerCount >= state.showcaseDeerCount
+                    && state.deerBedCount >= state.showcaseDeerBedCount
+                    && (state.deerFieldGuideBits & state.showcaseDeerFieldGuideBits)
+                      === state.showcaseDeerFieldGuideBits
+                  : state.mallardCount >= state.showcaseMallardCount
+                    && state.mallardNestCount <= state.showcaseMallardNestCount
+                    && (state.mallardFieldGuideBits & state.showcaseFieldGuideBits)
+                      === state.showcaseFieldGuideBits)
                 && state.dayTime === 6000
-                && state.mallardEggHotbarCount === 0
-                && state.mallardFeatherHotbarCount === 0
+                && (deerShowcase || (
+                  state.mallardEggHotbarCount === 0
+                  && state.mallardFeatherHotbarCount === 0
+                ))
                 && state.actorCount >= 4
                 && state.drawnActorCount >= 4;
             },
-            undefined,
+            deerShowcase,
             { timeout: 60_000 },
           );
         } catch (error) {
@@ -819,35 +827,44 @@ async function run() {
         );
         try {
           await page.waitForFunction(
-            (startTickCounts) => {
+            ({ startTickCounts, deerShowcase }) => {
               const state = globalThis.__mcloneWebApp?.state?.lastReport;
               const startTicks = String(startTickCounts ?? "").split(",").map(Number);
-              const currentTicks = String(state?.mallardTickCounts ?? "").split(",").map(Number);
+              const currentTicks = String(
+                deerShowcase ? state?.deerTickCounts : state?.mallardTickCounts,
+              ).split(",").map(Number);
               return startTicks.length === 3
                 && currentTicks.length >= 3
                 && startTicks.every((tick, index) => currentTicks[index] >= tick + 80);
             },
-            behaviorStart.mallardTickCounts,
+            {
+              startTickCounts: deerShowcase
+                ? behaviorStart.deerTickCounts
+                : behaviorStart.mallardTickCounts,
+              deerShowcase,
+            },
             { timeout: 35_000 },
           );
         } catch (error) {
           const state = await page.evaluate(
             () => globalThis.__mcloneWebApp?.state?.lastReport ?? null,
           );
-          throw new Error(`showcase behavior clock did not advance: ${error instanceof Error ? error.message : String(error)}\nstartTicks=${behaviorStart.mallardTickCounts}\ncurrentTicks=${state?.mallardTickCounts}\ncurrentMallards=${state?.mallardCount}\ncurrentNest=${state?.mallardNestCount}\ncurrentFieldGuide=${state?.mallardFieldGuideBits}`);
+          throw new Error(`showcase behavior clock did not advance: ${error instanceof Error ? error.message : String(error)}\nstart=${JSON.stringify(behaviorStart)}\ncurrent=${JSON.stringify(state)}`);
         }
         const behaviorEnd = await page.evaluate(
           () => globalThis.__mcloneWebApp?.state?.lastReport ?? null,
         );
+        /** @param {unknown} value */
         const parsePositions = (value) => String(value ?? "")
           .split(";")
           .filter(Boolean)
           .map((position) => position.split(",").map(Number));
-        const startIds = String(behaviorStart.mallardEntityIds ?? "").split(",");
-        const endIds = String(behaviorEnd.mallardEntityIds ?? "").split(",");
-        const startPositions = parsePositions(behaviorStart.mallardPositions);
-        const endPositions = parsePositions(behaviorEnd.mallardPositions);
-        const mallardDisplacement = startIds.map((id, index) => {
+        const subject = deerShowcase ? "deer" : "mallard";
+        const startIds = String(behaviorStart[`${subject}EntityIds`] ?? "").split(",");
+        const endIds = String(behaviorEnd[`${subject}EntityIds`] ?? "").split(",");
+        const startPositions = parsePositions(behaviorStart[`${subject}Positions`]);
+        const endPositions = parsePositions(behaviorEnd[`${subject}Positions`]);
+        const subjectDisplacement = startIds.map((id, index) => {
           const endIndex = endIds.indexOf(id);
           const start = startPositions[index];
           const end = endPositions[endIndex];
@@ -855,30 +872,46 @@ async function run() {
           return Math.hypot(end[0] - start[0], end[2] - start[2]);
         });
         const behaviorProbe = {
-          elapsedTicks: String(behaviorEnd.mallardTickCounts ?? "")
+          elapsedTicks: String(behaviorEnd[`${subject}TickCounts`] ?? "")
             .split(",")
-            .map((tick, index) => Number(tick) - Number(String(behaviorStart.mallardTickCounts ?? "").split(",")[index])),
-          mallardDisplacement,
+            .map((tick, index) => Number(tick) - Number(String(behaviorStart[`${subject}TickCounts`] ?? "").split(",")[index])),
+          subjectDisplacement,
           initialWaterCount: Number(behaviorStart.mallardWaterCount),
           finalWaterCount: Number(behaviorEnd.mallardWaterCount),
           initialDucklingCount: Number(behaviorStart.mallardDucklingCount),
           finalDucklingCount: Number(behaviorEnd.mallardDucklingCount),
-          initialFieldGuideBits: Number(behaviorStart.mallardFieldGuideBits),
-          finalFieldGuideBits: Number(behaviorEnd.mallardFieldGuideBits),
+          initialFieldGuideBits: Number(behaviorStart[`${subject}FieldGuideBits`]),
+          finalFieldGuideBits: Number(behaviorEnd[`${subject}FieldGuideBits`]),
         };
-        if (
-          mallardDisplacement.length !== 3
-          || mallardDisplacement.some((distance) => !Number.isFinite(distance) || distance < 1.5)
+        if (!deerShowcase && (
+          subjectDisplacement.length !== 3
+          || subjectDisplacement.some((distance) => !Number.isFinite(distance) || distance < 1.5)
           || behaviorProbe.initialWaterCount < 1
           || behaviorProbe.finalWaterCount < 1
           || behaviorProbe.finalDucklingCount < 2
           || (behaviorProbe.finalFieldGuideBits & 32) !== 32
-        ) {
+        )) {
           throw new Error(`showcase behavior window failed:\n${JSON.stringify({
             behaviorStart,
             behaviorEnd,
             behaviorProbe,
           }, null, 2)}`);
+        }
+        if (deerShowcase) {
+          const clips = `${behaviorStart.deerAnimationClips},${behaviorEnd.deerAnimationClips}`;
+          const behaviors = `${behaviorStart.deerBehaviors},${behaviorEnd.deerBehaviors}`;
+          if (
+            subjectDisplacement.length !== 3
+            || !subjectDisplacement.some((distance) => Number.isFinite(distance) && distance > 0.5)
+            || !/(lie_down|bedded_idle|stand_up)/.test(clips)
+            || !/(Alert|Flee)/.test(behaviors)
+          ) {
+            throw new Error(`deer showcase behavior window failed:\n${JSON.stringify({
+              behaviorStart,
+              behaviorEnd,
+              displacement: subjectDisplacement,
+            }, null, 2)}`);
+          }
         }
         await page.evaluate(() => globalThis.__mcloneWebApp?.pauseRendering?.());
         await page.waitForFunction(
@@ -934,13 +967,15 @@ async function run() {
           pageErrors.length > 0
           || canvasPixels.distinctInteriorColorCount < 2
           || result?.showcaseId !== showcase
-          || result?.showcaseRevision !== 2
-          || result?.activeWorldSeedText !== "17503"
+          || result?.showcaseRevision !== (deerShowcase ? 1 : 2)
+          || result?.activeWorldSeedText !== (deerShowcase ? "17504" : "17503")
           || result?.generationProfile !== "authored-only"
           || result?.dayTime !== 6000
-          || result?.mallardCount < 4
-          || result?.mallardNestCount !== 0
-          || result?.mallardFieldGuideBits === 1
+          || (deerShowcase
+            ? result?.deerCount < 3 || result?.deerBedCount < 1 || result?.deerFieldGuideBits < 3
+            : result?.mallardCount < 4
+              || result?.mallardNestCount !== 0
+              || result?.mallardFieldGuideBits === 1)
           || String(result?.showcaseEntryEye) !== `${result.cameraX},${result.cameraY},${result.cameraZ}`
           || Object.values(worldRecordCounts).some((count) => count !== 0)
         ) {

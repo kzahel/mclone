@@ -1,0 +1,103 @@
+{
+  "schemaVersion": 1,
+  "id": "deer-forest-edge",
+  "title": "Deer Forest Edge",
+  "revision": 1,
+  "baseTerrain": "deer-forest-edge-v1",
+  "seed": 17504,
+  "dayTime": 6000,
+  "freezeTime": true,
+  "entry": {
+    "feet": [8.5, 65.0, 29.5],
+    "lookAt": [4.0, 65.8, 10.0]
+  },
+  "blockPatches": [],
+  "entities": [
+    {
+      "id": "doe-a",
+      "position": [8.5, 65.0, 20.5],
+      "yRotDegrees": -15.0,
+      "onGround": true,
+      "liveInstantiation": "mclone-deer-natural-spawn",
+      "state": {
+        "kind": "deer",
+        "sex": "female",
+        "lifeStage": "adult",
+        "antlered": false,
+        "behavior": "idle",
+        "behaviorTicks": 72,
+        "health": 20,
+        "maxHealth": 20,
+        "antlerShedTime": -1
+      }
+    },
+    {
+      "id": "buck",
+      "position": [11.5, 65.0, 8.5],
+      "yRotDegrees": 20.0,
+      "onGround": true,
+      "liveInstantiation": "mclone-deer-natural-spawn",
+      "state": {
+        "kind": "deer",
+        "sex": "male",
+        "lifeStage": "adult",
+        "antlered": true,
+        "behavior": "idle",
+        "behaviorTicks": 76,
+        "health": 20,
+        "maxHealth": 20,
+        "antlerShedTime": 36000
+      }
+    },
+    {
+      "id": "doe-b",
+      "position": [-7.5, 65.0, 8.5],
+      "yRotDegrees": -25.0,
+      "onGround": true,
+      "liveInstantiation": "mclone-deer-natural-spawn",
+      "state": {
+        "kind": "deer",
+        "sex": "female",
+        "lifeStage": "adult",
+        "antlered": false,
+        "behavior": "bedded",
+        "behaviorTicks": 0,
+        "health": 20,
+        "maxHealth": 20,
+        "antlerShedTime": -1
+      }
+    },
+    {
+      "id": "rest-sign",
+      "position": [-6.5, 65.0, 6.5],
+      "yRotDegrees": 18.0,
+      "onGround": true,
+      "liveInstantiation": "mclone-deer-repeated-bed-sign",
+      "state": {
+        "kind": "deer-bed",
+        "source": "doe-b"
+      }
+    }
+  ],
+  "player": {
+    "selectedHotbarSlot": 0,
+    "inventory": [
+      {
+        "slot": 0,
+        "item": "mclone:hunting_spear",
+        "count": 1,
+        "liveInstantiation": "mclone-deer-hunting-spear"
+      }
+    ],
+    "observations": [
+      {
+        "kind": "deer-seen",
+        "liveInstantiation": "mclone-deer-field-guide-observation"
+      },
+      {
+        "kind": "deer-found-sign",
+        "liveInstantiation": "mclone-deer-field-guide-observation"
+      }
+    ]
+  }
+}

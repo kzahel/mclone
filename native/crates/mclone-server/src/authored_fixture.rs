@@ -4,7 +4,7 @@ use std::fs;
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::{Path, PathBuf};
 
-use mclone_core::{ChunkPos, ChunkRevision, ChunkStatus, Vec3d};
+use mclone_core::{ChunkPos, ChunkRevision, ChunkStatus, Vec3d, block_to_chunk_coord};
 use mclone_protocol::EntityRotation;
 use mclone_worldgen::block::{BRICKS, DIRT, GRASS_BLOCK, SAND, STONE, WATER};
 use mclone_worldgen::levelgen::{GeneratedChunk, MutableChunkBlockBuffer};
@@ -43,6 +43,7 @@ pub enum AuthoredWorldFixtureKind {
     Table,
     Island,
     MallardWetland,
+    DeerForestEdge,
     LobbyTableV2,
     LobbyIslandV2,
 }
@@ -53,6 +54,7 @@ impl AuthoredWorldFixtureKind {
             Self::Table => "live-diorama-table-a-v1",
             Self::Island => "live-diorama-island-b-v1",
             Self::MallardWetland => "mallard-wetland-v1",
+            Self::DeerForestEdge => "deer-forest-edge-v1",
             Self::LobbyTableV2 => "lobby-table-a-v2",
             Self::LobbyIslandV2 => "lobby-island-b-v2",
         }
@@ -63,6 +65,7 @@ impl AuthoredWorldFixtureKind {
             Self::Table => "table-a",
             Self::Island => "island-b",
             Self::MallardWetland => "mallard-wetland-v1",
+            Self::DeerForestEdge => "deer-forest-edge-v1",
             Self::LobbyTableV2 => "lobby-table-a-v2",
             Self::LobbyIslandV2 => "lobby-island-b-v2",
         }
@@ -73,6 +76,7 @@ impl AuthoredWorldFixtureKind {
             Self::Table | Self::LobbyTableV2 => 17_501,
             Self::Island | Self::LobbyIslandV2 => 17_502,
             Self::MallardWetland => 17_503,
+            Self::DeerForestEdge => 17_504,
         }
     }
 
@@ -81,6 +85,7 @@ impl AuthoredWorldFixtureKind {
             Self::Table | Self::LobbyTableV2 => [6.5, 64.0, 7.5],
             Self::Island | Self::LobbyIslandV2 => [7.5, 66.0, 7.5],
             Self::MallardWetland => [8.5, 65.0, 18.5],
+            Self::DeerForestEdge => [8.5, 65.0, 29.5],
         }
     }
 
@@ -92,6 +97,7 @@ impl AuthoredWorldFixtureKind {
             Self::Table | Self::LobbyTableV2 => [8.0, 65.03125, 8.0],
             Self::Island | Self::LobbyIslandV2 => [8.5, 65.0, 8.5],
             Self::MallardWetland => [8.5, 64.88, 7.5],
+            Self::DeerForestEdge => [8.5, 65.0, 8.5],
         }
     }
 
@@ -104,6 +110,7 @@ impl AuthoredWorldFixtureKind {
             Self::Table | Self::LobbyTableV2 => self.preview_anchor(),
             Self::Island | Self::LobbyIslandV2 => [4.0, 67.03125, 8.0],
             Self::MallardWetland => self.preview_anchor(),
+            Self::DeerForestEdge => self.preview_anchor(),
         }
     }
 
@@ -114,6 +121,7 @@ impl AuthoredWorldFixtureKind {
             // debug-creative reach of the fixture's accepted spawn.
             Self::Island | Self::LobbyIslandV2 => [5, 65, 8],
             Self::MallardWetland => [8, 64, 18],
+            Self::DeerForestEdge => [8, 64, 29],
         }
     }
 
@@ -202,6 +210,9 @@ pub fn authored_world_fixture_records(
                 AuthoredWorldFixtureKind::Island | AuthoredWorldFixtureKind::LobbyIslandV2 => {}
                 AuthoredWorldFixtureKind::MallardWetland => {
                     author_mallard_wetland_chunk(&mut buffer)
+                }
+                AuthoredWorldFixtureKind::DeerForestEdge => {
+                    author_deer_forest_edge_chunk(&mut buffer)
                 }
             }
             chunks.insert(pos, GeneratedChunk::from_mutable_buffer(buffer));
@@ -479,6 +490,79 @@ fn author_mallard_wetland_chunk(chunk: &mut MutableChunkBlockBuffer) {
     }
 }
 
+fn author_deer_forest_edge_chunk(chunk: &mut MutableChunkBlockBuffer) {
+    use mclone_worldgen::block::{AIR, OAK_LEAVES, OAK_LOG};
+
+    for local_z in 0..16 {
+        for local_x in 0..16 {
+            let world_x = chunk.chunk_x * 16 + local_x;
+            let world_z = chunk.chunk_z * 16 + local_z;
+            for y in 59..=62 {
+                chunk.set_block_at_y(local_x, y, local_z, STONE);
+            }
+            chunk.set_block_at_y(local_x, 63, local_z, DIRT);
+            let stream = (world_x - 8).abs() <= 1 && (-11..=-2).contains(&world_z);
+            chunk.set_block_at_y(
+                local_x,
+                64,
+                local_z,
+                if stream { WATER } else { GRASS_BLOCK },
+            );
+            if stream {
+                chunk.set_block_at_y(local_x, 65, local_z, AIR);
+            }
+        }
+    }
+
+    // Clumped trunks around the north, east, and west shoulders leave a
+    // broad south-facing meadow and connected central sight line. The same
+    // live blocks drive cover, safe-bank, browse, and bedding queries.
+    for (x, z) in [
+        (-8, -6),
+        (-3, -9),
+        (3, -8),
+        (9, -6),
+        (15, -4),
+        (20, 1),
+        (-9, 2),
+        (-5, 8),
+        (19, 9),
+        (23, 14),
+        (-7, 15),
+        (21, 21),
+    ] {
+        if block_to_chunk_coord(x) != chunk.chunk_x || block_to_chunk_coord(z) != chunk.chunk_z {
+            continue;
+        }
+        let local_x = x.rem_euclid(16);
+        let local_z = z.rem_euclid(16);
+        for y in 65..=68 {
+            chunk.set_block_at_y(local_x, y, local_z, OAK_LOG);
+        }
+        for dz in -2_i32..=2 {
+            for dx in -2_i32..=2 {
+                for y in 68..=70 {
+                    if dx.abs() + dz.abs() > 3 {
+                        continue;
+                    }
+                    let leaf_x = x + dx;
+                    let leaf_z = z + dz;
+                    if block_to_chunk_coord(leaf_x) == chunk.chunk_x
+                        && block_to_chunk_coord(leaf_z) == chunk.chunk_z
+                    {
+                        chunk.set_block_at_y(
+                            leaf_x.rem_euclid(16),
+                            y,
+                            leaf_z.rem_euclid(16),
+                            OAK_LEAVES,
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
 fn authored_lobby_island_entities() -> EntityChunkRecord {
     EntityChunkRecord::new(
         AUTHORED_WORLD_FIXTURE_CENTER,
@@ -532,6 +616,7 @@ mod tests {
             AuthoredWorldFixtureKind::Table,
             AuthoredWorldFixtureKind::Island,
             AuthoredWorldFixtureKind::MallardWetland,
+            AuthoredWorldFixtureKind::DeerForestEdge,
             AuthoredWorldFixtureKind::LobbyTableV2,
             AuthoredWorldFixtureKind::LobbyIslandV2,
         ] {
