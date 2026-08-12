@@ -682,6 +682,21 @@ world-generation change into one opaque commit.
   first-party pack resolves eight semantic resources: six actors and two
   props.
 
+### 2026-08-12 — Generated forest-edge intent
+
+- Extended the existing Mclone vegetation planner with a deterministic
+  forest-edge sample rather than adding a deer-specific noise field. The
+  sample exposes local cover plus four 64-block shoulders, cover contrast, and
+  directions toward both opening and escape cover.
+- The seed-12345 atlas over 97 by 97 positions at 32-block spacing measures
+  840 qualifying transitions, 696 dense interiors, and 5,646 open interiors.
+  The test rejects loss of any of these populations and bounds edge abundance.
+- This query is a derived semantic fact only. It changes no terrain blocks,
+  vegetation records, generator fingerprints, or profile identity; the
+  compatibility safety ledger records that resolution. Live habitat sampling
+  and natural group spawning remain the next part of this implementation
+  slice.
+
 For later slices, continue to record commit IDs, asset review paths,
 deterministic habitat/population measurements, focused and workspace tests,
 native/browser/Android/XR evidence, rejected visual or interaction iterations,

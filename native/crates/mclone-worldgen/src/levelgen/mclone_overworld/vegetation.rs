@@ -33,6 +33,7 @@ pub const MCLONE_VEGETATION_CANDIDATES_PER_CELL: u8 = 32;
 pub const MCLONE_OVERWORLD_GROVE_DOMAIN: u64 = 0x6d63_6f76_6772_6f76;
 pub const MCLONE_OVERWORLD_GROVE_SCALE_BLOCKS: i32 = 256;
 pub const MCLONE_FOREST_SUMMARY_FOOTPRINT_TAPS: usize = 4;
+pub const MCLONE_FOREST_EDGE_SAMPLE_RADIUS_BLOCKS: i32 = 64;
 
 const VEGETATION_PLAN_REVISION: u16 = 2;
 const GROVE_DOMAIN: SeedDomain = SeedDomain::new(MCLONE_OVERWORLD_GROVE_DOMAIN);
@@ -137,6 +138,32 @@ impl McloneForestIntentSample {
 
     fn density_threshold(self) -> u16 {
         (self.density.clamp(0.0, 1.0) * f32::from(u16::MAX)).round() as u16
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct McloneForestDirection {
+    pub x: i8,
+    pub z: i8,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct McloneForestEdgeIntentSample {
+    pub local: McloneForestIntentSample,
+    pub nearby_min_coverage: f32,
+    pub nearby_max_coverage: f32,
+    pub edge_contrast: f32,
+    pub clearing_direction: McloneForestDirection,
+    pub cover_direction: McloneForestDirection,
+}
+
+impl McloneForestEdgeIntentSample {
+    pub fn is_transitional_edge(self) -> bool {
+        self.local.coverage >= 0.10
+            && self.local.coverage <= 0.86
+            && self.nearby_min_coverage <= 0.36
+            && self.nearby_max_coverage >= 0.48
+            && self.edge_contrast >= 0.24
     }
 }
 
@@ -682,6 +709,52 @@ impl McloneOverworldVegetationPlanCache {
         )
         .map_err(McloneVegetationError::StructuredTerrain)?;
         Ok(self.planner.forest_intent(landform, world_x, world_z))
+    }
+
+    pub fn forest_edge_intent_at(
+        &mut self,
+        world_x: i32,
+        world_z: i32,
+    ) -> Result<McloneForestEdgeIntentSample, McloneVegetationError> {
+        let local = self.forest_intent_at(world_x, world_z)?;
+        let directions = [
+            McloneForestDirection { x: 0, z: -1 },
+            McloneForestDirection { x: 1, z: 0 },
+            McloneForestDirection { x: 0, z: 1 },
+            McloneForestDirection { x: -1, z: 0 },
+        ];
+        let mut samples = [(directions[0], 0.0_f32); 4];
+        for (index, direction) in directions.into_iter().enumerate() {
+            let sample_x = world_x
+                .checked_add(i32::from(direction.x) * MCLONE_FOREST_EDGE_SAMPLE_RADIUS_BLOCKS)
+                .ok_or(McloneVegetationError::CoordinateOverflow)?;
+            let sample_z = world_z
+                .checked_add(i32::from(direction.z) * MCLONE_FOREST_EDGE_SAMPLE_RADIUS_BLOCKS)
+                .ok_or(McloneVegetationError::CoordinateOverflow)?;
+            samples[index] = (
+                direction,
+                self.forest_intent_at(sample_x, sample_z)?.coverage,
+            );
+        }
+        let (clearing_direction, nearby_min_coverage) = samples
+            .iter()
+            .copied()
+            .min_by(|left, right| left.1.total_cmp(&right.1))
+            .expect("four forest-edge samples");
+        let (cover_direction, nearby_max_coverage) = samples
+            .iter()
+            .copied()
+            .max_by(|left, right| left.1.total_cmp(&right.1))
+            .expect("four forest-edge samples");
+
+        Ok(McloneForestEdgeIntentSample {
+            local,
+            nearby_min_coverage,
+            nearby_max_coverage,
+            edge_contrast: nearby_max_coverage - nearby_min_coverage,
+            clearing_direction,
+            cover_direction,
+        })
     }
 
     pub fn tree_records_intersecting(
@@ -1505,6 +1578,66 @@ mod tests {
         assert!((summary.mean_canopy_height - 8.0).abs() < 1.0e-6);
         assert!(summary.canopy_height_variation > 1.7);
         assert!((summary.grove_or_opening_influence - 0.35).abs() < 1.0e-6);
+    }
+
+    #[test]
+    fn forest_edge_intent_is_deterministic_and_directional() {
+        let source =
+            McloneVegetationSource::new(12_345, McloneOverworldSamplingTopology::Unbounded);
+        let mut first = McloneOverworldVegetationPlanCache::new(source);
+        let mut second = McloneOverworldVegetationPlanCache::new(source);
+        let sample = first.forest_edge_intent_at(-640, 96).unwrap();
+
+        assert_eq!(sample, second.forest_edge_intent_at(-640, 96).unwrap());
+        assert!(sample.nearby_min_coverage <= sample.nearby_max_coverage);
+        assert_eq!(
+            sample.edge_contrast,
+            sample.nearby_max_coverage - sample.nearby_min_coverage
+        );
+        assert_ne!(sample.clearing_direction, McloneForestDirection::default());
+        assert_ne!(sample.cover_direction, McloneForestDirection::default());
+    }
+
+    #[test]
+    fn forest_edge_intent_finds_sparse_but_useful_transitions() {
+        let source =
+            McloneVegetationSource::new(12_345, McloneOverworldSamplingTopology::Unbounded);
+        let mut cache = McloneOverworldVegetationPlanCache::new(source);
+        let mut edges = 0_usize;
+        let mut dense_interiors = 0_usize;
+        let mut open_interiors = 0_usize;
+        let mut max_contrast = 0.0_f32;
+        let mut max_contrast_sample = None;
+        let mut transition_candidates = 0_usize;
+
+        for z in (-1536..=1536).step_by(32) {
+            for x in (-1536..=1536).step_by(32) {
+                let sample = cache.forest_edge_intent_at(x, z).unwrap();
+                edges += usize::from(sample.is_transitional_edge());
+                if sample.edge_contrast > max_contrast {
+                    max_contrast = sample.edge_contrast;
+                    max_contrast_sample = Some((x, z, sample));
+                }
+                transition_candidates += usize::from(
+                    sample.nearby_min_coverage <= 0.45
+                        && sample.nearby_max_coverage >= 0.42
+                        && sample.edge_contrast >= 0.12,
+                );
+                dense_interiors += usize::from(
+                    sample.local.coverage >= 0.70 && sample.nearby_min_coverage >= 0.48,
+                );
+                open_interiors += usize::from(
+                    sample.local.coverage <= 0.16 && sample.nearby_max_coverage <= 0.36,
+                );
+            }
+        }
+
+        assert!(
+            (24..=900).contains(&edges),
+            "unexpected edge count {edges}; candidates {transition_candidates}; max contrast {max_contrast}; sample {max_contrast_sample:?}"
+        );
+        assert!(dense_interiors > 16, "missing dense forest interiors");
+        assert!(open_interiors > 16, "missing open interiors");
     }
 
     #[test]

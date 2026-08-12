@@ -170,6 +170,9 @@ world.
 
 - **Reviewed:** 2026-08-10 at Tactical 274 Human Review R1; no freeze trigger
   or preservation consumer was added
+- **Reviewed for Tactical 284:** 2026-08-12; the forest-edge query is derived
+  from existing `mclone-overworld-v1` landform and vegetation intent and does
+  not change generated blocks, fingerprints, or profile identity
 - **Project release state:** `internal-unshipped`
 - **Known external world/save consumers:** none
 - **Default fixture meaning:** refactor and determinism regression guard, not a

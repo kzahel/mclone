@@ -346,6 +346,17 @@ event, and no ambient soundtrack pretends that a flock exists.
   presentation abstraction. Nest entities and feather items now use required
   prepared semantic assets; terrain tracks retain their existing gameplay cue
   while a slope-conforming shared decal/surface path is developed.
+- Human Review 2 accepted the articulated deer and its ten named clips. The
+  exact checked asset is now a required shared `mclone:deer` runtime resource.
+- The production Mclone vegetation planner now exposes a deterministic
+  forest-edge intent above its existing coverage/density field. It samples
+  four 64-block cardinal shoulders and reports local cover, minimum/maximum
+  nearby cover, contrast, and explicit clearing/cover directions. This adds no
+  deer-only noise and changes no generated blocks.
+- A 97-by-97 seed-12345 atlas at 32-block spacing finds 840 transitional edge
+  sites, 696 dense interiors, and 5,646 open interiors. Tests retain all three
+  populations so later spawn tuning cannot silently make every forest or
+  meadow an edge.
 
 ## Known Gaps and Recommended Next Work
 
