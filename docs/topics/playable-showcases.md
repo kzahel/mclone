@@ -173,12 +173,14 @@ feather items. The bounded authored wetland fills all 49 chunks of the existing
 seven-by-seven fixture envelope; its shallow pond and grassy banks cross chunk
 boundaries.
 
-Local headed Web acceptance observed 80 authoritative ticks. The three
-initial mallards displaced `3.33`, `2.21`, and `3.59` blocks, the ordinary nest
-system hatched a fourth mallard, and field notes advanced from two to five
-observations through live proximity/call/track/hatch paths. All browser world
-stores remained empty. Public revision-2 deployment evidence is recorded in
-Tactical 282 once the pushed revision passes the same gate.
+Local and public headed Web acceptance each observed 80 authoritative ticks.
+The three initial mallards displaced `3.33`, `2.21`, and `3.59` blocks, the
+ordinary nest system hatched a fourth mallard, and field notes advanced from
+two to five observations through live proximity/call/track/hatch paths. All
+browser world stores remained empty. Exact pushed revision
+`25ea0d2efb44513aacb922fd5cbb9049a61207ff` passed the deployed probe; its
+inspected 1600x900 canvas digest was
+`c9e0ee0e64f507ab21b844650bbc099306a772090f61136e4761f33c12c040dc`.
 
 ## Code and Documentation Map
 

@@ -304,9 +304,9 @@ event, and no ambient soundtrack pretends that a flock exists.
   legibly into both eyes through the shared world-GUI renderer.
 - The `mallard-ecology` data recipe requires registered ordinary-game evidence
   for its lily pad, adults, duckling, nest, egg, feather, and observations. Its
-  local and deployed Web captures are pixel-identical, share the native seed,
-  entry pose, entity composition, and guide receipt, and leave all IndexedDB
-  world stores empty. The verified temporary play link is
+  revision-1 local and deployed Web captures are pixel-identical, share the
+  native seed, entry pose, entity composition, and guide receipt, and leave
+  all IndexedDB world stores empty. The verified temporary play link is
   `https://mclone.kzahel.com/app.html?showcase=mallard-ecology`.
 - A deterministic two-mallard 1,200-tick simulation proves retained non-local
   destinations, useful travel, water and actual dry-shore occupancy, bounded
@@ -315,6 +315,10 @@ event, and no ambient soundtrack pretends that a flock exists.
   move `3.33`, `2.21`, and `3.59` blocks over 80 authoritative ticks, then
   observes ordinary attended hatching and field-guide progress from 2/6 to
   5/6 while persistent browser world stores remain empty.
+- The public revision-2 probe at pushed revision `25ea0d2e` reproduces those
+  exact domain outcomes and displacements. Its inspected 1600x900 canvas shows
+  four separated mallards across the wetland after the hatch, with the field
+  guide visibly at 5/6 and an empty hotbar.
 
 ## Known Gaps and Recommended Next Work
 

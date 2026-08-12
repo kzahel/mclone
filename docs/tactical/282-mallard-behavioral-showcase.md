@@ -1,6 +1,6 @@
 # Tactical 282: Mallard Behavioral Showcase
 
-Status: **implementation and local acceptance complete; public deployment pending 2026-08-12**
+Status: **complete 2026-08-12**
 
 Topic:
 
@@ -191,5 +191,21 @@ Local acceptance evidence:
   field-guide bits advanced from `17` to `59` (2/6 to 5/6).
 - All eight IndexedDB world-store counts remained zero.
 
-The public push/deploy receipt, deployed behavior probe, and final screenshot
-digest remain pending.
+Public acceptance evidence:
+
+- Pushed revision `25ea0d2efb44513aacb922fd5cbb9049a61207ff`
+  deployed through the established exact-revision hook in 170 seconds, with
+  131 seconds in the aggregate Web deploy.
+- `pnpm native:web:showcase-deployed-smoke` passed against
+  `https://mclone.kzahel.com/app.html?showcase=mallard-ecology` with recipe
+  revision 2, seed `17503`, the expected entry pose, three initial mallards,
+  one nest, and one persisted observation.
+- The independent public 80-tick window reproduced displacements `3.3299`,
+  `2.2050`, and `3.5938` blocks. The attended nest hatched, ducklings increased
+  from one to two, and live field notes advanced from 2/6 to 5/6.
+- Every transient IndexedDB world-store count remained zero. The inspected
+  1600x900 public canvas had SHA-256
+  `c9e0ee0e64f507ab21b844650bbc099306a772090f61136e4761f33c12c040dc`.
+
+The rejected one-chunk static demo is therefore replaced by a public,
+resettable behavioral review that exercises ordinary authoritative gameplay.
