@@ -1611,6 +1611,7 @@ fn f32_array_bytes<const FLOATS: usize, const BYTES: usize>(values: [f32; FLOATS
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mclone_assets::mallard_duck_figure_id;
 
     fn prepared_actor_figures() -> ActorFigureSet {
         let mut source = mclone_assets::MemoryAssetSource::new();
