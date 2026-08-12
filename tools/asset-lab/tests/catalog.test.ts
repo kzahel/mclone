@@ -112,26 +112,24 @@ test("builds checked static semantic props without creature metadata", async () 
       sourcePaths: [
         path.join(assetLabRoot, "props/mallard_nest/figure.ts"),
         path.join(assetLabRoot, "props/mallard_feather/figure.ts"),
-        path.join(assetLabRoot, "props/mallard_tracks/figure.ts"),
       ],
       thumbnails: false,
     });
     assert.equal(catalog.summary.canonicalFigures, 0);
-    assert.equal(catalog.summary.semanticProps, 3);
-    assert.equal(catalog.summary.runtimePromotedProps, 3);
-    assert.equal(catalog.summary.liveInstantiatedProps, 0);
+    assert.equal(catalog.summary.semanticProps, 2);
+    assert.equal(catalog.summary.runtimePromotedProps, 2);
+    assert.equal(catalog.summary.liveInstantiatedProps, 2);
     assert.ok(catalog.figures.every((entry) => entry.clipCount === 0));
     assert.ok(catalog.figures.every((entry) => entry.defaultClip === undefined));
     assert.ok(catalog.figures.every((entry) => entry.metadata === undefined));
     assert.ok(catalog.figures.every(
-      (entry) => entry.runtimePromotion?.instantiation === "review_only",
+      (entry) => entry.runtimePromotion?.instantiation === "live_gameplay",
     ));
     assert.deepEqual(
       catalog.figures.map(({ anchor, name, use }) => ({ anchor, name, use })),
       [
         { anchor: "item_center", name: "mallard_feather", use: "item_prop" },
         { anchor: "ground", name: "mallard_nest", use: "world_prop" },
-        { anchor: "surface_trace", name: "mallard_tracks", use: "trace_prop" },
       ],
     );
     const malformed = structuredClone(catalog);

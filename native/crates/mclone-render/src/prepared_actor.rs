@@ -760,7 +760,8 @@ impl PreparedActorRecord {
                 evaluate_prepared_figure_rest_pose_into(&figure.figure, &mut self.pose_palette)?
             }
         }
-        let model = actor_model_matrix(actor).context("prepared actor has invalid transform")?;
+        let model = actor_model_matrix(actor, &figure.figure)
+            .context("prepared semantic figure has invalid transform")?;
         if !actor.opacity.is_finite() || !(0.0..=1.0).contains(&actor.opacity) {
             bail!("prepared actor has invalid opacity");
         }
@@ -1054,13 +1055,16 @@ fn prepared_actor_key(actor: ActorInstance) -> Option<(ActorInstanceId, ActorFig
     if !matches!(id, ActorInstanceId::Entity(_)) {
         return None;
     }
-    let ActorInstanceShape::Figure(figure_id) = actor.shape else {
-        return None;
+    let figure_id = match actor.shape {
+        ActorInstanceShape::Figure(figure_id) | ActorInstanceShape::SemanticProp(figure_id) => {
+            figure_id
+        }
+        _ => return None,
     };
     Some((id, figure_id))
 }
 
-fn actor_model_matrix(actor: ActorInstance) -> Option<Mat4> {
+fn actor_model_matrix(actor: ActorInstance, figure: &PreparedFigure) -> Option<Mat4> {
     if !actor.feet_position.is_finite()
         || !actor.rotation_pivot.is_finite()
         || !actor.height.is_finite()
@@ -1075,7 +1079,13 @@ fn actor_model_matrix(actor: ActorInstance) -> Option<Mat4> {
         .unwrap_or_else(|| {
             Quat::from_rotation_y(actor.yaw_radians) * Quat::from_rotation_x(actor.pitch_radians)
         });
-    let scale = actor.height.max(0.1);
+    let scale = if matches!(actor.shape, ActorInstanceShape::SemanticProp(_)) {
+        let span = (figure.bounds.max[0] - figure.bounds.min[0])
+            .max(figure.bounds.max[2] - figure.bounds.min[2]);
+        actor.width.max(0.01) / span.max(f32::EPSILON)
+    } else {
+        actor.height.max(0.1)
+    };
     let matrix = Mat4::from_translation(actor.feet_position + actor.rotation_pivot)
         * Mat4::from_quat(rotation)
         * Mat4::from_translation(-actor.rotation_pivot)
@@ -1631,7 +1641,19 @@ mod tests {
             mclone_assets::cow_figure_path(),
             include_str!("../../../../assets/mclone/figures/cow.figure.json"),
         );
-        crate::asset_lab_figure::load_first_party_actor_figures(&source).unwrap()
+        source.insert_text(
+            mclone_assets::mallard_duck_figure_path(),
+            include_str!("../../../../assets/mclone/figures/mallard_duck.figure.json"),
+        );
+        source.insert_text(
+            mclone_assets::mallard_nest_figure_path(),
+            include_str!("../../../../assets/mclone/figures/mallard_nest.figure.json"),
+        );
+        source.insert_text(
+            mclone_assets::mallard_feather_figure_path(),
+            include_str!("../../../../assets/mclone/figures/mallard_feather.figure.json"),
+        );
+        crate::asset_lab_figure::load_first_party_semantic_figures(&source).unwrap()
     }
 
     fn prepared_chicken() -> PreparedFigure {
@@ -1647,7 +1669,11 @@ mod tests {
         let actor = ActorInstance::remote_player(Vec3::new(2.0, 3.0, 4.0), 0.0)
             .with_dimensions(0.6, 1.8)
             .with_id(ActorInstanceId::Entity(7));
-        let model = actor_model_matrix(actor).expect("finite model");
+        let figures = prepared_actor_figures();
+        let figure = figures
+            .prepared(mclone_assets::default_player_figure_id())
+            .unwrap();
+        let model = actor_model_matrix(actor, figure).expect("finite model");
         assert_eq!(model.transform_point3(Vec3::ZERO), actor.feet_position);
         assert!((model.transform_point3(Vec3::Y).y - 4.8).abs() < 1.0e-6);
     }
@@ -1668,6 +1694,15 @@ mod tests {
         assert_eq!(
             prepared_actor_key(mallard),
             Some((ActorInstanceId::Entity(10), mallard_duck_figure_id()))
+        );
+        let nest = ActorInstance::mallard_nest(Vec3::ZERO, 0.0, 0.8, 0.32)
+            .with_id(ActorInstanceId::Entity(11));
+        assert_eq!(
+            prepared_actor_key(nest),
+            Some((
+                ActorInstanceId::Entity(11),
+                mclone_assets::mallard_nest_figure_id()
+            ))
         );
     }
 
@@ -1700,6 +1735,43 @@ mod tests {
     }
 
     #[test]
+    fn semantic_prop_model_uses_horizontal_span_and_ground_anchor() {
+        let figures = prepared_actor_figures();
+        let figure = figures
+            .prepared(mclone_assets::mallard_nest_figure_id())
+            .unwrap();
+        let actor = ActorInstance::mallard_nest(Vec3::new(2.0, 64.0, 3.0), 0.0, 0.8, 0.32)
+            .with_id(ActorInstanceId::Entity(12));
+        let model = actor_model_matrix(actor, figure).unwrap();
+        let min = model.transform_point3(Vec3::from_array(figure.bounds.min));
+        let max = model.transform_point3(Vec3::from_array(figure.bounds.max));
+
+        assert!((min.y - 64.0).abs() < 1.0e-6);
+        assert!((max.x - min.x - 0.8).abs() < 1.0e-5);
+        assert!(max.y - min.y > actor.height);
+        assert!(max.y - min.y < 0.5);
+    }
+
+    #[test]
+    fn semantic_prop_selection_preserves_semantic_resource_identity() {
+        let actor = ActorInstance::semantic_prop(
+            Vec3::ZERO,
+            0.0,
+            mclone_assets::ActorFigureId::from_static("mclone:missing-prop"),
+            0.8,
+            0.32,
+        )
+        .with_id(ActorInstanceId::Entity(13));
+        assert_eq!(
+            prepared_actor_key(actor),
+            Some((
+                ActorInstanceId::Entity(13),
+                mclone_assets::ActorFigureId::from_static("mclone:missing-prop")
+            ))
+        );
+    }
+
+    #[test]
     fn animated_chicken_pose_stays_finite_and_actor_sized_across_cycle() {
         let figure = prepared_chicken();
         let wing_ids = ["wing_l", "wing_r"].map(|name| {
@@ -1716,7 +1788,7 @@ mod tests {
         )
         .with_dimensions(0.4, 0.7)
         .with_id(ActorInstanceId::Entity(9));
-        let model = actor_model_matrix(actor).unwrap();
+        let model = actor_model_matrix(actor, &figure).unwrap();
         let walk = figure.clips.get("walk").unwrap();
         let mut palette = Vec::new();
 

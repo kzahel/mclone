@@ -59,10 +59,11 @@ Promoted static semantic props use the same generated JSON, validation,
 thumbnail, viewport, and pack path without entering creature counts or
 classification filters. Open the deliberately separate review mode with
 `/animals/?view=props`; adding a source under `props/` is rejected unless the
-checked promotion registry declares its exact `world_prop`, `item_prop`, or
-`trace_prop` use and matching `ground`, `item_center`, or `surface_trace`
-anchor. Props may have zero clips; the viewer presents them explicitly as
-static assets instead of requiring a fake idle animation.
+checked promotion registry declares its exact `world_prop` or `item_prop` use
+and matching `ground` or `item_center` anchor. Props may have zero clips; the
+viewer presents them explicitly as static assets instead of requiring a fake
+idle animation. Terrain traces such as footprints are not rigid semantic
+figures; they require a separate terrain-conforming surface/decal contract.
 
 Promotion also records `live_gameplay` or `review_only` instantiation status.
 Packing a review candidate is not proof that ordinary gameplay creates or

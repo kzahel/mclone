@@ -28,7 +28,6 @@ export const FIRST_PARTY_SEMANTIC_ASSETS: readonly FirstPartySemanticAsset[] = [
   firstPartyActor("upright_bear"),
   firstPartyProp("mallard_nest", "world_prop", "ground"),
   firstPartyProp("mallard_feather", "item_prop", "item_center"),
-  firstPartyProp("mallard_tracks", "trace_prop", "surface_trace"),
 ];
 
 export const FIRST_PARTY_FIGURES: readonly FirstPartyFigure[] =
@@ -59,7 +58,7 @@ function firstPartyProp(
   const runtimePath = `assets/mclone/figures/${name}.figure.json`;
   return {
     anchor,
-    instantiation: "review_only",
+    instantiation: "live_gameplay",
     name,
     sourcePath: path.join(assetLabRoot, "props", name, "figure.ts"),
     outputPath: path.join(repositoryRoot, runtimePath),

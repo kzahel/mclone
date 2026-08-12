@@ -89,15 +89,15 @@ test("reviews static semantic props without polluting the creature catalogue", a
 
   await page.goto("/animals/?view=props&figure=mallard_nest");
   await expect(page.getByRole("heading", { name: "Semantic Prop Review" })).toBeVisible();
-  await expect(page.locator(".resultCount")).toHaveText("3 props");
+  await expect(page.locator(".resultCount")).toHaveText("2 props");
   await expect(page.locator("canvas[data-figure='mallard_nest']")).toBeVisible();
   await expect(page.getByText("Static semantic asset · no animation clips")).toBeVisible();
   await expect(page.locator(".classificationSection")).toContainText("World prop");
   await expect(page.locator(".classificationSection")).toContainText("Ground");
   await expect(page.locator(".promotionStatus")).toContainText("mclone:mallard_nest");
-  await expect(page.locator(".promotionStatus")).toContainText("Packed review candidate");
-  await expect(page.locator(".promotionStatus")).toContainText("no live gameplay instantiation yet");
-  await expect(page.locator(".summaryItem").filter({ hasText: "live" })).toContainText("0");
+  await expect(page.locator(".promotionStatus")).toContainText("Live gameplay");
+  await expect(page.locator(".promotionStatus")).toContainText("ordinary live gameplay instantiation");
+  await expect(page.locator(".summaryItem").filter({ hasText: "live" })).toContainText("2");
   await expect(page.getByRole("combobox", { name: "Group" })).toHaveCount(0);
   await expect(page.locator("[data-catalog-name='chicken']")).toHaveCount(0);
   await page.screenshot({ path: "/tmp/mclone-semantic-props-nest.png", fullPage: true });
@@ -108,12 +108,6 @@ test("reviews static semantic props without polluting the creature catalogue", a
   await page.getByRole("button", { name: "Top" }).click();
   await expect(page).toHaveURL(/camera=top/);
   await page.screenshot({ path: "/tmp/mclone-semantic-props-feather.png", fullPage: true });
-
-  await page.locator("[data-catalog-name='mallard_tracks']").click();
-  await expect(page.locator("canvas[data-figure='mallard_tracks']")).toBeVisible();
-  await expect(page.locator(".classificationSection")).toContainText("Surface trace");
-  await page.getByRole("button", { name: "Top" }).click();
-  await page.screenshot({ path: "/tmp/mclone-semantic-props-tracks.png", fullPage: true });
 
   await page.goto("/animals/?figure=mallard_nest");
   await expect(page.getByRole("heading", { name: "Creature Catalogue" })).toBeVisible();

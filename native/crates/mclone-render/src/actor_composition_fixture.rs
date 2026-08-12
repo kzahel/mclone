@@ -14,7 +14,7 @@ use mclone_assets::{
 };
 use mclone_core::Vec3d;
 
-use crate::asset_lab_figure::load_first_party_actor_figures;
+use crate::asset_lab_figure::load_first_party_semantic_figures;
 use crate::chunk::{
     ChunkMultiviewRenderTarget, ChunkRenderTarget, ChunkRenderView, TexturedSectionRenderOptions,
 };
@@ -403,7 +403,19 @@ fn actor_fixture_figures() -> Result<crate::entity::ActorFigureSet> {
         cow_figure_path(),
         include_str!("../../../../assets/mclone/figures/cow.figure.json"),
     );
-    load_first_party_actor_figures(&source)
+    source.insert_text(
+        mclone_assets::mallard_duck_figure_path(),
+        include_str!("../../../../assets/mclone/figures/mallard_duck.figure.json"),
+    );
+    source.insert_text(
+        mclone_assets::mallard_nest_figure_path(),
+        include_str!("../../../../assets/mclone/figures/mallard_nest.figure.json"),
+    );
+    source.insert_text(
+        mclone_assets::mallard_feather_figure_path(),
+        include_str!("../../../../assets/mclone/figures/mallard_feather.figure.json"),
+    );
+    load_first_party_semantic_figures(&source)
 }
 
 fn actor_fixture_atlas() -> (Vec<u8>, ActorTextureLayout) {

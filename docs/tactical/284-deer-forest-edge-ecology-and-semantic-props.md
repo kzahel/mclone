@@ -1,12 +1,13 @@
 # Tactical 284: Deer Forest-Edge Ecology and Semantic Props
 
-Status: active; Review 1 semantic props pending 2026-08-12
+Status: active; Review 1 accepted with tracks redirected 2026-08-12
 
 Topics:
 
 - `habitat-driven-creature-ecology`
 - `figure-animation-actions`
 - `semantic-figure-assets`
+- `terrain-surface-traces`
 
 ## Intent
 
@@ -22,15 +23,18 @@ Use the chapter to remove two presentation shortcuts rather than adding more:
 
 1. generalize the existing semantic figure authoring, generated-JSON,
    preparation, pack, and review machinery so checked first-party assets can be
-   either actor figures or world/item/trace props; and
+   either actor figures or world/item props; and
 2. replace the renderer-local `Walk` choice with shared named-clip playback
    driven by authoritative gameplay state.
 
 The mallard nest is the first required semantic-prop migration. Migrate the
-existing mallard feather and track presentation through the same route so the
-proof covers a durable world prop, a collectible item prop, and a transient
-trace prop. Deer tracks, beds/sign, and shed antlers must then consume that
-ordinary prop path rather than introduce deer-specific mesh code.
+existing mallard feather through the same route so the proof covers a durable
+world prop and a collectible item prop. Human Review 1 rejected a rigid
+semantic figure as the long-term representation for tracks: mallard and deer
+tracks instead require the terrain-conforming surface-trace contract in
+[`terrain-surface-traces.md`](../topics/terrain-surface-traces.md). Deer
+beds/sign and shed antlers must consume the ordinary prop path rather than
+introduce deer-specific mesh code.
 
 This is a gameplay and content-pipeline tactical, not merely a new model or a
 showcase. It is complete only when the promoted assets and behaviors occur in
@@ -54,10 +58,11 @@ packaged for review by the showcase system.
 - Shared Rust preparation preserves arbitrary clip names and action metadata,
   while live actor composition still reduces animation to
   `ActorAnimationClip::Walk` and the literal `walk` clip.
-- The mallard itself uses checked generated semantic JSON and the prepared
-  figure renderer. The mallard nest, feather, track marks, and generic egg
-  presentation are still assembled by procedural functions in
-  `mclone-render/src/entity.rs`.
+- The mallard itself, nest, and feather use checked generated semantic JSON and
+  the prepared figure renderer. The generic egg and the temporary raised
+  mallard track visual remain procedural functions in
+  `mclone-render/src/entity.rs`; tracks leave that path only after the shared
+  terrain-conforming trace renderer exists.
 - Mallard gameplay already proves persistent world props, collectible items,
   ephemeral traces, habitat-aware AI, life-stage state, field observations,
   and data-driven playable showcases. Those mechanics are reusable patterns,
@@ -116,8 +121,7 @@ Generalize the checked first-party promotion record to carry an explicit use:
 
 - actor figure;
 - durable world prop;
-- item prop; or
-- transient trace prop.
+- item prop.
 
 Keep geometry preparation common. Use determines catalogue admission,
 anchoring/presentation validation, and which runtime owner may instantiate the
@@ -134,15 +138,14 @@ and a prepared semantic model rather than grow parallel `DeerModel`,
 ### Prop anchors and gameplay truth
 
 Promotion metadata must declare the presentation anchor needed by the first
-proofs: ground, item-center, or surface trace. Anchor validation belongs to the
-asset pipeline and render-session composition. Collision, interaction bounds,
-ownership, incubation, pickup, expiry, drops, and persistence remain explicit
-gameplay facts. Asset bounds must never silently become authoritative physics.
+proofs: ground or item-center. Anchor validation belongs to the asset pipeline
+and render-session composition. Collision, interaction bounds, ownership,
+incubation, pickup, drops, and persistence remain explicit gameplay facts.
+Asset bounds must never silently become authoritative physics.
 
-The prepared renderer must accept stable presentation identity for both
-durable and transient props. A moving feather item may bob or rotate through
-ordinary item presentation; a track may expire; neither case justifies
-recompiling topology or rebuilding all actors.
+The prepared renderer must accept stable presentation identity for durable
+world and item props. A moving feather item may bob or rotate through ordinary
+item presentation without recompiling topology or rebuilding all actors.
 
 ### Required mallard migrations
 
@@ -152,13 +155,18 @@ Author and promote at least:
 |---|---|---|
 | `mallard_nest` | durable world prop | visible nest and egg, correct ground anchor, ordinary incubation entity unchanged |
 | `mallard_feather` | item prop | collectible item identity, pickup, cooldown, and inventory behavior unchanged |
-| `mallard_tracks` | transient trace prop | bounded local cap, expiry, orientation, and observation behavior unchanged |
 
-Remove the corresponding procedural geometry only after prepared native and
-Web pixels are accepted. Do not retain a hidden second production rendering
-path “just in case.” A clearly reported missing-asset/debug fallback may
-remain only if it is shared and cannot make first-party validation pass while
-the required prop is absent.
+Remove the corresponding nest and feather procedural geometry only after
+prepared native and Web pixels are accepted. Do not retain a hidden second
+production rendering path “just in case.” A clearly reported
+missing-asset/debug fallback may remain only if it is shared and cannot make
+first-party validation pass while the required prop is absent.
+
+The reviewed `mallard_tracks` rigid figure is deliberately not promoted. Keep
+the existing bounded authoritative track cue and temporary procedural visual
+until a shared terrain-conforming surface-trace renderer can replace its
+presentation without changing expiry, cap, orientation, or observation
+semantics. That renderer is a separate prerequisite, not a third prop use.
 
 The nest should read as a low woven/reed bowl with a visible egg instead of a
 solid block mound. It remains one semantic assembly for this slice; incubation
@@ -293,11 +301,12 @@ Deer leave bounded evidence even when not visible:
 - a rare shed antler associated with an adult antler-bearing deer and a durable
   cooldown or seasonal placeholder.
 
-Use semantic props for all three. Track lifetime may remain presentation-only;
-beds/sign and antlers need explicit persistence/collection decisions. Do not
-mutate arbitrary terrain blocks into paths in this first chapter. Persistent
-terrain wear is a later stewardship/world-history mechanic after compact sign
-and population state are proven.
+Use semantic props for beds/sign and antlers. Render tracks through the shared
+terrain-conforming surface-trace path; their lifetime may remain
+presentation-only. Beds/sign and antlers need explicit persistence/collection
+decisions. Do not mutate arbitrary terrain blocks into paths in this first
+chapter. Persistent terrain wear is a later stewardship/world-history
+mechanic after compact sign and population state are proven.
 
 ## Hunting, Harvest, and Population Consequence
 
@@ -370,12 +379,13 @@ from that exact pushed/deployed revision.
 1. **Record baselines.** Capture the current deer source, clips, generated
    habitat distribution, mallard procedural-prop pixels, runtime actor/prop
    counts, and affected performance lanes.
-2. **Generalize promotion.** Add explicit actor/world/item/trace use to the
+2. **Generalize promotion.** Add explicit actor/world/item use to the
    first-party semantic promotion path, checked generated outputs, Rust asset
    inventory/lookup, and review diagnostics without changing gameplay.
 3. **Prove semantic props.** Author, review, promote, and render the mallard
-   nest first. Migrate feather and tracks, compare pixels/behavior, then delete
-   their superseded procedural geometry.
+   nest first. Migrate feather, compare pixels/behavior, then delete the two
+   superseded procedural geometry builders. Reject tracks from this registry
+   and record the separate surface-trace rendering prerequisite.
 4. **Generalize runtime animation.** Land named clip selection, distance and
    elapsed-time phase sources, authoritative epoch continuity, fallback/error
    policy, and mono/stereo/multiview tests using an existing promoted figure
@@ -433,15 +443,18 @@ world-generation change into one opaque commit.
 - Unload/reload and full reopen retain stable deer identities and durable
   state. Harvested deer stay dead, drops do not duplicate, and later
   recolonization creates a different identity under explicit rules.
-- The mallard nest, feather, and track retain their existing gameplay and
-  persistence semantics after their visual migration.
+- The mallard nest and feather retain their existing gameplay and persistence
+  semantics after their visual migration. The track mechanic retains its cap,
+  expiry, orientation, and observation semantics while its temporary visual
+  awaits the surface-trace renderer.
 
 ### Rendering and platform boundaries
 
 - Named distance- and elapsed-time clips render in shared prepared geometry
   with stable identity and no whole-crowd topology rebuild.
-- World, item, and trace props render through ordinary shared prepared paths;
-  no species-specific mesh function is added.
+- World and item props render through ordinary shared prepared paths. Tracks
+  render through the shared terrain-surface path once that prerequisite lands;
+  no new species-specific mesh function is added.
 - First drawable milestones are captured and inspected before later behavior
   is stacked on top.
 - Native mono/offscreen, synthetic stereo, full-frame multiview contract,
@@ -563,6 +576,41 @@ world-generation change into one opaque commit.
   [tracks](https://mclone.kzahel.com/animals/?view=props&figure=mallard_tracks&camera=top).
   Each showed `Packed review candidate`, `Review only`, and the expected use
   and anchor. Those URLs are the Human Review 1 acceptance surface.
+
+### 2026-08-12 — Review 1 decision and live migration
+
+- Human review accepted the nest and feather. It rejected the value of a rigid
+  track figure and identified terrain-conforming decal rendering as the more
+  appropriate direction.
+- Removed `mallard_tracks` from the checked semantic registry and first-party
+  runtime pack. Asset Lab now has two promoted props and intentionally has no
+  `trace_prop` or `surface_trace` category; environmental traces are governed
+  by [`terrain-surface-traces.md`](../topics/terrain-surface-traces.md).
+- Marked `mallard_nest` and `mallard_feather` as `live_gameplay`, loaded them as
+  required prepared semantic resources beside actor figures, and routed the
+  ordinary nest entity and feather item presentations to those stable resource
+  IDs through the shared mono/stereo/multiview actor renderer.
+- Removed the procedural mallard nest and feather geometry builders. Missing
+  first-party prop assets now fail preparation instead of silently presenting
+  a different fallback shape. Gameplay identity, incubation, pickup,
+  persistence, and replication remain in their existing authoritative owners.
+- The existing mallard track producer, lifetime, cap, observation, and
+  temporary raised procedural presentation remain unchanged. This avoids
+  coupling the decal prerequisite to the prop migration while also avoiding a
+  second rigid track asset that deer would copy.
+- Shared asset/render/render-session tests cover required loading, stable prop
+  identity, prepared admission, ground anchoring, horizontal sizing, and live
+  nest/feather composition. Asset Lab typecheck and all 32 semantic tests pass
+  with 204 canonical sources, two runtime props, and two live props.
+- The refreshed native flat capture was inspected. The live authored nest now
+  reads as a grounded low woven bowl with a visible pale egg at its ordinary
+  showcase location; the synthetic-stereo capture remained healthy through
+  the same shared resource migration.
+- Local headed Chrome/WebGPU inspected the same ordinary `mallard-ecology`
+  recipe after its 80-tick behavioral window. It rendered five actors, retained
+  the accepted movement/hatch/field-note outcomes, and left all eight browser
+  persistent-world stores empty. Flat Android debug and Android XR release APK
+  builds also pass with the refreshed first-party pack and shared renderer.
 
 For later slices, continue to record commit IDs, asset review paths,
 deterministic habitat/population measurements, focused and workspace tests,

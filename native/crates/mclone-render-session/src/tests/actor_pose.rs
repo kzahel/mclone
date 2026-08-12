@@ -400,6 +400,79 @@ fn mallard_egg_item_actor_uses_egg_item_shape() {
 }
 
 #[test]
+fn mallard_feather_item_actor_uses_live_semantic_prop() {
+    let client = ClientRuntime::local_integrated();
+    let presentation = ActorPresentation {
+        id: ActorPresentationId::Entity(mclone_protocol::EntityId(12)),
+        kind: ActorPresentationKind::Entity(mclone_protocol::EntityKind::Item),
+        appearance: ActorAppearance::NONE,
+        item_stack: Some(mclone_protocol::ItemStackSnapshot {
+            kind: mclone_protocol::ItemKind::MallardFeather,
+            count: 1,
+        }),
+        mallard_life_stage: None,
+        in_water: false,
+        mallard_nest: None,
+        feet_position: Vec3d::new(1.0, 64.0, 2.0),
+        y_rot_degrees: 45.0,
+        x_rot_degrees: 0.0,
+        rotation: None,
+        on_ground: false,
+        width: 0.25,
+        height: 0.25,
+        walk_animation_distance: 0.0,
+        chicken_wing_flap_radians: None,
+    };
+
+    let actors = actor_instances_from_presentations(&[presentation], &client);
+
+    assert_eq!(actors.len(), 1);
+    assert_eq!(
+        actors[0].shape,
+        mclone_render::entity::ActorInstanceShape::SemanticProp(
+            mclone_assets::mallard_feather_figure_id()
+        )
+    );
+}
+
+#[test]
+fn mallard_nest_entity_actor_uses_live_semantic_prop() {
+    let client = ClientRuntime::local_integrated();
+    let presentation = ActorPresentation {
+        id: ActorPresentationId::Entity(mclone_protocol::EntityId(13)),
+        kind: ActorPresentationKind::Entity(mclone_protocol::EntityKind::MallardNest),
+        appearance: ActorAppearance::NONE,
+        item_stack: None,
+        mallard_life_stage: None,
+        in_water: false,
+        mallard_nest: Some(mclone_protocol::MallardNestSnapshotData {
+            incubation_progress: 100,
+            incubation_required: 2_400,
+            attended: true,
+        }),
+        feet_position: Vec3d::new(1.0, 64.0, 2.0),
+        y_rot_degrees: 0.0,
+        x_rot_degrees: 0.0,
+        rotation: None,
+        on_ground: true,
+        width: 0.8,
+        height: 0.32,
+        walk_animation_distance: 0.0,
+        chicken_wing_flap_radians: None,
+    };
+
+    let actors = actor_instances_from_presentations(&[presentation], &client);
+
+    assert_eq!(actors.len(), 1);
+    assert_eq!(
+        actors[0].shape,
+        mclone_render::entity::ActorInstanceShape::SemanticProp(
+            mclone_assets::mallard_nest_figure_id()
+        )
+    );
+}
+
+#[test]
 fn local_player_actor_for_view_hides_first_person_by_default() {
     let client = ClientRuntime::local_integrated();
     let camera =

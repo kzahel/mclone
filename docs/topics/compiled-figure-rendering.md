@@ -78,25 +78,31 @@ entity/runtime architecture.
 
 Coordinating Tactical
 [`284`](../tactical/284-deer-forest-edge-ecology-and-semantic-props.md) now
-exercises the same semantic/prepared machinery for explicitly typed world,
-item, and trace props. The first review gate promotes authored mallard nest,
-feather, and track sources with checked use/anchor metadata, generated JSON,
-first-party pack inventory, shared Rust preparation tests, and an isolated
-`/animals/?view=props` web review mode. The normal Creature Catalogue remains
-actor-only. This is a generalization of asset use and anchoring, not a parallel
-prop compiler or permission to move gameplay state into asset metadata.
+exercises the same semantic/prepared machinery for explicitly typed world and
+item props. Human Review 1 accepted the authored mallard nest and feather,
+which retain checked use/anchor metadata, generated JSON, first-party pack
+inventory, shared Rust preparation, and an isolated `/animals/?view=props`
+review mode. The normal Creature Catalogue remains actor-only. This is a
+generalization of asset use and anchoring, not a parallel prop compiler or
+permission to move gameplay state into asset metadata.
 
 Promotion metadata also distinguishes `live_gameplay` from `review_only`.
-First-party packing alone cannot satisfy live-instantiation evidence: the
-three current prop candidates report `review_only` and the review surface
-reports zero live props until ordinary gameplay presentation lands.
+First-party packing alone cannot satisfy live-instantiation evidence. The nest
+and feather now report `live_gameplay` because ordinary render-session
+composition selects their stable resource IDs; there are two runtime props and
+two live props.
 
-The current live mallard procedural prop meshes deliberately remain in place
-until the review assets are accepted. Prop JSON is classified as
-`SemanticProp`, never inserted into `FIRST_PARTY_ACTOR_FIGURE_IDS`, and is not
-yet instantiated by gameplay. The next accepted slice must route ordinary
-world/item/trace presentation through shared prepared resources, compare live
-pixels and behavior, then remove the three superseded procedural builders.
+Prop JSON is classified as `SemanticProp`, never inserted into
+`FIRST_PARTY_ACTOR_FIGURE_IDS`, and is loaded as a required prepared resource.
+Ordinary live nest entities and feather items now select those resources, and
+their two procedural builders are removed. First-party prop preparation fails
+closed rather than making tests pass through a different production shape.
+
+Human review rejected the rigid track candidate. Terrain marks are not world
+or item figures: they need the slope, depth, fade, and batching contract in
+[`terrain-surface-traces.md`](terrain-surface-traces.md). The checked track
+asset was removed; the existing bounded mallard trace mechanic keeps its
+temporary procedural visual only until that shared renderer lands.
 
 The architectural target and `mclone-assets` compiler ownership are selected,
 while optimization thresholds and later LOD policy remain open. The purpose of

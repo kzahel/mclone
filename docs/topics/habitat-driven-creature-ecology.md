@@ -269,7 +269,9 @@ Tactical 279 closes the first mechanics ladder around that habitat:
 - real mallards emit spatially attenuated, flock-suppressed contact calls and
   shed collectible feathers under durable cooldowns;
 - recent authoritative shore movement creates locally capped, expiring track
-  figures that remain presentation evidence rather than world mutations; and
+  evidence rather than world mutations; its current raised procedural visual
+  is temporary pending the shared terrain-conforming path in
+  [`terrain-surface-traces.md`](terrain-surface-traces.md); and
 - seen, heard, feather, track, nest, and hatch observations form an idempotent
   per-player field-guide bitset, persisted and replicated to compact flat,
   stereo, and multiview presentation.
@@ -339,6 +341,11 @@ event, and no ambient soundtrack pretends that a flock exists.
   both ends of its behavioral window. Its inspected public pixels retain the
   full accepted ecology sequence while placing the waterline through the lower
   legs instead of under the feet.
+- Human Review 1 of Tactical 284 accepted authored mallard nest and feather
+  props for live gameplay, but rejected rigid track figures as the wrong
+  presentation abstraction. Nest entities and feather items now use required
+  prepared semantic assets; terrain tracks retain their existing gameplay cue
+  while a slope-conforming shared decal/surface path is developed.
 
 ## Known Gaps and Recommended Next Work
 
@@ -353,6 +360,9 @@ event, and no ambient soundtrack pretends that a flock exists.
   entities are correct; do not use them to weaken visible-entity continuity.
 - Feed animal paths, grazing sites, nests, and water access back into terrain
   and structure planning as evidence-bearing landscape history.
+- Replace raised track meshes with the bounded shared terrain-conforming
+  surface path in [`terrain-surface-traces.md`](terrain-surface-traces.md)
+  before deer introduces hoofprints.
 - Promote a contrasting second original species whose mechanic forces a new
   terrain capability instead of merely reusing the mallard wetland. Tactical
   [`284`](../tactical/284-deer-forest-edge-ecology-and-semantic-props.md) now

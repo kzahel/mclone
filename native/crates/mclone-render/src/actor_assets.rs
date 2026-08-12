@@ -3,7 +3,7 @@ use std::fmt;
 
 use mclone_assets::{AssetError, AssetPath, AssetSource};
 
-use crate::asset_lab_figure::{ActorFigureSet, load_first_party_actor_figures};
+use crate::asset_lab_figure::{SemanticFigureSet, load_first_party_semantic_figures};
 use crate::entity::{ActorTextureAtlas, ActorTextureLayout, ActorTextureRegion};
 
 const COW_TEXTURE_PATH: &str = "assets/minecraft/textures/entity/cow/cow.png";
@@ -13,7 +13,7 @@ const COW_TEXTURE_HEIGHT: u32 = 32;
 #[derive(Clone, Debug)]
 pub struct ActorTextureAssets {
     pub atlas: ActorTextureImage,
-    pub figures: ActorFigureSet,
+    pub figures: SemanticFigureSet,
 }
 
 #[derive(Clone, Debug)]
@@ -53,7 +53,7 @@ pub fn load_actor_texture_assets(
         COW_TEXTURE_HEIGHT,
     )?;
     let atlas = stitch_actor_texture_atlas(&cow);
-    let figures = load_first_party_actor_figures(source)
+    let figures = load_first_party_semantic_figures(source)
         .map_err(|source| ActorTextureAssetError::Figures { source })?;
 
     Ok(ActorTextureAssets { atlas, figures })
@@ -236,6 +236,14 @@ mod tests {
             mallard_duck_figure_path(),
             include_str!("../../../../assets/mclone/figures/mallard_duck.figure.json"),
         );
+        source.insert_text(
+            mclone_assets::mallard_nest_figure_path(),
+            include_str!("../../../../assets/mclone/figures/mallard_nest.figure.json"),
+        );
+        source.insert_text(
+            mclone_assets::mallard_feather_figure_path(),
+            include_str!("../../../../assets/mclone/figures/mallard_feather.figure.json"),
+        );
         source
     }
 
@@ -285,6 +293,18 @@ mod tests {
         );
         assert!(assets.figures.prepared(chicken_figure_id()).is_some());
         assert!(assets.figures.prepared(mallard_duck_figure_id()).is_some());
-        assert_eq!(assets.figures.len(), 5);
+        assert!(
+            assets
+                .figures
+                .prepared(mclone_assets::mallard_nest_figure_id())
+                .is_some()
+        );
+        assert!(
+            assets
+                .figures
+                .prepared(mclone_assets::mallard_feather_figure_id())
+                .is_some()
+        );
+        assert_eq!(assets.figures.len(), 7);
     }
 }

@@ -2152,8 +2152,6 @@ mod tests {
         include_str!("../../../../assets/mclone/figures/mallard_nest.figure.json");
     const MALLARD_FEATHER_FIGURE_JSON: &str =
         include_str!("../../../../assets/mclone/figures/mallard_feather.figure.json");
-    const MALLARD_TRACKS_FIGURE_JSON: &str =
-        include_str!("../../../../assets/mclone/figures/mallard_tracks.figure.json");
 
     #[test]
     fn prepares_player_as_static_box_geometry() {
@@ -3023,7 +3021,6 @@ mod tests {
         for (json, expected_name, expected_parts) in [
             (MALLARD_NEST_FIGURE_JSON, "mallard_nest", 15),
             (MALLARD_FEATHER_FIGURE_JSON, "mallard_feather", 7),
-            (MALLARD_TRACKS_FIGURE_JSON, "mallard_tracks", 8),
         ] {
             let asset: FigureAsset = serde_json::from_str(json).unwrap();
             let prepared = prepare_figure_asset(&asset).unwrap();

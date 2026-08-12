@@ -254,8 +254,11 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
   instantiation evidence, matched capture/browser review, and temporary hosted
   play links
 - `semantic-figure-assets` — one checked TypeScript-to-semantic-JSON asset path
-  for actor figures plus world, item, and trace props, beginning with mallard
-  prop migration and deer runtime promotion
+  for actor figures plus world and item props, beginning with mallard prop
+  migration and deer runtime promotion
+- `terrain-surface-traces` — bounded terrain-conforming decals or surface
+  patches for ecological tracks and scuffs, separate from rigid semantic
+  figures and persistent terrain mutation
 - `desktop-openxr-validation` — Windows VDXR and macOS/Linux WiVRn runtime
   bootstrap, headset-backed smoke evidence, Vulkan interop, and remaining
   desktop OpenXR hardware acceptance

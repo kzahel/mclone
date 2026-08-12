@@ -4,7 +4,7 @@ use std::sync::{Arc, OnceLock};
 
 use anyhow::{Context, Result, bail};
 use glam::{EulerRot, Mat4, Quat, Vec3};
-use mclone_assets::{ActorFigureId, default_player_figure_id};
+use mclone_assets::{ActorFigureId, SemanticFigureId, default_player_figure_id};
 use mclone_core::Vec3d;
 use mclone_diagnostics::GpuPassId;
 
@@ -23,7 +23,9 @@ use crate::uniform::{
     PER_VIEW_UNIFORM_SLOT_COUNT, PerViewSlot, PerViewUniformBuffer, SINGLE_VIEW_SLOT,
 };
 
-pub use crate::asset_lab_figure::{ActorFigureSet, CompiledFigure as ActorFigure};
+pub use crate::asset_lab_figure::{
+    ActorFigureSet, CompiledFigure as ActorFigure, SemanticFigureSet,
+};
 
 const ACTOR_VERTEX_BYTE_LEN: usize = 3 * std::mem::size_of::<f32>()
     + 2 * std::mem::size_of::<f32>()
@@ -85,13 +87,12 @@ pub enum ActorInstanceId {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ActorInstanceShape {
     Figure(ActorFigureId),
+    SemanticProp(SemanticFigureId),
     Humanoid,
     QuadrupedPlaceholder,
     CowModel,
     DebugCube,
     ItemEgg,
-    MallardNest,
-    MallardFeather,
     MallardTrack,
 }
 
@@ -292,7 +293,7 @@ impl ActorInstance {
 
     pub fn mallard_nest(feet_position: Vec3, y_rot_degrees: f32, width: f32, height: f32) -> Self {
         Self {
-            shape: ActorInstanceShape::MallardNest,
+            shape: ActorInstanceShape::SemanticProp(mclone_assets::mallard_nest_figure_id()),
             body_color: [0.31, 0.20, 0.09, 1.0],
             accent_color: [0.84, 0.75, 0.49, 1.0],
             ..Self::item_egg(feet_position, y_rot_degrees, width, height)
@@ -306,7 +307,7 @@ impl ActorInstance {
         height: f32,
     ) -> Self {
         Self {
-            shape: ActorInstanceShape::MallardFeather,
+            shape: ActorInstanceShape::SemanticProp(mclone_assets::mallard_feather_figure_id()),
             body_color: [0.73, 0.70, 0.62, 1.0],
             accent_color: [0.16, 0.34, 0.62, 1.0],
             ..Self::item_egg(feet_position, y_rot_degrees, width, height)
@@ -319,6 +320,19 @@ impl ActorInstance {
             body_color: [0.20, 0.13, 0.06, 0.72],
             accent_color: [0.12, 0.08, 0.04, 0.72],
             ..Self::item_egg(feet_position, y_rot_degrees, 0.34, 0.015)
+        }
+    }
+
+    pub fn semantic_prop(
+        feet_position: Vec3,
+        y_rot_degrees: f32,
+        figure: SemanticFigureId,
+        width: f32,
+        height: f32,
+    ) -> Self {
+        Self {
+            shape: ActorInstanceShape::SemanticProp(figure),
+            ..Self::item_egg(feet_position, y_rot_degrees, width, height)
         }
     }
 
@@ -409,7 +423,7 @@ pub struct ActorSharedResources {
     atlas: GpuActorTextureAtlas,
     texture_layout: ActorTextureLayout,
     atlas_size: [u32; 2],
-    actor_figures: ActorFigureSet,
+    semantic_figures: SemanticFigureSet,
     prepared: PreparedActorSharedResources,
 }
 
@@ -483,20 +497,20 @@ impl ActorSharedResources {
         queue: &wgpu::Queue,
         color_format: wgpu::TextureFormat,
         atlas: ActorTextureAtlas<'_>,
-        actor_figures: Option<&ActorFigureSet>,
+        semantic_figures: Option<&SemanticFigureSet>,
     ) -> Result<Arc<Self>> {
         let renderer = ActorRenderer::new(device, color_format);
         let gpu_atlas =
             GpuActorTextureAtlas::new(device, queue, &renderer.texture_bind_group_layout, atlas)?;
-        let actor_figures = actor_figures.cloned().unwrap_or_default();
+        let semantic_figures = semantic_figures.cloned().unwrap_or_default();
         let prepared =
-            PreparedActorSharedResources::new(device, queue, color_format, &actor_figures)?;
+            PreparedActorSharedResources::new(device, queue, color_format, &semantic_figures)?;
         Ok(Arc::new(Self {
             renderer,
             atlas: gpu_atlas,
             texture_layout: atlas.layout,
             atlas_size: [atlas.width.max(1), atlas.height.max(1)],
-            actor_figures,
+            semantic_figures,
             prepared,
         }))
     }
@@ -508,9 +522,10 @@ impl ActorDrawResources {
         queue: &wgpu::Queue,
         color_format: wgpu::TextureFormat,
         atlas: ActorTextureAtlas<'_>,
-        actor_figures: Option<&ActorFigureSet>,
+        semantic_figures: Option<&SemanticFigureSet>,
     ) -> Result<Self> {
-        let shared = ActorSharedResources::new(device, queue, color_format, atlas, actor_figures)?;
+        let shared =
+            ActorSharedResources::new(device, queue, color_format, atlas, semantic_figures)?;
         Ok(Self::new_with_shared_resources(device, shared))
     }
 
@@ -699,7 +714,7 @@ impl ActorDrawResources {
                 legacy_actors,
                 self.shared.texture_layout,
                 self.shared.atlas_size,
-                &self.shared.actor_figures,
+                &self.shared.semantic_figures,
             ) {
                 let uniform_offset = self.uniforms.write_slot(
                     queue,
@@ -890,7 +905,7 @@ impl ActorDrawResources {
                 legacy_actors,
                 self.shared.texture_layout,
                 self.shared.atlas_size,
-                &self.shared.actor_figures,
+                &self.shared.semantic_figures,
             ) {
                 let renderer = self.shared.renderer.placed_renderer(device);
                 if self.placed.borrow().is_none() {
@@ -994,7 +1009,7 @@ impl ActorDrawResources {
                 legacy_actors,
                 self.shared.texture_layout,
                 self.shared.atlas_size,
-                &self.shared.actor_figures,
+                &self.shared.semantic_figures,
             ) {
                 let renderer = self.shared.renderer.multiview_renderer(device)?;
                 if self.multiview.borrow().is_none() {
@@ -1104,7 +1119,7 @@ impl ActorDrawResources {
                 legacy_actors,
                 self.shared.texture_layout,
                 self.shared.atlas_size,
-                &self.shared.actor_figures,
+                &self.shared.semantic_figures,
             ) {
                 let renderer = self.shared.renderer.placed_multiview_renderer(device)?;
                 if self.placed_multiview.borrow().is_none() {
@@ -1224,7 +1239,7 @@ impl ActorDrawResources {
                 .saturating_add(prepared_world.mutable_known_allocated_bytes),
             atlas_size: self.shared.atlas_size,
             atlas_base_bytes,
-            figure_count: self.shared.actor_figures.len(),
+            figure_count: self.shared.semantic_figures.len(),
             direct_pipeline_count: 1,
             direct_uniform_payload_bytes: self.uniforms.payload_size(),
             direct_uniform_slot_bytes: self.uniforms.slot_size(),
@@ -2105,6 +2120,18 @@ fn append_actor(
             actor_figures.get(figure),
             scratch,
         ),
+        ActorInstanceShape::SemanticProp(figure) => {
+            if actor_figures.get(figure).is_some() {
+                append_asset_lab_figure_model(
+                    mesh,
+                    actor,
+                    texture_layout,
+                    atlas_size,
+                    actor_figures.get(figure),
+                    scratch,
+                )
+            }
+        }
         ActorInstanceShape::Humanoid => {
             append_humanoid_model(mesh, actor, texture_layout, atlas_size)
         }
@@ -2114,12 +2141,6 @@ fn append_actor(
         ActorInstanceShape::CowModel => append_cow_model(mesh, actor, texture_layout, atlas_size),
         ActorInstanceShape::DebugCube => append_debug_cube(mesh, actor, texture_layout, atlas_size),
         ActorInstanceShape::ItemEgg => append_item_egg(mesh, actor, texture_layout, atlas_size),
-        ActorInstanceShape::MallardNest => {
-            append_mallard_nest(mesh, actor, texture_layout, atlas_size)
-        }
-        ActorInstanceShape::MallardFeather => {
-            append_mallard_feather(mesh, actor, texture_layout, atlas_size)
-        }
         ActorInstanceShape::MallardTrack => {
             append_mallard_track(mesh, actor, texture_layout, atlas_size)
         }
@@ -2148,7 +2169,7 @@ fn append_asset_lab_figure_model(
     };
 
     let white_uv = texture_region_center_uv(texture_layout.white, atlas_size);
-    let model_scale = actor.height.max(0.1);
+    let model_scale = figure_model_scale(actor, figure);
     sample_figure_part_transforms_into(
         figure,
         actor.animation,
@@ -2196,6 +2217,20 @@ fn append_asset_lab_figure_model(
             );
         }
     }
+}
+
+fn figure_model_scale(actor: ActorInstance, figure: &ActorFigure) -> f32 {
+    if matches!(actor.shape, ActorInstanceShape::SemanticProp(_)) {
+        let bounds = figure.cuboids.iter().fold(
+            (Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY)),
+            |bounds, cuboid| (bounds.0.min(cuboid.min), bounds.1.max(cuboid.max)),
+        );
+        let span = (bounds.1.x - bounds.0.x).max(bounds.1.z - bounds.0.z);
+        if span.is_finite() && span > f32::EPSILON {
+            return actor.width.max(0.01) / span;
+        }
+    }
+    actor.height.max(0.1)
 }
 
 fn sample_figure_part_transforms_into(
@@ -2731,55 +2766,6 @@ fn append_item_egg(
             spot,
             shell_light,
         ],
-    );
-}
-
-fn append_mallard_nest(
-    mesh: &mut ActorMesh,
-    actor: ActorInstance,
-    texture_layout: ActorTextureLayout,
-    atlas_size: [u32; 2],
-) {
-    let half = actor.width.max(0.5) * 0.5;
-    let white_uv = texture_region_center_uv(texture_layout.white, atlas_size);
-    append_box(
-        mesh,
-        actor,
-        Vec3::new(-half, 0.0, -half),
-        Vec3::new(half, actor.height.max(0.18), half),
-        white_uv,
-        [
-            scale_color(actor.body_color, 0.55),
-            actor.body_color,
-            scale_color(actor.body_color, 0.82),
-            actor.accent_color,
-            actor.body_color,
-            scale_color(actor.accent_color, 1.08),
-        ],
-    );
-    let mut egg = actor;
-    egg.feet_position.y += actor.height.max(0.18) * 0.55;
-    egg.width *= 0.38;
-    egg.height *= 0.72;
-    append_item_egg(mesh, egg, texture_layout, atlas_size);
-}
-
-fn append_mallard_feather(
-    mesh: &mut ActorMesh,
-    actor: ActorInstance,
-    texture_layout: ActorTextureLayout,
-    atlas_size: [u32; 2],
-) {
-    let width = actor.width.max(0.08);
-    let height = actor.height.max(0.24);
-    let white_uv = texture_region_center_uv(texture_layout.white, atlas_size);
-    append_box(
-        mesh,
-        actor,
-        Vec3::new(-width * 0.5, 0.0, -0.025),
-        Vec3::new(width * 0.5, height, 0.025),
-        white_uv,
-        [actor.body_color; 6],
     );
 }
 
@@ -3514,7 +3500,7 @@ mod tests {
                 actors,
                 resources.shared.texture_layout,
                 resources.shared.atlas_size,
-                &resources.shared.actor_figures,
+                &resources.shared.semantic_figures,
             );
             assert!(prepared.is_some());
         };
@@ -3587,7 +3573,7 @@ mod tests {
                         actors,
                         resources.shared.texture_layout,
                         resources.shared.atlas_size,
-                        &resources.shared.actor_figures,
+                        &resources.shared.semantic_figures,
                     )
                     .is_some()
             );
@@ -3813,6 +3799,26 @@ mod tests {
 
         assert_eq!(mesh.vertices.len(), 12 * 6 * 4);
         assert_eq!(mesh.indices.len(), 12 * 6 * 6);
+    }
+
+    #[test]
+    fn actor_mesh_does_not_use_humanoid_fallback_for_unknown_semantic_props() {
+        let actor = ActorInstance::semantic_prop(
+            Vec3::ZERO,
+            0.0,
+            mclone_assets::ActorFigureId::from_static("mclone:missing-prop"),
+            0.8,
+            0.32,
+        );
+        let mesh = actor_mesh(
+            &[actor],
+            test_actor_texture_layout(),
+            test_actor_texture_atlas_size(),
+            &ActorFigureSet::default(),
+        );
+
+        assert!(mesh.vertices.is_empty());
+        assert!(mesh.indices.is_empty());
     }
 
     #[test]

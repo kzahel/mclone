@@ -487,7 +487,7 @@ fn actor_walk_review_specs(
     mclone_assets::FIRST_PARTY_ACTOR_FIGURE_IDS
         .iter()
         .map(|figure| {
-            let path = mclone_assets::actor_figure_path(*figure)
+            let path = mclone_assets::first_party_actor_figure_path(*figure)
                 .with_context(|| format!("unknown first-party actor figure {}", figure.as_str()))?;
             let asset = mclone_assets::load_figure_asset(source, &path)
                 .with_context(|| format!("failed to load actor figure {}", figure.as_str()))?;

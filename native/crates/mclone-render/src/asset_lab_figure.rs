@@ -3,9 +3,9 @@ use std::collections::{BTreeMap, HashMap};
 use anyhow::{Context, Result, bail};
 use glam::Vec3;
 use mclone_assets::{
-    ActorFigureId, FIRST_PARTY_ACTOR_FIGURE_IDS, FigureAsciiTexture, FigureAsset, FigureClip,
-    FigureClipLocomotion, FigureClipTransform, FigurePart, PreparedFigure, actor_figure_path,
-    load_figure_asset, prepare_figure_asset,
+    ActorFigureId, FIRST_PARTY_ACTOR_FIGURE_IDS, FIRST_PARTY_SEMANTIC_PROP_FIGURE_IDS,
+    FigureAsciiTexture, FigureAsset, FigureClip, FigureClipLocomotion, FigureClipTransform,
+    FigurePart, PreparedFigure, load_figure_asset, prepare_figure_asset, semantic_figure_path,
 };
 
 const TEXTURE_OVERLAY_DEPTH: f32 = 0.004;
@@ -21,12 +21,12 @@ pub struct CompiledFigure {
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct ActorFigureSet {
+pub struct SemanticFigureSet {
     figures: BTreeMap<ActorFigureId, CompiledFigure>,
     prepared_figures: BTreeMap<ActorFigureId, PreparedFigure>,
 }
 
-impl ActorFigureSet {
+impl SemanticFigureSet {
     pub fn new(figures: impl IntoIterator<Item = (ActorFigureId, CompiledFigure)>) -> Self {
         Self {
             figures: figures.into_iter().collect(),
@@ -68,6 +68,9 @@ impl ActorFigureSet {
         self.figures.is_empty()
     }
 }
+
+/// Compatibility name for actor-only renderer call sites during migration.
+pub type ActorFigureSet = SemanticFigureSet;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct CompiledCuboid {
@@ -150,13 +153,13 @@ pub(crate) struct CompiledFigureContact {
     pub stance_ratio: f32,
 }
 
-pub(crate) fn load_first_party_actor_figures(
+pub(crate) fn load_first_party_semantic_figures(
     source: &impl mclone_assets::AssetSource,
-) -> Result<ActorFigureSet> {
+) -> Result<SemanticFigureSet> {
     let mut figures = Vec::new();
     let mut prepared_figures = Vec::new();
     for id in FIRST_PARTY_ACTOR_FIGURE_IDS {
-        let path = actor_figure_path(id)
+        let path = semantic_figure_path(id)
             .with_context(|| format!("unknown actor figure id {}", id.as_str()))?;
         let asset = load_figure_asset(source, &path)
             .with_context(|| format!("failed to load actor figure {} at {}", id.as_str(), path))?;
@@ -170,7 +173,27 @@ pub(crate) fn load_first_party_actor_figures(
             ),
         }
     }
-    Ok(ActorFigureSet::with_prepared(figures, prepared_figures))
+    for id in FIRST_PARTY_SEMANTIC_PROP_FIGURE_IDS {
+        let path = semantic_figure_path(id)
+            .with_context(|| format!("unknown semantic prop figure id {}", id.as_str()))?;
+        let asset = load_figure_asset(source, &path).with_context(|| {
+            format!(
+                "failed to load semantic prop figure {} at {}",
+                id.as_str(),
+                path
+            )
+        })?;
+        figures.push((id, compile_figure_asset(&asset)?));
+        prepared_figures.push((
+            id,
+            prepare_figure_asset(&asset)
+                .map_err(anyhow::Error::from)
+                .with_context(|| {
+                    format!("failed to prepare required semantic prop {}", id.as_str())
+                })?,
+        ));
+    }
+    Ok(SemanticFigureSet::with_prepared(figures, prepared_figures))
 }
 
 #[cfg(test)]
@@ -178,7 +201,7 @@ pub(crate) fn load_compiled_actor_figure(
     source: &impl mclone_assets::AssetSource,
     id: ActorFigureId,
 ) -> Result<CompiledFigure> {
-    let path = actor_figure_path(id)
+    let path = semantic_figure_path(id)
         .with_context(|| format!("unknown actor figure id {}", id.as_str()))?;
     let asset = load_figure_asset(source, &path)
         .with_context(|| format!("failed to load actor figure {} at {}", id.as_str(), path))?;
@@ -1117,11 +1140,12 @@ mod tests {
     #[test]
     fn first_party_actor_figure_set_loads_legacy_and_prepared_figures() {
         let source = mclone_assets::FilesystemAssetSource::new("../../..");
-        let figures = load_first_party_actor_figures(&source).unwrap();
+        let figures = load_first_party_semantic_figures(&source).unwrap();
 
         assert_eq!(
             figures.len(),
             mclone_assets::FIRST_PARTY_ACTOR_FIGURE_IDS.len()
+                + mclone_assets::FIRST_PARTY_SEMANTIC_PROP_FIGURE_IDS.len()
         );
         for id in mclone_assets::FIRST_PARTY_ACTOR_FIGURE_IDS {
             assert!(figures.get(id).is_some(), "legacy figure {}", id.as_str());
@@ -1131,15 +1155,27 @@ mod tests {
                 id.as_str()
             );
         }
+        for id in mclone_assets::FIRST_PARTY_SEMANTIC_PROP_FIGURE_IDS {
+            assert!(
+                figures.get(id).is_some(),
+                "legacy prop figure {}",
+                id.as_str()
+            );
+            assert!(
+                figures.prepared(id).is_some(),
+                "prepared prop figure {}",
+                id.as_str()
+            );
+        }
     }
 
     #[test]
     fn first_party_actor_registry_recompiles_semantic_replacement() {
         let original_source = first_party_memory_source(PLAYER_FIGURE_JSON);
-        let original = load_first_party_actor_figures(&original_source).unwrap();
+        let original = load_first_party_semantic_figures(&original_source).unwrap();
         let replacement_json = PLAYER_FIGURE_JSON.replace("#2878b8", "#ff00ff");
         let replacement_source = first_party_memory_source(&replacement_json);
-        let replacement = load_first_party_actor_figures(&replacement_source).unwrap();
+        let replacement = load_first_party_semantic_figures(&replacement_source).unwrap();
         let id = mclone_assets::default_player_figure_id();
 
         assert_ne!(original.get(id), replacement.get(id));
@@ -1271,6 +1307,14 @@ mod tests {
         source.insert_text(
             mclone_assets::mallard_duck_figure_path(),
             MALLARD_DUCK_FIGURE_JSON,
+        );
+        source.insert_text(
+            mclone_assets::mallard_nest_figure_path(),
+            include_str!("../../../../assets/mclone/figures/mallard_nest.figure.json"),
+        );
+        source.insert_text(
+            mclone_assets::mallard_feather_figure_path(),
+            include_str!("../../../../assets/mclone/figures/mallard_feather.figure.json"),
         );
         source
     }

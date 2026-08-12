@@ -9,11 +9,16 @@ pub const UPRIGHT_BEAR_FIGURE_PATH: &str = "assets/mclone/figures/upright_bear.f
 pub const COW_FIGURE_PATH: &str = "assets/mclone/figures/cow.figure.json";
 pub const CHICKEN_FIGURE_PATH: &str = "assets/mclone/figures/chicken.figure.json";
 pub const MALLARD_DUCK_FIGURE_PATH: &str = "assets/mclone/figures/mallard_duck.figure.json";
+pub const MALLARD_NEST_FIGURE_PATH: &str = "assets/mclone/figures/mallard_nest.figure.json";
+pub const MALLARD_FEATHER_FIGURE_PATH: &str = "assets/mclone/figures/mallard_feather.figure.json";
 pub const DEFAULT_PLAYER_FIGURE_ID: ActorFigureId = ActorFigureId::from_static("mclone:player");
 pub const UPRIGHT_BEAR_FIGURE_ID: ActorFigureId = ActorFigureId::from_static("mclone:upright_bear");
 pub const COW_FIGURE_ID: ActorFigureId = ActorFigureId::from_static("mclone:cow");
 pub const CHICKEN_FIGURE_ID: ActorFigureId = ActorFigureId::from_static("mclone:chicken");
 pub const MALLARD_DUCK_FIGURE_ID: ActorFigureId = ActorFigureId::from_static("mclone:mallard_duck");
+pub const MALLARD_NEST_FIGURE_ID: ActorFigureId = ActorFigureId::from_static("mclone:mallard_nest");
+pub const MALLARD_FEATHER_FIGURE_ID: ActorFigureId =
+    ActorFigureId::from_static("mclone:mallard_feather");
 pub const FIRST_PARTY_ACTOR_FIGURE_IDS: [ActorFigureId; 5] = [
     DEFAULT_PLAYER_FIGURE_ID,
     UPRIGHT_BEAR_FIGURE_ID,
@@ -21,11 +26,13 @@ pub const FIRST_PARTY_ACTOR_FIGURE_IDS: [ActorFigureId; 5] = [
     CHICKEN_FIGURE_ID,
     MALLARD_DUCK_FIGURE_ID,
 ];
+pub const FIRST_PARTY_SEMANTIC_PROP_FIGURE_IDS: [SemanticFigureId; 2] =
+    [MALLARD_NEST_FIGURE_ID, MALLARD_FEATHER_FIGURE_ID];
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct ActorFigureId(&'static str);
+pub struct SemanticFigureId(&'static str);
 
-impl ActorFigureId {
+impl SemanticFigureId {
     pub const fn from_static(id: &'static str) -> Self {
         Self(id)
     }
@@ -34,6 +41,9 @@ impl ActorFigureId {
         self.0
     }
 }
+
+/// Compatibility name for call sites that can only select living figures.
+pub type ActorFigureId = SemanticFigureId;
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct FigureAsset {
@@ -218,6 +228,14 @@ pub fn mallard_duck_figure_path() -> AssetPath {
     AssetPath::new(MALLARD_DUCK_FIGURE_PATH)
 }
 
+pub fn mallard_nest_figure_path() -> AssetPath {
+    AssetPath::new(MALLARD_NEST_FIGURE_PATH)
+}
+
+pub fn mallard_feather_figure_path() -> AssetPath {
+    AssetPath::new(MALLARD_FEATHER_FIGURE_PATH)
+}
+
 pub const fn default_player_figure_id() -> ActorFigureId {
     DEFAULT_PLAYER_FIGURE_ID
 }
@@ -238,7 +256,15 @@ pub const fn mallard_duck_figure_id() -> ActorFigureId {
     MALLARD_DUCK_FIGURE_ID
 }
 
-pub fn actor_figure_path(id: ActorFigureId) -> Option<AssetPath> {
+pub const fn mallard_nest_figure_id() -> SemanticFigureId {
+    MALLARD_NEST_FIGURE_ID
+}
+
+pub const fn mallard_feather_figure_id() -> SemanticFigureId {
+    MALLARD_FEATHER_FIGURE_ID
+}
+
+fn actor_figure_path(id: ActorFigureId) -> Option<AssetPath> {
     match id.as_str() {
         "mclone:player" => Some(default_player_figure_path()),
         "mclone:upright_bear" => Some(upright_bear_figure_path()),
@@ -247,6 +273,18 @@ pub fn actor_figure_path(id: ActorFigureId) -> Option<AssetPath> {
         "mclone:mallard_duck" => Some(mallard_duck_figure_path()),
         _ => None,
     }
+}
+
+pub fn semantic_figure_path(id: SemanticFigureId) -> Option<AssetPath> {
+    actor_figure_path(id).or_else(|| match id.as_str() {
+        "mclone:mallard_nest" => Some(mallard_nest_figure_path()),
+        "mclone:mallard_feather" => Some(mallard_feather_figure_path()),
+        _ => None,
+    })
+}
+
+pub fn first_party_actor_figure_path(id: ActorFigureId) -> Option<AssetPath> {
+    actor_figure_path(id)
 }
 
 pub fn load_figure_asset(source: &impl AssetSource, path: &AssetPath) -> AssetResult<FigureAsset> {
@@ -356,27 +394,29 @@ mod tests {
     fn default_actor_figure_id_resolves_to_player_asset_path() {
         assert_eq!(default_player_figure_id().as_str(), "mclone:player");
         assert_eq!(
-            actor_figure_path(default_player_figure_id()).unwrap(),
+            first_party_actor_figure_path(default_player_figure_id()).unwrap(),
             default_player_figure_path()
         );
         assert_eq!(upright_bear_figure_id().as_str(), "mclone:upright_bear");
         assert_eq!(
-            actor_figure_path(upright_bear_figure_id()).unwrap(),
+            first_party_actor_figure_path(upright_bear_figure_id()).unwrap(),
             upright_bear_figure_path()
         );
         assert_eq!(chicken_figure_id().as_str(), "mclone:chicken");
         assert_eq!(
-            actor_figure_path(chicken_figure_id()).unwrap(),
+            first_party_actor_figure_path(chicken_figure_id()).unwrap(),
             chicken_figure_path()
         );
-        assert!(actor_figure_path(ActorFigureId::from_static("mclone:missing")).is_none());
+        assert!(
+            first_party_actor_figure_path(ActorFigureId::from_static("mclone:missing")).is_none()
+        );
     }
 
     #[test]
     fn cow_figure_has_a_stable_runtime_mapping() {
         assert_eq!(cow_figure_id().as_str(), "mclone:cow");
         assert_eq!(
-            actor_figure_path(cow_figure_id()).unwrap(),
+            first_party_actor_figure_path(cow_figure_id()).unwrap(),
             cow_figure_path()
         );
     }
@@ -385,8 +425,16 @@ mod tests {
     fn mallard_figure_has_a_stable_runtime_mapping() {
         assert_eq!(mallard_duck_figure_id().as_str(), "mclone:mallard_duck");
         assert_eq!(
-            actor_figure_path(mallard_duck_figure_id()).unwrap(),
+            first_party_actor_figure_path(mallard_duck_figure_id()).unwrap(),
             mallard_duck_figure_path()
+        );
+        assert_eq!(
+            semantic_figure_path(mallard_nest_figure_id()).unwrap(),
+            mallard_nest_figure_path()
+        );
+        assert_eq!(
+            semantic_figure_path(mallard_feather_figure_id()).unwrap(),
+            mallard_feather_figure_path()
         );
     }
 }
