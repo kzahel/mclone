@@ -232,3 +232,6 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
 - `habitat-driven-creature-ecology` — terrain and creature co-design,
   generated-world habitat queries, durable visible animals, explicit ambient
   summaries, and mechanics-led Creature Lab promotion
+- `playable-showcases` — bounded data-driven tiny-save recipes, live-game
+  instantiation evidence, matched capture/browser review, and temporary hosted
+  play links
