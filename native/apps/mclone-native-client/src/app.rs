@@ -1368,6 +1368,7 @@ impl ChunkApp {
                 .map_or(0, |driver| driver.host().selected_mono_hotbar_slot()),
             hotbar_pressed_slot: state.hotbar_pressed_slot,
             hotbar_icons: EMPTY_HOTBAR_ICONS,
+            hotbar_item_stacks: mclone_ui::EMPTY_HOTBAR_ITEM_STACKS,
         }
     }
 

@@ -537,6 +537,7 @@ fn flat_hud_renders_crosshair_hotbar_touch_and_status() {
         selected_hotbar_slot: 2,
         hotbar_pressed_slot: None,
         hotbar_icons: EMPTY_HOTBAR_ICONS,
+        hotbar_item_stacks: EMPTY_HOTBAR_ITEM_STACKS,
     };
     hud.status = StatusOverlay::new("ready", true);
 
@@ -545,6 +546,36 @@ fn flat_hud_renders_crosshair_hotbar_touch_and_status() {
     render_flat_hud(scale, &mut draw, &hud);
 
     assert!(!draw.commands().is_empty());
+}
+
+#[test]
+fn touch_hotbar_uses_the_same_inventory_contents_as_flat_hotbar() {
+    let mut draw = GuiDrawList::new();
+    let mut hud = FlatHud::new(resolved_flat_input(true));
+    let mut inventory = EMPTY_HOTBAR_ITEM_STACKS;
+    inventory[0] = Some(mclone_protocol::ItemStackSnapshot {
+        kind: mclone_protocol::ItemKind::HuntingSpear,
+        count: 1,
+    });
+    hud.hotbar = FlatHotbarOverlay::selected(0).with_item_stacks(inventory);
+    hud.touch = TouchOverlay {
+        visible: true,
+        hotbar_visible: true,
+        selected_hotbar_slot: 8,
+        ..TouchOverlay::hidden()
+    };
+
+    assert!(!hud.should_render_flat_hotbar());
+    render_flat_hud(GuiScale::from_pixels(780, 1688), &mut draw, &hud);
+
+    assert!(draw.commands().iter().any(|command| matches!(
+        command,
+        GuiDrawCommand::Text { text, .. } if text == "SP"
+    )));
+    assert!(!draw.commands().iter().any(|command| matches!(
+        command,
+        GuiDrawCommand::Text { text, .. } if text == "1"
+    )));
 }
 
 #[test]
@@ -746,6 +777,7 @@ fn touch_overlay_renders_native_controls_when_visible() {
         selected_hotbar_slot: 2,
         hotbar_pressed_slot: Some(4),
         hotbar_icons: EMPTY_HOTBAR_ICONS,
+        hotbar_item_stacks: EMPTY_HOTBAR_ITEM_STACKS,
     };
 
     render_touch_overlay(GuiScale::from_pixels(780, 1688), &mut draw, &overlay);

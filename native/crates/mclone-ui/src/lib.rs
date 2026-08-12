@@ -18,6 +18,8 @@ pub use v2::{
 pub const HOTBAR_SLOT_COUNT_USIZE: usize = FLAT_HOTBAR_SLOT_COUNT as usize;
 pub const EMPTY_HOTBAR_ICONS: [Option<GuiTextureUv>; HOTBAR_SLOT_COUNT_USIZE] =
     [None; HOTBAR_SLOT_COUNT_USIZE];
+pub const EMPTY_HOTBAR_ITEM_STACKS: [Option<mclone_protocol::ItemStackSnapshot>;
+    HOTBAR_SLOT_COUNT_USIZE] = [None; HOTBAR_SLOT_COUNT_USIZE];
 pub const BLOCK_PALETTE_ENTRY_CAPACITY: usize = 60;
 pub const EMPTY_BLOCK_PALETTE_ENTRIES: [Option<BlockPaletteEntry>; BLOCK_PALETTE_ENTRY_CAPACITY] =
     [None; BLOCK_PALETTE_ENTRY_CAPACITY];
@@ -3252,6 +3254,7 @@ pub struct TouchOverlay {
     pub selected_hotbar_slot: u8,
     pub hotbar_pressed_slot: Option<u8>,
     pub hotbar_icons: [Option<GuiTextureUv>; HOTBAR_SLOT_COUNT_USIZE],
+    pub hotbar_item_stacks: [Option<mclone_protocol::ItemStackSnapshot>; HOTBAR_SLOT_COUNT_USIZE],
 }
 
 impl TouchOverlay {
@@ -3438,6 +3441,11 @@ impl FlatHud {
     pub(crate) fn effective_touch_overlay(&self) -> TouchOverlay {
         let mut touch = self.touch;
         touch.visible &= self.world_hud_visible && self.input.touch_controls_visible;
+        if touch.hotbar_visible {
+            touch.selected_hotbar_slot = self.hotbar.selected_slot;
+            touch.hotbar_icons = self.hotbar.icons;
+            touch.hotbar_item_stacks = self.hotbar.item_stacks;
+        }
         touch
     }
 
@@ -4440,7 +4448,7 @@ fn render_touch_hotbar(
             font,
             rect,
             overlay.hotbar_icons[index],
-            None,
+            overlay.hotbar_item_stacks[index],
             index,
             20.0,
         );

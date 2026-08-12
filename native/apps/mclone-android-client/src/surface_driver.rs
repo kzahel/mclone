@@ -720,6 +720,7 @@ impl AndroidGpuState {
                 selected_hotbar_slot: self.host.selected_mono_hotbar_slot(),
                 hotbar_pressed_slot: overlay.hotbar_pressed_slot,
                 hotbar_icons: EMPTY_HOTBAR_ICONS,
+                hotbar_item_stacks: mclone_ui::EMPTY_HOTBAR_ITEM_STACKS,
             },
             touch_controls_mode: Some(self.input_preferences.touch_controls),
             touch_settings: Some(GameTouchSettings::new(

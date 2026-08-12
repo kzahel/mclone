@@ -246,7 +246,15 @@ const appLoop = movementPerf
   || process.env.MCLONE_NATIVE_WEB_APP_LOOP === "1";
 const mobileAppLoop = process.argv.includes("--mobile-app-loop")
   || process.env.MCLONE_NATIVE_WEB_MOBILE_APP_LOOP === "1";
-const mobileViewport = mobileAppLoop || movementPerf || lobbyScenarioMobileProbe;
+const mobileShowcase = process.argv.includes("--mobile-showcase")
+  || process.env.MCLONE_NATIVE_WEB_MOBILE_SHOWCASE === "1";
+if (mobileShowcase && !showcase) {
+  throw new Error("--mobile-showcase requires --showcase <id>");
+}
+const mobileViewport = mobileAppLoop
+  || mobileShowcase
+  || movementPerf
+  || lobbyScenarioMobileProbe;
 const serveOnly = process.argv.includes("--serve")
   || process.env.MCLONE_NATIVE_WEB_SERVE === "1";
 const screenshotPath = process.env.MCLONE_NATIVE_WEB_SMOKE_SCREENSHOT
@@ -270,8 +278,8 @@ const screenshotPath = process.env.MCLONE_NATIVE_WEB_SMOKE_SCREENSHOT
     ? "/tmp/mclone-native-web-half-space-terrain-probe.png"
     : showcase
     ? deployedBaseUrl
-      ? `/tmp/mclone-deployed-showcase-${showcase}.png`
-      : `/tmp/mclone-native-web-showcase-${showcase}.png`
+      ? `/tmp/mclone-deployed-${mobileShowcase ? "mobile-" : ""}showcase-${showcase}.png`
+      : `/tmp/mclone-native-web-${mobileShowcase ? "mobile-" : ""}showcase-${showcase}.png`
     : actorCompositionProbe
     ? "/tmp/mclone-native-web-actor-composition-probe.png"
     : lobbyRuntimeProbe
@@ -304,8 +312,8 @@ const canvasScreenshotPath = process.env.MCLONE_NATIVE_WEB_CANVAS_SCREENSHOT
     ? "/tmp/mclone-native-web-half-space-terrain-probe-canvas.png"
     : showcase
     ? deployedBaseUrl
-      ? `/tmp/mclone-deployed-showcase-${showcase}-canvas.png`
-      : `/tmp/mclone-native-web-showcase-${showcase}-canvas.png`
+      ? `/tmp/mclone-deployed-${mobileShowcase ? "mobile-" : ""}showcase-${showcase}-canvas.png`
+      : `/tmp/mclone-native-web-${mobileShowcase ? "mobile-" : ""}showcase-${showcase}-canvas.png`
     : actorCompositionProbe
     ? "/tmp/mclone-native-web-actor-composition-probe-canvas.png"
     : lobbyRuntimeProbe
@@ -997,6 +1005,7 @@ async function run() {
               || result?.mallardNestCount !== 0
               || result?.mallardFieldGuideBits === 1)
           || String(result?.showcaseEntryEye) !== `${result.cameraX},${result.cameraY},${result.cameraZ}`
+          || (mobileShowcase && result?.touchControlsVisible !== true)
           || Object.values(worldRecordCounts).some((count) => count !== 0)
         ) {
           throw new Error(`browser playable-showcase probe failed:\n${JSON.stringify({

@@ -2764,6 +2764,7 @@ impl WebSceneHost {
             selected_hotbar_slot: self.host_ref()?.selected_mono_hotbar_slot(),
             hotbar_pressed_slot: state.hotbar_pressed_slot,
             hotbar_icons: mclone_ui::EMPTY_HOTBAR_ICONS,
+            hotbar_item_stacks: mclone_ui::EMPTY_HOTBAR_ITEM_STACKS,
         };
         self.refresh_mono_ui_context()
     }
