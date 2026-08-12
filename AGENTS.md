@@ -94,6 +94,11 @@ runtime.
   Validate exact recipe/seed/camera/state receipts, inspect native and Web
   pixels under `/tmp`, deploy the exact pushed revision, run the deployed
   smoke, and inspect its screenshot before sharing the clean public URL.
+- A first-frame screenshot is composition evidence, not behavioral acceptance.
+  For creature AI, life cycles, progression, or other time-based subjects, add
+  a bounded time-window gate over ordinary replicated state. Require meaningful
+  domain outcomes such as displacement, habitat use, hatching, collection, or
+  discovery without commanding the showcased subject from the harness.
 - Web showcase links must remain fresh and non-persistent. Verification must
   assert that every IndexedDB world-record store stays empty.
 

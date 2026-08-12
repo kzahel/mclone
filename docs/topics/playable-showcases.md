@@ -5,7 +5,9 @@ Topic: `playable-showcases`
 Status: implemented and first publicly verified 2026-08-12. The first
 showcase, `mallard-ecology`, compiles one checked-in data recipe into an
 ordinary transient tiny save and opens at a fixed camera through the shared
-native and Web game path.
+native and Web game path. Human review rejected its first static island as a
+behavior demo; revision 2 now uses a multi-chunk wetland and requires a live
+motion/hatching/discovery window before the automated review passes.
 
 ## Purpose
 
@@ -49,6 +51,11 @@ The schema deliberately has no updates, scripts, triggers, timers, behavior
 trees, dialogue, commands, spawn rules, or rendering instructions. Behavior
 after hydration must already belong to the live game.
 
+A showcase has two independent acceptance dimensions. A captured first frame
+proves composition, rendering, and entry-camera identity. A time window proves
+that creatures and mechanics remain useful after that frame. When the subject
+is behavioral, both are required; pixel parity alone is not acceptance.
+
 ## Live-Instantiation Evidence
 
 Every gameplay-bearing recipe fact must declare `liveInstantiation`. Validation
@@ -87,7 +94,7 @@ features.
 
 - Keep recipes data-only and readable. Current hard limits are 256 block
   patches, 64 entities, a 64-byte symbolic entity ID, one bounded authored
-  island, and narrow item/entity/observation allowlists.
+  base fixture, and narrow item/entity/observation allowlists.
 - Do not add showcase checks to gameplay ticks, entity AI, interaction,
   protocol, UI, audio, or render code. Once loaded, the world must be ordinary.
 - Do not introduce an item, entity, observation, terrain feature, or behavior
@@ -122,6 +129,12 @@ features.
 8. Update this topic, the governing gameplay topic, and the tactical execution
    record with the evidence IDs, commands, receipt, and remaining gaps.
 
+For behavior-focused showcases, insert a time-window gate between steps 6 and
+7. Observe ordinary replicated state without issuing commands to the subject.
+Require domain outcomes such as displacement, habitat transition, life-cycle
+change, or discovery; do not substitute elapsed wall time or a second static
+image for those outcomes.
+
 The current first-showcase commands are:
 
 ```bash
@@ -148,6 +161,25 @@ The deployed browser probe reported zero records in `dimensionChunks`,
 `dimensionEntityChunks`, `dimensions`, `players`, `savedData`, `worldMetadata`,
 `managedWorlds`, and `worlds`.
 
+That revision remains a useful historical static-parity proof, but its human
+interactive review was rejected: the mallards mostly stayed at their initial
+water cells and rapidly changed yaw. Tactical
+[`282`](../tactical/282-mallard-behavioral-showcase.md) records the correction.
+
+Revision 2 uses seed `17503`, entry eye `8.5,66.62,18.5`, and entry target
+`8,64.9,7.5`. It begins with three mallards, one attended nest at 2320/2400
+incubation, one of six persisted observations, and no pre-awarded egg or
+feather items. The bounded authored wetland fills all 49 chunks of the existing
+seven-by-seven fixture envelope; its shallow pond and grassy banks cross chunk
+boundaries.
+
+Local headed Web acceptance observed 80 authoritative ticks. The three
+initial mallards displaced `3.33`, `2.21`, and `3.59` blocks, the ordinary nest
+system hatched a fourth mallard, and field notes advanced from two to five
+observations through live proximity/call/track/hatch paths. All browser world
+stores remained empty. Public revision-2 deployment evidence is recorded in
+Tactical 282 once the pushed revision passes the same gate.
+
 ## Code and Documentation Map
 
 - `assets/mclone/showcases/`: readable showcase recipes
@@ -166,6 +198,8 @@ The deployed browser probe reported zero records in `dimensionChunks`,
   ordinary mallard habitat and gameplay contract
 - [`../tactical/280-playable-showcase-links.md`](../tactical/280-playable-showcase-links.md):
   first implementation execution record
+- [`../tactical/282-mallard-behavioral-showcase.md`](../tactical/282-mallard-behavioral-showcase.md):
+  rejected baseline, shared AI correction, wetland revision, and timed proof
 
 ## Recommended Next Work
 

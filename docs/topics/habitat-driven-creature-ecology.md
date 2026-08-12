@@ -16,6 +16,9 @@ evidence, and discovery mechanics. Tactical
 live mechanics as a bounded transient tiny save for matched screenshot and
 interactive Web review. The continuing showcase contract lives separately in
 [`playable-showcases.md`](playable-showcases.md).
+Tactical [`282`](../tactical/282-mallard-behavioral-showcase.md) turns the
+first rejected static review into shared retained habitat intent, stable
+movement-derived orientation, a roomier wetland, and time-window evidence.
 
 ## Scope
 
@@ -248,8 +251,11 @@ Tactical 279 closes the first mechanics ladder around that habitat:
   losing progress;
 - one nest produces at most one durable duckling whose parent identities, age,
   and growth survive unload/reload;
-- mallards float and paddle in shallow water, seek water or shore, and apply
-  bounded cohesion and separation without changing other passive mobs;
+- mallards float and paddle in shallow water, retain non-local water and shore
+  destinations, and apply bounded cohesion and separation around those intents
+  without changing other passive mobs;
+- body orientation follows realized horizontal travel at a bounded turn rate,
+  so collision or arrival cannot create rapid stationary yaw jitter;
 - real mallards emit spatially attenuated, flock-suppressed contact calls and
   shed collectible feathers under durable cooldowns;
 - recent authoritative shore movement creates locally capped, expiring track
@@ -292,8 +298,8 @@ event, and no ambient soundtrack pretends that a flock exists.
   suppression, pickup, expiry/caps, every unlock source, idempotence,
   replication, and player-record persistence.
 - The inspected [mallard ecology capture](</tmp/mclone-mallard-ecology.png>)
-  shows two adults, their smaller duckling, a visible nest, real inventory
-  icons, and a completed six-part field-guide entry. The inspected
+  now shows two adults, their smaller duckling, a visible near-hatch nest, and
+  an incomplete field-guide entry across a multi-chunk wetland. The inspected
   [stereo capture](</tmp/mclone-mallard-ecology-stereo.png>) projects the guide
   legibly into both eyes through the shared world-GUI renderer.
 - The `mallard-ecology` data recipe requires registered ordinary-game evidence
@@ -302,6 +308,13 @@ event, and no ambient soundtrack pretends that a flock exists.
   entry pose, entity composition, and guide receipt, and leave all IndexedDB
   world stores empty. The verified temporary play link is
   `https://mclone.kzahel.com/app.html?showcase=mallard-ecology`.
+- A deterministic two-mallard 1,200-tick simulation proves retained non-local
+  destinations, useful travel, water and actual dry-shore occupancy, bounded
+  spacing and turning, and zero yaw mutations on stationary ticks.
+- Local headed Web revision-2 acceptance observes the original three mallards
+  move `3.33`, `2.21`, and `3.59` blocks over 80 authoritative ticks, then
+  observes ordinary attended hatching and field-guide progress from 2/6 to
+  5/6 while persistent browser world stores remain empty.
 
 ## Known Gaps and Recommended Next Work
 

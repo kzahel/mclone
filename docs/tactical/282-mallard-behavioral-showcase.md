@@ -1,6 +1,6 @@
 # Tactical 282: Mallard Behavioral Showcase
 
-Status: **active 2026-08-12**
+Status: **implementation and local acceptance complete; public deployment pending 2026-08-12**
 
 Topic:
 
@@ -148,4 +148,48 @@ as the sole proof of creature behavior.
 
 ## Execution Record
 
-Pending.
+Implemented in the `playable-showcases` and
+`habitat-driven-creature-ecology` commit series.
+
+- `dd5c28a1` replaces per-tick nearest-cell selection with retained randomized
+  water/shore intents, non-local shallow-water destinations, steering overlays,
+  movement-derived yaw, and a twelve-degree turn bound in ordinary server AI.
+- The new 1,200-tick regression proves target retention, more than twelve
+  blocks of travel per mallard, water and true dry-shore use, useful flock
+  spacing, bounded direction changes, and zero stationary yaw mutations. It
+  also corrected the old shore predicate that accepted water as clear space.
+- `4ab131a1` adds `mallard-wetland-v1`, filling the existing seven-by-seven
+  authored fixture envelope with one cross-chunk shallow pond and grassy bank.
+  Recipe revision 2 uses seed `17503`, eye `8.5,66.62,18.5`, target
+  `8,64.9,7.5`, five evidenced lily pads, three mallards, and one nest at
+  2320/2400 incubation.
+- The player starts with no awarded ecology resources and only the persisted
+  `seen` observation. Ordinary proximity immediately discovers the nest; live
+  movement, calls, tracks, hatching, shedding, egg laying, pickup, and remaining
+  observations stay available through their normal producers.
+- The Web smoke observer exposes generic replicated mallard IDs, positions,
+  yaw, ticks, water occupancy, and life-stage counts. It does not command the
+  creatures. The smoke waits 80 ticks, joins original entities by ID, requires
+  at least 1.5 blocks of displacement each, observes a second duckling and the
+  hatch note, and rechecks all transient IndexedDB stores.
+- Full all-target validation uncovered four stale pre-existing test ledgers:
+  the mallard figure import, actor-figure count, UI-action count, and the newer
+  illuminated water-shader signature. Commits `aa271719`, `a2830de3`,
+  `e531d809`, and `b97c9af1` repair those test-only contracts.
+
+Local acceptance evidence:
+
+- `cargo test --workspace --all-targets --quiet`: passed.
+- `pnpm native:thin-adapters:purity`: passed.
+- `pnpm native:web:build`: passed.
+- `pnpm native:desktop-offscreen:smoke`: passed; pixels written under `/tmp`.
+- `pnpm native:mallard-ecology:capture`: passed; flat and synthetic-stereo
+  revision-2 pixels inspected.
+- `pnpm native:web:showcase-smoke`: passed; headed WebGPU pixels inspected.
+- The Web window observed displacements `3.3299`, `2.2050`, and `3.5938`
+  blocks for the initial mallards. Ducklings increased from one to two and
+  field-guide bits advanced from `17` to `59` (2/6 to 5/6).
+- All eight IndexedDB world-store counts remained zero.
+
+The public push/deploy receipt, deployed behavior probe, and final screenshot
+digest remain pending.
