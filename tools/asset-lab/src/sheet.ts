@@ -9,6 +9,7 @@ interface SheetArgs {
   outPath: string;
   clip: string;
   debug: boolean;
+  staticPose: boolean;
 }
 
 const args = parseArgs(process.argv.slice(2));
@@ -53,6 +54,7 @@ try {
     figure: figurePath,
     clip: args.clip,
     debug: args.debug ? "1" : "0",
+    static: args.staticPose ? "1" : "0",
   });
   await page.goto(`${url}sheet.html?${params.toString()}`, { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => window.assetLabSheetReady === true, undefined, { timeout: 15_000 });
@@ -80,6 +82,7 @@ function parseArgs(argv: string[]): SheetArgs {
   let outPath = path.join("/tmp", "mclone-asset-lab", "sheet.png");
   let clip = "walk";
   let debug = true;
+  let staticPose = false;
   for (let index = 1; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--out") {
@@ -90,10 +93,12 @@ function parseArgs(argv: string[]): SheetArgs {
       index += 1;
     } else if (arg === "--clean") {
       debug = false;
+    } else if (arg === "--static") {
+      staticPose = true;
     } else {
       throw new Error(`Unknown argument '${arg}'`);
     }
   }
 
-  return { input, outPath, clip, debug };
+  return { input, outPath, clip, debug, staticPose };
 }

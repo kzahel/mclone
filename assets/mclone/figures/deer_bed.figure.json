@@ -1,0 +1,146 @@
+{
+  "schemaVersion": 1,
+  "name": "deer_bed",
+  "materials": {
+    "pressed_dark": {
+      "color": "#4c472c"
+    },
+    "pressed": {
+      "color": "#6f6a39"
+    },
+    "dry_grass": {
+      "color": "#9a8950"
+    }
+  },
+  "textures": {},
+  "parts": [
+    {
+      "name": "bed_center",
+      "at": [
+        0,
+        0.018,
+        0
+      ],
+      "material": "pressed_dark",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.72,
+          0.036,
+          1.05
+        ]
+      }
+    },
+    {
+      "name": "grass_north",
+      "at": [
+        -0.08,
+        0.045,
+        -0.52
+      ],
+      "rot": [
+        0,
+        -7,
+        0
+      ],
+      "material": "pressed",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.62,
+          0.05,
+          0.12
+        ]
+      }
+    },
+    {
+      "name": "grass_south",
+      "at": [
+        0.12,
+        0.04,
+        0.52
+      ],
+      "rot": [
+        0,
+        9,
+        0
+      ],
+      "material": "pressed",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.58,
+          0.045,
+          0.12
+        ]
+      }
+    },
+    {
+      "name": "grass_west",
+      "at": [
+        -0.38,
+        0.038,
+        0.03
+      ],
+      "rot": [
+        0,
+        -3,
+        0
+      ],
+      "material": "pressed",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.12,
+          0.042,
+          0.82
+        ]
+      }
+    },
+    {
+      "name": "grass_east",
+      "at": [
+        0.39,
+        0.042,
+        -0.06
+      ],
+      "rot": [
+        0,
+        6,
+        0
+      ],
+      "material": "pressed",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.11,
+          0.048,
+          0.76
+        ]
+      }
+    },
+    {
+      "name": "loose_stem",
+      "at": [
+        0.18,
+        0.07,
+        -0.08
+      ],
+      "rot": [
+        0,
+        -32,
+        3
+      ],
+      "material": "dry_grass",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.045,
+          0.04,
+          0.7
+        ]
+      }
+    }
+  ],
+  "clips": {}
+}

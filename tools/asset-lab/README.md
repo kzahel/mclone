@@ -103,6 +103,9 @@ The exported figure JSON is also written under `/tmp` unless `--out` is passed.
 The sheet command writes a larger review image with front, side,
 three-quarter, side animation, and three-quarter animation captures. Sheets use
 the clip locomotion metadata to scroll the floor at sampled frames.
+Static semantic props use `--static`; the sheet then omits clip lookup and
+repeats the rest pose through the standard multi-angle review layout rather
+than requiring a fake animation.
 The video command captures deterministic Playwright frames and uses `ffmpeg` to
 write a multi-cycle MP4 animation review at
 `/tmp/mclone-asset-lab/chicken-walk.mp4`. Walk clips keep the figure centered and

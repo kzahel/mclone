@@ -29,6 +29,11 @@ export const FIRST_PARTY_SEMANTIC_ASSETS: readonly FirstPartySemanticAsset[] = [
   firstPartyActor("deer"),
   firstPartyProp("mallard_nest", "world_prop", "ground"),
   firstPartyProp("mallard_feather", "item_prop", "item_center"),
+  firstPartyProp("hunting_spear", "item_prop", "item_center"),
+  firstPartyProp("venison", "item_prop", "item_center"),
+  firstPartyProp("deer_hide", "item_prop", "item_center"),
+  firstPartyProp("shed_antler", "item_prop", "item_center"),
+  firstPartyProp("deer_bed", "world_prop", "ground"),
 ];
 
 export const FIRST_PARTY_FIGURES: readonly FirstPartyFigure[] =

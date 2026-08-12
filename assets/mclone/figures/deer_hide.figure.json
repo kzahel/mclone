@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 1,
+  "name": "deer_hide",
+  "materials": {
+    "coat": {
+      "color": "#956744"
+    },
+    "coat_dark": {
+      "color": "#6f472f"
+    },
+    "underside": {
+      "color": "#d0b18c"
+    }
+  },
+  "textures": {},
+  "parts": [
+    {
+      "name": "folded_hide",
+      "at": [
+        0,
+        0.065,
+        0
+      ],
+      "material": "coat_dark",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.5,
+          0.1,
+          0.36
+        ]
+      }
+    },
+    {
+      "name": "upper_fold",
+      "at": [
+        -0.06,
+        0.135,
+        -0.02
+      ],
+      "rot": [
+        0,
+        8,
+        0
+      ],
+      "material": "coat",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.38,
+          0.08,
+          0.28
+        ]
+      }
+    },
+    {
+      "name": "turned_corner",
+      "at": [
+        0.16,
+        0.18,
+        0.1
+      ],
+      "rot": [
+        0,
+        -16,
+        7
+      ],
+      "material": "underside",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.17,
+          0.045,
+          0.13
+        ]
+      }
+    }
+  ],
+  "clips": {}
+}

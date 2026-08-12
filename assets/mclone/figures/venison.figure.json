@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 1,
+  "name": "venison",
+  "materials": {
+    "meat_dark": {
+      "color": "#71352f"
+    },
+    "meat": {
+      "color": "#a54d45"
+    },
+    "fat": {
+      "color": "#d7b99a"
+    }
+  },
+  "textures": {},
+  "parts": [
+    {
+      "name": "cut",
+      "at": [
+        0,
+        0.08,
+        0
+      ],
+      "rot": [
+        0,
+        -12,
+        0
+      ],
+      "material": "meat_dark",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.46,
+          0.15,
+          0.3
+        ]
+      }
+    },
+    {
+      "name": "center",
+      "at": [
+        -0.03,
+        0.155,
+        -0.015
+      ],
+      "rot": [
+        0,
+        -12,
+        0
+      ],
+      "material": "meat",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.34,
+          0.08,
+          0.22
+        ]
+      }
+    },
+    {
+      "name": "fat_edge",
+      "at": [
+        0.2,
+        0.13,
+        0.01
+      ],
+      "rot": [
+        0,
+        -12,
+        4
+      ],
+      "material": "fat",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.055,
+          0.09,
+          0.25
+        ]
+      }
+    }
+  ],
+  "clips": {}
+}

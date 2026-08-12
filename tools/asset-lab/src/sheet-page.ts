@@ -26,7 +26,7 @@ if (!sheet) {
 try {
   const params = new URLSearchParams(window.location.search);
   const figurePath = params.get("figure") ?? "/examples/chicken/figure.ts";
-  const clipName = params.get("clip") ?? "walk";
+  const clipName = params.get("static") === "1" ? undefined : params.get("clip") ?? "walk";
   const debug = params.get("debug") !== "0";
   const labels = params.get("labels") === "1";
   const asset = await loadBrowserFigure(figurePath);
@@ -45,16 +45,18 @@ try {
 function renderSheet(
   container: HTMLElement,
   asset: FigureAsset,
-  options: { clipName: string; debug: boolean; labels: boolean },
+  options: { clipName: string | undefined; debug: boolean; labels: boolean },
 ): void {
-  const clip = asset.clips[options.clipName];
+  const clip = options.clipName === undefined ? undefined : asset.clips[options.clipName];
   const duration = clipDuration(clip);
   const frameCount = 6;
   const frameTimes =
     duration > 0 ? Array.from({ length: frameCount }, (_, index) => (duration * index) / frameCount) : [0];
-  const subtitle = `${options.clipName} · ${
-    locomotionSummary(clip?.locomotion) ?? `${duration.toFixed(2)}s cycle`
-  } · ${options.debug ? "debug overlays" : "clean render"}`;
+  const subtitle = options.clipName === undefined
+    ? `static prop · ${options.debug ? "debug overlays" : "clean render"}`
+    : `${options.clipName} · ${
+      locomotionSummary(clip?.locomotion) ?? `${duration.toFixed(2)}s cycle`
+    } · ${options.debug ? "debug overlays" : "clean render"}`;
 
   container.innerHTML = `
     <header class="title">
@@ -112,7 +114,7 @@ function renderStrip(
   parent: HTMLElement,
   asset: FigureAsset,
   options: {
-    clipName: string;
+    clipName: string | undefined;
     debug: boolean;
     frameTimes: number[];
     labelPrefix: string;
@@ -122,7 +124,7 @@ function renderStrip(
 ): void {
   for (const [index, time] of options.frameTimes.entries()) {
     renderCell(parent, asset, {
-      label: `${options.clipName} ${options.labelPrefix} ${index + 1}/${options.frameTimes.length}`,
+      label: `${options.clipName ?? "static"} ${options.labelPrefix} ${index + 1}/${options.frameTimes.length}`,
       view: options.view,
       clipName: options.clipName,
       time,
@@ -138,7 +140,7 @@ function renderCell(
   options: {
     label: string;
     view: ViewName;
-    clipName: string;
+    clipName: string | undefined;
     time: number;
     debug: boolean;
     labels: boolean;
@@ -175,7 +177,7 @@ function renderCell(
   }
   const center = bounds.getCenter(new THREE.Vector3());
   const size = bounds.getSize(new THREE.Vector3());
-  const clip = asset.clips[options.clipName];
+  const clip = options.clipName === undefined ? undefined : asset.clips[options.clipName];
   const floor = createReviewFloor(bounds, clip?.locomotion, clipDuration(clip));
   floor.update(options.time);
   scene.add(floor.root);
