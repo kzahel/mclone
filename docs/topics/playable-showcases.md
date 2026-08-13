@@ -2,9 +2,8 @@
 
 Topic: `playable-showcases`
 
-Status: implemented with three accepted public creature showcases; the public
-farming showcase's automated mechanics pass but its manual usability
-acceptance was rejected 2026-08-13.
+Status: implemented with three accepted public creature showcases and one
+accepted public farming showcase as of 2026-08-13.
 `mallard-ecology` proves a wetland motion/hatching/discovery loop;
 `deer-forest-edge` proves a contrasting multi-chunk habitat, authoritative
 named actions, durable sign, field notes, and an ordinary hunting tool. Bees
@@ -379,7 +378,7 @@ establish that human usability. Tactical
 [`289`](../tactical/289-wheat-farming-feedback-and-harvest.md) records the
 shared feedback correction and stronger no-framing harvest gate.
 
-Revision 2 is locally accepted. It keeps seed `17506` and entry eye
+Revision 2 is publicly accepted. It keeps seed `17506` and entry eye
 `8.5,65.62,14.5`, but targets the reachable mature crop at
 `9.5,64.5,10.5`. Shared gameplay immediately hydrates water-adjacent tilling;
 the ordinary flat HUD labels wheat growth and names `ATK` as the mature-crop
@@ -387,7 +386,13 @@ harvest action. Desktop and phone gates first harvested exact state 236 at
 `9,64,10` from the untouched recipe camera, then used real controls to till a
 separate cell directly to moisture 7 and plant wheat. Both retained zero Web
 world records and captured immediate `Wheat sprout` feedback after planting.
-Public deployment acceptance remains pending.
+Exact pushed revision `924edf10a706b43a1965413e359965292eac91a6`
+deployed as Worker version `a917fa06-dbc2-4ddc-ac55-04963368e209`. Public
+desktop and phone gates reproduced the full receipt. Their inspected initial
+frames match local acceptance byte-for-byte at
+`fd8510a51ef69a8b522e31f1a1d5caa5c562c1b0088fbca53000a51f46a2eb07`
+and
+`c09833fac7bb6ca09496383cd1ac1cc58dcbc08158d3e7aa21033011f357ef74`.
 
 ## Code and Documentation Map
 

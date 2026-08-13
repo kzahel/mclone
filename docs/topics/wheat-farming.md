@@ -2,10 +2,10 @@
 
 Topic: `wheat-farming`
 
-Status: **live foundation deployed under Tactical
-[`288`](../tactical/288-wheat-farming-foundation.md); corrective Tactical
-[`289`](../tactical/289-wheat-farming-feedback-and-harvest.md) is implemented
-and locally accepted, with public deployment acceptance pending 2026-08-13.**
+Status: **live foundation and corrective usability pass deployed and accepted
+under Tacticals [`288`](../tactical/288-wheat-farming-foundation.md) and
+[`289`](../tactical/289-wheat-farming-feedback-and-harvest.md) on
+2026-08-13.**
 
 ## Purpose
 
@@ -127,8 +127,8 @@ Human review then found that adjacent-water hydration was too delayed to read,
 the age-0 sprout was nearly invisible, and the initial camera did not make a
 mature harvest target discoverable. The automated gate's smoke-only framing
 proved authoritative mechanics but masked those usability failures. Tactical
-289 owns the correction; until it closes, the revision-1 public URL remains a
-mechanics fixture rather than accepted manual farming evidence.
+289 owns the correction and supersedes revision 1 as the accepted manual
+farming evidence.
 
 Corrective commits `0d1b23b1` and `8e6cab39` provide immediate wet tilling,
 confirmed hoe/seed sound, a brighter proprietary-free age-zero rosette, and
@@ -148,5 +148,12 @@ the just-planted captures are
 `50a1b89e780251b95de52d701a7d16e3178e14dae2a13a37386a3bd3f9b0a017`
 and
 `be303f33a85d30dde3a4c5ae8a770132100461491abb27b85b6b0b76705688eb`.
-Full server validation now passes 670 tests. Public revision-2 deployment and
-inspection remain pending.
+Full server validation now passes 670 tests. Exact pushed revision
+`924edf10a706b43a1965413e359965292eac91a6` deployed as Worker version
+`a917fa06-dbc2-4ddc-ac55-04963368e209`. Public desktop and phone gates repeated
+the untouched-camera harvest, immediate hydrated till, planted-sprout
+feedback, automatic transition, inventory, and zero-storage receipts. Their
+initial frames are byte-identical to the local digests above; the public
+desktop planted frame is likewise byte-identical. The inspected public phone
+planted frame is
+`175d4502904c2be544afb2800790bf56d240236b287b3c892872994382f9b47c`.

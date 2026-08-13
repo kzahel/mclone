@@ -1,7 +1,7 @@
 # Tactical 289: Wheat Farming Feedback and Harvest
 
-Status: **implemented and locally accepted 2026-08-13; public deployment
-acceptance pending.**
+Status: **complete 2026-08-13; shared correction, exact pushed deployment,
+public desktop/phone interaction gates, and inspected pixels accepted.**
 
 Topics:
 
@@ -127,5 +127,23 @@ Validation completed locally:
 - local desktop and phone WebGPU showcase gates with inspected initial and
   planted pixels.
 
-Exact pushed deployment and public desktop/phone acceptance remain before this
-tactical can close.
+Exact pushed revision
+`924edf10a706b43a1965413e359965292eac91a6` deployed with asset version
+`924edf10a706-20260813071945` as Cloudflare Worker version
+`a917fa06-dbc2-4ddc-ac55-04963368e209`. Public desktop and phone gates
+reproduced recipe revision 2, the untouched-camera state-236 harvest,
+moisture-7 tilling, planting, inventory changes, an automatic farming
+transition, and zero records in all eight browser world stores.
+
+The public initial desktop and phone frames are byte-identical to their local
+counterparts at the digests above. The inspected public desktop planted frame
+is also byte-identical at
+`50a1b89e780251b95de52d701a7d16e3178e14dae2a13a37386a3bd3f9b0a017`.
+The inspected public phone planted frame is
+`175d4502904c2be544afb2800790bf56d240236b287b3c892872994382f9b47c`;
+its live capture frame is visually equivalent but not asserted byte-stable
+across runs. The accepted resettable field is:
+
+```text
+https://mclone.kzahel.com/app.html?showcase=wheat-farming
+```
