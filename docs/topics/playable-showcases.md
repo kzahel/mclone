@@ -2,13 +2,15 @@
 
 Topic: `playable-showcases`
 
-Status: implemented with three publicly verified showcases 2026-08-12.
+Status: implemented with three publicly verified showcases and one locally
+verified farming showcase 2026-08-13.
 `mallard-ecology` proves a wetland motion/hatching/discovery loop;
 `deer-forest-edge` proves a contrasting multi-chunk habitat, authoritative
 named actions, durable sign, field notes, and an ordinary hunting tool. Bees
-add real flower mutation plus phone-tested managed-habitat placement. All three
-compile checked data recipes into transient tiny saves through the shared
-native and Web game path.
+add real flower mutation plus phone-tested managed-habitat placement. Wheat
+adds real till/plant/grow/harvest interactions and phone controls; its public
+deployment is pending. All four compile checked data recipes into transient
+tiny saves through the shared native and Web game path.
 
 ## Purpose
 
@@ -28,6 +30,7 @@ The first public link is:
 https://mclone.kzahel.com/app.html?showcase=mallard-ecology
 https://mclone.kzahel.com/app.html?showcase=deer-forest-edge
 https://mclone.kzahel.com/app.html?showcase=bee-pollination
+https://mclone.kzahel.com/app.html?showcase=wheat-farming
 ```
 
 Opening it compiles a fresh in-memory world in the browser process. No world is
@@ -166,6 +169,16 @@ pnpm native:web:bee-showcase-smoke
 pnpm native:web:bee-showcase-mobile-smoke
 pnpm native:web:bee-showcase-deployed-smoke
 pnpm native:web:bee-showcase-mobile-deployed-smoke
+```
+
+The wheat commands are:
+
+```bash
+pnpm native:wheat-farming:capture
+pnpm native:web:wheat-showcase-smoke
+pnpm native:web:wheat-showcase-mobile-smoke
+pnpm native:web:wheat-showcase-deployed-smoke
+pnpm native:web:wheat-showcase-mobile-deployed-smoke
 ```
 
 Captures belong under `/tmp`. The deployed smoke must confirm the recipe ID and
@@ -334,6 +347,20 @@ uninterrupted `fly` intervals while its phase advanced `199`-`280` ticks. This
 retains the existing range, recovery, pollination, hotel-use, and zero-storage
 requirements.
 
+Tactical [`288`](../tactical/288-wheat-farming-foundation.md) adds the first
+non-creature showcase and demonstrates that the bounded format can review an
+ordinary multi-step player mechanic without becoming a script runner. Recipe
+revision 1 uses seed `17506`, entry eye `8.5,65.62,14.5`, and entry target
+`8,64.4,6`. It begins with one wooden hoe, eight seeds, an irrigation trench,
+readable farmland moisture, all eight wheat ages, and one nearby mature crop.
+
+Its local desktop and phone gates observe one automatic crop/soil transition,
+then select the real controls, till grass, plant wheat with seeds changing
+exactly `8 -> 7`, and harvest one wheat with seeds reaching `9`. Both retain
+zero browser persistence records. First-frame framing is exposed only through
+the explicit smoke harness ABI; production `WebSceneHost` has no showcase
+camera-control API. Public acceptance remains pending.
+
 ## Code and Documentation Map
 
 - `assets/mclone/showcases/`: readable showcase recipes
@@ -344,6 +371,8 @@ requirements.
 - `native/crates/mclone-server/src/bin/deer_forest_edge_fixture.rs`: deer
   tiny-save materialization receipt
 - `native/crates/mclone-server/src/bin/bee_pollination_fixture.rs`: bee
+  tiny-save materialization receipt
+- `native/crates/mclone-server/src/bin/wheat_farming_fixture.rs`: wheat field
   tiny-save materialization receipt
 - `native/apps/mclone-web-client/src/web_canvas.rs`: URL selection and strict
   transient/conflict policy
@@ -356,6 +385,7 @@ requirements.
   capture
 - `scripts/bee-pollination-capture.mjs`: bee native flat/stereo receipt and
   capture
+- `scripts/wheat-farming-capture.mjs`: wheat native receipt and capture
 - [`habitat-driven-creature-ecology.md`](habitat-driven-creature-ecology.md):
   ordinary mallard habitat and gameplay contract
 - [`../tactical/280-playable-showcase-links.md`](../tactical/280-playable-showcase-links.md):
@@ -367,11 +397,14 @@ requirements.
 - [`../tactical/286-bee-foraging-range-and-recovery.md`](../tactical/286-bee-foraging-range-and-recovery.md):
   rejected bee baseline, distributed forage, collision recovery, and the
   longer all-bee behavior gate
+- [`wheat-farming.md`](wheat-farming.md): ordinary field creation, crop state,
+  persistence, and deliberate gaps
 
 ## Recommended Next Work
 
 - Add another showcase only when its mechanic requires distinct review
-  evidence; three species are enough to generalize stable plumbing without
+  evidence; the existing species and farming loop are enough to generalize
+  stable plumbing without
   turning the showcase list into a content catalogue.
 - Generalize repeated capture assertions only where the two existing
   showcases now demonstrate a stable common shape. Keep species-specific

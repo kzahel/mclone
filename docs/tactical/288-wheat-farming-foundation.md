@@ -1,6 +1,7 @@
 # Tactical 288: Wheat Farming Foundation
 
-Status: **active 2026-08-13.**
+Status: **implementation and local acceptance complete 2026-08-13; pushed
+public deployment and exact-revision verification pending.**
 
 Topics:
 
@@ -194,4 +195,73 @@ At minimum:
 
 ## Execution Record
 
-Implementation pending.
+### Landed slices
+
+- `b52da2d4` recorded this tactical, the living topic, and series identity.
+- `a09e55ee` added shared block/item identity, first-party Texture Lab assets,
+  shape/mesh/render facts, authoritative till/plant/harvest, loaded-chunk random
+  ticks, inventory/persistence codecs, and restart tests.
+- `ff5ff6ed` added the checked data recipe, typed live-instantiation evidence,
+  native materializer/capture, transient Web startup, and desktop/phone gates.
+- `1f7fe2c3` kept deterministic block framing behind the explicit Web smoke ABI
+  instead of growing a product host control.
+- `dd6b68ba` refreshed the deterministic first-party asset lock, including
+  accumulated creature assets that predated its prior snapshot.
+- `f0c49730` separated the acknowledged `8 -> 7` planting receipt from later
+  harvest seed drops.
+- `1badbff4` corrected stale post-bee wildflower worldgen pins uncovered by the
+  required non-regression run; it changes no generator behavior.
+
+### Result
+
+The objective is live. A fresh player has one reusable wooden hoe in slot 8
+and eight wheat seeds in slot 9. Normal use commands till clear grass/dirt and
+plant only on farmland. Three deterministic random candidates per non-empty
+section of each block-ticking chunk dispatch hydration/drying and wheat growth.
+Mature and immature crops use distinct renewable inventory loot, capacity is
+atomic, unsupported wheat is removed, and all resulting blocks/items survive
+SQLite restart.
+
+The `wheat-farming` revision-1 recipe uses seed `17506`, authored-only base
+`wheat-farming-v1`, day time `6000`, entry feet `8.5,64,14.5`, and target
+`8,64.4,6`. Its patches show dry/wet farmland and all eight crop ages around a
+central water trench. Every gameplay-bearing patch/item declares compatible
+ordinary-world evidence. The recipe contains no behavior, tick acceleration,
+loot override, or refill.
+
+### Local acceptance
+
+- `cargo test -p mclone-server`: 669 passed.
+- `cargo test -p mclone-worldgen`: 414 passed, one intentional ignore; the
+  post-bee Mclone vegetation output and hash are pinned.
+- `cargo test -p mclone-web-client`: unit and boundary suites passed.
+- relevant protocol, asset, block, mesh, UI, and render-session suites passed;
+  `cargo fmt --all --check`, `pnpm assets:pack:check`,
+  `pnpm texture-lab:typecheck`, and `pnpm native:web:typecheck` passed.
+- native, desktop WebGPU, and phone WebGPU captures were inspected. Dry/wet
+  soil, green-to-gold crop ages, water placement, desktop hotbar, and phone
+  touch controls are legible.
+- both Web gates observed an automatic field transition, normal tilling,
+  seeds `8 -> 7` on planting, wheat `0 -> 1` on mature harvest, seeds `7 -> 9`
+  after that deterministic harvest, and zero records in all browser world
+  stores.
+
+Capture SHA-256 digests:
+
+- native: `a6deb1d4d576784d75f8dc81120da1e7a08c07cb237def27797f75bcf8068504`;
+- desktop Web canvas:
+  `e4093132d9ab1d0b63c4bf3869533c80a9cb29b5e1af6adccfa3b9a2c6f17e8d`;
+- phone Web canvas:
+  `53b55792adccd5b8f2761674bad379d09121d0d31f59ddaca6355cc717058d44`;
+  and
+- Texture Lab contact sheet:
+  `22e36db683b32203f3c5212dae9391beb556bb9bf3b40a304ccbe04db09904ef`.
+
+### Deliberate follow-ups
+
+Wooden-hoe durability awaits a general item-component system. Rain hydration,
+trampling, bone meal, Fortune, grass seed drops, crafting/bread/hunger,
+bee-assisted crop growth, other crops, villagers, generated farms, and
+unloaded-time catch-up remain outside this foundation. The nearest valuable
+world/content consumer is a real working wheat parcel in the accepted
+farmstead, using these mechanics rather than authored decorative crop blocks.

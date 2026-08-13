@@ -140,9 +140,9 @@ The direction is accepted before all of its consumers are ready:
 - The generated block-state lane now includes oak/spruce planks, cobblestone,
   stone bricks, vertical hay, glass, and straight spruce stairs/slabs. The
   extracted and repo-owned asset paths, transforms, light facts, and
-  multi-box collision path cover that first detail family. A convincing farm
-  kit still needs doors, fences and gates, farmland, crops, props, and their
-  collision/render/gameplay facts.
+  multi-box collision path cover that first detail family. Tactical 288 adds
+  working farmland, wheat, crop rendering, and the first complete crop loop.
+  A convincing farm kit still needs doors, fences/gates, and broader props.
 - The live shared protocol and persisted authored fixture currently prove cow
   and chicken residents. Additional animals must be admitted only after their
   actual shared simulation, persistence, protocol, asset, and render paths are
@@ -174,7 +174,7 @@ system is complete.
 | watermill animation or mechanics | not required | a visual wheel may precede actual power, input, and output simulation |
 | cows and chickens | enough to prove persistent residents | sheep, pigs, horses, ducks, and richer habitat behavior join when ready |
 | fence collision, gates, and entity navigation | required before enclosures are claimed to contain active residents | supports larger paddocks and routine animal movement |
-| crop hydration, growth, and harvesting | not required for a visual first garden | required before the farm claims complete crop gameplay |
+| crop hydration, growth, and harvesting | `proven` for wheat by Tactical 288 | expand only through the same shared random-tick, persistence, and interaction contracts |
 | distant structure/edit representation | not required at the ordinary-terrain spawn experience | needed for honest distant landmark continuity |
 
 Mountains/valleys and hydrology are therefore upstream quality investments,
@@ -722,7 +722,7 @@ approved; do not reserve a block of numbers in advance.
 |---|---|---|---|---|
 | `FS-00` | vision, vocabulary, staging, and cross-profile contract | `accepted` | this topic and reviewed Java 1.17.1 template/jigsaw/structure sources | keep reconciled as implementation changes facts |
 | `FS-01` | standalone structure-authoring lab | `proven` | Tactical 214: strict TypeScript source graph, generated JSON drift gate, Rust loader/compiler, twelve promoted family members, Lab-native coop, and inspected read-only catalogue | add buildings through finite source-first recipes; do not broaden into arbitrary dimensions or browser editing |
-| `FS-02` | coherent farm block/material/collision kit | `ready` | fourteen original farmstead materials now cover cottage, barn, and coop presentation; glass and transform/collision-aware stairs/slabs are proven; doors, fences/gates, farmland, crops, and props remain | resume with the next composition-driven family after the terrain campaign or when an active terrain review needs it |
+| `FS-02` | coherent farm block/material/collision kit | `partially proven` | fourteen original farmstead materials cover cottage, barn, and coop presentation; Tactical 288 adds dry/wet farmland, eight wheat ages, exact support/selection/collision facts, and first-party textures | doors, fences/gates, and broader props remain composition-driven additions |
 | `FS-03` | template records, semantic roles, transforms, markers, bounds, and touched chunks | `proven` | Tactical 208 pure kernel tests and persisted cross-chunk lab receipts | extend only when a caller needs processors, codecs, alternate palettes, entities, or block data |
 | `FS-04` | true structure statuses, starts, references, pieces, clipping, and persistence | `proven for first composition` | Tactical 274 reuses the wayside-arch foundation for one nine-piece farmstead start with exact touched-chunk references, clipped placement, order equality, SQLite reopen, and player-edit precedence | general registries and vanilla families remain later work |
 | `FS-05` | starter-content overlay and realized-instance identity | `plan persistence proven` | Tactical 274 Slices 0 and 3 persist starter content and the exact realized plan orthogonally to base generation; `10329418` intentionally replaces the internal review plan with accepted checksum `5daca45d...` | never rescore on ordinary reopen |
@@ -731,7 +731,7 @@ approved; do not reserve a block of numbers in advance.
 | `FS-08` | resident and player marker realization | `proven` | `a71ab724` publishes the accepted pose only for new players and preserves returning-player/respawn behavior; `f1133b31` realizes three chickens and two cows with stable ids and no duplication across partial materialization, chunk churn, cache reuse, or reopen; headed browser admission observes all five | preserve the marker ids and arrival contract; richer residents remain later work |
 | `FS-09` | cross-profile and topology adaptation | `deferred` | same engine contract accepted; first composition must land before breadth | Flat Grass, Small Island, Mclone, and explicit Overworld-overlay cases prove fit/fallback/rejection; admitted topology cases pass |
 | `FS-10` | maximal parcels, church, outbuildings, richer animals, and visual mill | `deferred` | named destination and optional parcels are preserved | additions pass composition, persistence, and performance reviews without replacing the first hierarchy |
-| `FS-11` | functional farm simulation and machinery | `deferred` | deliberately outside first visual/worldgen acceptance | shared gameplay contracts own crops, roles, power, inputs, and outputs |
+| `FS-11` | functional farm simulation and machinery | `wheat foundation proven` | Tactical 288 implements authoritative till, irrigate, random-tick growth, renewable harvest, inventory, and restart persistence independently of the showcase | connect a working wheat parcel to the accepted farmstead before adding crops, food/crafting, villagers, or machinery |
 | `FS-12` | settlement distant-presentation proxy | `deferred` | the removed chunk Far LOD omitted structures and edits | a future multiscale terrain architecture exists, then a shared presentation-only proxy passes its spatial handoff and coverage gates |
 
 The `ready` rows are not an instruction to start all of them. They identify
