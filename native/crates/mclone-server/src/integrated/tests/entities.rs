@@ -76,6 +76,81 @@ fn hunting_spear_damage_uses_fall_then_persistent_species_drops() {
 }
 
 #[test]
+fn ordinary_attack_disturbs_then_collapses_a_burrow_without_deleting_residents() {
+    let mut server = LocalRealmSession::new(54_321);
+    server.set_lighting_enabled(false);
+    server.set_debug_passive_showcase_enabled(false);
+    server.set_natural_spawning_enabled(false);
+    load_center_chunk(&mut server);
+    let player_position = Vec3d::new(8.5, 80.0, 8.5);
+    sync_player(&mut server, player_position);
+    let mouth_position = player_position.add(Vec3d::new(0.0, 0.0, 3.0));
+    let rabbit_id =
+        server
+            .entities
+            .insert_passive_mob_for_test(EntityKind::Rabbit, mouth_position, 180.0);
+    let rabbit_persistent_id = server.entities.state(rabbit_id).unwrap().persistent_id;
+    let mouth_block = BlockPos::containing(mouth_position);
+    server.scheduler_mut().set_block_at_world(mouth_block, AIR);
+    server.scheduler_mut().drain_pending_block_delta_events();
+    let burrow = server
+        .entities
+        .complete_rabbit_dig(rabbit_id, mouth_block)
+        .into_iter()
+        .find(|entity| entity.kind == EntityKind::RabbitBurrow)
+        .unwrap();
+    server
+        .try_handle_command(ClientCommand::move_player(MovePlayerCommand::Rot {
+            y_rot_degrees: 0.0,
+            x_rot_degrees: 24.0,
+            on_ground: true,
+        }))
+        .unwrap();
+    let eye = server.player().position().add(Vec3d::new(0.0, 1.62, 0.0));
+    let direction = look_direction_from_rot(0.0, 24.0);
+    let to = eye.add(direction.scale(DEER_HUNTING_SPEAR_REACH));
+    let (targeted, fraction) = server
+        .entities
+        .targeted_habitat_prop(eye, to)
+        .expect("test view must select the burrow mouth");
+    assert_eq!(targeted.id, burrow.id);
+    assert!(deer_attack_line_of_sight(eye, to, fraction, |pos| {
+        server.scheduler().block_at_world(pos)
+    }));
+
+    for _ in 0..2 {
+        server
+            .try_handle_command(ClientCommand::AttackEntity(AttackEntityCommand {
+                target: burrow.id,
+            }))
+            .expect("ordinary attack should disturb a visible burrow");
+        assert!(server.entities.state(burrow.id).is_some());
+        assert_eq!(
+            server.entities.mob_state(rabbit_id).unwrap().rabbit_home(),
+            Some(burrow.persistent_id)
+        );
+    }
+    server
+        .try_handle_command(ClientCommand::AttackEntity(AttackEntityCommand {
+            target: burrow.id,
+        }))
+        .expect("third prompt attack should collapse the burrow");
+
+    assert!(server.entities.state(burrow.id).is_none());
+    let rabbit = server
+        .entities
+        .state(rabbit_id)
+        .expect("collapse must preserve the resident rabbit");
+    assert_eq!(rabbit.persistent_id, rabbit_persistent_id);
+    assert!(rabbit.alive);
+    assert!(!rabbit.hidden_from_clients);
+    assert_eq!(
+        server.entities.mob_state(rabbit_id).unwrap().rabbit_home(),
+        None
+    );
+}
+
+#[test]
 fn homestead_residents_realize_by_entity_chunk_once_with_stable_ids() {
     let definition =
         crate::DimensionDefinition::overworld(0, WorldGenerationProfile::McloneOverworldV1);

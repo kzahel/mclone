@@ -558,6 +558,53 @@ impl MobRuntimeState {
         self.rabbit_habitat_intent = None;
     }
 
+    pub(crate) fn cancel_rabbit_dig(&mut self) -> bool {
+        let Some(rabbit) = self.species.rabbit_mut() else {
+            return false;
+        };
+        rabbit.set_dig_target(None);
+        rabbit.set_behavior(mclone_protocol::RabbitBehavior::Forage);
+        self.rabbit_completed_dig = None;
+        self.rabbit_habitat_intent = None;
+        self.navigation.stop();
+        true
+    }
+
+    pub(crate) fn release_rabbit_home(
+        &mut self,
+        entity: &mut ServerEntityState,
+        home: mclone_protocol::EntityPersistentId,
+        collapsed: bool,
+    ) -> bool {
+        let Some(rabbit) = self.species.rabbit_mut() else {
+            return false;
+        };
+        if rabbit.home() != Some(home) {
+            return false;
+        }
+        if collapsed {
+            rabbit.set_home(None);
+        }
+        rabbit.set_dig_target(None);
+        rabbit.set_behavior(mclone_protocol::RabbitBehavior::Emerge);
+        self.rabbit_home_position = None;
+        self.rabbit_habitat_intent = None;
+        self.rabbit_completed_dig = None;
+        self.rabbit_completed_raid = None;
+        self.navigation.stop();
+
+        let scale = if rabbit.life_stage() == mclone_protocol::RabbitLifeStage::Kit {
+            0.62
+        } else {
+            1.0
+        };
+        entity.hidden_from_clients = false;
+        entity.width = EntityMetadata::RABBIT.dimensions.width * scale;
+        entity.height = EntityMetadata::RABBIT.dimensions.height * scale;
+        set_rabbit_animation(entity, mclone_protocol::RabbitBehavior::Emerge);
+        true
+    }
+
     pub(crate) fn feed_rabbit(&mut self, love_ticks: u32) -> bool {
         self.species
             .rabbit_mut()
@@ -796,6 +843,23 @@ impl MobRuntimeState {
                 ticks_remaining: RABBIT_INTENT_TICKS,
                 stall_ticks: 0,
             });
+        } else if saved.behavior == mclone_protocol::RabbitBehavior::Underground {
+            if active && ticks >= RABBIT_UNDERGROUND_MIN_TICKS {
+                next = mclone_protocol::RabbitBehavior::Emerge;
+                if let Some(home) = self.rabbit_home_position {
+                    entity.position = home;
+                }
+            }
+        } else if saved.behavior == mclone_protocol::RabbitBehavior::Emerge
+            && ticks < RABBIT_EMERGE_TICKS
+        {
+            next = saved.behavior;
+        } else if saved.behavior == mclone_protocol::RabbitBehavior::EnterBurrow {
+            next = if ticks >= RABBIT_ENTRY_TICKS {
+                mclone_protocol::RabbitBehavior::Underground
+            } else {
+                saved.behavior
+            };
         } else if saved.home.is_none() {
             if saved.behavior == mclone_protocol::RabbitBehavior::Dig {
                 if ticks >= RABBIT_DIG_TICKS {
@@ -831,23 +895,6 @@ impl MobRuntimeState {
                     next = mclone_protocol::RabbitBehavior::Forage;
                 }
             }
-        } else if saved.behavior == mclone_protocol::RabbitBehavior::Underground {
-            if active && ticks >= RABBIT_UNDERGROUND_MIN_TICKS {
-                next = mclone_protocol::RabbitBehavior::Emerge;
-                if let Some(home) = self.rabbit_home_position {
-                    entity.position = home;
-                }
-            }
-        } else if saved.behavior == mclone_protocol::RabbitBehavior::Emerge
-            && ticks < RABBIT_EMERGE_TICKS
-        {
-            next = saved.behavior;
-        } else if saved.behavior == mclone_protocol::RabbitBehavior::EnterBurrow {
-            next = if ticks >= RABBIT_ENTRY_TICKS {
-                mclone_protocol::RabbitBehavior::Underground
-            } else {
-                saved.behavior
-            };
         } else if !active {
             if let Some(home) = self.rabbit_home_position {
                 if entity.position.distance_to_sqr(home) <= RABBIT_HOME_REACHED_DISTANCE_SQR {

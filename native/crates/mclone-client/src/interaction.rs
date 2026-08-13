@@ -116,9 +116,7 @@ impl ClientInteractionController {
         view_vector: Vec3d,
     ) -> Option<EntityInteractionTarget> {
         let selected = client.player_inventory()[usize::from(self.selected_hotbar_slot())];
-        if !selected.is_some_and(|stack| stack.kind == ItemKind::HuntingSpear) {
-            return None;
-        }
+        let hunting_spear = selected.is_some_and(|stack| stack.kind == ItemKind::HuntingSpear);
         let direction_length = view_vector.length_sqr().sqrt();
         if !eye_position.is_finite() || direction_length <= f64::EPSILON {
             return None;
@@ -133,7 +131,10 @@ impl ClientInteractionController {
         client
             .entity_snapshots()
             .filter(|entity| {
-                entity.kind == EntityKind::Deer && entity.deer.is_some_and(|deer| deer.health > 0)
+                entity.kind == EntityKind::RabbitBurrow
+                    || (hunting_spear
+                        && entity.kind == EntityKind::Deer
+                        && entity.deer.is_some_and(|deer| deer.health > 0))
             })
             .filter_map(|entity| {
                 let position = client
@@ -724,5 +725,39 @@ mod tests {
             .unwrap();
         assert_eq!(target.id, EntityId(9));
         assert!(target.distance < 3.0);
+    }
+
+    #[test]
+    fn rabbit_burrow_is_an_attack_target_without_a_hunting_spear() {
+        let mut client = client_with_blocks(&[]);
+        client.apply_update(mclone_protocol::ServerUpdate::EntitySnapshot(
+            mclone_protocol::EntitySnapshot {
+                id: EntityId(12),
+                persistent_id: mclone_protocol::EntityPersistentId::new(0, 12),
+                kind: EntityKind::RabbitBurrow,
+                item_stack: None,
+                mallard: None,
+                mallard_nest: None,
+                deer: None,
+                animation: None,
+                position: Vec3d::new(1.5, 1.0, 3.0),
+                y_rot_degrees: 0.0,
+                x_rot_degrees: 0.0,
+                rotation: None,
+                on_ground: true,
+                width: 0.9,
+                height: 0.76,
+                tick_count: 0,
+            },
+        ));
+
+        let target = ClientInteractionController::new()
+            .target_entity(
+                &client,
+                Vec3d::new(1.5, 1.62, 0.5),
+                Vec3d::new(0.0, 0.0, 1.0),
+            )
+            .expect("burrow should use the ordinary attack ray");
+        assert_eq!(target.id, EntityId(12));
     }
 }
