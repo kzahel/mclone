@@ -220,7 +220,7 @@ fn test_only_coarse_operation_is_a_boundary_fixpoint() {
             WEB_SCENE_HOST,
             "#[wasm_bindgen]\nimpl WebSceneSmokeHarness {"
         ),
-        6
+        7
     );
     assert_eq!(
         wasm_export_count(

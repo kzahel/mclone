@@ -1024,6 +1024,20 @@ impl WebSceneSmokeHarness {
     ) -> Result<JsValue, JsValue> {
         host.begin_lobby_smoke_with_chunk_span(chunk_span)
     }
+
+    /// Aim ordinary player controls at a known loaded block. This lives on
+    /// the explicit smoke surface so fixture coordinates never expand the
+    /// product host ABI.
+    #[wasm_bindgen(js_name = frameBlock)]
+    pub fn frame_block(
+        &mut self,
+        host: &mut WebSceneHost,
+        x: i32,
+        y: i32,
+        z: i32,
+    ) -> Result<JsValue, JsValue> {
+        host.frame_block_for_smoke(x, y, z)
+    }
 }
 
 #[wasm_bindgen]
@@ -1658,11 +1672,9 @@ impl WebSceneHost {
             .map_err(JsValue::from)
     }
 
-    /// Smoke/support helper for reproducibly aiming ordinary player controls
-    /// at a known loaded block. The helper changes only the normal player
-    /// camera; the following use/attack still travels through live gameplay.
-    #[wasm_bindgen(js_name = frameBlock)]
-    pub fn frame_block(&mut self, x: i32, y: i32, z: i32) -> Result<JsValue, JsValue> {
+    /// Reproducibly aim ordinary player controls at a known loaded block. The
+    /// following use/attack still travels through live gameplay.
+    fn frame_block_for_smoke(&mut self, x: i32, y: i32, z: i32) -> Result<JsValue, JsValue> {
         let block = BlockPos::new(x, y, z);
         if self
             .host_ref()?

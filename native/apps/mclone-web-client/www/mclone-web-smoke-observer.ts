@@ -414,8 +414,8 @@ export function installWebSmokeObserver(
     return report;
   };
   runtime.frameBlock = (x, y, z) => {
-    const report = apply((session) => session.frameBlock(
-      Math.trunc(x), Math.trunc(y), Math.trunc(z),
+    const report = applySmoke((harness, session) => harness.frameBlock(
+      session, Math.trunc(x), Math.trunc(y), Math.trunc(z),
     ));
     observer.observeTarget(app.sceneHostForObserver()?.previewBlockTarget());
     return report;
