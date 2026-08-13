@@ -2,7 +2,9 @@
 
 Topic: `playable-showcases`
 
-Status: implemented with four publicly verified showcases 2026-08-13.
+Status: implemented with three accepted public creature showcases; the public
+farming showcase's automated mechanics pass but its manual usability
+acceptance was rejected 2026-08-13.
 `mallard-ecology` proves a wetland motion/hatching/discovery loop;
 `deer-forest-edge` proves a contrasting multi-chunk habitat, authoritative
 named actions, durable sign, field notes, and an ordinary hunting tool. Bees
@@ -367,6 +369,15 @@ to local: desktop
 `e4093132d9ab1d0b63c4bf3869533c80a9cb29b5e1af6adccfa3b9a2c6f17e8d`
 and phone
 `53b55792adccd5b8f2761674bad379d09121d0d31f59ddaca6355cc717058d44`.
+
+Human review then rejected the farming scene as a manual interaction proof.
+Water-adjacent hydration was too delayed to observe consistently, the newly
+planted age-0 crop was not visibly legible, and the initial view did not make a
+mature crop discoverable or easy to target. The automated probe had used its
+smoke-only coordinate framing ABI before harvest, so its success could not
+establish that human usability. Tactical
+[`289`](../tactical/289-wheat-farming-feedback-and-harvest.md) records the
+shared feedback correction and stronger no-framing harvest gate.
 
 ## Code and Documentation Map
 

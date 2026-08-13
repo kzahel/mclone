@@ -2,8 +2,11 @@
 
 Topic: `wheat-farming`
 
-Status: **live, deployed, and desktop/phone accepted 2026-08-13 under Tactical
-[`288`](../tactical/288-wheat-farming-foundation.md).**
+Status: **live foundation deployed under Tactical
+[`288`](../tactical/288-wheat-farming-foundation.md); its manual-interaction
+acceptance was rejected and corrective Tactical
+[`289`](../tactical/289-wheat-farming-feedback-and-harvest.md) is active
+2026-08-13.**
 
 ## Purpose
 
@@ -113,3 +116,10 @@ The resettable public field is:
 ```text
 https://mclone.kzahel.com/app.html?showcase=wheat-farming
 ```
+
+Human review then found that adjacent-water hydration was too delayed to read,
+the age-0 sprout was nearly invisible, and the initial camera did not make a
+mature harvest target discoverable. The automated gate's smoke-only framing
+proved authoritative mechanics but masked those usability failures. Tactical
+289 owns the correction; until it closes, the revision-1 public URL remains a
+mechanics fixture rather than accepted manual farming evidence.
