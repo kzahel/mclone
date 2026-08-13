@@ -1,6 +1,7 @@
 # Tactical 289: Wheat Farming Feedback and Harvest
 
-Status: **active 2026-08-13.**
+Status: **implemented and locally accepted 2026-08-13; public deployment
+acceptance pending.**
 
 Topics:
 
@@ -22,7 +23,7 @@ The implementation explains all three observations:
 
 - hydration does not require a crop, but a single farmland cell is selected by
   the vanilla-shaped three-random-candidates-per-section system only about once
-  every 85 seconds on average;
+  every 68 seconds on average at 20 gameplay ticks per second;
 - wheat age 0 is only 2/16 blocks high and its authored texture contains a few
   dark pixels, so the authoritative crop update can be practically invisible
   at the review camera's phone distance;
@@ -64,8 +65,9 @@ review of the loop is withdrawn.
   immediately and dry tilling remains dry.
 - Scene/UI tests prove ordinary hoe/seed actions enqueue confirmed feedback and
   crop states map to the three target labels.
-- Texture Lab and rendered capture prove the new sprout is visible without its
-  outline at desktop and phone scale.
+- Texture Lab proves the proprietary-free age-zero asset is a bright rosette.
+  Rendered desktop and phone captures prove planting has immediate explicit
+  `Wheat sprout` feedback at the targeted cell without relying on its outline.
 - Desktop and phone browser gates begin by targeting a mature crop through the
   initial recipe camera without the smoke-only frame helper. They then harvest
   through the actual attack input, and continue to prove till, plant, inventory
@@ -85,4 +87,45 @@ review of the loop is withdrawn.
 
 ## Execution Record
 
-Implementation pending.
+Commits `0d1b23b1` and `8e6cab39` implement the shared correction and recipe
+revision 2. Nearby-water tilling now creates moisture-7 farmland immediately;
+dry tilling stays moisture 0. The replicated target state drives ordinary flat
+HUD labels for sprouts, growing crops, and mature crops, and the mature label
+names the rendered `ATK` action. Hoe and seed mutations use the existing
+authoritative-confirmation sound queue. Texture Lab authors a brighter age-zero
+rosette while leaving collision and selection geometry unchanged.
+
+The revision-2 entry eye is `8.5,65.62,14.5` and its target is
+`9.5,64.5,10.5`. Both local browser gates began on exact mature state 236 at
+`9,64,10`, harvested it before any smoke framing call, then used actual
+keyboard or rendered touch controls to till `8,63,14` directly to moisture 7
+and plant above it. Both saw one unrelated automatic farming transition and
+kept every browser world-record store empty. Inventory receipts were wheat
+`0 -> 1` and seeds `10 -> 9` after the harvest seed roll and planting.
+
+Inspected local first-frame desktop and phone digests are respectively
+`fd8510a51ef69a8b522e31f1a1d5caa5c562c1b0088fbca53000a51f46a2eb07`
+and
+`c09833fac7bb6ca09496383cd1ac1cc58dcbc08158d3e7aa21033011f357ef74`.
+The corresponding just-planted captures are
+`50a1b89e780251b95de52d701a7d16e3178e14dae2a13a37386a3bd3f9b0a017`
+and
+`be303f33a85d30dde3a4c5ae8a770132100461491abb27b85b6b0b76705688eb`.
+The inspected native capture digest is
+`0eaef98116ddce000e7838e228b290b5477067ab4f244cb4e6d1f2043b7db735`;
+the age-zero Texture Lab contact sheet is
+`8eaa8f7df815403bbd719dbe26b07b990a450f76fe4bf57b9aacaf6c6aac6338`.
+
+Validation completed locally:
+
+- full `mclone-server`: 670 passed;
+- full `mclone-ui`: 111 passed;
+- full `mclone-scene`: 215 tests passed across unit/integration/doc lanes,
+  with one existing GPU characterization ignore;
+- Texture Lab typecheck and age-zero export;
+- deterministic revision-2 fixture compilation; and
+- local desktop and phone WebGPU showcase gates with inspected initial and
+  planted pixels.
+
+Exact pushed deployment and public desktop/phone acceptance remain before this
+tactical can close.

@@ -3,10 +3,9 @@
 Topic: `wheat-farming`
 
 Status: **live foundation deployed under Tactical
-[`288`](../tactical/288-wheat-farming-foundation.md); its manual-interaction
-acceptance was rejected and corrective Tactical
-[`289`](../tactical/289-wheat-farming-feedback-and-harvest.md) is active
-2026-08-13.**
+[`288`](../tactical/288-wheat-farming-foundation.md); corrective Tactical
+[`289`](../tactical/289-wheat-farming-feedback-and-harvest.md) is implemented
+and locally accepted, with public deployment acceptance pending 2026-08-13.**
 
 ## Purpose
 
@@ -31,8 +30,12 @@ ordinary persisted records.
 
 The player creates a field by using a wooden hoe on grass or dirt with clear
 air above, placing water within four horizontal blocks, and planting wheat
-seeds on the new farmland. Loaded block-ticking chunks sample three random
-positions per non-empty section. Water hydrates farmland toward moisture 7;
+seeds on the new farmland. A successful till already in that water range
+immediately creates moisture-7 farmland so field creation is readable; dry
+tilling creates moisture 0. This is a narrow responsiveness divergence from
+Java 1.17.1's delayed first hydration. Loaded block-ticking chunks sample three
+random positions per non-empty section. Water hydrates farmland toward
+moisture 7;
 unwatered soil dries toward 0 and eventually returns to dirt if no crop
 protects it. Wheat grows from age 0 to 7 when light and the surrounding
 farmland/crop layout pass the reference-shaped growth calculation.
@@ -49,6 +52,9 @@ visually distinct green-to-gold crop stages. Farmland has its 15/16-height
 support shape; wheat is cutout, selectable by age-relative height, and has no
 collision. `WoodenHoe`, `WheatSeeds`, and `Wheat` travel through the shared
 protocol, persistence, inventory, item-entity, HUD, and item-label paths.
+Replicated wheat under the crosshair also drives ordinary shared flat-HUD
+labels for a sprout, a growing crop, or a mature crop with its `ATK` harvest
+action. Confirmed hoe and seed mutations use the normal interaction sound path.
 
 The compact runtime terrain-state lane is still an interim identity map backed
 by `u8` raw IDs. This slice can represent the sixteen required states, but it
@@ -123,3 +129,24 @@ mature harvest target discoverable. The automated gate's smoke-only framing
 proved authoritative mechanics but masked those usability failures. Tactical
 289 owns the correction; until it closes, the revision-1 public URL remains a
 mechanics fixture rather than accepted manual farming evidence.
+
+Corrective commits `0d1b23b1` and `8e6cab39` provide immediate wet tilling,
+confirmed hoe/seed sound, a brighter proprietary-free age-zero rosette, and
+replicated crop target labels. Revision 2 keeps seed `17506` and entry eye
+`8.5,65.62,14.5`, but targets a reachable mature crop at
+`9.5,64.5,10.5`. Local desktop and phone gates harvested state 236 at
+`9,64,10` from the untouched entry camera before using the smoke-only frame
+helper for the separate till/plant proof. Both then tilled the water-adjacent
+cell directly to moisture 7, planted wheat through real controls, observed an
+automatic transition, and retained zero browser records.
+
+The inspected local initial desktop and phone digests are
+`fd8510a51ef69a8b522e31f1a1d5caa5c562c1b0088fbca53000a51f46a2eb07`
+and
+`c09833fac7bb6ca09496383cd1ac1cc58dcbc08158d3e7aa21033011f357ef74`;
+the just-planted captures are
+`50a1b89e780251b95de52d701a7d16e3178e14dae2a13a37386a3bd3f9b0a017`
+and
+`be303f33a85d30dde3a4c5ae8a770132100461491abb27b85b6b0b76705688eb`.
+Full server validation now passes 670 tests. Public revision-2 deployment and
+inspection remain pending.

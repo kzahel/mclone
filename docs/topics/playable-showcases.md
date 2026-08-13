@@ -379,6 +379,16 @@ establish that human usability. Tactical
 [`289`](../tactical/289-wheat-farming-feedback-and-harvest.md) records the
 shared feedback correction and stronger no-framing harvest gate.
 
+Revision 2 is locally accepted. It keeps seed `17506` and entry eye
+`8.5,65.62,14.5`, but targets the reachable mature crop at
+`9.5,64.5,10.5`. Shared gameplay immediately hydrates water-adjacent tilling;
+the ordinary flat HUD labels wheat growth and names `ATK` as the mature-crop
+harvest action. Desktop and phone gates first harvested exact state 236 at
+`9,64,10` from the untouched recipe camera, then used real controls to till a
+separate cell directly to moisture 7 and plant wheat. Both retained zero Web
+world records and captured immediate `Wheat sprout` feedback after planting.
+Public deployment acceptance remains pending.
+
 ## Code and Documentation Map
 
 - `assets/mclone/showcases/`: readable showcase recipes
