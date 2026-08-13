@@ -1219,6 +1219,7 @@ async function run() {
           );
         }
         let farmingInteractionProbe = null;
+        let plantedWheatScreenshotPath = null;
         if (wheatShowcase) {
           await page.evaluate(() => globalThis.__mcloneWebApp?.resumeRendering?.());
           const useTouchControls = mobileShowcase;
@@ -1262,24 +1263,56 @@ async function run() {
                 action,
               );
 
-          await selectSlot(7, 101);
+          const initialHarvestTarget = await page.evaluate(
+            () => globalThis.__mcloneWebApp?.state?.currentTarget ?? null,
+          );
+          if (
+            initialHarvestTarget?.hit !== true
+            || initialHarvestTarget.blockX !== 9
+            || initialHarvestTarget.blockY !== 64
+            || initialHarvestTarget.blockZ !== 10
+            || initialHarvestTarget.hitBlockStateId !== 236
+          ) {
+            throw new Error(`wheat entry camera did not expose its mature harvest target: ${JSON.stringify(initialHarvestTarget)}`);
+          }
+          const wheatBeforeHarvest = await page.evaluate(
+            () => Number(globalThis.__mcloneWebApp?.state?.lastReport?.wheatHotbarCount),
+          );
+          // Exercise the initial recipe camera exactly as a person receives
+          // it. No smoke-only coordinate framing is allowed before harvest.
+          const harvest = await interact("attack", "break", 101);
+          try {
+            await page.waitForFunction(
+              ({ wheatBeforeHarvest }) => globalThis.__mcloneWebApp
+                  .blockStateAt?.(9, 64, 10)?.blockStateId === 0
+                && Number(globalThis.__mcloneWebApp?.state?.lastReport?.wheatHotbarCount)
+                  === wheatBeforeHarvest + 1,
+              { wheatBeforeHarvest },
+              { timeout: 10_000 },
+            );
+          } catch (error) {
+            const harvestState = await page.evaluate(() => ({
+              crop: globalThis.__mcloneWebApp.blockStateAt?.(9, 64, 10),
+              report: globalThis.__mcloneWebApp?.state?.lastReport,
+            }));
+            throw new Error(`wheat harvest did not settle: ${error instanceof Error ? error.message : String(error)}\nharvest=${JSON.stringify(harvest)}\nstate=${JSON.stringify(harvestState)}`);
+          }
+
+          await selectSlot(7, 102);
           await page.evaluate(() => globalThis.__mcloneWebApp.frameBlock?.(8, 63, 14));
-          const till = await interact("use", "place", 102);
+          const till = await interact("use", "place", 103);
           await page.waitForFunction(
-            () => {
-              const state = globalThis.__mcloneWebApp.blockStateAt?.(8, 63, 14)?.blockStateId;
-              return state >= 221 && state <= 228;
-            },
+            () => globalThis.__mcloneWebApp.blockStateAt?.(8, 63, 14)?.blockStateId === 228,
             undefined,
             { timeout: 10_000 },
           );
 
-          await selectSlot(8, 103);
+          await selectSlot(8, 104);
           const seedsBeforePlant = await page.evaluate(
             () => Number(globalThis.__mcloneWebApp?.state?.lastReport?.wheatSeedHotbarCount),
           );
           await page.evaluate(() => globalThis.__mcloneWebApp.frameBlock?.(8, 63, 14));
-          const plant = await interact("use", "place", 104);
+          const plant = await interact("use", "place", 105);
           await page.waitForFunction(
             ({ seedsBeforePlant }) => {
               const crop = globalThis.__mcloneWebApp.blockStateAt?.(8, 64, 14)?.blockStateId;
@@ -1294,40 +1327,30 @@ async function run() {
           const seedsAfterPlant = await page.evaluate(
             () => Number(globalThis.__mcloneWebApp?.state?.lastReport?.wheatSeedHotbarCount),
           );
-
-          const wheatBeforeHarvest = await page.evaluate(
-            () => Number(globalThis.__mcloneWebApp?.state?.lastReport?.wheatHotbarCount),
-          );
-          // Frame the mature proof plant beside the player's work area so the
-          // authoritative six-block break reach is exercised normally.
-          await page.evaluate(() => globalThis.__mcloneWebApp.frameBlock?.(9, 64, 9));
-          const harvest = await interact("attack", "break", 105);
-          try {
-            await page.waitForFunction(
-              ({ wheatBeforeHarvest }) => globalThis.__mcloneWebApp
-                  .blockStateAt?.(9, 64, 9)?.blockStateId === 0
-                && Number(globalThis.__mcloneWebApp?.state?.lastReport?.wheatHotbarCount)
-                  === wheatBeforeHarvest + 1,
-              { wheatBeforeHarvest },
-              { timeout: 10_000 },
-            );
-          } catch (error) {
-            const harvestState = await page.evaluate(() => ({
-              crop: globalThis.__mcloneWebApp.blockStateAt?.(9, 64, 9),
-              report: globalThis.__mcloneWebApp?.state?.lastReport,
-            }));
-            throw new Error(`wheat harvest did not settle: ${error instanceof Error ? error.message : String(error)}\nharvest=${JSON.stringify(harvest)}\nstate=${JSON.stringify(harvestState)}`);
-          }
+          await page.evaluate(async () => {
+            globalThis.__mcloneWebApp?.pauseRendering?.();
+            await globalThis.__mcloneWebApp?.renderOneFrameForSmoke?.();
+          });
+          plantedWheatScreenshotPath = screenshotPath.replace(/\.png$/i, "-planted.png");
+          await page.screenshot({
+            path: plantedWheatScreenshotPath,
+            fullPage: false,
+            timeout: 60_000,
+          });
           farmingInteractionProbe = await page.evaluate(
-            ({ till, plant, harvest, seedsBeforePlant, seedsAfterPlant, wheatBeforeHarvest }) => ({
-              ok: globalThis.__mcloneWebApp.blockStateAt?.(8, 63, 14)?.blockStateId >= 221
-                && globalThis.__mcloneWebApp.blockStateAt?.(8, 63, 14)?.blockStateId <= 228
+            ({ initialHarvestTarget, till, plant, harvest, seedsBeforePlant, seedsAfterPlant, wheatBeforeHarvest }) => ({
+              ok: initialHarvestTarget?.blockX === 9
+                && initialHarvestTarget?.blockY === 64
+                && initialHarvestTarget?.blockZ === 10
+                && initialHarvestTarget?.hitBlockStateId === 236
+                && globalThis.__mcloneWebApp.blockStateAt?.(8, 63, 14)?.blockStateId === 228
                 && globalThis.__mcloneWebApp.blockStateAt?.(8, 64, 14)?.blockStateId >= 229
                 && globalThis.__mcloneWebApp.blockStateAt?.(8, 64, 14)?.blockStateId <= 236
-                && globalThis.__mcloneWebApp.blockStateAt?.(9, 64, 9)?.blockStateId === 0
+                && globalThis.__mcloneWebApp.blockStateAt?.(9, 64, 10)?.blockStateId === 0
                 && seedsAfterPlant === seedsBeforePlant - 1
                 && Number(globalThis.__mcloneWebApp?.state?.lastReport?.wheatHotbarCount)
                   === wheatBeforeHarvest + 1,
+              initialHarvestTarget,
               till,
               plant,
               harvest,
@@ -1342,6 +1365,7 @@ async function run() {
               ),
             }),
             {
+              initialHarvestTarget,
               till,
               plant,
               harvest,
@@ -1350,7 +1374,6 @@ async function run() {
               wheatBeforeHarvest,
             },
           );
-          await page.evaluate(() => globalThis.__mcloneWebApp?.pauseRendering?.());
           await page.waitForFunction(
             () => globalThis.__mcloneWebApp?.state?.tickFrameBusy === false,
             undefined,
@@ -1390,7 +1413,7 @@ async function run() {
           pageErrors.length > 0
           || canvasPixels.distinctInteriorColorCount < 2
           || result?.showcaseId !== showcase
-          || result?.showcaseRevision !== (wheatShowcase ? 1 : beeShowcase ? 2 : deerShowcase ? 1 : 2)
+          || result?.showcaseRevision !== (wheatShowcase ? 2 : beeShowcase ? 2 : deerShowcase ? 1 : 2)
           || result?.activeWorldSeedText !== (wheatShowcase ? "17506" : beeShowcase ? "17505" : deerShowcase ? "17504" : "17503")
           || result?.generationProfile !== "authored-only"
           || result?.dayTime !== 6000
@@ -1429,6 +1452,7 @@ async function run() {
           behaviorProbe,
           mobileBeeUseProbe,
           farmingInteractionProbe,
+          plantedWheatScreenshotPath,
           result,
         }, null, 2));
         return;

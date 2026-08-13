@@ -1491,11 +1491,12 @@ mod tests {
         let identity = ClientIdentity::test_default();
         let (manifest, store) =
             playable_showcase_memory_store(PlayableShowcaseId::WheatFarming, &identity).unwrap();
-        assert_eq!(manifest.revision, 1);
+        assert_eq!(manifest.revision, 2);
         assert_eq!(manifest.seed, 17_506);
         assert_eq!(manifest.entity_count, 0);
         assert_eq!(manifest.entry_feet, [8.5, 64.0, 14.5]);
         assert_eq!(manifest.entry_eye, [8.5, 65.62, 14.5]);
+        assert_eq!(manifest.entry_look_at, [9.5, 64.5, 10.5]);
         let center = store.chunk(ChunkPos::new(0, 0)).unwrap();
         let block_at = |pos: BlockPos| {
             center

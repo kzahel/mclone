@@ -2,14 +2,14 @@
   "schemaVersion": 1,
   "id": "wheat-farming",
   "title": "Water-Fed Wheat Field",
-  "revision": 1,
+  "revision": 2,
   "baseTerrain": "wheat-farming-v1",
   "seed": 17506,
   "dayTime": 6000,
   "freezeTime": true,
   "entry": {
     "feet": [8.5, 64.0, 14.5],
-    "lookAt": [8.0, 64.4, 6.0]
+    "lookAt": [9.5, 64.5, 10.5]
   },
   "blockPatches": [
     {
@@ -123,6 +123,11 @@
       "liveInstantiation": "mclone-farmland-tilling"
     },
     {
+      "position": [9, 63, 10],
+      "block": "minecraft:farmland[moisture=7]",
+      "liveInstantiation": "mclone-farmland-tilling"
+    },
+    {
       "position": [5, 64, 5],
       "block": "minecraft:wheat[age=0]",
       "liveInstantiation": "mclone-wheat-planting-and-growth"
@@ -229,6 +234,11 @@
     },
     {
       "position": [9, 64, 9],
+      "block": "minecraft:wheat[age=7]",
+      "liveInstantiation": "mclone-wheat-planting-and-growth"
+    },
+    {
+      "position": [9, 64, 10],
       "block": "minecraft:wheat[age=7]",
       "liveInstantiation": "mclone-wheat-planting-and-growth"
     }
