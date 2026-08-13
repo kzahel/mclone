@@ -90,6 +90,8 @@ const RABBIT_EMERGE_TICKS: u32 = 18;
 const RABBIT_FORAGE_TICKS: u32 = 36;
 const RABBIT_RAID_TICKS: u32 = 26;
 const RABBIT_UNDERGROUND_MIN_TICKS: u32 = 80;
+const RABBIT_ACTIVE_REST_INTERVAL_TICKS: u64 = 480;
+const RABBIT_ACTIVE_REST_WARMUP_TICKS: u64 = 60;
 const RABBIT_INTENT_TICKS: u16 = 280;
 const RABBIT_STALL_TICKS: u16 = 24;
 const RABBIT_SEARCH_RADIUS: i32 = 12;
@@ -639,6 +641,12 @@ impl MobRuntimeState {
         {
             self.rabbit_habitat_intent = None;
             self.navigation.stop();
+            if self.rabbit_behavior() == Some(mclone_protocol::RabbitBehavior::Raid) {
+                self.species
+                    .rabbit_mut()
+                    .expect("rabbit species")
+                    .set_behavior(mclone_protocol::RabbitBehavior::Forage);
+            }
             return true;
         }
         self.navigation.recompute_path_around(pos, entity.position)
@@ -834,15 +842,17 @@ impl MobRuntimeState {
             && ticks < RABBIT_EMERGE_TICKS
         {
             next = saved.behavior;
+        } else if saved.behavior == mclone_protocol::RabbitBehavior::EnterBurrow {
+            next = if ticks >= RABBIT_ENTRY_TICKS {
+                mclone_protocol::RabbitBehavior::Underground
+            } else {
+                saved.behavior
+            };
         } else if !active {
             if let Some(home) = self.rabbit_home_position {
                 if entity.position.distance_to_sqr(home) <= RABBIT_HOME_REACHED_DISTANCE_SQR {
                     next = mclone_protocol::RabbitBehavior::EnterBurrow;
-                    if saved.behavior == mclone_protocol::RabbitBehavior::EnterBurrow
-                        && ticks >= RABBIT_ENTRY_TICKS
-                    {
-                        next = mclone_protocol::RabbitBehavior::Underground;
-                    }
+                    self.rabbit_habitat_intent = None;
                 } else {
                     next = mclone_protocol::RabbitBehavior::Hop;
                     self.rabbit_habitat_intent = Some(RabbitHabitatIntent {
@@ -855,9 +865,18 @@ impl MobRuntimeState {
                 }
             }
         } else if saved.behavior == mclone_protocol::RabbitBehavior::Raid {
-            if ticks >= RABBIT_RAID_TICKS {
-                self.rabbit_completed_raid =
-                    self.rabbit_habitat_intent.and_then(|intent| intent.block);
+            let raid_target = self.rabbit_habitat_intent.filter(|intent| {
+                intent.kind == RabbitIntentKind::Raid
+                    && intent.block.is_some_and(|block| {
+                        blocks(block) == Some(generated_block_state_id(CARROTS_AGE_7))
+                    })
+            });
+            if raid_target.is_none() {
+                next = mclone_protocol::RabbitBehavior::Forage;
+                self.rabbit_habitat_intent = None;
+                self.navigation.stop();
+            } else if ticks >= RABBIT_RAID_TICKS {
+                self.rabbit_completed_raid = raid_target.and_then(|intent| intent.block);
                 next = mclone_protocol::RabbitBehavior::Forage;
                 self.rabbit_habitat_intent = None;
             }
@@ -871,6 +890,24 @@ impl MobRuntimeState {
                 ticks_remaining: 40,
                 stall_ticks: 0,
             });
+        } else if saved.home.is_some()
+            && self.rabbit_home_position.is_some()
+            && rabbit_active_rest_due(*entity, self.rabbit_habitat_intent)
+        {
+            let home = self.rabbit_home_position.expect("checked rabbit home");
+            if entity.position.distance_to_sqr(home) <= RABBIT_HOME_REACHED_DISTANCE_SQR {
+                next = mclone_protocol::RabbitBehavior::EnterBurrow;
+                self.rabbit_habitat_intent = None;
+            } else {
+                next = mclone_protocol::RabbitBehavior::Hop;
+                self.rabbit_habitat_intent = Some(RabbitHabitatIntent {
+                    kind: RabbitIntentKind::Home,
+                    target: home,
+                    block: None,
+                    ticks_remaining: RABBIT_INTENT_TICKS,
+                    stall_ticks: 0,
+                });
+            }
         } else {
             if saved.behavior == mclone_protocol::RabbitBehavior::Forage
                 && ticks >= RABBIT_FORAGE_TICKS
@@ -935,10 +972,15 @@ impl MobRuntimeState {
                 if entity.position.distance_to_sqr(intent.target)
                     <= RABBIT_TARGET_REACHED_DISTANCE_SQR
                 {
-                    next = if intent.kind == RabbitIntentKind::Raid {
-                        mclone_protocol::RabbitBehavior::Raid
-                    } else {
-                        mclone_protocol::RabbitBehavior::Forage
+                    next = match intent.kind {
+                        RabbitIntentKind::Raid => mclone_protocol::RabbitBehavior::Raid,
+                        RabbitIntentKind::Home => {
+                            self.rabbit_habitat_intent = None;
+                            mclone_protocol::RabbitBehavior::EnterBurrow
+                        }
+                        RabbitIntentKind::Dig
+                        | RabbitIntentKind::Forage
+                        | RabbitIntentKind::Tempt => mclone_protocol::RabbitBehavior::Forage,
                     };
                 } else {
                     next = mclone_protocol::RabbitBehavior::Hop;
@@ -3012,6 +3054,26 @@ where
     deer_walkable_feet(feet, blocks)
 }
 
+fn rabbit_active_rest_due(entity: ServerEntityState, intent: Option<RabbitHabitatIntent>) -> bool {
+    if entity.tick_count < RABBIT_ACTIVE_REST_WARMUP_TICKS
+        || intent.is_some_and(|intent| {
+            matches!(
+                intent.kind,
+                RabbitIntentKind::Raid | RabbitIntentKind::Tempt | RabbitIntentKind::Dig
+            )
+        })
+    {
+        return false;
+    }
+    let phase = entity
+        .persistent_id
+        .least
+        .wrapping_mul(0x9e37_79b9_7f4a_7c15)
+        .rotate_left(17)
+        % RABBIT_ACTIVE_REST_INTERVAL_TICKS;
+    (entity.tick_count + phase).is_multiple_of(RABBIT_ACTIVE_REST_INTERVAL_TICKS)
+}
+
 fn move_rabbit_toward<F>(entity: &mut ServerEntityState, target: Vec3d, speed: f64, blocks: &F)
 where
     F: Fn(BlockPos) -> Option<BlockStateId>,
@@ -3380,6 +3442,149 @@ mod tests {
             Some(mclone_protocol::RabbitBehavior::Hop)
         );
         assert!(entity.position.x > 0.5);
+    }
+
+    #[test]
+    fn rabbit_cancels_a_raid_immediately_when_its_crop_changes() {
+        let crop = BlockPos::new(1, 64, 0);
+        let rabbit_id = EntityId(82);
+        let mut entity = ServerEntityState::from_metadata(
+            rabbit_id,
+            EntityPersistentId::new(0, 82),
+            EntityMetadata::RABBIT,
+            Vec3d::new(1.5, 64.0, 0.5),
+            0.0,
+            0.0,
+            None,
+            true,
+        );
+        let mut mob = MobRuntimeState::from_saved(
+            rabbit_id,
+            EntityMetadata::RABBIT,
+            true,
+            0.0,
+            Vec3d::ZERO,
+            None,
+            None,
+            None,
+            None,
+            Some(RabbitRuntimeSaveData {
+                home: Some(EntityPersistentId::new(0, 83)),
+                dig_target: None,
+                life_stage: mclone_protocol::RabbitLifeStage::Adult,
+                age_ticks: 2_400,
+                parents: [None, None],
+                behavior: mclone_protocol::RabbitBehavior::Raid,
+                behavior_ticks: 4,
+                health: 3,
+                max_health: 3,
+                love_ticks: 0,
+                breed_cooldown: 0,
+                raid_cooldown: 0,
+            }),
+        );
+        mob.rabbit_home_position = Some(Vec3d::new(0.5, 64.0, 0.5));
+        mob.rabbit_habitat_intent = Some(RabbitHabitatIntent {
+            kind: RabbitIntentKind::Raid,
+            target: entity.position,
+            block: Some(crop),
+            ticks_remaining: RABBIT_INTENT_TICKS,
+            stall_ticks: 0,
+        });
+
+        assert!(mob.on_block_changed(entity, crop));
+        assert_eq!(mob.rabbit_habitat_intent, None);
+        assert_eq!(
+            mob.rabbit_behavior(),
+            Some(mclone_protocol::RabbitBehavior::Forage)
+        );
+        mob.tick_entity_at_time(&mut entity, &[], &[], &[], 12_000, &flat_ground);
+        assert_eq!(mob.take_rabbit_completed_raid(), None);
+        assert_ne!(
+            mob.rabbit_behavior(),
+            Some(mclone_protocol::RabbitBehavior::Raid)
+        );
+    }
+
+    #[test]
+    fn housed_rabbit_takes_a_staggered_active_rest_and_reemerges_with_same_identity() {
+        let rabbit_id = EntityId(84);
+        let persistent_id = EntityPersistentId::new(0, 84);
+        let home = EntityPersistentId::new(0, 85);
+        let home_position = Vec3d::new(0.5, 64.0, 0.5);
+        let mut entity = ServerEntityState::from_metadata(
+            rabbit_id,
+            persistent_id,
+            EntityMetadata::RABBIT,
+            home_position,
+            0.0,
+            0.0,
+            None,
+            true,
+        );
+        entity.tick_count = (RABBIT_ACTIVE_REST_WARMUP_TICKS
+            ..RABBIT_ACTIVE_REST_WARMUP_TICKS + RABBIT_ACTIVE_REST_INTERVAL_TICKS)
+            .find(|tick| {
+                entity.tick_count = *tick;
+                rabbit_active_rest_due(entity, None)
+            })
+            .expect("one rest phase must occur in each interval");
+        let mut mob = MobRuntimeState::from_saved(
+            rabbit_id,
+            EntityMetadata::RABBIT,
+            true,
+            0.0,
+            Vec3d::ZERO,
+            None,
+            None,
+            None,
+            None,
+            Some(RabbitRuntimeSaveData {
+                home: Some(home),
+                dig_target: None,
+                life_stage: mclone_protocol::RabbitLifeStage::Adult,
+                age_ticks: 2_400,
+                parents: [None, None],
+                behavior: mclone_protocol::RabbitBehavior::Idle,
+                behavior_ticks: 0,
+                health: 3,
+                max_health: 3,
+                love_ticks: 0,
+                breed_cooldown: 0,
+                raid_cooldown: 600,
+            }),
+        );
+        mob.rabbit_home_position = Some(home_position);
+
+        mob.tick_entity_at_time(&mut entity, &[], &[], &[], 12_000, &flat_ground);
+        assert_eq!(
+            mob.rabbit_behavior(),
+            Some(mclone_protocol::RabbitBehavior::EnterBurrow)
+        );
+        assert!(!entity.hidden_from_clients);
+        for _ in 0..RABBIT_ENTRY_TICKS {
+            entity.tick_count += 1;
+            mob.tick_entity_at_time(&mut entity, &[], &[], &[], 12_000, &flat_ground);
+        }
+        assert_eq!(
+            mob.rabbit_behavior(),
+            Some(mclone_protocol::RabbitBehavior::Underground)
+        );
+        assert!(entity.hidden_from_clients);
+
+        for _ in 0..=RABBIT_UNDERGROUND_MIN_TICKS {
+            entity.tick_count += 1;
+            mob.tick_entity_at_time(&mut entity, &[], &[], &[], 12_000, &flat_ground);
+            if !entity.hidden_from_clients {
+                break;
+            }
+        }
+        assert_eq!(
+            mob.rabbit_behavior(),
+            Some(mclone_protocol::RabbitBehavior::Emerge)
+        );
+        assert!(!entity.hidden_from_clients);
+        assert_eq!(entity.persistent_id, persistent_id);
     }
 
     #[test]

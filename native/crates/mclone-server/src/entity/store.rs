@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use mclone_blocks::collision_aabb_for_feet_position;
+use mclone_blocks::{collide_movement, collision_aabb_for_feet_position};
 use mclone_core::{
     Aabb, AnimationClipId, AnimationState, AxisTopology, BlockPos, BlockStateId, ChunkPos,
     HorizontalTopology, Vec3d,
@@ -61,6 +61,7 @@ const RABBIT_SOUND_AUDIBLE_RADIUS: f32 = 16.0;
 const RABBIT_RAID_COOLDOWN_TICKS: u32 = 600;
 const RABBIT_LOVE_TICKS: u32 = 600;
 const RABBIT_BREED_COOLDOWN_TICKS: u32 = 6_000;
+const RABBIT_PAIR_PUSH_MAX: f64 = 0.04;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct MallardNestRuntimeState {
@@ -1045,6 +1046,82 @@ impl ServerEntityStore {
             .sum()
     }
 
+    fn separate_visible_rabbits<F>(
+        &mut self,
+        ticking_ids: &[EntityId],
+        block_state_at: &F,
+    ) -> Vec<ServerEntityState>
+    where
+        F: Fn(BlockPos) -> Option<BlockStateId>,
+    {
+        let rabbits = ticking_ids
+            .iter()
+            .filter_map(|id| self.entities.get(id).copied())
+            .filter(|entity| {
+                entity.alive
+                    && !entity.hidden_from_clients
+                    && entity.kind == EntityKind::Rabbit
+                    && entity.width > 0.01
+            })
+            .collect::<Vec<_>>();
+        let mut pushes = BTreeMap::<EntityId, Vec3d>::new();
+        for (index, left) in rabbits.iter().copied().enumerate() {
+            for mut right in rabbits[index + 1..].iter().copied() {
+                right.position = self
+                    .topology
+                    .nearest_position_lift(right.position, left.position);
+                if left.position.y >= right.position.y + f64::from(right.height)
+                    || right.position.y >= left.position.y + f64::from(left.height)
+                {
+                    continue;
+                }
+                let dx = right.position.x - left.position.x;
+                let dz = right.position.z - left.position.z;
+                let distance = (dx * dx + dz * dz).sqrt();
+                let contact_distance = f64::from(left.width + right.width) * 0.5;
+                if distance >= contact_distance {
+                    continue;
+                }
+                let (normal_x, normal_z) = if distance >= 0.01 {
+                    (dx / distance, dz / distance)
+                } else {
+                    stable_rabbit_pair_normal(left.persistent_id, right.persistent_id)
+                };
+                let amount = ((contact_distance - distance) * 0.5).min(RABBIT_PAIR_PUSH_MAX);
+                let left_push = pushes.entry(left.id).or_insert(Vec3d::ZERO);
+                *left_push = left_push.add(Vec3d::new(-normal_x * amount, 0.0, -normal_z * amount));
+                let right_push = pushes.entry(right.id).or_insert(Vec3d::ZERO);
+                *right_push = right_push.add(Vec3d::new(normal_x * amount, 0.0, normal_z * amount));
+            }
+        }
+
+        let mut updates = Vec::new();
+        for (id, mut requested) in pushes {
+            let horizontal_length = (requested.x * requested.x + requested.z * requested.z).sqrt();
+            if horizontal_length > RABBIT_PAIR_PUSH_MAX {
+                requested = requested.scale(RABBIT_PAIR_PUSH_MAX / horizontal_length);
+            }
+            let Some(entity) = self.entities.get_mut(&id) else {
+                continue;
+            };
+            let bounds = collision_aabb_for_feet_position(
+                entity.position,
+                f64::from(entity.width),
+                f64::from(entity.height),
+            );
+            let traveled = collide_movement(block_state_at, bounds, requested);
+            if traveled.length_sqr() <= f64::EPSILON {
+                continue;
+            }
+            let moved = entity.position.add(traveled);
+            if let Some(canonical) = self.topology.canonicalize_position(moved) {
+                entity.position = canonical;
+                updates.push(*entity);
+            }
+        }
+        updates
+    }
+
     #[allow(dead_code)]
     pub(crate) fn diagnostics(&self) -> ServerEntityStoreDiagnostics {
         ServerEntityStoreDiagnostics {
@@ -1479,6 +1556,7 @@ impl ServerEntityStore {
                 updated.push(*entity);
             }
         }
+        updated.extend(self.separate_visible_rabbits(&ticking_ids, &block_state_at));
         for id in removed_ids {
             self.remove_entity(id);
         }
@@ -3008,6 +3086,20 @@ fn squared_distance_xz(left: Vec3d, right: Vec3d) -> f64 {
     dx * dx + dz * dz
 }
 
+fn stable_rabbit_pair_normal(left: EntityPersistentId, right: EntityPersistentId) -> (f64, f64) {
+    let diagonal = std::f64::consts::FRAC_1_SQRT_2;
+    match (left.least ^ right.least.rotate_left(23)) & 7 {
+        0 => (1.0, 0.0),
+        1 => (diagonal, diagonal),
+        2 => (0.0, 1.0),
+        3 => (-diagonal, diagonal),
+        4 => (-1.0, 0.0),
+        5 => (-diagonal, -diagonal),
+        6 => (0.0, -1.0),
+        _ => (diagonal, -diagonal),
+    }
+}
+
 type RabbitBreedingCandidate = (EntityId, EntityPersistentId, Vec3d, EntityPersistentId);
 
 fn rabbit_breeding_pair(
@@ -3657,6 +3749,53 @@ mod tests {
             Some(loaded_burrow.persistent_id)
         );
         assert_eq!(loaded_rabbit.persistent_id, rabbit_persistent_id);
+    }
+
+    #[test]
+    fn visible_rabbit_pairs_separate_without_crossing_a_block_barrier() {
+        let mut store = ServerEntityStore::default();
+        let left =
+            store.insert_passive_mob_for_test(EntityKind::Rabbit, Vec3d::new(1.21, 64.0, 0.5), 0.0);
+        let right =
+            store.insert_passive_mob_for_test(EntityKind::Rabbit, Vec3d::new(1.22, 64.0, 0.5), 0.0);
+        let barrier = |pos: BlockPos| {
+            Some(if pos.y == 63 || (pos.x == 0 && pos.y == 64) {
+                BlockStateId(1)
+            } else {
+                BlockStateId(mclone_blocks::terrain_id::AIR)
+            })
+        };
+
+        for _ in 0..12 {
+            store.separate_visible_rabbits(&[left, right], &barrier);
+        }
+        let left_state = store.state(left).unwrap();
+        let right_state = store.state(right).unwrap();
+        assert!(
+            left_state.position.x - f64::from(left_state.width) * 0.5 >= 1.0 - 1.0e-9,
+            "the shared collision owner must keep a soft push outside the wall"
+        );
+        assert!(
+            squared_distance_xz(left_state.position, right_state.position).sqrt() > 0.35,
+            "overlapping rabbits must make useful separation progress"
+        );
+
+        let coincident_left =
+            store.insert_passive_mob_for_test(EntityKind::Rabbit, Vec3d::new(4.5, 64.0, 4.5), 0.0);
+        let coincident_right =
+            store.insert_passive_mob_for_test(EntityKind::Rabbit, Vec3d::new(4.5, 64.0, 4.5), 0.0);
+        for _ in 0..8 {
+            store.separate_visible_rabbits(&[coincident_left, coincident_right], &flat_ground);
+        }
+        assert!(
+            squared_distance_xz(
+                store.state(coincident_left).unwrap().position,
+                store.state(coincident_right).unwrap().position,
+            )
+            .sqrt()
+                > 0.3,
+            "stable identity fallback must separate exact coincident centers"
+        );
     }
 
     #[test]
