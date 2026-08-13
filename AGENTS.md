@@ -101,6 +101,9 @@ runtime.
   discovery without commanding the showcased subject from the harness.
 - Web showcase links must remain fresh and non-persistent. Verification must
   assert that every IndexedDB world-record store stays empty.
+- Run headed WebGPU showcase acceptance lanes sequentially on one GPU host.
+  Parallel desktop/phone captures can contend for GPU/event-loop time and make
+  simulation timing or browser shutdown look like a product defect.
 
 ## Implementation routing
 

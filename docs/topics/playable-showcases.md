@@ -2,14 +2,15 @@
 
 Topic: `playable-showcases`
 
-Status: implemented with three accepted public creature showcases, one
-accepted public field showcase, and one accepted public working-garden
-showcase as of 2026-08-13.
+Status: implemented with four accepted public creature showcases, one accepted
+public field showcase, and one accepted public working-garden showcase as of
+2026-08-13.
 `mallard-ecology` proves a wetland motion/hatching/discovery loop;
 `deer-forest-edge` proves a contrasting multi-chunk habitat, authoritative
 named actions, durable sign, field notes, and an ordinary hunting tool. Bees
 add real flower mutation plus phone-tested managed-habitat placement. Wheat
-adds real till/plant/grow/harvest interactions and phone controls. All five
+adds real till/plant/grow/harvest interactions and phone controls. Rabbits add
+terrain excavation, fence-mediated crop pressure, and feeding. All six
 compile checked data recipes into transient tiny saves through the shared
 native and Web game path.
 
@@ -25,7 +26,7 @@ They are review artifacts, not a second content runtime. A showcase may make a
 rare or time-dependent result immediately visible. It may not be the only way
 that result can occur in an ordinary live world.
 
-The first public link is:
+The public links are:
 
 ```text
 https://mclone.kzahel.com/app.html?showcase=mallard-ecology
@@ -33,9 +34,10 @@ https://mclone.kzahel.com/app.html?showcase=deer-forest-edge
 https://mclone.kzahel.com/app.html?showcase=bee-pollination
 https://mclone.kzahel.com/app.html?showcase=wheat-farming
 https://mclone.kzahel.com/app.html?showcase=kitchen-garden
+https://mclone.kzahel.com/app.html?showcase=rabbit-burrow
 ```
 
-Opening it compiles a fresh in-memory world in the browser process. No world is
+Opening one compiles a fresh in-memory world in the browser process. No world is
 read from or written to IndexedDB, and refresh starts again from the recipe.
 
 ## Contract
@@ -137,6 +139,10 @@ features.
 8. Update this topic, the governing gameplay topic, and the tactical execution
    record with the evidence IDs, commands, receipt, and remaining gaps.
 
+Run headed WebGPU showcase acceptance lanes sequentially on one GPU host.
+Parallel desktop/phone browser runs can contend for GPU/event-loop time and
+make simulation timing or browser shutdown look like a product defect.
+
 For behavior-focused showcases, insert a time-window gate between steps 6 and
 7. Observe ordinary replicated state without issuing commands to the subject.
 Require domain outcomes such as displacement, habitat transition, life-cycle
@@ -191,6 +197,16 @@ pnpm native:web:garden-showcase-smoke
 pnpm native:web:garden-showcase-mobile-smoke
 pnpm native:web:garden-showcase-deployed-smoke
 pnpm native:web:garden-showcase-mobile-deployed-smoke
+```
+
+The rabbit commands are:
+
+```bash
+pnpm native:rabbit-burrow:capture
+pnpm native:web:rabbit-showcase-smoke
+pnpm native:web:rabbit-showcase-mobile-smoke
+pnpm native:web:rabbit-showcase-deployed-smoke
+pnpm native:web:rabbit-showcase-mobile-deployed-smoke
 ```
 
 Captures belong under `/tmp`. The deployed smoke must confirm the recipe ID and
@@ -492,6 +508,31 @@ public planted digests are
 and
 `ed062b33b023cfdbd6ac95685632bd6df128d0e3dbf015aea0d274fb46d17ce8`.
 
+Tactical [`292`](../tactical/292-rabbit-burrow-ecology.md) adds
+`rabbit-burrow` revision 1, seed `17507`, entry feet `14.5,65,18.5`, and
+target `15,65.5,9.5`. Its five initial entities are one persistent warren and
+four rabbits: a family of two adults plus a kit and one independent founder.
+The block composition is one honest bank excavation and a real closed fenced
+garden with mature carrots. Typed evidence binds every fact to ordinary
+habitat spawning, excavation, farming, enclosure, persistence, or observation.
+
+Desktop and phone gates preserve all four mature carrots for 100 rabbit ticks
+behind the closed gate, open it through ordinary keyboard or rendered touch
+controls, retreat, and observe a bounded 360–720-tick window. Exact public
+revision `3a950022c3440ccac9fb5f44689c46c808f69d7f` saw all four rabbits
+travel roughly 21–30 blocks, hop/emerge/dig/forage presentation, a second
+ordinary burrow, and two real carrot-age mutations. Both lanes then selected
+the carried carrot and fed a reachable moving adult, consuming `12 -> 11`.
+Field notes reached 5/6 and all eight browser stores remained empty.
+
+The revision deployed as asset version
+`3a950022c344-20260813145448` and Worker version
+`c2ee65eb-2ad4-4fa9-941e-2b1e8fda174a`. Inspected public desktop and phone
+capture digests are
+`81133b9bc7bfcb5f1aed0314838b5fd976bd0a2ee5b04b09b599556082c89895`
+and
+`4803f1656053c21dd700652707d91c336efe1ed1a274e66f8f1d2abb1e9be1e9`.
+
 ## Code and Documentation Map
 
 - `assets/mclone/showcases/`: readable showcase recipes
@@ -521,8 +562,10 @@ and
 - `scripts/wheat-farming-capture.mjs`: wheat native receipt and capture
 - `scripts/kitchen-garden-capture.mjs`: working-garden native receipt and
   capture
+- `scripts/rabbit-burrow-capture.mjs`: rabbit habitat native flat/stereo
+  receipt and capture
 - [`habitat-driven-creature-ecology.md`](habitat-driven-creature-ecology.md):
-  ordinary mallard habitat and gameplay contract
+  ordinary creature habitat and gameplay contract
 - [`../tactical/280-playable-showcase-links.md`](../tactical/280-playable-showcase-links.md):
   first implementation execution record
 - [`../tactical/282-mallard-behavioral-showcase.md`](../tactical/282-mallard-behavioral-showcase.md):
@@ -543,8 +586,8 @@ and
   evidence; the existing species and farming loop are enough to generalize
   stable plumbing without
   turning the showcase list into a content catalogue.
-- Generalize repeated capture assertions only where the two existing
-  showcases now demonstrate a stable common shape. Keep species-specific
+- Generalize repeated capture assertions only where the existing showcase
+  suite demonstrates a stable common shape. Keep species-specific
   behavioral outcomes explicit rather than flattening them into elapsed-time
   or actor-count checks.
 - Keep deployed URLs as review links, not a permanent menu or public catalogue,

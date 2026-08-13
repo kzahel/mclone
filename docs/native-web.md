@@ -29,6 +29,7 @@ https://mclone.kzahel.com/app.html?showcase=deer-forest-edge
 https://mclone.kzahel.com/app.html?showcase=bee-pollination
 https://mclone.kzahel.com/app.html?showcase=wheat-farming
 https://mclone.kzahel.com/app.html?showcase=kitchen-garden
+https://mclone.kzahel.com/app.html?showcase=rabbit-burrow
 ```
 
 The `showcase` parameter selects a shared, checked-in tiny-save recipe and owns
@@ -165,6 +166,10 @@ pnpm native:web:garden-showcase-smoke
 pnpm native:web:garden-showcase-mobile-smoke
 pnpm native:web:garden-showcase-deployed-smoke
 pnpm native:web:garden-showcase-mobile-deployed-smoke
+pnpm native:web:rabbit-showcase-smoke
+pnpm native:web:rabbit-showcase-mobile-smoke
+pnpm native:web:rabbit-showcase-deployed-smoke
+pnpm native:web:rabbit-showcase-mobile-deployed-smoke
 
 # Prove that an ordinary URL renders title with no active session or world.
 pnpm native:web:menu-smoke

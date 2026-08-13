@@ -2,8 +2,9 @@
 
 Topic: `rabbit-burrow-ecology`
 
-Status: active under Tactical
-[`292`](../tactical/292-rabbit-burrow-ecology.md) from 2026-08-13.
+Status: live shared implementation and exact public desktop/phone acceptance
+complete under Tactical
+[`292`](../tactical/292-rabbit-burrow-ecology.md) on 2026-08-13.
 
 ## Purpose
 
@@ -74,6 +75,38 @@ recipe guardrails in [`playable-showcases.md`](playable-showcases.md).
 - **Review truth:** the public tiny save composes ordinary facts, passes a
   behavioral window, and never writes a browser world record.
 
+## Current Implementation
+
+Tactical 292 has landed the complete first chapter:
+
+- a habitat-qualified Mclone founder creates one persistent rabbit only where
+  a dry supported dirt/grass bank, forage, cover, movement room, and occupancy
+  checks pass;
+- the founder visibly digs and authoritatively removes one terrain cell, then
+  a semantic mouth occupies that honest recess and owns compact persistent
+  warren capacity/resident state;
+- individual rabbits retain identity, parentage, life stage, health,
+  underground state, love/breeding state, raid cooldown, and home across
+  entity-chunk persistence;
+- world-time emergence, collision-aware hop/flee movement, home retreat,
+  hidden sheltering, forage reconsideration, and named animations create a
+  legible daily loop;
+- closed fences and gates protect live mature carrots, while an open gate lets
+  rabbits reach and decrement one real crop age under cooldown;
+- a held carrot tempts rabbits; using one on a reachable adult consumes the
+  item and two compatible fed residents can create one durable smaller kit;
+- six normal evidence paths drive field notes, and real rabbit state emits
+  bounded spatial thump and dig cues from the first-party CC0 sound bank; and
+- the deny-unknown-fields `rabbit-burrow` recipe composes these facts without
+  behavior scripts or showcase-specific game logic.
+
+Exact implementation revision `3a950022` passed native flat/stereo, local
+desktop/phone, and public desktop/phone review. The public gates observed four
+rabbits travel roughly 21–30 blocks, a second ordinary excavation, two
+gate-dependent carrot raids, feeding consumption `12 -> 11`, and zero records
+in all browser world stores. The temporary review link is
+`https://mclone.kzahel.com/app.html?showcase=rabbit-burrow`.
+
 ## Deliberate Later Work
 
 - player-accessible tunnels, expanding warrens, multiple linked entrances,
@@ -98,7 +131,10 @@ recipe guardrails in [`playable-showcases.md`](playable-showcases.md).
 
 ## Recommended Next Direction
 
-Complete Tactical 292 before broadening crop or creature count. Human review
-should first judge the rabbit hop/entry animation and whether the mouth reads
-as an actual shallow excavation; later review should judge whether ordinary
-movement, garden pressure, retreat, and family life are interesting over time.
+Human review should now judge the rabbit hop/entry animation, whether the mouth
+reads as an actual shallow excavation, and whether garden pressure, retreat,
+and family life stay interesting outside the bounded receipt. Address any
+observed motion or legibility defect in the shared live system before adding
+more species. If this chapter holds up, the next ecology slice should deepen a
+reusable stewardship consequence—food/cooking, crop yield, protected habitat,
+or predator pressure—rather than immediately add another decorative animal.

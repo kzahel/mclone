@@ -1,6 +1,6 @@
 # Tactical 292: Rabbit Burrow Ecology
 
-Status: active 2026-08-13
+Status: complete 2026-08-13
 
 Topics:
 
@@ -297,3 +297,126 @@ This tactical is complete only when:
 - the exact pushed/deployed revision has inspected desktop and phone pixels,
   a passing bounded behavior receipt, zero IndexedDB persistence, and a usable
   public `rabbit-burrow` URL.
+
+## Execution Record
+
+### Contract and reviewed semantic assets
+
+Commit `e6921bff` recorded the selected hybrid contract and living topic.
+Commit `7260474c` then promoted the canonical Asset Lab rabbit and authored the
+`rabbit_burrow` world prop through the shared checked semantic-figure path. The
+rabbit has named idle, hop, flee, forage, dig, entry, emergence, and courtship
+clips; the burrow uses a recessed dark back, earth threshold, and roots around
+the real missing terrain cell. The same slice moved carrot, fence, and gate
+inventory figures into checked first-party sources.
+
+Inspected Asset Lab sheets:
+
+- burrow multi-angle sheet: `/tmp/mclone-rabbit-burrow-sheet.png`, SHA-256
+  `96ddae394b83c471bb64f65aa3acb85fb323201c39671b5b5260ace3dca8c673`;
+- hop strip: `/tmp/mclone-rabbit-hop-sheet.png`, SHA-256
+  `e3db3c26ad4d272026ca3ae9ebbb55327c8b6ff142002919bcbc030b5fdafb6e`;
+- dig strip: `/tmp/mclone-rabbit-dig-sheet.png`, SHA-256
+  `dd4aa554ef3e112eb5a670a553295b6390a74ef965cd70a725dd3982e1bd5cbe`.
+
+### Shared rabbit and warren ecology
+
+Commits `e2bbbc74` and `2e506cba` added `Rabbit` and `RabbitBurrow` across the
+shared protocol, server, persistence, client replica, scene, render-session,
+UI, assets, and audio owners. Ordinary Mclone natural spawning now requires a
+dry bank, support, clearance, vegetation, open movement space, and local
+occupancy. A founder reaches a qualified cell, performs the authored dig
+motion, removes exactly that live dirt/grass cell, and creates a durable mouth
+whose resident identities and capacity survive entity-chunk reload.
+
+The same persistent rabbit emerges and shelters according to world time,
+hops through shared collision, flees a nearby player toward home, reconsiders
+forage instead of retaining a stale destination, seeks live mature carrots,
+and mutates one crop age after a completed raid. Closed fence/gate collision
+protects the garden; an open gate is traversable. A held carrot tempts rabbits,
+and server-validated use consumes one carrot and starts persistent adult
+breeding state. Compatible fed adults sharing a warren with capacity produce
+one durable smaller kit with parent identities and cooldowns.
+
+Six ordinary observations and spatial thump/dig cues are routed from actual
+proximity, burrow, threshold, raid, and family events. The sound families reuse
+provenance-locked Kenney CC0 samples rather than adding an ambient rabbit
+track.
+
+Focused coverage includes habitat qualification and exclusion, natural
+founder creation, completed excavation, warren/rabbit identity round trips,
+underground visibility, emergence, displacement, stall recovery, fence/gate
+reachability, mature-carrot target selection and raid state, feeding range and
+inventory consumption, courtship/capacity/birth, field observations, audio,
+replication, and prepared semantic assets.
+
+### Bounded review save and behavior proof
+
+Commits `672b4e5b` and `4e0bda07` add `rabbit-burrow` revision 1. The data-only
+recipe uses seed `17507`, entry feet `14.5,65,18.5`, target
+`15,65.5,9.5`, one saved warren family, a second ordinary founder, one real
+bank threshold, a closed fenced carrot garden, and twelve carried carrots.
+Every gameplay fact has typed evidence for ordinary habitat spawning,
+excavation, farming, enclosure placement/use, family persistence, or field
+observation. No rabbit AI, update, interaction, or rendering branch knows the
+showcase ID.
+
+The desktop and phone harnesses first observe 100 protected ticks with all four
+mature carrots unchanged. They then walk through ordinary controls, open the
+gate, retreat beyond the flee radius, and observe at least 360 and at most 720
+rabbit ticks. Acceptance requires useful multi-rabbit displacement, hop
+presentation, a second live burrow, and at least one real crop raid. Finally,
+the harness selects the carrot through keyboard or rendered touch controls,
+approaches a moving adult, feeds it through normal entity interaction, and
+checks `12 -> 11`. Commits `057d45c4` and `3a950022` retain simulation-tick
+outcomes while allowing throttled phone wall time and an adaptive bounded raid
+window.
+
+The inspected native flat capture is `/tmp/mclone-rabbit-burrow.png`, SHA-256
+`26e1a3e21babd1a3a238cb0a2366db38d9a261bd2db619c87b604a5f363e4056`.
+It shows the rabbit family and recessed mouth on the left and the connected
+fenced carrot garden on the right from the recipe entry camera. The inspected
+stereo capture is `/tmp/mclone-rabbit-burrow-stereo.png`, SHA-256
+`32a8947fa83b9c923f1cd88bbabe4dec82f849d50f2e31e8c2bfe0054ed4e232`.
+Inspected local desktop and phone Web captures have SHA-256
+`f1eacb509a9d3974719a561c875a3adada496271144f531968c2bd752dd7daf0`
+and
+`309bd74a8386224617d04fc5ea4a25972d6dae9af75ac74336178c416d373499`.
+
+### Host validation
+
+The proportional closeout matrix passes on 2026-08-13:
+
+- full `cargo test --manifest-path native/Cargo.toml`;
+- focused rabbit habitat, mob, store, farming, integrated-interaction,
+  persistence, protocol, client, scene, asset, audio, and showcase suites;
+- `pnpm native:thin-adapters:purity`;
+- `pnpm native:desktop-offscreen:smoke`;
+- `pnpm native:web:build`;
+- native flat/stereo rabbit capture; and
+- local headed WebGPU desktop and phone rabbit behavior gates.
+
+### Deployment receipt
+
+Exact pushed implementation revision
+`3a950022c3440ccac9fb5f44689c46c808f69d7f` deployed as asset version
+`3a950022c344-20260813145448` and Cloudflare Worker version
+`c2ee65eb-2ad4-4fa9-941e-2b1e8fda174a`. The clean public review URL is:
+
+```text
+https://mclone.kzahel.com/app.html?showcase=rabbit-burrow
+```
+
+The sequential public desktop and 390×844 phone gates both kept mature states
+`308,308,308,308` intact behind the closed gate, opened state 270 to 274
+through ordinary controls, then observed final states `307,307,308,308`.
+All four rabbits accumulated useful travel: desktop measured
+`29.97,21.52,26.74,25.83` blocks and phone measured
+`30.44,21.65,26.75,26.04`. Both saw hop, emerge, dig, and forage clips, one
+new burrow, field notes at 5/6, and carrot feeding `12 -> 11`.
+
+All eight IndexedDB stores remained at zero records in both public runs. The
+inspected public desktop and phone capture digests are
+`81133b9bc7bfcb5f1aed0314838b5fd976bd0a2ee5b04b09b599556082c89895`
+and
+`4803f1656053c21dd700652707d91c336efe1ed1a274e66f8f1d2abb1e9be1e9`.

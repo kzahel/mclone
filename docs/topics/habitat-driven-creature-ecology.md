@@ -2,8 +2,8 @@
 
 Topic: `habitat-driven-creature-ecology`
 
-Status: active direction with its biome-habitat foundation and three complete
-original creature-life chapters landed through 2026-08-12. Tactical
+Status: active direction with its biome-habitat foundation and four complete
+original creature-life chapters landed through 2026-08-13. Tactical
 [`277`](../tactical/277-habitat-driven-creature-ecology-foundation.md) binds
 natural cow/chicken habitat to generated chunk biomes and proves immediate
 durability across persistent chunk unload/reload. Rich habitat fitness and
@@ -31,10 +31,10 @@ the third chapter: a shared habitat-fitness vocabulary, generated flowering
 pockets, persistent colony-to-flower flight, real pollination, managed hotels,
 renewable wax, field notes, and spatial buzz now make terrain both cause and
 record ecological gameplay.
-Tactical [`292`](../tactical/292-rabbit-burrow-ecology.md) is now active as the
-fourth chapter: rabbits qualify and excavate one real shallow bank threshold,
-persist as a warren family, emerge on world time, consume/raid real carrots,
-and make ordinary fence/gate state into ecological gameplay.
+Tactical [`292`](../tactical/292-rabbit-burrow-ecology.md) completes the fourth
+chapter: rabbits qualify and excavate one real shallow bank threshold, persist
+as a warren family, emerge on world time, consume/raid real carrots, and make
+ordinary fence/gate state into ecological gameplay.
 
 ## Scope
 
@@ -474,6 +474,30 @@ event, and no ambient soundtrack pretends that a flock exists.
   `14.57`-`20.84` rendered blocks while their uninterrupted flight phases
   advance `199`-`280` ticks; a clip-name-only claim can no longer pass.
 
+## Rabbit Burrow and Garden Chapter
+
+Tactical 292 adds the first creature-created durable terrain fact. A natural
+Mclone founder requires a live dry supported bank plus forage, cover, open
+movement space, and local occupancy headroom. It visibly digs, removes exactly
+one qualifying dirt/grass cell, and creates a persistent semantic burrow mouth
+whose compact warren stores capacity and stable resident identities. The
+deeper space is intentionally not a tunnel graph.
+
+Rabbits retain home, lineage, life stage, underground visibility, health,
+breeding state, and raid cooldown through entity-chunk persistence. World time
+drives entry/emergence; ordinary collision drives hop, flight, fence exclusion,
+and open-gate traversal. Live mature carrots are raid targets, carried carrots
+tempt and feed, and two compatible fed adults with warren capacity can create
+one durable kit. Six field observations and bounded spatial cues arise from
+real rabbit, terrain, crop, and family events.
+
+The data-only `rabbit-burrow` review save proves this shared loop rather than
+implementing it. Exact public desktop and phone gates observed all four
+rabbits travel about 21–30 blocks, one founder-created second burrow, two
+carrot-age mutations only after the gate opened, ordinary carrot feeding, 5/6
+notes, and zero browser-world records. The temporary play link is
+`https://mclone.kzahel.com/app.html?showcase=rabbit-burrow`.
+
 ## Known Gaps and Recommended Next Work
 
 - Decide which consumer actually needs the now-shared habitat-fitness record
@@ -491,9 +515,10 @@ event, and no ambient soundtrack pretends that a flock exists.
   [`terrain-surface-traces.md`](terrain-surface-traces.md). Do not add deer
   hoofprints merely as ambient decoration.
 - Build the next chapter around either crop growth that lets bee pollination
-  affect yield, a burrower that gives soil depth/substrate durable structure,
-  or a cliff animal that requires connected steep-surface navigation. Each
-  should consume the habitat vocabulary while adding a different player loop.
+  affect yield, a reusable food/storage consequence for gardens and hunting,
+  predator pressure that connects prey and cover, or a cliff animal that
+  requires connected steep-surface navigation. Each should consume the
+  habitat vocabulary while adding a different player loop.
 
 ## Code and Documentation Map
 

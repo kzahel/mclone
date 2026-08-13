@@ -46,10 +46,11 @@ topic owns their intersection as a repeatable gameplay place.
 - The intro homestead is the first ordinary generated consumer. Pure reference
   Overworld output remains unchanged.
 - Carrots precede potatoes because they are already useful as food-shaped
-  harvest, direct seed item, and the future rabbit attraction/breeding/raid
+  harvest, direct seed item, and the live rabbit attraction/breeding/raid
   resource.
-- Rabbits follow the garden foundation. Their burrows, feeding, crop damage,
-  and breeding must consume live carrots and real enclosure/navigation facts.
+- The rabbit chapter consumes the garden foundation. Its burrows, feeding,
+  crop damage, and breeding use live carrots and real enclosure/navigation
+  facts.
 
 ## Current Contract
 
@@ -71,7 +72,10 @@ Tactical 291 has landed the first complete chapter:
   surveyed grade and remains ordinary editable/persisted starter content; and
 - `kitchen-garden` revision 1 is a bounded data-only review save whose typed
   evidence points back to those live placement, farming, and homestead
-  producers.
+  producers;
+- Tactical 292 now consumes those same facts in ordinary rabbit ecology:
+  closed boundaries protect mature carrots, open gates expose them to bounded
+  raids, and carried carrots tempt and feed persistent rabbits for breeding.
 
 The local desktop and phone gates prove gate opening/traversal/closing and
 restored collision, automatic crop growth, mature carrot removal, generic
@@ -85,7 +89,8 @@ and deployment receipt live in Tactical 291.
 
 ## Deliberate Later Work
 
-- rabbits, burrows, crop attraction, crop raids, breeding, and garden escape;
+- richer animal-pressure defenses, crop loss/recovery balance, and garden
+  stewardship beyond the first rabbit loop;
 - potatoes, beetroot, crop rotation, fertility, pests, disease, and seasons;
 - crafting and acquisition loops for fences, gates, tools, and seeds;
 - food, hunger, cooking, storage, trade, and villager farming;
@@ -112,14 +117,12 @@ versions of its mechanics.
 
 ## Recommended Next Work
 
-Tactical [`292`](../tactical/292-rabbit-burrow-ecology.md) is now implementing
-the rabbit consumer of this foundation: a one-cell excavated bank threshold,
-persistent warren/family state, dawn/dusk emergence, wary foraging, carrot
-attraction, bounded crop raids, real fence/gate exclusion, breeding with real
-food, and ordinary field evidence. The selected entrance combines terrain
-mutation with a recessed semantic prop; it does not wait on or add a
-rabbit-specific surface-decal renderer. Potatoes remain later crop breadth and
-are not a prerequisite for the first rabbit loop.
+Tactical [`292`](../tactical/292-rabbit-burrow-ecology.md) completes the first
+animal-pressure consumer of this foundation. Human play should now tune how
+often raids create an interesting enclosure/stewardship choice without making
+small gardens futile. Potatoes remain useful later crop breadth, but food,
+cooking, storage, or crop-yield consequences may deepen the existing garden
+more than another mechanically equivalent plant.
 
 ## Code And Documentation Map
 
