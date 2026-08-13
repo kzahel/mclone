@@ -1524,7 +1524,7 @@
   "provenance": {
     "compilerId": "mclone-structure-dsl-v2",
     "sourcePath": "tools/structure-lab/examples/cottage_standard_stoop/structure.ts",
-    "sourceSha256": "b80158c627c6dd1ef49b5793a4f91cae5bc15ad949163b9e9612bedf1c4f17e5",
-    "semanticSha256": "58fa8b42e4bd9081fa3c28ddfb72b5b5a644d55228121a2f1ab1bbfa7d639467"
+    "sourceSha256": "7ed92b0897877fdebf63b2328f9e1f755e30a286ece732ecdd21d8a0f494e862",
+    "semanticSha256": "9aa8a5f7db1fa38f1bd44bc7c6f9fedc2c5201089f2fb1df7bb223b12f56a582"
   }
 }

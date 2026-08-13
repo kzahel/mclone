@@ -1,7 +1,39 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-07-25T00:00:00.000Z",
+  "updatedAt": "2026-08-13T10:18:34.406Z",
   "textures": {
+    "carrots_stage0": {
+      "state": "provisional",
+      "runtimeMaterials": [
+        "mclone:block/carrots_stage0"
+      ],
+      "asset": "provisional/block/carrots_stage0.png",
+      "sha256": "63ee809f49e04ffffaef1ded1f8d1ecae6951d2815c6a4d8e6bb8d04c5784186"
+    },
+    "carrots_stage1": {
+      "state": "provisional",
+      "runtimeMaterials": [
+        "mclone:block/carrots_stage1"
+      ],
+      "asset": "provisional/block/carrots_stage1.png",
+      "sha256": "9e73dd6c7ebbd5b60ad35ede7b6e16a9ef88806280c0b9b2aa3372eb9c4aa065"
+    },
+    "carrots_stage2": {
+      "state": "provisional",
+      "runtimeMaterials": [
+        "mclone:block/carrots_stage2"
+      ],
+      "asset": "provisional/block/carrots_stage2.png",
+      "sha256": "c983015d9f7d0935fef1a19f842aaa51dabef55e2380461b2479e29a824fd5f5"
+    },
+    "carrots_stage3": {
+      "state": "provisional",
+      "runtimeMaterials": [
+        "mclone:block/carrots_stage3"
+      ],
+      "asset": "provisional/block/carrots_stage3.png",
+      "sha256": "4c5a1ec34eb832544a86e34cef0c0a52b92bb87bfda224dc217fc5dace81a08a"
+    },
     "grass_block_top": {
       "state": "curated",
       "runtimeMaterials": [
@@ -21,6 +53,70 @@
       "sha256": "859c3e931f339b0ca47e1ffc7fcd8de45430b2d70ad963977d4b974144cdcf63",
       "codename": "H4106S58",
       "candidateId": "candidate-seed4106-strength0p580"
+    },
+    "wheat_stage0": {
+      "state": "provisional",
+      "runtimeMaterials": [
+        "mclone:block/wheat_stage0"
+      ],
+      "asset": "provisional/block/wheat_stage0.png",
+      "sha256": "0afc529c6e4066b3973bb79185020facc8bb83e4712379cca3c6e7f17ac51590"
+    },
+    "wheat_stage1": {
+      "state": "provisional",
+      "runtimeMaterials": [
+        "mclone:block/wheat_stage1"
+      ],
+      "asset": "provisional/block/wheat_stage1.png",
+      "sha256": "c888d2d1b2ecd2782798c331bf60e0ccbfb4fa6b88e3757f70445001d63bdc3b"
+    },
+    "wheat_stage2": {
+      "state": "provisional",
+      "runtimeMaterials": [
+        "mclone:block/wheat_stage2"
+      ],
+      "asset": "provisional/block/wheat_stage2.png",
+      "sha256": "c3f12dc2cc18c833dbd87eb006ac28b6336f3aa00575e5c0ba2d653f9c85e354"
+    },
+    "wheat_stage3": {
+      "state": "provisional",
+      "runtimeMaterials": [
+        "mclone:block/wheat_stage3"
+      ],
+      "asset": "provisional/block/wheat_stage3.png",
+      "sha256": "d9cc231d44c50dd59a581fd00e347fcc1bdc6be74e04d60262429d2bbedbc3ed"
+    },
+    "wheat_stage4": {
+      "state": "provisional",
+      "runtimeMaterials": [
+        "mclone:block/wheat_stage4"
+      ],
+      "asset": "provisional/block/wheat_stage4.png",
+      "sha256": "46bc46152b9a9bbfb96db07d1558ba49a7cfcd9563c4831acf6192952a6382ba"
+    },
+    "wheat_stage5": {
+      "state": "provisional",
+      "runtimeMaterials": [
+        "mclone:block/wheat_stage5"
+      ],
+      "asset": "provisional/block/wheat_stage5.png",
+      "sha256": "fecdd3d61f5a6dac910b85a5f80afebdb68cafd072fe2ab96f926af62c30e9cc"
+    },
+    "wheat_stage6": {
+      "state": "provisional",
+      "runtimeMaterials": [
+        "mclone:block/wheat_stage6"
+      ],
+      "asset": "provisional/block/wheat_stage6.png",
+      "sha256": "f9db95de1446fd4bd6be7d41df08f7c9dcf7ab2f6d5408329f0ff02a152291aa"
+    },
+    "wheat_stage7": {
+      "state": "provisional",
+      "runtimeMaterials": [
+        "mclone:block/wheat_stage7"
+      ],
+      "asset": "provisional/block/wheat_stage7.png",
+      "sha256": "92046dad8333e3279e62b0acda8c2b098d159309597b40cb6fcdfa9a1e3fa70b"
     }
   }
 }

@@ -497,6 +497,14 @@ pub fn barn_templates_for(variant: BarnVariant) -> Result<BarnTemplateSet, Templ
     })
 }
 
+#[cfg(test)]
+pub fn kitchen_garden_template() -> Result<StructureTemplate, TemplateError> {
+    load_promoted_template(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../assets/mclone/structures/farmstead-kitchen-garden-v1.structure.json"
+    )))
+}
+
 fn load_promoted_template(json: &str) -> Result<StructureTemplate, TemplateError> {
     load_canonical_structure_json(json)
         .map(|record| record.template)
@@ -845,6 +853,7 @@ mod tests {
         let cottage = cottage_template().unwrap();
         let barn = barn_core_template().unwrap();
         let lean_to = barn_lean_to_template().unwrap();
+        let garden = kitchen_garden_template().unwrap();
 
         assert_eq!(cottage.size(), [15, 15, 17]);
         assert!(cottage.blocks().len() > 900);
@@ -854,6 +863,9 @@ mod tests {
         assert_eq!(barn.markers().len(), 3);
         assert_eq!(lean_to.size(), [7, 8, 13]);
         assert_eq!(lean_to.markers().len(), 2);
+        assert_eq!(garden.size(), [13, 2, 13]);
+        assert_eq!(garden.blocks().len(), 253);
+        assert_eq!(garden.markers().len(), 3);
     }
 
     #[test]

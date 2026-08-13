@@ -1,18 +1,26 @@
 //! Terrain-matched semantic pieces for the intro homestead composition.
 //!
-//! Revision one deliberately uses only the honest generated-block vocabulary:
-//! path surfacing, soil and flowers, a low open hedge, hay, and an authored oak.
-//! Fence/gate and crop gameplay remain later content work.
+//! Landscape roles project source-authored composition onto surveyed terrain.
+//! The working garden comes from Structure Lab and retains ordinary fence,
+//! gate, soil, water, and crop states after projection.
+
+use std::sync::LazyLock;
 
 use mclone_core::{BlockPos, ChunkPos};
 use mclone_worldgen::block::{
-    COARSE_DIRT, DANDELION, DIRT, GRAVEL, HAY_BLOCK, OAK_LEAVES, OAK_LOG, OAK_LOG_X, OAK_LOG_Z,
-    POPPY, RawBlockId, material_blocks_motion,
+    COARSE_DIRT, GRAVEL, HAY_BLOCK, OAK_LEAVES, OAK_LOG, OAK_LOG_X, OAK_LOG_Z, RawBlockId,
+    material_blocks_motion,
 };
 use mclone_worldgen::homestead_site::HomesteadRotation;
 use mclone_worldgen::levelgen::GeneratedChunk;
+use mclone_worldgen::structure_template::{
+    PlacedTemplateBlock, StructurePlaceSettings, TemplateMirror, TemplateRotation,
+};
 
-use crate::homestead_plan::{HomesteadPlanPieceKind, IntroHomesteadPlanRecord};
+use crate::homestead_plan::{
+    HomesteadPlanPieceKind, IntroHomesteadPlanRecord, garden_local_origin,
+    load_homestead_structure_record,
+};
 use crate::{
     StructureBlockPlacement, StructureBoundingBox, StructurePieceRecord, StructurePlacementReceipt,
 };
@@ -112,31 +120,79 @@ fn materialize_garden(
     chunk: &mut GeneratedChunk,
     receipt: &mut StructurePlacementReceipt,
 ) -> Result<(), String> {
+    let recipe = projected_garden_recipe()?;
+    let planned = plan
+        .pieces
+        .iter()
+        .find(|planned| planned.piece_id == piece.piece_id)
+        .ok_or_else(|| "intro homestead garden is missing from its realized plan".to_owned())?;
+    if planned.content_id != recipe.content_id
+        || planned.semantic_sha256.as_deref() != Some(recipe.semantic_sha256.as_str())
+    {
+        return Err("intro homestead garden no longer matches its source recipe".to_owned());
+    }
+    let (forward_origin, right_origin) = garden_local_origin(plan.selected_site.tier);
     for_each_piece_column(piece, target, |world_x, world_z| {
         let (forward, right) = world_to_local(plan, world_x, world_z);
-        let bed = (-26..=-14).contains(&forward) && matches!(right, 12..=14 | 18..=20 | 24..=26);
-        if !bed {
+        let local_x = forward - forward_origin;
+        let local_z = right - right_origin;
+        if !(0..recipe.size[0]).contains(&local_x) || !(0..recipe.size[2]).contains(&local_z) {
             return Ok(());
         }
         let Some(surface_y) = terrain_surface_y(chunk, world_x, world_z) else {
             return Ok(());
         };
-        let soil = if (forward + right).rem_euclid(5) == 0 {
-            COARSE_DIRT
-        } else {
-            DIRT
-        };
-        place_dynamic(chunk, world_x, surface_y, world_z, soil, receipt)?;
-        if (forward + 2 * right).rem_euclid(3) == 0 {
-            let flower = if (forward - right).rem_euclid(2) == 0 {
-                DANDELION
-            } else {
-                POPPY
-            };
-            place_dynamic(chunk, world_x, surface_y + 1, world_z, flower, receipt)?;
+        let mut column = recipe
+            .blocks
+            .iter()
+            .filter(|block| block.pos.x == local_x && block.pos.z == local_z)
+            .copied()
+            .collect::<Vec<_>>();
+        column.sort_by_key(|block| block.pos.y);
+        for block in column {
+            place_dynamic(
+                chunk,
+                world_x,
+                surface_y + block.pos.y,
+                world_z,
+                block.block,
+                receipt,
+            )?;
         }
         Ok(())
     })
+}
+
+struct ProjectedGardenRecipe {
+    content_id: String,
+    semantic_sha256: String,
+    size: [i32; 3],
+    blocks: Vec<PlacedTemplateBlock>,
+}
+
+fn projected_garden_recipe() -> Result<&'static ProjectedGardenRecipe, String> {
+    static RECIPE: LazyLock<Result<ProjectedGardenRecipe, String>> = LazyLock::new(|| {
+        let record = load_homestead_structure_record("farmstead-kitchen-garden-v1")?;
+        let theme = record
+            .default_theme()
+            .ok_or_else(|| "kitchen garden has no default material theme".to_owned())?;
+        let placed = record
+            .template
+            .place(&StructurePlaceSettings {
+                origin: BlockPos::ZERO,
+                rotation: TemplateRotation::None,
+                mirror: TemplateMirror::Z,
+                theme,
+            })
+            .map_err(|error| error.to_string())?;
+        Ok(ProjectedGardenRecipe {
+            content_id: record.template.id().to_owned(),
+            semantic_sha256: record.provenance.semantic_sha256,
+            size: record.template.size(),
+            blocks: placed.blocks,
+        })
+    });
+    RECIPE.as_ref().map_err(Clone::clone)
 }
 
 fn materialize_animal_yard(

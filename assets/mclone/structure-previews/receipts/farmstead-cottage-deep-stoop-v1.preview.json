@@ -271,18 +271,18 @@
   },
   "artifacts": {
     "meshPath": "meshes/farmstead-cottage-deep-stoop-v1.glb",
-    "meshSha256": "c20f2c365698ce86613491c3f0e39d7657016db35f7698f71c35af17459f8248",
-    "atlasPath": "atlases/terrain-4f0c6faf041b7a74fcea0030baf51ca53d673f8c79bb52c6996a3727d76749b2.png",
-    "atlasSha256": "4f0c6faf041b7a74fcea0030baf51ca53d673f8c79bb52c6996a3727d76749b2",
-    "atlasWidth": 1024,
+    "meshSha256": "ad65a5205a58643126193c8005ad6b3d40c3bd5365ef163cb95717bff278fb4f",
+    "atlasPath": "atlases/terrain-c5e939a662b5a73fbeddad6776eaafa9efc77831f7fdc8e60873786f7d0538fb.png",
+    "atlasSha256": "c5e939a662b5a73fbeddad6776eaafa9efc77831f7fdc8e60873786f7d0538fb",
+    "atlasWidth": 2048,
     "atlasHeight": 256,
-    "atlasSpriteCount": 143
+    "atlasSpriteCount": 163
   },
   "source": {
     "compilerId": "mclone-structure-dsl-v2",
     "path": "tools/structure-lab/examples/cottage_deep_stoop/structure.ts",
-    "sha256": "e758b13faac5ab953bbeb77053d3c61c70457951357973961f228096653f5326",
-    "semanticSha256": "9734a1437d1ee6b35237c7c3a1f80950782aad2abbdabe06c92ad8b331fa36be"
+    "sha256": "24b35385cce2195d3eda71f744e0aa7df3be397aab86edddb4ed2d9195cc33ec",
+    "semanticSha256": "fd3046a0bae50e84226afce3be19b78ff4967badcaecca4ffaaff8b57a08c6dc"
   },
   "lighting": {
     "id": "fixed-midday-full-bright-ao-v1",
@@ -292,19 +292,19 @@
     {
       "id": "mclone-authored",
       "origin": "first_party",
-      "contentFingerprint": "sha256:be4ef110a35a1cc4a539d4b4aa19488668c7a1c7f3d9712159cd648e3c3f8b65",
-      "sha256": "db34b12e9dc1e8864ac8ca0b8e8b5f7654d7f0d8c616e04623e8f7ac8991173b"
+      "contentFingerprint": "sha256:0894d1264a4602203402d4c246fa34842062dd9bfbd30e77a14dc25c3d4ef9a6",
+      "sha256": "6c865df61bb3cb0231779459d09010f3c56cc73e7b76ef5c4ca4d7f9a9a57e76"
     },
     {
       "id": "mclone-generated-fallback",
-      "origin": "generated",
-      "contentFingerprint": "sha256:5760de9a6f85e2bac3794bbd5833af37322a672caaf1af752faf83a3a51abe39",
-      "sha256": "a7cab40a0ae313b65a10a78749d60172b4d6482a6098ca171e2d1ea80c450595"
+      "origin": "first_party_provisional",
+      "contentFingerprint": "sha256:4e3ebfcb1dd47105cf6d70b1ff6331b5d4882b3f6b5497b4e2cab4b2a8ee71d9",
+      "sha256": "ad37312c77af9943d39916bae41bc83b80e90ba2305386e70c274bed00d6f9e1"
     }
   ],
   "assetProvenance": {
-    "firstParty": 22,
-    "generated": 122,
+    "firstParty": 2,
+    "generated": 0,
     "minecraftReference": 0,
     "unknown": 0,
     "missing": 1

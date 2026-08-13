@@ -303,6 +303,12 @@ impl TexturedMeshCatalog {
                 (FirstPartyVisualClass::Stair, Some(sprite)) => {
                     first_party_stair_faces(record, sprite)
                 }
+                (FirstPartyVisualClass::Fence, Some(sprite)) => {
+                    first_party_fence_faces(record, sprite)
+                }
+                (FirstPartyVisualClass::FenceGate, Some(sprite)) => {
+                    first_party_fence_gate_faces(record, sprite)
+                }
                 (FirstPartyVisualClass::CrossedPlane, Some(sprite)) => {
                     first_party_crossed_faces(record.block.path(), sprite)
                 }
@@ -757,6 +763,94 @@ fn first_party_stair_faces(
         sprite,
     ));
     faces
+}
+
+fn first_party_fence_faces(
+    record: &mclone_assets::BlockStateRecord,
+    sprite: AtlasSpriteUv,
+) -> Vec<TexturedBlockFace> {
+    let block = record.block.path();
+    let mut faces = first_party_cuboid_faces(block, [6.0, 0.0, 6.0], [10.0, 16.0, 10.0], sprite);
+    for (property, from, to) in [
+        ("north", [7.0, 6.0, 0.0], [9.0, 9.0, 8.0]),
+        ("south", [7.0, 6.0, 8.0], [9.0, 9.0, 16.0]),
+        ("west", [0.0, 6.0, 7.0], [8.0, 9.0, 9.0]),
+        ("east", [8.0, 6.0, 7.0], [16.0, 9.0, 9.0]),
+    ] {
+        if record
+            .properties
+            .get(property)
+            .is_some_and(|value| value == "true")
+        {
+            faces.extend(first_party_cuboid_faces(block, from, to, sprite));
+            let mut upper_from = from;
+            let mut upper_to = to;
+            upper_from[1] = 12.0;
+            upper_to[1] = 15.0;
+            faces.extend(first_party_cuboid_faces(
+                block, upper_from, upper_to, sprite,
+            ));
+        }
+    }
+    faces
+}
+
+fn first_party_fence_gate_faces(
+    record: &mclone_assets::BlockStateRecord,
+    sprite: AtlasSpriteUv,
+) -> Vec<TexturedBlockFace> {
+    let block = record.block.path();
+    let north_south = matches!(
+        record.properties.get("facing").map(String::as_str),
+        Some("north" | "south")
+    );
+    let open = record
+        .properties
+        .get("open")
+        .is_some_and(|value| value == "true");
+    let lowered = record
+        .properties
+        .get("in_wall")
+        .is_some_and(|value| value == "true");
+    let y_offset = if lowered { -3.0 } else { 0.0 };
+    let shift = |mut from: [f32; 3], mut to: [f32; 3]| {
+        from[1] += y_offset;
+        to[1] += y_offset;
+        (from, to)
+    };
+    let mut boxes = Vec::new();
+    if north_south {
+        boxes.push(([0.0, 5.0, 7.0], [2.0, 16.0, 9.0]));
+        boxes.push(([14.0, 5.0, 7.0], [16.0, 16.0, 9.0]));
+        if open {
+            for x in [[2.0, 4.0], [12.0, 14.0]] {
+                boxes.push(([x[0], 6.0, 0.0], [x[1], 9.0, 8.0]));
+                boxes.push(([x[0], 12.0, 0.0], [x[1], 15.0, 8.0]));
+            }
+        } else {
+            boxes.push(([2.0, 6.0, 7.0], [14.0, 9.0, 9.0]));
+            boxes.push(([2.0, 12.0, 7.0], [14.0, 15.0, 9.0]));
+        }
+    } else {
+        boxes.push(([7.0, 5.0, 0.0], [9.0, 16.0, 2.0]));
+        boxes.push(([7.0, 5.0, 14.0], [9.0, 16.0, 16.0]));
+        if open {
+            for z in [[2.0, 4.0], [12.0, 14.0]] {
+                boxes.push(([0.0, 6.0, z[0]], [8.0, 9.0, z[1]]));
+                boxes.push(([0.0, 12.0, z[0]], [8.0, 15.0, z[1]]));
+            }
+        } else {
+            boxes.push(([7.0, 6.0, 2.0], [9.0, 9.0, 14.0]));
+            boxes.push(([7.0, 12.0, 2.0], [9.0, 15.0, 14.0]));
+        }
+    }
+    boxes
+        .into_iter()
+        .flat_map(|(from, to)| {
+            let (from, to) = shift(from, to);
+            first_party_cuboid_faces(block, from, to, sprite)
+        })
+        .collect()
 }
 
 fn first_party_crossed_faces(block: &str, sprite: AtlasSpriteUv) -> Vec<TexturedBlockFace> {
@@ -1340,6 +1434,66 @@ mod tests {
         );
         assert!(!full_cube_occluder(&slab_faces));
         assert!(!full_cube_occluder(&stair_faces));
+    }
+
+    #[test]
+    fn first_party_fence_and_gate_geometry_follow_connection_state() {
+        let sprite = AtlasSpriteUv {
+            u0: 0.0,
+            v0: 0.0,
+            u1: 1.0,
+            v1: 1.0,
+        };
+        let fence = mclone_assets::BlockStateRecord::new(
+            BlockStateId(239),
+            ResourceLocation::parse("minecraft:oak_fence").unwrap(),
+            [
+                ("east", "true"),
+                ("north", "false"),
+                ("south", "false"),
+                ("waterlogged", "false"),
+                ("west", "false"),
+            ],
+        );
+        let closed_gate = mclone_assets::BlockStateRecord::new(
+            BlockStateId(269),
+            ResourceLocation::parse("minecraft:oak_fence_gate").unwrap(),
+            [
+                ("facing", "south"),
+                ("in_wall", "false"),
+                ("open", "false"),
+                ("powered", "false"),
+            ],
+        );
+        let open_gate = mclone_assets::BlockStateRecord::new(
+            BlockStateId(273),
+            ResourceLocation::parse("minecraft:oak_fence_gate").unwrap(),
+            [
+                ("facing", "south"),
+                ("in_wall", "false"),
+                ("open", "true"),
+                ("powered", "false"),
+            ],
+        );
+
+        let fence_faces = first_party_fence_faces(&fence, sprite);
+        assert_eq!(fence_faces.len(), 18);
+        assert!(fence_faces.iter().any(|face| face.to[0] == 16.0));
+        assert!(!full_cube_occluder(&fence_faces));
+        let closed_faces = first_party_fence_gate_faces(&closed_gate, sprite);
+        let open_faces = first_party_fence_gate_faces(&open_gate, sprite);
+        assert_eq!(closed_faces.len(), 24);
+        assert_eq!(open_faces.len(), 36);
+        assert!(
+            closed_faces
+                .iter()
+                .any(|face| { face.from == [2.0, 6.0, 7.0] && face.to == [14.0, 9.0, 9.0] })
+        );
+        assert!(
+            open_faces
+                .iter()
+                .any(|face| { face.from == [2.0, 6.0, 0.0] && face.to == [4.0, 9.0, 8.0] })
+        );
     }
 
     #[test]

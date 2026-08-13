@@ -66,6 +66,8 @@ const fn visual_class_name(class: FirstPartyVisualClass) -> &'static str {
         FirstPartyVisualClass::Farmland => "farmland",
         FirstPartyVisualClass::Slab => "slab",
         FirstPartyVisualClass::Stair => "stair",
+        FirstPartyVisualClass::Fence => "fence",
+        FirstPartyVisualClass::FenceGate => "fence_gate",
         FirstPartyVisualClass::CrossedPlane => "crossed_plane",
         FirstPartyVisualClass::Flat => "flat",
         FirstPartyVisualClass::Fluid => "fluid",

@@ -12,6 +12,8 @@ pub enum FirstPartyVisualClass {
     Farmland,
     Slab,
     Stair,
+    Fence,
+    FenceGate,
     CrossedPlane,
     Flat,
     Fluid,
@@ -258,6 +260,8 @@ fn visual_class(block: &str) -> FirstPartyVisualClass {
         "farmland" => FirstPartyVisualClass::Farmland,
         "spruce_slab" => FirstPartyVisualClass::Slab,
         "spruce_stairs" => FirstPartyVisualClass::Stair,
+        "oak_fence" => FirstPartyVisualClass::Fence,
+        "oak_fence_gate" => FirstPartyVisualClass::FenceGate,
         "lily_pad" => FirstPartyVisualClass::Flat,
         "grass"
         | "tall_grass"
@@ -303,7 +307,8 @@ fn visual_class(block: &str) -> FirstPartyVisualClass {
         | "bubble_coral_wall_fan"
         | "fire_coral_wall_fan"
         | "horn_coral_wall_fan"
-        | "wheat" => FirstPartyVisualClass::CrossedPlane,
+        | "wheat"
+        | "carrots" => FirstPartyVisualClass::CrossedPlane,
         _ => FirstPartyVisualClass::Solid,
     }
 }
@@ -326,6 +331,16 @@ fn material_path(state: &BlockStateRecord) -> String {
             "wheat_stage{}",
             state.properties.get("age").map_or("0", String::as_str)
         ),
+        "carrots" => {
+            let stage = match state.properties.get("age").map(String::as_str) {
+                Some("0" | "1") => 0,
+                Some("2" | "3") => 1,
+                Some("4" | "5" | "6") => 2,
+                _ => 3,
+            };
+            format!("carrots_stage{stage}")
+        }
+        "oak_fence" | "oak_fence_gate" => "oak_planks".to_owned(),
         block => block.to_owned(),
     }
 }
@@ -359,6 +374,22 @@ mod tests {
                     .material
                     .as_ref()
                     .is_some_and(|material| material.to_string() == "mclone:block/spruce_planks")
+        }));
+        assert!(inventory.block_visuals.iter().any(|visual| {
+            visual.state.block.to_string() == "minecraft:oak_fence"
+                && visual.class == FirstPartyVisualClass::Fence
+                && visual
+                    .material
+                    .as_ref()
+                    .is_some_and(|material| material.to_string() == "mclone:block/oak_planks")
+        }));
+        assert!(inventory.block_visuals.iter().any(|visual| {
+            visual.state.canonical_key() == "minecraft:carrots[age=7]"
+                && visual.class == FirstPartyVisualClass::CrossedPlane
+                && visual
+                    .material
+                    .as_ref()
+                    .is_some_and(|material| material.to_string() == "mclone:block/carrots_stage3")
         }));
         assert!(
             inventory

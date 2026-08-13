@@ -333,7 +333,11 @@ const fn template_rotation(rotation: HomesteadPlanTemplateRotation) -> TemplateR
 mod tests {
     use std::collections::BTreeMap;
 
-    use mclone_worldgen::block::{AIR, DANDELION, OAK_LEAVES, OAK_LOG, POPPY, RawBlockId};
+    use mclone_worldgen::block::{
+        AIR, CARROTS_AGE_0, CARROTS_AGE_7, FARMLAND_MOISTURE_0, FARMLAND_MOISTURE_7,
+        OAK_FENCE_GATE_STATE_END, OAK_FENCE_GATE_STATE_START, OAK_FENCE_STATE_END,
+        OAK_FENCE_STATE_START, OAK_LEAVES, OAK_LOG, RawBlockId, WHEAT_AGE_0, WHEAT_AGE_7,
+    };
     use mclone_worldgen::levelgen::McloneOverworldFeatureDependencyCache;
 
     use super::*;
@@ -512,19 +516,35 @@ mod tests {
         let authored_counts = forward
             .values()
             .flat_map(|chunk| chunk.blocks().iter().copied())
-            .fold([0usize; 3], |mut counts, block| {
+            .fold([0usize; 6], |mut counts, block| {
                 if block == OAK_LEAVES {
                     counts[0] += 1;
-                } else if block == DANDELION {
+                } else if (OAK_FENCE_STATE_START..=OAK_FENCE_STATE_END).contains(&block) {
                     counts[1] += 1;
-                } else if block == POPPY {
+                } else if (OAK_FENCE_GATE_STATE_START..=OAK_FENCE_GATE_STATE_END).contains(&block) {
                     counts[2] += 1;
+                } else if (FARMLAND_MOISTURE_0..=FARMLAND_MOISTURE_7).contains(&block) {
+                    counts[3] += 1;
+                } else if (WHEAT_AGE_0..=WHEAT_AGE_7).contains(&block) {
+                    counts[4] += 1;
+                } else if (CARROTS_AGE_0..=CARROTS_AGE_7).contains(&block) {
+                    counts[5] += 1;
                 }
                 counts
             });
         assert!(authored_counts[0] > 100);
-        assert!(authored_counts[1] > 10);
-        assert!(authored_counts[2] > 10);
+        assert_eq!(&authored_counts[1..], &[35, 1, 48, 24, 24]);
+        let garden = plan
+            .pieces
+            .iter()
+            .find(|piece| piece.kind == HomesteadPlanPieceKind::Garden)
+            .unwrap();
+        assert_eq!(garden.content_id, "farmstead-kitchen-garden-v1");
+        assert!(garden.semantic_sha256.is_some());
+        assert!(plan.source_fingerprints.iter().any(|source| {
+            source.content_id == garden.content_id
+                && Some(source.semantic_sha256.as_str()) == garden.semantic_sha256.as_deref()
+        }));
     }
 
     fn block_at(

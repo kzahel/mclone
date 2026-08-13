@@ -6,12 +6,12 @@ use mclone_core::BlockPos;
 use serde::Deserialize;
 
 use crate::block::{
-    AIR, BRICKS, CARROTS_AGE_0, COBBLESTONE, CORNFLOWER, GLASS, HAY_BLOCK, MOSSY_COBBLESTONE,
-    OAK_LOG, OAK_LOG_X, OAK_LOG_Z, OAK_PLANKS, OakFenceGateState, OakFenceState, POPPY,
-    RED_TERRACOTTA, RawBlockId, SPRUCE_LOG, SPRUCE_LOG_X, SPRUCE_LOG_Z, SPRUCE_PLANKS,
-    SPRUCE_SLAB_BOTTOM, SPRUCE_SLAB_TOP, SPRUCE_STAIRS_EAST, SPRUCE_STAIRS_NORTH,
-    SPRUCE_STAIRS_SOUTH, SPRUCE_STAIRS_WEST, STONE_BRICKS, WALL_TORCH_SOUTH, WHITE_TERRACOTTA,
-    oak_fence_for_state, oak_fence_gate_for_state,
+    AIR, BRICKS, CARROTS_AGE_0, COBBLESTONE, CORNFLOWER, FARMLAND_MOISTURE_0, GLASS, GRASS_BLOCK,
+    HAY_BLOCK, MOSSY_COBBLESTONE, OAK_LOG, OAK_LOG_X, OAK_LOG_Z, OAK_PLANKS, OakFenceGateState,
+    OakFenceState, POPPY, RED_TERRACOTTA, RawBlockId, SPRUCE_LOG, SPRUCE_LOG_X, SPRUCE_LOG_Z,
+    SPRUCE_PLANKS, SPRUCE_SLAB_BOTTOM, SPRUCE_SLAB_TOP, SPRUCE_STAIRS_EAST, SPRUCE_STAIRS_NORTH,
+    SPRUCE_STAIRS_SOUTH, SPRUCE_STAIRS_WEST, STONE_BRICKS, WALL_TORCH_SOUTH, WATER, WHEAT_AGE_0,
+    WHITE_TERRACOTTA, oak_fence_for_state, oak_fence_gate_for_state,
 };
 use crate::structure_template::{
     StructureMaterialTheme, StructureTemplate, StructureTemplateBuilder, TemplateBlockState,
@@ -336,6 +336,14 @@ pub fn raw_block_state_for_canonical_key(key: &str) -> Option<RawBlockId> {
         if key == format!("minecraft:carrots[age={age}]") {
             return Some(CARROTS_AGE_0 + age);
         }
+        if key == format!("minecraft:wheat[age={age}]") {
+            return Some(WHEAT_AGE_0 + age);
+        }
+    }
+    for moisture in 0_u16..8 {
+        if key == format!("minecraft:farmland[moisture={moisture}]") {
+            return Some(FARMLAND_MOISTURE_0 + moisture);
+        }
     }
     Some(match key {
         "minecraft:air" => AIR,
@@ -343,6 +351,7 @@ pub fn raw_block_state_for_canonical_key(key: &str) -> Option<RawBlockId> {
         "minecraft:cobblestone" => COBBLESTONE,
         "minecraft:cornflower" => CORNFLOWER,
         "minecraft:glass" => GLASS,
+        "minecraft:grass_block" => GRASS_BLOCK,
         "minecraft:hay_block" => HAY_BLOCK,
         "minecraft:mossy_cobblestone" => MOSSY_COBBLESTONE,
         "minecraft:oak_log[axis=x]" => OAK_LOG_X,
@@ -371,6 +380,7 @@ pub fn raw_block_state_for_canonical_key(key: &str) -> Option<RawBlockId> {
         }
         "minecraft:stone_bricks" => STONE_BRICKS,
         "minecraft:wall_torch[facing=south]" => WALL_TORCH_SOUTH,
+        "minecraft:water[level=0]" => WATER,
         "minecraft:white_terracotta" => WHITE_TERRACOTTA,
         _ => return None,
     })
@@ -699,6 +709,11 @@ fn material_role(value: &str) -> Option<TemplateMaterialRole> {
         "trim" => TemplateMaterialRole::Trim,
         "floor" => TemplateMaterialRole::Floor,
         "accent" => TemplateMaterialRole::Accent,
+        "fence" => TemplateMaterialRole::Fence,
+        "gate" => TemplateMaterialRole::Gate,
+        "soil" => TemplateMaterialRole::Soil,
+        "cropPrimary" => TemplateMaterialRole::CropPrimary,
+        "cropSecondary" => TemplateMaterialRole::CropSecondary,
         _ => return None,
     })
 }
@@ -822,9 +837,13 @@ struct RawProvenance {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::structure_template::{StructurePlaceSettings, TemplateMirror, TemplateRotation};
 
     const STANDARD_COTTAGE_JSON: &str =
         include_str!("../../../../assets/mclone/structures/farmstead-cottage-a-v2.structure.json");
+    const KITCHEN_GARDEN_JSON: &str = include_str!(
+        "../../../../assets/mclone/structures/farmstead-kitchen-garden-v1.structure.json"
+    );
 
     #[test]
     fn loads_checked_standard_cottage_record() {
@@ -840,6 +859,50 @@ mod tests {
             Some("warm-oak-and-plaster-v2")
         );
         assert!(record.default_theme().is_some());
+    }
+
+    #[test]
+    fn loads_working_kitchen_garden_with_connected_role_fences() {
+        let record = load_canonical_structure_json(KITCHEN_GARDEN_JSON).unwrap();
+        assert_eq!(record.template.id(), "farmstead-kitchen-garden-v1");
+        assert_eq!(record.template.size(), [13, 2, 13]);
+        assert_eq!(record.template.blocks().len(), 253);
+        assert_eq!(record.template.markers().len(), 3);
+        let theme = record.default_theme().unwrap();
+        let placed = record
+            .template
+            .place(&StructurePlaceSettings {
+                origin: BlockPos::ZERO,
+                rotation: TemplateRotation::None,
+                mirror: TemplateMirror::None,
+                theme,
+            })
+            .unwrap();
+        let north_west = placed
+            .blocks
+            .iter()
+            .find(|block| block.pos == BlockPos::new(1, 1, 2))
+            .unwrap();
+        let state = crate::block::oak_fence_state(north_west.block).unwrap();
+        assert!(state.east);
+        assert!(state.south);
+        assert!(!state.north);
+        assert!(!state.west);
+        assert!(placed.blocks.iter().any(|block| {
+            crate::block::oak_fence_gate_state(block.block).is_some_and(|gate| !gate.open)
+        }));
+        assert!(
+            placed
+                .blocks
+                .iter()
+                .any(|block| block.block == crate::block::WATER)
+        );
+        assert!(
+            placed
+                .blocks
+                .iter()
+                .any(|block| block.block == crate::block::CARROTS_AGE_7)
+        );
     }
 
     #[test]

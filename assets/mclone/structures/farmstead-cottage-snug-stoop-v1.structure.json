@@ -1312,7 +1312,7 @@
   "provenance": {
     "compilerId": "mclone-structure-dsl-v2",
     "sourcePath": "tools/structure-lab/examples/cottage_snug_stoop/structure.ts",
-    "sourceSha256": "ba946f40e9be4132c3b70f5a72581af984f1149beb10fea75f2e4c1cff87addb",
-    "semanticSha256": "1f9fe6b031514baf093c23c32f6021082f6cb29908d97c2597426cc8da1a0f82"
+    "sourceSha256": "816c4d9f63d3c167413c183a4432248351b84d61c79ea9e705c2af33ea291dab",
+    "semanticSha256": "20893a88a360bb940a142714aef214a5c8f17ed94a61aedea77704dfe08d221f"
   }
 }

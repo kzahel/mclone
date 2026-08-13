@@ -437,7 +437,7 @@
   "provenance": {
     "compilerId": "mclone-structure-dsl-v2",
     "sourcePath": "tools/structure-lab/examples/barn_lean_to_short/structure.ts",
-    "sourceSha256": "c542114960adfb7f3fbaae9f79b311bc149f5189002f169fe5d71f43a2f16379",
-    "semanticSha256": "4809cac6eceb58deb12ebcc14c19d307f01fbf6e145149fb25f087356664525f"
+    "sourceSha256": "f6671f6d4988c999b01581219022be067afa4ed98e04c236df9801ca9dd502da",
+    "semanticSha256": "23bae5b432539b7570a2dd9056a8f96bf7f2bcaa13e1c52303e4e589d1f4f281"
   }
 }

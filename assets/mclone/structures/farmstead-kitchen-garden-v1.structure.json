@@ -1,0 +1,431 @@
+{
+  "blocks": [
+    {"components":["boundary"],"palette":5,"pos":[0,0,0]},
+    {"components":["boundary"],"palette":5,"pos":[0,0,1]},
+    {"components":["boundary"],"palette":5,"pos":[0,0,2]},
+    {"components":["boundary"],"palette":5,"pos":[0,0,3]},
+    {"components":["boundary"],"palette":5,"pos":[0,0,4]},
+    {"components":["boundary"],"palette":5,"pos":[0,0,5]},
+    {"components":["boundary"],"palette":5,"pos":[0,0,6]},
+    {"components":["boundary"],"palette":5,"pos":[0,0,7]},
+    {"components":["boundary"],"palette":5,"pos":[0,0,8]},
+    {"components":["boundary"],"palette":5,"pos":[0,0,9]},
+    {"components":["boundary"],"palette":5,"pos":[0,0,10]},
+    {"components":["boundary"],"palette":5,"pos":[0,0,11]},
+    {"components":["boundary"],"palette":5,"pos":[0,0,12]},
+    {"components":["boundary"],"palette":5,"pos":[1,0,0]},
+    {"components":["boundary"],"palette":5,"pos":[1,0,1]},
+    {"components":["boundary"],"palette":5,"pos":[1,0,2]},
+    {"components":["boundary"],"palette":5,"pos":[1,0,3]},
+    {"components":["boundary"],"palette":5,"pos":[1,0,4]},
+    {"components":["boundary"],"palette":5,"pos":[1,0,5]},
+    {"components":["boundary"],"palette":5,"pos":[1,0,6]},
+    {"components":["boundary"],"palette":5,"pos":[1,0,7]},
+    {"components":["boundary"],"palette":5,"pos":[1,0,8]},
+    {"components":["boundary"],"palette":5,"pos":[1,0,9]},
+    {"components":["boundary"],"palette":5,"pos":[1,0,10]},
+    {"components":["boundary"],"palette":5,"pos":[1,0,11]},
+    {"components":["boundary"],"palette":5,"pos":[1,0,12]},
+    {"components":["boundary"],"palette":3,"pos":[1,1,2]},
+    {"components":["boundary"],"palette":3,"pos":[1,1,3]},
+    {"components":["boundary"],"palette":3,"pos":[1,1,4]},
+    {"components":["boundary"],"palette":3,"pos":[1,1,5]},
+    {"components":["boundary"],"palette":3,"pos":[1,1,6]},
+    {"components":["boundary"],"palette":3,"pos":[1,1,7]},
+    {"components":["boundary"],"palette":3,"pos":[1,1,8]},
+    {"components":["boundary"],"palette":3,"pos":[1,1,9]},
+    {"components":["boundary"],"palette":3,"pos":[1,1,10]},
+    {"components":["boundary"],"palette":5,"pos":[2,0,0]},
+    {"components":["boundary"],"palette":5,"pos":[2,0,1]},
+    {"components":["boundary"],"palette":5,"pos":[2,0,2]},
+    {"components":["beds"],"palette":7,"pos":[2,0,3]},
+    {"components":["beds"],"palette":7,"pos":[2,0,4]},
+    {"components":["beds"],"palette":7,"pos":[2,0,5]},
+    {"components":["irrigation"],"palette":8,"pos":[2,0,6]},
+    {"components":["beds"],"palette":7,"pos":[2,0,7]},
+    {"components":["beds"],"palette":7,"pos":[2,0,8]},
+    {"components":["beds"],"palette":7,"pos":[2,0,9]},
+    {"components":["boundary"],"palette":5,"pos":[2,0,10]},
+    {"components":["boundary"],"palette":5,"pos":[2,0,11]},
+    {"components":["boundary"],"palette":5,"pos":[2,0,12]},
+    {"components":["boundary"],"palette":3,"pos":[2,1,2]},
+    {"components":["beds"],"palette":1,"pos":[2,1,3]},
+    {"components":["beds"],"palette":9,"pos":[2,1,4]},
+    {"components":["beds"],"palette":1,"pos":[2,1,5]},
+    {"components":["beds"],"palette":2,"pos":[2,1,7]},
+    {"components":["beds"],"palette":0,"pos":[2,1,8]},
+    {"components":["beds"],"palette":2,"pos":[2,1,9]},
+    {"components":["boundary"],"palette":3,"pos":[2,1,10]},
+    {"components":["boundary"],"palette":5,"pos":[3,0,0]},
+    {"components":["boundary"],"palette":5,"pos":[3,0,1]},
+    {"components":["boundary"],"palette":5,"pos":[3,0,2]},
+    {"components":["beds"],"palette":7,"pos":[3,0,3]},
+    {"components":["beds"],"palette":7,"pos":[3,0,4]},
+    {"components":["beds"],"palette":7,"pos":[3,0,5]},
+    {"components":["irrigation"],"palette":8,"pos":[3,0,6]},
+    {"components":["beds"],"palette":7,"pos":[3,0,7]},
+    {"components":["beds"],"palette":7,"pos":[3,0,8]},
+    {"components":["beds"],"palette":7,"pos":[3,0,9]},
+    {"components":["boundary"],"palette":5,"pos":[3,0,10]},
+    {"components":["boundary"],"palette":5,"pos":[3,0,11]},
+    {"components":["boundary"],"palette":5,"pos":[3,0,12]},
+    {"components":["boundary"],"palette":3,"pos":[3,1,2]},
+    {"components":["beds"],"palette":1,"pos":[3,1,3]},
+    {"components":["beds"],"palette":9,"pos":[3,1,4]},
+    {"components":["beds"],"palette":1,"pos":[3,1,5]},
+    {"components":["beds"],"palette":2,"pos":[3,1,7]},
+    {"components":["beds"],"palette":0,"pos":[3,1,8]},
+    {"components":["beds"],"palette":2,"pos":[3,1,9]},
+    {"components":["boundary"],"palette":3,"pos":[3,1,10]},
+    {"components":["boundary"],"palette":5,"pos":[4,0,0]},
+    {"components":["boundary"],"palette":5,"pos":[4,0,1]},
+    {"components":["boundary"],"palette":5,"pos":[4,0,2]},
+    {"components":["beds"],"palette":7,"pos":[4,0,3]},
+    {"components":["beds"],"palette":7,"pos":[4,0,4]},
+    {"components":["beds"],"palette":7,"pos":[4,0,5]},
+    {"components":["irrigation"],"palette":8,"pos":[4,0,6]},
+    {"components":["beds"],"palette":7,"pos":[4,0,7]},
+    {"components":["beds"],"palette":7,"pos":[4,0,8]},
+    {"components":["beds"],"palette":7,"pos":[4,0,9]},
+    {"components":["boundary"],"palette":5,"pos":[4,0,10]},
+    {"components":["boundary"],"palette":5,"pos":[4,0,11]},
+    {"components":["boundary"],"palette":5,"pos":[4,0,12]},
+    {"components":["boundary"],"palette":3,"pos":[4,1,2]},
+    {"components":["beds"],"palette":1,"pos":[4,1,3]},
+    {"components":["beds"],"palette":9,"pos":[4,1,4]},
+    {"components":["beds"],"palette":1,"pos":[4,1,5]},
+    {"components":["beds"],"palette":2,"pos":[4,1,7]},
+    {"components":["beds"],"palette":0,"pos":[4,1,8]},
+    {"components":["beds"],"palette":2,"pos":[4,1,9]},
+    {"components":["boundary"],"palette":3,"pos":[4,1,10]},
+    {"components":["boundary"],"palette":5,"pos":[5,0,0]},
+    {"components":["boundary"],"palette":5,"pos":[5,0,1]},
+    {"components":["boundary"],"palette":5,"pos":[5,0,2]},
+    {"components":["beds"],"palette":7,"pos":[5,0,3]},
+    {"components":["beds"],"palette":7,"pos":[5,0,4]},
+    {"components":["beds"],"palette":7,"pos":[5,0,5]},
+    {"components":["irrigation"],"palette":8,"pos":[5,0,6]},
+    {"components":["beds"],"palette":7,"pos":[5,0,7]},
+    {"components":["beds"],"palette":7,"pos":[5,0,8]},
+    {"components":["beds"],"palette":7,"pos":[5,0,9]},
+    {"components":["boundary"],"palette":5,"pos":[5,0,10]},
+    {"components":["boundary"],"palette":5,"pos":[5,0,11]},
+    {"components":["boundary"],"palette":5,"pos":[5,0,12]},
+    {"components":["boundary"],"palette":3,"pos":[5,1,2]},
+    {"components":["beds"],"palette":1,"pos":[5,1,3]},
+    {"components":["beds"],"palette":9,"pos":[5,1,4]},
+    {"components":["beds"],"palette":1,"pos":[5,1,5]},
+    {"components":["beds"],"palette":2,"pos":[5,1,7]},
+    {"components":["beds"],"palette":0,"pos":[5,1,8]},
+    {"components":["beds"],"palette":2,"pos":[5,1,9]},
+    {"components":["boundary"],"palette":3,"pos":[5,1,10]},
+    {"components":["boundary"],"palette":5,"pos":[6,0,0]},
+    {"components":["boundary"],"palette":5,"pos":[6,0,1]},
+    {"components":["boundary"],"palette":5,"pos":[6,0,2]},
+    {"components":["boundary"],"palette":5,"pos":[6,0,3]},
+    {"components":["boundary"],"palette":5,"pos":[6,0,4]},
+    {"components":["boundary"],"palette":5,"pos":[6,0,5]},
+    {"components":["approach"],"palette":6,"pos":[6,0,6]},
+    {"components":["approach"],"palette":6,"pos":[6,0,7]},
+    {"components":["approach"],"palette":6,"pos":[6,0,8]},
+    {"components":["approach"],"palette":6,"pos":[6,0,9]},
+    {"components":["approach"],"palette":6,"pos":[6,0,10]},
+    {"components":["approach"],"palette":6,"pos":[6,0,11]},
+    {"components":["approach"],"palette":6,"pos":[6,0,12]},
+    {"components":["boundary"],"palette":3,"pos":[6,1,2]},
+    {"components":["boundary"],"palette":4,"pos":[6,1,10]},
+    {"components":["boundary"],"palette":5,"pos":[7,0,0]},
+    {"components":["boundary"],"palette":5,"pos":[7,0,1]},
+    {"components":["boundary"],"palette":5,"pos":[7,0,2]},
+    {"components":["beds"],"palette":7,"pos":[7,0,3]},
+    {"components":["beds"],"palette":7,"pos":[7,0,4]},
+    {"components":["beds"],"palette":7,"pos":[7,0,5]},
+    {"components":["irrigation"],"palette":8,"pos":[7,0,6]},
+    {"components":["beds"],"palette":7,"pos":[7,0,7]},
+    {"components":["beds"],"palette":7,"pos":[7,0,8]},
+    {"components":["beds"],"palette":7,"pos":[7,0,9]},
+    {"components":["boundary"],"palette":5,"pos":[7,0,10]},
+    {"components":["boundary"],"palette":5,"pos":[7,0,11]},
+    {"components":["boundary"],"palette":5,"pos":[7,0,12]},
+    {"components":["boundary"],"palette":3,"pos":[7,1,2]},
+    {"components":["beds"],"palette":2,"pos":[7,1,3]},
+    {"components":["beds"],"palette":0,"pos":[7,1,4]},
+    {"components":["beds"],"palette":2,"pos":[7,1,5]},
+    {"components":["beds"],"palette":1,"pos":[7,1,7]},
+    {"components":["beds"],"palette":9,"pos":[7,1,8]},
+    {"components":["beds"],"palette":1,"pos":[7,1,9]},
+    {"components":["boundary"],"palette":3,"pos":[7,1,10]},
+    {"components":["boundary"],"palette":5,"pos":[8,0,0]},
+    {"components":["boundary"],"palette":5,"pos":[8,0,1]},
+    {"components":["boundary"],"palette":5,"pos":[8,0,2]},
+    {"components":["beds"],"palette":7,"pos":[8,0,3]},
+    {"components":["beds"],"palette":7,"pos":[8,0,4]},
+    {"components":["beds"],"palette":7,"pos":[8,0,5]},
+    {"components":["irrigation"],"palette":8,"pos":[8,0,6]},
+    {"components":["beds"],"palette":7,"pos":[8,0,7]},
+    {"components":["beds"],"palette":7,"pos":[8,0,8]},
+    {"components":["beds"],"palette":7,"pos":[8,0,9]},
+    {"components":["boundary"],"palette":5,"pos":[8,0,10]},
+    {"components":["boundary"],"palette":5,"pos":[8,0,11]},
+    {"components":["boundary"],"palette":5,"pos":[8,0,12]},
+    {"components":["boundary"],"palette":3,"pos":[8,1,2]},
+    {"components":["beds"],"palette":2,"pos":[8,1,3]},
+    {"components":["beds"],"palette":0,"pos":[8,1,4]},
+    {"components":["beds"],"palette":2,"pos":[8,1,5]},
+    {"components":["beds"],"palette":1,"pos":[8,1,7]},
+    {"components":["beds"],"palette":9,"pos":[8,1,8]},
+    {"components":["beds"],"palette":1,"pos":[8,1,9]},
+    {"components":["boundary"],"palette":3,"pos":[8,1,10]},
+    {"components":["boundary"],"palette":5,"pos":[9,0,0]},
+    {"components":["boundary"],"palette":5,"pos":[9,0,1]},
+    {"components":["boundary"],"palette":5,"pos":[9,0,2]},
+    {"components":["beds"],"palette":7,"pos":[9,0,3]},
+    {"components":["beds"],"palette":7,"pos":[9,0,4]},
+    {"components":["beds"],"palette":7,"pos":[9,0,5]},
+    {"components":["irrigation"],"palette":8,"pos":[9,0,6]},
+    {"components":["beds"],"palette":7,"pos":[9,0,7]},
+    {"components":["beds"],"palette":7,"pos":[9,0,8]},
+    {"components":["beds"],"palette":7,"pos":[9,0,9]},
+    {"components":["boundary"],"palette":5,"pos":[9,0,10]},
+    {"components":["boundary"],"palette":5,"pos":[9,0,11]},
+    {"components":["boundary"],"palette":5,"pos":[9,0,12]},
+    {"components":["boundary"],"palette":3,"pos":[9,1,2]},
+    {"components":["beds"],"palette":2,"pos":[9,1,3]},
+    {"components":["beds"],"palette":0,"pos":[9,1,4]},
+    {"components":["beds"],"palette":2,"pos":[9,1,5]},
+    {"components":["beds"],"palette":1,"pos":[9,1,7]},
+    {"components":["beds"],"palette":9,"pos":[9,1,8]},
+    {"components":["beds"],"palette":1,"pos":[9,1,9]},
+    {"components":["boundary"],"palette":3,"pos":[9,1,10]},
+    {"components":["boundary"],"palette":5,"pos":[10,0,0]},
+    {"components":["boundary"],"palette":5,"pos":[10,0,1]},
+    {"components":["boundary"],"palette":5,"pos":[10,0,2]},
+    {"components":["beds"],"palette":7,"pos":[10,0,3]},
+    {"components":["beds"],"palette":7,"pos":[10,0,4]},
+    {"components":["beds"],"palette":7,"pos":[10,0,5]},
+    {"components":["irrigation"],"palette":8,"pos":[10,0,6]},
+    {"components":["beds"],"palette":7,"pos":[10,0,7]},
+    {"components":["beds"],"palette":7,"pos":[10,0,8]},
+    {"components":["beds"],"palette":7,"pos":[10,0,9]},
+    {"components":["boundary"],"palette":5,"pos":[10,0,10]},
+    {"components":["boundary"],"palette":5,"pos":[10,0,11]},
+    {"components":["boundary"],"palette":5,"pos":[10,0,12]},
+    {"components":["boundary"],"palette":3,"pos":[10,1,2]},
+    {"components":["beds"],"palette":2,"pos":[10,1,3]},
+    {"components":["beds"],"palette":0,"pos":[10,1,4]},
+    {"components":["beds"],"palette":2,"pos":[10,1,5]},
+    {"components":["beds"],"palette":1,"pos":[10,1,7]},
+    {"components":["beds"],"palette":9,"pos":[10,1,8]},
+    {"components":["beds"],"palette":1,"pos":[10,1,9]},
+    {"components":["boundary"],"palette":3,"pos":[10,1,10]},
+    {"components":["boundary"],"palette":5,"pos":[11,0,0]},
+    {"components":["boundary"],"palette":5,"pos":[11,0,1]},
+    {"components":["boundary"],"palette":5,"pos":[11,0,2]},
+    {"components":["boundary"],"palette":5,"pos":[11,0,3]},
+    {"components":["boundary"],"palette":5,"pos":[11,0,4]},
+    {"components":["boundary"],"palette":5,"pos":[11,0,5]},
+    {"components":["boundary"],"palette":5,"pos":[11,0,6]},
+    {"components":["boundary"],"palette":5,"pos":[11,0,7]},
+    {"components":["boundary"],"palette":5,"pos":[11,0,8]},
+    {"components":["boundary"],"palette":5,"pos":[11,0,9]},
+    {"components":["boundary"],"palette":5,"pos":[11,0,10]},
+    {"components":["boundary"],"palette":5,"pos":[11,0,11]},
+    {"components":["boundary"],"palette":5,"pos":[11,0,12]},
+    {"components":["boundary"],"palette":3,"pos":[11,1,2]},
+    {"components":["boundary"],"palette":3,"pos":[11,1,3]},
+    {"components":["boundary"],"palette":3,"pos":[11,1,4]},
+    {"components":["boundary"],"palette":3,"pos":[11,1,5]},
+    {"components":["boundary"],"palette":3,"pos":[11,1,6]},
+    {"components":["boundary"],"palette":3,"pos":[11,1,7]},
+    {"components":["boundary"],"palette":3,"pos":[11,1,8]},
+    {"components":["boundary"],"palette":3,"pos":[11,1,9]},
+    {"components":["boundary"],"palette":3,"pos":[11,1,10]},
+    {"components":["boundary"],"palette":5,"pos":[12,0,0]},
+    {"components":["boundary"],"palette":5,"pos":[12,0,1]},
+    {"components":["boundary"],"palette":5,"pos":[12,0,2]},
+    {"components":["boundary"],"palette":5,"pos":[12,0,3]},
+    {"components":["boundary"],"palette":5,"pos":[12,0,4]},
+    {"components":["boundary"],"palette":5,"pos":[12,0,5]},
+    {"components":["boundary"],"palette":5,"pos":[12,0,6]},
+    {"components":["boundary"],"palette":5,"pos":[12,0,7]},
+    {"components":["boundary"],"palette":5,"pos":[12,0,8]},
+    {"components":["boundary"],"palette":5,"pos":[12,0,9]},
+    {"components":["boundary"],"palette":5,"pos":[12,0,10]},
+    {"components":["boundary"],"palette":5,"pos":[12,0,11]},
+    {"components":["boundary"],"palette":5,"pos":[12,0,12]}
+  ],
+  "category": "infrastructure",
+  "components": [
+    {
+      "id": "approach",
+      "label": "Gate approach and crossing",
+      "optional": false
+    },
+    {
+      "id": "beds",
+      "label": "Hydrated mixed crop beds",
+      "optional": false
+    },
+    {
+      "id": "boundary",
+      "label": "Connected oak enclosure",
+      "optional": false
+    },
+    {
+      "id": "irrigation",
+      "label": "Central irrigation run",
+      "optional": false
+    }
+  ],
+  "defaultTheme": "oak-wheat-and-carrots-v1",
+  "description": "A compact fenced kitchen garden with a working gate, a central irrigation run, and mixed wheat and carrot beds.",
+  "family": {
+    "id": "farmstead-garden",
+    "member": "kitchen-mixed-crops",
+    "label": "Farmstead Garden"
+  },
+  "id": "farmstead-kitchen-garden-v1",
+  "label": "Kitchen Garden",
+  "markers": [
+    {
+      "kind": "water:irrigation",
+      "pos": [
+        3,
+        0,
+        6
+      ]
+    },
+    {
+      "kind": "entrance:south",
+      "pos": [
+        6,
+        1,
+        12
+      ]
+    },
+    {
+      "kind": "harvest:carrots",
+      "pos": [
+        8,
+        1,
+        7
+      ]
+    }
+  ],
+  "palette": [
+    {
+      "key": "carrotGrowing",
+      "state": {
+        "kind": "block",
+        "state": "minecraft:carrots[age=3]"
+      }
+    },
+    {
+      "key": "cropPrimary",
+      "state": {
+        "kind": "role",
+        "role": "cropPrimary"
+      }
+    },
+    {
+      "key": "cropSecondary",
+      "state": {
+        "kind": "role",
+        "role": "cropSecondary"
+      }
+    },
+    {
+      "key": "fence",
+      "state": {
+        "kind": "role",
+        "role": "fence"
+      }
+    },
+    {
+      "key": "gate",
+      "state": {
+        "kind": "role",
+        "role": "gate"
+      }
+    },
+    {
+      "key": "grass",
+      "state": {
+        "kind": "block",
+        "state": "minecraft:grass_block"
+      }
+    },
+    {
+      "key": "path",
+      "state": {
+        "kind": "role",
+        "role": "floor"
+      }
+    },
+    {
+      "key": "soil",
+      "state": {
+        "kind": "role",
+        "role": "soil"
+      }
+    },
+    {
+      "key": "water",
+      "state": {
+        "kind": "block",
+        "state": "minecraft:water[level=0]"
+      }
+    },
+    {
+      "key": "wheatGrowing",
+      "state": {
+        "kind": "block",
+        "state": "minecraft:wheat[age=4]"
+      }
+    }
+  ],
+  "schemaVersion": 1,
+  "size": [
+    13,
+    2,
+    13
+  ],
+  "sockets": [
+    {
+      "facing": "south",
+      "id": "south-path",
+      "kind": "attachment:path",
+      "pos": [
+        6,
+        0,
+        12
+      ]
+    }
+  ],
+  "tags": [
+    "crops",
+    "farmstead",
+    "garden",
+    "starter-settlement"
+  ],
+  "themes": [
+    {
+      "id": "oak-wheat-and-carrots-v1",
+      "label": "Oak, wheat, and carrots",
+      "materials": {
+        "cropPrimary": "minecraft:wheat[age=7]",
+        "cropSecondary": "minecraft:carrots[age=7]",
+        "fence": "minecraft:oak_fence[east=false,north=false,south=false,waterlogged=false,west=false]",
+        "floor": "minecraft:oak_planks",
+        "gate": "minecraft:oak_fence_gate[facing=south,in_wall=false,open=false,powered=false]",
+        "soil": "minecraft:farmland[moisture=7]"
+      }
+    }
+  ],
+  "provenance": {
+    "compilerId": "mclone-structure-dsl-v2",
+    "sourcePath": "tools/structure-lab/examples/kitchen_garden/structure.ts",
+    "sourceSha256": "30c3d51e91c3bad596e988637b4b711e6f8310cfee7e2d367b33cc65dcdcd361",
+    "semanticSha256": "2d713679d248e2c97085837c153fb886b7e72351e6877ab7359a840db5eceed3"
+  }
+}

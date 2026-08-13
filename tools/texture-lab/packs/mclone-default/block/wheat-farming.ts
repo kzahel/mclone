@@ -162,6 +162,79 @@ export function defineWheatFarmingTextures(api: TextureLabApi): void {
       ],
     });
   }
+
+  defineCarrotTextures(api);
+}
+
+function defineCarrotTextures(api: TextureLabApi): void {
+  api.palette("carrot_crop", {
+    transparent: "#00000000",
+    leaf_dark: "#2f6129",
+    leaf: "#4f8738",
+    leaf_light: "#79a94b",
+    root_dark: "#b94e1d",
+    root: "#e87325",
+    root_light: "#f6a33c",
+  });
+  const stages = [
+    [
+      empty, empty, empty, empty, empty, empty, empty, empty,
+      empty, empty, empty,
+      "......l.l.......", ".......g........", "......gdg.......",
+      ".......d........", ".......d........",
+    ],
+    [
+      empty, empty, empty, empty, empty, empty, empty, empty,
+      ".....l...l......", "......lgl.......", ".....ggggg......",
+      "......gdg.......", "......ddd.......", ".......d........",
+      ".......d........", ".......d........",
+    ],
+    [
+      empty, empty, empty, empty, empty, empty,
+      "....l..g..l.....", ".....lgggl......", "....ggggggg.....",
+      ".....ggggg......", ".....dgdgd......", "......odo.......",
+      "......ooo.......", ".......o........", ".......o........",
+      ".......d........",
+    ],
+    [
+      empty, empty, empty, empty,
+      "...l..g.g..l....", "....lgggggl.....", "...ggggggggg....",
+      "....ggggggg.....", "....g.g.g.g.....", "....d.d.d.d.....",
+      ".....ororo......", ".....ooooo......", "......oOo.......",
+      "......ooo.......", ".......o........", ".......d........",
+    ],
+  ];
+  for (const [stage, pixels] of stages.entries()) {
+    api.texture(`carrots_stage${stage}`, {
+      size: 32,
+      source: "final-color",
+      palette: "carrot_crop",
+      base: "transparent",
+      exportPath: `assets/mclone/textures/block/carrots_stage${stage}.png`,
+      preview: { checkerboard: true, cube: false, rotation: false, tiling: "none" },
+      catalog: {
+        tiling: "none",
+        rotation: "model-driven",
+        tags: ["cutout", "crop", "carrots", `stage:${stage}`],
+      },
+      layers: [
+        api.mask({
+          colors: {
+            d: "leaf_dark",
+            g: "leaf",
+            l: "leaf_light",
+            o: "root",
+            O: "root_light",
+            r: "root_dark",
+          },
+          opacity: 1,
+          upscale: "nearest",
+          authoring: { role: "structure", label: `CARROTS STAGE ${stage}` },
+          pixels,
+        }),
+      ],
+    });
+  }
 }
 
 function defineFarmland(api: TextureLabApi, name: string, moist: boolean): void {

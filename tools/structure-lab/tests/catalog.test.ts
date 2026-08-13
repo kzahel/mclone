@@ -11,14 +11,14 @@ test("builds a public-safe catalog from checked Rust preview receipts", async ()
   const outRoot = path.join(parent, "catalog");
   try {
     const catalog = await buildWebCatalog({ outRoot, thumbnails: false });
-    assert.equal(catalog.summary.structures, 13);
-    assert.equal(catalog.summary.families, 3);
+    assert.equal(catalog.summary.structures, 14);
+    assert.equal(catalog.summary.families, 4);
     const standard = catalog.structures.find(
       (entry) => entry.structureId === "farmstead-cottage-a-v2",
     );
     assert.ok(standard);
     assert.equal(standard.runtimeStatus, "promoted");
-    assert.equal(catalog.summary.runtimePromoted, 12);
+    assert.equal(catalog.summary.runtimePromoted, 13);
     assert.equal(
       catalog.structures.find(
         (entry) => entry.structureId === "farmstead-rosehip-chicken-coop-v1",

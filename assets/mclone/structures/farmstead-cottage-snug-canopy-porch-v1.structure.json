@@ -1338,7 +1338,7 @@
   "provenance": {
     "compilerId": "mclone-structure-dsl-v2",
     "sourcePath": "tools/structure-lab/examples/cottage_snug_canopy/structure.ts",
-    "sourceSha256": "a2648047579ee9fcd71b568097d25956a61eee706209c77e5287289a21283a87",
-    "semanticSha256": "8e74f0a51a10aec2587f33d29861d6e6499273d9e3856a921e6504f705217dfc"
+    "sourceSha256": "ce1165cbbe41ab2a6f2548ae30a847dab45a7f52383b5321cf0226d1fbeb2199",
+    "semanticSha256": "eef0eddee2435f64106bd986b6e8669fd31c2409dfd73329d3acef48c428d89a"
   }
 }

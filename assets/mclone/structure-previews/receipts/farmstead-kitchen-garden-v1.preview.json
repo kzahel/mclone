@@ -1,0 +1,219 @@
+{
+  "schemaVersion": 1,
+  "compilerId": "mclone-structure-preview-v1",
+  "structureId": "farmstead-kitchen-garden-v1",
+  "label": "Kitchen Garden",
+  "description": "A compact fenced kitchen garden with a working gate, a central irrigation run, and mixed wheat and carrot beds.",
+  "category": "infrastructure",
+  "tags": [
+    "crops",
+    "farmstead",
+    "garden",
+    "starter-settlement"
+  ],
+  "family": {
+    "id": "farmstead-garden",
+    "member": "kitchen-mixed-crops",
+    "label": "Farmstead Garden"
+  },
+  "size": [
+    13,
+    2,
+    13
+  ],
+  "authoredOperationCount": 253,
+  "placedBlockCount": 253,
+  "materialBill": [
+    {
+      "paletteKey": "carrotGrowing",
+      "count": 8
+    },
+    {
+      "paletteKey": "cropPrimary",
+      "count": 16
+    },
+    {
+      "paletteKey": "cropSecondary",
+      "count": 16
+    },
+    {
+      "paletteKey": "fence",
+      "count": 35
+    },
+    {
+      "paletteKey": "gate",
+      "count": 1
+    },
+    {
+      "paletteKey": "grass",
+      "count": 106
+    },
+    {
+      "paletteKey": "path",
+      "count": 7
+    },
+    {
+      "paletteKey": "soil",
+      "count": 48
+    },
+    {
+      "paletteKey": "water",
+      "count": 8
+    },
+    {
+      "paletteKey": "wheatGrowing",
+      "count": 8
+    }
+  ],
+  "components": [
+    {
+      "id": "approach",
+      "label": "Gate approach and crossing",
+      "optional": false,
+      "blockCount": 7
+    },
+    {
+      "id": "beds",
+      "label": "Hydrated mixed crop beds",
+      "optional": false,
+      "blockCount": 96
+    },
+    {
+      "id": "boundary",
+      "label": "Connected oak enclosure",
+      "optional": false,
+      "blockCount": 142
+    },
+    {
+      "id": "irrigation",
+      "label": "Central irrigation run",
+      "optional": false,
+      "blockCount": 8
+    }
+  ],
+  "markers": [
+    {
+      "kind": "water:irrigation",
+      "pos": [
+        3,
+        0,
+        6
+      ]
+    },
+    {
+      "kind": "entrance:south",
+      "pos": [
+        6,
+        1,
+        12
+      ]
+    },
+    {
+      "kind": "harvest:carrots",
+      "pos": [
+        8,
+        1,
+        7
+      ]
+    }
+  ],
+  "sockets": [
+    {
+      "id": "south-path",
+      "kind": "attachment:path",
+      "pos": [
+        6,
+        0,
+        12
+      ],
+      "facing": "south"
+    }
+  ],
+  "defaultTheme": "oak-wheat-and-carrots-v1",
+  "geometry": {
+    "vertexCount": 7364,
+    "indexCount": 11046,
+    "faceCount": 1841,
+    "boundsMin": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "boundsMax": [
+      13.0,
+      2.0,
+      13.0
+    ],
+    "solidFaceCount": 23,
+    "cutoutFaceCount": 1778,
+    "translucentFaceCount": 40,
+    "componentGroups": [
+      {
+        "id": "approach",
+        "faceCount": 23
+      },
+      {
+        "id": "beds",
+        "faceCount": 440
+      },
+      {
+        "id": "boundary",
+        "faceCount": 1338
+      },
+      {
+        "id": "irrigation",
+        "faceCount": 40
+      }
+    ],
+    "verticalLayers": [
+      {
+        "y": 0,
+        "faceCount": 610
+      },
+      {
+        "y": 1,
+        "faceCount": 1231
+      }
+    ]
+  },
+  "artifacts": {
+    "meshPath": "meshes/farmstead-kitchen-garden-v1.glb",
+    "meshSha256": "fcb60467825025812549211662972fe40a4303496e361cd68ae474c2dc9dec7a",
+    "atlasPath": "atlases/terrain-c5e939a662b5a73fbeddad6776eaafa9efc77831f7fdc8e60873786f7d0538fb.png",
+    "atlasSha256": "c5e939a662b5a73fbeddad6776eaafa9efc77831f7fdc8e60873786f7d0538fb",
+    "atlasWidth": 2048,
+    "atlasHeight": 256,
+    "atlasSpriteCount": 163
+  },
+  "source": {
+    "compilerId": "mclone-structure-dsl-v2",
+    "path": "tools/structure-lab/examples/kitchen_garden/structure.ts",
+    "sha256": "30c3d51e91c3bad596e988637b4b711e6f8310cfee7e2d367b33cc65dcdcd361",
+    "semanticSha256": "2d713679d248e2c97085837c153fb886b7e72351e6877ab7359a840db5eceed3"
+  },
+  "lighting": {
+    "id": "fixed-midday-full-bright-ao-v1",
+    "description": "Production face shading and ambient occlusion with full midday light baked into vertex colors."
+  },
+  "assetPacks": [
+    {
+      "id": "mclone-authored",
+      "origin": "first_party",
+      "contentFingerprint": "sha256:0894d1264a4602203402d4c246fa34842062dd9bfbd30e77a14dc25c3d4ef9a6",
+      "sha256": "6c865df61bb3cb0231779459d09010f3c56cc73e7b76ef5c4ca4d7f9a9a57e76"
+    },
+    {
+      "id": "mclone-generated-fallback",
+      "origin": "first_party_provisional",
+      "contentFingerprint": "sha256:4e3ebfcb1dd47105cf6d70b1ff6331b5d4882b3f6b5497b4e2cab4b2a8ee71d9",
+      "sha256": "ad37312c77af9943d39916bae41bc83b80e90ba2305386e70c274bed00d6f9e1"
+    }
+  ],
+  "assetProvenance": {
+    "firstParty": 2,
+    "generated": 0,
+    "minecraftReference": 0,
+    "unknown": 0,
+    "missing": 1
+  }
+}

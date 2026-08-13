@@ -28,6 +28,7 @@ export const FIRST_PARTY_STRUCTURES: readonly FirstPartyStructure[] = [
     "farmstead-rosehip-chicken-coop-v1",
     "lab-only",
   ),
+  firstPartyStructure("kitchen_garden", "farmstead-kitchen-garden-v1"),
 ];
 
 function firstPartyStructure(

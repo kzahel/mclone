@@ -27,7 +27,7 @@ use crate::{
 
 pub const INTRO_HOMESTEAD_PLAN_SCHEMA_VERSION: u32 = 1;
 pub const INTRO_HOMESTEAD_PLANNER_REVISION: u32 = 2;
-pub const INTRO_HOMESTEAD_COMPOSITION_REVISION: u32 = 2;
+pub const INTRO_HOMESTEAD_COMPOSITION_REVISION: u32 = 3;
 pub const INTRO_HOMESTEAD_PLAN_RECORD_REVISION: u64 = 1;
 
 const COTTAGE_STANDARD_JSON: &str = include_str!(concat!(
@@ -58,6 +58,10 @@ const COOP_JSON: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../../assets/mclone/structures/farmstead-rosehip-chicken-coop-v1.structure.json"
 ));
+const GARDEN_JSON: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../../assets/mclone/structures/farmstead-kitchen-garden-v1.structure.json"
+));
 
 pub(crate) fn load_homestead_structure_record(
     content_id: &str,
@@ -70,6 +74,7 @@ pub(crate) fn load_homestead_structure_record(
         "farmstead-barn-lean-to-a-v2" => LEAN_TO_STANDARD_JSON,
         "farmstead-barn-lean-to-short-v1" => LEAN_TO_SHORT_JSON,
         "farmstead-rosehip-chicken-coop-v1" => COOP_JSON,
+        "farmstead-kitchen-garden-v1" => GARDEN_JSON,
         _ => return Err(format!("unknown intro homestead content `{content_id}`")),
     };
     load_canonical_structure_json(json).map_err(|error| error.to_string())
@@ -486,6 +491,20 @@ pub fn compile_intro_homestead_plan(
             topology,
         )?);
     }
+    let garden_record =
+        load_canonical_structure_json(GARDEN_JSON).map_err(|error| error.to_string())?;
+    let garden_surface_y = grade_regions
+        .iter()
+        .find(|region| region.region_id == "garden-foundation-v1")
+        .expect("the working garden has a declared grade region")
+        .target_surface_y;
+    pieces.push(projected_garden_piece(
+        &selected,
+        selected.tier,
+        &garden_record,
+        garden_surface_y,
+        topology,
+    )?);
     for (piece_id, kind, content_id, forward_min, forward_max, right_min, right_max) in
         semantic_layout(selected.tier)
     {
@@ -518,6 +537,12 @@ pub fn compile_intro_homestead_plan(
             source_sha256: asset.record.provenance.source_sha256.clone(),
             semantic_sha256: asset.record.provenance.semantic_sha256.clone(),
         })
+        .chain(std::iter::once(HomesteadContentFingerprint {
+            content_id: garden_record.template.id().to_owned(),
+            compiler_id: garden_record.provenance.compiler_id.clone(),
+            source_sha256: garden_record.provenance.source_sha256.clone(),
+            semantic_sha256: garden_record.provenance.semantic_sha256.clone(),
+        }))
         .collect();
     let mut plan = IntroHomesteadPlanRecord {
         schema_version: INTRO_HOMESTEAD_PLAN_SCHEMA_VERSION,
@@ -700,6 +725,45 @@ fn semantic_piece(
     })
 }
 
+fn projected_garden_piece(
+    selected: &SelectedHomesteadSite,
+    tier: HomesteadCompositionTier,
+    record: &CanonicalStructureRecord,
+    surface_y: i32,
+    topology: HorizontalTopology,
+) -> Result<HomesteadPlanPiece, String> {
+    let [width, height, depth] = record.template.size();
+    let (forward, right) = garden_local_origin(tier);
+    let horizontal = local_bounds(
+        selected,
+        forward,
+        forward + width - 1,
+        right,
+        right + depth - 1,
+    );
+    let bounds = HomesteadPlanBounds3d {
+        min: [horizontal.min_x, surface_y - 3, horizontal.min_z],
+        max: [horizontal.max_x, surface_y + height + 6, horizontal.max_z],
+    };
+    Ok(HomesteadPlanPiece {
+        piece_id: "garden-v1".to_owned(),
+        kind: HomesteadPlanPieceKind::Garden,
+        content_id: record.template.id().to_owned(),
+        origin: bounds.min,
+        rotation: HomesteadPlanTemplateRotation::None,
+        touched_chunks: touched_chunks(bounds, topology)?,
+        bounds,
+        semantic_sha256: Some(record.provenance.semantic_sha256.clone()),
+    })
+}
+
+pub(super) const fn garden_local_origin(tier: HomesteadCompositionTier) -> (i32, i32) {
+    match tier {
+        HomesteadCompositionTier::FullV1 => (-34, 16),
+        HomesteadCompositionTier::CompactV1 => (-26, 12),
+    }
+}
+
 fn semantic_layout(
     tier: HomesteadCompositionTier,
 ) -> [(
@@ -710,18 +774,9 @@ fn semantic_layout(
     i32,
     i32,
     i32,
-); 4] {
+); 3] {
     let compact = tier == HomesteadCompositionTier::CompactV1;
     [
-        (
-            "garden-v1",
-            HomesteadPlanPieceKind::Garden,
-            "mclone:intro-homestead-garden-v1",
-            if compact { -28 } else { -38 },
-            if compact { -12 } else { -17 },
-            if compact { 10 } else { 14 },
-            if compact { 27 } else { 31 },
-        ),
         (
             "animal-yard-v1",
             HomesteadPlanPieceKind::AnimalYard,
@@ -757,7 +812,7 @@ fn grade_regions(
     selected: &SelectedHomesteadSite,
     tier: HomesteadCompositionTier,
 ) -> Result<Vec<HomesteadGradeRegion>, String> {
-    homestead_foundation_grade_specs(tier)
+    let mut regions = homestead_foundation_grade_specs(tier)
         .iter()
         .map(|spec| {
             let bounds = local_bounds(
@@ -774,7 +829,16 @@ fn grade_regions(
                 feather_blocks: spec.feather_blocks,
             })
         })
-        .collect()
+        .collect::<Result<Vec<_>, String>>()?;
+    let (forward, right) = garden_local_origin(tier);
+    let garden_bounds = local_bounds(selected, forward, forward + 12, right, right + 12);
+    regions.push(HomesteadGradeRegion {
+        region_id: "garden-foundation-v1".to_owned(),
+        target_surface_y: median_surface(source, garden_bounds)?,
+        bounds: garden_bounds,
+        feather_blocks: 2,
+    });
+    Ok(regions)
 }
 
 fn median_surface(
@@ -968,7 +1032,7 @@ mod tests {
         let plan = flat_plan();
         assert_eq!(plan.selected_site.tier, HomesteadCompositionTier::FullV1);
         assert_eq!(plan.pieces.len(), 10);
-        assert_eq!(plan.grade_regions.len(), 3);
+        assert_eq!(plan.grade_regions.len(), 4);
         assert_eq!(plan.resident_markers.len(), 2);
         assert_eq!(plan.arrival_path.width_blocks, 3);
         assert_eq!(
@@ -1031,7 +1095,7 @@ mod tests {
         );
         assert_eq!(
             plan.checksum_sha256,
-            "5daca45d879b28e72a7781e3c0e473264071660e817a34b6dfeeaa83543509ee"
+            "5ea0fc552ed3b131a4329b3fae9ca658a831157f15679ed84e665c18c0a75064"
         );
     }
 

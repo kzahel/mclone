@@ -62,7 +62,7 @@ test("browses the expanded barn family without allocating another canvas", async
   const canvas = page.locator("canvas[data-structure='farmstead-barn-core-a-v2']");
   await expect(canvas).toHaveAttribute("data-viewer-status", "ready");
   await expect(page.locator(".viewerHeader h2")).toHaveText("Working Red Barn");
-  await expect(page.locator(".summaryItem").first()).toContainText("13");
+  await expect(page.locator(".summaryItem").first()).toContainText("14");
   await expect(page.locator("canvas")).toHaveCount(1);
   await page.getByRole("searchbox", { name: "Find a structure" }).fill("lean-to");
   await expect(page.locator(".catalogCard")).toHaveCount(3);
@@ -82,5 +82,19 @@ test("presents a Structure-Lab-native coop as lab-only content", async ({ page }
   await expect(page.locator(".statusBadge").last()).toContainText("Lab only");
   await expect(page.locator(".detailList").first()).toContainText("Animal Chickens");
   await page.screenshot({ path: "/tmp/mclone-structure-lab-coop.png", fullPage: true });
+  expect(browserErrors).toEqual([]);
+});
+
+test("presents the promoted working kitchen garden", async ({ page }) => {
+  const browserErrors: string[] = [];
+  page.on("console", (message) => { if (message.type() === "error") browserErrors.push(message.text()); });
+  page.on("pageerror", (error) => browserErrors.push(error.stack ?? error.message));
+  await page.goto("/structures/?structure=farmstead-kitchen-garden-v1&camera=three-quarter");
+  const canvas = page.locator("canvas[data-structure='farmstead-kitchen-garden-v1']");
+  await expect(canvas).toHaveAttribute("data-viewer-status", "ready");
+  await expect(page.locator(".viewerHeader h2")).toHaveText("Kitchen Garden");
+  await expect(page.locator(".statusBadge").last()).toContainText("Runtime");
+  await expect(page.locator(".materialList")).toContainText("CarrotGrowing");
+  await page.screenshot({ path: "/tmp/mclone-structure-lab-kitchen-garden.png", fullPage: true });
   expect(browserErrors).toEqual([]);
 });

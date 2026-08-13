@@ -177,7 +177,7 @@ fn outline_shape(state: BlockStateId) -> Option<LocalShape> {
             Some(wheat_outline_shape(state.0 - terrain_id::WHEAT_AGE_0))
         }
         terrain_id::CARROTS_AGE_0..=terrain_id::CARROTS_AGE_7 => {
-            Some(wheat_outline_shape(state.0 - terrain_id::CARROTS_AGE_0))
+            Some(carrot_outline_shape(state.0 - terrain_id::CARROTS_AGE_0))
         }
         _ => Some(full_block()),
     }
@@ -294,6 +294,11 @@ fn farmland_shape() -> LocalShape {
 
 fn wheat_outline_shape(age: u32) -> LocalShape {
     let height = (age.clamp(0, 7) + 1) as f64 * 2.0 / 16.0;
+    local_box(0.0, 0.0, 0.0, 1.0, height, 1.0)
+}
+
+fn carrot_outline_shape(age: u32) -> LocalShape {
+    let height = (age.clamp(0, 7) + 2) as f64 / 16.0;
     local_box(0.0, 0.0, 0.0, 1.0, height, 1.0)
 }
 
@@ -1264,7 +1269,7 @@ mod tests {
         );
         assert_eq!(
             block_outline_aabbs(state(terrain_id::CARROTS_AGE_7), pos),
-            vec![Aabb::new(2.0, 64.0, -3.0, 3.0, 65.0, -2.0)]
+            vec![Aabb::new(2.0, 64.0, -3.0, 3.0, 64.5625, -2.0)]
         );
         assert_eq!(
             block_collision_aabb(state(terrain_id::CARROTS_AGE_7), pos),

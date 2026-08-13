@@ -1762,7 +1762,7 @@
   "provenance": {
     "compilerId": "mclone-structure-dsl-v2",
     "sourcePath": "tools/structure-lab/examples/cottage_deep_canopy/structure.ts",
-    "sourceSha256": "e0adb98e686378e33f3fdf1cd4f31bbc79204c5625b807f2ac66f09d90514739",
-    "semanticSha256": "76dc83f7ff9fd54dbee8808984fee7c4ff841c34717977e7dbf6aedffc934ca9"
+    "sourceSha256": "eae53a42dd103dfe3bf16d5a1024d7e79c55a43160acbf972770d098099a9799",
+    "semanticSha256": "408b6424dac982530b25d6d755d662b1f451283ba52bbcadfac55c86e3e7984b"
   }
 }

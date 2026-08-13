@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt;
 
-use mclone_core::{BlockPos, ChunkPos};
+use mclone_core::{BlockPos, ChunkPos, Direction};
 
 use crate::block::{
     OAK_LOG_X, OAK_LOG_Z, OakFenceState, RawBlockId, SPRUCE_LOG_X, SPRUCE_LOG_Z,
@@ -46,6 +46,11 @@ pub enum TemplateMaterialRole {
     Trim,
     Floor,
     Accent,
+    Fence,
+    Gate,
+    Soil,
+    CropPrimary,
+    CropSecondary,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -133,6 +138,7 @@ impl StructureTemplate {
             ),
         };
         let mut blocks = BTreeMap::new();
+        let mut connected_fence_roles = BTreeSet::new();
         for block in &self.blocks {
             let local_pos = transform_pos(
                 block.local_pos,
@@ -151,13 +157,18 @@ impl StructureTemplate {
                     })?
                 }
             };
+            let placed_pos = settings
+                .origin
+                .offset(local_pos.x, local_pos.y, local_pos.z);
+            if block.state == TemplateBlockState::Role(TemplateMaterialRole::Fence) {
+                connected_fence_roles.insert(placed_pos);
+            }
             blocks.insert(
-                settings
-                    .origin
-                    .offset(local_pos.x, local_pos.y, local_pos.z),
+                placed_pos,
                 transform_block_state(raw, settings.mirror, settings.rotation),
             );
         }
+        resolve_connected_fence_roles(&mut blocks, &connected_fence_roles);
 
         let mut markers = self
             .markers
@@ -194,6 +205,46 @@ impl StructureTemplate {
             markers,
         })
     }
+}
+
+fn resolve_connected_fence_roles(
+    blocks: &mut BTreeMap<BlockPos, RawBlockId>,
+    connected_fence_roles: &BTreeSet<BlockPos>,
+) {
+    let resolved = connected_fence_roles
+        .iter()
+        .filter_map(|pos| {
+            let current = *blocks.get(pos)?;
+            let mut state = oak_fence_state(current)?;
+            state.north = blocks
+                .get(&pos.relative(Direction::North))
+                .is_some_and(|block| authored_fence_connects_to(*block, Direction::North));
+            state.east = blocks
+                .get(&pos.relative(Direction::East))
+                .is_some_and(|block| authored_fence_connects_to(*block, Direction::East));
+            state.south = blocks
+                .get(&pos.relative(Direction::South))
+                .is_some_and(|block| authored_fence_connects_to(*block, Direction::South));
+            state.west = blocks
+                .get(&pos.relative(Direction::West))
+                .is_some_and(|block| authored_fence_connects_to(*block, Direction::West));
+            Some((*pos, oak_fence_for_state(state)))
+        })
+        .collect::<Vec<_>>();
+    for (pos, state) in resolved {
+        blocks.insert(pos, state);
+    }
+}
+
+fn authored_fence_connects_to(block: RawBlockId, direction: Direction) -> bool {
+    if oak_fence_state(block).is_some() {
+        return true;
+    }
+    oak_fence_gate_state(block).is_some_and(|gate| {
+        let gate_axis_x = gate.facing == 1 || gate.facing == 3;
+        let direction_axis_z = matches!(direction, Direction::North | Direction::South);
+        gate_axis_x == direction_axis_z
+    })
 }
 
 #[derive(Clone, Debug)]

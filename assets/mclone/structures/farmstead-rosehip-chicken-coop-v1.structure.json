@@ -654,7 +654,7 @@
   "provenance": {
     "compilerId": "mclone-structure-dsl-v2",
     "sourcePath": "tools/structure-lab/examples/coop_rosehip/structure.ts",
-    "sourceSha256": "69c9c3d3a35382697d783b3c022e586fd989b7084196b70c796e04fb561e9d2a",
-    "semanticSha256": "61ee5b186e1f3a7ba23484441364ecd6f52d214b726c5ec41a8aff0d3f3f4e1e"
+    "sourceSha256": "b60d4b374d1efdec86dc85990a90f42e53031e92018a87d562abe4352fba5899",
+    "semanticSha256": "8ac9715f3135030c6a7bf739f34654695d43ae127a0f958a1133a3315c55b4a6"
   }
 }

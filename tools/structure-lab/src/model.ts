@@ -17,6 +17,11 @@ export const MATERIAL_ROLES = [
   "trim",
   "floor",
   "accent",
+  "fence",
+  "gate",
+  "soil",
+  "cropPrimary",
+  "cropSecondary",
 ] as const;
 
 export type MaterialRole = typeof MATERIAL_ROLES[number];

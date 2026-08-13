@@ -21,7 +21,7 @@ test("discovers and round-trips every canonical TypeScript structure", async () 
 });
 
 test("the standard cottage remains a promoted family member", async () => {
-  assert.equal(FIRST_PARTY_STRUCTURES.length, 13);
+  assert.equal(FIRST_PARTY_STRUCTURES.length, 14);
   const standard = FIRST_PARTY_STRUCTURES.find(
     (entry) => entry.runtimeStructureId === "farmstead-cottage-a-v2",
   );

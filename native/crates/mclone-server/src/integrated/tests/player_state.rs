@@ -131,7 +131,7 @@ fn new_world_metadata_persists_realized_starter_plan_orthogonally() {
     );
     assert_eq!(
         server.intro_homestead_plan().unwrap().checksum_sha256,
-        "5daca45d879b28e72a7781e3c0e473264071660e817a34b6dfeeaa83543509ee"
+        "5ea0fc552ed3b131a4329b3fae9ca658a831157f15679ed84e665c18c0a75064"
     );
 }
 

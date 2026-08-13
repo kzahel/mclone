@@ -811,9 +811,9 @@ mod tests {
             receipt,
             HomesteadTerrainPlacementReceipt {
                 affected: true,
-                graded_columns: 1_313,
-                cut_blocks: 754,
-                fill_blocks: 732,
+                graded_columns: 1_469,
+                cut_blocks: 767,
+                fill_blocks: 916,
                 maximum_cut_depth: 3,
                 maximum_fill_depth: 2,
                 cleared_reserved_decorations: 2_439,
@@ -822,7 +822,7 @@ mod tests {
                 pond_water_blocks: 118,
                 pond_bottom_blocks: 78,
                 pond_bank_fill_blocks: 24,
-                changed_blocks: 4_838,
+                changed_blocks: 5_053,
             }
         );
 
