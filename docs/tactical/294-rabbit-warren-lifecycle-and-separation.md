@@ -1,6 +1,7 @@
 # Tactical 294: Rabbit Warren Lifecycle and Separation
 
-Status: active 2026-08-13
+Status: implementation and local desktop/phone acceptance complete 2026-08-13;
+exact public deployment pending
 
 Topic: `rabbit-burrow-ecology`
 
@@ -78,8 +79,10 @@ ordinary world mechanics and may not branch on a showcase ID.
 ### Disturbance, collapse, and resettlement
 
 - The normal attack ray may select a rabbit burrow with any held item while
-  deer remain spear-only. Server reach, target identity, line of sight, world
-  permissions, and authoritative kind are revalidated.
+  deer remain spear-only. The client must select the exact rendered entity;
+  the server revalidates authoritative identity, kind, mutable-world policy,
+  and Java-shaped less-than-six-block entity interaction reach. It does not
+  reconstruct a second camera ray from a potentially older server tick.
 - A hit adds bounded, decaying disturbance to the persisted habitat prop.
   Disturbed mouths are temporarily unsafe: resident rabbits visibly flush
   from deep shelter and flee from a nearby player while retaining the home if
@@ -152,4 +155,55 @@ the fresh URL.
 
 ## Execution Record
 
-Pending implementation and validation.
+Four commits implement this correction:
+
+- `8a13b9a6` records this tactical and the reference/ownership decision;
+- `771cd3a3` cancels stale carrot raids immediately, adds staggered active
+  rests that exercise visible entry/deep hiding/same-ID emergence, and applies
+  deterministic collision-respecting soft separation to visible rabbits;
+- `ec258b27` turns the persisted disturbance field into ordinary habitat
+  damage, alarm, three-hit collapse, resident survival, home invalidation,
+  replacement founding, and full-warren mature-offspring dispersal; and
+- `6916abed` advances the bounded data recipe to revision 3 and proves the
+  lifecycle through ordinary keyboard and rendered phone controls.
+
+Burrow structural damage is persisted separately from decaying alarm. Entity
+chunk format 10 writes that damage; format 9 migrates it to zero. A disturbed
+mouth flushes hidden residents without deleting their home. The third hit
+removes the semantic mouth, clears resident home links, makes every loaded
+resident visible, and preserves entity, persistent, family, and lineage IDs.
+Full occupancy releases one stable mature child with recorded parents into the
+existing unhomed founder loop rather than inventing a second population path.
+
+The revision 3 recipe remains deny-unknown-fields data with no behavior
+commands. Its bounded 720-tick desktop and phone gates independently observed
+all four initial IDs hide and later return, zero sustained overlap samples,
+two carrot decrements only after the off-axis gate opened, three ordinary
+mouth attacks, survival of every initial rabbit, removal of the original
+mouth, and replacement mouths with new semantic IDs. All eight IndexedDB
+world-record stores remained empty in both lanes.
+
+Inspected local pixels are:
+
+- native flat composition `/tmp/mclone-rabbit-burrow.png`, digest
+  `a154f6a4e9839c0fc8013be96b7ff5bf4ae4935ced4d3090e1b36a1b5ca27ce9`;
+- native stereo `/tmp/mclone-rabbit-burrow-stereo.png`, digest
+  `32a8947fa83b9c923f1cd88bbabe4dec82f849d50f2e31e8c2bfe0054ed4e232`;
+- local Web desktop
+  `/tmp/mclone-native-web-showcase-rabbit-burrow.png`, digest
+  `b59d8907650b0eaee3db61f74afc7a501f88bd9d7dfd325c8fb7bee221a3767d`;
+  and
+- local Web phone
+  `/tmp/mclone-native-web-mobile-showcase-rabbit-burrow.png`, digest
+  `1a671dbe800cc910fe2349dcf14bd9204aeee3b5220b9197752b0b52dfe1e6f1`.
+
+Focused mob, store, integrated interaction, showcase-schema, and persistence
+tests pass. `cargo fmt --check`, thin-adapter purity, the Web build, desktop
+offscreen smoke, and native rabbit flat/stereo capture also pass. Two parallel
+`cargo test --workspace` runs each reached 698/699 server-library tests but
+hit the pre-existing timing-sensitive
+`homestead_residents_reopen_once_and_removed_residents_stay_removed` test;
+that test passes alone, and the complete `mclone-server` library passes 699/699
+with `--test-threads=1`. No unrelated timing policy was changed in this slice.
+
+Exact pushed/deployed desktop and phone receipts remain the close condition.

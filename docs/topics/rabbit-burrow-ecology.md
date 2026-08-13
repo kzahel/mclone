@@ -5,7 +5,11 @@ Topic: `rabbit-burrow-ecology`
 Status: **live shared implementation complete under Tacticals
 [`292`](../tactical/292-rabbit-burrow-ecology.md) and
 [`293`](../tactical/293-rabbit-navigation-and-burrow-visibility.md), including
-the shared A* routing and deep-burrow visibility correction on 2026-08-13.**
+the shared A* routing and deep-burrow visibility correction, with Tactical
+[`294`](../tactical/294-rabbit-warren-lifecycle-and-separation.md) locally
+accepted for shelter cadence, soft separation, disturbance, collapse,
+resident-safe resettlement, and full-warren dispersal on 2026-08-13. Exact
+public revision 3 deployment remains pending.**
 
 ## Purpose
 
@@ -39,10 +43,15 @@ recipe guardrails in [`playable-showcases.md`](playable-showcases.md).
   irregular earth lip, roots, and threshold within that cell. Geometry is
   presentation; server state owns identity, capacity, residents, and use.
 - The deeper warren is inaccessible compact simulation state. Player crawling,
-  tunnel graphs, general cave carving, and collapse are later systems that
-  require their own design.
+  tunnel graphs, general cave carving, and voxel cave-ins remain later systems
+  that require their own design. The semantic mouth itself takes ordinary
+  player damage and can collapse without pretending the compact warren is a
+  traversable cave.
 - Individual rabbits become durable when materialized. Going underground
   hides the same saved entity; it does not despawn and reroll an individual.
+- Housed rabbits take identity-staggered short rests during active hours, so
+  visible entry, true deep hiding, and same-identity emergence are observable
+  without freezing a review scene at night.
 - Natural Mclone founder rabbits must visibly qualify and dig a site. A
   showcase may start from the resulting ordinary saved fact but cannot be the
   only producer.
@@ -56,6 +65,16 @@ recipe guardrails in [`playable-showcases.md`](playable-showcases.md).
 - Closed fences and gates exclude rabbits through ordinary collision/path
   facts; open gates are traversable. No garden/showcase coordinate exceptions
   are permitted.
+- Visible rabbits use bounded mutual soft pushes resolved through ordinary
+  block collision. Contact at a mouth remains possible, but sustained
+  same-space occupation is not normal behavior.
+- A hit alarms a mouth and flushes deep residents. Three prompt hits collapse
+  it; residents survive with their identities and family links, lose the
+  invalid home, flee, and reuse ordinary habitat qualification and excavation
+  to resettle.
+- At capacity, a stable mature descendant with recorded parents disperses into
+  the same unhomed founder loop. Founders and kits are not selected merely to
+  create room.
 - Terrain-surface decals remain a separate general concern. Loose-earth decal
   blending may improve the mouth later but cannot become a rabbit-specific
   renderer.
@@ -103,6 +122,17 @@ Tactical 292 has landed the complete first chapter:
   snapshotted again with the same entity and persistent identity on emergence;
 - a held carrot tempts rabbits; using one on a reachable adult consumes the
   item and two compatible fed residents can create one durable smaller kit;
+- a harvested raid target cancels on that block-change tick instead of letting
+  a rabbit finish a chew epoch at air;
+- active-hour rests now exercise the full mouth-entry, untracked underground,
+  and same-ID emergence loop; visible pairs receive deterministic soft
+  separation without being pushed through fences or banks;
+- ordinary cross-platform attacks alarm a mouth, and the third prompt hit
+  collapses it. Loaded residents are flushed alive, retain identity and family
+  truth, lose the invalid home, and can excavate replacement mouths. Persisted
+  damage is covered by current-format roundtrip and legacy-format migration;
+- full warrens release a stable mature offspring with recorded parents through
+  the ordinary founder path;
 - six normal evidence paths drive field notes, and real rabbit state emits
   bounded spatial thump and dig cues from the first-party CC0 sound bank; and
 - the deny-unknown-fields `rabbit-burrow` recipe composes these facts without
@@ -123,10 +153,17 @@ and phone under Cloudflare Worker version
 `61ee5243-c972-4f2a-8dcb-7d1a175fe0e9`. The temporary review link is
 `https://mclone.kzahel.com/app.html?showcase=rabbit-burrow`.
 
+Tactical 294 revision 3 local acceptance then observed every initial rabbit ID
+hide and return, no sustained near-zero pair overlap, the protected-garden
+route and two real raids, three normal attacks that removed the exact initial
+mouth, survival of all initial residents, and ordinary replacement mouths in
+both desktop and phone lanes. All browser world-record stores remained empty.
+Its exact public receipt is pending.
+
 ## Deliberate Later Work
 
 - player-accessible tunnels, expanding warrens, multiple linked entrances,
-  collapse, repair, trapping, relocation, artificial burrow boxes, predators,
+  voxel cave-ins, repair, trapping, relocation, artificial burrow boxes, predators,
   and population-summary simulation;
 - rabbit variants, fur/resource loops, taming, richer genetics, disease,
   seasons, temperature, crop economics, and cooking;
@@ -147,10 +184,10 @@ and phone under Cloudflare Worker version
 
 ## Recommended Next Direction
 
-Human review should now judge whether the off-axis opening produces believable
-garden navigation, whether deep sheltering reads cleanly as disappearance into
-the compact warren, and whether garden pressure, retreat, and family life stay
-interesting outside the bounded receipt. If this chapter holds up, the next
-ecology slice should deepen a reusable stewardship consequence—food/cooking,
-crop yield, protected habitat, or predator pressure—rather than immediately
-add another decorative animal.
+Human review should now judge whether staggered sheltering reads clearly as
+disappearance into the compact warren, whether mutual pushes make groups feel
+alive without looking slippery, and whether alarm, collapse, and autonomous
+resettlement form a legible stewardship consequence outside the bounded
+receipt. The next ecology slice should deepen food/cooking, crop yield,
+protected habitat, or predator pressure rather than immediately add another
+decorative animal.

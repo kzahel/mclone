@@ -547,6 +547,16 @@ browser world-record store stayed empty. Feeding is no longer part of this
 autonomous-route window; the ordinary authoritative feeding interaction keeps
 focused server coverage and its earlier public receipt.
 
+Tactical
+[`294`](../tactical/294-rabbit-warren-lifecycle-and-separation.md) advances
+`rabbit-burrow` to revision 3 without adding behavior data. Its ordinary
+720-tick local desktop and phone windows observed every initial rabbit ID hide
+and later return, no sustained near-zero overlap, the protected off-axis
+garden route and two raids, three player attacks that collapsed the exact
+initial mouth, survival of all four initial rabbits, and newly excavated
+replacement mouths. All eight browser world-record stores remained empty in
+both lanes. Exact public revision 3 acceptance is pending.
+
 ## Code and Documentation Map
 
 - `assets/mclone/showcases/`: readable showcase recipes
