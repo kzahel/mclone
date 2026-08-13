@@ -6,7 +6,7 @@ mod population;
 use mclone_core::{CHUNK_WIDTH, chunk_min_block_coord};
 
 use crate::block::{
-    AIR, BEDROCK, DIRT, GRASS_BLOCK, GRAVEL, ICE, LAVA, SAND, SANDSTONE, STONE, WATER,
+    AIR, BEDROCK, DIRT, GRASS_BLOCK, GRAVEL, ICE, LAVA, RawBlockId, SAND, SANDSTONE, STONE, WATER,
 };
 use crate::prng::SimpleRandomSource;
 
@@ -473,7 +473,7 @@ pub fn beta_semantic_bytes(chunk: &GeneratedChunk) -> Vec<u8> {
     bytes
 }
 
-pub const fn beta_semantic_block_id(native: u8) -> Option<u8> {
+pub const fn beta_semantic_block_id(native: RawBlockId) -> Option<u8> {
     match native {
         AIR => Some(0),
         STONE => Some(1),

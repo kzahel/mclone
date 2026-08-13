@@ -1,5 +1,5 @@
 use mclone_core::{CHUNK_WIDTH, ChunkPos};
-use mclone_worldgen::block::{AIR, WATER};
+use mclone_worldgen::block::{AIR, RawBlockId, WATER};
 use mclone_worldgen::levelgen::{
     GeneratedChunk, McloneOverworldFeatureDependencyCache,
     McloneOverworldFeatureDependencyCacheReport, OverworldFeatureDependencyCache,
@@ -41,7 +41,7 @@ pub struct CanonicalTerrainChunk {
     pub chunk_z: i32,
     pub min_y: i32,
     pub height: i32,
-    pub blocks: Vec<u8>,
+    pub blocks: Vec<RawBlockId>,
     pub biomes: Vec<i32>,
     pub fingerprint: u64,
     pub dependency_cache: CanonicalTerrainDependencyCacheReport,
@@ -71,15 +71,15 @@ impl CanonicalTerrainChunk {
         }
     }
 
-    pub fn presentation_blocks(&self, visibility: CanonicalTerrainVisibility) -> Vec<u8> {
+    pub fn presentation_blocks(&self, visibility: CanonicalTerrainVisibility) -> Vec<RawBlockId> {
         canonical_terrain_presentation_blocks(&self.blocks, visibility)
     }
 }
 
 pub fn canonical_terrain_presentation_blocks(
-    blocks: &[u8],
+    blocks: &[RawBlockId],
     visibility: CanonicalTerrainVisibility,
-) -> Vec<u8> {
+) -> Vec<RawBlockId> {
     if visibility.vegetation {
         return blocks.to_vec();
     }
@@ -275,7 +275,9 @@ fn canonical_terrain_fingerprint(chunk: &GeneratedChunk) -> u64 {
     ] {
         hash = fnv1a_extend(hash, bytes);
     }
-    hash = fnv1a_extend(hash, chunk.blocks());
+    for block in chunk.blocks() {
+        hash = fnv1a_extend(hash, &block.to_le_bytes());
+    }
     for biome in chunk.biomes() {
         hash = fnv1a_extend(hash, &biome.to_le_bytes());
     }
@@ -290,7 +292,7 @@ fn fnv1a_extend(mut hash: u64, bytes: &[u8]) -> u64 {
     hash
 }
 
-fn canonical_preview_without_vegetation(block: u8) -> u8 {
+fn canonical_preview_without_vegetation(block: RawBlockId) -> RawBlockId {
     if matches!(block, 107..=120 | 179..=208) {
         // Sea plants and coral are waterlogged in the production catalogue.
         // Removing their visible model should preserve the water volume.

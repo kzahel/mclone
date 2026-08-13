@@ -1,4 +1,5 @@
 use crate::biome::OverworldBiomeSource;
+use crate::block::RawBlockId;
 use crate::levelgen::MutableChunkBlockBuffer;
 use crate::prng::{RandomSource, SimpleRandomSource, WorldgenRandom};
 use mclone_core::{
@@ -16,43 +17,43 @@ const COS_OFFSET: f32 = 16_384.0_f32;
 const PI: f32 = std::f32::consts::PI;
 const TWO_PI: f32 = PI * 2.0;
 
-const AIR: u8 = 0;
-const STONE: u8 = 1;
-const WATER: u8 = 2;
-const GRASS_BLOCK: u8 = 4;
-const DIRT: u8 = 5;
-const SAND: u8 = 6;
-const GRAVEL: u8 = 7;
-const SNOW: u8 = 8;
-const LAVA: u8 = 9;
-const GRANITE: u8 = 10;
-const DIORITE: u8 = 11;
-const ANDESITE: u8 = 12;
-const COARSE_DIRT: u8 = 13;
-const PODZOL: u8 = 14;
-const MYCELIUM: u8 = 15;
-const TERRACOTTA: u8 = 16;
-const WHITE_TERRACOTTA: u8 = 17;
-const ORANGE_TERRACOTTA: u8 = 18;
-const MAGENTA_TERRACOTTA: u8 = 19;
-const LIGHT_BLUE_TERRACOTTA: u8 = 20;
-const YELLOW_TERRACOTTA: u8 = 21;
-const LIME_TERRACOTTA: u8 = 22;
-const PINK_TERRACOTTA: u8 = 23;
-const GRAY_TERRACOTTA: u8 = 24;
-const LIGHT_GRAY_TERRACOTTA: u8 = 25;
-const CYAN_TERRACOTTA: u8 = 26;
-const PURPLE_TERRACOTTA: u8 = 27;
-const BLUE_TERRACOTTA: u8 = 28;
-const BROWN_TERRACOTTA: u8 = 29;
-const GREEN_TERRACOTTA: u8 = 30;
-const RED_TERRACOTTA: u8 = 31;
-const BLACK_TERRACOTTA: u8 = 32;
-const SANDSTONE: u8 = 33;
-const RED_SANDSTONE: u8 = 34;
-const PACKED_ICE: u8 = 35;
-const OBSIDIAN: u8 = 36;
-const MAGMA_BLOCK: u8 = 37;
+const AIR: RawBlockId = 0;
+const STONE: RawBlockId = 1;
+const WATER: RawBlockId = 2;
+const GRASS_BLOCK: RawBlockId = 4;
+const DIRT: RawBlockId = 5;
+const SAND: RawBlockId = 6;
+const GRAVEL: RawBlockId = 7;
+const SNOW: RawBlockId = 8;
+const LAVA: RawBlockId = 9;
+const GRANITE: RawBlockId = 10;
+const DIORITE: RawBlockId = 11;
+const ANDESITE: RawBlockId = 12;
+const COARSE_DIRT: RawBlockId = 13;
+const PODZOL: RawBlockId = 14;
+const MYCELIUM: RawBlockId = 15;
+const TERRACOTTA: RawBlockId = 16;
+const WHITE_TERRACOTTA: RawBlockId = 17;
+const ORANGE_TERRACOTTA: RawBlockId = 18;
+const MAGENTA_TERRACOTTA: RawBlockId = 19;
+const LIGHT_BLUE_TERRACOTTA: RawBlockId = 20;
+const YELLOW_TERRACOTTA: RawBlockId = 21;
+const LIME_TERRACOTTA: RawBlockId = 22;
+const PINK_TERRACOTTA: RawBlockId = 23;
+const GRAY_TERRACOTTA: RawBlockId = 24;
+const LIGHT_GRAY_TERRACOTTA: RawBlockId = 25;
+const CYAN_TERRACOTTA: RawBlockId = 26;
+const PURPLE_TERRACOTTA: RawBlockId = 27;
+const BLUE_TERRACOTTA: RawBlockId = 28;
+const BROWN_TERRACOTTA: RawBlockId = 29;
+const GREEN_TERRACOTTA: RawBlockId = 30;
+const RED_TERRACOTTA: RawBlockId = 31;
+const BLACK_TERRACOTTA: RawBlockId = 32;
+const SANDSTONE: RawBlockId = 33;
+const RED_SANDSTONE: RawBlockId = 34;
+const PACKED_ICE: RawBlockId = 35;
+const OBSIDIAN: RawBlockId = 36;
+const MAGMA_BLOCK: RawBlockId = 37;
 
 const MAGMA_BLOCK_TARGET: &str = "minecraft:magma_block";
 const WATER_TARGET: &str = "minecraft:water";
@@ -1205,7 +1206,7 @@ fn get_carve_state(
     config: &CarverConfiguration,
     y: i32,
     _random: &mut SimpleRandomSource,
-) -> u8 {
+) -> RawBlockId {
     if y <= config.lava_level(context) {
         LAVA
     } else if !config.aquifers_enabled {
@@ -1219,14 +1220,14 @@ fn get_carve_state(
     }
 }
 
-fn can_replace_block(current: u8, above: u8) -> bool {
+fn can_replace_block(current: RawBlockId, above: RawBlockId) -> bool {
     match current {
         SAND | GRAVEL => !is_water(above),
         _ => can_replace_block_without_above(current),
     }
 }
 
-fn can_replace_block_without_above(block: u8) -> bool {
+fn can_replace_block_without_above(block: RawBlockId) -> bool {
     matches!(
         block,
         STONE
@@ -1262,17 +1263,17 @@ fn can_replace_block_without_above(block: u8) -> bool {
     )
 }
 
-fn can_replace_underwater_block(replacement: CarverReplacement, block: u8) -> bool {
+fn can_replace_underwater_block(replacement: CarverReplacement, block: RawBlockId) -> bool {
     can_replace_block_without_above(block)
         || matches!(block, SAND | GRAVEL | WATER | LAVA | OBSIDIAN | PACKED_ICE)
         || (matches!(replacement, CarverReplacement::UnderwaterCanyon) && block == AIR)
 }
 
-fn is_grass_or_mycelium(block: u8) -> bool {
+fn is_grass_or_mycelium(block: RawBlockId) -> bool {
     block == GRASS_BLOCK || block == MYCELIUM
 }
 
-fn is_water(block: u8) -> bool {
+fn is_water(block: RawBlockId) -> bool {
     block == WATER
 }
 
@@ -1632,14 +1633,14 @@ mod tests {
         assert_ticks_match(chunk.liquid_ticks(), &carved.liquid_ticks);
     }
 
-    fn assert_blocks_match(actual: &[u8], expected: &[u8], min_y: i32, height: i32) {
+    fn assert_blocks_match(actual: &[RawBlockId], expected: &[u8], min_y: i32, height: i32) {
         assert_eq!(actual.len(), expected.len());
         let mismatches: Vec<_> = actual
             .iter()
             .zip(expected.iter())
             .enumerate()
             .filter_map(|(index, (&actual, &expected))| {
-                (actual != expected).then(|| {
+                (actual != RawBlockId::from(expected)).then(|| {
                     let local_y = index as i32 / 256;
                     let within_layer = index as i32 % 256;
                     let local_z = within_layer / 16;
@@ -1651,12 +1652,14 @@ mod tests {
 
         if !mismatches.is_empty() {
             let sample: Vec<_> = mismatches.iter().take(16).copied().collect();
-            let max_block = actual
-                .iter()
-                .chain(expected.iter())
-                .copied()
-                .max()
-                .unwrap_or(0) as usize;
+            let max_block = actual.iter().copied().max().unwrap_or(0).max(
+                expected
+                    .iter()
+                    .copied()
+                    .map(RawBlockId::from)
+                    .max()
+                    .unwrap_or(0),
+            ) as usize;
             let mut actual_counts = vec![0_usize; max_block + 1];
             let mut expected_counts = vec![0_usize; max_block + 1];
             for &block in actual {

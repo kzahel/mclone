@@ -12,7 +12,7 @@ use mclone_worldgen::block::{
     ACACIA_LOG, AIR, BAMBOO, BIRCH_LOG, BROWN_MUSHROOM_BLOCK, COARSE_DIRT, DARK_OAK_LOG, DIRT,
     GRASS_BLOCK, GRAVEL, JUNGLE_LOG, LARGE_FERN_LOWER, LARGE_FERN_UPPER, LILAC_LOWER, LILAC_UPPER,
     MUSHROOM_STEM, OAK_LOG, PEONY_LOWER, PEONY_UPPER, RED_MUSHROOM_BLOCK, ROSE_BUSH_LOWER,
-    ROSE_BUSH_UPPER, SPRUCE_LOG, SUNFLOWER_LOWER, SUNFLOWER_UPPER, TALL_GRASS_LOWER,
+    ROSE_BUSH_UPPER, RawBlockId, SPRUCE_LOG, SUNFLOWER_LOWER, SUNFLOWER_UPPER, TALL_GRASS_LOWER,
     TALL_GRASS_UPPER, WATER, base_block_id, is_air_like, is_bamboo, is_cocoa, is_leaves, is_vine,
     material_blocks_motion,
 };
@@ -418,7 +418,7 @@ fn grade_column(
     local_z: i32,
     natural_surface_y: i32,
     target_surface_y: i32,
-    surface_block: Option<u8>,
+    surface_block: Option<RawBlockId>,
     receipt: &mut HomesteadTerrainPlacementReceipt,
 ) -> Result<(), String> {
     require_vertical(chunk, target_surface_y - 2, target_surface_y + 1)?;
@@ -471,7 +471,7 @@ fn set_block(
     local_x: i32,
     y: i32,
     local_z: i32,
-    block: u8,
+    block: RawBlockId,
     receipt: &mut HomesteadTerrainPlacementReceipt,
 ) {
     if chunk.block_at_y(local_x, y, local_z).0 != block {
@@ -577,7 +577,7 @@ fn pond_depth(bounds: HomesteadBounds2d, x: i32, z: i32, maximum_depth: u8) -> u
     }
 }
 
-fn path_surface_block(x: i32, z: i32) -> u8 {
+fn path_surface_block(x: i32, z: i32) -> RawBlockId {
     if (x.wrapping_mul(31) ^ z.wrapping_mul(17)).rem_euclid(5) == 0 {
         GRAVEL
     } else {
@@ -585,7 +585,7 @@ fn path_surface_block(x: i32, z: i32) -> u8 {
     }
 }
 
-fn is_reserved_decoration(block: u8) -> bool {
+fn is_reserved_decoration(block: RawBlockId) -> bool {
     is_leaves(block)
         || is_vine(block)
         || is_cocoa(block)
@@ -846,7 +846,7 @@ mod tests {
         x: i32,
         y: i32,
         z: i32,
-    ) -> Option<u8> {
+    ) -> Option<RawBlockId> {
         chunks
             .get(&ChunkPos::new(x.div_euclid(16), z.div_euclid(16)))
             .map(|chunk| chunk.block_at_y(x.rem_euclid(16), y, z.rem_euclid(16)).0)

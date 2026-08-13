@@ -11,6 +11,7 @@ use super::fields::{
 };
 use super::streams::{McloneOverworldStreamPlan, McloneOverworldStreamPlanCache};
 use super::surface::write_surface_column;
+use crate::block::RawBlockId;
 use crate::levelgen::chunk::sample_column_biome_payload;
 use crate::levelgen::profile::{FLAT_GRASS_HEIGHT, FLAT_GRASS_MIN_Y};
 use crate::levelgen::{GeneratedChunk, MutableChunkBlockBuffer};
@@ -297,7 +298,7 @@ fn hydraulic_block_at(
     world_x: i32,
     y: i32,
     world_z: i32,
-) -> Option<u8> {
+) -> Option<RawBlockId> {
     let pos = ChunkPos::new(block_to_chunk_coord(world_x), block_to_chunk_coord(world_z));
     let chunk = chunks.get(&pos)?;
     (y >= chunk.min_y && y < chunk.min_y + chunk.height).then(|| {
@@ -909,12 +910,11 @@ mod tests {
             let mut hash = 0xcbf2_9ce4_8422_2325_u64;
             for (chunk_x, chunk_z) in [(0, 0), (-17, 11), (31, -1)] {
                 let chunk = generate_mclone_overworld_surface_chunk(seed, chunk_x, chunk_z);
-                for byte in chunk
-                    .blocks()
-                    .iter()
-                    .copied()
-                    .chain(chunk.biomes().iter().flat_map(|id| id.to_le_bytes()))
-                {
+                for byte in chunk.blocks().iter().flat_map(|block| block.to_le_bytes()) {
+                    hash ^= u64::from(byte);
+                    hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+                }
+                for byte in chunk.biomes().iter().flat_map(|id| id.to_le_bytes()) {
                     hash ^= u64::from(byte);
                     hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
                 }
@@ -925,9 +925,9 @@ mod tests {
         assert_eq!(
             fingerprints,
             [
-                14_533_808_619_436_530_021,
-                14_808_440_699_220_437_904,
-                5_586_964_471_471_919_149,
+                12_644_984_267_279_927_397,
+                2_814_475_253_965_988_474,
+                1_967_058_863_224_171_115,
             ]
         );
     }

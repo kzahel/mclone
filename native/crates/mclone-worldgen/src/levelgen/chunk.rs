@@ -63,7 +63,7 @@ pub struct MutableChunkBlockBuffer {
     pub chunk_z: i32,
     pub min_y: i32,
     pub height: i32,
-    pub blocks: Vec<u8>,
+    pub blocks: Vec<RawBlockId>,
     worldgen_heightmaps: Option<ChunkWorldgenHeightmaps>,
     glow_lichen_faces: BTreeMap<usize, u8>,
     block_ticks: Vec<ScheduledTick>,
@@ -157,11 +157,11 @@ impl MutableChunkBlockBuffer {
         chunk
     }
 
-    pub fn get_block(&self, local_x: i32, local_y: i32, local_z: i32) -> u8 {
+    pub fn get_block(&self, local_x: i32, local_y: i32, local_z: i32) -> RawBlockId {
         self.blocks[chunk_block_index(local_x, local_y, local_z)]
     }
 
-    pub fn set_block(&mut self, local_x: i32, local_y: i32, local_z: i32, block_id: u8) {
+    pub fn set_block(&mut self, local_x: i32, local_y: i32, local_z: i32, block_id: RawBlockId) {
         let index = chunk_block_index(local_x, local_y, local_z);
         self.blocks[index] = block_id;
         if block_id != GLOW_LICHEN {
@@ -169,11 +169,11 @@ impl MutableChunkBlockBuffer {
         }
     }
 
-    pub fn get_block_at_y(&self, local_x: i32, y: i32, local_z: i32) -> u8 {
+    pub fn get_block_at_y(&self, local_x: i32, y: i32, local_z: i32) -> RawBlockId {
         self.get_block(local_x, y - self.min_y, local_z)
     }
 
-    pub fn set_block_at_y(&mut self, local_x: i32, y: i32, local_z: i32, block_id: u8) {
+    pub fn set_block_at_y(&mut self, local_x: i32, y: i32, local_z: i32, block_id: RawBlockId) {
         self.set_block(local_x, y - self.min_y, local_z, block_id);
     }
 
@@ -463,7 +463,7 @@ fn scan_heightmap_height(
     chunk: &MutableChunkBlockBuffer,
     local_x: i32,
     local_z: i32,
-    is_opaque: impl Fn(u8) -> bool,
+    is_opaque: impl Fn(RawBlockId) -> bool,
 ) -> i32 {
     for y in (chunk.min_y..chunk.min_y + chunk.height).rev() {
         if is_opaque(chunk.get_block_at_y(local_x, y, local_z)) {

@@ -322,11 +322,11 @@ fn sample_density_surface(
         display_y,
         water,
         biome,
-        approximate_surface_material,
+        approximate_surface_material: approximate_surface_material as u8,
         visible_material: if water {
-            WATER
+            WATER as u8
         } else {
-            inferred_surface_material
+            inferred_surface_material as u8
         },
     }
 }
@@ -341,7 +341,8 @@ mod tests {
 
     use crate::biome::get_layered_biome_by_id;
     use crate::block::{
-        COARSE_DIRT, DIRT, GRASS_BLOCK, GRAVEL, PODZOL, STONE, WATER, material_blocks_motion,
+        COARSE_DIRT, DIRT, GRASS_BLOCK, GRAVEL, PODZOL, RawBlockId, STONE, WATER,
+        material_blocks_motion,
     };
     use crate::levelgen::{
         GeneratedChunk, MutableChunkBlockBuffer, generate_overworld_surface_chunk,
@@ -537,8 +538,8 @@ mod tests {
         let local_z = local_block_coord(0);
         let actual_top = top_solid_block(&surface, local_x, local_z);
 
-        assert_ne!(sample.approximate_surface_material, AIR);
-        assert!(actual_top != AIR);
+        assert_ne!(sample.approximate_surface_material, AIR as u8);
+        assert!(actual_top != AIR as u8);
     }
 
     #[test]
@@ -587,7 +588,7 @@ mod tests {
         chunk: &MutableChunkBlockBuffer,
         local_x: i32,
         local_z: i32,
-        predicate: impl Fn(u8) -> bool,
+        predicate: impl Fn(RawBlockId) -> bool,
     ) -> i32 {
         for y in (chunk.min_y..chunk.min_y + chunk.height).rev() {
             if predicate(chunk.get_block_at_y(local_x, y, local_z)) {
@@ -597,7 +598,7 @@ mod tests {
         chunk.min_y
     }
 
-    fn top_block(chunk: &MutableChunkBlockBuffer, local_x: i32, local_z: i32) -> u8 {
+    fn top_block(chunk: &MutableChunkBlockBuffer, local_x: i32, local_z: i32) -> RawBlockId {
         let height = column_height(chunk, local_x, local_z, |block| block != AIR);
         if height == chunk.min_y {
             AIR
@@ -610,19 +611,19 @@ mod tests {
         for y in (chunk.min_y..chunk.min_y + chunk.height).rev() {
             let block = chunk.block_at_y(local_x, y, local_z).raw();
             if material_blocks_motion(block) {
-                return block;
+                return block as u8;
             }
         }
-        AIR
+        AIR as u8
     }
 
     fn top_non_air_block(chunk: &GeneratedChunk, local_x: i32, local_z: i32) -> u8 {
         for y in (chunk.min_y..chunk.min_y + chunk.height).rev() {
             let block = chunk.block_at_y(local_x, y, local_z).raw();
             if block != AIR {
-                return block;
+                return block as u8;
             }
         }
-        AIR
+        AIR as u8
     }
 }

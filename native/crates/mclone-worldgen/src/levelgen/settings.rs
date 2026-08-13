@@ -1,4 +1,4 @@
-use crate::block::{STONE, WATER};
+use crate::block::{RawBlockId, STONE, WATER};
 
 const BITS_FOR_Y: i32 = 12;
 const Y_SIZE: i32 = (1 << BITS_FOR_Y) - 32;
@@ -205,8 +205,8 @@ impl NoiseModifier {
 #[derive(Clone, Debug, PartialEq)]
 pub struct NoiseGeneratorSettings {
     noise_settings: NoiseSettings,
-    default_block: u8,
-    default_fluid: u8,
+    default_block: RawBlockId,
+    default_fluid: RawBlockId,
     bedrock_roof_position: i32,
     bedrock_floor_position: i32,
     sea_level: i32,
@@ -260,11 +260,11 @@ impl NoiseGeneratorSettings {
         &self.noise_settings
     }
 
-    pub fn default_block(&self) -> u8 {
+    pub fn default_block(&self) -> RawBlockId {
         self.default_block
     }
 
-    pub fn default_fluid(&self) -> u8 {
+    pub fn default_fluid(&self) -> RawBlockId {
         self.default_fluid
     }
 

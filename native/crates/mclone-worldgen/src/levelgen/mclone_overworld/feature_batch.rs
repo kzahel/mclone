@@ -914,12 +914,11 @@ mod tests {
         });
         let mut hash = 0xcbf2_9ce4_8422_2325_u64;
         for chunk in chunks.values() {
-            for byte in chunk
-                .blocks()
-                .iter()
-                .copied()
-                .chain(chunk.biomes().iter().flat_map(|id| id.to_le_bytes()))
-            {
+            for byte in chunk.blocks().iter().flat_map(|block| block.to_le_bytes()) {
+                hash ^= u64::from(byte);
+                hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+            }
+            for byte in chunk.biomes().iter().flat_map(|id| id.to_le_bytes()) {
                 hash ^= u64::from(byte);
                 hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
             }
@@ -929,7 +928,7 @@ mod tests {
             decoration_counts,
             [50, 446, 208, 1_446, 108, 0, 6, 13, 77, 75]
         );
-        assert_eq!(hash, 11_647_844_216_779_008_310);
+        assert_eq!(hash, 14_527_017_474_575_156_910);
 
         let source =
             McloneVegetationSource::new(12_345, McloneOverworldSamplingTopology::Unbounded);
@@ -1151,12 +1150,11 @@ mod tests {
             let decoration_counts =
                 [OAK_LOG, GRASS, DANDELION, POPPY].map(|block| chunk.block_count(block));
             let mut hash = 0xcbf2_9ce4_8422_2325_u64;
-            for byte in chunk
-                .blocks()
-                .iter()
-                .copied()
-                .chain(chunk.biomes().iter().flat_map(|id| id.to_le_bytes()))
-            {
+            for byte in chunk.blocks().iter().flat_map(|block| block.to_le_bytes()) {
+                hash ^= u64::from(byte);
+                hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+            }
+            for byte in chunk.biomes().iter().flat_map(|id| id.to_le_bytes()) {
                 hash ^= u64::from(byte);
                 hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
             }
@@ -1166,9 +1164,9 @@ mod tests {
         assert_eq!(
             receipts,
             [
-                ([0, 0, 0, 0], 14_512_218_172_821_283_965),
-                ([0, 2, 0, 0], 5_411_810_371_936_586_166),
-                ([0, 1, 0, 0], 1_967_711_706_735_651_513),
+                ([0, 0, 0, 0], 14_572_546_530_249_955_333),
+                ([0, 2, 0, 0], 3_042_644_276_474_332_076),
+                ([0, 1, 0, 0], 9_715_722_375_109_045_949),
             ]
         );
     }

@@ -8,7 +8,7 @@ use mclone_core::{CHUNK_WIDTH, ChunkPos, chunk_min_block_coord, expected_chunk_b
 use crate::block::{
     AIR, BEDROCK, BROWN_MUSHROOM, CACTUS, CLAY, COAL_ORE, DANDELION, DIAMOND_ORE, DIRT, GOLD_ORE,
     GRASS_BLOCK, GRAVEL, ICE, IRON_ORE, LAVA, MOSSY_COBBLESTONE, POPPY, RED_MUSHROOM, REDSTONE_ORE,
-    SAND, SNOW, STONE, SUGAR_CANE, WATER,
+    RawBlockId, SAND, SNOW, STONE, SUGAR_CANE, WATER,
 };
 use crate::feature::{BasicTreeConfiguration, ConfiguredFeature, FeatureRegion, FeatureWorld};
 use crate::placement::BlockPos;
@@ -696,7 +696,7 @@ pub fn alpha_semantic_bytes(chunk: &GeneratedChunk) -> Vec<u8> {
     bytes
 }
 
-pub const fn alpha_semantic_block_id(native: u8) -> Option<u8> {
+pub const fn alpha_semantic_block_id(native: RawBlockId) -> Option<u8> {
     match native {
         AIR => Some(0),
         STONE => Some(1),
@@ -1033,7 +1033,7 @@ fn place_alpha_vein_attempts(
     random: &mut SimpleRandomSource,
     origin_x: i32,
     origin_z: i32,
-    block: u8,
+    block: RawBlockId,
     size: i32,
     attempts: i32,
     y_bound: i32,
@@ -1052,9 +1052,9 @@ fn place_alpha_vein(
     world: &mut FeatureRegion,
     random: &mut SimpleRandomSource,
     origin: BlockPos,
-    block: u8,
+    block: RawBlockId,
     size: i32,
-    replace: u8,
+    replace: RawBlockId,
     require_water_origin: bool,
 ) -> bool {
     if require_water_origin && alpha_block(world, origin) != WATER {
@@ -1161,7 +1161,7 @@ fn place_alpha_plant_patch(
     world: &mut FeatureRegion,
     random: &mut SimpleRandomSource,
     origin: BlockPos,
-    plant: u8,
+    plant: RawBlockId,
 ) {
     for _ in 0..64 {
         let pos = BlockPos::new(
@@ -1242,7 +1242,7 @@ fn place_alpha_cactus(
     }
 }
 
-fn place_alpha_spring(world: &mut FeatureRegion, origin: BlockPos, liquid: u8) -> bool {
+fn place_alpha_spring(world: &mut FeatureRegion, origin: BlockPos, liquid: RawBlockId) -> bool {
     if alpha_block(world, BlockPos::new(origin.x, origin.y + 1, origin.z)) != STONE
         || alpha_block(world, BlockPos::new(origin.x, origin.y - 1, origin.z)) != STONE
         || !matches!(alpha_block(world, origin), AIR | STONE)
@@ -1288,11 +1288,11 @@ fn apply_alpha_snow(chunk: &mut MutableChunkBlockBuffer) {
     }
 }
 
-fn alpha_block(world: &mut FeatureRegion, pos: BlockPos) -> u8 {
+fn alpha_block(world: &mut FeatureRegion, pos: BlockPos) -> RawBlockId {
     world.block_at_world(pos).unwrap_or(AIR)
 }
 
-fn alpha_is_solid(block: u8) -> bool {
+fn alpha_is_solid(block: RawBlockId) -> bool {
     !matches!(
         block,
         AIR | WATER | LAVA | SNOW | DANDELION | POPPY | BROWN_MUSHROOM | RED_MUSHROOM | SUGAR_CANE
@@ -1757,7 +1757,7 @@ mod tests {
         );
     }
 
-    fn active_block_count(chunk: &GeneratedChunk, block: u8) -> usize {
+    fn active_block_count(chunk: &GeneratedChunk, block: RawBlockId) -> usize {
         let mut count = 0;
         for y in 0..ALPHA_ACTIVE_HEIGHT {
             for z in 0..CHUNK_WIDTH {

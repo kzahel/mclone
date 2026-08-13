@@ -4,8 +4,8 @@ use crate::block::{
     GRASS_BLOCK, GRAVEL, GRAY_TERRACOTTA, GREEN_TERRACOTTA, ICE, LIGHT_BLUE_TERRACOTTA,
     LIGHT_GRAY_TERRACOTTA, LIME_TERRACOTTA, MAGENTA_TERRACOTTA, MYCELIUM, ORANGE_TERRACOTTA,
     PACKED_ICE, PINK_TERRACOTTA, PODZOL, PURPLE_TERRACOTTA, RED_SAND, RED_SANDSTONE,
-    RED_TERRACOTTA, SAND, SANDSTONE, SNOW_BLOCK, STONE, TERRACOTTA, WATER, WHITE_TERRACOTTA,
-    YELLOW_TERRACOTTA,
+    RED_TERRACOTTA, RawBlockId, SAND, SANDSTONE, SNOW_BLOCK, STONE, TERRACOTTA, WATER,
+    WHITE_TERRACOTTA, YELLOW_TERRACOTTA,
 };
 use crate::levelgen::MutableChunkBlockBuffer;
 use crate::noise::PerlinSimplexNoise;
@@ -27,9 +27,9 @@ const FROZEN_OCEAN_ICEBERG_ROOF_OCTAVES: [i32; 1] = [0];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct SurfaceBuilderConfiguration {
-    top_material: u8,
-    under_material: u8,
-    underwater_material: u8,
+    top_material: RawBlockId,
+    under_material: RawBlockId,
+    underwater_material: RawBlockId,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -54,7 +54,7 @@ struct SurfaceBiomeDefinition {
 
 #[derive(Clone, Debug)]
 struct BadlandsNoiseState {
-    clay_bands: Vec<u8>,
+    clay_bands: Vec<RawBlockId>,
     pillar_noise: PerlinSimplexNoise,
     pillar_roof_noise: PerlinSimplexNoise,
     clay_bands_offset_noise: PerlinSimplexNoise,
@@ -283,7 +283,7 @@ pub fn apply_overworld_surface(
     }
 }
 
-pub fn overworld_surface_top_material(biome: BiomeDefinition) -> u8 {
+pub fn overworld_surface_top_material(biome: BiomeDefinition) -> RawBlockId {
     resolve_surface_biome_definition(biome).config.top_material
 }
 
@@ -292,7 +292,7 @@ pub fn overworld_inferred_surface_top_material(
     noise: f64,
     surface_top_y: i32,
     sea_level: i32,
-) -> u8 {
+) -> RawBlockId {
     let definition = resolve_surface_biome_definition(biome);
     let config = match definition.builder {
         SurfaceBuilderKind::Mountain => {
@@ -672,8 +672,8 @@ fn apply_badlands_top(
     sea_level: i32,
     surface_depth: i32,
     cosine_bands: bool,
-    biome_top_material: u8,
-    under_material: u8,
+    biome_top_material: RawBlockId,
+    under_material: RawBlockId,
     top_placed: &mut bool,
 ) {
     if y >= sea_level - 1 {
@@ -704,8 +704,8 @@ fn apply_wooded_badlands_top(
     sea_level: i32,
     surface_depth: i32,
     cosine_bands: bool,
-    biome_top_material: u8,
-    under_material: u8,
+    biome_top_material: RawBlockId,
+    under_material: RawBlockId,
     top_placed: &mut bool,
 ) {
     if y < sea_level - 1 {
@@ -871,7 +871,7 @@ fn apply_frozen_ocean_surface(
     }
 }
 
-fn is_terracotta(block_id: u8) -> bool {
+fn is_terracotta(block_id: RawBlockId) -> bool {
     matches!(
         block_id,
         TERRACOTTA
@@ -900,7 +900,7 @@ fn get_badlands_ceiling_block(
     y: i32,
     world_z: i32,
     cosine_bands: bool,
-) -> u8 {
+) -> RawBlockId {
     if !(64..=127).contains(&y) {
         ORANGE_TERRACOTTA
     } else if cosine_bands {
@@ -910,7 +910,7 @@ fn get_badlands_ceiling_block(
     }
 }
 
-fn get_badlands_band(state: &BadlandsNoiseState, world_x: i32, y: i32, world_z: i32) -> u8 {
+fn get_badlands_band(state: &BadlandsNoiseState, world_x: i32, y: i32, world_z: i32) -> RawBlockId {
     let offset = java_round(
         state.clay_bands_offset_noise.get_value(
             world_x as f64 / 512.0,
@@ -1137,7 +1137,7 @@ fn get_block_at_y_or_air(
     local_x: i32,
     y: i32,
     local_z: i32,
-) -> u8 {
+) -> RawBlockId {
     if is_inside_chunk_y(chunk, y) {
         chunk.get_block_at_y(local_x, y, local_z)
     } else {
@@ -1150,7 +1150,7 @@ fn set_block_at_y_if_inside(
     local_x: i32,
     y: i32,
     local_z: i32,
-    block_id: u8,
+    block_id: RawBlockId,
 ) {
     if is_inside_chunk_y(chunk, y) {
         chunk.set_block_at_y(local_x, y, local_z, block_id);

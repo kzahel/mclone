@@ -6900,7 +6900,7 @@ fn reconcile_observer_preview_entry(
         |pos| {
             client
                 .block_state_at_block_pos(pos)
-                .and_then(|state| u8::try_from(state.0).ok())
+                .and_then(|state| u16::try_from(state.0).ok())
         },
         |chunk| client.chunk_snapshot(chunk).is_some(),
     ) else {

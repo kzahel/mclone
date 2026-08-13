@@ -1,6 +1,11 @@
 use mclone_core::BlockStateId;
 
-pub type RawBlockId = u8;
+/// Compact generated/live block-state identity lane.
+///
+/// `BlockStateId` remains the canonical `u32` identity used by snapshots and
+/// protocol payloads. This raw lane is intentionally narrower, but it must not
+/// alias exact property states merely to fit one byte.
+pub type RawBlockId = u16;
 
 pub const AIR: RawBlockId = 0;
 pub const STONE: RawBlockId = 1;
@@ -436,7 +441,7 @@ pub const fn is_air_like(block_id: RawBlockId) -> bool {
 
 pub const fn farmland_moisture(block_id: RawBlockId) -> Option<u8> {
     if block_id >= FARMLAND_MOISTURE_0 && block_id <= FARMLAND_MOISTURE_7 {
-        Some(block_id - FARMLAND_MOISTURE_0)
+        Some((block_id - FARMLAND_MOISTURE_0) as u8)
     } else {
         None
     }
@@ -444,7 +449,7 @@ pub const fn farmland_moisture(block_id: RawBlockId) -> Option<u8> {
 
 pub const fn farmland_for_moisture(moisture: u8) -> Option<RawBlockId> {
     if moisture <= 7 {
-        Some(FARMLAND_MOISTURE_0 + moisture)
+        Some(FARMLAND_MOISTURE_0 + moisture as RawBlockId)
     } else {
         None
     }
@@ -452,7 +457,7 @@ pub const fn farmland_for_moisture(moisture: u8) -> Option<RawBlockId> {
 
 pub const fn wheat_age(block_id: RawBlockId) -> Option<u8> {
     if block_id >= WHEAT_AGE_0 && block_id <= WHEAT_AGE_7 {
-        Some(block_id - WHEAT_AGE_0)
+        Some((block_id - WHEAT_AGE_0) as u8)
     } else {
         None
     }
@@ -460,7 +465,7 @@ pub const fn wheat_age(block_id: RawBlockId) -> Option<u8> {
 
 pub const fn wheat_for_age(age: u8) -> Option<RawBlockId> {
     if age <= 7 {
-        Some(WHEAT_AGE_0 + age)
+        Some(WHEAT_AGE_0 + age as RawBlockId)
     } else {
         None
     }

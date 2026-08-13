@@ -7,7 +7,7 @@ use mclone_mesh::{
     pack_textured_render_sections,
 };
 use mclone_worldgen::block::{
-    ACACIA_LEAVES, ACACIA_LOG, AIR, OAK_LEAVES, OAK_LOG, SPRUCE_LEAVES, SPRUCE_LOG,
+    ACACIA_LEAVES, ACACIA_LOG, AIR, OAK_LEAVES, OAK_LOG, RawBlockId, SPRUCE_LEAVES, SPRUCE_LOG,
 };
 use mclone_worldgen::levelgen::{
     McloneOverworldSamplingTopology, McloneOverworldVegetationPlanCache, McloneTreeFamily,
@@ -510,7 +510,7 @@ fn separate_natural_tree_blocks(
     presented: &mut BTreeMap<(i32, i32), Vec<BlockStateId>>,
     occurrences: &[McloneTreeOccurrence],
 ) -> BTreeMap<McloneTreeOccurrenceId, CanonicalNaturalTreeBlocks> {
-    let mut assignments = BTreeMap::<[i32; 3], (McloneTreeOccurrenceId, u8)>::new();
+    let mut assignments = BTreeMap::<[i32; 3], (McloneTreeOccurrenceId, RawBlockId)>::new();
     let mut occurrence_by_id = BTreeMap::new();
     for occurrence in occurrences {
         let id = McloneTreeOccurrenceId::from(*occurrence);
@@ -564,7 +564,7 @@ fn separate_natural_tree_blocks(
     separated
 }
 
-fn natural_tree_block_matches(family: McloneTreeFamily, block: u8) -> bool {
+fn natural_tree_block_matches(family: McloneTreeFamily, block: RawBlockId) -> bool {
     match family {
         McloneTreeFamily::TemperateBroadleaf => matches!(block, OAK_LOG | OAK_LEAVES),
         McloneTreeFamily::CoolWetConifer => matches!(block, SPRUCE_LOG | SPRUCE_LEAVES),

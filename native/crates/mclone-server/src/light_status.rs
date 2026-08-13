@@ -371,8 +371,8 @@ mod shared_input_tests {
     fn overlapping_statuses_share_each_unique_raw_input_once() {
         let center = ChunkPos::new(0, 0);
         let east = ChunkPos::new(1, 0);
-        let center_blocks = vec![1_u8; 16];
-        let east_blocks = vec![2_u8; 16];
+        let center_blocks = vec![1_u16; 16];
+        let east_blocks = vec![2_u16; 16];
         let center_status = PendingLightStatus::from_parts(
             center,
             snapshot(center),

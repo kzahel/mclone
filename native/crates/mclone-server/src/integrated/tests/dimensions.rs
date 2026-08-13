@@ -1255,7 +1255,7 @@ fn move_player(server: &mut RealmServer, player: ServerPlayerId, position: Vec3d
         .unwrap();
 }
 
-fn snapshot_block(record: ChunkRecord, pos: BlockPos) -> u8 {
+fn snapshot_block(record: ChunkRecord, pos: BlockPos) -> u16 {
     crate::mutable_buffer_from_snapshot(&record.snapshot).get_block_at_y(
         local_block_coord(pos.x),
         pos.y,

@@ -333,7 +333,7 @@ const fn template_rotation(rotation: HomesteadPlanTemplateRotation) -> TemplateR
 mod tests {
     use std::collections::BTreeMap;
 
-    use mclone_worldgen::block::{AIR, DANDELION, OAK_LEAVES, OAK_LOG, POPPY};
+    use mclone_worldgen::block::{AIR, DANDELION, OAK_LEAVES, OAK_LOG, POPPY, RawBlockId};
     use mclone_worldgen::levelgen::McloneOverworldFeatureDependencyCache;
 
     use super::*;
@@ -527,7 +527,12 @@ mod tests {
         assert!(authored_counts[2] > 10);
     }
 
-    fn block_at(chunks: &BTreeMap<ChunkPos, GeneratedChunk>, x: i32, y: i32, z: i32) -> Option<u8> {
+    fn block_at(
+        chunks: &BTreeMap<ChunkPos, GeneratedChunk>,
+        x: i32,
+        y: i32,
+        z: i32,
+    ) -> Option<RawBlockId> {
         chunks
             .get(&ChunkPos::new(x.div_euclid(16), z.div_euclid(16)))
             .map(|chunk| chunk.block_at_y(x.rem_euclid(16), y, z.rem_euclid(16)).0)

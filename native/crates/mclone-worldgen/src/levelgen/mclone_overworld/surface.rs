@@ -555,7 +555,7 @@ fn write_subsurface(
     local_x: i32,
     local_z: i32,
     top_y: i32,
-    material: u8,
+    material: RawBlockId,
     depth: i32,
 ) {
     let material_min_y = (top_y - depth + 1).max(1);

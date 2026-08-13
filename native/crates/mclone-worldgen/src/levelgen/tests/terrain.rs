@@ -1,6 +1,8 @@
 use super::*;
 
-pub(super) fn terrain_stage_blocks_from_oracle(oracle: &TerrainChunkOracleFixture) -> Vec<u8> {
+pub(super) fn terrain_stage_blocks_from_oracle(
+    oracle: &TerrainChunkOracleFixture,
+) -> Vec<RawBlockId> {
     oracle
         .blocks
         .iter()
@@ -8,13 +10,17 @@ pub(super) fn terrain_stage_blocks_from_oracle(oracle: &TerrainChunkOracleFixtur
             if *block_id == BEDROCK {
                 STONE
             } else {
-                *block_id
+                RawBlockId::from(*block_id)
             }
         })
         .collect()
 }
 
-pub(super) fn assert_chunk_blocks_match(actual: &[u8], expected: &[u8], min_y: i32) {
+pub(super) fn assert_chunk_blocks_match(
+    actual: &[RawBlockId],
+    expected: &[RawBlockId],
+    min_y: i32,
+) {
     assert_eq!(actual.len(), expected.len());
     for (index, (actual, expected)) in actual.iter().zip(expected.iter()).enumerate() {
         assert_eq!(
@@ -54,7 +60,7 @@ pub(super) fn assert_terrain_chunk_matches_java_oracle(oracle: TerrainChunkOracl
     assert_eq!(chunk.chunk_z, oracle.chunk_z);
     assert_eq!(chunk.min_y, oracle.min_y);
     assert_eq!(chunk.height, oracle.height);
-    assert!(!chunk.blocks.contains(&BEDROCK));
+    assert!(!chunk.blocks.contains(&RawBlockId::from(BEDROCK)));
     assert_chunk_blocks_match(&chunk.blocks, &expected, oracle.min_y);
 }
 
@@ -589,7 +595,13 @@ pub(super) fn assert_surface_chunk_matches_java_oracle(oracle: TerrainChunkOracl
     assert_eq!(chunk.chunk_z, oracle.chunk_z);
     assert_eq!(chunk.min_y, oracle.min_y);
     assert_eq!(chunk.height, oracle.height);
-    assert_chunk_blocks_match(&chunk.blocks, &oracle.blocks, oracle.min_y);
+    let expected = oracle
+        .blocks
+        .iter()
+        .copied()
+        .map(RawBlockId::from)
+        .collect::<Vec<_>>();
+    assert_chunk_blocks_match(&chunk.blocks, &expected, oracle.min_y);
 }
 
 #[test]
@@ -730,7 +742,7 @@ pub(super) fn fills_chunk_zero_zero_with_terrain_only_java_oracle() {
     assert_eq!(chunk.chunk_z, oracle.chunk_z);
     assert_eq!(chunk.min_y, oracle.min_y);
     assert_eq!(chunk.height, oracle.height);
-    assert!(!chunk.blocks.contains(&BEDROCK));
+    assert!(!chunk.blocks.contains(&RawBlockId::from(BEDROCK)));
     assert_eq!(chunk.blocks.len(), expected.len());
 
     for (index, (actual, expected)) in chunk.blocks.iter().zip(expected.iter()).enumerate() {

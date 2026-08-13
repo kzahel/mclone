@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use mclone_core::{BlockPos, ChunkPos, ChunkRevision, ChunkStatus};
 use mclone_worldgen::block::{
     ALLIUM, COARSE_DIRT, CORNFLOWER, DANDELION, DIRT, GRASS_BLOCK, GRAVEL, HAY_BLOCK, OAK_LOG_X,
-    POPPY, STONE, TORCH,
+    POPPY, RawBlockId, STONE, TORCH,
 };
 #[cfg(test)]
 use mclone_worldgen::block::{
@@ -670,7 +670,7 @@ fn stamp_placement(
 fn set_world_block(
     chunks: &mut BTreeMap<ChunkPos, MutableChunkBlockBuffer>,
     pos: BlockPos,
-    block: u8,
+    block: RawBlockId,
 ) -> ChunkStoreResult<()> {
     let chunk_pos = pos.chunk_pos();
     let chunk = chunks.get_mut(&chunk_pos).ok_or_else(|| {

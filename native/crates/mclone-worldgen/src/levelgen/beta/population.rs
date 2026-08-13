@@ -5,8 +5,8 @@ use mclone_core::{CHUNK_WIDTH, ChunkPos, chunk_min_block_coord};
 use crate::block::{
     AIR, BIRCH_LEAVES, BIRCH_LOG, BROWN_MUSHROOM, CACTUS, CLAY, COAL_ORE, DANDELION, DEAD_BUSH,
     DIAMOND_ORE, DIRT, FERN, GOLD_ORE, GRASS, GRASS_BLOCK, GRAVEL, ICE, IRON_ORE, LAPIS_ORE, LAVA,
-    OAK_LEAVES, OAK_LOG, POPPY, PUMPKIN, RED_MUSHROOM, REDSTONE_ORE, SAND, SNOW, SPRUCE_LEAVES,
-    SPRUCE_LOG, STONE, SUGAR_CANE, WATER,
+    OAK_LEAVES, OAK_LOG, POPPY, PUMPKIN, RED_MUSHROOM, REDSTONE_ORE, RawBlockId, SAND, SNOW,
+    SPRUCE_LEAVES, SPRUCE_LOG, STONE, SUGAR_CANE, WATER,
 };
 use crate::feature::{
     BasicTreeConfiguration, ConfiguredFeature, FeatureRegion, FeatureWorld, LakeConfiguration,
@@ -348,7 +348,7 @@ fn place_beta_lake(
     world: &mut FeatureRegion,
     random: &mut SimpleRandomSource,
     mut origin: BlockPos,
-    liquid: u8,
+    liquid: RawBlockId,
 ) -> bool {
     // The historical feature subtracts eight before forming its 16x16 mask;
     // the shared geometric primitive accepts that adjusted base directly.
@@ -415,7 +415,7 @@ fn place_beta_vein_attempts(
     random: &mut SimpleRandomSource,
     origin_x: i32,
     origin_z: i32,
-    block: u8,
+    block: RawBlockId,
     size: i32,
     attempts: i32,
     y_bound: i32,
@@ -434,9 +434,9 @@ fn place_beta_vein(
     world: &mut FeatureRegion,
     random: &mut SimpleRandomSource,
     origin: BlockPos,
-    block: u8,
+    block: RawBlockId,
     size: i32,
-    replace: u8,
+    replace: RawBlockId,
     require_water_origin: bool,
 ) -> bool {
     if require_water_origin && beta_block(world, origin) != WATER {
@@ -537,7 +537,7 @@ fn place_beta_plant_patch(
     world: &mut FeatureRegion,
     random: &mut SimpleRandomSource,
     mut origin: BlockPos,
-    plant: u8,
+    plant: RawBlockId,
     tries: i32,
     seek_ground: bool,
 ) {
@@ -642,7 +642,7 @@ fn place_beta_pumpkins(
     }
 }
 
-fn place_beta_spring(world: &mut FeatureRegion, origin: BlockPos, liquid: u8) -> bool {
+fn place_beta_spring(world: &mut FeatureRegion, origin: BlockPos, liquid: RawBlockId) -> bool {
     if beta_block(world, BlockPos::new(origin.x, origin.y + 1, origin.z)) != STONE
         || beta_block(world, BlockPos::new(origin.x, origin.y - 1, origin.z)) != STONE
         || !matches!(beta_block(world, origin), AIR | STONE)
@@ -694,11 +694,11 @@ fn apply_beta_snow(chunk: &mut MutableChunkBlockBuffer, climate: &BetaClimateSou
     }
 }
 
-fn beta_block(world: &mut FeatureRegion, pos: BlockPos) -> u8 {
+fn beta_block(world: &mut FeatureRegion, pos: BlockPos) -> RawBlockId {
     world.block_at_world(pos).unwrap_or(AIR)
 }
 
-fn beta_is_solid(block: u8) -> bool {
+fn beta_is_solid(block: RawBlockId) -> bool {
     !matches!(
         block,
         AIR | WATER

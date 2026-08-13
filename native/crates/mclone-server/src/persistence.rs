@@ -53,9 +53,10 @@ pub use record_executor::{
 use mclone_core::{
     BlockStateId, ChunkStatus, LIGHT_DATA_LAYER_BYTE_COUNT, PackedChunkSection, PackedLightSection,
 };
+use mclone_worldgen::block::RawBlockId;
 
 const SNAPSHOT_MAGIC: &[u8; 12] = b"MCLONESNAP\0\0";
-const SNAPSHOT_FORMAT_VERSION: u32 = 6;
+const SNAPSHOT_FORMAT_VERSION: u32 = 7;
 const ENTITY_CHUNK_MAGIC: &[u8; 12] = b"MCLONEENT\0\0\0";
 const PLAYER_RECORD_MAGIC: &[u8; 12] = b"MCLONEPLYR\0\0";
 const WORLD_METADATA_MAGIC: &[u8; 12] = b"MCLONEWRLD\0\0";
@@ -5592,7 +5593,7 @@ fn read_chunk_record(reader: &mut impl Read) -> ChunkStoreResult<ChunkRecord> {
         (Vec::new(), Vec::new())
     };
     let structures = if version >= 6 {
-        read_chunk_structure_data(reader)?
+        read_chunk_structure_data(reader, version)?
     } else {
         ChunkStructureData::default()
     };
@@ -5648,7 +5649,7 @@ fn write_chunk_structure_data(
             write_len(writer, piece.blocks.len(), "structure block count")?;
             for placement in &piece.blocks {
                 write_block_pos(writer, placement.pos)?;
-                write_u8(writer, placement.block)?;
+                write_u16(writer, placement.block)?;
             }
         }
     }
@@ -5665,7 +5666,10 @@ fn write_chunk_structure_data(
     Ok(())
 }
 
-fn read_chunk_structure_data(reader: &mut impl Read) -> ChunkStoreResult<ChunkStructureData> {
+fn read_chunk_structure_data(
+    reader: &mut impl Read,
+    snapshot_version: u32,
+) -> ChunkStoreResult<ChunkStructureData> {
     let start_count = read_len(reader)?;
     let mut starts = Vec::with_capacity(start_count);
     for _ in 0..start_count {
@@ -5683,7 +5687,11 @@ fn read_chunk_structure_data(reader: &mut impl Read) -> ChunkStoreResult<ChunkSt
             for _ in 0..block_count {
                 blocks.push(StructureBlockPlacement {
                     pos: read_block_pos(reader)?,
-                    block: read_u8(reader)?,
+                    block: if snapshot_version >= 7 {
+                        read_u16(reader)?
+                    } else {
+                        RawBlockId::from(read_u8(reader)?)
+                    },
                 });
             }
             pieces.push(StructurePieceRecord {
@@ -7120,6 +7128,17 @@ fn read_u8(reader: &mut impl Read) -> ChunkStoreResult<u8> {
     Ok(bytes[0])
 }
 
+fn write_u16(writer: &mut impl Write, value: u16) -> ChunkStoreResult<()> {
+    writer.write_all(&value.to_le_bytes())?;
+    Ok(())
+}
+
+fn read_u16(reader: &mut impl Read) -> ChunkStoreResult<u16> {
+    let mut bytes = [0_u8; 2];
+    reader.read_exact(&mut bytes)?;
+    Ok(u16::from_le_bytes(bytes))
+}
+
 fn write_bool(writer: &mut impl Write, value: bool) -> ChunkStoreResult<()> {
     write_u8(writer, u8::from(value))
 }
@@ -7239,7 +7258,7 @@ mod tests {
     #[test]
     fn binary_chunk_record_format_roundtrips_light_algorithm_version() {
         let overlay = StructureOverlay::CrossChunkCanaryV1;
-        let record = ChunkRecord {
+        let mut record = ChunkRecord {
             snapshot: test_snapshot(ChunkPos::new(0, 0), 7).with_light_sections(
                 true,
                 vec![PackedLightSection::new(
@@ -7266,6 +7285,7 @@ mod tests {
                     .unwrap(),
             },
         };
+        record.structures.starts[0].pieces[0].blocks[0].block = 300;
         let mut bytes = Vec::new();
 
         write_chunk_record(&mut bytes, &record).unwrap();

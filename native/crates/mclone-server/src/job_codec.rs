@@ -7,6 +7,7 @@ use mclone_core::{
     HorizontalTopology, PackedLightSection,
 };
 use mclone_protocol::{ServerUpdate, decode_server_update, encode_server_update};
+use mclone_worldgen::block::RawBlockId;
 use mclone_worldgen::feature::{DecorationStep, FeatureDecorationTiming};
 use mclone_worldgen::levelgen::{
     AlphaFeatureDependencyCache, AlphaFeatureDependencyCacheReport, BetaFeatureDependencyCache,
@@ -44,7 +45,7 @@ const WORLDGEN_RESPONSE_MAGIC: u32 = 0x5747_4A53;
 const WORLDGEN_DELTA_REQUEST_MAGIC: u32 = 0x5747_4A44;
 const LIGHT_REQUEST_MAGIC: u32 = 0x4C54_4A52;
 const LIGHT_RESPONSE_MAGIC: u32 = 0x4C54_4A53;
-const JOB_FRAME_VERSION: u32 = 7;
+const JOB_FRAME_VERSION: u32 = 8;
 const SERVER_JOB_ACTOR_INIT_MAGIC: u32 = 0x534A_4149;
 const SERVER_JOB_ACTOR_INIT_VERSION: u32 = 1;
 const SERVER_JOB_ACTOR_INIT_FRAME_BYTES: usize = 9;
@@ -908,6 +909,14 @@ impl FrameWriter {
         Ok(())
     }
 
+    fn write_raw_block_ids(&mut self, field: &str, blocks: &[RawBlockId]) -> Result<(), String> {
+        self.write_len(field, blocks.len())?;
+        for block in blocks {
+            self.bytes.extend_from_slice(&block.to_le_bytes());
+        }
+        Ok(())
+    }
+
     fn write_string(&mut self, field: &str, value: &str) -> Result<(), String> {
         self.write_bytes(field, value.as_bytes())
     }
@@ -1027,7 +1036,7 @@ impl FrameWriter {
         self.write_i32(chunk.chunk_z);
         self.write_i32(chunk.min_y);
         self.write_i32(chunk.height);
-        self.write_bytes("generated chunk blocks", chunk.blocks())?;
+        self.write_raw_block_ids("generated chunk blocks", chunk.blocks())?;
         self.write_len("generated chunk biomes", chunk.biomes().len())?;
         for biome in chunk.biomes() {
             self.write_i32(*biome);
@@ -1042,7 +1051,7 @@ impl FrameWriter {
         self.write_i32(chunk.chunk_z);
         self.write_i32(chunk.min_y);
         self.write_i32(chunk.height);
-        self.write_bytes("mutable chunk blocks", &chunk.blocks)?;
+        self.write_raw_block_ids("mutable chunk blocks", &chunk.blocks)?;
         self.write_bool(chunk.has_primed_worldgen_heightmaps());
         let glow_faces = chunk.glow_lichen_faces().collect::<Vec<_>>();
         self.write_len("glow lichen faces", glow_faces.len())?;
@@ -1094,14 +1103,14 @@ impl FrameWriter {
             "light status scheduled fluid ticks",
             &status.scheduled_fluid_ticks,
         )?;
-        self.write_bytes("light status raw blocks", status.raw_blocks())?;
+        self.write_raw_block_ids("light status raw blocks", status.raw_blocks())?;
         self.write_len(
             "light status neighbor blocks",
             status.neighbor_blocks().len(),
         )?;
         for (pos, blocks) in status.neighbor_blocks() {
             self.write_chunk_pos(*pos);
-            self.write_bytes("light status neighbor block data", blocks)?;
+            self.write_raw_block_ids("light status neighbor block data", blocks)?;
         }
         Ok(())
     }
@@ -1326,6 +1335,18 @@ impl<'a> FrameReader<'a> {
         Ok(self.read_exact(len)?.to_vec())
     }
 
+    fn read_raw_block_ids(&mut self, field: &str) -> Result<Vec<RawBlockId>, String> {
+        let len = self.read_len(field)?;
+        let byte_len = len
+            .checked_mul(std::mem::size_of::<RawBlockId>())
+            .ok_or_else(|| format!("{field} byte length overflow"))?;
+        let bytes = self.read_exact(byte_len)?;
+        Ok(bytes
+            .chunks_exact(2)
+            .map(|value| RawBlockId::from_le_bytes([value[0], value[1]]))
+            .collect())
+    }
+
     fn read_string(&mut self, field: &str) -> Result<String, String> {
         String::from_utf8(self.read_bytes(field)?)
             .map_err(|error| format!("{field} was not valid UTF-8: {error}"))
@@ -1456,7 +1477,7 @@ impl<'a> FrameReader<'a> {
         let chunk_z = self.read_i32()?;
         let min_y = self.read_i32()?;
         let height = self.read_i32()?;
-        let blocks = self.read_bytes("generated chunk blocks")?;
+        let blocks = self.read_raw_block_ids("generated chunk blocks")?;
         let biomes = self.read_vec("generated chunk biomes", FrameReader::read_i32)?;
         let block_ticks = self.read_ticks("generated chunk block ticks")?;
         let liquid_ticks = self.read_ticks("generated chunk liquid ticks")?;
@@ -1477,7 +1498,7 @@ impl<'a> FrameReader<'a> {
         let chunk_z = self.read_i32()?;
         let min_y = self.read_i32()?;
         let height = self.read_i32()?;
-        let blocks = self.read_bytes("mutable chunk blocks")?;
+        let blocks = self.read_raw_block_ids("mutable chunk blocks")?;
         let prime_worldgen_heightmaps = self.read_bool()?;
         let glow_lichen_faces = self.read_map("glow lichen faces", |reader| {
             let index = reader.read_u32()? as usize;
@@ -1530,10 +1551,10 @@ impl<'a> FrameReader<'a> {
         let feature_snapshot = self.read_snapshot()?;
         let scheduled_block_ticks = self.read_tick_records("light status scheduled block ticks")?;
         let scheduled_fluid_ticks = self.read_tick_records("light status scheduled fluid ticks")?;
-        let raw_blocks = self.read_bytes("light status raw blocks")?;
+        let raw_blocks = self.read_raw_block_ids("light status raw blocks")?;
         let neighbor_blocks = self.read_vec("light status neighbor blocks", |reader| {
             let pos = reader.read_chunk_pos()?;
-            let blocks = reader.read_bytes("light status neighbor block data")?;
+            let blocks = reader.read_raw_block_ids("light status neighbor block data")?;
             Ok((pos, blocks))
         })?;
         Ok(PendingLightStatus::from_parts_with_token(
@@ -1701,6 +1722,23 @@ mod tests {
     use super::*;
     use mclone_core::{AIR_BLOCK_STATE_ID, CHUNK_SECTION_VOLUME, ChunkRevision, ChunkStatus};
     use mclone_worldgen::levelgen::OverworldFeatureBatchResult;
+
+    #[test]
+    fn raw_block_identity_frame_preserves_values_above_u8() {
+        let expected = [0, u16::from(u8::MAX), 256, 30_000, u16::MAX];
+        let mut writer = FrameWriter::new(WORLDGEN_REQUEST_MAGIC);
+        writer
+            .write_raw_block_ids("test raw blocks", &expected)
+            .unwrap();
+
+        let frame = writer.into_bytes();
+        let mut reader = FrameReader::new(&frame, WORLDGEN_REQUEST_MAGIC).unwrap();
+        assert_eq!(
+            reader.read_raw_block_ids("test raw blocks").unwrap(),
+            expected
+        );
+        reader.finish().unwrap();
+    }
 
     fn execution_request(
         descriptor: WorldGenerationDescriptor,

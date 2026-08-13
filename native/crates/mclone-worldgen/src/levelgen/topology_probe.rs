@@ -6,8 +6,8 @@ use mclone_core::{
 };
 
 use crate::block::{
-    BEDROCK, BLUE_TERRACOTTA, DIRT, GRASS_BLOCK, GRAVEL, GREEN_TERRACOTTA, RED_TERRACOTTA, STONE,
-    STONE_BRICKS, TORCH, WATER, YELLOW_TERRACOTTA,
+    BEDROCK, BLUE_TERRACOTTA, DIRT, GRASS_BLOCK, GRAVEL, GREEN_TERRACOTTA, RED_TERRACOTTA,
+    RawBlockId, STONE, STONE_BRICKS, TORCH, WATER, YELLOW_TERRACOTTA,
 };
 
 use super::{GeneratedChunk, MutableChunkBlockBuffer};
@@ -36,7 +36,7 @@ pub struct TopologyProbeColumnSample {
     pub is_channel: bool,
     pub is_island: bool,
     pub is_pond: bool,
-    pub top_block: u8,
+    pub top_block: RawBlockId,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -251,7 +251,7 @@ impl TopologyProbeSource {
             .collect()
     }
 
-    fn material_band_block(self, world_x: i32) -> u8 {
+    fn material_band_block(self, world_x: i32) -> RawBlockId {
         let canonical_x = self
             .topology
             .x

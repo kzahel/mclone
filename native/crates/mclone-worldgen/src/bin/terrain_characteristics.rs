@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use mclone_worldgen::biome::OverworldBiomeSource;
-use mclone_worldgen::block::{has_fluid, is_air_like};
+use mclone_worldgen::block::{RawBlockId, has_fluid, is_air_like};
 use mclone_worldgen::levelgen::{
     AlphaGenerationStage, BetaGenerationStage, GeneratedChunk, MutableChunkBlockBuffer,
     NoiseBasedChunkGenerator, NoiseGeneratorSettings, generate_alpha_stage_chunk,
@@ -492,7 +492,7 @@ fn write_generated_heights(
     }
 }
 
-fn top_solid_y(min_y: i32, height: i32, block_at: impl Fn(i32) -> u8) -> i32 {
+fn top_solid_y(min_y: i32, height: i32, block_at: impl Fn(i32) -> RawBlockId) -> i32 {
     for y in (min_y..min_y + height).rev() {
         let block = block_at(y);
         if !is_air_like(block) && !has_fluid(block) {

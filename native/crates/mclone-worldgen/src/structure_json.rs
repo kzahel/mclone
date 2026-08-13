@@ -7,9 +7,10 @@ use serde::Deserialize;
 
 use crate::block::{
     AIR, BRICKS, COBBLESTONE, CORNFLOWER, GLASS, HAY_BLOCK, MOSSY_COBBLESTONE, OAK_LOG, OAK_LOG_X,
-    OAK_LOG_Z, OAK_PLANKS, POPPY, RED_TERRACOTTA, SPRUCE_LOG, SPRUCE_LOG_X, SPRUCE_LOG_Z,
-    SPRUCE_PLANKS, SPRUCE_SLAB_BOTTOM, SPRUCE_SLAB_TOP, SPRUCE_STAIRS_EAST, SPRUCE_STAIRS_NORTH,
-    SPRUCE_STAIRS_SOUTH, SPRUCE_STAIRS_WEST, STONE_BRICKS, WALL_TORCH_SOUTH, WHITE_TERRACOTTA,
+    OAK_LOG_Z, OAK_PLANKS, POPPY, RED_TERRACOTTA, RawBlockId, SPRUCE_LOG, SPRUCE_LOG_X,
+    SPRUCE_LOG_Z, SPRUCE_PLANKS, SPRUCE_SLAB_BOTTOM, SPRUCE_SLAB_TOP, SPRUCE_STAIRS_EAST,
+    SPRUCE_STAIRS_NORTH, SPRUCE_STAIRS_SOUTH, SPRUCE_STAIRS_WEST, STONE_BRICKS, WALL_TORCH_SOUTH,
+    WHITE_TERRACOTTA,
 };
 use crate::structure_template::{
     StructureMaterialTheme, StructureTemplate, StructureTemplateBuilder, TemplateBlockState,
@@ -295,7 +296,7 @@ pub fn load_canonical_structure_json(
     })
 }
 
-pub fn raw_block_state_for_canonical_key(key: &str) -> Option<u8> {
+pub fn raw_block_state_for_canonical_key(key: &str) -> Option<RawBlockId> {
     Some(match key {
         "minecraft:air" => AIR,
         "minecraft:bricks" => BRICKS,

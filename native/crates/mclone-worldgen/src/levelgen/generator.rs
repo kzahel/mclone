@@ -1,5 +1,5 @@
 use crate::biome::{NoiseBiome, NoiseBiomeSource, OverworldBiomeSource};
-use crate::block::{AIR, BEDROCK};
+use crate::block::{AIR, BEDROCK, RawBlockId};
 use crate::noise::{BlendedNoise, PerlinNoise, PerlinSimplexNoise, SimplexNoise};
 use crate::prng::WorldgenRandom;
 use crate::surface::apply_overworld_surface;
@@ -458,7 +458,7 @@ impl<B: NoiseBiomeSource> NoiseBasedChunkGenerator<B> {
         self.sea_level
     }
 
-    pub(crate) fn resolve_terrain_block(&self, y: i32, noise: f64) -> u8 {
+    pub(crate) fn resolve_terrain_block(&self, y: i32, noise: f64) -> RawBlockId {
         let mut density = (noise / 200.0).clamp(-1.0, 1.0);
         density = density / 2.0 - density * density * density / 24.0;
         if density > 0.0 {
@@ -589,7 +589,7 @@ fn set_block_at_i64_y_if_inside(
     local_x: i32,
     y: i64,
     local_z: i32,
-    block_id: u8,
+    block_id: RawBlockId,
 ) {
     if y >= chunk.min_y as i64 && y < (chunk.min_y + chunk.height) as i64 {
         chunk.set_block_at_y(local_x, y as i32, local_z, block_id);
