@@ -1291,6 +1291,9 @@ async function run() {
             { seedsBeforePlant },
             { timeout: 10_000 },
           );
+          const seedsAfterPlant = await page.evaluate(
+            () => Number(globalThis.__mcloneWebApp?.state?.lastReport?.wheatSeedHotbarCount),
+          );
 
           const wheatBeforeHarvest = await page.evaluate(
             () => Number(globalThis.__mcloneWebApp?.state?.lastReport?.wheatHotbarCount),
@@ -1316,21 +1319,21 @@ async function run() {
             throw new Error(`wheat harvest did not settle: ${error instanceof Error ? error.message : String(error)}\nharvest=${JSON.stringify(harvest)}\nstate=${JSON.stringify(harvestState)}`);
           }
           farmingInteractionProbe = await page.evaluate(
-            ({ till, plant, harvest, seedsBeforePlant, wheatBeforeHarvest }) => ({
+            ({ till, plant, harvest, seedsBeforePlant, seedsAfterPlant, wheatBeforeHarvest }) => ({
               ok: globalThis.__mcloneWebApp.blockStateAt?.(8, 63, 14)?.blockStateId >= 221
                 && globalThis.__mcloneWebApp.blockStateAt?.(8, 63, 14)?.blockStateId <= 228
                 && globalThis.__mcloneWebApp.blockStateAt?.(8, 64, 14)?.blockStateId >= 229
                 && globalThis.__mcloneWebApp.blockStateAt?.(8, 64, 14)?.blockStateId <= 236
                 && globalThis.__mcloneWebApp.blockStateAt?.(9, 64, 9)?.blockStateId === 0
-                && Number(globalThis.__mcloneWebApp?.state?.lastReport?.wheatSeedHotbarCount)
-                  >= seedsBeforePlant - 1
+                && seedsAfterPlant === seedsBeforePlant - 1
                 && Number(globalThis.__mcloneWebApp?.state?.lastReport?.wheatHotbarCount)
                   === wheatBeforeHarvest + 1,
               till,
               plant,
               harvest,
               seedsBeforePlant,
-              seedsAfterPlant: Number(
+              seedsAfterPlant,
+              seedsAfterHarvest: Number(
                 globalThis.__mcloneWebApp?.state?.lastReport?.wheatSeedHotbarCount,
               ),
               wheatBeforeHarvest,
@@ -1338,7 +1341,14 @@ async function run() {
                 globalThis.__mcloneWebApp?.state?.lastReport?.wheatHotbarCount,
               ),
             }),
-            { till, plant, harvest, seedsBeforePlant, wheatBeforeHarvest },
+            {
+              till,
+              plant,
+              harvest,
+              seedsBeforePlant,
+              seedsAfterPlant,
+              wheatBeforeHarvest,
+            },
           );
           await page.evaluate(() => globalThis.__mcloneWebApp?.pauseRendering?.());
           await page.waitForFunction(
