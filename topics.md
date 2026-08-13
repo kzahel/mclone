@@ -258,6 +258,9 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
 - `functional-kitchen-gardens` — connected fences and gates, reusable mixed
   crops, source-first garden composition, ordinary homestead integration, and
   future animal-pressure gameplay
+- `rabbit-burrow-ecology` — one genuinely excavated shallow bank threshold,
+  persistent rabbit families, time-aware emergence, garden pressure, carrot
+  breeding, and a bounded ordinary-system showcase
 - `semantic-figure-assets` — one checked TypeScript-to-semantic-JSON asset path
   for actor figures plus world and item props, beginning with mallard prop
   migration and deer runtime promotion

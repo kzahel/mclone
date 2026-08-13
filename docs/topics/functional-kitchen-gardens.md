@@ -112,14 +112,14 @@ versions of its mechanics.
 
 ## Recommended Next Work
 
-Promote rabbits as the next contrasting creature chapter:
-substrate-qualified burrows, dawn/dusk emergence, wary
-foraging, carrot attraction, bounded crop raids, fence/gate-aware escape and
-exclusion, breeding with real food, persistent family/burrow state, and field
-notes based on ordinary evidence. Decide whether burrow mouths need a terrain
-decal/surface-patch owner before adding raised track-like geometry. Potatoes
-remain later crop breadth; they are not a prerequisite for the first rabbit
-loop.
+Tactical [`292`](../tactical/292-rabbit-burrow-ecology.md) is now implementing
+the rabbit consumer of this foundation: a one-cell excavated bank threshold,
+persistent warren/family state, dawn/dusk emergence, wary foraging, carrot
+attraction, bounded crop raids, real fence/gate exclusion, breeding with real
+food, and ordinary field evidence. The selected entrance combines terrain
+mutation with a recessed semantic prop; it does not wait on or add a
+rabbit-specific surface-decal renderer. Potatoes remain later crop breadth and
+are not a prerequisite for the first rabbit loop.
 
 ## Code And Documentation Map
 
@@ -137,3 +137,5 @@ loop.
 - [`habitat-driven-creature-ecology.md`](habitat-driven-creature-ecology.md):
   terrain/creature mechanics cycle
 - [`playable-showcases.md`](playable-showcases.md): review-save guardrails
+- [`rabbit-burrow-ecology.md`](rabbit-burrow-ecology.md): rabbit/garden
+  pressure and persistent hybrid-warren contract

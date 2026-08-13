@@ -31,6 +31,10 @@ the third chapter: a shared habitat-fitness vocabulary, generated flowering
 pockets, persistent colony-to-flower flight, real pollination, managed hotels,
 renewable wax, field notes, and spatial buzz now make terrain both cause and
 record ecological gameplay.
+Tactical [`292`](../tactical/292-rabbit-burrow-ecology.md) is now active as the
+fourth chapter: rabbits qualify and excavate one real shallow bank threshold,
+persist as a warren family, emerge on world time, consume/raid real carrots,
+and make ordinary fence/gate state into ecological gameplay.
 
 ## Scope
 
