@@ -3822,6 +3822,12 @@ impl WebSceneHost {
                         mclone_protocol::ItemKind::WheatSeeds,
                     ),
                     ("wheatHotbarCount", mclone_protocol::ItemKind::Wheat),
+                    ("carrotHotbarCount", mclone_protocol::ItemKind::Carrot),
+                    ("oakFenceHotbarCount", mclone_protocol::ItemKind::OakFence),
+                    (
+                        "oakFenceGateHotbarCount",
+                        mclone_protocol::ItemKind::OakFenceGate,
+                    ),
                 ] {
                     report_set_number(
                         &object,
@@ -3838,6 +3844,7 @@ impl WebSceneHost {
                 for (prefix, kind) in [
                     ("wheatDrop", mclone_protocol::ItemKind::Wheat),
                     ("wheatSeedDrop", mclone_protocol::ItemKind::WheatSeeds),
+                    ("carrotDrop", mclone_protocol::ItemKind::Carrot),
                 ] {
                     let drops = client
                         .entity_snapshots()

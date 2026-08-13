@@ -11,6 +11,7 @@ use mclone_protocol::{
 use mclone_worldgen::block::{
     FARMLAND_MOISTURE_0, FARMLAND_MOISTURE_7, LILY_PAD, generated_block_state_id, wheat_for_age,
 };
+use mclone_worldgen::structure_json::raw_block_state_for_canonical_key;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
@@ -46,6 +47,10 @@ const WHEAT_FARMING_RECIPE: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../../assets/mclone/showcases/wheat-farming.showcase.json"
 ));
+const KITCHEN_GARDEN_RECIPE: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../../assets/mclone/showcases/kitchen-garden.showcase.json"
+));
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum PlayableShowcaseId {
@@ -53,14 +58,16 @@ pub enum PlayableShowcaseId {
     DeerForestEdge,
     BeePollination,
     WheatFarming,
+    KitchenGarden,
 }
 
 impl PlayableShowcaseId {
-    pub const ALL: [Self; 4] = [
+    pub const ALL: [Self; 5] = [
         Self::MallardEcology,
         Self::DeerForestEdge,
         Self::BeePollination,
         Self::WheatFarming,
+        Self::KitchenGarden,
     ];
 
     pub const fn label(self) -> &'static str {
@@ -69,6 +76,7 @@ impl PlayableShowcaseId {
             Self::DeerForestEdge => "deer-forest-edge",
             Self::BeePollination => "bee-pollination",
             Self::WheatFarming => "wheat-farming",
+            Self::KitchenGarden => "kitchen-garden",
         }
     }
 
@@ -78,8 +86,9 @@ impl PlayableShowcaseId {
             "deer-forest-edge" => Ok(Self::DeerForestEdge),
             "bee-pollination" => Ok(Self::BeePollination),
             "wheat-farming" => Ok(Self::WheatFarming),
+            "kitchen-garden" => Ok(Self::KitchenGarden),
             _ => Err(PlayableShowcaseError::invalid(format!(
-                "unknown playable showcase `{value}`; expected mallard-ecology, deer-forest-edge, bee-pollination, or wheat-farming"
+                "unknown playable showcase `{value}`; expected mallard-ecology, deer-forest-edge, bee-pollination, wheat-farming, or kitchen-garden"
             ))),
         }
     }
@@ -90,6 +99,7 @@ impl PlayableShowcaseId {
             Self::DeerForestEdge => DEER_FOREST_EDGE_RECIPE,
             Self::BeePollination => BEE_POLLINATION_RECIPE,
             Self::WheatFarming => WHEAT_FARMING_RECIPE,
+            Self::KitchenGarden => KITCHEN_GARDEN_RECIPE,
         }
     }
 }
@@ -170,6 +180,12 @@ enum LiveInstantiationSubject {
     WoodenHoe,
     WheatSeeds,
     WheatItem,
+    CarrotCrop,
+    CarrotItem,
+    OakFenceBlock,
+    OakFenceItem,
+    OakFenceGateBlock,
+    OakFenceGateItem,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -307,6 +323,42 @@ pub const LIVE_INSTANTIATION_EVIDENCE: &[LiveInstantiationEvidence] = &[
         contract: "mclone-server::integrated::tests::debug_interactions::wooden_hoe_seed_and_harvest_form_an_authoritative_inventory_loop",
         subject: LiveInstantiationSubject::WheatItem,
     },
+    LiveInstantiationEvidence {
+        id: "mclone-carrot-planting-and-growth",
+        ordinary_producer: "carrot planting followed by loaded-world random crop ticks",
+        contract: "mclone-server::farming::tests::hydrated_farmland_advances_carrots_through_the_shared_crop_system",
+        subject: LiveInstantiationSubject::CarrotCrop,
+    },
+    LiveInstantiationEvidence {
+        id: "mclone-farming-starter-carrots",
+        ordinary_producer: "fresh ordinary Mclone-world starter inventory",
+        contract: "mclone-server::integrated::tests::debug_interactions::carrot_plant_and_harvest_use_the_shared_crop_and_item_drop_loop",
+        subject: LiveInstantiationSubject::CarrotItem,
+    },
+    LiveInstantiationEvidence {
+        id: "mclone-oak-fence-placement",
+        ordinary_producer: "ordinary oak-fence item placement with neighbor refresh",
+        contract: "mclone-server::integrated::tests::debug_interactions::fences_connect_and_gate_toggles_authoritatively",
+        subject: LiveInstantiationSubject::OakFenceBlock,
+    },
+    LiveInstantiationEvidence {
+        id: "mclone-farming-starter-fences",
+        ordinary_producer: "fresh ordinary Mclone-world starter inventory",
+        contract: "mclone-server::integrated::tests::debug_interactions::fences_connect_and_gate_toggles_authoritatively",
+        subject: LiveInstantiationSubject::OakFenceItem,
+    },
+    LiveInstantiationEvidence {
+        id: "mclone-oak-fence-gate-placement-and-use",
+        ordinary_producer: "ordinary oak-fence-gate placement and manual block use",
+        contract: "mclone-server::integrated::tests::debug_interactions::fences_connect_and_gate_toggles_authoritatively",
+        subject: LiveInstantiationSubject::OakFenceGateBlock,
+    },
+    LiveInstantiationEvidence {
+        id: "mclone-farming-starter-gates",
+        ordinary_producer: "fresh ordinary Mclone-world starter inventory",
+        contract: "mclone-server::integrated::tests::debug_interactions::fences_connect_and_gate_toggles_authoritatively",
+        subject: LiveInstantiationSubject::OakFenceGateItem,
+    },
 ];
 
 pub fn playable_showcase_manifest(
@@ -433,6 +485,9 @@ fn validate_recipe(
                 LiveInstantiationSubject::FarmSoil
             }
             value if wheat_block_age(value).is_some() => LiveInstantiationSubject::WheatCrop,
+            value if carrots_block_age(value).is_some() => LiveInstantiationSubject::CarrotCrop,
+            value if is_oak_fence_block(value) => LiveInstantiationSubject::OakFenceBlock,
+            value if is_oak_fence_gate_block(value) => LiveInstantiationSubject::OakFenceGateBlock,
             value => {
                 return Err(PlayableShowcaseError::invalid(format!(
                     "showcase block `{value}` is not in the bounded block-patch allowlist"
@@ -583,6 +638,9 @@ fn validate_recipe(
             "minecraft:wooden_hoe" => LiveInstantiationSubject::WoodenHoe,
             "minecraft:wheat_seeds" => LiveInstantiationSubject::WheatSeeds,
             "minecraft:wheat" => LiveInstantiationSubject::WheatItem,
+            "minecraft:carrot" => LiveInstantiationSubject::CarrotItem,
+            "minecraft:oak_fence" => LiveInstantiationSubject::OakFenceItem,
+            "minecraft:oak_fence_gate" => LiveInstantiationSubject::OakFenceGateItem,
             value => {
                 return Err(PlayableShowcaseError::invalid(format!(
                     "showcase inventory item `{value}` is not in the bounded item allowlist"
@@ -642,6 +700,29 @@ fn wheat_block_age(block: &str) -> Option<u8> {
     (age <= 7).then_some(age)
 }
 
+fn carrots_block_age(block: &str) -> Option<u8> {
+    let age = block
+        .strip_prefix("minecraft:carrots[age=")?
+        .strip_suffix(']')?
+        .parse::<u8>()
+        .ok()?;
+    (age <= 7).then_some(age)
+}
+
+fn is_oak_fence_block(block: &str) -> bool {
+    block.starts_with("minecraft:oak_fence[")
+        && raw_block_state_for_canonical_key(block)
+            .and_then(mclone_worldgen::block::oak_fence_state)
+            .is_some()
+}
+
+fn is_oak_fence_gate_block(block: &str) -> bool {
+    block.starts_with("minecraft:oak_fence_gate[")
+        && raw_block_state_for_canonical_key(block)
+            .and_then(mclone_worldgen::block::oak_fence_gate_state)
+            .is_some()
+}
+
 fn validate_position(label: &str, position: [f64; 3]) -> Result<(), PlayableShowcaseError> {
     if !position.into_iter().all(f64::is_finite)
         || position[0].abs() > 64.0
@@ -693,6 +774,16 @@ fn apply_block_patches(
                 wheat_for_age(wheat_block_age(value).expect("guarded wheat age"))
                     .expect("validated wheat age exists"),
             ),
+            value
+                if carrots_block_age(value).is_some()
+                    || is_oak_fence_block(value)
+                    || is_oak_fence_gate_block(value) =>
+            {
+                generated_block_state_id(
+                    raw_block_state_for_canonical_key(value)
+                        .expect("validated canonical garden state exists"),
+                )
+            }
             _ => unreachable!("validated block patch"),
         };
         record.snapshot.patch_section_block(
@@ -878,6 +969,9 @@ fn write_player(
             "minecraft:wooden_hoe" => ItemKind::WoodenHoe,
             "minecraft:wheat_seeds" => ItemKind::WheatSeeds,
             "minecraft:wheat" => ItemKind::Wheat,
+            "minecraft:carrot" => ItemKind::Carrot,
+            "minecraft:oak_fence" => ItemKind::OakFence,
+            "minecraft:oak_fence_gate" => ItemKind::OakFenceGate,
             _ => unreachable!("validated inventory item"),
         };
         player.inventory[usize::from(item.slot)] = Some(ItemStackSnapshot {
@@ -1546,6 +1640,69 @@ mod tests {
                 count: 8,
             })
         );
+    }
+
+    #[test]
+    fn kitchen_garden_recipe_compiles_real_boundary_and_crop_facts() {
+        let identity = ClientIdentity::test_default();
+        let (manifest, store) =
+            playable_showcase_memory_store(PlayableShowcaseId::KitchenGarden, &identity).unwrap();
+        assert_eq!(manifest.revision, 1);
+        assert_eq!(manifest.seed, 17_506);
+        assert_eq!(manifest.entity_count, 0);
+        assert_eq!(manifest.entry_feet, [2.5, 64.0, 8.5]);
+        assert_eq!(manifest.entry_eye, [2.5, 65.62, 8.5]);
+        assert_eq!(manifest.entry_look_at, [5.5, 64.75, 8.5]);
+
+        let center = store.chunk(ChunkPos::new(0, 0)).unwrap();
+        let block_at = |pos: BlockPos| {
+            center
+                .snapshot
+                .sections
+                .iter()
+                .find(|section| section.section_y == block_to_section_coord(pos.y))
+                .map(|section| {
+                    section.block_state_id_at(mclone_core::chunk_section_index(
+                        pos.x.rem_euclid(16),
+                        pos.y.rem_euclid(16),
+                        pos.z.rem_euclid(16),
+                    ))
+                })
+                .unwrap_or(mclone_core::AIR_BLOCK_STATE_ID)
+        };
+        let west_gate = block_at(BlockPos::new(5, 64, 8));
+        let gate = mclone_worldgen::block::oak_fence_gate_state(west_gate.0 as u16).unwrap();
+        assert_eq!(gate.facing, 1);
+        assert!(!gate.open);
+        let adjacent =
+            mclone_worldgen::block::oak_fence_state(block_at(BlockPos::new(5, 64, 7)).0 as u16)
+                .unwrap();
+        assert!(adjacent.north && adjacent.south);
+        assert_eq!(
+            block_at(BlockPos::new(6, 64, 9)),
+            generated_block_state_id(mclone_worldgen::block::CARROTS_AGE_7)
+        );
+        assert_eq!(
+            block_at(BlockPos::new(10, 64, 9)),
+            generated_block_state_id(wheat_for_age(7).unwrap())
+        );
+
+        let player = store
+            .player(&PlayerRecordKey::from_profile_id(identity.profile_id))
+            .unwrap();
+        assert_eq!(player.selected_hotbar_slot, 3);
+        for (slot, kind, count) in [
+            (1, ItemKind::OakFence, 32),
+            (2, ItemKind::OakFenceGate, 4),
+            (3, ItemKind::Carrot, 8),
+            (7, ItemKind::WoodenHoe, 1),
+            (8, ItemKind::WheatSeeds, 8),
+        ] {
+            assert_eq!(
+                player.inventory[slot],
+                Some(ItemStackSnapshot { kind, count })
+            );
+        }
     }
 
     #[test]
