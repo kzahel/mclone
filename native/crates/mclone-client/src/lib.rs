@@ -815,7 +815,7 @@ impl ClientRuntime {
         let Some(snapshot) = self.chunks.get_mut(&pos) else {
             return false;
         };
-        snapshot.patch_section_blocks(
+        let changed = snapshot.patch_section_blocks(
             section_y,
             updates.iter().filter_map(|update| {
                 if update.local_x as i32 >= CHUNK_WIDTH
@@ -831,7 +831,16 @@ impl ClientRuntime {
                     update.block_state,
                 ))
             }),
-        ) > 0
+        );
+        if changed == 0 {
+            return false;
+        }
+        // Section deltas mutate the resident snapshot without replacing it.
+        // Advance its content revision so browser render-worker mirrors, and
+        // any future revision-keyed snapshot consumers, receive an upsert
+        // instead of rebuilding from their stale copy.
+        snapshot.revision.0 = snapshot.revision.0.wrapping_add(1);
+        true
     }
 
     fn apply_entity_update(&mut self, update: EntityUpdate) {
@@ -2100,10 +2109,30 @@ mod tests {
         });
 
         let snapshot = runtime.chunk_snapshot(ChunkPos::new(0, 0)).unwrap();
+        assert_eq!(snapshot.revision, ChunkRevision(2));
         assert_eq!(snapshot.sections.len(), 1);
         let blocks = snapshot.sections[0].unpack_block_state_ids();
         assert_eq!(blocks[chunk_section_index(1, 2, 3)], BlockStateId(42));
         assert_eq!(blocks[chunk_section_index(4, 5, 6)], BlockStateId(43));
+
+        assert!(!runtime.apply_section_block_updates(
+            ChunkPos::new(0, 0),
+            0,
+            &[SectionBlockUpdate {
+                local_x: 1,
+                local_y: 2,
+                local_z: 3,
+                block_state: BlockStateId(42),
+            }],
+        ));
+        assert_eq!(
+            runtime
+                .chunk_snapshot(ChunkPos::new(0, 0))
+                .unwrap()
+                .revision,
+            ChunkRevision(2),
+            "an idempotent delta must not force a render-mirror upsert"
+        );
     }
 
     #[test]
