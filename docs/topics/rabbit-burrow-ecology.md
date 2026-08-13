@@ -2,9 +2,11 @@
 
 Topic: `rabbit-burrow-ecology`
 
-Status: live shared implementation and exact public desktop/phone acceptance
-complete under Tactical
-[`292`](../tactical/292-rabbit-burrow-ecology.md) on 2026-08-13.
+Status: live shared implementation completed under Tactical
+[`292`](../tactical/292-rabbit-burrow-ecology.md), with the A* routing and deep
+burrow tracking correction active under Tactical
+[`293`](../tactical/293-rabbit-navigation-and-burrow-visibility.md) on
+2026-08-13.
 
 ## Purpose
 
