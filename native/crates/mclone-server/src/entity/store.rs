@@ -1015,38 +1015,6 @@ impl ServerEntityStore {
             .min_by(|(_, left), (_, right)| left.total_cmp(right))
     }
 
-    pub(crate) fn targeted_rabbit(
-        &self,
-        from: Vec3d,
-        to: Vec3d,
-    ) -> Option<(ServerEntityState, f64)> {
-        self.entities
-            .values()
-            .copied()
-            .filter(|entity| {
-                entity.alive
-                    && entity.kind == EntityKind::Rabbit
-                    && entity.width > 0.01
-                    && entity.height > 0.01
-            })
-            .filter_map(|mut entity| {
-                entity.position = self.topology.nearest_position_lift(entity.position, from);
-                let center =
-                    entity
-                        .position
-                        .add(Vec3d::new(0.0, f64::from(entity.height) * 0.5, 0.0));
-                Aabb::of_size(
-                    center,
-                    f64::from(entity.width) + 0.3,
-                    f64::from(entity.height) + 0.3,
-                    f64::from(entity.width) + 0.3,
-                )
-                .ray_intersection_fraction(from, to)
-                .map(|fraction| (entity, fraction))
-            })
-            .min_by(|(_, left), (_, right)| left.total_cmp(right))
-    }
-
     pub(crate) fn feed_rabbit(&mut self, id: EntityId) -> Option<ServerEntityState> {
         let mob = self.mobs.get_mut(&id)?;
         mob.feed_rabbit(RABBIT_LOVE_TICKS)

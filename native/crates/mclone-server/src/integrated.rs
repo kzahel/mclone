@@ -146,6 +146,7 @@ const DEER_HUNTING_SPEAR_REACH: f64 = 4.5;
 const DEER_HUNTING_SPEAR_DAMAGE: u8 = 8;
 const DEER_HUNTING_SPEAR_COOLDOWN_TICKS: u64 = 12;
 const BEE_COLONY_INTERACTION_REACH: f64 = 4.5;
+const ENTITY_INTERACTION_REACH_SQR: f64 = 6.0 * 6.0;
 const NATURAL_SPAWN_TICK_SEED_MULTIPLIER: i64 = 6_364_136_223_846_793_005;
 
 fn session_configuration(
@@ -3929,19 +3930,23 @@ impl RealmServer {
         }
         let player_id = target.player_id();
         let player = self.player_for_target(target)?;
-        let eye = player.position().add(Vec3d::new(0.0, 1.62, 0.0));
+        let player_position = player.position();
+        let eye = player_position.add(Vec3d::new(0.0, 1.62, 0.0));
         let direction = look_direction_from_rot(player.y_rot_degrees(), player.x_rot_degrees());
         let to = eye.add(direction.scale(BEE_COLONY_INTERACTION_REACH));
         if self
             .inventory_for_target(target)?
             .selected_item_stack()
             .is_some_and(|stack| stack.kind == ItemKind::Carrot)
-            && let Some((targeted, hit_fraction)) =
-                self.active_dimension.entities.targeted_rabbit(eye, to)
-            && targeted.id == command.target
-            && deer_attack_line_of_sight(eye, to, hit_fraction, |pos| {
-                self.scheduler.block_at_world(pos)
-            })
+            && self
+                .active_dimension
+                .entities
+                .state(command.target)
+                .is_some_and(|rabbit| {
+                    rabbit.kind == EntityKind::Rabbit
+                        && player_position.distance_to_sqr(rabbit.position)
+                            < ENTITY_INTERACTION_REACH_SQR
+                })
             && let Some(updated) = self.active_dimension.entities.feed_rabbit(command.target)
         {
             let consumed = self

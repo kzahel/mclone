@@ -168,6 +168,44 @@ fn carrot_plant_and_harvest_use_the_shared_crop_and_item_drop_loop() {
 }
 
 #[test]
+fn carrot_feeding_accepts_the_client_selected_adult_rabbit_within_reach() {
+    let mut server = LocalRealmSession::new(20);
+    load_center_chunk(&mut server);
+    let rabbit = server.entities.insert_passive_mob_for_test(
+        EntityKind::Rabbit,
+        Vec3d::new(10.5, 65.0, 10.5),
+        0.0,
+    );
+    sync_player(&mut server, Vec3d::new(8.5, 65.0, 10.5));
+    sync_carried_slot(&mut server, 3);
+    let before = server.inventory().item_count(ItemKind::Carrot);
+
+    let updates = server
+        .try_handle_command(ClientCommand::InteractEntity(InteractEntityCommand {
+            target: rabbit,
+            hand: InteractionHand::MainHand,
+        }))
+        .expect("feed nearby adult rabbit selected by the client");
+
+    assert_eq!(server.inventory().item_count(ItemKind::Carrot), before - 1);
+    assert!(updates.iter().any(|update| matches!(
+        update,
+        ServerUpdate::PlayerInventory { hotbar }
+            if hotbar[3]
+                == Some(ItemStackSnapshot {
+                    kind: ItemKind::Carrot,
+                    count: u8::try_from(before - 1).unwrap(),
+                })
+    )));
+    assert!(
+        server
+            .entities
+            .mob_state(rabbit)
+            .is_some_and(|mob| mob.rabbit_can_breed())
+    );
+}
+
+#[test]
 fn fences_connect_and_gate_toggles_authoritatively() {
     let mut server = LocalRealmSession::new(23);
     load_center_chunk(&mut server);

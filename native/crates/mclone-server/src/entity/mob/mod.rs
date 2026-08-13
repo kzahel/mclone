@@ -87,6 +87,7 @@ const RABBIT_FLEE_SPEED: f64 = 0.15;
 const RABBIT_DIG_TICKS: u32 = 56;
 const RABBIT_ENTRY_TICKS: u32 = 18;
 const RABBIT_EMERGE_TICKS: u32 = 18;
+const RABBIT_FORAGE_TICKS: u32 = 36;
 const RABBIT_RAID_TICKS: u32 = 26;
 const RABBIT_UNDERGROUND_MIN_TICKS: u32 = 80;
 const RABBIT_INTENT_TICKS: u16 = 280;
@@ -856,6 +857,11 @@ impl MobRuntimeState {
                 stall_ticks: 0,
             });
         } else {
+            if saved.behavior == mclone_protocol::RabbitBehavior::Forage
+                && ticks >= RABBIT_FORAGE_TICKS
+            {
+                self.rabbit_habitat_intent = None;
+            }
             let target_is_valid = self.rabbit_habitat_intent.is_some_and(|intent| {
                 intent.ticks_remaining > 0
                     && intent.block.is_none_or(|block| {
@@ -3153,6 +3159,97 @@ mod tests {
             Some(mclone_protocol::RabbitBehavior::Idle)
         );
         assert!(entity.position.x > 2.0);
+    }
+
+    #[test]
+    fn rabbit_selects_a_mature_carrot_as_a_reachable_raid_target() {
+        let crop = BlockPos::new(8, 64, 0);
+        let blocks = |pos: BlockPos| {
+            Some(generated_block_state_id(if pos == crop {
+                CARROTS_AGE_7
+            } else if pos.y == 63 {
+                mclone_worldgen::block::FARMLAND_MOISTURE_7
+            } else {
+                mclone_worldgen::block::AIR
+            }))
+        };
+
+        assert_eq!(
+            select_rabbit_carrot_target(Vec3d::new(0.5, 64.0, 0.5), &blocks),
+            Some(crop)
+        );
+    }
+
+    #[test]
+    fn rabbit_finishes_foraging_and_reconsiders_a_mature_carrot() {
+        let rabbit_id = EntityId(78);
+        let persistent_id = EntityPersistentId::new(0, 78);
+        let home = EntityPersistentId::new(0, 79);
+        let mut entity = ServerEntityState::from_metadata(
+            rabbit_id,
+            persistent_id,
+            EntityMetadata::RABBIT,
+            Vec3d::new(0.5, 64.0, 0.5),
+            0.0,
+            0.0,
+            None,
+            true,
+        );
+        let mut mob = MobRuntimeState::from_saved(
+            rabbit_id,
+            EntityMetadata::RABBIT,
+            true,
+            0.0,
+            Vec3d::ZERO,
+            None,
+            None,
+            None,
+            None,
+            Some(RabbitRuntimeSaveData {
+                home: Some(home),
+                dig_target: None,
+                life_stage: mclone_protocol::RabbitLifeStage::Adult,
+                age_ticks: 2_400,
+                parents: [None, None],
+                behavior: mclone_protocol::RabbitBehavior::Forage,
+                behavior_ticks: RABBIT_FORAGE_TICKS,
+                health: 3,
+                max_health: 3,
+                love_ticks: 0,
+                breed_cooldown: 0,
+                raid_cooldown: 0,
+            }),
+        );
+        mob.rabbit_home_position = Some(entity.position);
+        mob.rabbit_habitat_intent = Some(RabbitHabitatIntent {
+            kind: RabbitIntentKind::Forage,
+            target: entity.position,
+            block: None,
+            ticks_remaining: RABBIT_INTENT_TICKS,
+            stall_ticks: 0,
+        });
+        let crop = BlockPos::new(8, 64, 0);
+        let blocks = |pos: BlockPos| {
+            Some(generated_block_state_id(if pos == crop {
+                CARROTS_AGE_7
+            } else if pos.y == 63 {
+                mclone_worldgen::block::FARMLAND_MOISTURE_7
+            } else {
+                mclone_worldgen::block::AIR
+            }))
+        };
+
+        mob.tick_entity_at_time(&mut entity, &[], &[], &[], 12_000, &blocks);
+
+        assert_eq!(
+            mob.rabbit_habitat_intent.map(|intent| intent.kind),
+            Some(RabbitIntentKind::Raid)
+        );
+        assert_eq!(
+            mob.rabbit_behavior(),
+            Some(mclone_protocol::RabbitBehavior::Hop)
+        );
+        assert!(entity.position.x > 0.5);
     }
 
     fn one_block_ledge(pos: BlockPos) -> Option<BlockStateId> {
