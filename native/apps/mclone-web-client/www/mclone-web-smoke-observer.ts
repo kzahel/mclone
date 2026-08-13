@@ -218,6 +218,15 @@ export function installWebSmokeObserver(
       runtime.state.showcaseBeeFieldGuideBits = startup.showcaseBeeFieldGuideBits == null
         ? null
         : Number(startup.showcaseBeeFieldGuideBits);
+      runtime.state.showcaseRabbitCount = startup.showcaseRabbitCount == null
+        ? null
+        : Number(startup.showcaseRabbitCount);
+      runtime.state.showcaseRabbitBurrowCount = startup.showcaseRabbitBurrowCount == null
+        ? null
+        : Number(startup.showcaseRabbitBurrowCount);
+      runtime.state.showcaseRabbitFieldGuideBits = startup.showcaseRabbitFieldGuideBits == null
+        ? null
+        : Number(startup.showcaseRabbitFieldGuideBits);
     },
     observeReport(report): void {
       if (!report?.ok) {

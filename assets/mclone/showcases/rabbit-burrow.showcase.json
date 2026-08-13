@@ -1,0 +1,180 @@
+{
+  "schemaVersion": 1,
+  "id": "rabbit-burrow",
+  "title": "Rabbit Burrow and Garden",
+  "revision": 1,
+  "baseTerrain": "rabbit-meadow-v1",
+  "seed": 17507,
+  "dayTime": 12000,
+  "freezeTime": true,
+  "entry": {
+    "feet": [14.5, 65.0, 14.0],
+    "lookAt": [9.0, 65.5, 9.0]
+  },
+  "blockPatches": [
+    { "position": [16, 65, 8], "block": "minecraft:oak_fence[east=true,north=false,south=true,waterlogged=false,west=false]", "liveInstantiation": "mclone-oak-fence-placement" },
+    { "position": [17, 65, 8], "block": "minecraft:oak_fence[east=true,north=false,south=false,waterlogged=false,west=true]", "liveInstantiation": "mclone-oak-fence-placement" },
+    { "position": [18, 65, 8], "block": "minecraft:oak_fence[east=true,north=false,south=false,waterlogged=false,west=true]", "liveInstantiation": "mclone-oak-fence-placement" },
+    { "position": [19, 65, 8], "block": "minecraft:oak_fence[east=true,north=false,south=false,waterlogged=false,west=true]", "liveInstantiation": "mclone-oak-fence-placement" },
+    { "position": [20, 65, 8], "block": "minecraft:oak_fence[east=true,north=false,south=false,waterlogged=false,west=true]", "liveInstantiation": "mclone-oak-fence-placement" },
+    { "position": [21, 65, 8], "block": "minecraft:oak_fence[east=true,north=false,south=false,waterlogged=false,west=true]", "liveInstantiation": "mclone-oak-fence-placement" },
+    { "position": [22, 65, 8], "block": "minecraft:oak_fence[east=true,north=false,south=false,waterlogged=false,west=true]", "liveInstantiation": "mclone-oak-fence-placement" },
+    { "position": [23, 65, 8], "block": "minecraft:oak_fence[east=true,north=false,south=false,waterlogged=false,west=true]", "liveInstantiation": "mclone-oak-fence-placement" },
+    { "position": [24, 65, 8], "block": "minecraft:oak_fence[east=false,north=false,south=true,waterlogged=false,west=true]", "liveInstantiation": "mclone-oak-fence-placement" },
+
+    { "position": [16, 65, 9], "block": "minecraft:oak_fence[east=false,north=true,south=true,waterlogged=false,west=false]", "liveInstantiation": "mclone-oak-fence-placement" },
+    { "position": [16, 65, 10], "block": "minecraft:oak_fence_gate[facing=east,in_wall=false,open=false,powered=false]", "liveInstantiation": "mclone-oak-fence-gate-placement-and-use" },
+    { "position": [16, 65, 11], "block": "minecraft:oak_fence[east=false,north=true,south=true,waterlogged=false,west=false]", "liveInstantiation": "mclone-oak-fence-placement" },
+    { "position": [16, 65, 12], "block": "minecraft:oak_fence[east=false,north=true,south=true,waterlogged=false,west=false]", "liveInstantiation": "mclone-oak-fence-placement" },
+    { "position": [16, 65, 13], "block": "minecraft:oak_fence[east=false,north=true,south=true,waterlogged=false,west=false]", "liveInstantiation": "mclone-oak-fence-placement" },
+    { "position": [16, 65, 14], "block": "minecraft:oak_fence[east=false,north=true,south=true,waterlogged=false,west=false]", "liveInstantiation": "mclone-oak-fence-placement" },
+
+    { "position": [24, 65, 9], "block": "minecraft:oak_fence[east=false,north=true,south=true,waterlogged=false,west=false]", "liveInstantiation": "mclone-oak-fence-placement" },
+    { "position": [24, 65, 10], "block": "minecraft:oak_fence[east=false,north=true,south=true,waterlogged=false,west=false]", "liveInstantiation": "mclone-oak-fence-placement" },
+    { "position": [24, 65, 11], "block": "minecraft:oak_fence[east=false,north=true,south=true,waterlogged=false,west=false]", "liveInstantiation": "mclone-oak-fence-placement" },
+    { "position": [24, 65, 12], "block": "minecraft:oak_fence[east=false,north=true,south=true,waterlogged=false,west=false]", "liveInstantiation": "mclone-oak-fence-placement" },
+    { "position": [24, 65, 13], "block": "minecraft:oak_fence[east=false,north=true,south=true,waterlogged=false,west=false]", "liveInstantiation": "mclone-oak-fence-placement" },
+    { "position": [24, 65, 14], "block": "minecraft:oak_fence[east=false,north=true,south=true,waterlogged=false,west=false]", "liveInstantiation": "mclone-oak-fence-placement" },
+
+    { "position": [16, 65, 15], "block": "minecraft:oak_fence[east=true,north=true,south=false,waterlogged=false,west=false]", "liveInstantiation": "mclone-oak-fence-placement" },
+    { "position": [17, 65, 15], "block": "minecraft:oak_fence[east=true,north=false,south=false,waterlogged=false,west=true]", "liveInstantiation": "mclone-oak-fence-placement" },
+    { "position": [18, 65, 15], "block": "minecraft:oak_fence[east=true,north=false,south=false,waterlogged=false,west=true]", "liveInstantiation": "mclone-oak-fence-placement" },
+    { "position": [19, 65, 15], "block": "minecraft:oak_fence[east=true,north=false,south=false,waterlogged=false,west=true]", "liveInstantiation": "mclone-oak-fence-placement" },
+    { "position": [20, 65, 15], "block": "minecraft:oak_fence[east=true,north=false,south=false,waterlogged=false,west=true]", "liveInstantiation": "mclone-oak-fence-placement" },
+    { "position": [21, 65, 15], "block": "minecraft:oak_fence[east=true,north=false,south=false,waterlogged=false,west=true]", "liveInstantiation": "mclone-oak-fence-placement" },
+    { "position": [22, 65, 15], "block": "minecraft:oak_fence[east=true,north=false,south=false,waterlogged=false,west=true]", "liveInstantiation": "mclone-oak-fence-placement" },
+    { "position": [23, 65, 15], "block": "minecraft:oak_fence[east=true,north=false,south=false,waterlogged=false,west=true]", "liveInstantiation": "mclone-oak-fence-placement" },
+    { "position": [24, 65, 15], "block": "minecraft:oak_fence[east=false,north=true,south=false,waterlogged=false,west=true]", "liveInstantiation": "mclone-oak-fence-placement" },
+
+    { "position": [18, 64, 10], "block": "minecraft:farmland[moisture=7]", "liveInstantiation": "mclone-farmland-tilling" },
+    { "position": [19, 64, 10], "block": "minecraft:farmland[moisture=7]", "liveInstantiation": "mclone-farmland-tilling" },
+    { "position": [18, 64, 11], "block": "minecraft:farmland[moisture=7]", "liveInstantiation": "mclone-farmland-tilling" },
+    { "position": [19, 64, 11], "block": "minecraft:farmland[moisture=7]", "liveInstantiation": "mclone-farmland-tilling" },
+    { "position": [21, 64, 13], "block": "minecraft:farmland[moisture=7]", "liveInstantiation": "mclone-farmland-tilling" },
+    { "position": [22, 64, 13], "block": "minecraft:farmland[moisture=7]", "liveInstantiation": "mclone-farmland-tilling" },
+    { "position": [21, 64, 14], "block": "minecraft:farmland[moisture=7]", "liveInstantiation": "mclone-farmland-tilling" },
+    { "position": [22, 64, 14], "block": "minecraft:farmland[moisture=7]", "liveInstantiation": "mclone-farmland-tilling" },
+
+    { "position": [18, 65, 10], "block": "minecraft:carrots[age=7]", "liveInstantiation": "mclone-carrot-planting-and-growth" },
+    { "position": [19, 65, 10], "block": "minecraft:carrots[age=6]", "liveInstantiation": "mclone-carrot-planting-and-growth" },
+    { "position": [18, 65, 11], "block": "minecraft:carrots[age=7]", "liveInstantiation": "mclone-carrot-planting-and-growth" },
+    { "position": [19, 65, 11], "block": "minecraft:carrots[age=4]", "liveInstantiation": "mclone-carrot-planting-and-growth" },
+    { "position": [21, 65, 13], "block": "minecraft:carrots[age=7]", "liveInstantiation": "mclone-carrot-planting-and-growth" },
+    { "position": [22, 65, 13], "block": "minecraft:carrots[age=5]", "liveInstantiation": "mclone-carrot-planting-and-growth" },
+    { "position": [21, 65, 14], "block": "minecraft:carrots[age=7]", "liveInstantiation": "mclone-carrot-planting-and-growth" },
+    { "position": [22, 65, 14], "block": "minecraft:carrots[age=3]", "liveInstantiation": "mclone-carrot-planting-and-growth" }
+  ],
+  "entities": [
+    {
+      "id": "home-warren",
+      "position": [8.5, 65.0, 8.5],
+      "yRotDegrees": 0.0,
+      "onGround": true,
+      "liveInstantiation": "mclone-rabbit-burrow-excavation",
+      "state": {
+        "kind": "rabbit-burrow",
+        "capacity": 6,
+        "residents": ["doe", "buck", "kit", null, null, null],
+        "disturbanceTicks": 0
+      }
+    },
+    {
+      "id": "doe",
+      "position": [8.5, 65.0, 11.5],
+      "yRotDegrees": -90.0,
+      "onGround": true,
+      "liveInstantiation": "mclone-rabbit-warren-family",
+      "state": {
+        "kind": "rabbit",
+        "home": "home-warren",
+        "digTarget": null,
+        "lifeStage": "adult",
+        "ageTicks": 2400,
+        "parents": [null, null],
+        "behavior": "forage",
+        "behaviorTicks": 30,
+        "health": 3,
+        "maxHealth": 3,
+        "loveTicks": 0,
+        "breedCooldown": 0,
+        "raidCooldown": 0
+      }
+    },
+    {
+      "id": "buck",
+      "position": [8.0, 65.0, 10.8],
+      "yRotDegrees": -90.0,
+      "onGround": true,
+      "liveInstantiation": "mclone-rabbit-warren-family",
+      "state": {
+        "kind": "rabbit",
+        "home": "home-warren",
+        "digTarget": null,
+        "lifeStage": "adult",
+        "ageTicks": 2400,
+        "parents": [null, null],
+        "behavior": "idle",
+        "behaviorTicks": 50,
+        "health": 3,
+        "maxHealth": 3,
+        "loveTicks": 0,
+        "breedCooldown": 0,
+        "raidCooldown": 300
+      }
+    },
+    {
+      "id": "kit",
+      "position": [8.8, 65.0, 11.5],
+      "yRotDegrees": -70.0,
+      "onGround": true,
+      "liveInstantiation": "mclone-rabbit-warren-family",
+      "state": {
+        "kind": "rabbit",
+        "home": "home-warren",
+        "digTarget": null,
+        "lifeStage": "kit",
+        "ageTicks": 600,
+        "parents": ["doe", "buck"],
+        "behavior": "emerge",
+        "behaviorTicks": 4,
+        "health": 3,
+        "maxHealth": 3,
+        "loveTicks": 0,
+        "breedCooldown": 0,
+        "raidCooldown": 0
+      }
+    },
+    {
+      "id": "founder",
+      "position": [-4.5, 65.0, 10.5],
+      "yRotDegrees": 0.0,
+      "onGround": true,
+      "liveInstantiation": "mclone-rabbit-natural-founder",
+      "state": {
+        "kind": "rabbit",
+        "home": null,
+        "digTarget": null,
+        "lifeStage": "adult",
+        "ageTicks": 2400,
+        "parents": [null, null],
+        "behavior": "idle",
+        "behaviorTicks": 0,
+        "health": 3,
+        "maxHealth": 3,
+        "loveTicks": 0,
+        "breedCooldown": 0,
+        "raidCooldown": 0
+      }
+    }
+  ],
+  "player": {
+    "selectedHotbarSlot": 0,
+    "inventory": [
+      { "slot": 3, "item": "minecraft:carrot", "count": 12, "liveInstantiation": "mclone-farming-starter-carrots" }
+    ],
+    "observations": [
+      { "kind": "rabbit-seen", "liveInstantiation": "mclone-rabbit-field-guide-observation" },
+      { "kind": "rabbit-found-burrow", "liveInstantiation": "mclone-rabbit-field-guide-observation" }
+    ]
+  }
+}

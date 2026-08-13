@@ -3804,6 +3804,84 @@ impl WebSceneHost {
                     "beeFieldGuideCount",
                     f64::from(client.bee_field_guide().discovered_count()),
                 )?;
+                let rabbits = client
+                    .entity_snapshots()
+                    .filter(|entity| entity.kind == mclone_protocol::EntityKind::Rabbit)
+                    .collect::<Vec<_>>();
+                report_set_number(&object, "rabbitCount", rabbits.len() as f64)?;
+                report_set_number(
+                    &object,
+                    "rabbitBurrowCount",
+                    client
+                        .entity_snapshots()
+                        .filter(|entity| entity.kind == mclone_protocol::EntityKind::RabbitBurrow)
+                        .count() as f64,
+                )?;
+                report_set_string(
+                    &object,
+                    "rabbitEntityIds",
+                    &rabbits
+                        .iter()
+                        .map(|entity| entity.id.0.to_string())
+                        .collect::<Vec<_>>()
+                        .join(","),
+                )?;
+                report_set_string(
+                    &object,
+                    "rabbitPositions",
+                    &rabbits
+                        .iter()
+                        .map(|entity| {
+                            format!(
+                                "{:.4},{:.4},{:.4}",
+                                entity.position.x, entity.position.y, entity.position.z
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join(";"),
+                )?;
+                report_set_string(
+                    &object,
+                    "rabbitTickCounts",
+                    &rabbits
+                        .iter()
+                        .map(|entity| entity.tick_count.to_string())
+                        .collect::<Vec<_>>()
+                        .join(","),
+                )?;
+                report_set_string(
+                    &object,
+                    "rabbitHeights",
+                    &rabbits
+                        .iter()
+                        .map(|entity| format!("{:.4}", entity.height))
+                        .collect::<Vec<_>>()
+                        .join(","),
+                )?;
+                report_set_string(
+                    &object,
+                    "rabbitAnimationClips",
+                    &rabbits
+                        .iter()
+                        .map(|entity| {
+                            entity.animation.map_or_else(
+                                || "none".to_owned(),
+                                |animation| animation.clip.to_string(),
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join(","),
+                )?;
+                report_set_number(
+                    &object,
+                    "rabbitFieldGuideBits",
+                    f64::from(client.rabbit_field_guide().bits()),
+                )?;
+                report_set_number(
+                    &object,
+                    "rabbitFieldGuideCount",
+                    f64::from(client.rabbit_field_guide().discovered_count()),
+                )?;
                 report_set_number(
                     &object,
                     "mallardEggHotbarCount",
@@ -4256,6 +4334,8 @@ impl WebSceneHost {
                             mclone_protocol::EntityKind::Bee => "bee",
                             mclone_protocol::EntityKind::BeeNest => "beeNest",
                             mclone_protocol::EntityKind::BeeHotel => "beeHotel",
+                            mclone_protocol::EntityKind::Rabbit => "rabbit",
+                            mclone_protocol::EntityKind::RabbitBurrow => "rabbitBurrow",
                             mclone_protocol::EntityKind::Mannequin => "mannequin",
                             mclone_protocol::EntityKind::DebugCube => "debugCube",
                             mclone_protocol::EntityKind::Item => "item",
@@ -4348,6 +4428,8 @@ impl WebSceneHost {
                             mclone_protocol::EntityKind::Bee => "bee",
                             mclone_protocol::EntityKind::BeeNest => "beeNest",
                             mclone_protocol::EntityKind::BeeHotel => "beeHotel",
+                            mclone_protocol::EntityKind::Rabbit => "rabbit",
+                            mclone_protocol::EntityKind::RabbitBurrow => "rabbitBurrow",
                             mclone_protocol::EntityKind::Mannequin => "mannequin",
                             mclone_protocol::EntityKind::DebugCube => "debugCube",
                             mclone_protocol::EntityKind::Item => "item",

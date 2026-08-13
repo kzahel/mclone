@@ -2,11 +2,14 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt;
 
-use mclone_core::{ChunkPos, ChunkRevision, Vec3d, block_to_chunk_coord, block_to_section_coord};
+use mclone_core::{
+    BlockPos, ChunkPos, ChunkRevision, Vec3d, block_to_chunk_coord, block_to_section_coord,
+};
 use mclone_protocol::{
     BeeBehavior, BeeFieldGuideProgress, BeeObservationKind, ClientIdentity, DeerBehavior,
     DeerFieldGuideProgress, DeerLifeStage, DeerObservationKind, DeerSex, DimensionKey,
     EntityRotation, ItemKind, ItemStackSnapshot, MallardFieldGuideProgress, MallardObservationKind,
+    RabbitBehavior, RabbitFieldGuideProgress, RabbitLifeStage, RabbitObservationKind,
 };
 use mclone_worldgen::block::{
     FARMLAND_MOISTURE_0, FARMLAND_MOISTURE_7, LILY_PAD, generated_block_state_id, wheat_for_age,
@@ -51,6 +54,10 @@ const KITCHEN_GARDEN_RECIPE: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../../assets/mclone/showcases/kitchen-garden.showcase.json"
 ));
+const RABBIT_BURROW_RECIPE: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../../assets/mclone/showcases/rabbit-burrow.showcase.json"
+));
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum PlayableShowcaseId {
@@ -59,15 +66,17 @@ pub enum PlayableShowcaseId {
     BeePollination,
     WheatFarming,
     KitchenGarden,
+    RabbitBurrow,
 }
 
 impl PlayableShowcaseId {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::MallardEcology,
         Self::DeerForestEdge,
         Self::BeePollination,
         Self::WheatFarming,
         Self::KitchenGarden,
+        Self::RabbitBurrow,
     ];
 
     pub const fn label(self) -> &'static str {
@@ -77,6 +86,7 @@ impl PlayableShowcaseId {
             Self::BeePollination => "bee-pollination",
             Self::WheatFarming => "wheat-farming",
             Self::KitchenGarden => "kitchen-garden",
+            Self::RabbitBurrow => "rabbit-burrow",
         }
     }
 
@@ -87,8 +97,9 @@ impl PlayableShowcaseId {
             "bee-pollination" => Ok(Self::BeePollination),
             "wheat-farming" => Ok(Self::WheatFarming),
             "kitchen-garden" => Ok(Self::KitchenGarden),
+            "rabbit-burrow" => Ok(Self::RabbitBurrow),
             _ => Err(PlayableShowcaseError::invalid(format!(
-                "unknown playable showcase `{value}`; expected mallard-ecology, deer-forest-edge, bee-pollination, wheat-farming, or kitchen-garden"
+                "unknown playable showcase `{value}`; expected mallard-ecology, deer-forest-edge, bee-pollination, wheat-farming, kitchen-garden, or rabbit-burrow"
             ))),
         }
     }
@@ -100,6 +111,7 @@ impl PlayableShowcaseId {
             Self::BeePollination => BEE_POLLINATION_RECIPE,
             Self::WheatFarming => WHEAT_FARMING_RECIPE,
             Self::KitchenGarden => KITCHEN_GARDEN_RECIPE,
+            Self::RabbitBurrow => RABBIT_BURROW_RECIPE,
         }
     }
 }
@@ -128,6 +140,9 @@ pub struct PlayableShowcaseManifest {
     pub bee_nest_count: usize,
     pub bee_hotel_count: usize,
     pub bee_field_guide_bits: u32,
+    pub rabbit_count: usize,
+    pub rabbit_burrow_count: usize,
+    pub rabbit_field_guide_bits: u32,
 }
 
 #[derive(Debug)]
@@ -186,6 +201,9 @@ enum LiveInstantiationSubject {
     OakFenceItem,
     OakFenceGateBlock,
     OakFenceGateItem,
+    Rabbit,
+    RabbitBurrow,
+    RabbitObservation,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -359,6 +377,30 @@ pub const LIVE_INSTANTIATION_EVIDENCE: &[LiveInstantiationEvidence] = &[
         contract: "mclone-server::integrated::tests::debug_interactions::fences_connect_and_gate_toggles_authoritatively",
         subject: LiveInstantiationSubject::OakFenceGateItem,
     },
+    LiveInstantiationEvidence {
+        id: "mclone-rabbit-natural-founder",
+        ordinary_producer: "browse-and-bank-qualified passive natural spawning",
+        contract: "mclone-server::entity::spawning::habitat::tests::rabbit_habitat_requires_browse_and_a_real_soil_bank",
+        subject: LiveInstantiationSubject::Rabbit,
+    },
+    LiveInstantiationEvidence {
+        id: "mclone-rabbit-warren-family",
+        ordinary_producer: "carrot-fed adult rabbits sharing a persistent warren with capacity",
+        contract: "mclone-server::entity::store::tests::rabbit_and_warren_identity_round_trip_together",
+        subject: LiveInstantiationSubject::Rabbit,
+    },
+    LiveInstantiationEvidence {
+        id: "mclone-rabbit-burrow-excavation",
+        ordinary_producer: "founder rabbit excavation of a validated live soil bank",
+        contract: "mclone-server::entity::mob::tests::founder_rabbit_chooses_a_real_bank_and_completes_one_dig",
+        subject: LiveInstantiationSubject::RabbitBurrow,
+    },
+    LiveInstantiationEvidence {
+        id: "mclone-rabbit-field-guide-observation",
+        ordinary_producer: "ordinary rabbit proximity, burrow, threshold, raid, and family observation paths",
+        contract: "mclone-server::integrated::route_rabbit_ecology_cues",
+        subject: LiveInstantiationSubject::RabbitObservation,
+    },
 ];
 
 pub fn playable_showcase_manifest(
@@ -529,6 +571,8 @@ fn validate_recipe(
             ShowcaseEntityState::Bee { .. } => LiveInstantiationSubject::Bee,
             ShowcaseEntityState::BeeNest { .. } => LiveInstantiationSubject::BeeNest,
             ShowcaseEntityState::BeeHotel { .. } => LiveInstantiationSubject::BeeHotel,
+            ShowcaseEntityState::Rabbit { .. } => LiveInstantiationSubject::Rabbit,
+            ShowcaseEntityState::RabbitBurrow { .. } => LiveInstantiationSubject::RabbitBurrow,
         };
         validate_evidence(&entity.live_instantiation, expected)?;
     }
@@ -614,6 +658,58 @@ fn validate_recipe(
                 entity.id
             )));
         }
+        if let ShowcaseEntityState::Rabbit {
+            home,
+            dig_target,
+            life_stage,
+            age_ticks,
+            health,
+            max_health,
+            ..
+        } = &entity.state
+        {
+            if home
+                .as_ref()
+                .is_some_and(|home| !entity_ids.contains(home.as_str()))
+            {
+                return Err(PlayableShowcaseError::invalid(format!(
+                    "showcase rabbit `{}` references a missing burrow",
+                    entity.id
+                )));
+            }
+            if let Some(target) = dig_target {
+                validate_block_position(*target)?;
+            }
+            if *max_health == 0
+                || *health > *max_health
+                || (*life_stage == ShowcaseRabbitLifeStage::Kit && *age_ticks >= 2_400)
+                || (*life_stage == ShowcaseRabbitLifeStage::Adult && *age_ticks < 2_400)
+            {
+                return Err(PlayableShowcaseError::invalid(format!(
+                    "showcase rabbit `{}` has impossible biological state",
+                    entity.id
+                )));
+            }
+        }
+        if let ShowcaseEntityState::RabbitBurrow {
+            capacity,
+            residents,
+            ..
+        } = &entity.state
+        {
+            if *capacity == 0
+                || usize::from(*capacity) > residents.len()
+                || residents
+                    .iter()
+                    .flatten()
+                    .any(|resident| !entity_ids.contains(resident.as_str()))
+            {
+                return Err(PlayableShowcaseError::invalid(format!(
+                    "showcase rabbit burrow `{}` has invalid capacity or resident references",
+                    entity.id
+                )));
+            }
+        }
     }
 
     if recipe.player.selected_hotbar_slot >= 9 {
@@ -663,6 +759,8 @@ fn validate_recipe(
                 LiveInstantiationSubject::DeerObservation
             } else if observation.kind.bee_protocol_kind().is_some() {
                 LiveInstantiationSubject::BeeObservation
+            } else if observation.kind.rabbit_protocol_kind().is_some() {
+                LiveInstantiationSubject::RabbitObservation
             } else {
                 LiveInstantiationSubject::MallardObservation
             },
@@ -902,6 +1000,52 @@ fn write_entities(
                 work_capacity: *work_capacity,
                 spread_cooldown: *spread_cooldown,
             },
+            ShowcaseEntityState::Rabbit {
+                home,
+                dig_target,
+                life_stage,
+                age_ticks,
+                behavior,
+                behavior_ticks,
+                health,
+                max_health,
+                love_ticks,
+                breed_cooldown,
+                raid_cooldown,
+                ..
+            } => EntitySavePayload::Rabbit {
+                home: home.as_ref().map(|home| {
+                    *persistent_ids
+                        .get(home.as_str())
+                        .expect("validated rabbit burrow reference")
+                }),
+                dig_target: dig_target.map(|target| BlockPos::new(target[0], target[1], target[2])),
+                life_stage: life_stage.protocol(),
+                age_ticks: *age_ticks,
+                parents,
+                behavior: behavior.protocol(),
+                behavior_ticks: *behavior_ticks,
+                health: *health,
+                max_health: *max_health,
+                love_ticks: *love_ticks,
+                breed_cooldown: *breed_cooldown,
+                raid_cooldown: *raid_cooldown,
+            },
+            ShowcaseEntityState::RabbitBurrow {
+                capacity,
+                residents,
+                disturbance_ticks,
+            } => EntitySavePayload::RabbitBurrow {
+                capacity: *capacity,
+                residents: residents.clone().map(|resident| {
+                    resident.map(|resident| {
+                        *persistent_ids
+                            .get(resident.as_str())
+                            .expect("validated rabbit resident reference")
+                    })
+                }),
+                disturbance_ticks: *disturbance_ticks,
+            },
         };
         let kind = match &recipe.state {
             ShowcaseEntityState::Mallard { .. } => "mclone:mallard",
@@ -911,6 +1055,8 @@ fn write_entities(
             ShowcaseEntityState::Bee { .. } => "mclone:bee",
             ShowcaseEntityState::BeeNest { .. } => "mclone:bee_nest",
             ShowcaseEntityState::BeeHotel { .. } => "mclone:bee_hotel",
+            ShowcaseEntityState::Rabbit { .. } => "mclone:rabbit",
+            ShowcaseEntityState::RabbitBurrow { .. } => "mclone:rabbit_burrow",
         };
         let position = Vec3d::new(recipe.position[0], recipe.position[1], recipe.position[2]);
         chunks
@@ -989,6 +1135,9 @@ fn write_player(
         if let Some(kind) = observation.kind.bee_protocol_kind() {
             player.bee_field_guide.observe(kind);
         }
+        if let Some(kind) = observation.kind.rabbit_protocol_kind() {
+            player.rabbit_field_guide.observe(kind);
+        }
     }
     store.save_player(&player)?;
     Ok(())
@@ -1033,6 +1182,7 @@ fn manifest_from_recipe(
     let mut guide = MallardFieldGuideProgress::default();
     let mut deer_guide = DeerFieldGuideProgress::default();
     let mut bee_guide = BeeFieldGuideProgress::default();
+    let mut rabbit_guide = RabbitFieldGuideProgress::default();
     for observation in &recipe.player.observations {
         if let Some(kind) = observation.kind.mallard_protocol_kind() {
             guide.observe(kind);
@@ -1042,6 +1192,9 @@ fn manifest_from_recipe(
         }
         if let Some(kind) = observation.kind.bee_protocol_kind() {
             bee_guide.observe(kind);
+        }
+        if let Some(kind) = observation.kind.rabbit_protocol_kind() {
+            rabbit_guide.observe(kind);
         }
     }
     PlayableShowcaseManifest {
@@ -1099,6 +1252,17 @@ fn manifest_from_recipe(
             .filter(|entity| matches!(&entity.state, ShowcaseEntityState::BeeHotel { .. }))
             .count(),
         bee_field_guide_bits: bee_guide.bits(),
+        rabbit_count: recipe
+            .entities
+            .iter()
+            .filter(|entity| matches!(&entity.state, ShowcaseEntityState::Rabbit { .. }))
+            .count(),
+        rabbit_burrow_count: recipe
+            .entities
+            .iter()
+            .filter(|entity| matches!(&entity.state, ShowcaseEntityState::RabbitBurrow { .. }))
+            .count(),
+        rabbit_field_guide_bits: rabbit_guide.bits(),
     }
 }
 
@@ -1127,6 +1291,7 @@ enum ShowcaseBaseTerrain {
     DeerForestEdgeV1,
     BeeFloweringMeadowV1,
     WheatFarmingV1,
+    RabbitMeadowV1,
 }
 
 impl ShowcaseBaseTerrain {
@@ -1137,6 +1302,7 @@ impl ShowcaseBaseTerrain {
             Self::DeerForestEdgeV1 => AuthoredWorldFixtureKind::DeerForestEdge,
             Self::BeeFloweringMeadowV1 => AuthoredWorldFixtureKind::BeeFloweringMeadow,
             Self::WheatFarmingV1 => AuthoredWorldFixtureKind::WheatFarming,
+            Self::RabbitMeadowV1 => AuthoredWorldFixtureKind::RabbitMeadow,
         }
     }
 }
@@ -1232,6 +1398,82 @@ enum ShowcaseEntityState {
         #[serde(rename = "spreadCooldown")]
         spread_cooldown: u32,
     },
+    Rabbit {
+        home: Option<String>,
+        #[serde(rename = "digTarget")]
+        dig_target: Option<[i32; 3]>,
+        #[serde(rename = "lifeStage")]
+        life_stage: ShowcaseRabbitLifeStage,
+        #[serde(rename = "ageTicks")]
+        age_ticks: u32,
+        parents: [Option<String>; 2],
+        behavior: ShowcaseRabbitBehavior,
+        #[serde(rename = "behaviorTicks")]
+        behavior_ticks: u32,
+        health: u8,
+        #[serde(rename = "maxHealth")]
+        max_health: u8,
+        #[serde(rename = "loveTicks")]
+        love_ticks: u32,
+        #[serde(rename = "breedCooldown")]
+        breed_cooldown: u32,
+        #[serde(rename = "raidCooldown")]
+        raid_cooldown: u32,
+    },
+    RabbitBurrow {
+        capacity: u8,
+        residents: [Option<String>; 6],
+        #[serde(rename = "disturbanceTicks")]
+        disturbance_ticks: u32,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+enum ShowcaseRabbitLifeStage {
+    Kit,
+    Adult,
+}
+
+impl ShowcaseRabbitLifeStage {
+    const fn protocol(self) -> RabbitLifeStage {
+        match self {
+            Self::Kit => RabbitLifeStage::Kit,
+            Self::Adult => RabbitLifeStage::Adult,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+enum ShowcaseRabbitBehavior {
+    Idle,
+    Hop,
+    Dig,
+    Emerge,
+    Forage,
+    Raid,
+    Flee,
+    EnterBurrow,
+    Underground,
+    Courtship,
+}
+
+impl ShowcaseRabbitBehavior {
+    const fn protocol(self) -> RabbitBehavior {
+        match self {
+            Self::Idle => RabbitBehavior::Idle,
+            Self::Hop => RabbitBehavior::Hop,
+            Self::Dig => RabbitBehavior::Dig,
+            Self::Emerge => RabbitBehavior::Emerge,
+            Self::Forage => RabbitBehavior::Forage,
+            Self::Raid => RabbitBehavior::Raid,
+            Self::Flee => RabbitBehavior::Flee,
+            Self::EnterBurrow => RabbitBehavior::EnterBurrow,
+            Self::Underground => RabbitBehavior::Underground,
+            Self::Courtship => RabbitBehavior::Courtship,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
@@ -1330,7 +1572,9 @@ impl ShowcaseEntityState {
             | Self::DeerBed { .. }
             | Self::Bee { .. }
             | Self::BeeNest { .. }
-            | Self::BeeHotel { .. } => return [None, None],
+            | Self::BeeHotel { .. }
+            | Self::RabbitBurrow { .. } => return [None, None],
+            Self::Rabbit { parents, .. } => parents,
         };
         [parents[0].as_deref(), parents[1].as_deref()]
     }
@@ -1374,6 +1618,12 @@ enum ShowcaseObservationKind {
     BeeWitnessedReturn,
     BeeWitnessedPollination,
     BeeCollectedBeeswax,
+    RabbitSeen,
+    RabbitFoundBurrow,
+    RabbitWitnessedDig,
+    RabbitWitnessedThresholdUse,
+    RabbitWitnessedRaid,
+    RabbitWitnessedFamily,
 }
 
 impl ShowcaseObservationKind {
@@ -1409,6 +1659,18 @@ impl ShowcaseObservationKind {
             Self::BeeWitnessedReturn => BeeObservationKind::WitnessedReturn,
             Self::BeeWitnessedPollination => BeeObservationKind::WitnessedPollination,
             Self::BeeCollectedBeeswax => BeeObservationKind::CollectedBeeswax,
+            _ => return None,
+        })
+    }
+
+    const fn rabbit_protocol_kind(self) -> Option<RabbitObservationKind> {
+        Some(match self {
+            Self::RabbitSeen => RabbitObservationKind::Seen,
+            Self::RabbitFoundBurrow => RabbitObservationKind::FoundBurrow,
+            Self::RabbitWitnessedDig => RabbitObservationKind::WitnessedDig,
+            Self::RabbitWitnessedThresholdUse => RabbitObservationKind::WitnessedThresholdUse,
+            Self::RabbitWitnessedRaid => RabbitObservationKind::WitnessedRaid,
+            Self::RabbitWitnessedFamily => RabbitObservationKind::WitnessedFamily,
             _ => return None,
         })
     }
@@ -1703,6 +1965,96 @@ mod tests {
                 Some(ItemStackSnapshot { kind, count })
             );
         }
+    }
+
+    #[test]
+    fn rabbit_burrow_recipe_is_data_only_and_links_one_family_home() {
+        let identity = ClientIdentity::test_default();
+        let (manifest, store) =
+            playable_showcase_memory_store(PlayableShowcaseId::RabbitBurrow, &identity).unwrap();
+        assert_eq!(manifest.revision, 1);
+        assert_eq!(manifest.seed, 17_507);
+        assert_eq!(manifest.entity_count, 5);
+        assert_eq!(manifest.rabbit_count, 4);
+        assert_eq!(manifest.rabbit_burrow_count, 1);
+        assert_eq!(
+            manifest.rabbit_field_guide_bits,
+            RabbitObservationKind::Seen.bit() | RabbitObservationKind::FoundBurrow.bit()
+        );
+
+        let center_entities = store.entity_chunk(ChunkPos::new(0, 0)).unwrap();
+        let burrow = center_entities
+            .entities
+            .iter()
+            .find(|entity| entity.kind == "mclone:rabbit_burrow")
+            .expect("semantic burrow record");
+        assert!(matches!(
+            burrow.payload,
+            EntitySavePayload::RabbitBurrow {
+                capacity: 6,
+                residents: [Some(_), Some(_), Some(_), None, None, None],
+                ..
+            }
+        ));
+        assert_eq!(
+            center_entities
+                .entities
+                .iter()
+                .filter(|entity| matches!(entity.payload, EntitySavePayload::Rabbit { .. }))
+                .count(),
+            3
+        );
+        assert!(center_entities.entities.iter().any(|entity| {
+            matches!(
+                entity.payload,
+                EntitySavePayload::Rabbit {
+                    home: Some(home),
+                    life_stage: RabbitLifeStage::Kit,
+                    ..
+                } if home == burrow.persistent_id
+            )
+        }));
+
+        let center = store.chunk(ChunkPos::new(1, 0)).unwrap();
+        let block_at = |pos: BlockPos| {
+            center
+                .snapshot
+                .sections
+                .iter()
+                .find(|section| section.section_y == block_to_section_coord(pos.y))
+                .map(|section| {
+                    section.block_state_id_at(mclone_core::chunk_section_index(
+                        pos.x.rem_euclid(16),
+                        pos.y.rem_euclid(16),
+                        pos.z.rem_euclid(16),
+                    ))
+                })
+                .unwrap_or(mclone_core::AIR_BLOCK_STATE_ID)
+        };
+        assert_eq!(
+            block_at(BlockPos::new(18, 65, 10)),
+            generated_block_state_id(mclone_worldgen::block::CARROTS_AGE_7)
+        );
+        assert!(
+            mclone_worldgen::block::oak_fence_gate_state(
+                block_at(BlockPos::new(16, 65, 10)).0 as u16
+            )
+            .is_some_and(|gate| !gate.open)
+        );
+        let player = store
+            .player(&PlayerRecordKey::from_profile_id(identity.profile_id))
+            .unwrap();
+        assert_eq!(
+            player.inventory[3],
+            Some(ItemStackSnapshot {
+                kind: ItemKind::Carrot,
+                count: 12,
+            })
+        );
+        assert_eq!(
+            player.rabbit_field_guide.bits(),
+            manifest.rabbit_field_guide_bits
+        );
     }
 
     #[test]

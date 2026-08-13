@@ -46,6 +46,7 @@ pub enum AuthoredWorldFixtureKind {
     DeerForestEdge,
     BeeFloweringMeadow,
     WheatFarming,
+    RabbitMeadow,
     LobbyTableV2,
     LobbyIslandV2,
 }
@@ -59,6 +60,7 @@ impl AuthoredWorldFixtureKind {
             Self::DeerForestEdge => "deer-forest-edge-v1",
             Self::BeeFloweringMeadow => "bee-flowering-meadow-v1",
             Self::WheatFarming => "wheat-farming-v1",
+            Self::RabbitMeadow => "rabbit-meadow-v1",
             Self::LobbyTableV2 => "lobby-table-a-v2",
             Self::LobbyIslandV2 => "lobby-island-b-v2",
         }
@@ -72,6 +74,7 @@ impl AuthoredWorldFixtureKind {
             Self::DeerForestEdge => "deer-forest-edge-v1",
             Self::BeeFloweringMeadow => "bee-flowering-meadow-v1",
             Self::WheatFarming => "wheat-farming-v1",
+            Self::RabbitMeadow => "rabbit-meadow-v1",
             Self::LobbyTableV2 => "lobby-table-a-v2",
             Self::LobbyIslandV2 => "lobby-island-b-v2",
         }
@@ -85,6 +88,7 @@ impl AuthoredWorldFixtureKind {
             Self::DeerForestEdge => 17_504,
             Self::BeeFloweringMeadow => 17_505,
             Self::WheatFarming => 17_506,
+            Self::RabbitMeadow => 17_507,
         }
     }
 
@@ -96,6 +100,7 @@ impl AuthoredWorldFixtureKind {
             Self::DeerForestEdge => [8.5, 65.0, 29.5],
             Self::BeeFloweringMeadow => [8.5, 65.0, 24.5],
             Self::WheatFarming => [8.5, 64.0, 14.5],
+            Self::RabbitMeadow => [14.5, 65.0, 14.0],
         }
     }
 
@@ -110,6 +115,7 @@ impl AuthoredWorldFixtureKind {
             Self::DeerForestEdge => [8.5, 65.0, 8.5],
             Self::BeeFloweringMeadow => [8.5, 65.0, 8.5],
             Self::WheatFarming => [8.5, 65.0, 8.5],
+            Self::RabbitMeadow => [8.5, 65.0, 8.5],
         }
     }
 
@@ -125,6 +131,7 @@ impl AuthoredWorldFixtureKind {
             Self::DeerForestEdge => self.preview_anchor(),
             Self::BeeFloweringMeadow => self.preview_anchor(),
             Self::WheatFarming => self.preview_anchor(),
+            Self::RabbitMeadow => self.preview_anchor(),
         }
     }
 
@@ -138,6 +145,7 @@ impl AuthoredWorldFixtureKind {
             Self::DeerForestEdge => [8, 64, 29],
             Self::BeeFloweringMeadow => [8, 64, 24],
             Self::WheatFarming => [8, 63, 14],
+            Self::RabbitMeadow => [14, 64, 14],
         }
     }
 
@@ -236,6 +244,7 @@ pub fn authored_world_fixture_records(
                 AuthoredWorldFixtureKind::WheatFarming => {
                     author_wheat_farming_site_chunk(&mut buffer)
                 }
+                AuthoredWorldFixtureKind::RabbitMeadow => author_rabbit_meadow_chunk(&mut buffer),
             }
             chunks.insert(pos, GeneratedChunk::from_mutable_buffer(buffer));
         }
@@ -424,6 +433,46 @@ fn author_wheat_farming_site_chunk(chunk: &mut MutableChunkBlockBuffer) {
     for z in 4..=12 {
         chunk.set_block_at_y(8, 62, z, DIRT);
         chunk.set_block_at_y(8, 63, z, WATER);
+    }
+}
+
+fn author_rabbit_meadow_chunk(chunk: &mut MutableChunkBlockBuffer) {
+    use mclone_worldgen::block::{AIR, GRASS, WATER};
+
+    for local_z in 0..16 {
+        for local_x in 0..16 {
+            let world_x = chunk.chunk_x * 16 + local_x;
+            let world_z = chunk.chunk_z * 16 + local_z;
+            for y in 59..=62 {
+                chunk.set_block_at_y(local_x, y, local_z, STONE);
+            }
+            chunk.set_block_at_y(local_x, 63, local_z, DIRT);
+            chunk.set_block_at_y(local_x, 64, local_z, GRASS_BLOCK);
+
+            // A long two-block-high turf bank supplies ordinary substrate,
+            // roof, rear support, and an open meadow threshold. The one
+            // existing recess is terrain, while RabbitBurrow remains a
+            // semantic persistent prop placed by the showcase recipe.
+            if (-8..=16).contains(&world_x) && (2..=8).contains(&world_z) {
+                chunk.set_block_at_y(local_x, 65, local_z, DIRT);
+                chunk.set_block_at_y(local_x, 66, local_z, GRASS_BLOCK);
+            }
+            if (world_x, world_z) == (8, 8) {
+                chunk.set_block_at_y(local_x, 65, local_z, AIR);
+            }
+
+            let review_sightline = (7..=15).contains(&world_x) && (9..=15).contains(&world_z);
+            let browse = (world_x * 13 + world_z * 29).rem_euclid(11) == 0;
+            if browse && !(2..=8).contains(&world_z) && !review_sightline {
+                chunk.set_block_at_y(local_x, 65, local_z, GRASS);
+            }
+
+            // A water cell inside the review garden keeps the patched crop
+            // soil hydrated through the ordinary farming tick path.
+            if (world_x, world_z) == (20, 12) {
+                chunk.set_block_at_y(local_x, 64, local_z, WATER);
+            }
+        }
     }
 }
 
