@@ -1035,8 +1035,9 @@ impl WebSceneSmokeHarness {
         x: i32,
         y: i32,
         z: i32,
+        preserve_position: bool,
     ) -> Result<JsValue, JsValue> {
-        host.frame_block_for_smoke(x, y, z)
+        host.frame_block_for_smoke(x, y, z, preserve_position)
     }
 }
 
@@ -1674,7 +1675,13 @@ impl WebSceneHost {
 
     /// Reproducibly aim ordinary player controls at a known loaded block. The
     /// following use/attack still travels through live gameplay.
-    fn frame_block_for_smoke(&mut self, x: i32, y: i32, z: i32) -> Result<JsValue, JsValue> {
+    fn frame_block_for_smoke(
+        &mut self,
+        x: i32,
+        y: i32,
+        z: i32,
+        preserve_position: bool,
+    ) -> Result<JsValue, JsValue> {
         let block = BlockPos::new(x, y, z);
         if self
             .host_ref()?
@@ -1684,7 +1691,11 @@ impl WebSceneHost {
         {
             return Err(JsValue::from_str("cannot frame an unloaded block"));
         }
-        aim_player_host_at_block(self.host_mut()?, block);
+        if preserve_position {
+            aim_player_host_at_block_from_current(self.host_mut()?, block);
+        } else {
+            aim_player_host_at_block(self.host_mut()?, block);
+        }
         self.diagnostic_report(None, false, 0.0, false)
             .map_err(JsValue::from)
     }
@@ -5269,6 +5280,24 @@ fn aim_player_host_at_block(host: &mut McloneSceneHost, block: BlockPos) {
         f64::from(pitch),
         fly_speed,
     );
+}
+
+fn aim_player_host_at_block_from_current(host: &mut McloneSceneHost, block: BlockPos) {
+    let camera = host.camera_frame_state().camera;
+    let target = Vec3d::new(
+        f64::from(block.x) + 0.5,
+        f64::from(block.y) + 0.5,
+        f64::from(block.z) + 0.5,
+    );
+    let direction = Vec3d::new(
+        target.x - camera.eye.x,
+        target.y - camera.eye.y,
+        target.z - camera.eye.z,
+    );
+    let horizontal = (direction.x * direction.x + direction.z * direction.z).sqrt();
+    let yaw = direction.x.atan2(direction.z);
+    let pitch = direction.y.atan2(horizontal);
+    host.set_mono_player_camera(camera.eye, yaw, pitch, camera.speed_blocks_per_second);
 }
 
 fn set_host_camera_look_at(host: &mut McloneSceneHost, eye: Vec3, target: Vec3) {

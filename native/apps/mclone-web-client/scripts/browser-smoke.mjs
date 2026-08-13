@@ -165,9 +165,10 @@ if (showcase && ![
   "deer-forest-edge",
   "bee-pollination",
   "wheat-farming",
+  "kitchen-garden",
 ].includes(showcase)) {
   throw new Error(
-    `--showcase requires mallard-ecology, deer-forest-edge, bee-pollination, or wheat-farming; got ${showcase}`,
+    `--showcase requires mallard-ecology, deer-forest-edge, bee-pollination, wheat-farming, or kitchen-garden; got ${showcase}`,
   );
 }
 const deployedBaseUrlArgIndex = process.argv.indexOf("--deployed-base-url");
@@ -807,15 +808,23 @@ async function run() {
         const deerShowcase = showcase === "deer-forest-edge";
         const beeShowcase = showcase === "bee-pollination";
         const wheatShowcase = showcase === "wheat-farming";
+        const gardenShowcase = showcase === "kitchen-garden";
+        const cropShowcase = wheatShowcase || gardenShowcase;
         try {
           await page.waitForFunction(
-            ({ deerShowcase, beeShowcase, wheatShowcase }) => {
+            ({ deerShowcase, beeShowcase, wheatShowcase, gardenShowcase, cropShowcase }) => {
               const state = globalThis.__mcloneWebApp?.state;
               return state?.startupReady === true
                 && state.streamingSettled === true
                 && state.pendingCompileJobCount === 0
                 && state.entityCount >= state.showcaseEntityCount
-                && (wheatShowcase
+                && (gardenShowcase
+                  ? state.carrotHotbarCount === 8
+                    && state.oakFenceHotbarCount === 32
+                    && state.oakFenceGateHotbarCount === 4
+                    && state.woodenHoeHotbarCount === 1
+                    && state.wheatSeedHotbarCount === 8
+                  : wheatShowcase
                   ? state.woodenHoeHotbarCount === 1
                     && state.wheatSeedHotbarCount === 8
                   : beeShowcase
@@ -834,16 +843,16 @@ async function run() {
                     && (state.mallardFieldGuideBits & state.showcaseFieldGuideBits)
                       === state.showcaseFieldGuideBits)
                 && state.dayTime === 6000
-                && (wheatShowcase || deerShowcase || beeShowcase || (
+                && (cropShowcase || deerShowcase || beeShowcase || (
                   state.mallardEggHotbarCount === 0
                   && state.mallardFeatherHotbarCount === 0
                 ))
-                && (wheatShowcase || (
+                && (cropShowcase || (
                   state.actorCount >= 4
                   && state.drawnActorCount >= 4
                 ));
             },
-            { deerShowcase, beeShowcase, wheatShowcase },
+            { deerShowcase, beeShowcase, wheatShowcase, gardenShowcase, cropShowcase },
             { timeout: 60_000 },
           );
         } catch (error) {
@@ -856,8 +865,13 @@ async function run() {
         let behaviorEnd = behaviorStart;
         /** @type {Record<string, any>} */
         let behaviorProbe = {};
-        if (wheatShowcase) {
-          const cropPositions = [
+        if (cropShowcase) {
+          const cropPositions = gardenShowcase ? [
+            [6, 64, 6], [7, 64, 6], [6, 64, 7],
+            [7, 64, 7], [7, 64, 9], [9, 64, 6],
+            [10, 64, 6], [9, 64, 7], [10, 64, 7],
+            [9, 64, 9],
+          ] : [
             [5, 63, 5], [11, 63, 5], [5, 63, 6],
             [11, 63, 6], [5, 63, 7], [11, 63, 7],
             [5, 64, 5], [6, 64, 5], [7, 64, 5],
@@ -1219,8 +1233,11 @@ async function run() {
           );
         }
         let farmingInteractionProbe = null;
+        let gardenInteractionProbe = null;
         let harvestedWheatScreenshotPath = null;
         let plantedWheatScreenshotPath = null;
+        let harvestedCarrotScreenshotPath = null;
+        let plantedCarrotScreenshotPath = null;
         if (wheatShowcase) {
           await page.evaluate(() => globalThis.__mcloneWebApp?.resumeRendering?.());
           const useTouchControls = mobileShowcase;
@@ -1533,6 +1550,414 @@ async function run() {
             undefined,
             { timeout: 10_000 },
           );
+        } else if (gardenShowcase) {
+          await page.evaluate(() => globalThis.__mcloneWebApp?.resumeRendering?.());
+          const useTouchControls = mobileShowcase;
+          /** @param {number} slot @param {number} pointerId */
+          const selectSlot = async (slot, pointerId) => {
+            if (useTouchControls) {
+              await dispatchTouchHotbarSlotPointerEvent(page, slot, "pointerdown", {
+                pointerId,
+                buttons: 1,
+              });
+              await dispatchTouchHotbarSlotPointerEvent(page, slot, "pointerup", {
+                pointerId,
+                buttons: 0,
+              });
+            } else {
+              const digit = String(slot + 1);
+              await dispatchKeyboardEvent(page, "keydown", {
+                code: `Digit${digit}`,
+                key: digit,
+              });
+              await dispatchKeyboardEvent(page, "keyup", {
+                code: `Digit${digit}`,
+                key: digit,
+              });
+            }
+            await page.waitForFunction(
+              (selected) => globalThis.__mcloneWebApp?.state?.selectedHotbarSlot === selected,
+              slot,
+              { timeout: 10_000 },
+            );
+          };
+          /**
+           * @param {"attack" | "use"} key
+           * @param {"break" | "place"} action
+           * @param {number} pointerId
+           */
+          const interact = async (key, action, pointerId) => useTouchControls
+            ? exerciseFramedTouchInteractionButton(page, key, action, pointerId)
+            : page.evaluate(
+                (requested) => globalThis.__mcloneWebApp.interactBlock?.(requested) ?? null,
+                action,
+              );
+          /** @param {number} pointerId */
+          const beginForward = async (pointerId) => {
+            if (useTouchControls) {
+              await dispatchCanvasPointerEvent(page, "pointerdown", {
+                pointerId,
+                xFraction: 0.24,
+                yFraction: 0.72,
+                buttons: 1,
+              });
+              await dispatchCanvasPointerEvent(page, "pointermove", {
+                pointerId,
+                xFraction: 0.24,
+                yFraction: 0.50,
+                buttons: 1,
+              });
+            } else {
+              await dispatchKeyboardEvent(page, "keydown", { code: "KeyW", key: "w" });
+            }
+          };
+          /** @param {number} pointerId */
+          const endForward = async (pointerId) => {
+            if (useTouchControls) {
+              await dispatchCanvasPointerEvent(page, "pointerup", {
+                pointerId,
+                xFraction: 0.24,
+                yFraction: 0.50,
+                buttons: 0,
+              });
+              await page.waitForFunction(
+                () => globalThis.__mcloneWebApp?.state?.touchPointerActiveCount === 0,
+                undefined,
+                { timeout: 10_000 },
+              );
+            } else {
+              await dispatchKeyboardEvent(page, "keyup", { code: "KeyW", key: "w" });
+            }
+          };
+
+          const initialGateTarget = await page.evaluate(
+            () => globalThis.__mcloneWebApp?.state?.currentTarget ?? null,
+          );
+          if (
+            initialGateTarget?.hit !== true
+            || initialGateTarget.blockX !== 5
+            || initialGateTarget.blockY !== 64
+            || initialGateTarget.blockZ !== 8
+            || initialGateTarget.hitBlockStateId !== 270
+          ) {
+            throw new Error(`garden entry camera did not expose its closed gate: ${JSON.stringify(initialGateTarget)}`);
+          }
+          const openGate = await interact("use", "place", 201);
+          await page.waitForFunction(
+            () => globalThis.__mcloneWebApp.blockStateAt?.(5, 64, 8)?.blockStateId === 274,
+            undefined,
+            { timeout: 10_000 },
+          );
+
+          const outsideX = await page.evaluate(
+            () => Number(globalThis.__mcloneWebApp?.state?.cameraX),
+          );
+          await beginForward(202);
+          try {
+            await page.waitForFunction(
+              () => Number(globalThis.__mcloneWebApp?.state?.cameraX) >= 6.8,
+              undefined,
+              { timeout: 10_000 },
+            );
+          } finally {
+            await endForward(202);
+          }
+          const insideX = await page.evaluate(
+            () => Number(globalThis.__mcloneWebApp?.state?.cameraX),
+          );
+
+          await page.evaluate(() => globalThis.__mcloneWebApp.frameBlock?.(5, 64, 8, true));
+          await page.waitForFunction(
+            () => {
+              const target = globalThis.__mcloneWebApp?.state?.currentTarget;
+              return target?.blockX === 5
+                && target?.blockY === 64
+                && target?.blockZ === 8
+                && target?.hitBlockStateId === 274;
+            },
+            undefined,
+            { timeout: 10_000 },
+          );
+          const closeGate = await interact("use", "place", 203);
+          await page.waitForFunction(
+            () => globalThis.__mcloneWebApp.blockStateAt?.(5, 64, 8)?.blockStateId === 270,
+            undefined,
+            { timeout: 10_000 },
+          );
+          const barrierStartX = await page.evaluate(
+            () => Number(globalThis.__mcloneWebApp?.state?.cameraX),
+          );
+          const barrierSamples = [];
+          await beginForward(204);
+          try {
+            for (let sample = 0; sample < 20; sample += 1) {
+              await page.waitForTimeout(50);
+              barrierSamples.push(await page.evaluate(() => {
+                const state = globalThis.__mcloneWebApp?.state;
+                return {
+                  x: Number(state?.cameraX),
+                  y: Number(state?.cameraY),
+                  z: Number(state?.cameraZ),
+                  horizontalCollision: state?.horizontalCollision === true,
+                };
+              }));
+            }
+          } finally {
+            await endForward(204);
+          }
+          const barrierEndX = await page.evaluate(
+            () => Number(globalThis.__mcloneWebApp?.state?.cameraX),
+          );
+          if (barrierEndX < 5.8 || barrierEndX >= barrierStartX - 0.05) {
+            const barrierState = await page.evaluate(() => {
+              const state = globalThis.__mcloneWebApp?.state;
+              return {
+                cameraX: state?.cameraX,
+                cameraY: state?.cameraY,
+                cameraZ: state?.cameraZ,
+                movementMode: state?.movementMode,
+                collisionMode: state?.collisionMode,
+                onGround: state?.onGround,
+                horizontalCollision: state?.horizontalCollision,
+                gate: globalThis.__mcloneWebApp.blockStateAt?.(5, 64, 8),
+              };
+            });
+            throw new Error(`closed garden gate did not restore its physical barrier: ${JSON.stringify({ barrierStartX, barrierEndX, barrierState, barrierSamples })}`);
+          }
+
+          await page.evaluate(() => globalThis.__mcloneWebApp.frameBlock?.(6, 64, 9, true));
+          await page.waitForFunction(
+            () => globalThis.__mcloneWebApp?.state?.currentTarget?.hitBlockStateId === 308,
+            undefined,
+            { timeout: 10_000 },
+          );
+          const harvestTarget = await page.evaluate(
+            () => globalThis.__mcloneWebApp?.state?.currentTarget ?? null,
+          );
+          if (harvestTarget?.hitBlockStateId !== 308) {
+            throw new Error(`garden camera did not frame the mature carrot: ${JSON.stringify(harvestTarget)}`);
+          }
+          const carrotsBeforeHarvest = await page.evaluate(
+            () => Number(globalThis.__mcloneWebApp?.state?.lastReport?.carrotHotbarCount),
+          );
+          const harvestCarrot = await interact("attack", "break", 205);
+          await page.waitForFunction(
+            ({ carrotsBeforeHarvest }) => globalThis.__mcloneWebApp
+                .blockStateAt?.(6, 64, 9)?.blockStateId === 0
+              && Number(globalThis.__mcloneWebApp?.state?.lastReport?.carrotHotbarCount)
+                === carrotsBeforeHarvest
+              && Number(globalThis.__mcloneWebApp?.state?.lastReport?.carrotDropEntityCount) >= 1,
+            { carrotsBeforeHarvest },
+            { timeout: 10_000 },
+          );
+          const dropBeforePickup = await page.evaluate(() => {
+            const state = globalThis.__mcloneWebApp.state;
+            return {
+              cameraX: Number(state.cameraX),
+              cameraZ: Number(state.cameraZ),
+              carrotDropEntityCount: Number(state.lastReport?.carrotDropEntityCount) || 0,
+              carrotDropItemCount: Number(state.lastReport?.carrotDropItemCount) || 0,
+              carrotDropPositions: String(state.lastReport?.carrotDropPositions ?? ""),
+              carrotHotbarCount: Number(state.lastReport?.carrotHotbarCount) || 0,
+              debugOverlayVisible: state.debugOverlayVisible === true,
+            };
+          });
+          await page.evaluate(async () => {
+            globalThis.__mcloneWebApp?.pauseRendering?.();
+            await globalThis.__mcloneWebApp?.renderOneFrameForSmoke?.();
+          });
+          harvestedCarrotScreenshotPath = screenshotPath.replace(/\.png$/i, "-harvested.png");
+          await page.screenshot({
+            path: harvestedCarrotScreenshotPath,
+            fullPage: false,
+            timeout: 60_000,
+          });
+          await page.evaluate(() => globalThis.__mcloneWebApp?.resumeRendering?.());
+
+          await page.waitForTimeout(750);
+          const pickupAnchor = (() => {
+            const [x, , z] = String(dropBeforePickup.carrotDropPositions)
+              .split(";", 1)[0]
+              .split(",")
+              .map(Number);
+            return Number.isFinite(x) && Number.isFinite(z) ? { x, z } : { x: 6.5, z: 9.5 };
+          })();
+          const settledPickupAnchor = await page.evaluate((fallback) => {
+            const [x, , z] = String(
+              globalThis.__mcloneWebApp?.state?.lastReport?.carrotDropPositions ?? "",
+            )
+              .split(";", 1)[0]
+              .split(",")
+              .map(Number);
+            return Number.isFinite(x) && Number.isFinite(z) ? { x, z } : fallback;
+          }, pickupAnchor);
+          await page.evaluate(
+            ({ x, z }) => globalThis.__mcloneWebApp.frameBlock?.(
+              Math.floor(x),
+              63,
+              Math.floor(z),
+              true,
+            ),
+            settledPickupAnchor,
+          );
+          await beginForward(206);
+          try {
+            await page.waitForFunction(
+              ({ carrotsBeforeHarvest }) => {
+                const report = globalThis.__mcloneWebApp?.state?.lastReport;
+                return Number(report?.carrotHotbarCount) > carrotsBeforeHarvest
+                  && Number(report?.carrotDropEntityCount) === 0;
+              },
+              { carrotsBeforeHarvest },
+              { timeout: 15_000 },
+            );
+          } catch (error) {
+            const state = await page.evaluate(() => {
+              const appState = globalThis.__mcloneWebApp?.state;
+              return {
+                cameraX: Number(appState?.cameraX),
+                cameraY: Number(appState?.cameraY),
+                cameraZ: Number(appState?.cameraZ),
+                carrotHotbarCount: Number(appState?.lastReport?.carrotHotbarCount) || 0,
+                carrotDropEntityCount:
+                  Number(appState?.lastReport?.carrotDropEntityCount) || 0,
+                carrotDropItemCount: Number(appState?.lastReport?.carrotDropItemCount) || 0,
+                carrotDropPositions: String(
+                  appState?.lastReport?.carrotDropPositions ?? "",
+                ),
+              };
+            });
+            throw new Error(`carrot pickup did not settle: ${error instanceof Error ? error.message : String(error)}\n${JSON.stringify({ pickupAnchor, settledPickupAnchor, state })}`);
+          } finally {
+            await endForward(206);
+          }
+          const pickup = await page.evaluate((before) => {
+            const state = globalThis.__mcloneWebApp.state;
+            return {
+              ok: Number(state.lastReport?.carrotHotbarCount) > before.carrotHotbarCount
+                && Number(state.lastReport?.carrotDropEntityCount) === 0,
+              distance: Math.hypot(
+                Number(state.cameraX) - before.cameraX,
+                Number(state.cameraZ) - before.cameraZ,
+              ),
+              carrotHotbarCount: Number(state.lastReport?.carrotHotbarCount) || 0,
+            };
+          }, dropBeforePickup);
+
+          await selectSlot(3, 207);
+          const carrotsBeforePlant = pickup.carrotHotbarCount;
+          await page.evaluate(() => globalThis.__mcloneWebApp.frameBlock?.(6, 63, 9, true));
+          await beginForward(208);
+          try {
+            await page.waitForFunction(
+              () => Math.hypot(
+                Number(globalThis.__mcloneWebApp?.state?.cameraX) - 6.5,
+                Number(globalThis.__mcloneWebApp?.state?.cameraZ) - 9.5,
+              ) <= 0.45,
+              undefined,
+              { timeout: 10_000 },
+            );
+          } finally {
+            await endForward(208);
+          }
+          await page.evaluate(() => globalThis.__mcloneWebApp.frameBlock?.(6, 63, 9, true));
+          try {
+            await page.waitForFunction(
+              () => {
+                const target = globalThis.__mcloneWebApp?.state?.currentTarget;
+                return target?.blockX === 6
+                  && target?.blockY === 63
+                  && target?.blockZ === 9;
+              },
+              undefined,
+              { timeout: 10_000 },
+            );
+          } catch (error) {
+            const state = await page.evaluate(() => ({
+              cameraX: Number(globalThis.__mcloneWebApp?.state?.cameraX),
+              cameraY: Number(globalThis.__mcloneWebApp?.state?.cameraY),
+              cameraZ: Number(globalThis.__mcloneWebApp?.state?.cameraZ),
+              target: globalThis.__mcloneWebApp?.state?.currentTarget ?? null,
+            }));
+            throw new Error(`harvested carrot farmland did not become targetable: ${error instanceof Error ? error.message : String(error)}\n${JSON.stringify(state)}`);
+          }
+          const plantCarrot = await interact("use", "place", 209);
+          await page.waitForFunction(
+            ({ carrotsBeforePlant }) => globalThis.__mcloneWebApp
+                .blockStateAt?.(6, 64, 9)?.blockStateId === 301
+              && Number(globalThis.__mcloneWebApp?.state?.lastReport?.carrotHotbarCount)
+                === carrotsBeforePlant - 1
+              && Number(globalThis.__mcloneWebApp?.state?.pendingCompileJobCount) === 0,
+            { carrotsBeforePlant },
+            { timeout: 10_000 },
+          );
+          await page.evaluate(async () => {
+            globalThis.__mcloneWebApp?.pauseRendering?.();
+            await globalThis.__mcloneWebApp?.renderOneFrameForSmoke?.();
+          });
+          plantedCarrotScreenshotPath = screenshotPath.replace(/\.png$/i, "-planted.png");
+          await page.screenshot({
+            path: plantedCarrotScreenshotPath,
+            fullPage: false,
+            timeout: 60_000,
+          });
+          gardenInteractionProbe = await page.evaluate(
+            ({ initialGateTarget, openGate, closeGate, outsideX, insideX, barrierStartX, barrierEndX, barrierSamples, harvestTarget, harvestCarrot, dropBeforePickup, pickup, carrotsBeforePlant, plantCarrot }) => ({
+              ok: initialGateTarget?.hitBlockStateId === 270
+                && openGate?.ok === true
+                && closeGate?.ok === true
+                && insideX >= 6.8
+                && insideX > outsideX + 4.0
+                && barrierEndX >= 5.8
+                && barrierEndX < barrierStartX - 0.05
+                && globalThis.__mcloneWebApp.blockStateAt?.(5, 64, 8)?.blockStateId === 270
+                && harvestTarget?.hitBlockStateId === 308
+                && harvestCarrot?.ok === true
+                && dropBeforePickup.carrotDropEntityCount >= 1
+                && dropBeforePickup.carrotDropItemCount >= 1
+                && dropBeforePickup.debugOverlayVisible === false
+                && pickup.ok === true
+                && plantCarrot?.ok === true
+                && globalThis.__mcloneWebApp.blockStateAt?.(6, 64, 9)?.blockStateId === 301
+                && Number(globalThis.__mcloneWebApp?.state?.lastReport?.carrotHotbarCount)
+                  === carrotsBeforePlant - 1,
+              initialGateTarget,
+              openGate,
+              closeGate,
+              outsideX,
+              insideX,
+              barrierStartX,
+              barrierEndX,
+              barrierSamples,
+              harvestTarget,
+              harvestCarrot,
+              dropBeforePickup,
+              pickup,
+              carrotsBeforePlant,
+              plantCarrot,
+            }),
+            {
+              initialGateTarget,
+              openGate,
+              closeGate,
+              outsideX,
+              insideX,
+              barrierStartX,
+              barrierEndX,
+              barrierSamples,
+              harvestTarget,
+              harvestCarrot,
+              dropBeforePickup,
+              pickup,
+              carrotsBeforePlant,
+              plantCarrot,
+            },
+          );
+          await page.waitForFunction(
+            () => globalThis.__mcloneWebApp?.state?.tickFrameBusy === false,
+            undefined,
+            { timeout: 10_000 },
+          );
         }
         const worldRecordCounts = await page.evaluate(async () => {
           const stores = [
@@ -1567,11 +1992,14 @@ async function run() {
           pageErrors.length > 0
           || canvasPixels.distinctInteriorColorCount < 2
           || result?.showcaseId !== showcase
-          || result?.showcaseRevision !== (wheatShowcase ? 3 : beeShowcase ? 2 : deerShowcase ? 1 : 2)
-          || result?.activeWorldSeedText !== (wheatShowcase ? "17506" : beeShowcase ? "17505" : deerShowcase ? "17504" : "17503")
+          || result?.showcaseRevision !== (gardenShowcase ? 1 : wheatShowcase ? 3 : beeShowcase ? 2 : deerShowcase ? 1 : 2)
+          || result?.activeWorldSeedText !== (cropShowcase ? "17506" : beeShowcase ? "17505" : deerShowcase ? "17504" : "17503")
           || result?.generationProfile !== "authored-only"
           || result?.dayTime !== 6000
-          || (wheatShowcase
+          || (gardenShowcase
+            ? behaviorProbe.automaticTransitionCount < 1
+              || gardenInteractionProbe?.ok !== true
+            : wheatShowcase
             ? behaviorProbe.automaticTransitionCount < 1
               || farmingInteractionProbe?.ok !== true
             : beeShowcase
@@ -1583,7 +2011,7 @@ async function run() {
             : result?.mallardCount < 4
               || result?.mallardNestCount !== 0
               || result?.mallardFieldGuideBits === 1)
-          || (!wheatShowcase
+          || (!cropShowcase
             && String(result?.showcaseEntryEye) !== `${result.cameraX},${result.cameraY},${result.cameraZ}`)
           || (mobileShowcase && result?.touchControlsVisible !== true)
           || (mobileShowcase && beeShowcase && mobileBeeUseProbe?.ok !== true)
@@ -1593,7 +2021,20 @@ async function run() {
             pageErrors,
             canvasPixels,
             worldRecordCounts,
-            result,
+            behaviorProbe,
+            farmingInteractionProbe,
+            gardenInteractionProbe: gardenInteractionProbe == null ? null : {
+              ...gardenInteractionProbe,
+              barrierSamples: `${gardenInteractionProbe.barrierSamples.length} samples`,
+            },
+            result: {
+              showcaseId: result?.showcaseId,
+              showcaseRevision: result?.showcaseRevision,
+              activeWorldSeedText: result?.activeWorldSeedText,
+              generationProfile: result?.generationProfile,
+              dayTime: result?.dayTime,
+              touchControlsVisible: result?.touchControlsVisible,
+            },
           }, null, 2)}`);
         }
         console.log(JSON.stringify({
@@ -1606,8 +2047,11 @@ async function run() {
           behaviorProbe,
           mobileBeeUseProbe,
           farmingInteractionProbe,
+          gardenInteractionProbe,
           plantedWheatScreenshotPath,
           harvestedWheatScreenshotPath,
+          plantedCarrotScreenshotPath,
+          harvestedCarrotScreenshotPath,
           result,
         }, null, 2));
         return;
