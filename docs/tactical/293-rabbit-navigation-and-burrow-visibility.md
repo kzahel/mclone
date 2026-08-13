@@ -135,4 +135,16 @@ The first broad workspace attempt saw one transient failure in the unrelated
 homestead-resident removal persistence test. A clean current-source rebuild,
 five consecutive isolated repeats, and the complete workspace rerun all
 passed; no rabbit change was made to suppress or bypass it. The deployment
-receipt is recorded below after verification of the pushed revision.
+receipt is recorded below.
+
+Exact pushed revision `d466a763` deployed as Cloudflare Worker version
+`61ee5243-c972-4f2a-8dcb-7d1a175fe0e9`. Public desktop and phone gates each
+repeated revision 2's protected `308,308,308,308` state, gate transition
+`270 -> 274`, two raids, roughly 24–30 blocks of travel for every rabbit, all
+four required clips, the second burrow, and zero records in all eight browser
+world stores. The inspected public desktop and phone capture digests are
+`77e3b19214dcd8b87d4cabc1b58e7b5964a65d79f7780c1d9df191cc860fefd2`
+and
+`123e96492ea92f163fa3ce89b4a6dd09698c200498eb9a772e749de7b513dd83`.
+The fresh non-persistent review URL is
+`https://mclone.kzahel.com/app.html?showcase=rabbit-burrow`.

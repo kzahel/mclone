@@ -118,7 +118,9 @@ second ordinary excavation, and mutate two protected carrots only after the
 gate opened; all browser world stores remained empty. Feeding remains covered
 by the focused authoritative interaction test and the original public
 `12 -> 11` receipt rather than being coupled to this autonomous-route gate.
-The temporary review link is
+Exact pushed revision `d466a763` repeated those outcomes on deployed desktop
+and phone under Cloudflare Worker version
+`61ee5243-c972-4f2a-8dcb-7d1a175fe0e9`. The temporary review link is
 `https://mclone.kzahel.com/app.html?showcase=rabbit-burrow`.
 
 ## Deliberate Later Work
