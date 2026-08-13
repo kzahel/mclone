@@ -270,8 +270,8 @@ At minimum:
 
 ### Slice 1 — contract and state capacity
 
-Commit `f91c32f0` recorded this tactical, the living garden topic, and the
-shared-first/non-goal boundary. Commit `7fb0d534` then widened `RawBlockId`
+Commit `28c8098c` recorded this tactical, the living garden topic, and the
+shared-first/non-goal boundary. Commit `1e68d96d` then widened `RawBlockId`
 from `u8` to `u16` throughout generated chunks, lighting, terrain views,
 structure placement, and native/Web worker frames. Raw job frames now encode
 little-endian `u16`; persisted raw structure-placement arrays write snapshot
@@ -281,7 +281,7 @@ snapshot, generation, mesh, and above-255 round trips pass.
 
 ### Slice 2 — ordinary boundary and crop mechanics
 
-Commit `99f3cfc4` added exact states 237–268 for connected oak fences, 269–300
+Commit `f1c78ef1` added exact states 237–268 for connected oak fences, 269–300
 for oak gates, and 301–308 for carrot ages. The shared implementation includes
 state transforms, connected model baking, five-box selection/collision,
 placement and horizontal-neighbor refresh, manual gate use, wood feedback,
@@ -290,14 +290,14 @@ path, direct carrot planting, and ordinary randomized carrot item drops.
 
 Browser interaction found a real shared tall-shape defect: once jumping feet
 crossed the next integer Y boundary, collision lookup omitted the lower cell
-that still owned the overlapping 1.5-block fence/gate shape. Commit `89cc073d`
+that still owned the overlapping 1.5-block fence/gate shape. Commit `bee025f2`
 keeps that cell in the query and adds primitive plus walking-auto-jump
 regressions. A closed gate now blocks the player and ground navigation; its
 open state is actually traversable.
 
 ### Slice 3 — one source-first place
 
-Commit `fec07279` authored and promoted
+Commit `e3b65ba2` authored and promoted
 `farmstead-kitchen-garden-v1` from
 `tools/structure-lab/examples/kitchen_garden/structure.ts`. The 13×2×13
 record contains 253 blocks: a 35-fence/one-gate perimeter, seven-block
@@ -324,7 +324,7 @@ Inspected local pixels:
 
 ### Slice 4 — bounded review save and behavioral acceptance
 
-Commits `d7c81050` and `e6bc36b2` add the deny-unknown-fields
+Commits `1dd5687a` and `e5b8d2f9` add the deny-unknown-fields
 `kitchen-garden` revision-1 recipe. It uses seed `17506`, entry eye
 `2.5,65.62,8.5`, target `5.5,64.75,8.5`, the ordinary wheat-farming base,
 and typed live evidence for every fence, gate, crop, and inventory fact. A
@@ -361,9 +361,26 @@ planted frames are
 and
 `24a19c5a332562e4c1cf8877d24620f6c3ec459b7b98f25ef39f04c65ad3651a`.
 
+### Host validation
+
+The proportional closeout matrix passes on 2026-08-13:
+
+- serial `cargo test --workspace --all-targets`;
+- Rust formatting, focused garden/showcase suites, Web unit and type checks,
+  browser-boundary convergence, and thin-adapter purity;
+- first-party asset coverage with 309 block states and no missing registry
+  entries;
+- Structure Lab typecheck, tests, generated-source/preview drift checks, and
+  production Web build;
+- Texture Lab typecheck, runtime compatibility export, and production Web
+  build;
+- `wasm32-unknown-unknown`, native offscreen, and synthetic stereo builds;
+- inspected native and stereo screenshots; and
+- flat Android debug and Android XR release APK builds through the canonical
+  project scripts.
+
 ### Remaining closeout
 
-- Run the final proportional shared and host validation matrix.
 - Push and deploy the exact revision.
 - Repeat the desktop and phone gates against the public URL, inspect their
   captures, and record the deployment receipt here.

@@ -79,8 +79,8 @@ moving world drops, proximity pickup, age-zero replanting, real keyboard/touch
 controls, and zero browser persistence. The gate exposed and fixed a shared
 tall-collision lookup defect rather than compensating in the showcase.
 
-Implementation commits are `7fb0d534`, `99f3cfc4`, `fec07279`, `d7c81050`,
-`89cc073d`, and `e6bc36b2`. Exact captures, digests, commands, and the pending
+Implementation commits are `1e68d96d`, `f1c78ef1`, `e3b65ba2`, `1dd5687a`,
+`bee025f2`, and `e5b8d2f9`. Exact captures, digests, commands, and the pending
 deployment closeout live in Tactical 291.
 
 ## Deliberate Later Work
