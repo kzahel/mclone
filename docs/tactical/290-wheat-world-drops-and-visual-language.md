@@ -1,7 +1,7 @@
 # Tactical 290: Wheat World Drops and Visual Language
 
-Status: **implementation and local desktop/phone acceptance complete
-2026-08-13; exact pushed deployment acceptance pending.**
+Status: **complete 2026-08-13, including exact-revision public desktop and
+phone acceptance.**
 
 Topics:
 
@@ -130,5 +130,27 @@ Asset Lab checks and the full affected Rust suites pass: 77 asset, 143 client,
 103 mesh, 132 render-session, 175 scene plus contract, and 670 server tests.
 The one broad server-suite resident-chicken failure passed alone and the full
 suite passed on rerun, so it remains an unrelated order-sensitive flake rather
-than accepted farming evidence. Deployment remains the only open acceptance
-item.
+than accepted farming evidence.
+
+Exact pushed revision `0f746896545ee3bc9ce446257d656b5ab28fbffe`
+deployed as asset version `0f746896545e-20260813081257` and Cloudflare Worker
+version `a2306ede-be7a-4056-9b7c-73a2a1b9a89c`. The first public request reached
+revision 2 during edge propagation; direct app, JS, and Wasm hashes then
+matched the deployed bundle, and both gates passed on retry against the clean
+public route.
+
+Public desktop and phone receipts reproduce revision 3, seed `17506`, crop
+state 236 at `11,64,10`, one wheat entity, one seed entity for this reference
+roll, unchanged inventory before pickup, `4.14` blocks of real movement,
+collection, tilling, planting, debug labels off, and zero records in every
+browser world store. The public initial frames are byte-identical to local.
+Inspected public desktop harvested/planted digests are
+`a93ea616dee3086edffd2c6cdf20e3cef860068f989021f903e447017f609934`
+and
+`9637b7ec8be7f7daee10b67d0644a2cad3bef3efd626460d8ebc695582b2aacf`;
+phone harvested/planted digests are
+`1899ec9b17b88877354311bcb4875d6117263d9c71f81e754633caf955274518`
+and
+`af7a0cd01f76ee8eb0a05abff7f7f4b40dae0ae30c863e1a63a7602f58a63172`.
+All four were inspected and show an empty harvested cell with ordinary loot or
+clearly green planted growth. This closes the tactical.

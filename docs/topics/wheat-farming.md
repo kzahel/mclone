@@ -2,10 +2,10 @@
 
 Topic: `wheat-farming`
 
-Status: **live foundation deployed; world-drop and object-level visual
-correction locally accepted under Tactical
-[`290`](../tactical/290-wheat-world-drops-and-visual-language.md), with exact
-deployment acceptance pending on 2026-08-13.**
+Status: **live foundation plus world-drop and object-level visual correction
+deployed and accepted under Tactical
+[`290`](../tactical/290-wheat-world-drops-and-visual-language.md) on
+2026-08-13.**
 
 ## Purpose
 
@@ -196,5 +196,20 @@ inspected planted frames are
 `01c66226e3b29d96985b2b6b378f22ad09781c71cd43393093d2c912c1c78a66`
 and
 `c17abedc91702af4fcea639bf7dbf5c200fa48b7ac5db657c2aee533c87e488f`.
-Full affected shared suites pass. Exact public deployment acceptance remains
-open.
+Full affected shared suites pass. Exact pushed revision
+`0f746896545ee3bc9ce446257d656b5ab28fbffe` deployed as asset version
+`0f746896545e-20260813081257` and Worker version
+`a2306ede-be7a-4056-9b7c-73a2a1b9a89c`.
+
+Public desktop and phone gates reproduced the same revision, seed, target,
+world-drop counts, pre-pickup inventory, `4.14`-block movement pickup, till,
+plant, debug-label, and zero-storage receipts. Their initial frames are
+byte-identical to local. Inspected public harvested frames are
+`a93ea616dee3086edffd2c6cdf20e3cef860068f989021f903e447017f609934`
+and
+`1899ec9b17b88877354311bcb4875d6117263d9c71f81e754633caf955274518`;
+planted frames are
+`9637b7ec8be7f7daee10b67d0644a2cad3bef3efd626460d8ebc695582b2aacf`
+and
+`af7a0cd01f76ee8eb0a05abff7f7f4b40dae0ae30c863e1a63a7602f58a63172`.
+The existing clean public field URL remains fresh and non-persistent.

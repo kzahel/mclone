@@ -422,7 +422,20 @@ planted digests are
 `01c66226e3b29d96985b2b6b378f22ad09781c71cd43393093d2c912c1c78a66`
 and
 `c17abedc91702af4fcea639bf7dbf5c200fa48b7ac5db657c2aee533c87e488f`.
-Exact public deployment acceptance remains pending.
+Exact pushed revision `0f746896545ee3bc9ce446257d656b5ab28fbffe`
+deployed as asset version `0f746896545e-20260813081257` and Worker version
+`a2306ede-be7a-4056-9b7c-73a2a1b9a89c`. Public desktop and phone gates
+reproduced revision 3, seed `17506`, the isolated target, world-drop counts,
+unchanged inventory before movement, `4.14`-block normal pickup, till, plant,
+debug-label, and zero-storage receipts. Their initial frames are byte-identical
+to local. Inspected public harvested desktop/phone digests are
+`a93ea616dee3086edffd2c6cdf20e3cef860068f989021f903e447017f609934`
+and
+`1899ec9b17b88877354311bcb4875d6117263d9c71f81e754633caf955274518`;
+planted digests are
+`9637b7ec8be7f7daee10b67d0644a2cad3bef3efd626460d8ebc695582b2aacf`
+and
+`af7a0cd01f76ee8eb0a05abff7f7f4b40dae0ae30c863e1a63a7602f58a63172`.
 
 ## Code and Documentation Map
 
