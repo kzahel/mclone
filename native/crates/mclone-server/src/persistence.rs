@@ -573,6 +573,9 @@ impl From<ItemStackSnapshot> for ItemStackSaveRecord {
             mclone_protocol::ItemKind::WoodenHoe => "minecraft:wooden_hoe",
             mclone_protocol::ItemKind::WheatSeeds => "minecraft:wheat_seeds",
             mclone_protocol::ItemKind::Wheat => "minecraft:wheat",
+            mclone_protocol::ItemKind::Carrot => "minecraft:carrot",
+            mclone_protocol::ItemKind::OakFence => "minecraft:oak_fence",
+            mclone_protocol::ItemKind::OakFenceGate => "minecraft:oak_fence_gate",
         };
         Self::new(kind, stack.count)
     }
@@ -6753,6 +6756,9 @@ fn write_optional_item_stack_snapshot(
             mclone_protocol::ItemKind::WoodenHoe => 9,
             mclone_protocol::ItemKind::WheatSeeds => 10,
             mclone_protocol::ItemKind::Wheat => 11,
+            mclone_protocol::ItemKind::Carrot => 12,
+            mclone_protocol::ItemKind::OakFence => 13,
+            mclone_protocol::ItemKind::OakFenceGate => 14,
         };
         write_u8(writer, kind)?;
         write_u8(writer, stack.count)?;
@@ -6779,6 +6785,9 @@ fn read_optional_item_stack_snapshot(
         9 => mclone_protocol::ItemKind::WoodenHoe,
         10 => mclone_protocol::ItemKind::WheatSeeds,
         11 => mclone_protocol::ItemKind::Wheat,
+        12 => mclone_protocol::ItemKind::Carrot,
+        13 => mclone_protocol::ItemKind::OakFence,
+        14 => mclone_protocol::ItemKind::OakFenceGate,
         value => {
             return Err(ChunkStoreError::InvalidData(format!(
                 "unknown player inventory item kind {value}"

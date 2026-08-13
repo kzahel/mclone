@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "name": "carrot",
+  "materials": {
+    "root": { "color": "#e97817" },
+    "root_light": { "color": "#f39a2d" },
+    "leaf": { "color": "#3d9635" },
+    "leaf_light": { "color": "#67b84e" }
+  },
+  "textures": {},
+  "parts": [
+    {
+      "name": "root_upper",
+      "at": [0, 0, 0],
+      "material": "root_light",
+      "primitive": { "kind": "box", "size": [0.19, 0.28, 0.19] }
+    },
+    {
+      "name": "root_tip",
+      "at": [0, -0.18, 0],
+      "material": "root",
+      "primitive": { "kind": "box", "size": [0.1, 0.12, 0.1] }
+    },
+    {
+      "name": "leaf_center",
+      "at": [0, 0.2, 0],
+      "rot": [0, 0, -5],
+      "material": "leaf_light",
+      "primitive": { "kind": "box", "size": [0.055, 0.22, 0.055] }
+    },
+    {
+      "name": "leaf_left",
+      "at": [-0.07, 0.18, 0],
+      "rot": [0, 0, 24],
+      "material": "leaf",
+      "primitive": { "kind": "box", "size": [0.055, 0.2, 0.055] }
+    },
+    {
+      "name": "leaf_right",
+      "at": [0.07, 0.18, 0],
+      "rot": [0, 0, -24],
+      "material": "leaf",
+      "primitive": { "kind": "box", "size": [0.055, 0.2, 0.055] }
+    }
+  ],
+  "clips": {}
+}

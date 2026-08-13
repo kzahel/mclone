@@ -145,6 +145,12 @@ pub mod terrain_id {
     pub const FARMLAND_MOISTURE_7: u32 = 228;
     pub const WHEAT_AGE_0: u32 = 229;
     pub const WHEAT_AGE_7: u32 = 236;
+    pub const OAK_FENCE_STATE_START: u32 = 237;
+    pub const OAK_FENCE_STATE_END: u32 = 268;
+    pub const OAK_FENCE_GATE_STATE_START: u32 = 269;
+    pub const OAK_FENCE_GATE_STATE_END: u32 = 300;
+    pub const CARROTS_AGE_0: u32 = 301;
+    pub const CARROTS_AGE_7: u32 = 308;
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]

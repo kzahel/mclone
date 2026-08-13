@@ -393,7 +393,10 @@ pub fn actor_instances_from_presentations_near_observer(
                             | ItemKind::BeeHotel
                             | ItemKind::Beeswax
                             | ItemKind::WheatSeeds
-                            | ItemKind::Wheat),
+                            | ItemKind::Wheat
+                            | ItemKind::Carrot
+                            | ItemKind::OakFence
+                            | ItemKind::OakFenceGate),
                         ) => ActorInstance::semantic_prop(
                             glam_vec3_from_vec3d(feet_position),
                             actor.y_rot_degrees,
@@ -406,6 +409,11 @@ pub fn actor_instances_from_presentations_near_observer(
                                 ItemKind::Beeswax => mclone_assets::beeswax_figure_id(),
                                 ItemKind::WheatSeeds => mclone_assets::wheat_seeds_item_figure_id(),
                                 ItemKind::Wheat => mclone_assets::wheat_bundle_figure_id(),
+                                ItemKind::Carrot => mclone_assets::carrot_figure_id(),
+                                ItemKind::OakFence => mclone_assets::oak_fence_item_figure_id(),
+                                ItemKind::OakFenceGate => {
+                                    mclone_assets::oak_fence_gate_item_figure_id()
+                                }
                                 _ => unreachable!(),
                             },
                             actor.width,

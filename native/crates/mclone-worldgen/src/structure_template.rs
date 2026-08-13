@@ -5,9 +5,10 @@ use std::fmt;
 use mclone_core::{BlockPos, ChunkPos};
 
 use crate::block::{
-    OAK_LOG_X, OAK_LOG_Z, RawBlockId, SPRUCE_LOG_X, SPRUCE_LOG_Z, SPRUCE_STAIRS_EAST,
-    SPRUCE_STAIRS_NORTH, SPRUCE_STAIRS_SOUTH, SPRUCE_STAIRS_WEST, WALL_TORCH_EAST,
-    WALL_TORCH_NORTH, WALL_TORCH_SOUTH, WALL_TORCH_WEST,
+    OAK_LOG_X, OAK_LOG_Z, OakFenceState, RawBlockId, SPRUCE_LOG_X, SPRUCE_LOG_Z,
+    SPRUCE_STAIRS_EAST, SPRUCE_STAIRS_NORTH, SPRUCE_STAIRS_SOUTH, SPRUCE_STAIRS_WEST,
+    WALL_TORCH_EAST, WALL_TORCH_NORTH, WALL_TORCH_SOUTH, WALL_TORCH_WEST, oak_fence_for_state,
+    oak_fence_gate_for_state, oak_fence_gate_state, oak_fence_state,
 };
 
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -428,6 +429,26 @@ fn transform_block_state(
     mirror: TemplateMirror,
     rotation: TemplateRotation,
 ) -> RawBlockId {
+    if let Some(state) = oak_fence_state(block) {
+        let source = [state.north, state.east, state.south, state.west];
+        let mut transformed = [false; 4];
+        for (index, connected) in source.into_iter().enumerate() {
+            transformed
+                [transform_horizontal_facing_index(index as u8, mirror, rotation) as usize] =
+                connected;
+        }
+        return oak_fence_for_state(OakFenceState {
+            north: transformed[0],
+            east: transformed[1],
+            south: transformed[2],
+            west: transformed[3],
+            waterlogged: state.waterlogged,
+        });
+    }
+    if let Some(mut state) = oak_fence_gate_state(block) {
+        state.facing = transform_horizontal_facing_index(state.facing, mirror, rotation);
+        return oak_fence_gate_for_state(state).expect("transformed fence gate facing is valid");
+    }
     match block {
         OAK_LOG_X | OAK_LOG_Z | SPRUCE_LOG_X | SPRUCE_LOG_Z => {
             if matches!(
@@ -481,12 +502,24 @@ fn transform_horizontal_facing(
     mirror: TemplateMirror,
     rotation: TemplateRotation,
 ) -> RawBlockId {
-    let (mut x, mut z) = match block {
-        id if id == directions[0] => (0, -1),
-        id if id == directions[1] => (1, 0),
-        id if id == directions[2] => (0, 1),
-        id if id == directions[3] => (-1, 0),
-        _ => unreachable!(),
+    let index = directions
+        .iter()
+        .position(|direction| *direction == block)
+        .expect("horizontal state belongs to its direction table") as u8;
+    directions[transform_horizontal_facing_index(index, mirror, rotation) as usize]
+}
+
+fn transform_horizontal_facing_index(
+    index: u8,
+    mirror: TemplateMirror,
+    rotation: TemplateRotation,
+) -> u8 {
+    let (mut x, mut z) = match index {
+        0 => (0, -1),
+        1 => (1, 0),
+        2 => (0, 1),
+        3 => (-1, 0),
+        _ => unreachable!("horizontal facing index must be within 0..4"),
     };
     match mirror {
         TemplateMirror::None => {}
@@ -500,10 +533,10 @@ fn transform_horizontal_facing(
         TemplateRotation::CounterClockwise90 => (z, -x),
     };
     match (x, z) {
-        (0, -1) => directions[0],
-        (1, 0) => directions[1],
-        (0, 1) => directions[2],
-        (-1, 0) => directions[3],
+        (0, -1) => 0,
+        (1, 0) => 1,
+        (0, 1) => 2,
+        (-1, 0) => 3,
         _ => unreachable!(),
     }
 }

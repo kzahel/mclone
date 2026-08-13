@@ -6,11 +6,12 @@ use mclone_core::BlockPos;
 use serde::Deserialize;
 
 use crate::block::{
-    AIR, BRICKS, COBBLESTONE, CORNFLOWER, GLASS, HAY_BLOCK, MOSSY_COBBLESTONE, OAK_LOG, OAK_LOG_X,
-    OAK_LOG_Z, OAK_PLANKS, POPPY, RED_TERRACOTTA, RawBlockId, SPRUCE_LOG, SPRUCE_LOG_X,
-    SPRUCE_LOG_Z, SPRUCE_PLANKS, SPRUCE_SLAB_BOTTOM, SPRUCE_SLAB_TOP, SPRUCE_STAIRS_EAST,
-    SPRUCE_STAIRS_NORTH, SPRUCE_STAIRS_SOUTH, SPRUCE_STAIRS_WEST, STONE_BRICKS, WALL_TORCH_SOUTH,
-    WHITE_TERRACOTTA,
+    AIR, BRICKS, CARROTS_AGE_0, COBBLESTONE, CORNFLOWER, GLASS, HAY_BLOCK, MOSSY_COBBLESTONE,
+    OAK_LOG, OAK_LOG_X, OAK_LOG_Z, OAK_PLANKS, OakFenceGateState, OakFenceState, POPPY,
+    RED_TERRACOTTA, RawBlockId, SPRUCE_LOG, SPRUCE_LOG_X, SPRUCE_LOG_Z, SPRUCE_PLANKS,
+    SPRUCE_SLAB_BOTTOM, SPRUCE_SLAB_TOP, SPRUCE_STAIRS_EAST, SPRUCE_STAIRS_NORTH,
+    SPRUCE_STAIRS_SOUTH, SPRUCE_STAIRS_WEST, STONE_BRICKS, WALL_TORCH_SOUTH, WHITE_TERRACOTTA,
+    oak_fence_for_state, oak_fence_gate_for_state,
 };
 use crate::structure_template::{
     StructureMaterialTheme, StructureTemplate, StructureTemplateBuilder, TemplateBlockState,
@@ -297,6 +298,45 @@ pub fn load_canonical_structure_json(
 }
 
 pub fn raw_block_state_for_canonical_key(key: &str) -> Option<RawBlockId> {
+    for bits in 0_u16..32 {
+        let state = OakFenceState {
+            north: bits & 1 != 0,
+            east: bits & 2 != 0,
+            south: bits & 4 != 0,
+            west: bits & 8 != 0,
+            waterlogged: bits & 16 != 0,
+        };
+        let canonical = format!(
+            "minecraft:oak_fence[east={},north={},south={},waterlogged={},west={}]",
+            state.east, state.north, state.south, state.waterlogged, state.west
+        );
+        if key == canonical {
+            return Some(oak_fence_for_state(state));
+        }
+    }
+    for bits in 0_u16..32 {
+        let state = OakFenceGateState {
+            facing: (bits & 3) as u8,
+            open: bits & 4 != 0,
+            powered: bits & 8 != 0,
+            in_wall: bits & 16 != 0,
+        };
+        let canonical = format!(
+            "minecraft:oak_fence_gate[facing={},in_wall={},open={},powered={}]",
+            ["north", "east", "south", "west"][state.facing as usize],
+            state.in_wall,
+            state.open,
+            state.powered
+        );
+        if key == canonical {
+            return oak_fence_gate_for_state(state);
+        }
+    }
+    for age in 0_u16..8 {
+        if key == format!("minecraft:carrots[age={age}]") {
+            return Some(CARROTS_AGE_0 + age);
+        }
+    }
     Some(match key {
         "minecraft:air" => AIR,
         "minecraft:bricks" => BRICKS,

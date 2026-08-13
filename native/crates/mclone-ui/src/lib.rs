@@ -4651,6 +4651,9 @@ const fn item_kind_hotbar_label(kind: mclone_protocol::ItemKind) -> &'static str
         mclone_protocol::ItemKind::WoodenHoe => "HOE",
         mclone_protocol::ItemKind::WheatSeeds => "SEED",
         mclone_protocol::ItemKind::Wheat => "W",
+        mclone_protocol::ItemKind::Carrot => "CRT",
+        mclone_protocol::ItemKind::OakFence => "FNC",
+        mclone_protocol::ItemKind::OakFenceGate => "GATE",
     }
 }
 
@@ -4668,6 +4671,9 @@ const fn item_kind_display_name(kind: mclone_protocol::ItemKind) -> &'static str
         mclone_protocol::ItemKind::WoodenHoe => "Wooden hoe",
         mclone_protocol::ItemKind::WheatSeeds => "Wheat seeds",
         mclone_protocol::ItemKind::Wheat => "Wheat",
+        mclone_protocol::ItemKind::Carrot => "Carrot",
+        mclone_protocol::ItemKind::OakFence => "Oak fence",
+        mclone_protocol::ItemKind::OakFenceGate => "Oak fence gate",
     }
 }
 

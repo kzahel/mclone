@@ -105,27 +105,28 @@ impl BlockStateRecord {
     }
 
     fn property_ignored_by_model_variant(&self, property: &str) -> bool {
-        property == "waterlogged"
-            && matches!(
-                self.block.path(),
-                "spruce_stairs"
-                    | "spruce_slab"
-                    | "tube_coral"
-                    | "brain_coral"
-                    | "bubble_coral"
-                    | "fire_coral"
-                    | "horn_coral"
-                    | "tube_coral_fan"
-                    | "brain_coral_fan"
-                    | "bubble_coral_fan"
-                    | "fire_coral_fan"
-                    | "horn_coral_fan"
-                    | "tube_coral_wall_fan"
-                    | "brain_coral_wall_fan"
-                    | "bubble_coral_wall_fan"
-                    | "fire_coral_wall_fan"
-                    | "horn_coral_wall_fan"
-            )
+        (property == "powered" && self.block.path() == "oak_fence_gate")
+            || (property == "waterlogged"
+                && matches!(
+                    self.block.path(),
+                    "spruce_stairs"
+                        | "spruce_slab"
+                        | "tube_coral"
+                        | "brain_coral"
+                        | "bubble_coral"
+                        | "fire_coral"
+                        | "horn_coral"
+                        | "tube_coral_fan"
+                        | "brain_coral_fan"
+                        | "bubble_coral_fan"
+                        | "fire_coral_fan"
+                        | "horn_coral_fan"
+                        | "tube_coral_wall_fan"
+                        | "brain_coral_wall_fan"
+                        | "bubble_coral_wall_fan"
+                        | "fire_coral_wall_fan"
+                        | "horn_coral_wall_fan"
+                ))
     }
 }
 
@@ -151,6 +152,7 @@ impl BlockStateRegistry {
                 ))
                 .expect("terrain MVP block ids are unique");
         }
+        register_kitchen_garden_states(&mut registry);
         registry
     }
 
@@ -210,6 +212,56 @@ impl BlockStateRegistry {
         }
         Ok(())
     }
+}
+
+fn register_kitchen_garden_states(registry: &mut BlockStateRegistry) {
+    for bits in 0_u32..32 {
+        let properties = [
+            ("north", bool_label(bits & 1 != 0)),
+            ("east", bool_label(bits & 2 != 0)),
+            ("south", bool_label(bits & 4 != 0)),
+            ("west", bool_label(bits & 8 != 0)),
+            ("waterlogged", bool_label(bits & 16 != 0)),
+        ];
+        registry
+            .register(BlockStateRecord::new(
+                BlockStateId(237 + bits),
+                ResourceLocation::parse("minecraft:oak_fence").unwrap(),
+                properties,
+            ))
+            .expect("oak fence block states are unique");
+    }
+    for bits in 0_u32..32 {
+        let properties = [
+            (
+                "facing",
+                ["north", "east", "south", "west"][(bits & 3) as usize],
+            ),
+            ("open", bool_label(bits & 4 != 0)),
+            ("powered", bool_label(bits & 8 != 0)),
+            ("in_wall", bool_label(bits & 16 != 0)),
+        ];
+        registry
+            .register(BlockStateRecord::new(
+                BlockStateId(269 + bits),
+                ResourceLocation::parse("minecraft:oak_fence_gate").unwrap(),
+                properties,
+            ))
+            .expect("oak fence gate block states are unique");
+    }
+    for age in 0_u32..8 {
+        registry
+            .register(BlockStateRecord::new(
+                BlockStateId(301 + age),
+                ResourceLocation::parse("minecraft:carrots").unwrap(),
+                [("age", age.to_string())],
+            ))
+            .expect("carrot block states are unique");
+    }
+}
+
+const fn bool_label(value: bool) -> &'static str {
+    if value { "true" } else { "false" }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1045,7 +1097,7 @@ mod tests {
     fn terrain_mvp_registry_names_current_generated_ids() {
         let registry = BlockStateRegistry::terrain_mvp();
 
-        assert_eq!(registry.len(), 237);
+        assert_eq!(registry.len(), 309);
         assert_eq!(
             registry.by_id(BlockStateId(0)).unwrap().canonical_key(),
             "minecraft:air"

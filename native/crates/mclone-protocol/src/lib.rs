@@ -46,7 +46,7 @@ pub use statistics::{
     SUCCESSFUL_BLOCK_PLACEMENT_STATISTIC_VALUE_KEY, StatisticKey, StatisticKeyError,
 };
 
-pub const PROTOCOL_VERSION: u32 = 40;
+pub const PROTOCOL_VERSION: u32 = 41;
 pub const HOTBAR_SLOT_COUNT: u8 = 9;
 pub const HOTBAR_SLOT_COUNT_USIZE: usize = HOTBAR_SLOT_COUNT as usize;
 pub const MAX_PLAYER_DISPLAY_NAME_BYTES: usize = 16;
@@ -653,6 +653,9 @@ pub enum ItemKind {
     WoodenHoe,
     WheatSeeds,
     Wheat,
+    Carrot,
+    OakFence,
+    OakFenceGate,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1735,6 +1738,9 @@ impl ByteWriter {
             ItemKind::WoodenHoe => 9,
             ItemKind::WheatSeeds => 10,
             ItemKind::Wheat => 11,
+            ItemKind::Carrot => 12,
+            ItemKind::OakFence => 13,
+            ItemKind::OakFenceGate => 14,
         });
     }
 
@@ -2324,6 +2330,9 @@ impl<'a> ByteReader<'a> {
             9 => Ok(ItemKind::WoodenHoe),
             10 => Ok(ItemKind::WheatSeeds),
             11 => Ok(ItemKind::Wheat),
+            12 => Ok(ItemKind::Carrot),
+            13 => Ok(ItemKind::OakFence),
+            14 => Ok(ItemKind::OakFenceGate),
             kind => Err(ProtocolCodecError::UnknownItemKind(kind)),
         }
     }

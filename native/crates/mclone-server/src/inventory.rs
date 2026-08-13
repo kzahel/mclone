@@ -31,6 +31,18 @@ impl Default for ServerInventory {
             kind: mclone_protocol::ItemKind::HuntingSpear,
             count: 1,
         });
+        item_stacks[1] = Some(ItemStackSnapshot {
+            kind: mclone_protocol::ItemKind::OakFence,
+            count: 32,
+        });
+        item_stacks[2] = Some(ItemStackSnapshot {
+            kind: mclone_protocol::ItemKind::OakFenceGate,
+            count: 4,
+        });
+        item_stacks[3] = Some(ItemStackSnapshot {
+            kind: mclone_protocol::ItemKind::Carrot,
+            count: 8,
+        });
         item_stacks[6] = Some(ItemStackSnapshot {
             kind: mclone_protocol::ItemKind::BeeHotel,
             count: 1,
@@ -351,7 +363,7 @@ mod tests {
             })
         );
         assert_eq!(
-            inventory.item_stack_in_slot(1),
+            inventory.item_stack_in_slot(4),
             Some(ItemStackSnapshot {
                 kind: ItemKind::Egg,
                 count: 1,

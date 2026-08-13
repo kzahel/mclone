@@ -112,6 +112,153 @@ fn wooden_hoe_seed_and_harvest_form_an_authoritative_inventory_loop() {
 }
 
 #[test]
+fn carrot_plant_and_harvest_use_the_shared_crop_and_item_drop_loop() {
+    let mut server = LocalRealmSession::new(19);
+    load_center_chunk(&mut server);
+    sync_player(&mut server, Vec3d::new(8.5, 67.0, 10.5));
+    let soil = BlockPos::new(8, 64, 8);
+    let crop = soil.offset(0, 1, 0);
+    assert!(
+        server
+            .scheduler_mut()
+            .set_block_at_world(soil, mclone_worldgen::block::FARMLAND_MOISTURE_7)
+    );
+    server.scheduler_mut().set_block_at_world(crop, AIR);
+    server.scheduler_mut().drain_pending_block_delta_events();
+
+    sync_carried_slot(&mut server, 3);
+    server
+        .try_handle_command(use_held_item_on(BlockHitResult::new(
+            Vec3d::new(8.5, 65.0, 8.5),
+            Direction::Up,
+            soil,
+            false,
+        )))
+        .expect("plant carrots");
+    assert_eq!(
+        server.scheduler().block_at_world(crop),
+        Some(mclone_worldgen::block::CARROTS_AGE_0)
+    );
+    assert_eq!(server.inventory().item_count(ItemKind::Carrot), 7);
+
+    assert!(
+        server
+            .scheduler_mut()
+            .set_block_at_world(crop, mclone_worldgen::block::CARROTS_AGE_7)
+    );
+    server.scheduler_mut().drain_pending_block_delta_events();
+    server
+        .try_handle_command(ClientCommand::PlayerAction(PlayerActionCommand {
+            pos: crop,
+            direction: Direction::Up,
+            kind: PlayerActionKind::DebugInstantBreak,
+        }))
+        .expect("harvest mature carrots");
+
+    assert_eq!(server.scheduler().block_at_world(crop), Some(AIR));
+    let carrot_drop_count = server
+        .entities
+        .states()
+        .into_iter()
+        .filter_map(|entity| entity.item_stack)
+        .filter(|stack| stack.kind == ItemKind::Carrot)
+        .map(|stack| stack.count)
+        .sum::<u8>();
+    assert!((1..=4).contains(&carrot_drop_count));
+}
+
+#[test]
+fn fences_connect_and_gate_toggles_authoritatively() {
+    let mut server = LocalRealmSession::new(23);
+    load_center_chunk(&mut server);
+    sync_player(&mut server, Vec3d::new(8.5, 67.0, 10.5));
+    let west = BlockPos::new(7, 65, 8);
+    let gate = BlockPos::new(8, 65, 8);
+    let east = BlockPos::new(9, 65, 8);
+    for pos in [west, gate, east] {
+        assert!(
+            server
+                .scheduler_mut()
+                .set_block_at_world(pos.below(), STONE)
+        );
+        server.scheduler_mut().set_block_at_world(pos, AIR);
+    }
+    server.scheduler_mut().drain_pending_block_delta_events();
+
+    sync_carried_slot(&mut server, 1);
+    for pos in [west, east] {
+        server
+            .try_handle_command(use_held_item_on(BlockHitResult::new(
+                Vec3d::new(
+                    f64::from(pos.x) + 0.5,
+                    f64::from(pos.y),
+                    f64::from(pos.z) + 0.5,
+                ),
+                Direction::Up,
+                pos.below(),
+                false,
+            )))
+            .expect("place fence");
+    }
+    sync_carried_slot(&mut server, 2);
+    server
+        .try_handle_command(use_held_item_on(BlockHitResult::new(
+            Vec3d::new(8.5, 65.0, 8.5),
+            Direction::Up,
+            gate.below(),
+            false,
+        )))
+        .expect("place gate");
+
+    let west_state =
+        mclone_worldgen::block::oak_fence_state(server.scheduler().block_at_world(west).unwrap())
+            .unwrap();
+    let east_state =
+        mclone_worldgen::block::oak_fence_state(server.scheduler().block_at_world(east).unwrap())
+            .unwrap();
+    assert!(west_state.east);
+    assert!(east_state.west);
+    assert!(
+        !mclone_worldgen::block::oak_fence_gate_state(
+            server.scheduler().block_at_world(gate).unwrap()
+        )
+        .unwrap()
+        .open
+    );
+
+    server
+        .try_handle_command(use_held_item_on(BlockHitResult::new(
+            Vec3d::new(8.5, 65.5, 8.5),
+            Direction::North,
+            gate,
+            false,
+        )))
+        .expect("open gate");
+    assert!(
+        mclone_worldgen::block::oak_fence_gate_state(
+            server.scheduler().block_at_world(gate).unwrap()
+        )
+        .unwrap()
+        .open
+    );
+    server
+        .try_handle_command(use_held_item_on(BlockHitResult::new(
+            Vec3d::new(8.5, 65.5, 8.5),
+            Direction::North,
+            gate,
+            false,
+        )))
+        .expect("close gate");
+    assert!(
+        !mclone_worldgen::block::oak_fence_gate_state(
+            server.scheduler().block_at_world(gate).unwrap()
+        )
+        .unwrap()
+        .open
+    );
+}
+
+#[test]
 fn full_inventory_leaves_harvest_loot_in_the_world() {
     let mut server = LocalRealmSession::new(33);
     load_center_chunk(&mut server);
@@ -286,6 +433,109 @@ fn farming_field_and_inventory_survive_sqlite_restart() {
     std::fs::remove_dir_all(root).unwrap();
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn open_garden_gate_and_carrot_crop_survive_sqlite_restart() {
+    let root = actor_tool_temp_dir("functional-garden-restart");
+    let identity = ClientIdentity::new(PlayerProfileId::new([0x47; 16]), "Gardener").unwrap();
+    let fence = BlockPos::new(7, 65, 8);
+    let gate = BlockPos::new(8, 65, 8);
+    let soil = BlockPos::new(9, 64, 8);
+    let crop = soil.offset(0, 1, 0);
+    {
+        let mut server = LocalRealmSession::try_with_threaded_sqlite_world_dir(73, &root).unwrap();
+        server
+            .configure_local_player_identity_blocking(identity.clone())
+            .unwrap();
+        load_center_chunk(&mut server);
+        sync_player(&mut server, Vec3d::new(8.5, 67.0, 10.5));
+        for pos in [fence.below(), gate.below()] {
+            assert!(server.scheduler_mut().set_block_at_world(pos, STONE));
+        }
+        server.scheduler_mut().set_block_at_world(fence, AIR);
+        server.scheduler_mut().set_block_at_world(gate, AIR);
+        assert!(
+            server
+                .scheduler_mut()
+                .set_block_at_world(soil, mclone_worldgen::block::FARMLAND_MOISTURE_7)
+        );
+        server.scheduler_mut().set_block_at_world(crop, AIR);
+        server.scheduler_mut().drain_pending_block_delta_events();
+
+        sync_carried_slot(&mut server, 1);
+        server
+            .try_handle_command(use_held_item_on(BlockHitResult::new(
+                Vec3d::new(7.5, 65.0, 8.5),
+                Direction::Up,
+                fence.below(),
+                false,
+            )))
+            .unwrap();
+        sync_carried_slot(&mut server, 2);
+        server
+            .try_handle_command(use_held_item_on(BlockHitResult::new(
+                Vec3d::new(8.5, 65.0, 8.5),
+                Direction::Up,
+                gate.below(),
+                false,
+            )))
+            .unwrap();
+        server
+            .try_handle_command(use_held_item_on(BlockHitResult::new(
+                Vec3d::new(8.5, 65.5, 8.5),
+                Direction::North,
+                gate,
+                false,
+            )))
+            .unwrap();
+        sync_carried_slot(&mut server, 3);
+        server
+            .try_handle_command(use_held_item_on(BlockHitResult::new(
+                Vec3d::new(9.5, 65.0, 8.5),
+                Direction::Up,
+                soil,
+                false,
+            )))
+            .unwrap();
+        assert!(
+            server
+                .scheduler_mut()
+                .set_block_at_world(crop, mclone_worldgen::block::CARROTS_AGE_4)
+        );
+        server.shutdown_persistence().unwrap();
+    }
+
+    {
+        let mut reopened =
+            LocalRealmSession::try_with_threaded_sqlite_world_dir(73, &root).unwrap();
+        reopened
+            .configure_local_player_identity_blocking(identity)
+            .unwrap();
+        load_center_chunk(&mut reopened);
+        assert!(
+            mclone_worldgen::block::oak_fence_state(
+                reopened.scheduler().block_at_world(fence).unwrap()
+            )
+            .unwrap()
+            .east
+        );
+        assert!(
+            mclone_worldgen::block::oak_fence_gate_state(
+                reopened.scheduler().block_at_world(gate).unwrap()
+            )
+            .unwrap()
+            .open
+        );
+        assert_eq!(
+            reopened.scheduler().block_at_world(crop),
+            Some(mclone_worldgen::block::CARROTS_AGE_4)
+        );
+        assert_eq!(reopened.inventory().item_count(ItemKind::Carrot), 7);
+        reopened.shutdown_persistence().unwrap();
+    }
+    std::fs::remove_dir_all(root).unwrap();
+}
+
 #[test]
 fn debug_break_command_mutates_block_and_returns_section_delta() {
     let mut server = LocalRealmSession::new(0);
@@ -403,6 +653,7 @@ fn debug_break_reschedules_neighbor_water_to_refill_removed_block() {
     server.liquid_ticks = FluidTickList::new();
     sync_player(&mut server, Vec3d::new(8.5, 80.0, 8.5));
     sync_carried_slot(&mut server, 1);
+    server.inventory_mut().set_item_stack_for_test(1, None);
 
     let target = BlockPos::new(8, 80, 8);
     for x in 6..=10 {
@@ -473,6 +724,7 @@ fn debug_place_command_places_adjacent_to_hit_face() {
     load_center_chunk(&mut server);
     sync_player(&mut server, Vec3d::new(8.5, 80.0, 8.5));
     sync_carried_slot(&mut server, 1);
+    server.inventory_mut().set_item_stack_for_test(1, None);
     let clicked = BlockPos::new(8, 80, 8);
     let target = clicked.relative(Direction::Up);
     assert!(server.scheduler_mut().set_block_at_world(clicked, STONE));
@@ -1008,6 +1260,7 @@ fn debug_place_command_replaces_clicked_replaceable_block() {
     load_center_chunk(&mut server);
     sync_player(&mut server, Vec3d::new(8.5, 80.0, 8.5));
     sync_carried_slot(&mut server, 1);
+    server.inventory_mut().set_item_stack_for_test(1, None);
     let clicked = BlockPos::new(8, 80, 8);
     let adjacent = clicked.relative(Direction::Up);
     assert!(server.scheduler_mut().set_block_at_world(clicked, GRASS));
@@ -1041,6 +1294,7 @@ fn debug_place_command_does_not_overwrite_solid_relative_target() {
     load_center_chunk(&mut server);
     sync_player(&mut server, Vec3d::new(8.5, 80.0, 8.5));
     sync_carried_slot(&mut server, 1);
+    server.inventory_mut().set_item_stack_for_test(1, None);
     let clicked = BlockPos::new(8, 80, 8);
     let target = clicked.relative(Direction::Up);
     assert!(server.scheduler_mut().set_block_at_world(clicked, STONE));
@@ -1124,6 +1378,7 @@ fn debug_place_command_replaces_one_layer_snow_in_place() {
     load_center_chunk(&mut server);
     sync_player(&mut server, Vec3d::new(8.5, 80.0, 8.5));
     sync_carried_slot(&mut server, 1);
+    server.inventory_mut().set_item_stack_for_test(1, None);
     let clicked = BlockPos::new(8, 80, 8);
     assert!(server.scheduler_mut().set_block_at_world(clicked, SNOW));
     server.scheduler_mut().drain_pending_block_delta_events();

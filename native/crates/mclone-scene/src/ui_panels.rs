@@ -1422,7 +1422,7 @@ impl McloneSceneHost {
         self.enqueue_interaction_sound(
             match action {
                 XrGameplayInteractionAction::Attack => LocalInteractionSoundIntent::Break,
-                XrGameplayInteractionAction::Use => LocalInteractionSoundIntent::Place,
+                XrGameplayInteractionAction::Use => LocalInteractionSoundIntent::Use,
             },
             target,
         );

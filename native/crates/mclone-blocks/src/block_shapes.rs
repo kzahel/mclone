@@ -73,15 +73,23 @@ pub fn clip_block_outline(
         })
 }
 
-fn shapes_for(state: BlockStateId, use_case: ShapeUse) -> [Option<LocalShape>; 2] {
+fn shapes_for(state: BlockStateId, use_case: ShapeUse) -> [Option<LocalShape>; 5] {
+    if (terrain_id::OAK_FENCE_STATE_START..=terrain_id::OAK_FENCE_STATE_END).contains(&state.0) {
+        return oak_fence_shapes(state.0 - terrain_id::OAK_FENCE_STATE_START, use_case);
+    }
+    if (terrain_id::OAK_FENCE_GATE_STATE_START..=terrain_id::OAK_FENCE_GATE_STATE_END)
+        .contains(&state.0)
+    {
+        return oak_fence_gate_shapes(state.0 - terrain_id::OAK_FENCE_GATE_STATE_START, use_case);
+    }
     match state.0 {
-        terrain_id::SPRUCE_SLAB_BOTTOM => [Some(bottom_slab()), None],
-        terrain_id::SPRUCE_SLAB_TOP => [Some(top_slab()), None],
+        terrain_id::SPRUCE_SLAB_BOTTOM => [Some(bottom_slab()), None, None, None, None],
+        terrain_id::SPRUCE_SLAB_TOP => [Some(top_slab()), None, None, None, None],
         terrain_id::SPRUCE_STAIRS_NORTH => straight_bottom_stair(0.0, 0.0, 1.0, 0.5),
         terrain_id::SPRUCE_STAIRS_EAST => straight_bottom_stair(0.5, 0.0, 1.0, 1.0),
         terrain_id::SPRUCE_STAIRS_SOUTH => straight_bottom_stair(0.0, 0.5, 1.0, 1.0),
         terrain_id::SPRUCE_STAIRS_WEST => straight_bottom_stair(0.0, 0.0, 0.5, 1.0),
-        _ => [shape_for(state, use_case), None],
+        _ => [shape_for(state, use_case), None, None, None, None],
     }
 }
 
@@ -168,6 +176,9 @@ fn outline_shape(state: BlockStateId) -> Option<LocalShape> {
         terrain_id::WHEAT_AGE_0..=terrain_id::WHEAT_AGE_7 => {
             Some(wheat_outline_shape(state.0 - terrain_id::WHEAT_AGE_0))
         }
+        terrain_id::CARROTS_AGE_0..=terrain_id::CARROTS_AGE_7 => {
+            Some(wheat_outline_shape(state.0 - terrain_id::CARROTS_AGE_0))
+        }
         _ => Some(full_block()),
     }
 }
@@ -253,7 +264,8 @@ fn collision_shape(state: BlockStateId) -> Option<LocalShape> {
         | terrain_id::WALL_TORCH_EAST
         | terrain_id::WALL_TORCH_SOUTH
         | terrain_id::WALL_TORCH_WEST => None,
-        terrain_id::WHEAT_AGE_0..=terrain_id::WHEAT_AGE_7 => None,
+        terrain_id::WHEAT_AGE_0..=terrain_id::WHEAT_AGE_7
+        | terrain_id::CARROTS_AGE_0..=terrain_id::CARROTS_AGE_7 => None,
         id if is_vine(id) || is_cocoa(id) => None,
         terrain_id::FARMLAND_MOISTURE_0..=terrain_id::FARMLAND_MOISTURE_7 => Some(farmland_shape()),
         terrain_id::CACTUS => Some(cactus_collision_shape()),
@@ -285,6 +297,67 @@ fn wheat_outline_shape(age: u32) -> LocalShape {
     local_box(0.0, 0.0, 0.0, 1.0, height, 1.0)
 }
 
+fn oak_fence_shapes(bits: u32, use_case: ShapeUse) -> [Option<LocalShape>; 5] {
+    let height = match use_case {
+        ShapeUse::Outline => 1.0,
+        ShapeUse::Collision => 24.0 / 16.0,
+    };
+    let mut shapes = [None; 5];
+    shapes[0] = Some(local_box(
+        6.0 / 16.0,
+        0.0,
+        6.0 / 16.0,
+        10.0 / 16.0,
+        height,
+        10.0 / 16.0,
+    ));
+    let mut next = 1;
+    for (connected, shape) in [
+        (
+            bits & 1 != 0,
+            local_box(6.0 / 16.0, 0.0, 0.0, 10.0 / 16.0, height, 10.0 / 16.0),
+        ),
+        (
+            bits & 2 != 0,
+            local_box(6.0 / 16.0, 0.0, 6.0 / 16.0, 1.0, height, 10.0 / 16.0),
+        ),
+        (
+            bits & 4 != 0,
+            local_box(6.0 / 16.0, 0.0, 6.0 / 16.0, 10.0 / 16.0, height, 1.0),
+        ),
+        (
+            bits & 8 != 0,
+            local_box(0.0, 0.0, 6.0 / 16.0, 10.0 / 16.0, height, 10.0 / 16.0),
+        ),
+    ] {
+        if connected {
+            shapes[next] = Some(shape);
+            next += 1;
+        }
+    }
+    shapes
+}
+
+fn oak_fence_gate_shapes(bits: u32, use_case: ShapeUse) -> [Option<LocalShape>; 5] {
+    let facing = bits & 3;
+    let open = bits & 4 != 0;
+    let in_wall = bits & 16 != 0;
+    if use_case == ShapeUse::Collision && open {
+        return [None; 5];
+    }
+    let height = match use_case {
+        ShapeUse::Outline if in_wall => 13.0 / 16.0,
+        ShapeUse::Outline => 1.0,
+        ShapeUse::Collision => 24.0 / 16.0,
+    };
+    let shape = if facing == 0 || facing == 2 {
+        local_box(0.0, 0.0, 6.0 / 16.0, 1.0, height, 10.0 / 16.0)
+    } else {
+        local_box(6.0 / 16.0, 0.0, 0.0, 10.0 / 16.0, height, 1.0)
+    };
+    [Some(shape), None, None, None, None]
+}
+
 fn bottom_slab() -> LocalShape {
     local_box(0.0, 0.0, 0.0, 1.0, 0.5, 1.0)
 }
@@ -298,7 +371,7 @@ fn straight_bottom_stair(
     upper_min_z: f64,
     upper_max_x: f64,
     upper_max_z: f64,
-) -> [Option<LocalShape>; 2] {
+) -> [Option<LocalShape>; 5] {
     [
         Some(bottom_slab()),
         Some(local_box(
@@ -309,6 +382,9 @@ fn straight_bottom_stair(
             1.0,
             upper_max_z,
         )),
+        None,
+        None,
+        None,
     ]
 }
 
@@ -1181,6 +1257,48 @@ mod tests {
         assert_eq!(
             block_collision_aabb(state(terrain_id::WHEAT_AGE_7), pos),
             None
+        );
+        assert_eq!(
+            block_outline_aabbs(state(terrain_id::CARROTS_AGE_0), pos),
+            vec![Aabb::new(2.0, 64.0, -3.0, 3.0, 64.125, -2.0)]
+        );
+        assert_eq!(
+            block_outline_aabbs(state(terrain_id::CARROTS_AGE_7), pos),
+            vec![Aabb::new(2.0, 64.0, -3.0, 3.0, 65.0, -2.0)]
+        );
+        assert_eq!(
+            block_collision_aabb(state(terrain_id::CARROTS_AGE_7), pos),
+            None
+        );
+    }
+
+    #[test]
+    fn fence_and_gate_shapes_match_java_connection_and_open_contracts() {
+        let pos = BlockPos::new(2, 64, -3);
+        let north_east_fence = state(terrain_id::OAK_FENCE_STATE_START + 1 + 2);
+        assert_eq!(
+            block_outline_aabbs(north_east_fence, pos),
+            vec![
+                Aabb::new(2.375, 64.0, -2.625, 2.625, 65.0, -2.375),
+                Aabb::new(2.375, 64.0, -3.0, 2.625, 65.0, -2.375),
+                Aabb::new(2.375, 64.0, -2.625, 3.0, 65.0, -2.375),
+            ]
+        );
+        assert_eq!(
+            block_collision_aabb(north_east_fence, pos),
+            Some(Aabb::new(2.375, 64.0, -3.0, 3.0, 65.5, -2.375))
+        );
+
+        let closed_north = state(terrain_id::OAK_FENCE_GATE_STATE_START);
+        let open_north = state(terrain_id::OAK_FENCE_GATE_STATE_START + 4);
+        assert_eq!(
+            block_collision_aabb(closed_north, pos),
+            Some(Aabb::new(2.0, 64.0, -2.625, 3.0, 65.5, -2.375))
+        );
+        assert_eq!(block_collision_aabb(open_north, pos), None);
+        assert_eq!(
+            block_outline_aabbs(open_north, pos),
+            vec![Aabb::new(2.0, 64.0, -2.625, 3.0, 65.0, -2.375)]
         );
     }
 }

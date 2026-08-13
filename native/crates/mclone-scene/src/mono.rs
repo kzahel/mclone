@@ -1756,7 +1756,7 @@ impl McloneSceneHost {
         self.enqueue_interaction_sound(
             match action {
                 FlatInputAction::Attack => LocalInteractionSoundIntent::Break,
-                FlatInputAction::Use => LocalInteractionSoundIntent::Place,
+                FlatInputAction::Use => LocalInteractionSoundIntent::Use,
                 _ => return Ok(MonoWorldActionStatus::NoCommand),
             },
             &target,

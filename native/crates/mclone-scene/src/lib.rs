@@ -109,8 +109,9 @@ use mclone_audio::PreparedAudioAssets;
 use mclone_audio::{
     AcousticMaterial, AudioOutputCapability, BEE_BUZZ, DEER_ALARM, DEER_CONTACT, DEER_IMPACT,
     MALLARD_CALL, PlaybackParams, SoundKey, UI_BACK, UI_CONFIRM, UI_ERROR, UI_OPEN, UI_SELECT,
-    landing_playback_for_impact,
+    WOOD_CREAK, landing_playback_for_impact,
 };
+use mclone_client::block_facts::terrain_id;
 use mclone_client::{
     ActorInterpolationConfig, ActorInterpolationState, ActorPresentation, BlockInteractionTarget,
     ClientInteractionController, ClientRuntime, EntityInteractionTarget,
@@ -628,7 +629,7 @@ struct FootstepCadence {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum LocalInteractionSoundIntent {
     Break,
-    Place,
+    Use,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -639,6 +640,10 @@ enum PendingInteractionSoundKind {
     },
     Place {
         candidates: [(BlockPos, Option<BlockStateId>); 2],
+    },
+    Toggle {
+        pos: BlockPos,
+        before: BlockStateId,
     },
 }
 
@@ -691,6 +696,13 @@ impl PendingInteractionSound {
                 }
                 PendingInteractionResolution::Pending
             }
+            PendingInteractionSoundKind::Toggle { pos, before } => match block_state_at(pos) {
+                Some(current) if current != before => PendingInteractionResolution::Confirmed {
+                    pos,
+                    sound: WOOD_CREAK,
+                },
+                _ => PendingInteractionResolution::Pending,
+            },
         }
     }
 }
@@ -767,6 +779,8 @@ fn placement_acoustic_material(
         _ => match inventory_stack?.kind {
             ItemKind::WoodenHoe => Some(AcousticMaterial::Soft),
             ItemKind::WheatSeeds => Some(AcousticMaterial::Grass),
+            ItemKind::Carrot => Some(AcousticMaterial::Grass),
+            ItemKind::OakFence | ItemKind::OakFenceGate => Some(AcousticMaterial::Wood),
             _ => None,
         },
     }
@@ -922,6 +936,32 @@ mod sound_effect_tests {
             PendingInteractionResolution::Confirmed {
                 pos: adjacent,
                 sound: mclone_audio::PLACE_STONE,
+            }
+        );
+    }
+
+    #[test]
+    fn gate_sound_waits_for_authoritative_state_toggle() {
+        let pos = BlockPos::new(1, 2, 3);
+        let before = BlockStateId(terrain_id::OAK_FENCE_GATE_STATE_START);
+        let submitted = PendingInteractionSound {
+            kind: PendingInteractionSoundKind::Toggle { pos, before },
+            material: AcousticMaterial::Wood,
+            submitted_at: MonotonicInstant::ZERO,
+            sequence: 0,
+        };
+
+        assert_eq!(
+            submitted.resolve(MonotonicInstant::from_nanos(1), |_| Some(before)),
+            PendingInteractionResolution::Pending
+        );
+        assert_eq!(
+            submitted.resolve(MonotonicInstant::from_nanos(2), |_| {
+                Some(BlockStateId(before.0 + 4))
+            }),
+            PendingInteractionResolution::Confirmed {
+                pos,
+                sound: WOOD_CREAK,
             }
         );
     }
@@ -5498,7 +5538,21 @@ impl McloneSceneHost {
                     acoustic_material_for_state(before),
                 )
             }
-            LocalInteractionSoundIntent::Place => {
+            LocalInteractionSoundIntent::Use => {
+                let clicked = target.hit.block_pos;
+                if let Some(before) = client.block_state_at_block_pos(clicked)
+                    && (terrain_id::OAK_FENCE_GATE_STATE_START
+                        ..=terrain_id::OAK_FENCE_GATE_STATE_END)
+                        .contains(&before.0)
+                {
+                    return self.push_pending_interaction_sound(
+                        PendingInteractionSoundKind::Toggle {
+                            pos: clicked,
+                            before,
+                        },
+                        AcousticMaterial::Wood,
+                    );
+                }
                 let selected = usize::from(self.active_world.interaction.selected_hotbar_slot());
                 let Some(material) = placement_acoustic_material(
                     self.active_world.interaction.hotbar_items()[selected],
@@ -5506,7 +5560,6 @@ impl McloneSceneHost {
                 ) else {
                     return;
                 };
-                let clicked = target.hit.block_pos;
                 let adjacent = clicked.relative(target.hit.direction);
                 (
                     PendingInteractionSoundKind::Place {
@@ -5519,6 +5572,14 @@ impl McloneSceneHost {
                 )
             }
         };
+        self.push_pending_interaction_sound(kind_and_material.0, kind_and_material.1);
+    }
+
+    fn push_pending_interaction_sound(
+        &mut self,
+        kind: PendingInteractionSoundKind,
+        material: AcousticMaterial,
+    ) {
         if self.active_world.pending_interaction_sounds.len() == MAX_PENDING_INTERACTION_SOUNDS {
             self.active_world.pending_interaction_sounds.pop_front();
         }
@@ -5527,8 +5588,8 @@ impl McloneSceneHost {
         self.active_world
             .pending_interaction_sounds
             .push_back(PendingInteractionSound {
-                kind: kind_and_material.0,
-                material: kind_and_material.1,
+                kind,
+                material,
                 submitted_at: self.services.clock.now(),
                 sequence,
             });

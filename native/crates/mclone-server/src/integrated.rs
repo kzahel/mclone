@@ -31,7 +31,7 @@ use mclone_protocol::{
 use mclone_worldgen::biome::{OverworldBiomeSource, get_layered_biome_by_id};
 use mclone_worldgen::block::{
     AIR, DANDELION, GRASS_BLOCK, POPPY, RawBlockId, block_name, farmland_moisture,
-    generated_block_state_id, material_blocks_motion, wheat_age,
+    generated_block_state_id, material_blocks_motion,
 };
 use mclone_worldgen::levelgen::{
     McloneOverworldSamplingTopology, McloneOverworldVegetationPlanCache, McloneVegetationSource,
@@ -63,10 +63,14 @@ use crate::falling_block::{
     block_tick_requests_after_block_change,
 };
 use crate::farming::{
-    FarmingBlockAction, harvest_stacks, plan_plant, plan_till, random_farming_tick,
-    random_farming_tick_candidates, wheat_harvest,
+    CropKind, FarmingBlockAction, crop_harvest, crop_state, harvest_stacks, plan_plant, plan_till,
+    random_farming_tick, random_farming_tick_candidates,
 };
 use crate::game_mode::ServerInteractionContext;
+use crate::garden_blocks::{
+    connected_fence_updates, horizontal_direction_from_y_rot, placed_oak_fence_gate_state,
+    placed_oak_fence_state, toggled_oak_fence_gate_state,
+};
 use crate::inventory::ServerInventory;
 use crate::persistence::{
     DimensionRecord, EntityChunkRecord, EntityPersistentId, PlayerRecord, PlayerRecordKey,
@@ -3776,8 +3780,8 @@ impl RealmServer {
             );
             if context.may_break_block(command.pos) {
                 let before = self.scheduler.block_at_world(command.pos);
-                if before.and_then(wheat_age).is_some() {
-                    self.harvest_wheat_for_target(target, command.pos, before.unwrap());
+                if before.and_then(crop_state).is_some() {
+                    self.harvest_crop_for_target(target, command.pos, before.unwrap());
                 } else {
                     self.set_block_debug(command.pos, AIR_BLOCK_STATE_ID);
                 }
@@ -3901,6 +3905,28 @@ impl RealmServer {
         target: CommandTarget,
         command: UseItemOnCommand,
     ) -> ChunkStoreResult<Vec<ServerUpdate>> {
+        if command.hand == InteractionHand::MainHand {
+            let clicked = self.scheduler.block_at_world(command.hit.block_pos);
+            if let Some(next) = clicked.and_then(|block| {
+                let facing = horizontal_direction_from_y_rot(
+                    self.player_for_target(target)
+                        .expect("validated interaction target has a player")
+                        .y_rot_degrees(),
+                );
+                toggled_oak_fence_gate_state(block, facing)
+            }) {
+                let player_position = self.player_for_target(target)?.position();
+                let context = ServerInteractionContext::debug_creative_in(
+                    player_position,
+                    self.active_dimension.definition.topology,
+                );
+                if context.may_use_item_on(command.hit)
+                    && self.set_block_from_simulation(command.hit.block_pos, next)
+                {
+                    return self.drain_pending_block_delta_updates_for_target(target);
+                }
+            }
+        }
         if command.hand == InteractionHand::MainHand
             && self
                 .inventory_for_target(target)?
@@ -3912,6 +3938,23 @@ impl RealmServer {
                 command,
                 ItemKind::WoodenHoe,
             );
+        }
+        if command.hand == InteractionHand::MainHand
+            && self
+                .inventory_for_target(target)?
+                .selected_item_stack()
+                .is_some_and(|stack| stack.kind == ItemKind::Carrot)
+        {
+            return self.handle_farming_use_item_on_for_target(target, command, ItemKind::Carrot);
+        }
+        if command.hand == InteractionHand::MainHand {
+            if let Some(kind @ (ItemKind::OakFence | ItemKind::OakFenceGate)) = self
+                .inventory_for_target(target)?
+                .selected_item_stack()
+                .map(|stack| stack.kind)
+            {
+                return self.handle_garden_block_use_item_on_for_target(target, command, kind);
+            }
         }
         if command.hand == InteractionHand::MainHand
             && self
@@ -3991,8 +4034,13 @@ impl RealmServer {
             ItemKind::WoodenHoe => plan_till(command.hit.block_pos, command.hit.direction, |pos| {
                 self.scheduler.block_at_world(pos)
             }),
-            ItemKind::WheatSeeds => {
-                plan_plant(command.hit.block_pos, command.hit.direction, |pos| {
+            ItemKind::WheatSeeds | ItemKind::Carrot => {
+                let crop = if kind == ItemKind::WheatSeeds {
+                    CropKind::Wheat
+                } else {
+                    CropKind::Carrots
+                };
+                plan_plant(command.hit.block_pos, command.hit.direction, crop, |pos| {
                     self.scheduler.block_at_world(pos)
                 })
             }
@@ -4009,17 +4057,14 @@ impl RealmServer {
         if !context.may_place_at(pos) || !self.set_block_from_simulation(pos, state) {
             return Ok(Vec::new());
         }
-        if kind == ItemKind::WheatSeeds {
+        if matches!(kind, ItemKind::WheatSeeds | ItemKind::Carrot) {
             let consumed = self
                 .inventory_mut_for_target(target)?
-                .consume_selected_item(ItemKind::WheatSeeds);
-            debug_assert!(
-                consumed,
-                "validated wheat seeds disappeared before planting"
-            );
+                .consume_selected_item(kind);
+            debug_assert!(consumed, "validated crop item disappeared before planting");
         }
         let mut updates = self.drain_pending_block_delta_updates_for_target(target)?;
-        if kind == ItemKind::WheatSeeds {
+        if matches!(kind, ItemKind::WheatSeeds | ItemKind::Carrot) {
             updates.push(ServerUpdate::PlayerInventory {
                 hotbar: self.inventory_for_target(target)?.hotbar_item_stacks(),
             });
@@ -4027,7 +4072,68 @@ impl RealmServer {
         Ok(updates)
     }
 
-    fn harvest_wheat_for_target(
+    fn handle_garden_block_use_item_on_for_target(
+        &mut self,
+        target: CommandTarget,
+        command: UseItemOnCommand,
+        kind: ItemKind,
+    ) -> ChunkStoreResult<Vec<ServerUpdate>> {
+        if !self.world_behavior_profile.allows_player_place() {
+            return Ok(Vec::new());
+        }
+        let player = self.player_for_target(target)?;
+        let player_position = player.position();
+        let player_facing = horizontal_direction_from_y_rot(player.y_rot_degrees());
+        let context = ServerInteractionContext::debug_creative_in(
+            player_position,
+            self.active_dimension.definition.topology,
+        );
+        if !context.may_use_item_on(command.hit) {
+            return Ok(Vec::new());
+        }
+        let base = match kind {
+            ItemKind::OakFence => mclone_worldgen::block::OAK_FENCE,
+            ItemKind::OakFenceGate => mclone_worldgen::block::OAK_FENCE_GATE,
+            _ => return Ok(Vec::new()),
+        };
+        let Some(clicked_block) = self.scheduler.block_at_world(command.hit.block_pos) else {
+            return Ok(Vec::new());
+        };
+        let Some(placement) = DebugBlockItem::new(base).and_then(|item| {
+            item.use_on(command.hit, clicked_block, |pos| {
+                self.scheduler.block_at_world(pos)
+            })
+        }) else {
+            return Ok(Vec::new());
+        };
+        if !context.may_place_at(placement.pos) {
+            return Ok(Vec::new());
+        }
+        let state = match kind {
+            ItemKind::OakFence => {
+                placed_oak_fence_state(placement.pos, |pos| self.scheduler.block_at_world(pos))
+            }
+            ItemKind::OakFenceGate => placed_oak_fence_gate_state(player_facing),
+            _ => unreachable!(),
+        };
+        if !self.set_block_from_simulation(placement.pos, state) {
+            return Ok(Vec::new());
+        }
+        let consumed = self
+            .inventory_mut_for_target(target)?
+            .consume_selected_item(kind);
+        debug_assert!(consumed, "validated garden block item disappeared");
+        let mut updates = self.drain_pending_block_delta_updates_for_target(target)?;
+        updates.push(ServerUpdate::PlayerInventory {
+            hotbar: self.inventory_for_target(target)?.hotbar_item_stacks(),
+        });
+        updates.push(
+            self.increment_player_statistic(target, StatisticKey::successful_block_placement())?,
+        );
+        Ok(updates)
+    }
+
+    fn harvest_crop_for_target(
         &mut self,
         _target: CommandTarget,
         pos: BlockPos,
@@ -4038,7 +4144,7 @@ impl RealmServer {
             ^ i64::from(pos.x).wrapping_mul(341_873_128_712)
             ^ i64::from(pos.y).wrapping_mul(31_337)
             ^ i64::from(pos.z).wrapping_mul(132_897_987_541);
-        let Some(harvest) = wheat_harvest(block, &mut SimpleRandomSource::new(seed)) else {
+        let Some(harvest) = crop_harvest(block, &mut SimpleRandomSource::new(seed)) else {
             return;
         };
         if !self.set_block_from_simulation(pos, AIR) {
@@ -4332,6 +4438,18 @@ impl RealmServer {
     }
 
     fn set_block_from_simulation(&mut self, pos: BlockPos, block_id: RawBlockId) -> bool {
+        let changed = self.set_block_from_simulation_once(pos, block_id);
+        if changed {
+            let updates =
+                connected_fence_updates(pos, |sample| self.scheduler.block_at_world(sample));
+            for (neighbor, state) in updates {
+                self.set_block_from_simulation_once(neighbor, state);
+            }
+        }
+        changed
+    }
+
+    fn set_block_from_simulation_once(&mut self, pos: BlockPos, block_id: RawBlockId) -> bool {
         let Some(pos) = self
             .active_dimension
             .definition
@@ -4377,7 +4495,7 @@ impl RealmServer {
                 && self
                     .scheduler
                     .block_at_world(above)
-                    .and_then(wheat_age)
+                    .and_then(crop_state)
                     .is_some()
             {
                 self.set_block_from_simulation(above, AIR);

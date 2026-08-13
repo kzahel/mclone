@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "name": "oak_fence_item",
+  "materials": {
+    "oak": { "color": "#9b6b35" },
+    "oak_light": { "color": "#bd884b" }
+  },
+  "textures": {},
+  "parts": [
+    {
+      "name": "post",
+      "at": [0, 0, 0],
+      "material": "oak_light",
+      "primitive": { "kind": "box", "size": [0.14, 0.48, 0.14] }
+    },
+    {
+      "name": "rail_upper",
+      "at": [0, 0.1, 0],
+      "material": "oak",
+      "primitive": { "kind": "box", "size": [0.48, 0.09, 0.09] }
+    },
+    {
+      "name": "rail_lower",
+      "at": [0, -0.1, 0],
+      "material": "oak",
+      "primitive": { "kind": "box", "size": [0.48, 0.09, 0.09] }
+    }
+  ],
+  "clips": {}
+}

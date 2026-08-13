@@ -15,7 +15,10 @@ pub(crate) const fn item_max_stack_size(kind: ItemKind) -> u8 {
         | ItemKind::ShedAntler
         | ItemKind::Beeswax
         | ItemKind::WheatSeeds
-        | ItemKind::Wheat => 64,
+        | ItemKind::Wheat
+        | ItemKind::Carrot
+        | ItemKind::OakFence
+        | ItemKind::OakFenceGate => 64,
     }
 }
 

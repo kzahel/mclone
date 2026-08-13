@@ -24,6 +24,10 @@ pub const BEE_HOTEL_ITEM_FIGURE_PATH: &str = "assets/mclone/figures/bee_hotel_it
 pub const BEESWAX_FIGURE_PATH: &str = "assets/mclone/figures/beeswax.figure.json";
 pub const WHEAT_BUNDLE_FIGURE_PATH: &str = "assets/mclone/figures/wheat_bundle.figure.json";
 pub const WHEAT_SEEDS_ITEM_FIGURE_PATH: &str = "assets/mclone/figures/wheat_seeds_item.figure.json";
+pub const CARROT_FIGURE_PATH: &str = "assets/mclone/figures/carrot.figure.json";
+pub const OAK_FENCE_ITEM_FIGURE_PATH: &str = "assets/mclone/figures/oak_fence_item.figure.json";
+pub const OAK_FENCE_GATE_ITEM_FIGURE_PATH: &str =
+    "assets/mclone/figures/oak_fence_gate_item.figure.json";
 pub const DEFAULT_PLAYER_FIGURE_ID: ActorFigureId = ActorFigureId::from_static("mclone:player");
 pub const UPRIGHT_BEAR_FIGURE_ID: ActorFigureId = ActorFigureId::from_static("mclone:upright_bear");
 pub const COW_FIGURE_ID: ActorFigureId = ActorFigureId::from_static("mclone:cow");
@@ -48,6 +52,11 @@ pub const BEESWAX_FIGURE_ID: ActorFigureId = ActorFigureId::from_static("mclone:
 pub const WHEAT_BUNDLE_FIGURE_ID: ActorFigureId = ActorFigureId::from_static("mclone:wheat_bundle");
 pub const WHEAT_SEEDS_ITEM_FIGURE_ID: ActorFigureId =
     ActorFigureId::from_static("mclone:wheat_seeds_item");
+pub const CARROT_FIGURE_ID: ActorFigureId = ActorFigureId::from_static("mclone:carrot");
+pub const OAK_FENCE_ITEM_FIGURE_ID: ActorFigureId =
+    ActorFigureId::from_static("mclone:oak_fence_item");
+pub const OAK_FENCE_GATE_ITEM_FIGURE_ID: ActorFigureId =
+    ActorFigureId::from_static("mclone:oak_fence_gate_item");
 pub const FIRST_PARTY_ACTOR_FIGURE_IDS: [ActorFigureId; 7] = [
     DEFAULT_PLAYER_FIGURE_ID,
     UPRIGHT_BEAR_FIGURE_ID,
@@ -57,7 +66,7 @@ pub const FIRST_PARTY_ACTOR_FIGURE_IDS: [ActorFigureId; 7] = [
     DEER_FIGURE_ID,
     BEE_FIGURE_ID,
 ];
-pub const FIRST_PARTY_SEMANTIC_PROP_FIGURE_IDS: [SemanticFigureId; 13] = [
+pub const FIRST_PARTY_SEMANTIC_PROP_FIGURE_IDS: [SemanticFigureId; 16] = [
     MALLARD_NEST_FIGURE_ID,
     MALLARD_FEATHER_FIGURE_ID,
     HUNTING_SPEAR_FIGURE_ID,
@@ -71,6 +80,9 @@ pub const FIRST_PARTY_SEMANTIC_PROP_FIGURE_IDS: [SemanticFigureId; 13] = [
     BEESWAX_FIGURE_ID,
     WHEAT_BUNDLE_FIGURE_ID,
     WHEAT_SEEDS_ITEM_FIGURE_ID,
+    CARROT_FIGURE_ID,
+    OAK_FENCE_ITEM_FIGURE_ID,
+    OAK_FENCE_GATE_ITEM_FIGURE_ID,
 ];
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -332,6 +344,18 @@ pub fn wheat_seeds_item_figure_path() -> AssetPath {
     AssetPath::new(WHEAT_SEEDS_ITEM_FIGURE_PATH)
 }
 
+pub fn carrot_figure_path() -> AssetPath {
+    AssetPath::new(CARROT_FIGURE_PATH)
+}
+
+pub fn oak_fence_item_figure_path() -> AssetPath {
+    AssetPath::new(OAK_FENCE_ITEM_FIGURE_PATH)
+}
+
+pub fn oak_fence_gate_item_figure_path() -> AssetPath {
+    AssetPath::new(OAK_FENCE_GATE_ITEM_FIGURE_PATH)
+}
+
 pub const fn default_player_figure_id() -> ActorFigureId {
     DEFAULT_PLAYER_FIGURE_ID
 }
@@ -412,6 +436,18 @@ pub const fn wheat_seeds_item_figure_id() -> SemanticFigureId {
     WHEAT_SEEDS_ITEM_FIGURE_ID
 }
 
+pub const fn carrot_figure_id() -> SemanticFigureId {
+    CARROT_FIGURE_ID
+}
+
+pub const fn oak_fence_item_figure_id() -> SemanticFigureId {
+    OAK_FENCE_ITEM_FIGURE_ID
+}
+
+pub const fn oak_fence_gate_item_figure_id() -> SemanticFigureId {
+    OAK_FENCE_GATE_ITEM_FIGURE_ID
+}
+
 fn actor_figure_path(id: ActorFigureId) -> Option<AssetPath> {
     match id.as_str() {
         "mclone:player" => Some(default_player_figure_path()),
@@ -440,6 +476,9 @@ pub fn semantic_figure_path(id: SemanticFigureId) -> Option<AssetPath> {
         "mclone:beeswax" => Some(beeswax_figure_path()),
         "mclone:wheat_bundle" => Some(wheat_bundle_figure_path()),
         "mclone:wheat_seeds_item" => Some(wheat_seeds_item_figure_path()),
+        "mclone:carrot" => Some(carrot_figure_path()),
+        "mclone:oak_fence_item" => Some(oak_fence_item_figure_path()),
+        "mclone:oak_fence_gate_item" => Some(oak_fence_gate_item_figure_path()),
         _ => None,
     })
 }

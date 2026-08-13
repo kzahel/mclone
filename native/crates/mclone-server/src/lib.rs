@@ -12,6 +12,7 @@ mod falling_block;
 mod farming;
 mod fluid;
 mod game_mode;
+mod garden_blocks;
 mod holder;
 mod homestead_landscape;
 mod homestead_plan;

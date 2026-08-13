@@ -7,6 +7,7 @@ const MAX_FLOOR_STEP_HEIGHT: f64 = 1.125;
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub(crate) enum BlockPathType {
     Blocked,
+    Fence,
     Open,
     Walkable,
     Lava,
@@ -16,7 +17,7 @@ pub(crate) enum BlockPathType {
 impl BlockPathType {
     pub(crate) const fn default_malus(self) -> f32 {
         match self {
-            Self::Blocked | Self::Lava => -1.0,
+            Self::Blocked | Self::Fence | Self::Lava => -1.0,
             Self::Open | Self::Walkable => 0.0,
             Self::Water => 8.0,
         }
@@ -137,7 +138,7 @@ impl WalkNodeEvaluator {
                 | BlockPathType::Open
                 | BlockPathType::Water
                 | BlockPathType::Lava => BlockPathType::Open,
-                BlockPathType::Blocked => BlockPathType::Walkable,
+                BlockPathType::Blocked | BlockPathType::Fence => BlockPathType::Walkable,
             };
         }
         path_type
@@ -206,6 +207,14 @@ impl WalkNodeEvaluator {
 
         match state.0 {
             terrain_id::AIR | terrain_id::CAVE_AIR => BlockPathType::Open,
+            terrain_id::OAK_FENCE_STATE_START..=terrain_id::OAK_FENCE_STATE_END => {
+                BlockPathType::Fence
+            }
+            terrain_id::OAK_FENCE_GATE_STATE_START..=terrain_id::OAK_FENCE_GATE_STATE_END
+                if (state.0 - terrain_id::OAK_FENCE_GATE_STATE_START) & 4 == 0 =>
+            {
+                BlockPathType::Fence
+            }
             _ => match block_fluid_kind(state) {
                 BlockFluidKind::Water => BlockPathType::Water,
                 BlockFluidKind::Lava => BlockPathType::Lava,
@@ -361,6 +370,32 @@ mod tests {
             WalkNodeEvaluator::get_block_path_type_static(&terrain, BlockPos::new(2, 64, 0)),
             BlockPathType::Open
         );
+    }
+
+    #[test]
+    fn fence_and_closed_gate_are_fence_nodes_but_open_gate_is_open() {
+        let at = |pos: BlockPos| {
+            Some(match pos.x {
+                0 => state(terrain_id::OAK_FENCE_STATE_START),
+                1 => state(terrain_id::OAK_FENCE_GATE_STATE_START),
+                2 => state(terrain_id::OAK_FENCE_GATE_STATE_START + 4),
+                _ => state(terrain_id::AIR),
+            })
+        };
+
+        assert_eq!(
+            WalkNodeEvaluator::get_block_path_type_static(&at, BlockPos::new(0, 64, 0)),
+            BlockPathType::Fence
+        );
+        assert_eq!(
+            WalkNodeEvaluator::get_block_path_type_static(&at, BlockPos::new(1, 64, 0)),
+            BlockPathType::Fence
+        );
+        assert_eq!(
+            WalkNodeEvaluator::get_block_path_type_static(&at, BlockPos::new(2, 64, 0)),
+            BlockPathType::Open
+        );
+        assert_eq!(BlockPathType::Fence.default_malus(), -1.0);
     }
 
     #[test]

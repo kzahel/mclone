@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "name": "oak_fence_gate_item",
+  "materials": {
+    "oak": { "color": "#9b6b35" },
+    "oak_light": { "color": "#bd884b" }
+  },
+  "textures": {},
+  "parts": [
+    {
+      "name": "post_left",
+      "at": [-0.2, 0, 0],
+      "material": "oak_light",
+      "primitive": { "kind": "box", "size": [0.11, 0.46, 0.11] }
+    },
+    {
+      "name": "post_right",
+      "at": [0.2, 0, 0],
+      "material": "oak_light",
+      "primitive": { "kind": "box", "size": [0.11, 0.46, 0.11] }
+    },
+    {
+      "name": "rail_upper",
+      "at": [0, 0.11, 0],
+      "material": "oak",
+      "primitive": { "kind": "box", "size": [0.37, 0.075, 0.075] }
+    },
+    {
+      "name": "rail_lower",
+      "at": [0, -0.11, 0],
+      "material": "oak",
+      "primitive": { "kind": "box", "size": [0.37, 0.075, 0.075] }
+    },
+    {
+      "name": "brace",
+      "at": [0, 0, 0.005],
+      "rot": [0, 0, -24],
+      "material": "oak_light",
+      "primitive": { "kind": "box", "size": [0.38, 0.055, 0.055] }
+    }
+  ],
+  "clips": {}
+}

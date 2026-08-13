@@ -2521,6 +2521,9 @@ fn item_stack_snapshot_from_save(
         "minecraft:wooden_hoe" => ItemKind::WoodenHoe,
         "minecraft:wheat_seeds" => ItemKind::WheatSeeds,
         "minecraft:wheat" => ItemKind::Wheat,
+        "minecraft:carrot" => ItemKind::Carrot,
+        "minecraft:oak_fence" => ItemKind::OakFence,
+        "minecraft:oak_fence_gate" => ItemKind::OakFenceGate,
         kind => {
             return Err(ChunkStoreError::InvalidData(format!(
                 "unsupported item stack kind {kind:?}"

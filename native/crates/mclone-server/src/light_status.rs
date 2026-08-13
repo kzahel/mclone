@@ -390,8 +390,8 @@ mod shared_input_tests {
 
         assert_eq!(batch.target_count(), 2);
         assert_eq!(batch.unique_input_count(), 2);
-        assert_eq!(batch.owned_input_bytes(), 32);
-        assert!(batch.lifecycle_owned_bytes_estimate() > 32);
+        assert_eq!(batch.owned_input_bytes(), 64);
+        assert!(batch.lifecycle_owned_bytes_estimate() > 64);
         let statuses = batch.into_statuses();
         assert!(Arc::ptr_eq(
             &statuses[0].raw_blocks,

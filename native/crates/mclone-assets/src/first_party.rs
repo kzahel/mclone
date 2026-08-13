@@ -269,7 +269,7 @@ mod tests {
         );
 
         let catalog = FirstPartyVisualCatalog::load(&source).unwrap();
-        assert_eq!(catalog.definitions().count(), 237);
+        assert_eq!(catalog.definitions().count(), 309);
         assert_eq!(
             catalog
                 .get(BlockStateId(1))

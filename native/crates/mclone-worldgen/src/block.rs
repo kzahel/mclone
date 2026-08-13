@@ -247,6 +247,39 @@ pub const WHEAT_AGE_4: RawBlockId = 233;
 pub const WHEAT_AGE_5: RawBlockId = 234;
 pub const WHEAT_AGE_6: RawBlockId = 235;
 pub const WHEAT_AGE_7: RawBlockId = 236;
+pub const OAK_FENCE_STATE_START: RawBlockId = 237;
+pub const OAK_FENCE: RawBlockId = OAK_FENCE_STATE_START;
+pub const OAK_FENCE_STATE_END: RawBlockId = 268;
+pub const OAK_FENCE_GATE_STATE_START: RawBlockId = 269;
+pub const OAK_FENCE_GATE: RawBlockId = OAK_FENCE_GATE_STATE_START;
+pub const OAK_FENCE_GATE_STATE_END: RawBlockId = 300;
+pub const CARROTS_AGE_0: RawBlockId = 301;
+pub const CARROTS: RawBlockId = CARROTS_AGE_0;
+pub const CARROTS_AGE_1: RawBlockId = 302;
+pub const CARROTS_AGE_2: RawBlockId = 303;
+pub const CARROTS_AGE_3: RawBlockId = 304;
+pub const CARROTS_AGE_4: RawBlockId = 305;
+pub const CARROTS_AGE_5: RawBlockId = 306;
+pub const CARROTS_AGE_6: RawBlockId = 307;
+pub const CARROTS_AGE_7: RawBlockId = 308;
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct OakFenceState {
+    pub north: bool,
+    pub east: bool,
+    pub south: bool,
+    pub west: bool,
+    pub waterlogged: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct OakFenceGateState {
+    /// Horizontal facing in north, east, south, west order.
+    pub facing: u8,
+    pub open: bool,
+    pub powered: bool,
+    pub in_wall: bool,
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct GeneratedBlockId(pub RawBlockId);
@@ -471,7 +504,78 @@ pub const fn wheat_for_age(age: u8) -> Option<RawBlockId> {
     }
 }
 
+pub const fn carrots_age(block_id: RawBlockId) -> Option<u8> {
+    if block_id >= CARROTS_AGE_0 && block_id <= CARROTS_AGE_7 {
+        Some((block_id - CARROTS_AGE_0) as u8)
+    } else {
+        None
+    }
+}
+
+pub const fn carrots_for_age(age: u8) -> Option<RawBlockId> {
+    if age <= 7 {
+        Some(CARROTS_AGE_0 + age as RawBlockId)
+    } else {
+        None
+    }
+}
+
+pub const fn oak_fence_state(block_id: RawBlockId) -> Option<OakFenceState> {
+    if block_id < OAK_FENCE_STATE_START || block_id > OAK_FENCE_STATE_END {
+        return None;
+    }
+    let bits = block_id - OAK_FENCE_STATE_START;
+    Some(OakFenceState {
+        north: bits & 1 != 0,
+        east: bits & 2 != 0,
+        south: bits & 4 != 0,
+        west: bits & 8 != 0,
+        waterlogged: bits & 16 != 0,
+    })
+}
+
+pub const fn oak_fence_for_state(state: OakFenceState) -> RawBlockId {
+    OAK_FENCE_STATE_START
+        + state.north as RawBlockId
+        + (state.east as RawBlockId) * 2
+        + (state.south as RawBlockId) * 4
+        + (state.west as RawBlockId) * 8
+        + (state.waterlogged as RawBlockId) * 16
+}
+
+pub const fn oak_fence_gate_state(block_id: RawBlockId) -> Option<OakFenceGateState> {
+    if block_id < OAK_FENCE_GATE_STATE_START || block_id > OAK_FENCE_GATE_STATE_END {
+        return None;
+    }
+    let bits = block_id - OAK_FENCE_GATE_STATE_START;
+    Some(OakFenceGateState {
+        facing: (bits & 3) as u8,
+        open: bits & 4 != 0,
+        powered: bits & 8 != 0,
+        in_wall: bits & 16 != 0,
+    })
+}
+
+pub const fn oak_fence_gate_for_state(state: OakFenceGateState) -> Option<RawBlockId> {
+    if state.facing > 3 {
+        return None;
+    }
+    Some(
+        OAK_FENCE_GATE_STATE_START
+            + state.facing as RawBlockId
+            + (state.open as RawBlockId) * 4
+            + (state.powered as RawBlockId) * 8
+            + (state.in_wall as RawBlockId) * 16,
+    )
+}
+
 pub const fn material_blocks_motion(block_id: RawBlockId) -> bool {
+    if oak_fence_state(block_id).is_some() {
+        return true;
+    }
+    if let Some(state) = oak_fence_gate_state(block_id) {
+        return !state.open;
+    }
     if has_fluid(block_id) {
         return false;
     }
@@ -545,12 +649,24 @@ pub const fn material_blocks_motion(block_id: RawBlockId) -> bool {
             | WHEAT_AGE_5
             | WHEAT_AGE_6
             | WHEAT_AGE_7
+            | CARROTS_AGE_0
+            | CARROTS_AGE_1
+            | CARROTS_AGE_2
+            | CARROTS_AGE_3
+            | CARROTS_AGE_4
+            | CARROTS_AGE_5
+            | CARROTS_AGE_6
+            | CARROTS_AGE_7
     )
 }
 
 pub const fn block_light_opacity(block_id: RawBlockId) -> u8 {
     if is_leaves(block_id) {
         1
+    } else if let Some(state) = oak_fence_state(block_id) {
+        state.waterlogged as u8
+    } else if oak_fence_gate_state(block_id).is_some() {
+        0
     } else if has_fluid(block_id) {
         1
     } else if matches!(
@@ -707,6 +823,8 @@ pub const fn base_block_id(block_id: RawBlockId) -> RawBlockId {
         | FARMLAND_MOISTURE_5 | FARMLAND_MOISTURE_6 | FARMLAND_MOISTURE_7 => FARMLAND_MOISTURE_0,
         WHEAT_AGE_1 | WHEAT_AGE_2 | WHEAT_AGE_3 | WHEAT_AGE_4 | WHEAT_AGE_5 | WHEAT_AGE_6
         | WHEAT_AGE_7 => WHEAT_AGE_0,
+        CARROTS_AGE_1 | CARROTS_AGE_2 | CARROTS_AGE_3 | CARROTS_AGE_4 | CARROTS_AGE_5
+        | CARROTS_AGE_6 | CARROTS_AGE_7 => CARROTS_AGE_0,
         TUBE_CORAL_WALL_FAN_EAST | TUBE_CORAL_WALL_FAN_SOUTH | TUBE_CORAL_WALL_FAN_WEST => {
             TUBE_CORAL_WALL_FAN_NORTH
         }
@@ -722,6 +840,8 @@ pub const fn base_block_id(block_id: RawBlockId) -> RawBlockId {
         HORN_CORAL_WALL_FAN_EAST | HORN_CORAL_WALL_FAN_SOUTH | HORN_CORAL_WALL_FAN_WEST => {
             HORN_CORAL_WALL_FAN_NORTH
         }
+        _ if oak_fence_state(block_id).is_some() => OAK_FENCE,
+        _ if oak_fence_gate_state(block_id).is_some() => OAK_FENCE_GATE,
         _ => block_id,
     }
 }
@@ -746,6 +866,11 @@ pub const fn has_fluid(block_id: RawBlockId) -> bool {
 /// places them with `waterlogged=true`. Coral *blocks* are full solid cubes that
 /// are never waterlogged and are intentionally excluded.
 pub const fn holds_source_water(block_id: RawBlockId) -> bool {
+    if let Some(state) = oak_fence_state(block_id) {
+        if state.waterlogged {
+            return true;
+        }
+    }
     matches!(
         block_id,
         SEAGRASS
@@ -841,6 +966,12 @@ pub const fn block_name(block_id: RawBlockId) -> &'static str {
     }
     if is_bamboo(block_id) {
         return "minecraft:bamboo";
+    }
+    if oak_fence_state(block_id).is_some() {
+        return "minecraft:oak_fence";
+    }
+    if oak_fence_gate_state(block_id).is_some() {
+        return "minecraft:oak_fence_gate";
     }
 
     match block_id {
@@ -1011,6 +1142,8 @@ pub const fn block_name(block_id: RawBlockId) -> &'static str {
         }
         WHEAT_AGE_0 | WHEAT_AGE_1 | WHEAT_AGE_2 | WHEAT_AGE_3 | WHEAT_AGE_4 | WHEAT_AGE_5
         | WHEAT_AGE_6 | WHEAT_AGE_7 => "minecraft:wheat",
+        CARROTS_AGE_0 | CARROTS_AGE_1 | CARROTS_AGE_2 | CARROTS_AGE_3 | CARROTS_AGE_4
+        | CARROTS_AGE_5 | CARROTS_AGE_6 | CARROTS_AGE_7 => "minecraft:carrots",
         _ => "minecraft:unknown",
     }
 }
@@ -1125,9 +1258,45 @@ mod tests {
             assert_eq!(wheat_age(state), Some(age));
             assert_eq!(base_block_id(state), WHEAT_AGE_0);
             assert_eq!(block_name(state), "minecraft:wheat");
+
+            let state = carrots_for_age(age).unwrap();
+            assert_eq!(carrots_age(state), Some(age));
+            assert_eq!(base_block_id(state), CARROTS_AGE_0);
+            assert_eq!(block_name(state), "minecraft:carrots");
         }
         assert_eq!(farmland_for_moisture(8), None);
         assert_eq!(wheat_for_age(8), None);
+        assert_eq!(carrots_for_age(8), None);
+    }
+
+    #[test]
+    fn garden_connection_states_round_trip_without_aliases() {
+        let fence = OakFenceState {
+            north: true,
+            east: false,
+            south: true,
+            west: true,
+            waterlogged: true,
+        };
+        let fence_block = oak_fence_for_state(fence);
+        assert_eq!(oak_fence_state(fence_block), Some(fence));
+        assert_eq!(base_block_id(fence_block), OAK_FENCE);
+        assert!(holds_source_water(fence_block));
+
+        let gate = OakFenceGateState {
+            facing: 3,
+            open: true,
+            powered: false,
+            in_wall: true,
+        };
+        let gate_block = oak_fence_gate_for_state(gate).unwrap();
+        assert_eq!(oak_fence_gate_state(gate_block), Some(gate));
+        assert_eq!(base_block_id(gate_block), OAK_FENCE_GATE);
+        assert!(!material_blocks_motion(gate_block));
+        assert_eq!(
+            oak_fence_gate_for_state(OakFenceGateState { facing: 4, ..gate }),
+            None
+        );
     }
 
     #[test]

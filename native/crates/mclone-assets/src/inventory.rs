@@ -202,6 +202,21 @@ fn direct_asset_requirements() -> Vec<CanonicalAssetRequirement> {
             Required,
         ),
         (
+            "assets/mclone/figures/carrot.figure.json",
+            SemanticProp,
+            Required,
+        ),
+        (
+            "assets/mclone/figures/oak_fence_item.figure.json",
+            SemanticProp,
+            Required,
+        ),
+        (
+            "assets/mclone/figures/oak_fence_gate_item.figure.json",
+            SemanticProp,
+            Required,
+        ),
+        (
             "assets/minecraft/textures/misc/underwater.png",
             ScreenEffect,
             Required,
@@ -323,7 +338,7 @@ mod tests {
     fn canonical_inventory_covers_every_repo_owned_runtime_block_state() {
         let inventory = canonical_first_party_asset_inventory();
 
-        assert_eq!(inventory.block_visuals.len(), 237);
+        assert_eq!(inventory.block_visuals.len(), 309);
         assert_eq!(
             inventory
                 .block_visuals
@@ -331,7 +346,7 @@ mod tests {
                 .map(|visual| visual.state.canonical_key())
                 .collect::<BTreeSet<_>>()
                 .len(),
-            237
+            309
         );
         assert!(inventory.block_visuals.iter().any(|visual| {
             visual.state.block.to_string() == "minecraft:water"
@@ -379,6 +394,9 @@ mod tests {
             "assets/mclone/figures/beeswax.figure.json",
             "assets/mclone/figures/wheat_bundle.figure.json",
             "assets/mclone/figures/wheat_seeds_item.figure.json",
+            "assets/mclone/figures/carrot.figure.json",
+            "assets/mclone/figures/oak_fence_item.figure.json",
+            "assets/mclone/figures/oak_fence_gate_item.figure.json",
             "assets/minecraft/textures/misc/underwater.png",
             "assets/minecraft/sounds/damage/fallsmall.ogg",
         ] {
