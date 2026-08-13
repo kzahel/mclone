@@ -1674,41 +1674,24 @@ mod tests {
             actors.len(),
             mclone_assets::FIRST_PARTY_ACTOR_FIGURE_IDS.len() + 1
         );
+        for (actor, figure) in actors
+            .iter()
+            .zip(mclone_assets::FIRST_PARTY_ACTOR_FIGURE_IDS)
+        {
+            assert_eq!(
+                actor.shape,
+                mclone_render::entity::ActorInstanceShape::Figure(figure)
+            );
+        }
         assert_eq!(
-            actors[0].shape,
-            mclone_render::entity::ActorInstanceShape::Figure(
-                mclone_assets::default_player_figure_id()
-            )
-        );
-        assert_eq!(
-            actors[1].shape,
-            mclone_render::entity::ActorInstanceShape::Figure(
-                mclone_assets::upright_bear_figure_id()
-            )
-        );
-        assert_eq!(
-            actors[2].shape,
-            mclone_render::entity::ActorInstanceShape::Figure(mclone_assets::cow_figure_id())
-        );
-        assert_eq!(
-            actors[3].shape,
-            mclone_render::entity::ActorInstanceShape::Figure(mclone_assets::chicken_figure_id())
-        );
-        assert_eq!(
-            actors[4].shape,
-            mclone_render::entity::ActorInstanceShape::Figure(
-                mclone_assets::mallard_duck_figure_id()
-            )
-        );
-        assert_eq!(
-            actors[5].shape,
+            actors.last().unwrap().shape,
             mclone_render::entity::ActorInstanceShape::ItemEgg
         );
-        assert!(actors[0].feet_position.x < actors[1].feet_position.x);
-        assert!(actors[1].feet_position.x < actors[2].feet_position.x);
-        assert!(actors[2].feet_position.x < actors[3].feet_position.x);
-        assert!(actors[3].feet_position.x < actors[4].feet_position.x);
-        assert!(actors[4].feet_position.x < actors[5].feet_position.x);
+        assert!(
+            actors
+                .windows(2)
+                .all(|pair| pair[0].feet_position.x < pair[1].feet_position.x)
+        );
     }
 
     #[test]
