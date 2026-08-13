@@ -1,7 +1,6 @@
 # Tactical 288: Wheat Farming Foundation
 
-Status: **implementation and local acceptance complete 2026-08-13; pushed
-public deployment and exact-revision verification pending.**
+Status: **complete 2026-08-13.**
 
 Topics:
 
@@ -265,3 +264,23 @@ bee-assisted crop growth, other crops, villagers, generated farms, and
 unloaded-time catch-up remain outside this foundation. The nearest valuable
 world/content consumer is a real working wheat parcel in the accepted
 farmstead, using these mechanics rather than authored decorative crop blocks.
+
+### Public acceptance
+
+Exact pushed implementation revision
+`250edd201dc16b069d4d7033823d3625b69c0a7f` deployed as Cloudflare Worker
+version `0041ab1e-5dd7-492d-8dbc-d899be35451d`. The public desktop and phone
+commands repeated the local gates at recipe revision 1, seed `17506`, entry eye
+`8.5,65.62,14.5`, and target `8,64.4,6`.
+
+Each public run observed one automatic field-state transition, tilled the
+ordinary grass proof cell, planted with seeds `8 -> 7`, harvested wheat
+`0 -> 1` with seeds reaching `9`, and found zero records in all eight browser
+world stores. The inspected public captures are byte-identical to their local
+counterparts at the desktop and phone digests recorded above.
+
+The clean refresh-reset review URL is:
+
+```text
+https://mclone.kzahel.com/app.html?showcase=wheat-farming
+```

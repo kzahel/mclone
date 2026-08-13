@@ -2,15 +2,14 @@
 
 Topic: `playable-showcases`
 
-Status: implemented with three publicly verified showcases and one locally
-verified farming showcase 2026-08-13.
+Status: implemented with four publicly verified showcases 2026-08-13.
 `mallard-ecology` proves a wetland motion/hatching/discovery loop;
 `deer-forest-edge` proves a contrasting multi-chunk habitat, authoritative
 named actions, durable sign, field notes, and an ordinary hunting tool. Bees
 add real flower mutation plus phone-tested managed-habitat placement. Wheat
-adds real till/plant/grow/harvest interactions and phone controls; its public
-deployment is pending. All four compile checked data recipes into transient
-tiny saves through the shared native and Web game path.
+adds real till/plant/grow/harvest interactions and phone controls. All four
+compile checked data recipes into transient tiny saves through the shared
+native and Web game path.
 
 ## Purpose
 
@@ -359,7 +358,15 @@ then select the real controls, till grass, plant wheat with seeds changing
 exactly `8 -> 7`, and harvest one wheat with seeds reaching `9`. Both retain
 zero browser persistence records. First-frame framing is exposed only through
 the explicit smoke harness ABI; production `WebSceneHost` has no showcase
-camera-control API. Public acceptance remains pending.
+camera-control API.
+
+Exact pushed revision `250edd201dc16b069d4d7033823d3625b69c0a7f`
+deployed as Worker version `0041ab1e-5dd7-492d-8dbc-d899be35451d` and passed
+the same public desktop and phone gates. The public captures are byte-identical
+to local: desktop
+`e4093132d9ab1d0b63c4bf3869533c80a9cb29b5e1af6adccfa3b9a2c6f17e8d`
+and phone
+`53b55792adccd5b8f2761674bad379d09121d0d31f59ddaca6355cc717058d44`.
 
 ## Code and Documentation Map
 

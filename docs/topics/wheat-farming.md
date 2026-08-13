@@ -2,10 +2,8 @@
 
 Topic: `wheat-farming`
 
-Status: **live implementation and local desktop/phone acceptance complete
-2026-08-13 under Tactical
-[`288`](../tactical/288-wheat-farming-foundation.md); public deployment is the
-remaining closeout gate.**
+Status: **live, deployed, and desktop/phone accepted 2026-08-13 under Tactical
+[`288`](../tactical/288-wheat-farming-foundation.md).**
 
 ## Purpose
 
@@ -102,3 +100,16 @@ order-independent random candidates, atomic inventory capacity, and SQLite
 restart. The full server suite passes 669 tests. The full worldgen suite passes
 414 tests with one intentional ignore and pins the already-live post-bee
 wildflower output; wheat adds no generated crop fields or Overworld mutation.
+
+Exact pushed implementation revision
+`250edd201dc16b069d4d7033823d3625b69c0a7f` deployed as Cloudflare Worker
+version `0041ab1e-5dd7-492d-8dbc-d899be35451d`. Public desktop and phone gates
+reproduced the same seed, revision, camera, automatic transition, interaction
+counts, inventory changes, and zero-store result. Their inspected images are
+byte-identical to the local captures at the digests above.
+
+The resettable public field is:
+
+```text
+https://mclone.kzahel.com/app.html?showcase=wheat-farming
+```
