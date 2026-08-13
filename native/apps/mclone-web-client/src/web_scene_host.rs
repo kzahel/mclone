@@ -1039,6 +1039,21 @@ impl WebSceneSmokeHarness {
     ) -> Result<JsValue, JsValue> {
         host.frame_block_for_smoke(x, y, z, preserve_position)
     }
+
+    /// Aim ordinary player controls at a replicated entity. This remains on
+    /// the explicit smoke surface and does not add a product-host control API.
+    #[wasm_bindgen(js_name = frameEntity)]
+    pub fn frame_entity(
+        &mut self,
+        host: &mut WebSceneHost,
+        entity_id: u32,
+        preserve_position: bool,
+    ) -> Result<JsValue, JsValue> {
+        host.frame_entity_for_smoke(
+            mclone_protocol::EntityId(u64::from(entity_id)),
+            preserve_position,
+        )
+    }
 }
 
 #[wasm_bindgen]
@@ -1695,6 +1710,30 @@ impl WebSceneHost {
             aim_player_host_at_block_from_current(self.host_mut()?, block);
         } else {
             aim_player_host_at_block(self.host_mut()?, block);
+        }
+        self.diagnostic_report(None, false, 0.0, false)
+            .map_err(JsValue::from)
+    }
+
+    fn frame_entity_for_smoke(
+        &mut self,
+        entity_id: mclone_protocol::EntityId,
+        preserve_position: bool,
+    ) -> Result<JsValue, JsValue> {
+        let entity = self
+            .host_ref()?
+            .mono_client()
+            .and_then(|client| {
+                client
+                    .entity_snapshots()
+                    .find(|entity| entity.id == entity_id)
+                    .copied()
+            })
+            .ok_or_else(|| JsValue::from_str("cannot frame an unavailable entity"))?;
+        if preserve_position {
+            aim_player_host_at_entity_from_current(self.host_mut()?, entity);
+        } else {
+            aim_player_host_at_entity(self.host_mut()?, entity);
         }
         self.diagnostic_report(None, false, 0.0, false)
             .map_err(JsValue::from)
@@ -3817,6 +3856,33 @@ impl WebSceneHost {
                         .filter(|entity| entity.kind == mclone_protocol::EntityKind::RabbitBurrow)
                         .count() as f64,
                 )?;
+                let rabbit_burrows = client
+                    .entity_snapshots()
+                    .filter(|entity| entity.kind == mclone_protocol::EntityKind::RabbitBurrow)
+                    .collect::<Vec<_>>();
+                report_set_string(
+                    &object,
+                    "rabbitBurrowEntityIds",
+                    &rabbit_burrows
+                        .iter()
+                        .map(|entity| entity.id.0.to_string())
+                        .collect::<Vec<_>>()
+                        .join(","),
+                )?;
+                report_set_string(
+                    &object,
+                    "rabbitBurrowPositions",
+                    &rabbit_burrows
+                        .iter()
+                        .map(|entity| {
+                            format!(
+                                "{:.4},{:.4},{:.4}",
+                                entity.position.x, entity.position.y, entity.position.z
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join(";"),
+                )?;
                 report_set_string(
                     &object,
                     "rabbitEntityIds",
@@ -5380,6 +5446,34 @@ fn aim_player_host_at_block_from_current(host: &mut McloneSceneHost, block: Bloc
     let yaw = direction.x.atan2(direction.z);
     let pitch = direction.y.atan2(horizontal);
     host.set_mono_player_camera(camera.eye, yaw, pitch, camera.speed_blocks_per_second);
+}
+
+fn aim_player_host_at_entity(host: &mut McloneSceneHost, entity: mclone_protocol::EntitySnapshot) {
+    let target = entity
+        .position
+        .add(Vec3d::new(0.0, f64::from(entity.height) * 0.5, 0.0));
+    let eye = entity.position.add(Vec3d::new(0.0, 1.62, 2.2));
+    set_player_host_camera_look_at(host, eye, target);
+}
+
+fn aim_player_host_at_entity_from_current(
+    host: &mut McloneSceneHost,
+    entity: mclone_protocol::EntitySnapshot,
+) {
+    let target = entity
+        .position
+        .add(Vec3d::new(0.0, f64::from(entity.height) * 0.5, 0.0));
+    let eye = host.camera_frame_state().camera.eye;
+    set_player_host_camera_look_at(host, eye, target);
+}
+
+fn set_player_host_camera_look_at(host: &mut McloneSceneHost, eye: Vec3d, target: Vec3d) {
+    let direction = target.subtract(eye);
+    let horizontal = (direction.x * direction.x + direction.z * direction.z).sqrt();
+    let yaw = direction.x.atan2(direction.z);
+    let pitch = direction.y.atan2(horizontal);
+    let speed = host.mono_camera_speed_blocks_per_second();
+    host.set_mono_player_camera(eye, yaw, pitch, speed);
 }
 
 fn set_host_camera_look_at(host: &mut McloneSceneHost, eye: Vec3, target: Vec3) {

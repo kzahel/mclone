@@ -106,18 +106,6 @@ fn ordinary_attack_disturbs_then_collapses_a_burrow_without_deleting_residents()
             on_ground: true,
         }))
         .unwrap();
-    let eye = server.player().position().add(Vec3d::new(0.0, 1.62, 0.0));
-    let direction = look_direction_from_rot(0.0, 24.0);
-    let to = eye.add(direction.scale(DEER_HUNTING_SPEAR_REACH));
-    let (targeted, fraction) = server
-        .entities
-        .targeted_habitat_prop(eye, to)
-        .expect("test view must select the burrow mouth");
-    assert_eq!(targeted.id, burrow.id);
-    assert!(deer_attack_line_of_sight(eye, to, fraction, |pos| {
-        server.scheduler().block_at_world(pos)
-    }));
-
     for _ in 0..2 {
         server
             .try_handle_command(ClientCommand::AttackEntity(AttackEntityCommand {
@@ -130,11 +118,16 @@ fn ordinary_attack_disturbs_then_collapses_a_burrow_without_deleting_residents()
             Some(burrow.persistent_id)
         );
     }
-    server
+    let collapse_updates = server
         .try_handle_command(ClientCommand::AttackEntity(AttackEntityCommand {
             target: burrow.id,
         }))
         .expect("third prompt attack should collapse the burrow");
+    assert!(
+        collapse_updates
+            .iter()
+            .any(|update| matches!(update, ServerUpdate::EntityRemove { id } if *id == burrow.id))
+    );
 
     assert!(server.entities.state(burrow.id).is_none());
     let rabbit = server

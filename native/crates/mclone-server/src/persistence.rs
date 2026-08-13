@@ -79,8 +79,9 @@ const DEER_BED_ENTITY_CHUNK_RECORD_VERSION: u32 = 6;
 const DEER_ANTLER_SHED_ENTITY_CHUNK_RECORD_VERSION: u32 = 7;
 const BEE_ENTITY_CHUNK_RECORD_VERSION: u32 = 8;
 const RABBIT_ENTITY_CHUNK_RECORD_VERSION: u32 = 9;
+const RABBIT_WARREN_LIFECYCLE_ENTITY_CHUNK_RECORD_VERSION: u32 = 10;
 const DEER_ANTLER_SHED_LEGACY_REMAINING_TICKS: i32 = 36_000;
-pub const ENTITY_CHUNK_RECORD_VERSION: u32 = 9;
+pub const ENTITY_CHUNK_RECORD_VERSION: u32 = 10;
 const LEGACY_PLAYER_RECORD_VERSION: u32 = 1;
 const STATISTICS_PLAYER_RECORD_VERSION: u32 = 2;
 const PLAYER_LIFE_RECORD_VERSION: u32 = 3;
@@ -556,6 +557,7 @@ pub enum EntitySavePayload {
         capacity: u8,
         residents: [Option<EntityPersistentId>; 6],
         disturbance_ticks: u32,
+        damage: u8,
     },
     Item {
         stack: ItemStackSaveRecord,
@@ -6582,13 +6584,15 @@ fn write_entity_save_payload(
             capacity,
             residents,
             disturbance_ticks,
+            damage,
         } => {
             write_u8(writer, 11)?;
             write_u8(writer, *capacity)?;
             for resident in residents {
                 write_optional_entity_persistent_id(writer, *resident)?;
             }
-            write_u32(writer, *disturbance_ticks)
+            write_u32(writer, *disturbance_ticks)?;
+            write_u8(writer, *damage)
         }
         EntitySavePayload::Item {
             stack,
@@ -6833,6 +6837,11 @@ fn read_entity_save_payload(
                 *resident = read_optional_entity_persistent_id(reader)?;
             }
             let disturbance_ticks = read_u32(reader)?;
+            let damage = if codec_version >= RABBIT_WARREN_LIFECYCLE_ENTITY_CHUNK_RECORD_VERSION {
+                read_u8(reader)?
+            } else {
+                0
+            };
             if capacity == 0 || usize::from(capacity) > residents.len() {
                 return Err(ChunkStoreError::InvalidData(
                     "invalid rabbit burrow capacity".to_owned(),
@@ -6842,6 +6851,7 @@ fn read_entity_save_payload(
                 capacity,
                 residents,
                 disturbance_ticks,
+                damage,
             })
         }
         value => Err(ChunkStoreError::InvalidData(format!(
@@ -7611,6 +7621,42 @@ mod tests {
         let decoded = read_entity_chunk_record(&mut bytes.as_slice()).unwrap();
 
         assert_eq!(decoded, record);
+    }
+
+    #[test]
+    fn rabbit_burrow_damage_roundtrips_and_legacy_records_default_to_undamaged() {
+        let resident = EntityPersistentId::new(0xCAFE, 0xBABE);
+        let payload = EntitySavePayload::RabbitBurrow {
+            capacity: 6,
+            residents: [Some(resident), None, None, None, None, None],
+            disturbance_ticks: 17,
+            damage: 2,
+        };
+        let mut current = Vec::new();
+        write_entity_save_payload(&mut current, &payload).unwrap();
+        assert_eq!(
+            read_entity_save_payload(&mut current.as_slice(), ENTITY_CHUNK_RECORD_VERSION).unwrap(),
+            payload
+        );
+
+        let mut legacy = Vec::new();
+        write_u8(&mut legacy, 11).unwrap();
+        write_u8(&mut legacy, 6).unwrap();
+        write_optional_entity_persistent_id(&mut legacy, Some(resident)).unwrap();
+        for _ in 0..5 {
+            write_optional_entity_persistent_id(&mut legacy, None).unwrap();
+        }
+        write_u32(&mut legacy, 17).unwrap();
+        assert_eq!(
+            read_entity_save_payload(&mut legacy.as_slice(), RABBIT_ENTITY_CHUNK_RECORD_VERSION)
+                .unwrap(),
+            EntitySavePayload::RabbitBurrow {
+                capacity: 6,
+                residents: [Some(resident), None, None, None, None, None],
+                disturbance_ticks: 17,
+                damage: 0,
+            }
+        );
     }
 
     #[test]

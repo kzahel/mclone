@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "rabbit-burrow",
   "title": "Rabbit Burrow and Garden",
-  "revision": 2,
+  "revision": 3,
   "baseTerrain": "rabbit-meadow-v1",
   "seed": 17507,
   "dayTime": 12000,
@@ -75,7 +75,8 @@
         "kind": "rabbit-burrow",
         "capacity": 6,
         "residents": ["doe", "buck", "kit", null, null, null],
-        "disturbanceTicks": 0
+        "disturbanceTicks": 0,
+        "damage": 0
       }
     },
     {

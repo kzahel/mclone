@@ -938,15 +938,21 @@ async function run() {
             for (let sampleIndex = 0; sampleIndex < 5; sampleIndex += 1) {
               await page.waitForFunction(
                 ({ startTickCounts }) => {
-                  const current = String(
-                    globalThis.__mcloneWebApp?.state?.lastReport?.rabbitTickCounts ?? "",
-                  ).split(",").map(Number);
-                  const start = String(startTickCounts ?? "").split(",").map(Number);
-                  return start.length === 4
-                    && current.length >= 4
-                    && start.every((tick, index) => current[index] >= tick + 20);
+                  const report = globalThis.__mcloneWebApp?.state?.lastReport;
+                  const ids = String(report?.rabbitEntityIds ?? "").split(",");
+                  const ticks = String(report?.rabbitTickCounts ?? "").split(",").map(Number);
+                  const current = new Map(ids.map((id, index) => [id, ticks[index]]));
+                  return String(startTickCounts ?? "")
+                    .split(",")
+                    .map((entry) => entry.split(":"))
+                    .some(([id, tick]) => Number(current.get(id)) >= Number(tick) + 20);
                 },
-                { startTickCounts: priorRabbitSample.rabbitTickCounts },
+                {
+                  startTickCounts: String(priorRabbitSample.rabbitEntityIds ?? "")
+                    .split(",")
+                    .map((id, index) => `${id}:${String(priorRabbitSample.rabbitTickCounts ?? "").split(",")[index]}`)
+                    .join(","),
+                },
                 { timeout: 35_000 },
               );
               priorRabbitSample = await page.evaluate(
@@ -1101,34 +1107,27 @@ async function run() {
             for (let sampleIndex = 0; sampleIndex < 36; sampleIndex += 1) {
               await page.waitForFunction(
                 ({ startTickCounts }) => {
-                  const current = String(
-                    globalThis.__mcloneWebApp?.state?.lastReport?.rabbitTickCounts ?? "",
-                  ).split(",").map(Number);
-                  const start = String(startTickCounts ?? "").split(",").map(Number);
-                  return start.length === 4
-                    && current.length >= 4
-                    && start.every((tick, index) => current[index] >= tick + 20);
+                  const report = globalThis.__mcloneWebApp?.state?.lastReport;
+                  const ids = String(report?.rabbitEntityIds ?? "").split(",");
+                  const ticks = String(report?.rabbitTickCounts ?? "").split(",").map(Number);
+                  const current = new Map(ids.map((id, index) => [id, ticks[index]]));
+                  return String(startTickCounts ?? "")
+                    .split(",")
+                    .map((entry) => entry.split(":"))
+                    .some(([id, tick]) => Number(current.get(id)) >= Number(tick) + 20);
                 },
-                { startTickCounts: priorRabbitSample.rabbitTickCounts },
+                {
+                  startTickCounts: String(priorRabbitSample.rabbitEntityIds ?? "")
+                    .split(",")
+                    .map((id, index) => `${id}:${String(priorRabbitSample.rabbitTickCounts ?? "").split(",")[index]}`)
+                    .join(","),
+                },
                 { timeout: 35_000 },
               );
               priorRabbitSample = await page.evaluate(
                 () => globalThis.__mcloneWebApp?.state?.lastReport ?? null,
               );
               rabbitSamples.push(priorRabbitSample);
-              if (sampleIndex >= 17 && Number(priorRabbitSample.rabbitBurrowCount) >= 2) {
-                const currentCarrotStates = await page.evaluate(
-                  (positions) => positions.map(
-                    ([x, y, z]) => globalThis.__mcloneWebApp.blockStateAt?.(x, y, z)?.blockStateId,
-                  ),
-                  matureCarrots,
-                );
-                if (currentCarrotStates.some(
-                  (state, index) => state !== initialCarrotStates[index],
-                )) {
-                  break;
-                }
-              }
             }
           } catch (error) {
             const state = await page.evaluate(
@@ -1153,12 +1152,47 @@ async function run() {
           const rabbitIds = String(rabbitSamples[0].rabbitEntityIds ?? "").split(",");
           const rabbitTravel = rabbitIds.map(() => 0);
           const sampledClips = new Set();
+          const hiddenRabbitIds = new Set();
+          const hiddenThenReturnedIds = new Set();
+          const overlapStreaks = new Map();
+          let maxOverlapSampleStreak = 0;
+          let minimumVisibleRabbitCount = rabbitIds.length;
           for (let sampleIndex = 0; sampleIndex < rabbitSamples.length; sampleIndex += 1) {
             const sample = rabbitSamples[sampleIndex];
+            const sampleIds = String(sample.rabbitEntityIds ?? "").split(",").filter(Boolean);
+            minimumVisibleRabbitCount = Math.min(minimumVisibleRabbitCount, sampleIds.length);
+            for (const rabbitId of rabbitIds) {
+              if (!sampleIds.includes(rabbitId)) {
+                hiddenRabbitIds.add(rabbitId);
+              } else if (hiddenRabbitIds.has(rabbitId)) {
+                hiddenThenReturnedIds.add(rabbitId);
+              }
+            }
             String(sample.rabbitAnimationClips ?? "")
               .split(",")
               .filter(Boolean)
               .forEach((clip) => sampledClips.add(clip));
+            const samplePositions = parseRabbitPositions(sample.rabbitPositions);
+            const overlappingPairs = new Set();
+            for (let left = 0; left < sampleIds.length; left += 1) {
+              for (let right = left + 1; right < sampleIds.length; right += 1) {
+                const pair = [sampleIds[left], sampleIds[right]].sort().join(":");
+                const distance = Math.hypot(
+                  samplePositions[left][0] - samplePositions[right][0],
+                  samplePositions[left][1] - samplePositions[right][1],
+                  samplePositions[left][2] - samplePositions[right][2],
+                );
+                if (distance < 0.18) overlappingPairs.add(pair);
+              }
+            }
+            for (const pair of [...overlapStreaks.keys()]) {
+              if (!overlappingPairs.has(pair)) overlapStreaks.set(pair, 0);
+            }
+            for (const pair of overlappingPairs) {
+              const streak = Number(overlapStreaks.get(pair) ?? 0) + 1;
+              overlapStreaks.set(pair, streak);
+              maxOverlapSampleStreak = Math.max(maxOverlapSampleStreak, streak);
+            }
             if (sampleIndex === 0) continue;
             const previous = rabbitSamples[sampleIndex - 1];
             const ids = String(sample.rabbitEntityIds ?? "").split(",");
@@ -1182,6 +1216,211 @@ async function run() {
           const raidedCarrotCount = initialCarrotStates.filter(
             (state, index) => state !== finalCarrotStates[index],
           ).length;
+
+          const burrowIdsBeforeCollapse = String(behaviorEnd.rabbitBurrowEntityIds ?? "")
+            .split(",")
+            .filter(Boolean);
+          const burrowPositionsBeforeCollapse = parseRabbitPositions(
+            behaviorEnd.rabbitBurrowPositions,
+          );
+          const homeBurrowIndex = burrowPositionsBeforeCollapse
+            .map((position) => Math.hypot(position[0] - 8.5, position[2] - 8.5))
+            .reduce(
+              (best, distance, index, distances) => distance < distances[best] ? index : best,
+              0,
+            );
+          const homeBurrowId = burrowIdsBeforeCollapse[homeBurrowIndex];
+          if (!homeBurrowId || Number(behaviorEnd.rabbitBurrowCount) < 2) {
+            throw new Error(`rabbit home mouth was not available for collapse: ${JSON.stringify({ behaviorEnd, burrowIdsBeforeCollapse, burrowPositionsBeforeCollapse })}`);
+          }
+          await page.evaluate(() => globalThis.__mcloneWebApp.frameBlock?.(8, 64, 8, true));
+          const burrowApproachPointerId = 303;
+          if (mobileShowcase) {
+            await dispatchCanvasPointerEvent(page, "pointerdown", {
+              pointerId: burrowApproachPointerId,
+              xFraction: 0.24,
+              yFraction: 0.72,
+              buttons: 1,
+            });
+            await dispatchCanvasPointerEvent(page, "pointermove", {
+              pointerId: burrowApproachPointerId,
+              xFraction: 0.24,
+              yFraction: 0.50,
+              buttons: 1,
+            });
+          } else {
+            await dispatchKeyboardEvent(page, "keydown", { code: "KeyW", key: "w" });
+          }
+          try {
+            await page.waitForFunction(
+              () => Math.hypot(
+                Number(globalThis.__mcloneWebApp?.state?.cameraX) - 8.5,
+                Number(globalThis.__mcloneWebApp?.state?.cameraZ) - 8.5,
+              ) <= 3.5,
+              undefined,
+              { timeout: 15_000 },
+            );
+          } finally {
+            if (mobileShowcase) {
+              await dispatchCanvasPointerEvent(page, "pointerup", {
+                pointerId: burrowApproachPointerId,
+                xFraction: 0.24,
+                yFraction: 0.50,
+                buttons: 0,
+              });
+              await page.waitForFunction(
+                () => globalThis.__mcloneWebApp?.state?.touchPointerActiveCount === 0,
+                undefined,
+                { timeout: 10_000 },
+              );
+            } else {
+              await dispatchKeyboardEvent(page, "keyup", { code: "KeyW", key: "w" });
+            }
+          }
+          const initialBurrowFraming = await page.evaluate((entityId) => {
+            if (typeof globalThis.__mcloneWebApp.frameEntity !== "function") {
+              throw new Error("rabbit showcase requires the smoke-only frameEntity helper");
+            }
+            return globalThis.__mcloneWebApp.frameEntity(Number(entityId), true);
+          }, homeBurrowId);
+          if (initialBurrowFraming?.ok !== true) {
+            throw new Error(`could not frame rabbit home mouth: ${JSON.stringify(initialBurrowFraming)}`);
+          }
+          const framingTick = await page.evaluate(() => Math.max(
+            ...String(
+              globalThis.__mcloneWebApp?.state?.lastReport?.rabbitTickCounts ?? "0",
+            ).split(",").map(Number),
+          ));
+          await page.waitForFunction(
+            (startTick) => Math.max(
+              ...String(
+                globalThis.__mcloneWebApp?.state?.lastReport?.rabbitTickCounts ?? "0",
+              ).split(",").map(Number),
+            ) >= Number(startTick) + 4,
+            framingTick,
+            { timeout: 10_000 },
+          );
+          const collapseCommands = [];
+          for (let hit = 0; hit < 3; hit += 1) {
+            const framed = await page.evaluate(
+              (entityId) => globalThis.__mcloneWebApp.frameEntity(Number(entityId), true),
+              homeBurrowId,
+            );
+            if (framed?.ok !== true) {
+              throw new Error(`rabbit home mouth disappeared before hit ${hit + 1}: ${JSON.stringify(framed)}`);
+            }
+            const command = mobileShowcase
+              ? await exerciseFramedTouchInteractionButton(
+                  page,
+                  "attack",
+                  "break",
+                  310 + hit,
+                )
+              : await page.evaluate(
+                  () => globalThis.__mcloneWebApp.interactBlock?.("break") ?? null,
+                );
+            collapseCommands.push(command);
+            if (mobileShowcase ? command?.ok !== true : (
+              command?.commandSent !== true
+                || command?.targetKind !== "entity"
+                || String(command?.targetEntityId) !== String(homeBurrowId)
+            )) {
+              throw new Error(`rabbit burrow attack ${hit + 1} missed the live mouth: ${JSON.stringify({ homeBurrowId, command })}`);
+            }
+            if (hit < 2) {
+              const attackTick = await page.evaluate(() => Math.max(
+                ...String(
+                  globalThis.__mcloneWebApp?.state?.lastReport?.rabbitTickCounts ?? "0",
+                ).split(",").map(Number),
+              ));
+              await page.waitForFunction(
+                (startTick) => Math.max(
+                  ...String(
+                    globalThis.__mcloneWebApp?.state?.lastReport?.rabbitTickCounts ?? "0",
+                  ).split(",").map(Number),
+                ) >= Number(startTick) + 2,
+                attackTick,
+                { timeout: 10_000 },
+              );
+            }
+          }
+          await page.waitForFunction(
+            (removedId) => !String(
+              globalThis.__mcloneWebApp?.state?.lastReport?.rabbitBurrowEntityIds ?? "",
+            ).split(",").includes(String(removedId)),
+            homeBurrowId,
+            { timeout: 10_000 },
+          );
+          const collapsedState = await page.evaluate(
+            () => globalThis.__mcloneWebApp?.state?.lastReport ?? null,
+          );
+          const collapsedBurrowCount = Number(collapsedState.rabbitBurrowCount);
+          await page.evaluate(() => globalThis.__mcloneWebApp.frameBlock?.(14, 64, 28, true));
+          const collapseRetreatPointerId = 304;
+          if (mobileShowcase) {
+            await dispatchCanvasPointerEvent(page, "pointerdown", {
+              pointerId: collapseRetreatPointerId,
+              xFraction: 0.24,
+              yFraction: 0.72,
+              buttons: 1,
+            });
+            await dispatchCanvasPointerEvent(page, "pointermove", {
+              pointerId: collapseRetreatPointerId,
+              xFraction: 0.24,
+              yFraction: 0.50,
+              buttons: 1,
+            });
+          } else {
+            await dispatchKeyboardEvent(page, "keydown", { code: "KeyW", key: "w" });
+          }
+          try {
+            await page.waitForFunction(
+              () => Math.hypot(
+                Number(globalThis.__mcloneWebApp?.state?.cameraX) - 8.5,
+                Number(globalThis.__mcloneWebApp?.state?.cameraZ) - 8.5,
+              ) >= 18,
+              undefined,
+              { timeout: 15_000 },
+            );
+          } finally {
+            if (mobileShowcase) {
+              await dispatchCanvasPointerEvent(page, "pointerup", {
+                pointerId: collapseRetreatPointerId,
+                xFraction: 0.24,
+                yFraction: 0.50,
+                buttons: 0,
+              });
+              await page.waitForFunction(
+                () => globalThis.__mcloneWebApp?.state?.touchPointerActiveCount === 0,
+                undefined,
+                { timeout: 10_000 },
+              );
+            } else {
+              await dispatchKeyboardEvent(page, "keyup", { code: "KeyW", key: "w" });
+            }
+          }
+          const postCollapseSeenRabbitIds = new Set();
+          let replacementEnd = collapsedState;
+          for (let sample = 0; sample < 120; sample += 1) {
+            replacementEnd = await page.evaluate(
+              () => globalThis.__mcloneWebApp?.state?.lastReport ?? null,
+            );
+            String(replacementEnd.rabbitEntityIds ?? "")
+              .split(",")
+              .filter(Boolean)
+              .forEach((id) => postCollapseSeenRabbitIds.add(id));
+            if (
+              Number(replacementEnd.rabbitBurrowCount) > collapsedBurrowCount
+              && rabbitIds.every((id) => postCollapseSeenRabbitIds.has(id))
+            ) {
+              break;
+            }
+            await page.waitForTimeout(250);
+          }
+          behaviorEnd = replacementEnd;
+          const replacementBurrowIds = String(behaviorEnd.rabbitBurrowEntityIds ?? "")
+            .split(",")
+            .filter(Boolean);
           behaviorProbe = {
             initialCarrotStates,
             protectedCarrotStates,
@@ -1191,6 +1430,15 @@ async function run() {
             sampledClips: [...sampledClips],
             initialBurrowCount: Number(rabbitSamples[0].rabbitBurrowCount),
             finalBurrowCount: Number(behaviorEnd.rabbitBurrowCount),
+            minimumVisibleRabbitCount,
+            hiddenRabbitIds: [...hiddenRabbitIds],
+            hiddenThenReturnedIds: [...hiddenThenReturnedIds],
+            maxOverlapSampleStreak,
+            homeBurrowId,
+            collapseCommands,
+            collapsedBurrowCount,
+            postCollapseSeenRabbitIds: [...postCollapseSeenRabbitIds],
+            replacementBurrowIds,
             initialGateState,
             openGateState,
             gateCommandSent: openGate?.commandSent === true || openGate?.ok === true,
@@ -1201,7 +1449,13 @@ async function run() {
             || rabbitTravel.filter((distance) => Number.isFinite(distance) && distance > 1).length < 2
             || !sampledClips.has("hop")
             || raidedCarrotCount < 1
-            || Number(behaviorEnd.rabbitBurrowCount) < 2
+            || hiddenThenReturnedIds.size < 1
+            || minimumVisibleRabbitCount >= rabbitIds.length
+            || maxOverlapSampleStreak > 2
+            || collapsedBurrowCount >= Number(rabbitSamples.at(-1).rabbitBurrowCount)
+            || Number(behaviorEnd.rabbitBurrowCount) <= collapsedBurrowCount
+            || replacementBurrowIds.includes(homeBurrowId)
+            || !rabbitIds.every((id) => postCollapseSeenRabbitIds.has(id))
             || openGateState === initialGateState
             || behaviorProbe.gateCommandSent !== true
           ) {
@@ -2294,12 +2548,12 @@ async function run() {
           pageErrors.length > 0
           || canvasPixels.distinctInteriorColorCount < 2
           || result?.showcaseId !== showcase
-          || result?.showcaseRevision !== (rabbitShowcase ? 2 : gardenShowcase ? 1 : wheatShowcase ? 3 : beeShowcase ? 2 : deerShowcase ? 1 : 2)
+          || result?.showcaseRevision !== (rabbitShowcase ? 3 : gardenShowcase ? 1 : wheatShowcase ? 3 : beeShowcase ? 2 : deerShowcase ? 1 : 2)
           || result?.activeWorldSeedText !== (rabbitShowcase ? "17507" : cropShowcase ? "17506" : beeShowcase ? "17505" : deerShowcase ? "17504" : "17503")
           || result?.generationProfile !== "authored-only"
           || result?.dayTime !== (rabbitShowcase ? 12000 : 6000)
           || (rabbitShowcase
-            ? result?.rabbitCount < 4
+            ? result?.rabbitCount < 3
               || result?.rabbitBurrowCount < 2
               || (result?.rabbitFieldGuideBits & result?.showcaseRabbitFieldGuideBits)
                 !== result?.showcaseRabbitFieldGuideBits

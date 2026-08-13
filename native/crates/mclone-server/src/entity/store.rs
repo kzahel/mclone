@@ -63,7 +63,7 @@ const RABBIT_LOVE_TICKS: u32 = 600;
 const RABBIT_BREED_COOLDOWN_TICKS: u32 = 6_000;
 const RABBIT_PAIR_PUSH_MAX: f64 = 0.04;
 const RABBIT_BURROW_DISTURBANCE_PER_HIT: u32 = 40;
-const RABBIT_BURROW_COLLAPSE_THRESHOLD: u32 = 100;
+const RABBIT_BURROW_COLLAPSE_DAMAGE: u8 = 3;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct MallardNestRuntimeState {
@@ -91,6 +91,7 @@ struct RabbitBurrowRuntimeState {
     capacity: u8,
     residents: [Option<EntityPersistentId>; 6],
     disturbance_ticks: u32,
+    damage: u8,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -827,6 +828,7 @@ impl ServerEntityStore {
                 capacity: 6,
                 residents,
                 disturbance_ticks: 0,
+                damage: 0,
             },
         );
         let Some(mob) = self.mobs.get_mut(&rabbit_id) else {
@@ -1008,33 +1010,6 @@ impl ServerEntityStore {
             .min_by(|(_, left), (_, right)| left.total_cmp(right))
     }
 
-    pub(crate) fn targeted_habitat_prop(
-        &self,
-        from: Vec3d,
-        to: Vec3d,
-    ) -> Option<(ServerEntityState, f64)> {
-        self.entities
-            .values()
-            .copied()
-            .filter(|entity| entity.alive && entity.kind == EntityKind::RabbitBurrow)
-            .filter_map(|mut entity| {
-                entity.position = self.topology.nearest_position_lift(entity.position, from);
-                let center =
-                    entity
-                        .position
-                        .add(Vec3d::new(0.0, f64::from(entity.height) * 0.5, 0.0));
-                Aabb::of_size(
-                    center,
-                    f64::from(entity.width) + 0.3,
-                    f64::from(entity.height) + 0.3,
-                    f64::from(entity.width) + 0.3,
-                )
-                .ray_intersection_fraction(from, to)
-                .map(|fraction| (entity, fraction))
-            })
-            .min_by(|(_, left), (_, right)| left.total_cmp(right))
-    }
-
     pub(crate) fn damage_habitat_prop(&mut self, id: EntityId) -> Option<HabitatPropDamageResult> {
         let burrow_entity = self
             .entities
@@ -1045,7 +1020,8 @@ impl ServerEntityStore {
         burrow.disturbance_ticks = burrow
             .disturbance_ticks
             .saturating_add(RABBIT_BURROW_DISTURBANCE_PER_HIT);
-        let collapsed = burrow.disturbance_ticks >= RABBIT_BURROW_COLLAPSE_THRESHOLD;
+        burrow.damage = burrow.damage.saturating_add(1);
+        let collapsed = burrow.damage >= RABBIT_BURROW_COLLAPSE_DAMAGE;
         let home = burrow_entity.persistent_id;
         let resident_ids = self
             .mobs
@@ -2752,6 +2728,7 @@ impl ServerEntityStore {
                     capacity,
                     residents,
                     disturbance_ticks,
+                    damage,
                 },
             ) => self.insert_rabbit_burrow_with_persistent_id(
                 id,
@@ -2762,6 +2739,7 @@ impl ServerEntityStore {
                     capacity: *capacity,
                     residents: *residents,
                     disturbance_ticks: *disturbance_ticks,
+                    damage: *damage,
                 },
             ),
             (
@@ -3031,6 +3009,7 @@ impl ServerEntityStore {
                     capacity: burrow.capacity,
                     residents: burrow.residents,
                     disturbance_ticks: burrow.disturbance_ticks,
+                    damage: burrow.damage,
                 }
             }
             EntityKind::Mannequin => EntitySavePayload::Mannequin,
@@ -4072,6 +4051,7 @@ mod tests {
                     entity.payload,
                     EntitySavePayload::RabbitBurrow {
                         disturbance_ticks: 40,
+                        damage: 1,
                         ..
                     }
                 ))

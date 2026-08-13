@@ -3883,30 +3883,15 @@ impl RealmServer {
         }) {
             return Ok(Vec::new());
         }
-        let eye = feet.add(Vec3d::new(0.0, 1.62, 0.0));
-        let direction = look_direction_from_rot(y_rot_degrees, x_rot_degrees);
-        let to = eye.add(direction.scale(DEER_HUNTING_SPEAR_REACH));
-
-        if self
-            .active_dimension
-            .entities
-            .state(command.target)
-            .is_some_and(|entity| entity.kind == EntityKind::RabbitBurrow)
-        {
-            let Some((targeted, hit_fraction)) = self
-                .active_dimension
+        if let Some(targeted) =
+            self.active_dimension
                 .entities
-                .targeted_habitat_prop(eye, to)
-            else {
-                return Ok(Vec::new());
-            };
-            if targeted.id != command.target
-                || !deer_attack_line_of_sight(eye, to, hit_fraction, |pos| {
-                    self.scheduler.block_at_world(pos)
+                .state(command.target)
+                .filter(|entity| {
+                    entity.kind == EntityKind::RabbitBurrow
+                        && feet.distance_to_sqr(entity.position) < ENTITY_INTERACTION_REACH_SQR
                 })
-            {
-                return Ok(Vec::new());
-            }
+        {
             let before_chunk = targeted.chunk_pos();
             let Some(result) = self
                 .active_dimension
@@ -3924,6 +3909,9 @@ impl RealmServer {
             return self.drain_chunk_updates_for_target(target);
         }
 
+        let eye = feet.add(Vec3d::new(0.0, 1.62, 0.0));
+        let direction = look_direction_from_rot(y_rot_degrees, x_rot_degrees);
+        let to = eye.add(direction.scale(DEER_HUNTING_SPEAR_REACH));
         if !self
             .inventory_for_target(target)?
             .selected_item_stack()

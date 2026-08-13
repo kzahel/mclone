@@ -694,11 +694,13 @@ fn validate_recipe(
         if let ShowcaseEntityState::RabbitBurrow {
             capacity,
             residents,
+            damage,
             ..
         } = &entity.state
         {
             if *capacity == 0
                 || usize::from(*capacity) > residents.len()
+                || *damage >= 3
                 || residents
                     .iter()
                     .flatten()
@@ -1035,6 +1037,7 @@ fn write_entities(
                 capacity,
                 residents,
                 disturbance_ticks,
+                damage,
             } => EntitySavePayload::RabbitBurrow {
                 capacity: *capacity,
                 residents: residents.clone().map(|resident| {
@@ -1045,6 +1048,7 @@ fn write_entities(
                     })
                 }),
                 disturbance_ticks: *disturbance_ticks,
+                damage: *damage,
             },
         };
         let kind = match &recipe.state {
@@ -1425,6 +1429,7 @@ enum ShowcaseEntityState {
         residents: [Option<String>; 6],
         #[serde(rename = "disturbanceTicks")]
         disturbance_ticks: u32,
+        damage: u8,
     },
 }
 
@@ -1972,7 +1977,7 @@ mod tests {
         let identity = ClientIdentity::test_default();
         let (manifest, store) =
             playable_showcase_memory_store(PlayableShowcaseId::RabbitBurrow, &identity).unwrap();
-        assert_eq!(manifest.revision, 2);
+        assert_eq!(manifest.revision, 3);
         assert_eq!(manifest.seed, 17_507);
         assert_eq!(manifest.entity_count, 5);
         assert_eq!(manifest.rabbit_count, 4);

@@ -37,6 +37,10 @@ interface SmokeRuntime {
     z: number,
     preservePosition?: boolean,
   ) => WasmReport | null;
+  frameEntity?: (
+    entityId: number,
+    preservePosition?: boolean,
+  ) => WasmReport | null;
   renderOneFrameForSmoke?: () => Promise<WasmReport | null>;
   renderHalfSpaceTerrainProof?: () => Promise<WasmReport | null>;
   renderPreparedFigureProof?: () => Promise<WasmReport | null>;
@@ -433,6 +437,15 @@ export function installWebSmokeObserver(
       Math.trunc(x),
       Math.trunc(y),
       Math.trunc(z),
+      preservePosition,
+    ));
+    observer.observeTarget(app.sceneHostForObserver()?.previewBlockTarget());
+    return report;
+  };
+  runtime.frameEntity = (entityId, preservePosition = false) => {
+    const report = applySmoke((harness, session) => harness.frameEntity(
+      session,
+      Math.trunc(entityId),
       preservePosition,
     ));
     observer.observeTarget(app.sceneHostForObserver()?.previewBlockTarget());
