@@ -9,6 +9,7 @@ mod dimension;
 mod distance_manager;
 mod entity;
 mod falling_block;
+mod farming;
 mod fluid;
 mod game_mode;
 mod holder;

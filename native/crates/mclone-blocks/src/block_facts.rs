@@ -141,6 +141,10 @@ pub mod terrain_id {
     pub const SPRUCE_STAIRS_WEST: u32 = 218;
     pub const SPRUCE_SLAB_BOTTOM: u32 = 219;
     pub const SPRUCE_SLAB_TOP: u32 = 220;
+    pub const FARMLAND_MOISTURE_0: u32 = 221;
+    pub const FARMLAND_MOISTURE_7: u32 = 228;
+    pub const WHEAT_AGE_0: u32 = 229;
+    pub const WHEAT_AGE_7: u32 = 236;
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]

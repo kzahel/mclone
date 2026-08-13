@@ -369,15 +369,20 @@ pub fn actor_instances_from_presentations_near_observer(
                 .with_packed_light(packed_light),
                 ActorPresentationKind::Entity(EntityKind::Item) => {
                     match actor.item_stack.map(|stack| stack.kind) {
-                        Some(ItemKind::Egg | ItemKind::MallardEgg) | None => {
-                            ActorInstance::item_egg(
-                                glam_vec3_from_vec3d(feet_position),
-                                actor.y_rot_degrees,
-                                actor.width,
-                                actor.height,
-                            )
-                            .with_packed_light(packed_light)
-                        }
+                        Some(
+                            ItemKind::Egg
+                            | ItemKind::MallardEgg
+                            | ItemKind::WoodenHoe
+                            | ItemKind::WheatSeeds
+                            | ItemKind::Wheat,
+                        )
+                        | None => ActorInstance::item_egg(
+                            glam_vec3_from_vec3d(feet_position),
+                            actor.y_rot_degrees,
+                            actor.width,
+                            actor.height,
+                        )
+                        .with_packed_light(packed_light),
                         Some(ItemKind::MallardFeather) => ActorInstance::mallard_feather(
                             glam_vec3_from_vec3d(feet_position),
                             actor.y_rot_degrees,

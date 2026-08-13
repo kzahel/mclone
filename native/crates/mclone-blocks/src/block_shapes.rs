@@ -164,6 +164,10 @@ fn outline_shape(state: BlockStateId) -> Option<LocalShape> {
         terrain_id::WALL_TORCH_SOUTH => Some(wall_torch_south_shape()),
         terrain_id::WALL_TORCH_WEST => Some(wall_torch_west_shape()),
         terrain_id::GLOW_LICHEN => None,
+        terrain_id::FARMLAND_MOISTURE_0..=terrain_id::FARMLAND_MOISTURE_7 => Some(farmland_shape()),
+        terrain_id::WHEAT_AGE_0..=terrain_id::WHEAT_AGE_7 => {
+            Some(wheat_outline_shape(state.0 - terrain_id::WHEAT_AGE_0))
+        }
         _ => Some(full_block()),
     }
 }
@@ -249,7 +253,9 @@ fn collision_shape(state: BlockStateId) -> Option<LocalShape> {
         | terrain_id::WALL_TORCH_EAST
         | terrain_id::WALL_TORCH_SOUTH
         | terrain_id::WALL_TORCH_WEST => None,
+        terrain_id::WHEAT_AGE_0..=terrain_id::WHEAT_AGE_7 => None,
         id if is_vine(id) || is_cocoa(id) => None,
+        terrain_id::FARMLAND_MOISTURE_0..=terrain_id::FARMLAND_MOISTURE_7 => Some(farmland_shape()),
         terrain_id::CACTUS => Some(cactus_collision_shape()),
         id if is_bamboo(id) => Some(bamboo_collision_shape()),
         terrain_id::LILY_PAD => Some(lily_pad_shape()),
@@ -268,6 +274,15 @@ fn local_box(min_x: f64, min_y: f64, min_z: f64, max_x: f64, max_y: f64, max_z: 
 
 fn full_block() -> LocalShape {
     local_box(0.0, 0.0, 0.0, 1.0, 1.0, 1.0)
+}
+
+fn farmland_shape() -> LocalShape {
+    local_box(0.0, 0.0, 0.0, 1.0, 15.0 / 16.0, 1.0)
+}
+
+fn wheat_outline_shape(age: u32) -> LocalShape {
+    let height = (age.clamp(0, 7) + 1) as f64 * 2.0 / 16.0;
+    local_box(0.0, 0.0, 0.0, 1.0, height, 1.0)
 }
 
 fn bottom_slab() -> LocalShape {
@@ -1145,6 +1160,27 @@ mod tests {
         assert_eq!(
             block_collision_aabb(state(terrain_id::SPRUCE_STAIRS_NORTH), pos),
             Some(Aabb::unit_block(pos))
+        );
+    }
+
+    #[test]
+    fn farming_shapes_match_java_farmland_and_crop_contracts() {
+        let pos = BlockPos::new(2, 64, -3);
+        assert_eq!(
+            block_collision_aabb(state(terrain_id::FARMLAND_MOISTURE_0), pos),
+            Some(Aabb::new(2.0, 64.0, -3.0, 3.0, 64.9375, -2.0))
+        );
+        assert_eq!(
+            block_outline_aabbs(state(terrain_id::WHEAT_AGE_0), pos),
+            vec![Aabb::new(2.0, 64.0, -3.0, 3.0, 64.125, -2.0)]
+        );
+        assert_eq!(
+            block_outline_aabbs(state(terrain_id::WHEAT_AGE_7), pos),
+            vec![Aabb::new(2.0, 64.0, -3.0, 3.0, 65.0, -2.0)]
+        );
+        assert_eq!(
+            block_collision_aabb(state(terrain_id::WHEAT_AGE_7), pos),
+            None
         );
     }
 }

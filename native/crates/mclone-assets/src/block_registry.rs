@@ -617,7 +617,21 @@ const STAIRS_WEST_BOTTOM_STRAIGHT: &[(&str, &str)] = &[
 const SLAB_BOTTOM: &[(&str, &str)] = &[("type", "bottom"), ("waterlogged", "false")];
 const SLAB_TOP: &[(&str, &str)] = &[("type", "top"), ("waterlogged", "false")];
 const AGE_0: &[(&str, &str)] = &[("age", "0")];
+const AGE_1: &[(&str, &str)] = &[("age", "1")];
+const AGE_2: &[(&str, &str)] = &[("age", "2")];
 const AGE_3: &[(&str, &str)] = &[("age", "3")];
+const AGE_4: &[(&str, &str)] = &[("age", "4")];
+const AGE_5: &[(&str, &str)] = &[("age", "5")];
+const AGE_6: &[(&str, &str)] = &[("age", "6")];
+const AGE_7: &[(&str, &str)] = &[("age", "7")];
+const MOISTURE_0: &[(&str, &str)] = &[("moisture", "0")];
+const MOISTURE_1: &[(&str, &str)] = &[("moisture", "1")];
+const MOISTURE_2: &[(&str, &str)] = &[("moisture", "2")];
+const MOISTURE_3: &[(&str, &str)] = &[("moisture", "3")];
+const MOISTURE_4: &[(&str, &str)] = &[("moisture", "4")];
+const MOISTURE_5: &[(&str, &str)] = &[("moisture", "5")];
+const MOISTURE_6: &[(&str, &str)] = &[("moisture", "6")];
+const MOISTURE_7: &[(&str, &str)] = &[("moisture", "7")];
 const AGE_20: &[(&str, &str)] = &[("age", "20")];
 const BAMBOO_TRUNK: &[(&str, &str)] = &[("age", "1"), ("leaves", "none"), ("stage", "0")];
 const BAMBOO_TOP_SMALL: &[(&str, &str)] = &[("age", "1"), ("leaves", "small"), ("stage", "0")];
@@ -997,6 +1011,22 @@ const TERRAIN_MVP_STATES: &[(u32, &str, &[(&str, &str)])] = &[
     (218, "minecraft:spruce_stairs", STAIRS_WEST_BOTTOM_STRAIGHT),
     (219, "minecraft:spruce_slab", SLAB_BOTTOM),
     (220, "minecraft:spruce_slab", SLAB_TOP),
+    (221, "minecraft:farmland", MOISTURE_0),
+    (222, "minecraft:farmland", MOISTURE_1),
+    (223, "minecraft:farmland", MOISTURE_2),
+    (224, "minecraft:farmland", MOISTURE_3),
+    (225, "minecraft:farmland", MOISTURE_4),
+    (226, "minecraft:farmland", MOISTURE_5),
+    (227, "minecraft:farmland", MOISTURE_6),
+    (228, "minecraft:farmland", MOISTURE_7),
+    (229, "minecraft:wheat", AGE_0),
+    (230, "minecraft:wheat", AGE_1),
+    (231, "minecraft:wheat", AGE_2),
+    (232, "minecraft:wheat", AGE_3),
+    (233, "minecraft:wheat", AGE_4),
+    (234, "minecraft:wheat", AGE_5),
+    (235, "minecraft:wheat", AGE_6),
+    (236, "minecraft:wheat", AGE_7),
 ];
 
 #[cfg(test)]
@@ -1015,7 +1045,7 @@ mod tests {
     fn terrain_mvp_registry_names_current_generated_ids() {
         let registry = BlockStateRegistry::terrain_mvp();
 
-        assert_eq!(registry.len(), 221);
+        assert_eq!(registry.len(), 237);
         assert_eq!(
             registry.by_id(BlockStateId(0)).unwrap().canonical_key(),
             "minecraft:air"

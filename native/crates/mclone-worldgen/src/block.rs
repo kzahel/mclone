@@ -224,6 +224,24 @@ pub const SPRUCE_STAIRS_SOUTH: RawBlockId = 217;
 pub const SPRUCE_STAIRS_WEST: RawBlockId = 218;
 pub const SPRUCE_SLAB_BOTTOM: RawBlockId = 219;
 pub const SPRUCE_SLAB_TOP: RawBlockId = 220;
+pub const FARMLAND_MOISTURE_0: RawBlockId = 221;
+pub const FARMLAND: RawBlockId = FARMLAND_MOISTURE_0;
+pub const FARMLAND_MOISTURE_1: RawBlockId = 222;
+pub const FARMLAND_MOISTURE_2: RawBlockId = 223;
+pub const FARMLAND_MOISTURE_3: RawBlockId = 224;
+pub const FARMLAND_MOISTURE_4: RawBlockId = 225;
+pub const FARMLAND_MOISTURE_5: RawBlockId = 226;
+pub const FARMLAND_MOISTURE_6: RawBlockId = 227;
+pub const FARMLAND_MOISTURE_7: RawBlockId = 228;
+pub const WHEAT_AGE_0: RawBlockId = 229;
+pub const WHEAT: RawBlockId = WHEAT_AGE_0;
+pub const WHEAT_AGE_1: RawBlockId = 230;
+pub const WHEAT_AGE_2: RawBlockId = 231;
+pub const WHEAT_AGE_3: RawBlockId = 232;
+pub const WHEAT_AGE_4: RawBlockId = 233;
+pub const WHEAT_AGE_5: RawBlockId = 234;
+pub const WHEAT_AGE_6: RawBlockId = 235;
+pub const WHEAT_AGE_7: RawBlockId = 236;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct GeneratedBlockId(pub RawBlockId);
@@ -374,6 +392,22 @@ impl GeneratedBlockId {
     pub const SPRUCE_STAIRS_WEST: Self = Self(SPRUCE_STAIRS_WEST);
     pub const SPRUCE_SLAB_BOTTOM: Self = Self(SPRUCE_SLAB_BOTTOM);
     pub const SPRUCE_SLAB_TOP: Self = Self(SPRUCE_SLAB_TOP);
+    pub const FARMLAND_MOISTURE_0: Self = Self(FARMLAND_MOISTURE_0);
+    pub const FARMLAND_MOISTURE_1: Self = Self(FARMLAND_MOISTURE_1);
+    pub const FARMLAND_MOISTURE_2: Self = Self(FARMLAND_MOISTURE_2);
+    pub const FARMLAND_MOISTURE_3: Self = Self(FARMLAND_MOISTURE_3);
+    pub const FARMLAND_MOISTURE_4: Self = Self(FARMLAND_MOISTURE_4);
+    pub const FARMLAND_MOISTURE_5: Self = Self(FARMLAND_MOISTURE_5);
+    pub const FARMLAND_MOISTURE_6: Self = Self(FARMLAND_MOISTURE_6);
+    pub const FARMLAND_MOISTURE_7: Self = Self(FARMLAND_MOISTURE_7);
+    pub const WHEAT_AGE_0: Self = Self(WHEAT_AGE_0);
+    pub const WHEAT_AGE_1: Self = Self(WHEAT_AGE_1);
+    pub const WHEAT_AGE_2: Self = Self(WHEAT_AGE_2);
+    pub const WHEAT_AGE_3: Self = Self(WHEAT_AGE_3);
+    pub const WHEAT_AGE_4: Self = Self(WHEAT_AGE_4);
+    pub const WHEAT_AGE_5: Self = Self(WHEAT_AGE_5);
+    pub const WHEAT_AGE_6: Self = Self(WHEAT_AGE_6);
+    pub const WHEAT_AGE_7: Self = Self(WHEAT_AGE_7);
 
     pub const fn raw(self) -> RawBlockId {
         self.0
@@ -398,6 +432,38 @@ impl GeneratedBlockId {
 
 pub const fn is_air_like(block_id: RawBlockId) -> bool {
     block_id == AIR || block_id == CAVE_AIR
+}
+
+pub const fn farmland_moisture(block_id: RawBlockId) -> Option<u8> {
+    if block_id >= FARMLAND_MOISTURE_0 && block_id <= FARMLAND_MOISTURE_7 {
+        Some(block_id - FARMLAND_MOISTURE_0)
+    } else {
+        None
+    }
+}
+
+pub const fn farmland_for_moisture(moisture: u8) -> Option<RawBlockId> {
+    if moisture <= 7 {
+        Some(FARMLAND_MOISTURE_0 + moisture)
+    } else {
+        None
+    }
+}
+
+pub const fn wheat_age(block_id: RawBlockId) -> Option<u8> {
+    if block_id >= WHEAT_AGE_0 && block_id <= WHEAT_AGE_7 {
+        Some(block_id - WHEAT_AGE_0)
+    } else {
+        None
+    }
+}
+
+pub const fn wheat_for_age(age: u8) -> Option<RawBlockId> {
+    if age <= 7 {
+        Some(WHEAT_AGE_0 + age)
+    } else {
+        None
+    }
 }
 
 pub const fn material_blocks_motion(block_id: RawBlockId) -> bool {
@@ -466,6 +532,14 @@ pub const fn material_blocks_motion(block_id: RawBlockId) -> bool {
             | SEA_PICKLE_2
             | SEA_PICKLE_3
             | SEA_PICKLE_4
+            | WHEAT_AGE_0
+            | WHEAT_AGE_1
+            | WHEAT_AGE_2
+            | WHEAT_AGE_3
+            | WHEAT_AGE_4
+            | WHEAT_AGE_5
+            | WHEAT_AGE_6
+            | WHEAT_AGE_7
     )
 }
 
@@ -483,6 +557,14 @@ pub const fn block_light_opacity(block_id: RawBlockId) -> u8 {
             | SPRUCE_STAIRS_WEST
             | SPRUCE_SLAB_BOTTOM
             | SPRUCE_SLAB_TOP
+            | FARMLAND_MOISTURE_0
+            | FARMLAND_MOISTURE_1
+            | FARMLAND_MOISTURE_2
+            | FARMLAND_MOISTURE_3
+            | FARMLAND_MOISTURE_4
+            | FARMLAND_MOISTURE_5
+            | FARMLAND_MOISTURE_6
+            | FARMLAND_MOISTURE_7
     ) {
         0
     } else if material_blocks_motion(block_id) {
@@ -616,6 +698,10 @@ pub const fn base_block_id(block_id: RawBlockId) -> RawBlockId {
         | COCOA_AGE1_EAST | COCOA_AGE1_SOUTH | COCOA_AGE1_WEST | COCOA_AGE2_NORTH
         | COCOA_AGE2_EAST | COCOA_AGE2_SOUTH | COCOA_AGE2_WEST => COCOA_AGE0_NORTH,
         BAMBOO_TOP_SMALL | BAMBOO_TOP_LARGE | BAMBOO_FINAL_LARGE => BAMBOO,
+        FARMLAND_MOISTURE_1 | FARMLAND_MOISTURE_2 | FARMLAND_MOISTURE_3 | FARMLAND_MOISTURE_4
+        | FARMLAND_MOISTURE_5 | FARMLAND_MOISTURE_6 | FARMLAND_MOISTURE_7 => FARMLAND_MOISTURE_0,
+        WHEAT_AGE_1 | WHEAT_AGE_2 | WHEAT_AGE_3 | WHEAT_AGE_4 | WHEAT_AGE_5 | WHEAT_AGE_6
+        | WHEAT_AGE_7 => WHEAT_AGE_0,
         TUBE_CORAL_WALL_FAN_EAST | TUBE_CORAL_WALL_FAN_SOUTH | TUBE_CORAL_WALL_FAN_WEST => {
             TUBE_CORAL_WALL_FAN_NORTH
         }
@@ -914,6 +1000,12 @@ pub const fn block_name(block_id: RawBlockId) -> &'static str {
             "minecraft:spruce_stairs"
         }
         SPRUCE_SLAB_BOTTOM | SPRUCE_SLAB_TOP => "minecraft:spruce_slab",
+        FARMLAND_MOISTURE_0 | FARMLAND_MOISTURE_1 | FARMLAND_MOISTURE_2 | FARMLAND_MOISTURE_3
+        | FARMLAND_MOISTURE_4 | FARMLAND_MOISTURE_5 | FARMLAND_MOISTURE_6 | FARMLAND_MOISTURE_7 => {
+            "minecraft:farmland"
+        }
+        WHEAT_AGE_0 | WHEAT_AGE_1 | WHEAT_AGE_2 | WHEAT_AGE_3 | WHEAT_AGE_4 | WHEAT_AGE_5
+        | WHEAT_AGE_6 | WHEAT_AGE_7 => "minecraft:wheat",
         _ => "minecraft:unknown",
     }
 }
@@ -965,6 +1057,8 @@ mod tests {
         assert_eq!(block_light_opacity(VINE), 0);
         assert_eq!(block_light_opacity(VINE_NORTH), 0);
         assert_eq!(block_light_opacity(VINE_WEST), 0);
+        assert_eq!(block_light_opacity(FARMLAND_MOISTURE_7), 0);
+        assert_eq!(block_light_opacity(WHEAT_AGE_7), 0);
         assert_eq!(block_light_opacity(COCOA_AGE2_SOUTH), 0);
         assert_eq!(block_light_opacity(TALL_GRASS_LOWER), 0);
         assert_eq!(block_light_opacity(TALL_GRASS_UPPER), 0);
@@ -1011,6 +1105,24 @@ mod tests {
         assert_eq!(block_light_opacity(DARK_OAK_LOG), 15);
         assert_eq!(block_light_opacity(ACACIA_LOG), 15);
         assert_eq!(block_light_opacity(BROWN_MUSHROOM_BLOCK), 15);
+    }
+
+    #[test]
+    fn farming_state_helpers_cover_exact_bounded_ranges() {
+        for moisture in 0..=7 {
+            let state = farmland_for_moisture(moisture).unwrap();
+            assert_eq!(farmland_moisture(state), Some(moisture));
+            assert_eq!(base_block_id(state), FARMLAND_MOISTURE_0);
+            assert_eq!(block_name(state), "minecraft:farmland");
+        }
+        for age in 0..=7 {
+            let state = wheat_for_age(age).unwrap();
+            assert_eq!(wheat_age(state), Some(age));
+            assert_eq!(base_block_id(state), WHEAT_AGE_0);
+            assert_eq!(block_name(state), "minecraft:wheat");
+        }
+        assert_eq!(farmland_for_moisture(8), None);
+        assert_eq!(wheat_for_age(8), None);
     }
 
     #[test]

@@ -9,7 +9,13 @@ pub(crate) const fn item_max_stack_size(kind: ItemKind) -> u8 {
         ItemKind::MallardFeather => FEATHER_MAX_STACK_SIZE,
         ItemKind::HuntingSpear => 1,
         ItemKind::BeeHotel => 1,
-        ItemKind::Venison | ItemKind::DeerHide | ItemKind::ShedAntler | ItemKind::Beeswax => 64,
+        ItemKind::WoodenHoe => 1,
+        ItemKind::Venison
+        | ItemKind::DeerHide
+        | ItemKind::ShedAntler
+        | ItemKind::Beeswax
+        | ItemKind::WheatSeeds
+        | ItemKind::Wheat => 64,
     }
 }
 

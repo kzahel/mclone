@@ -6,6 +6,7 @@ import { defineGrassBlockTextures } from "./block/grass-block";
 import { definePartialShapeTextures } from "./block/partial-shapes";
 import { definePlantAndFlatTextures } from "./block/plants-and-flats";
 import { defineStoneTextures } from "./block/stone";
+import { defineWheatFarmingTextures } from "./block/wheat-farming";
 
 export default texturePack("mclone-default", (api) => {
   defineDirtTextures(api);
@@ -15,4 +16,5 @@ export default texturePack("mclone-default", (api) => {
   definePlantAndFlatTextures(api);
   definePartialShapeTextures(api);
   defineFarmsteadMaterialTextures(api);
+  defineWheatFarmingTextures(api);
 });

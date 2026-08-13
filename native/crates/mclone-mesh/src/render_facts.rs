@@ -72,6 +72,7 @@ fn java_no_collision(block: &ResourceLocation) -> bool {
             | "sea_pickle"
             | "torch"
             | "wall_torch"
+            | "wheat"
     )
 }
 
@@ -215,6 +216,7 @@ fn java_material_blocks_motion(block: &ResourceLocation) -> bool {
             | "sea_pickle"
             | "torch"
             | "wall_torch"
+            | "wheat"
     )
 }
 
@@ -256,6 +258,7 @@ fn java_bush_like_block(block: &ResourceLocation) -> bool {
             | "kelp"
             | "kelp_plant"
             | "sea_pickle"
+            | "wheat"
     )
 }
 

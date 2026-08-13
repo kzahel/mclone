@@ -569,6 +569,9 @@ impl From<ItemStackSnapshot> for ItemStackSaveRecord {
             mclone_protocol::ItemKind::ShedAntler => "mclone:shed_antler",
             mclone_protocol::ItemKind::BeeHotel => "mclone:bee_hotel",
             mclone_protocol::ItemKind::Beeswax => "mclone:beeswax",
+            mclone_protocol::ItemKind::WoodenHoe => "minecraft:wooden_hoe",
+            mclone_protocol::ItemKind::WheatSeeds => "minecraft:wheat_seeds",
+            mclone_protocol::ItemKind::Wheat => "minecraft:wheat",
         };
         Self::new(kind, stack.count)
     }
@@ -6739,6 +6742,9 @@ fn write_optional_item_stack_snapshot(
             mclone_protocol::ItemKind::ShedAntler => 6,
             mclone_protocol::ItemKind::BeeHotel => 7,
             mclone_protocol::ItemKind::Beeswax => 8,
+            mclone_protocol::ItemKind::WoodenHoe => 9,
+            mclone_protocol::ItemKind::WheatSeeds => 10,
+            mclone_protocol::ItemKind::Wheat => 11,
         };
         write_u8(writer, kind)?;
         write_u8(writer, stack.count)?;
@@ -6762,6 +6768,9 @@ fn read_optional_item_stack_snapshot(
         6 => mclone_protocol::ItemKind::ShedAntler,
         7 => mclone_protocol::ItemKind::BeeHotel,
         8 => mclone_protocol::ItemKind::Beeswax,
+        9 => mclone_protocol::ItemKind::WoodenHoe,
+        10 => mclone_protocol::ItemKind::WheatSeeds,
+        11 => mclone_protocol::ItemKind::Wheat,
         value => {
             return Err(ChunkStoreError::InvalidData(format!(
                 "unknown player inventory item kind {value}"

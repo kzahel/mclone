@@ -4606,6 +4606,9 @@ const fn item_kind_hotbar_label(kind: mclone_protocol::ItemKind) -> &'static str
         mclone_protocol::ItemKind::ShedAntler => "A",
         mclone_protocol::ItemKind::BeeHotel => "BH",
         mclone_protocol::ItemKind::Beeswax => "BW",
+        mclone_protocol::ItemKind::WoodenHoe => "HOE",
+        mclone_protocol::ItemKind::WheatSeeds => "SEED",
+        mclone_protocol::ItemKind::Wheat => "W",
     }
 }
 
@@ -4620,6 +4623,9 @@ const fn item_kind_display_name(kind: mclone_protocol::ItemKind) -> &'static str
         mclone_protocol::ItemKind::ShedAntler => "Shed antler",
         mclone_protocol::ItemKind::BeeHotel => "Bee hotel",
         mclone_protocol::ItemKind::Beeswax => "Beeswax",
+        mclone_protocol::ItemKind::WoodenHoe => "Wooden hoe",
+        mclone_protocol::ItemKind::WheatSeeds => "Wheat seeds",
+        mclone_protocol::ItemKind::Wheat => "Wheat",
     }
 }
 

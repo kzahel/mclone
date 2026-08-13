@@ -288,6 +288,15 @@ impl TexturedMeshCatalog {
                 (FirstPartyVisualClass::Solid, Some(sprite)) => {
                     first_party_solid_faces(record.block.path(), sprite)
                 }
+                (FirstPartyVisualClass::Farmland, Some(top)) => first_party_farmland_faces(
+                    record.block.path(),
+                    top,
+                    first_party_sprite(
+                        &ResourceLocation::parse("mclone:block/dirt")
+                            .expect("first-party dirt material id is valid"),
+                        atlas,
+                    )?,
+                ),
                 (FirstPartyVisualClass::Slab, Some(sprite)) => {
                     first_party_slab_faces(record, sprite)
                 }
@@ -656,6 +665,21 @@ fn first_party_solid_faces(block: &str, sprite: AtlasSpriteUv) -> Vec<TexturedBl
         )
     })
     .collect()
+}
+
+fn first_party_farmland_faces(
+    block: &str,
+    top: AtlasSpriteUv,
+    dirt: AtlasSpriteUv,
+) -> Vec<TexturedBlockFace> {
+    let mut faces = first_party_cuboid_faces(block, [0.0, 0.0, 0.0], [16.0, 15.0, 16.0], dirt);
+    if let Some(face) = faces
+        .iter_mut()
+        .find(|face| face.direction == ModelFaceDirection::Up)
+    {
+        face.sprite = top;
+    }
+    faces
 }
 
 fn first_party_cuboid_faces(
@@ -1284,6 +1308,40 @@ mod tests {
         );
         assert!(!full_cube_occluder(&slab_faces));
         assert!(!full_cube_occluder(&stair_faces));
+    }
+
+    #[test]
+    fn first_party_farmland_uses_furrows_only_on_its_lowered_top() {
+        let dirt = AtlasSpriteUv {
+            u0: 0.0,
+            v0: 0.0,
+            u1: 0.5,
+            v1: 0.5,
+        };
+        let top = AtlasSpriteUv {
+            u0: 0.5,
+            v0: 0.5,
+            u1: 1.0,
+            v1: 1.0,
+        };
+
+        let faces = first_party_farmland_faces("farmland", top, dirt);
+
+        assert_eq!(faces.len(), 6);
+        assert!(faces.iter().all(|face| face.to[1] == 15.0));
+        assert_eq!(
+            faces
+                .iter()
+                .find(|face| face.direction == ModelFaceDirection::Up)
+                .map(|face| face.sprite),
+            Some(top)
+        );
+        assert!(
+            faces
+                .iter()
+                .filter(|face| face.direction != ModelFaceDirection::Up)
+                .all(|face| face.sprite == dirt)
+        );
     }
 
     #[test]

@@ -9,6 +9,7 @@ use crate::{AssetPath, BlockStateRecord, BlockStateRegistry, ResourceLocation};
 pub enum FirstPartyVisualClass {
     Empty,
     Solid,
+    Farmland,
     Slab,
     Stair,
     CrossedPlane,
@@ -66,11 +67,8 @@ pub fn canonical_first_party_asset_inventory() -> CanonicalFirstPartyAssetInvent
         .map(|state| {
             let class = visual_class(state.block.path());
             let material = (class != FirstPartyVisualClass::Empty).then(|| {
-                ResourceLocation::new(
-                    "mclone",
-                    format!("block/{}", material_path(state.block.path())),
-                )
-                .expect("registry block paths produce valid first-party material ids")
+                ResourceLocation::new("mclone", format!("block/{}", material_path(&state)))
+                    .expect("registry block paths produce valid first-party material ids")
             });
             FirstPartyBlockVisual {
                 state,
@@ -232,6 +230,7 @@ fn visual_class(block: &str) -> FirstPartyVisualClass {
     match block {
         "air" | "cave_air" => FirstPartyVisualClass::Empty,
         "water" | "lava" => FirstPartyVisualClass::Fluid,
+        "farmland" => FirstPartyVisualClass::Farmland,
         "spruce_slab" => FirstPartyVisualClass::Slab,
         "spruce_stairs" => FirstPartyVisualClass::Stair,
         "lily_pad" => FirstPartyVisualClass::Flat,
@@ -278,15 +277,31 @@ fn visual_class(block: &str) -> FirstPartyVisualClass {
         | "brain_coral_wall_fan"
         | "bubble_coral_wall_fan"
         | "fire_coral_wall_fan"
-        | "horn_coral_wall_fan" => FirstPartyVisualClass::CrossedPlane,
+        | "horn_coral_wall_fan"
+        | "wheat" => FirstPartyVisualClass::CrossedPlane,
         _ => FirstPartyVisualClass::Solid,
     }
 }
 
-fn material_path(block: &str) -> &str {
-    match block {
-        "spruce_slab" | "spruce_stairs" => "spruce_planks",
-        _ => block,
+fn material_path(state: &BlockStateRecord) -> String {
+    match state.block.path() {
+        "spruce_slab" | "spruce_stairs" => "spruce_planks".to_owned(),
+        "farmland" => {
+            if state
+                .properties
+                .get("moisture")
+                .is_some_and(|value| value == "7")
+            {
+                "farmland_moist".to_owned()
+            } else {
+                "farmland".to_owned()
+            }
+        }
+        "wheat" => format!(
+            "wheat_stage{}",
+            state.properties.get("age").map_or("0", String::as_str)
+        ),
+        block => block.to_owned(),
     }
 }
 
@@ -298,7 +313,7 @@ mod tests {
     fn canonical_inventory_covers_every_repo_owned_runtime_block_state() {
         let inventory = canonical_first_party_asset_inventory();
 
-        assert_eq!(inventory.block_visuals.len(), 221);
+        assert_eq!(inventory.block_visuals.len(), 237);
         assert_eq!(
             inventory
                 .block_visuals
@@ -306,7 +321,7 @@ mod tests {
                 .map(|visual| visual.state.canonical_key())
                 .collect::<BTreeSet<_>>()
                 .len(),
-            221
+            237
         );
         assert!(inventory.block_visuals.iter().any(|visual| {
             visual.state.block.to_string() == "minecraft:water"

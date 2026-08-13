@@ -1876,7 +1876,7 @@ impl ServerEntityStore {
         self.remove_entity(id)
     }
 
-    fn insert_item_entity(
+    pub(crate) fn insert_item_entity(
         &mut self,
         stack: ItemStackSnapshot,
         position: Vec3d,
@@ -2518,6 +2518,9 @@ fn item_stack_snapshot_from_save(
         "mclone:shed_antler" => ItemKind::ShedAntler,
         "mclone:bee_hotel" => ItemKind::BeeHotel,
         "mclone:beeswax" => ItemKind::Beeswax,
+        "minecraft:wooden_hoe" => ItemKind::WoodenHoe,
+        "minecraft:wheat_seeds" => ItemKind::WheatSeeds,
+        "minecraft:wheat" => ItemKind::Wheat,
         kind => {
             return Err(ChunkStoreError::InvalidData(format!(
                 "unsupported item stack kind {kind:?}"

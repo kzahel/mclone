@@ -1,6 +1,192 @@
 use super::*;
 
 #[test]
+fn wooden_hoe_seed_and_harvest_form_an_authoritative_inventory_loop() {
+    let mut server = LocalRealmSession::new(0);
+    load_center_chunk(&mut server);
+    sync_player(&mut server, Vec3d::new(8.5, 67.0, 10.5));
+    let soil = BlockPos::new(8, 64, 8);
+    let crop = soil.offset(0, 1, 0);
+    assert!(server.scheduler_mut().set_block_at_world(soil, GRASS_BLOCK));
+    server.scheduler_mut().set_block_at_world(crop, AIR);
+    server.scheduler_mut().drain_pending_block_delta_events();
+
+    sync_carried_slot(&mut server, 7);
+    let tilled = server
+        .try_handle_command(use_held_item_on(BlockHitResult::new(
+            Vec3d::new(8.5, 65.0, 8.5),
+            Direction::Up,
+            soil,
+            false,
+        )))
+        .expect("till grass");
+    assert_eq!(
+        server.scheduler().block_at_world(soil),
+        Some(mclone_worldgen::block::FARMLAND_MOISTURE_0)
+    );
+    assert!(has_section_block_updates(&tilled));
+
+    sync_carried_slot(&mut server, 8);
+    let planted = server
+        .try_handle_command(use_held_item_on(BlockHitResult::new(
+            Vec3d::new(8.5, 65.0, 8.5),
+            Direction::Up,
+            soil,
+            false,
+        )))
+        .expect("plant wheat");
+    assert_eq!(
+        server.scheduler().block_at_world(crop),
+        Some(mclone_worldgen::block::WHEAT_AGE_0)
+    );
+    assert_eq!(server.inventory().item_count(ItemKind::WheatSeeds), 7);
+    assert!(planted.iter().any(|update| matches!(
+        update,
+        ServerUpdate::PlayerInventory { hotbar }
+            if hotbar[8] == Some(ItemStackSnapshot { kind: ItemKind::WheatSeeds, count: 7 })
+    )));
+
+    assert!(
+        server
+            .scheduler_mut()
+            .set_block_at_world(crop, mclone_worldgen::block::WHEAT_AGE_7)
+    );
+    server.scheduler_mut().drain_pending_block_delta_events();
+    server
+        .try_handle_command(ClientCommand::PlayerAction(PlayerActionCommand {
+            pos: crop,
+            direction: Direction::Up,
+            kind: PlayerActionKind::DebugInstantBreak,
+        }))
+        .expect("harvest mature wheat");
+    assert_eq!(server.scheduler().block_at_world(crop), Some(AIR));
+    assert_eq!(server.inventory().item_count(ItemKind::Wheat), 1);
+    assert!(server.inventory().item_count(ItemKind::WheatSeeds) >= 7);
+}
+
+#[test]
+fn protected_lobby_rejects_farming_items() {
+    let mut server = LocalRealmSession::new(0);
+    load_center_chunk(&mut server);
+    sync_player(&mut server, Vec3d::new(8.5, 67.0, 10.5));
+    let soil = BlockPos::new(8, 64, 8);
+    assert!(server.scheduler_mut().set_block_at_world(soil, GRASS_BLOCK));
+    server
+        .scheduler_mut()
+        .set_block_at_world(soil.offset(0, 1, 0), AIR);
+    server.scheduler_mut().drain_pending_block_delta_events();
+    server.set_world_behavior_profile(WorldBehaviorProfile::ProtectedLobby);
+    sync_carried_slot(&mut server, 7);
+
+    let updates = server
+        .try_handle_command(use_held_item_on(BlockHitResult::new(
+            Vec3d::new(8.5, 65.0, 8.5),
+            Direction::Up,
+            soil,
+            false,
+        )))
+        .expect("reject protected till");
+    assert_eq!(server.scheduler().block_at_world(soil), Some(GRASS_BLOCK));
+    assert!(updates.is_empty());
+}
+
+#[test]
+fn loaded_random_ticks_hydrate_a_real_farmland_block() {
+    let mut server = LocalRealmSession::new(44);
+    load_center_chunk(&mut server);
+    let soil = BlockPos::new(8, 64, 8);
+    assert!(
+        server
+            .scheduler_mut()
+            .set_block_at_world(soil, mclone_worldgen::block::FARMLAND_MOISTURE_0)
+    );
+    assert!(
+        server
+            .scheduler_mut()
+            .set_block_at_world(soil.offset(4, 0, 0), WATER)
+    );
+    for tick in 1..=10_000 {
+        server.tick_random_farming_blocks(tick, &[soil.chunk_pos()]);
+        if server.scheduler().block_at_world(soil)
+            == Some(mclone_worldgen::block::FARMLAND_MOISTURE_7)
+        {
+            return;
+        }
+    }
+    panic!("loaded random ticks never selected and hydrated the field");
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn farming_field_and_inventory_survive_sqlite_restart() {
+    let root = actor_tool_temp_dir("wheat-farming-restart");
+    let identity = ClientIdentity::new(PlayerProfileId::new([0x57; 16]), "Farmer").unwrap();
+    let soil = BlockPos::new(8, 64, 8);
+    let crop = soil.offset(0, 1, 0);
+    {
+        let mut server = LocalRealmSession::try_with_threaded_sqlite_world_dir(71, &root).unwrap();
+        server
+            .configure_local_player_identity_blocking(identity.clone())
+            .unwrap();
+        load_center_chunk(&mut server);
+        sync_player(&mut server, Vec3d::new(8.5, 67.0, 10.5));
+        assert!(server.scheduler_mut().set_block_at_world(soil, GRASS_BLOCK));
+        server.scheduler_mut().set_block_at_world(crop, AIR);
+        server.scheduler_mut().drain_pending_block_delta_events();
+        sync_carried_slot(&mut server, 7);
+        server
+            .try_handle_command(use_held_item_on(BlockHitResult::new(
+                Vec3d::new(8.5, 65.0, 8.5),
+                Direction::Up,
+                soil,
+                false,
+            )))
+            .unwrap();
+        sync_carried_slot(&mut server, 8);
+        server
+            .try_handle_command(use_held_item_on(BlockHitResult::new(
+                Vec3d::new(8.5, 65.0, 8.5),
+                Direction::Up,
+                soil,
+                false,
+            )))
+            .unwrap();
+        assert!(
+            server
+                .scheduler_mut()
+                .set_block_at_world(soil, mclone_worldgen::block::FARMLAND_MOISTURE_7)
+        );
+        assert!(
+            server
+                .scheduler_mut()
+                .set_block_at_world(crop, mclone_worldgen::block::WHEAT_AGE_4)
+        );
+        server.shutdown_persistence().unwrap();
+    }
+
+    {
+        let mut reopened =
+            LocalRealmSession::try_with_threaded_sqlite_world_dir(71, &root).unwrap();
+        reopened
+            .configure_local_player_identity_blocking(identity)
+            .unwrap();
+        load_center_chunk(&mut reopened);
+        assert_eq!(
+            reopened.scheduler().block_at_world(soil),
+            Some(mclone_worldgen::block::FARMLAND_MOISTURE_7)
+        );
+        assert_eq!(
+            reopened.scheduler().block_at_world(crop),
+            Some(mclone_worldgen::block::WHEAT_AGE_4)
+        );
+        assert_eq!(reopened.inventory().item_count(ItemKind::WheatSeeds), 7);
+        assert_eq!(reopened.inventory().selected_hotbar_slot(), 8);
+        reopened.shutdown_persistence().unwrap();
+    }
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn debug_break_command_mutates_block_and_returns_section_delta() {
     let mut server = LocalRealmSession::new(0);
     load_center_chunk(&mut server);
@@ -384,6 +570,8 @@ fn set_debug_hotbar_slot_command_changes_placed_block() {
 #[test]
 fn actor_hotbar_tools_spawn_authoritative_chicken_and_mannequin() {
     let mut server = LocalRealmSession::new(0);
+    server.inventory_mut().set_item_stack_for_test(7, None);
+    server.inventory_mut().set_item_stack_for_test(8, None);
     load_center_chunk(&mut server);
     sync_player(&mut server, Vec3d::new(8.5, 82.0, 10.5));
     for clicked in [BlockPos::new(8, 80, 8), BlockPos::new(9, 80, 8)] {
@@ -434,6 +622,8 @@ fn placed_chicken_and_mannequin_survive_sqlite_restart() {
         let mut server =
             LocalRealmSession::try_with_threaded_sqlite_world_dir(seed, &root).unwrap();
         server.set_debug_passive_showcase_enabled(false);
+        server.inventory_mut().set_item_stack_for_test(7, None);
+        server.inventory_mut().set_item_stack_for_test(8, None);
         load_center_chunk(&mut server);
         sync_player(&mut server, Vec3d::new(8.5, 82.0, 10.5));
         for clicked in [BlockPos::new(8, 80, 8), BlockPos::new(9, 80, 8)] {
@@ -515,6 +705,9 @@ fn actor_hotbar_tools_require_debug_capability_and_valid_clear_target() {
         RealmServer::new(0),
         SessionCapabilities::NONE,
     );
+    unauthorized
+        .inventory_mut()
+        .set_item_stack_for_test(7, None);
     load_center_chunk(&mut unauthorized);
     sync_player(&mut unauthorized, Vec3d::new(8.5, 82.0, 10.5));
     let clicked = BlockPos::new(8, 80, 8);
@@ -543,6 +736,7 @@ fn actor_hotbar_tools_require_debug_capability_and_valid_clear_target() {
     assert!(first_entity_snapshot_of_kind(&unauthorized_updates, EntityKind::Chicken).is_none());
 
     let mut blocked = LocalRealmSession::new(0);
+    blocked.inventory_mut().set_item_stack_for_test(8, None);
     load_center_chunk(&mut blocked);
     sync_player(&mut blocked, Vec3d::new(8.5, 82.0, 10.5));
     blocked.scheduler_mut().set_block_at_world(clicked, STONE);

@@ -807,6 +807,9 @@ fn write_player(
             "mclone:hunting_spear" => ItemKind::HuntingSpear,
             "mclone:bee_hotel" => ItemKind::BeeHotel,
             "mclone:beeswax" => ItemKind::Beeswax,
+            "minecraft:wooden_hoe" => ItemKind::WoodenHoe,
+            "minecraft:wheat_seeds" => ItemKind::WheatSeeds,
+            "minecraft:wheat" => ItemKind::Wheat,
             _ => unreachable!("validated inventory item"),
         };
         player.inventory[usize::from(item.slot)] = Some(ItemStackSnapshot {

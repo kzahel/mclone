@@ -35,6 +35,14 @@ impl Default for ServerInventory {
             kind: mclone_protocol::ItemKind::BeeHotel,
             count: 1,
         });
+        item_stacks[7] = Some(ItemStackSnapshot {
+            kind: mclone_protocol::ItemKind::WoodenHoe,
+            count: 1,
+        });
+        item_stacks[8] = Some(ItemStackSnapshot {
+            kind: mclone_protocol::ItemKind::WheatSeeds,
+            count: 8,
+        });
         Self {
             items: DEFAULT_DEBUG_HOTBAR,
             item_stacks,
@@ -104,6 +112,19 @@ impl ServerInventory {
                 ..stack
             }),
         }
+    }
+
+    pub(crate) fn with_added_item_stacks(
+        &self,
+        stacks: impl IntoIterator<Item = ItemStackSnapshot>,
+    ) -> Option<Self> {
+        let mut inventory = self.clone();
+        for stack in stacks {
+            if inventory.add_item_stack(stack).remaining.is_some() {
+                return None;
+            }
+        }
+        Some(inventory)
     }
 
     pub(crate) fn hotbar_item_stacks(
@@ -384,5 +405,33 @@ mod tests {
             inventory.item_count(ItemKind::Egg),
             PLAYER_MAIN_INVENTORY_SLOT_COUNT as u32 * 16
         );
+    }
+
+    #[test]
+    fn transactional_item_addition_leaves_a_full_inventory_unchanged() {
+        let mut inventory = ServerInventory::default();
+        for slot in 0..PLAYER_MAIN_INVENTORY_SLOT_COUNT {
+            inventory.set_item_stack_for_test(
+                slot,
+                Some(ItemStackSnapshot {
+                    kind: ItemKind::Egg,
+                    count: 16,
+                }),
+            );
+        }
+
+        assert!(
+            inventory
+                .with_added_item_stacks([ItemStackSnapshot {
+                    kind: ItemKind::Wheat,
+                    count: 1,
+                }])
+                .is_none()
+        );
+        assert_eq!(
+            inventory.item_count(ItemKind::Egg),
+            PLAYER_MAIN_INVENTORY_SLOT_COUNT as u32 * 16
+        );
+        assert_eq!(inventory.item_count(ItemKind::Wheat), 0);
     }
 }

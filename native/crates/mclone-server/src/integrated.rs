@@ -30,7 +30,8 @@ use mclone_protocol::{
 };
 use mclone_worldgen::biome::{OverworldBiomeSource, get_layered_biome_by_id};
 use mclone_worldgen::block::{
-    AIR, DANDELION, GRASS_BLOCK, POPPY, RawBlockId, block_name, generated_block_state_id,
+    AIR, DANDELION, GRASS_BLOCK, POPPY, RawBlockId, block_name, farmland_moisture,
+    generated_block_state_id, material_blocks_motion, wheat_age,
 };
 use mclone_worldgen::levelgen::{
     McloneOverworldSamplingTopology, McloneOverworldVegetationPlanCache, McloneVegetationSource,
@@ -60,6 +61,10 @@ use crate::entity::{
 use crate::falling_block::{
     BlockTickList, BlockTickPhaseReport, basic_falling_block_move,
     block_tick_requests_after_block_change,
+};
+use crate::farming::{
+    FarmingBlockAction, harvest_stacks, plan_plant, plan_till, random_farming_tick,
+    random_farming_tick_candidates, wheat_harvest,
 };
 use crate::game_mode::ServerInteractionContext;
 use crate::inventory::ServerInventory;
@@ -2483,6 +2488,7 @@ impl RealmServer {
         let block_tick_chunks = run_noop_simulation_phase(&tick_report.block_ticking_chunks);
         let _block_tick_report =
             self.tick_scheduled_blocks(simulation_tick, &tick_report.block_ticking_chunks);
+        self.tick_random_farming_blocks(simulation_tick, &tick_report.block_ticking_chunks);
         let block_tick_us = simulation_timing_elapsed_us(block_tick_start);
 
         let fluid_tick_start = simulation_timing_start();
@@ -3769,7 +3775,12 @@ impl RealmServer {
                 self.active_dimension.definition.topology,
             );
             if context.may_break_block(command.pos) {
-                self.set_block_debug(command.pos, AIR_BLOCK_STATE_ID);
+                let before = self.scheduler.block_at_world(command.pos);
+                if before.and_then(wheat_age).is_some() {
+                    self.harvest_wheat_for_target(target, command.pos, before.unwrap());
+                } else {
+                    self.set_block_debug(command.pos, AIR_BLOCK_STATE_ID);
+                }
             }
         }
         self.drain_pending_block_delta_updates_for_target(target)
@@ -3894,6 +3905,30 @@ impl RealmServer {
             && self
                 .inventory_for_target(target)?
                 .selected_item_stack()
+                .is_some_and(|stack| stack.kind == ItemKind::WoodenHoe)
+        {
+            return self.handle_farming_use_item_on_for_target(
+                target,
+                command,
+                ItemKind::WoodenHoe,
+            );
+        }
+        if command.hand == InteractionHand::MainHand
+            && self
+                .inventory_for_target(target)?
+                .selected_item_stack()
+                .is_some_and(|stack| stack.kind == ItemKind::WheatSeeds)
+        {
+            return self.handle_farming_use_item_on_for_target(
+                target,
+                command,
+                ItemKind::WheatSeeds,
+            );
+        }
+        if command.hand == InteractionHand::MainHand
+            && self
+                .inventory_for_target(target)?
+                .selected_item_stack()
                 .is_some_and(|stack| stack.kind == ItemKind::BeeHotel)
         {
             return self.handle_bee_hotel_use_item_on_for_target(target, command);
@@ -3933,6 +3968,101 @@ impl RealmServer {
             );
         }
         Ok(updates)
+    }
+
+    fn handle_farming_use_item_on_for_target(
+        &mut self,
+        target: CommandTarget,
+        command: UseItemOnCommand,
+        kind: ItemKind,
+    ) -> ChunkStoreResult<Vec<ServerUpdate>> {
+        if !self.world_behavior_profile.allows_player_place() {
+            return Ok(Vec::new());
+        }
+        let player_position = self.player_for_target(target)?.position();
+        let context = ServerInteractionContext::debug_creative_in(
+            player_position,
+            self.active_dimension.definition.topology,
+        );
+        if !context.may_use_item_on(command.hit) {
+            return Ok(Vec::new());
+        }
+        let action = match kind {
+            ItemKind::WoodenHoe => plan_till(command.hit.block_pos, command.hit.direction, |pos| {
+                self.scheduler.block_at_world(pos)
+            }),
+            ItemKind::WheatSeeds => {
+                plan_plant(command.hit.block_pos, command.hit.direction, |pos| {
+                    self.scheduler.block_at_world(pos)
+                })
+            }
+            _ => None,
+        };
+        let Some(action) = action else {
+            return Ok(Vec::new());
+        };
+        let (pos, state) = match action {
+            FarmingBlockAction::Till { pos, state } | FarmingBlockAction::Plant { pos, state } => {
+                (pos, state)
+            }
+        };
+        if !context.may_place_at(pos) || !self.set_block_from_simulation(pos, state) {
+            return Ok(Vec::new());
+        }
+        if kind == ItemKind::WheatSeeds {
+            let consumed = self
+                .inventory_mut_for_target(target)?
+                .consume_selected_item(ItemKind::WheatSeeds);
+            debug_assert!(
+                consumed,
+                "validated wheat seeds disappeared before planting"
+            );
+        }
+        let mut updates = self.drain_pending_block_delta_updates_for_target(target)?;
+        if kind == ItemKind::WheatSeeds {
+            updates.push(ServerUpdate::PlayerInventory {
+                hotbar: self.inventory_for_target(target)?.hotbar_item_stacks(),
+            });
+        }
+        Ok(updates)
+    }
+
+    fn harvest_wheat_for_target(
+        &mut self,
+        target: CommandTarget,
+        pos: BlockPos,
+        block: RawBlockId,
+    ) {
+        let seed = self.seed
+            ^ self.simulation_tick as i64
+            ^ i64::from(pos.x).wrapping_mul(341_873_128_712)
+            ^ i64::from(pos.y).wrapping_mul(31_337)
+            ^ i64::from(pos.z).wrapping_mul(132_897_987_541);
+        let Some(harvest) = wheat_harvest(block, &mut SimpleRandomSource::new(seed)) else {
+            return;
+        };
+        let player_id = target.player_id();
+        let Some(next_inventory) = self.players.get(player_id).and_then(|player| {
+            player
+                .inventory
+                .with_added_item_stacks(harvest_stacks(harvest))
+        }) else {
+            return;
+        };
+        if !self.set_block_from_simulation(pos, AIR) {
+            return;
+        }
+        if let Some(player) = self.players.get_mut(player_id) {
+            player.inventory = next_inventory;
+        }
+        if let Some(hotbar) = self
+            .players
+            .get(player_id)
+            .map(|player| player.inventory.hotbar_item_stacks())
+        {
+            self.chunk_tracking
+                .queue_update_for_player(player_id, ServerUpdate::PlayerInventory { hotbar });
+        }
     }
 
     fn handle_mallard_nest_use_item_on_for_target(
@@ -4231,8 +4361,49 @@ impl RealmServer {
                 self.block_ticks
                     .schedule_tick(request_pos, target, request.delay, simulation_tick);
             }
+            let above = pos.offset(0, 1, 0);
+            if farmland_moisture(block_id).is_none()
+                && self
+                    .scheduler
+                    .block_at_world(above)
+                    .and_then(wheat_age)
+                    .is_some()
+            {
+                self.set_block_from_simulation(above, AIR);
+            }
+            let below = pos.below();
+            if material_blocks_motion(block_id)
+                && self
+                    .scheduler
+                    .block_at_world(below)
+                    .and_then(farmland_moisture)
+                    .is_some()
+            {
+                self.set_block_from_simulation(below, mclone_worldgen::block::DIRT);
+            }
         }
         changed
+    }
+
+    fn tick_random_farming_blocks(&mut self, game_time: u64, block_ticking_chunks: &[ChunkPos]) {
+        let candidates = random_farming_tick_candidates(self.seed, game_time, block_ticking_chunks);
+        for pos in candidates {
+            let seed = self.seed
+                ^ game_time as i64
+                ^ i64::from(pos.x).wrapping_mul(341_873_128_712)
+                ^ i64::from(pos.y).wrapping_mul(31_337)
+                ^ i64::from(pos.z).wrapping_mul(132_897_987_541);
+            let mut random = SimpleRandomSource::new(seed);
+            let plan = random_farming_tick(
+                pos,
+                &mut random,
+                |sample| self.scheduler.block_at_world(sample),
+                self.scheduler.raw_brightness_at_world(pos, 0),
+            );
+            if let Some(plan) = plan {
+                self.set_block_from_simulation(plan.pos, plan.next_state);
+            }
+        }
     }
 
     fn tick_scheduled_blocks(
@@ -6473,6 +6644,16 @@ impl LocalRealmSession {
             .players
             .get(self.player_id())
             .map(|player| &player.inventory)
+            .expect("local realm session player must exist")
+    }
+
+    #[cfg(test)]
+    pub(crate) fn inventory_mut(&mut self) -> &mut ServerInventory {
+        let player_id = self.player_id();
+        self.server
+            .players
+            .get_mut(player_id)
+            .map(|player| &mut player.inventory)
             .expect("local realm session player must exist")
     }
 

@@ -247,6 +247,7 @@ mod tests {
                     "class": match visual.class {
                         FirstPartyVisualClass::Empty => "empty",
                         FirstPartyVisualClass::Solid => "solid",
+                        FirstPartyVisualClass::Farmland => "farmland",
                         FirstPartyVisualClass::Slab => "slab",
                         FirstPartyVisualClass::Stair => "stair",
                         FirstPartyVisualClass::CrossedPlane => "crossed_plane",
@@ -268,7 +269,7 @@ mod tests {
         );
 
         let catalog = FirstPartyVisualCatalog::load(&source).unwrap();
-        assert_eq!(catalog.definitions().count(), 221);
+        assert_eq!(catalog.definitions().count(), 237);
         assert_eq!(
             catalog
                 .get(BlockStateId(1))
