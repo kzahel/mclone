@@ -3,13 +3,13 @@
 Topic: `playable-showcases`
 
 Status: implemented with three accepted public creature showcases, one
-accepted public field showcase, and one locally accepted working-garden
-showcase awaiting exact public deployment verification as of 2026-08-13.
+accepted public field showcase, and one accepted public working-garden
+showcase as of 2026-08-13.
 `mallard-ecology` proves a wetland motion/hatching/discovery loop;
 `deer-forest-edge` proves a contrasting multi-chunk habitat, authoritative
 named actions, durable sign, field notes, and an ordinary hunting tool. Bees
 add real flower mutation plus phone-tested managed-habitat placement. Wheat
-adds real till/plant/grow/harvest interactions and phone controls. All four
+adds real till/plant/grow/harvest interactions and phone controls. All five
 compile checked data recipes into transient tiny saves through the shared
 native and Web game path.
 
@@ -478,7 +478,19 @@ planted frame digests are
 `7d9cc28eb2b8bf2f2a064d26c1ce2b07d0ade0a5b07af6ac42edbea3ed265da0`
 and
 `24a19c5a332562e4c1cf8877d24620f6c3ec459b7b98f25ef39f04c65ad3651a`.
-Exact public evidence remains Tactical 291's final closeout gate.
+Revision `1b44c53f` deployed the garden as asset version
+`1b44c53fa153-20260813114846` and Worker version
+`c4f10fc1-0494-4e1e-977d-f4c8924501e0`. Exact public desktop and phone gates
+repeated the complete local loop and retained zero browser world records. Their
+initial frames are byte-identical to local. Inspected public harvested digests
+are
+`1f3afda1a07d7d18485525ce0cdcc1a82da612486eae5fdd7b3717e87d54f6fc`
+and
+`1ac1c45ae85ecceae0efcb72a7d7798c53bde5ee4e1970d3530764c58204e1cf`;
+public planted digests are
+`a5b50245f731472b4c1a482680a60fb6bbe2219f23f9032b4617cd35c0aa33cb`
+and
+`ed062b33b023cfdbd6ac95685632bd6df128d0e3dbf015aea0d274fb46d17ce8`.
 
 ## Code and Documentation Map
 

@@ -1,7 +1,7 @@
 # Tactical 291: Functional Kitchen Garden Foundation
 
-Status: **implementation and local desktop/phone acceptance complete
-2026-08-13; exact-revision deployment verification pending.**
+Status: **complete 2026-08-13, including exact-revision public desktop and
+phone acceptance.**
 
 Topics:
 
@@ -379,8 +379,32 @@ The proportional closeout matrix passes on 2026-08-13:
 - flat Android debug and Android XR release APK builds through the canonical
   project scripts.
 
-### Remaining closeout
+### Deployment receipt
 
-- Push and deploy the exact revision.
-- Repeat the desktop and phone gates against the public URL, inspect their
-  captures, and record the deployment receipt here.
+Implementation and host-validation revision `1b44c53f` deployed as asset
+version `1b44c53fa153-20260813114846` and Cloudflare Worker version
+`c4f10fc1-0494-4e1e-977d-f4c8924501e0`. The clean public review URL is:
+
+```text
+https://mclone.kzahel.com/app.html?showcase=kitchen-garden
+```
+
+The exact public desktop and 390×844 phone gates repeated the local domain
+outcomes: automatic growth; open, cross, close, and collide at X `5.925`;
+mature state-308 harvest to a visible randomized two- or three-carrot item
+drop; proximity pickup; age-zero state-301 planting through keyboard or touch
+hotbar controls; and zero records in every IndexedDB world store.
+
+The inspected public initial desktop and phone frames are byte-identical to
+their local counterparts, with SHA-256
+`1f5173416ec3bbc46338937911957e6a9c274bda17b2e2c0a95a7a5a4fec0de1`
+and
+`abd18032ce71f331e8f11c5b724bf9b870a346e035574ddc595d6e0f95931dee`.
+Public harvested frames have SHA-256
+`1f3afda1a07d7d18485525ce0cdcc1a82da612486eae5fdd7b3717e87d54f6fc`
+and
+`1ac1c45ae85ecceae0efcb72a7d7798c53bde5ee4e1970d3530764c58204e1cf`;
+public planted frames have SHA-256
+`a5b50245f731472b4c1a482680a60fb6bbe2219f23f9032b4617cd35c0aa33cb`
+and
+`ed062b33b023cfdbd6ac95685632bd6df128d0e3dbf015aea0d274fb46d17ce8`.

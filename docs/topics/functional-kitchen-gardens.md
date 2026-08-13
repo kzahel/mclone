@@ -2,10 +2,10 @@
 
 Topic: `functional-kitchen-gardens`
 
-Status: **live shared implementation and local desktop/phone acceptance
-complete under Tactical
+Status: **live shared implementation and exact public desktop/phone
+acceptance complete under Tactical
 [`291`](../tactical/291-functional-kitchen-garden-foundation.md) on
-2026-08-13; exact public deployment verification remains.**
+2026-08-13.**
 
 ## Purpose
 
@@ -80,8 +80,8 @@ controls, and zero browser persistence. The gate exposed and fixed a shared
 tall-collision lookup defect rather than compensating in the showcase.
 
 Implementation commits are `1e68d96d`, `f1c78ef1`, `e3b65ba2`, `1dd5687a`,
-`bee025f2`, and `e5b8d2f9`. Exact captures, digests, commands, and the pending
-deployment closeout live in Tactical 291.
+`bee025f2`, and `e5b8d2f9`. Exact local and public captures, digests, commands,
+and deployment receipt live in Tactical 291.
 
 ## Deliberate Later Work
 
@@ -112,8 +112,8 @@ versions of its mechanics.
 
 ## Recommended Next Work
 
-After Tactical 291's public acceptance, promote rabbits as the next contrasting
-creature chapter: substrate-qualified burrows, dawn/dusk emergence, wary
+Promote rabbits as the next contrasting creature chapter:
+substrate-qualified burrows, dawn/dusk emergence, wary
 foraging, carrot attraction, bounded crop raids, fence/gate-aware escape and
 exclusion, breeding with real food, persistent family/burrow state, and field
 notes based on ordinary evidence. Decide whether burrow mouths need a terrain
