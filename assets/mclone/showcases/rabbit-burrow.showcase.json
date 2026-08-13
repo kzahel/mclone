@@ -8,8 +8,8 @@
   "dayTime": 12000,
   "freezeTime": true,
   "entry": {
-    "feet": [14.5, 65.0, 14.0],
-    "lookAt": [9.0, 65.5, 9.0]
+    "feet": [14.5, 65.0, 18.5],
+    "lookAt": [15.0, 65.5, 9.5]
   },
   "blockPatches": [
     { "position": [16, 65, 8], "block": "minecraft:oak_fence[east=true,north=false,south=true,waterlogged=false,west=false]", "liveInstantiation": "mclone-oak-fence-placement" },

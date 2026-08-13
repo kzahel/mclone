@@ -970,6 +970,47 @@ async function run() {
             throw new Error(`closed rabbit-garden gate did not protect mature carrots: ${JSON.stringify({ initialCarrotStates, protectedCarrotStates })}`);
           }
 
+          await page.evaluate(() => globalThis.__mcloneWebApp.frameBlock?.(14, 64, 10, true));
+          const gateApproachPointerId = 300;
+          if (mobileShowcase) {
+            await dispatchCanvasPointerEvent(page, "pointerdown", {
+              pointerId: gateApproachPointerId,
+              xFraction: 0.24,
+              yFraction: 0.72,
+              buttons: 1,
+            });
+            await dispatchCanvasPointerEvent(page, "pointermove", {
+              pointerId: gateApproachPointerId,
+              xFraction: 0.24,
+              yFraction: 0.50,
+              buttons: 1,
+            });
+          } else {
+            await dispatchKeyboardEvent(page, "keydown", { code: "KeyW", key: "w" });
+          }
+          try {
+            await page.waitForFunction(
+              () => Number(globalThis.__mcloneWebApp?.state?.cameraZ) <= 13,
+              undefined,
+              { timeout: 12_000 },
+            );
+          } finally {
+            if (mobileShowcase) {
+              await dispatchCanvasPointerEvent(page, "pointerup", {
+                pointerId: gateApproachPointerId,
+                xFraction: 0.24,
+                yFraction: 0.50,
+                buttons: 0,
+              });
+              await page.waitForFunction(
+                () => globalThis.__mcloneWebApp?.state?.touchPointerActiveCount === 0,
+                undefined,
+                { timeout: 10_000 },
+              );
+            } else {
+              await dispatchKeyboardEvent(page, "keyup", { code: "KeyW", key: "w" });
+            }
+          }
           await page.evaluate(
             () => globalThis.__mcloneWebApp.frameBlock?.(16, 65, 10, true),
           );

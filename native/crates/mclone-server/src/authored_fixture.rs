@@ -100,7 +100,7 @@ impl AuthoredWorldFixtureKind {
             Self::DeerForestEdge => [8.5, 65.0, 29.5],
             Self::BeeFloweringMeadow => [8.5, 65.0, 24.5],
             Self::WheatFarming => [8.5, 64.0, 14.5],
-            Self::RabbitMeadow => [14.5, 65.0, 14.0],
+            Self::RabbitMeadow => [14.5, 65.0, 18.5],
         }
     }
 
