@@ -160,8 +160,15 @@ const showcaseArgIndex = process.argv.indexOf("--showcase");
 const showcase = showcaseArgIndex >= 0
   ? String(process.argv[showcaseArgIndex + 1] ?? "")
   : "";
-if (showcase && !["mallard-ecology", "deer-forest-edge", "bee-pollination"].includes(showcase)) {
-  throw new Error(`--showcase requires mallard-ecology, deer-forest-edge, or bee-pollination; got ${showcase}`);
+if (showcase && ![
+  "mallard-ecology",
+  "deer-forest-edge",
+  "bee-pollination",
+  "wheat-farming",
+].includes(showcase)) {
+  throw new Error(
+    `--showcase requires mallard-ecology, deer-forest-edge, bee-pollination, or wheat-farming; got ${showcase}`,
+  );
 }
 const deployedBaseUrlArgIndex = process.argv.indexOf("--deployed-base-url");
 const deployedBaseUrl = deployedBaseUrlArgIndex >= 0
@@ -799,15 +806,19 @@ async function run() {
       if (showcase) {
         const deerShowcase = showcase === "deer-forest-edge";
         const beeShowcase = showcase === "bee-pollination";
+        const wheatShowcase = showcase === "wheat-farming";
         try {
           await page.waitForFunction(
-            ({ deerShowcase, beeShowcase }) => {
+            ({ deerShowcase, beeShowcase, wheatShowcase }) => {
               const state = globalThis.__mcloneWebApp?.state;
               return state?.startupReady === true
                 && state.streamingSettled === true
                 && state.pendingCompileJobCount === 0
                 && state.entityCount >= state.showcaseEntityCount
-                && (beeShowcase
+                && (wheatShowcase
+                  ? state.woodenHoeHotbarCount === 1
+                    && state.wheatSeedHotbarCount === 8
+                  : beeShowcase
                   ? state.beeCount >= state.showcaseBeeCount
                     && state.beeNestCount >= state.showcaseBeeNestCount
                     && state.beeHotelCount >= state.showcaseBeeHotelCount
@@ -823,23 +834,68 @@ async function run() {
                     && (state.mallardFieldGuideBits & state.showcaseFieldGuideBits)
                       === state.showcaseFieldGuideBits)
                 && state.dayTime === 6000
-                && (deerShowcase || beeShowcase || (
+                && (wheatShowcase || deerShowcase || beeShowcase || (
                   state.mallardEggHotbarCount === 0
                   && state.mallardFeatherHotbarCount === 0
                 ))
-                && state.actorCount >= 4
-                && state.drawnActorCount >= 4;
+                && (wheatShowcase || (
+                  state.actorCount >= 4
+                  && state.drawnActorCount >= 4
+                ));
             },
-            { deerShowcase, beeShowcase },
+            { deerShowcase, beeShowcase, wheatShowcase },
             { timeout: 60_000 },
           );
         } catch (error) {
           const state = await page.evaluate(() => globalThis.__mcloneWebApp?.state ?? null);
           throw new Error(`showcase did not settle: ${error instanceof Error ? error.message : String(error)}\nstate=${JSON.stringify(state, null, 2)}`);
         }
-        const behaviorStart = await page.evaluate(
+        let behaviorStart = await page.evaluate(
           () => globalThis.__mcloneWebApp?.state?.lastReport ?? null,
         );
+        let behaviorEnd = behaviorStart;
+        /** @type {Record<string, any>} */
+        let behaviorProbe = {};
+        if (wheatShowcase) {
+          const cropPositions = [
+            [5, 63, 5], [11, 63, 5], [5, 63, 6],
+            [11, 63, 6], [5, 63, 7], [11, 63, 7],
+            [5, 64, 5], [6, 64, 5], [7, 64, 5],
+            [9, 64, 5], [10, 64, 5], [11, 64, 5],
+            [5, 64, 6], [6, 64, 6], [7, 64, 6],
+            [10, 64, 6], [11, 64, 6],
+          ];
+          const initialCropStates = await page.evaluate(
+            (positions) => positions.map(
+              ([x, y, z]) => globalThis.__mcloneWebApp.blockStateAt?.(x, y, z)?.blockStateId,
+            ),
+            cropPositions,
+          );
+          await page.waitForFunction(
+            ({ positions, initial }) => positions.some(
+              ([x, y, z], index) => globalThis.__mcloneWebApp
+                .blockStateAt?.(x, y, z)?.blockStateId !== initial[index],
+            ),
+            { positions: cropPositions, initial: initialCropStates },
+            { timeout: 60_000 },
+          );
+          const finalCropStates = await page.evaluate(
+            (positions) => positions.map(
+              ([x, y, z]) => globalThis.__mcloneWebApp.blockStateAt?.(x, y, z)?.blockStateId,
+            ),
+            cropPositions,
+          );
+          behaviorEnd = await page.evaluate(
+            () => globalThis.__mcloneWebApp?.state?.lastReport ?? null,
+          );
+          behaviorProbe = {
+            initialCropStates,
+            finalCropStates,
+            automaticTransitionCount: initialCropStates.filter(
+              (state, index) => state !== finalCropStates[index],
+            ).length,
+          };
+        } else {
         const beeBehaviorSamples = beeShowcase ? [behaviorStart] : [];
         try {
           const sampleCount = beeShowcase ? 18 : 1;
@@ -881,7 +937,7 @@ async function run() {
           );
           throw new Error(`showcase behavior clock did not advance: ${error instanceof Error ? error.message : String(error)}\nstart=${JSON.stringify(behaviorStart)}\ncurrent=${JSON.stringify(state)}`);
         }
-        const behaviorEnd = await page.evaluate(
+        behaviorEnd = await page.evaluate(
           () => globalThis.__mcloneWebApp?.state?.lastReport ?? null,
         );
         /** @param {unknown} value */
@@ -917,7 +973,7 @@ async function run() {
           const endIndex = endDeerPresentationIds.indexOf(id);
           return endDeerWalkDistances[endIndex] - startDeerWalkDistances[index];
         });
-        const behaviorProbe = {
+        behaviorProbe = {
           elapsedTicks: String(behaviorEnd[`${subject}TickCounts`] ?? "")
             .split(",")
             .map((tick, index) => Number(tick) - Number(String(behaviorStart[`${subject}TickCounts`] ?? "").split(",")[index])),
@@ -1095,6 +1151,7 @@ async function run() {
             }, null, 2)}`);
           }
         }
+        }
         await page.evaluate(() => globalThis.__mcloneWebApp?.pauseRendering?.());
         await page.waitForFunction(
           () => globalThis.__mcloneWebApp?.state?.tickFrameBusy === false,
@@ -1161,6 +1218,135 @@ async function run() {
             { timeout: 10_000 },
           );
         }
+        let farmingInteractionProbe = null;
+        if (wheatShowcase) {
+          await page.evaluate(() => globalThis.__mcloneWebApp?.resumeRendering?.());
+          const useTouchControls = mobileShowcase;
+          /** @param {number} slot @param {number} pointerId */
+          const selectSlot = async (slot, pointerId) => {
+            if (useTouchControls) {
+              await dispatchTouchHotbarSlotPointerEvent(page, slot, "pointerdown", {
+                pointerId,
+                buttons: 1,
+              });
+              await dispatchTouchHotbarSlotPointerEvent(page, slot, "pointerup", {
+                pointerId,
+                buttons: 0,
+              });
+            } else {
+              const digit = String(slot + 1);
+              await dispatchKeyboardEvent(page, "keydown", {
+                code: `Digit${digit}`,
+                key: digit,
+              });
+              await dispatchKeyboardEvent(page, "keyup", {
+                code: `Digit${digit}`,
+                key: digit,
+              });
+            }
+            await page.waitForFunction(
+              (selected) => globalThis.__mcloneWebApp?.state?.selectedHotbarSlot === selected,
+              slot,
+              { timeout: 10_000 },
+            );
+          };
+          /**
+           * @param {"attack" | "use"} key
+           * @param {"break" | "place"} action
+           * @param {number} pointerId
+           */
+          const interact = async (key, action, pointerId) => useTouchControls
+            ? exerciseFramedTouchInteractionButton(page, key, action, pointerId)
+            : page.evaluate(
+                (requested) => globalThis.__mcloneWebApp.interactBlock?.(requested) ?? null,
+                action,
+              );
+
+          await selectSlot(7, 101);
+          await page.evaluate(() => globalThis.__mcloneWebApp.frameBlock?.(8, 63, 14));
+          const till = await interact("use", "place", 102);
+          await page.waitForFunction(
+            () => {
+              const state = globalThis.__mcloneWebApp.blockStateAt?.(8, 63, 14)?.blockStateId;
+              return state >= 221 && state <= 228;
+            },
+            undefined,
+            { timeout: 10_000 },
+          );
+
+          await selectSlot(8, 103);
+          const seedsBeforePlant = await page.evaluate(
+            () => Number(globalThis.__mcloneWebApp?.state?.lastReport?.wheatSeedHotbarCount),
+          );
+          await page.evaluate(() => globalThis.__mcloneWebApp.frameBlock?.(8, 63, 14));
+          const plant = await interact("use", "place", 104);
+          await page.waitForFunction(
+            ({ seedsBeforePlant }) => {
+              const crop = globalThis.__mcloneWebApp.blockStateAt?.(8, 64, 14)?.blockStateId;
+              return crop >= 229
+                && crop <= 236
+                && Number(globalThis.__mcloneWebApp?.state?.lastReport?.wheatSeedHotbarCount)
+                  === seedsBeforePlant - 1;
+            },
+            { seedsBeforePlant },
+            { timeout: 10_000 },
+          );
+
+          const wheatBeforeHarvest = await page.evaluate(
+            () => Number(globalThis.__mcloneWebApp?.state?.lastReport?.wheatHotbarCount),
+          );
+          // Frame the mature proof plant beside the player's work area so the
+          // authoritative six-block break reach is exercised normally.
+          await page.evaluate(() => globalThis.__mcloneWebApp.frameBlock?.(9, 64, 9));
+          const harvest = await interact("attack", "break", 105);
+          try {
+            await page.waitForFunction(
+              ({ wheatBeforeHarvest }) => globalThis.__mcloneWebApp
+                  .blockStateAt?.(9, 64, 9)?.blockStateId === 0
+                && Number(globalThis.__mcloneWebApp?.state?.lastReport?.wheatHotbarCount)
+                  === wheatBeforeHarvest + 1,
+              { wheatBeforeHarvest },
+              { timeout: 10_000 },
+            );
+          } catch (error) {
+            const harvestState = await page.evaluate(() => ({
+              crop: globalThis.__mcloneWebApp.blockStateAt?.(9, 64, 9),
+              report: globalThis.__mcloneWebApp?.state?.lastReport,
+            }));
+            throw new Error(`wheat harvest did not settle: ${error instanceof Error ? error.message : String(error)}\nharvest=${JSON.stringify(harvest)}\nstate=${JSON.stringify(harvestState)}`);
+          }
+          farmingInteractionProbe = await page.evaluate(
+            ({ till, plant, harvest, seedsBeforePlant, wheatBeforeHarvest }) => ({
+              ok: globalThis.__mcloneWebApp.blockStateAt?.(8, 63, 14)?.blockStateId >= 221
+                && globalThis.__mcloneWebApp.blockStateAt?.(8, 63, 14)?.blockStateId <= 228
+                && globalThis.__mcloneWebApp.blockStateAt?.(8, 64, 14)?.blockStateId >= 229
+                && globalThis.__mcloneWebApp.blockStateAt?.(8, 64, 14)?.blockStateId <= 236
+                && globalThis.__mcloneWebApp.blockStateAt?.(9, 64, 9)?.blockStateId === 0
+                && Number(globalThis.__mcloneWebApp?.state?.lastReport?.wheatSeedHotbarCount)
+                  >= seedsBeforePlant - 1
+                && Number(globalThis.__mcloneWebApp?.state?.lastReport?.wheatHotbarCount)
+                  === wheatBeforeHarvest + 1,
+              till,
+              plant,
+              harvest,
+              seedsBeforePlant,
+              seedsAfterPlant: Number(
+                globalThis.__mcloneWebApp?.state?.lastReport?.wheatSeedHotbarCount,
+              ),
+              wheatBeforeHarvest,
+              wheatAfterHarvest: Number(
+                globalThis.__mcloneWebApp?.state?.lastReport?.wheatHotbarCount,
+              ),
+            }),
+            { till, plant, harvest, seedsBeforePlant, wheatBeforeHarvest },
+          );
+          await page.evaluate(() => globalThis.__mcloneWebApp?.pauseRendering?.());
+          await page.waitForFunction(
+            () => globalThis.__mcloneWebApp?.state?.tickFrameBusy === false,
+            undefined,
+            { timeout: 10_000 },
+          );
+        }
         const worldRecordCounts = await page.evaluate(async () => {
           const stores = [
             "dimensionChunks",
@@ -1194,11 +1380,14 @@ async function run() {
           pageErrors.length > 0
           || canvasPixels.distinctInteriorColorCount < 2
           || result?.showcaseId !== showcase
-          || result?.showcaseRevision !== (beeShowcase ? 2 : deerShowcase ? 1 : 2)
-          || result?.activeWorldSeedText !== (beeShowcase ? "17505" : deerShowcase ? "17504" : "17503")
+          || result?.showcaseRevision !== (wheatShowcase ? 1 : beeShowcase ? 2 : deerShowcase ? 1 : 2)
+          || result?.activeWorldSeedText !== (wheatShowcase ? "17506" : beeShowcase ? "17505" : deerShowcase ? "17504" : "17503")
           || result?.generationProfile !== "authored-only"
           || result?.dayTime !== 6000
-          || (beeShowcase
+          || (wheatShowcase
+            ? behaviorProbe.automaticTransitionCount < 1
+              || farmingInteractionProbe?.ok !== true
+            : beeShowcase
             ? result?.beeCount < 3
               || result?.beeNestCount < 1
               || (result?.beeFieldGuideBits & 16) !== 16
@@ -1207,7 +1396,8 @@ async function run() {
             : result?.mallardCount < 4
               || result?.mallardNestCount !== 0
               || result?.mallardFieldGuideBits === 1)
-          || String(result?.showcaseEntryEye) !== `${result.cameraX},${result.cameraY},${result.cameraZ}`
+          || (!wheatShowcase
+            && String(result?.showcaseEntryEye) !== `${result.cameraX},${result.cameraY},${result.cameraZ}`)
           || (mobileShowcase && result?.touchControlsVisible !== true)
           || (mobileShowcase && beeShowcase && mobileBeeUseProbe?.ok !== true)
           || Object.values(worldRecordCounts).some((count) => count !== 0)
@@ -1228,6 +1418,7 @@ async function run() {
           worldRecordCounts,
           behaviorProbe,
           mobileBeeUseProbe,
+          farmingInteractionProbe,
           result,
         }, null, 2));
         return;
@@ -7478,6 +7669,16 @@ async function exerciseTouchButton(page, key, pointerId) {
  */
 async function exerciseTouchInteractionButton(page, key, action, pointerId) {
   await page.evaluate(() => globalThis.__mcloneWebApp?.frameInteractionSurface?.());
+  return exerciseFramedTouchInteractionButton(page, key, action, pointerId);
+}
+
+/**
+ * @param {Page} page
+ * @param {"attack" | "use"} key
+ * @param {"break" | "place"} action
+ * @param {number} pointerId
+ */
+async function exerciseFramedTouchInteractionButton(page, key, action, pointerId) {
   const startCommandCount = await page.evaluate(
     () => globalThis.__mcloneWebApp?.state?.lastReport?.commandCount ?? 0,
   );

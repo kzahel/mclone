@@ -1658,6 +1658,25 @@ impl WebSceneHost {
             .map_err(JsValue::from)
     }
 
+    /// Smoke/support helper for reproducibly aiming ordinary player controls
+    /// at a known loaded block. The helper changes only the normal player
+    /// camera; the following use/attack still travels through live gameplay.
+    #[wasm_bindgen(js_name = frameBlock)]
+    pub fn frame_block(&mut self, x: i32, y: i32, z: i32) -> Result<JsValue, JsValue> {
+        let block = BlockPos::new(x, y, z);
+        if self
+            .host_ref()?
+            .mono_client()
+            .and_then(|client| client.block_state_at_block_pos(block))
+            .is_none()
+        {
+            return Err(JsValue::from_str("cannot frame an unloaded block"));
+        }
+        aim_player_host_at_block(self.host_mut()?, block);
+        self.diagnostic_report(None, false, 0.0, false)
+            .map_err(JsValue::from)
+    }
+
     #[wasm_bindgen(js_name = interactBlock)]
     pub fn interact_block(&mut self, action: &str) -> Result<JsValue, JsValue> {
         let action = match action {
@@ -3784,6 +3803,26 @@ impl WebSceneHost {
                         .map(|stack| f64::from(stack.count))
                         .sum(),
                 )?;
+                for (name, kind) in [
+                    ("woodenHoeHotbarCount", mclone_protocol::ItemKind::WoodenHoe),
+                    (
+                        "wheatSeedHotbarCount",
+                        mclone_protocol::ItemKind::WheatSeeds,
+                    ),
+                    ("wheatHotbarCount", mclone_protocol::ItemKind::Wheat),
+                ] {
+                    report_set_number(
+                        &object,
+                        name,
+                        client
+                            .player_inventory()
+                            .iter()
+                            .flatten()
+                            .filter(|stack| stack.kind == kind)
+                            .map(|stack| f64::from(stack.count))
+                            .sum(),
+                    )?;
+                }
                 report_set_number(
                     &object,
                     "playerJumpStatistic",

@@ -45,6 +45,7 @@ pub enum AuthoredWorldFixtureKind {
     MallardWetland,
     DeerForestEdge,
     BeeFloweringMeadow,
+    WheatFarming,
     LobbyTableV2,
     LobbyIslandV2,
 }
@@ -57,6 +58,7 @@ impl AuthoredWorldFixtureKind {
             Self::MallardWetland => "mallard-wetland-v1",
             Self::DeerForestEdge => "deer-forest-edge-v1",
             Self::BeeFloweringMeadow => "bee-flowering-meadow-v1",
+            Self::WheatFarming => "wheat-farming-v1",
             Self::LobbyTableV2 => "lobby-table-a-v2",
             Self::LobbyIslandV2 => "lobby-island-b-v2",
         }
@@ -69,6 +71,7 @@ impl AuthoredWorldFixtureKind {
             Self::MallardWetland => "mallard-wetland-v1",
             Self::DeerForestEdge => "deer-forest-edge-v1",
             Self::BeeFloweringMeadow => "bee-flowering-meadow-v1",
+            Self::WheatFarming => "wheat-farming-v1",
             Self::LobbyTableV2 => "lobby-table-a-v2",
             Self::LobbyIslandV2 => "lobby-island-b-v2",
         }
@@ -81,6 +84,7 @@ impl AuthoredWorldFixtureKind {
             Self::MallardWetland => 17_503,
             Self::DeerForestEdge => 17_504,
             Self::BeeFloweringMeadow => 17_505,
+            Self::WheatFarming => 17_506,
         }
     }
 
@@ -91,6 +95,7 @@ impl AuthoredWorldFixtureKind {
             Self::MallardWetland => [8.5, 65.0, 18.5],
             Self::DeerForestEdge => [8.5, 65.0, 29.5],
             Self::BeeFloweringMeadow => [8.5, 65.0, 24.5],
+            Self::WheatFarming => [8.5, 64.0, 14.5],
         }
     }
 
@@ -104,6 +109,7 @@ impl AuthoredWorldFixtureKind {
             Self::MallardWetland => [8.5, 64.88, 7.5],
             Self::DeerForestEdge => [8.5, 65.0, 8.5],
             Self::BeeFloweringMeadow => [8.5, 65.0, 8.5],
+            Self::WheatFarming => [8.5, 65.0, 8.5],
         }
     }
 
@@ -118,6 +124,7 @@ impl AuthoredWorldFixtureKind {
             Self::MallardWetland => self.preview_anchor(),
             Self::DeerForestEdge => self.preview_anchor(),
             Self::BeeFloweringMeadow => self.preview_anchor(),
+            Self::WheatFarming => self.preview_anchor(),
         }
     }
 
@@ -130,6 +137,7 @@ impl AuthoredWorldFixtureKind {
             Self::MallardWetland => [8, 64, 18],
             Self::DeerForestEdge => [8, 64, 29],
             Self::BeeFloweringMeadow => [8, 64, 24],
+            Self::WheatFarming => [8, 63, 14],
         }
     }
 
@@ -224,6 +232,9 @@ pub fn authored_world_fixture_records(
                 }
                 AuthoredWorldFixtureKind::BeeFloweringMeadow => {
                     author_bee_flowering_meadow_chunk(&mut buffer)
+                }
+                AuthoredWorldFixtureKind::WheatFarming => {
+                    author_wheat_farming_site_chunk(&mut buffer)
                 }
             }
             chunks.insert(pos, GeneratedChunk::from_mutable_buffer(buffer));
@@ -400,6 +411,19 @@ fn author_flat_grass_chunk(chunk: &mut MutableChunkBlockBuffer) {
             chunk.set_block_at_y(x, 62, z, DIRT);
             chunk.set_block_at_y(x, 63, z, GRASS_BLOCK);
         }
+    }
+}
+
+fn author_wheat_farming_site_chunk(chunk: &mut MutableChunkBlockBuffer) {
+    author_flat_grass_chunk(chunk);
+    if chunk.chunk_x != 0 || chunk.chunk_z != 0 {
+        return;
+    }
+    // The base terrain provides only a naturalistic water-fed field site.
+    // Farmland and crops remain recipe patches backed by live-game evidence.
+    for z in 4..=12 {
+        chunk.set_block_at_y(8, 62, z, DIRT);
+        chunk.set_block_at_y(8, 63, z, WATER);
     }
 }
 
@@ -700,6 +724,7 @@ mod tests {
             AuthoredWorldFixtureKind::MallardWetland,
             AuthoredWorldFixtureKind::DeerForestEdge,
             AuthoredWorldFixtureKind::BeeFloweringMeadow,
+            AuthoredWorldFixtureKind::WheatFarming,
             AuthoredWorldFixtureKind::LobbyTableV2,
             AuthoredWorldFixtureKind::LobbyIslandV2,
         ] {

@@ -8,7 +8,9 @@ use mclone_protocol::{
     DeerFieldGuideProgress, DeerLifeStage, DeerObservationKind, DeerSex, DimensionKey,
     EntityRotation, ItemKind, ItemStackSnapshot, MallardFieldGuideProgress, MallardObservationKind,
 };
-use mclone_worldgen::block::{LILY_PAD, generated_block_state_id};
+use mclone_worldgen::block::{
+    FARMLAND_MOISTURE_0, FARMLAND_MOISTURE_7, LILY_PAD, generated_block_state_id, wheat_for_age,
+};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
@@ -40,19 +42,25 @@ const BEE_POLLINATION_RECIPE: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../../assets/mclone/showcases/bee-pollination.showcase.json"
 ));
+const WHEAT_FARMING_RECIPE: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../../assets/mclone/showcases/wheat-farming.showcase.json"
+));
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum PlayableShowcaseId {
     MallardEcology,
     DeerForestEdge,
     BeePollination,
+    WheatFarming,
 }
 
 impl PlayableShowcaseId {
-    pub const ALL: [Self; 3] = [
+    pub const ALL: [Self; 4] = [
         Self::MallardEcology,
         Self::DeerForestEdge,
         Self::BeePollination,
+        Self::WheatFarming,
     ];
 
     pub const fn label(self) -> &'static str {
@@ -60,6 +68,7 @@ impl PlayableShowcaseId {
             Self::MallardEcology => "mallard-ecology",
             Self::DeerForestEdge => "deer-forest-edge",
             Self::BeePollination => "bee-pollination",
+            Self::WheatFarming => "wheat-farming",
         }
     }
 
@@ -68,8 +77,9 @@ impl PlayableShowcaseId {
             "mallard-ecology" => Ok(Self::MallardEcology),
             "deer-forest-edge" => Ok(Self::DeerForestEdge),
             "bee-pollination" => Ok(Self::BeePollination),
+            "wheat-farming" => Ok(Self::WheatFarming),
             _ => Err(PlayableShowcaseError::invalid(format!(
-                "unknown playable showcase `{value}`; expected mallard-ecology, deer-forest-edge, or bee-pollination"
+                "unknown playable showcase `{value}`; expected mallard-ecology, deer-forest-edge, bee-pollination, or wheat-farming"
             ))),
         }
     }
@@ -79,6 +89,7 @@ impl PlayableShowcaseId {
             Self::MallardEcology => MALLARD_ECOLOGY_RECIPE,
             Self::DeerForestEdge => DEER_FOREST_EDGE_RECIPE,
             Self::BeePollination => BEE_POLLINATION_RECIPE,
+            Self::WheatFarming => WHEAT_FARMING_RECIPE,
         }
     }
 }
@@ -154,6 +165,11 @@ enum LiveInstantiationSubject {
     BeeHotel,
     Beeswax,
     BeeObservation,
+    FarmSoil,
+    WheatCrop,
+    WoodenHoe,
+    WheatSeeds,
+    WheatItem,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -260,6 +276,36 @@ pub const LIVE_INSTANTIATION_EVIDENCE: &[LiveInstantiationEvidence] = &[
         ordinary_producer: "ordinary bee proximity, behavior, pollination, and harvest observation paths",
         contract: "mclone-server::integrated::route_bee_ecology_cues",
         subject: LiveInstantiationSubject::BeeObservation,
+    },
+    LiveInstantiationEvidence {
+        id: "mclone-farmland-tilling",
+        ordinary_producer: "authoritative use of a wooden hoe on grass or dirt",
+        contract: "mclone-server::integrated::tests::debug_interactions::wooden_hoe_seed_and_harvest_form_an_authoritative_inventory_loop",
+        subject: LiveInstantiationSubject::FarmSoil,
+    },
+    LiveInstantiationEvidence {
+        id: "mclone-wheat-planting-and-growth",
+        ordinary_producer: "seed planting followed by loaded-world random crop ticks",
+        contract: "mclone-server::farming::tests::hydrated_farmland_advances_wheat_through_the_reference_probability",
+        subject: LiveInstantiationSubject::WheatCrop,
+    },
+    LiveInstantiationEvidence {
+        id: "mclone-farming-starter-hoe",
+        ordinary_producer: "fresh ordinary Mclone-world starter inventory",
+        contract: "mclone-server::integrated::tests::debug_interactions::wooden_hoe_seed_and_harvest_form_an_authoritative_inventory_loop",
+        subject: LiveInstantiationSubject::WoodenHoe,
+    },
+    LiveInstantiationEvidence {
+        id: "mclone-farming-starter-seeds",
+        ordinary_producer: "fresh ordinary Mclone-world starter inventory",
+        contract: "mclone-server::integrated::tests::debug_interactions::wooden_hoe_seed_and_harvest_form_an_authoritative_inventory_loop",
+        subject: LiveInstantiationSubject::WheatSeeds,
+    },
+    LiveInstantiationEvidence {
+        id: "mclone-mature-wheat-harvest",
+        ordinary_producer: "authoritative mature wheat harvest",
+        contract: "mclone-server::integrated::tests::debug_interactions::wooden_hoe_seed_and_harvest_form_an_authoritative_inventory_loop",
+        subject: LiveInstantiationSubject::WheatItem,
     },
 ];
 
@@ -383,6 +429,10 @@ fn validate_recipe(
         validate_block_position(patch.position)?;
         let expected = match patch.block.as_str() {
             "minecraft:lily_pad" => LiveInstantiationSubject::LilyPad,
+            "minecraft:farmland[moisture=0]" | "minecraft:farmland[moisture=7]" => {
+                LiveInstantiationSubject::FarmSoil
+            }
+            value if wheat_block_age(value).is_some() => LiveInstantiationSubject::WheatCrop,
             value => {
                 return Err(PlayableShowcaseError::invalid(format!(
                     "showcase block `{value}` is not in the bounded block-patch allowlist"
@@ -530,6 +580,9 @@ fn validate_recipe(
             "mclone:hunting_spear" => LiveInstantiationSubject::HuntingSpear,
             "mclone:bee_hotel" => LiveInstantiationSubject::BeeHotel,
             "mclone:beeswax" => LiveInstantiationSubject::Beeswax,
+            "minecraft:wooden_hoe" => LiveInstantiationSubject::WoodenHoe,
+            "minecraft:wheat_seeds" => LiveInstantiationSubject::WheatSeeds,
+            "minecraft:wheat" => LiveInstantiationSubject::WheatItem,
             value => {
                 return Err(PlayableShowcaseError::invalid(format!(
                     "showcase inventory item `{value}` is not in the bounded item allowlist"
@@ -580,6 +633,15 @@ fn validate_evidence(
     Ok(())
 }
 
+fn wheat_block_age(block: &str) -> Option<u8> {
+    let age = block
+        .strip_prefix("minecraft:wheat[age=")?
+        .strip_suffix(']')?
+        .parse::<u8>()
+        .ok()?;
+    (age <= 7).then_some(age)
+}
+
 fn validate_position(label: &str, position: [f64; 3]) -> Result<(), PlayableShowcaseError> {
     if !position.into_iter().all(f64::is_finite)
         || position[0].abs() > 64.0
@@ -625,6 +687,12 @@ fn apply_block_patches(
         };
         let block_state = match patch.block.as_str() {
             "minecraft:lily_pad" => generated_block_state_id(LILY_PAD),
+            "minecraft:farmland[moisture=0]" => generated_block_state_id(FARMLAND_MOISTURE_0),
+            "minecraft:farmland[moisture=7]" => generated_block_state_id(FARMLAND_MOISTURE_7),
+            value if wheat_block_age(value).is_some() => generated_block_state_id(
+                wheat_for_age(wheat_block_age(value).expect("guarded wheat age"))
+                    .expect("validated wheat age exists"),
+            ),
             _ => unreachable!("validated block patch"),
         };
         record.snapshot.patch_section_block(
@@ -964,6 +1032,7 @@ enum ShowcaseBaseTerrain {
     MallardWetlandV1,
     DeerForestEdgeV1,
     BeeFloweringMeadowV1,
+    WheatFarmingV1,
 }
 
 impl ShowcaseBaseTerrain {
@@ -973,6 +1042,7 @@ impl ShowcaseBaseTerrain {
             Self::MallardWetlandV1 => AuthoredWorldFixtureKind::MallardWetland,
             Self::DeerForestEdgeV1 => AuthoredWorldFixtureKind::DeerForestEdge,
             Self::BeeFloweringMeadowV1 => AuthoredWorldFixtureKind::BeeFloweringMeadow,
+            Self::WheatFarmingV1 => AuthoredWorldFixtureKind::WheatFarming,
         }
     }
 }
@@ -1414,6 +1484,63 @@ mod tests {
             })
         );
         assert_eq!(player.bee_field_guide.bits(), manifest.bee_field_guide_bits);
+    }
+
+    #[test]
+    fn wheat_farming_recipe_is_data_only_and_uses_live_crop_states() {
+        let identity = ClientIdentity::test_default();
+        let (manifest, store) =
+            playable_showcase_memory_store(PlayableShowcaseId::WheatFarming, &identity).unwrap();
+        assert_eq!(manifest.revision, 1);
+        assert_eq!(manifest.seed, 17_506);
+        assert_eq!(manifest.entity_count, 0);
+        assert_eq!(manifest.entry_feet, [8.5, 64.0, 14.5]);
+        assert_eq!(manifest.entry_eye, [8.5, 65.62, 14.5]);
+        let center = store.chunk(ChunkPos::new(0, 0)).unwrap();
+        let block_at = |pos: BlockPos| {
+            center
+                .snapshot
+                .sections
+                .iter()
+                .find(|section| section.section_y == block_to_section_coord(pos.y))
+                .map(|section| {
+                    section.block_state_id_at(mclone_core::chunk_section_index(
+                        pos.x.rem_euclid(16),
+                        pos.y.rem_euclid(16),
+                        pos.z.rem_euclid(16),
+                    ))
+                })
+                .unwrap_or(mclone_core::AIR_BLOCK_STATE_ID)
+        };
+        assert_eq!(
+            block_at(BlockPos::new(5, 63, 5)),
+            generated_block_state_id(FARMLAND_MOISTURE_0)
+        );
+        assert_eq!(
+            block_at(BlockPos::new(6, 63, 5)),
+            generated_block_state_id(FARMLAND_MOISTURE_7)
+        );
+        assert_eq!(
+            block_at(BlockPos::new(9, 64, 6)),
+            generated_block_state_id(wheat_for_age(7).unwrap())
+        );
+        let player = store
+            .player(&PlayerRecordKey::from_profile_id(identity.profile_id))
+            .unwrap();
+        assert_eq!(
+            player.inventory[7],
+            Some(ItemStackSnapshot {
+                kind: ItemKind::WoodenHoe,
+                count: 1,
+            })
+        );
+        assert_eq!(
+            player.inventory[8],
+            Some(ItemStackSnapshot {
+                kind: ItemKind::WheatSeeds,
+                count: 8,
+            })
+        );
     }
 
     #[test]
