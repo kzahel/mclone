@@ -10,8 +10,9 @@ use mclone_worldgen::prng::SimpleRandomSource;
 use super::biome_tables::{MobSpawnEntry, farm_animal_spawns_for_biome};
 use super::dry_run::{SurfaceProbeFailure, top_motion_blocking_no_leaves_feet_y};
 use super::habitat::{
-    FloweringHabitatFailure, ForestEdgeHabitatFailure, WetlandHabitatFailure,
-    sample_flowering_habitat, sample_forest_edge_habitat, sample_wetland_habitat,
+    FloweringHabitatFailure, ForestEdgeHabitatFailure, RabbitHabitatFailure, WetlandHabitatFailure,
+    sample_flowering_habitat, sample_forest_edge_habitat, sample_rabbit_habitat,
+    sample_wetland_habitat,
 };
 use super::placements::{check_farm_animal_natural_spawn, check_land_creature_natural_spawn};
 
@@ -62,6 +63,9 @@ pub(crate) struct CreatureSpawnDiagnostics {
     pub(crate) flowering_habitats_detected: usize,
     pub(crate) blocked_missing_flowering_data: usize,
     pub(crate) bee_colonies_spawned: usize,
+    pub(crate) rabbit_habitats_detected: usize,
+    pub(crate) blocked_missing_rabbit_data: usize,
+    pub(crate) rabbit_founders_spawned: usize,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -254,6 +258,37 @@ where
                     }
                 } else {
                     result.diagnostics.blocked_missing_forest_edge_data += 1;
+                }
+
+                match sample_rabbit_habitat(pos, &mut block_at) {
+                    Ok(sample) if sample.suitable() => {
+                        result.diagnostics.rabbit_habitats_detected += 1;
+                        if check_land_creature_natural_spawn(
+                            EntityKind::Rabbit,
+                            pos,
+                            |block_pos| block_at(block_pos),
+                            |brightness_pos| raw_brightness_at(brightness_pos),
+                        )
+                        .is_ok()
+                        {
+                            result.requests.push(CreatureSpawnRequest {
+                                kind: EntityKind::Rabbit,
+                                position: Vec3d::new(
+                                    f64::from(pos.x) + 0.5,
+                                    f64::from(pos.y),
+                                    f64::from(pos.z) + 0.5,
+                                ),
+                                y_rot_degrees: random.next_float() * 360.0,
+                            });
+                            result.diagnostics.rabbit_founders_spawned += 1;
+                            continue;
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(RabbitHabitatFailure::MissingBlockData) => {
+                        result.diagnostics.blocked_missing_rabbit_data += 1;
+                        continue;
+                    }
                 }
             }
 

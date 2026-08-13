@@ -68,7 +68,9 @@ impl EngineServerUpdateReport {
                 | ServerUpdate::MallardFieldGuide(_)
                 | ServerUpdate::DeerFieldGuide(_)
                 | ServerUpdate::BeeFieldGuide(_)
+                | ServerUpdate::RabbitFieldGuide(_)
                 | ServerUpdate::BeeSound(_)
+                | ServerUpdate::RabbitSound(_)
                 | ServerUpdate::DeerSound(_)
                 | ServerUpdate::MallardCall(_)
                 | ServerUpdate::MallardTrack(_)
@@ -156,7 +158,9 @@ impl EngineServerUpdateDirtyBatch {
                 ServerUpdate::MallardFieldGuide(_) => {}
                 ServerUpdate::DeerFieldGuide(_) => {}
                 ServerUpdate::BeeFieldGuide(_) => {}
+                ServerUpdate::RabbitFieldGuide(_) => {}
                 ServerUpdate::BeeSound(_) => {}
+                ServerUpdate::RabbitSound(_) => {}
                 ServerUpdate::DeerSound(_) => {}
                 ServerUpdate::MallardCall(_) => {}
                 ServerUpdate::MallardTrack(_) => {}

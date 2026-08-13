@@ -78,15 +78,17 @@ const DEER_ENTITY_CHUNK_RECORD_VERSION: u32 = 5;
 const DEER_BED_ENTITY_CHUNK_RECORD_VERSION: u32 = 6;
 const DEER_ANTLER_SHED_ENTITY_CHUNK_RECORD_VERSION: u32 = 7;
 const BEE_ENTITY_CHUNK_RECORD_VERSION: u32 = 8;
+const RABBIT_ENTITY_CHUNK_RECORD_VERSION: u32 = 9;
 const DEER_ANTLER_SHED_LEGACY_REMAINING_TICKS: i32 = 36_000;
-pub const ENTITY_CHUNK_RECORD_VERSION: u32 = 8;
+pub const ENTITY_CHUNK_RECORD_VERSION: u32 = 9;
 const LEGACY_PLAYER_RECORD_VERSION: u32 = 1;
 const STATISTICS_PLAYER_RECORD_VERSION: u32 = 2;
 const PLAYER_LIFE_RECORD_VERSION: u32 = 3;
 const INVENTORY_AND_MALLARD_PLAYER_RECORD_VERSION: u32 = 4;
 const DEER_FIELD_GUIDE_PLAYER_RECORD_VERSION: u32 = 5;
 const BEE_FIELD_GUIDE_PLAYER_RECORD_VERSION: u32 = 6;
-pub const PLAYER_RECORD_VERSION: u32 = 6;
+const RABBIT_FIELD_GUIDE_PLAYER_RECORD_VERSION: u32 = 7;
+pub const PLAYER_RECORD_VERSION: u32 = 7;
 pub const DIMENSION_RECORD_VERSION: u32 = 2;
 pub const WORLD_METADATA_VERSION: u32 = 3;
 pub const WORLD_METADATA_TARGET_MINECRAFT_VERSION: &str = "1.17.1";
@@ -536,6 +538,25 @@ pub enum EntitySavePayload {
         work_capacity: u32,
         spread_cooldown: u32,
     },
+    Rabbit {
+        home: Option<EntityPersistentId>,
+        dig_target: Option<BlockPos>,
+        life_stage: mclone_protocol::RabbitLifeStage,
+        age_ticks: u32,
+        parents: [Option<EntityPersistentId>; 2],
+        behavior: mclone_protocol::RabbitBehavior,
+        behavior_ticks: u32,
+        health: u8,
+        max_health: u8,
+        love_ticks: u32,
+        breed_cooldown: u32,
+        raid_cooldown: u32,
+    },
+    RabbitBurrow {
+        capacity: u8,
+        residents: [Option<EntityPersistentId>; 6],
+        disturbance_ticks: u32,
+    },
     Item {
         stack: ItemStackSaveRecord,
         age: u64,
@@ -635,6 +656,7 @@ pub struct PlayerRecord {
     pub mallard_field_guide: mclone_protocol::MallardFieldGuideProgress,
     pub deer_field_guide: mclone_protocol::DeerFieldGuideProgress,
     pub bee_field_guide: mclone_protocol::BeeFieldGuideProgress,
+    pub rabbit_field_guide: mclone_protocol::RabbitFieldGuideProgress,
     pub health: f32,
     pub pending_death_cause: Option<PlayerDamageCause>,
 }
@@ -663,6 +685,7 @@ impl PlayerRecord {
             mallard_field_guide: mclone_protocol::MallardFieldGuideProgress::default(),
             deer_field_guide: mclone_protocol::DeerFieldGuideProgress::default(),
             bee_field_guide: mclone_protocol::BeeFieldGuideProgress::default(),
+            rabbit_field_guide: mclone_protocol::RabbitFieldGuideProgress::default(),
             health: DEFAULT_PLAYER_MAX_HEALTH,
             pending_death_cause: None,
         }
@@ -5814,6 +5837,7 @@ fn write_player_record(writer: &mut impl Write, record: &PlayerRecord) -> ChunkS
     write_u32(writer, record.mallard_field_guide.bits())?;
     write_u32(writer, record.deer_field_guide.bits())?;
     write_u32(writer, record.bee_field_guide.bits())?;
+    write_u32(writer, record.rabbit_field_guide.bits())?;
     write_f32(writer, record.health)?;
     write_player_damage_cause(writer, record.pending_death_cause)?;
     writer.flush()?;
@@ -6225,6 +6249,11 @@ fn read_player_record(reader: &mut impl Read) -> ChunkStoreResult<PlayerRecord> 
         } else {
             mclone_protocol::BeeFieldGuideProgress::default()
         },
+        rabbit_field_guide: if codec_version >= RABBIT_FIELD_GUIDE_PLAYER_RECORD_VERSION {
+            mclone_protocol::RabbitFieldGuideProgress::from_bits_retain(read_u32(reader)?)
+        } else {
+            mclone_protocol::RabbitFieldGuideProgress::default()
+        },
         health: if codec_version >= PLAYER_LIFE_RECORD_VERSION {
             read_f32(reader)?
         } else {
@@ -6508,6 +6537,59 @@ fn write_entity_save_payload(
             write_u32(writer, *work_capacity)?;
             write_u32(writer, *spread_cooldown)
         }
+        EntitySavePayload::Rabbit {
+            home,
+            dig_target,
+            life_stage,
+            age_ticks,
+            parents,
+            behavior,
+            behavior_ticks,
+            health,
+            max_health,
+            love_ticks,
+            breed_cooldown,
+            raid_cooldown,
+        } => {
+            write_u8(writer, 10)?;
+            write_optional_entity_persistent_id(writer, *home)?;
+            write_bool(writer, dig_target.is_some())?;
+            if let Some(target) = dig_target {
+                write_i32(writer, target.x)?;
+                write_i32(writer, target.y)?;
+                write_i32(writer, target.z)?;
+            }
+            write_u8(
+                writer,
+                match life_stage {
+                    mclone_protocol::RabbitLifeStage::Kit => 0,
+                    mclone_protocol::RabbitLifeStage::Adult => 1,
+                },
+            )?;
+            write_u32(writer, *age_ticks)?;
+            for parent in parents {
+                write_optional_entity_persistent_id(writer, *parent)?;
+            }
+            write_u8(writer, rabbit_behavior_code(*behavior))?;
+            write_u32(writer, *behavior_ticks)?;
+            write_u8(writer, *health)?;
+            write_u8(writer, *max_health)?;
+            write_u32(writer, *love_ticks)?;
+            write_u32(writer, *breed_cooldown)?;
+            write_u32(writer, *raid_cooldown)
+        }
+        EntitySavePayload::RabbitBurrow {
+            capacity,
+            residents,
+            disturbance_ticks,
+        } => {
+            write_u8(writer, 11)?;
+            write_u8(writer, *capacity)?;
+            for resident in residents {
+                write_optional_entity_persistent_id(writer, *resident)?;
+            }
+            write_u32(writer, *disturbance_ticks)
+        }
         EntitySavePayload::Item {
             stack,
             age,
@@ -6692,10 +6774,115 @@ fn read_entity_save_payload(
                 spread_cooldown,
             })
         }
+        10 if codec_version >= RABBIT_ENTITY_CHUNK_RECORD_VERSION => {
+            let home = read_optional_entity_persistent_id(reader)?;
+            let dig_target = if read_bool(reader)? {
+                Some(BlockPos::new(
+                    read_i32(reader)?,
+                    read_i32(reader)?,
+                    read_i32(reader)?,
+                ))
+            } else {
+                None
+            };
+            let life_stage = match read_u8(reader)? {
+                0 => mclone_protocol::RabbitLifeStage::Kit,
+                1 => mclone_protocol::RabbitLifeStage::Adult,
+                value => {
+                    return Err(ChunkStoreError::InvalidData(format!(
+                        "unknown rabbit life stage {value}"
+                    )));
+                }
+            };
+            let age_ticks = read_u32(reader)?;
+            let parents = [
+                read_optional_entity_persistent_id(reader)?,
+                read_optional_entity_persistent_id(reader)?,
+            ];
+            let behavior = rabbit_behavior_from_code(read_u8(reader)?)?;
+            let behavior_ticks = read_u32(reader)?;
+            let health = read_u8(reader)?;
+            let max_health = read_u8(reader)?;
+            let love_ticks = read_u32(reader)?;
+            let breed_cooldown = read_u32(reader)?;
+            let raid_cooldown = read_u32(reader)?;
+            if max_health == 0 || health > max_health {
+                return Err(ChunkStoreError::InvalidData(
+                    "invalid rabbit health state".to_owned(),
+                ));
+            }
+            Ok(EntitySavePayload::Rabbit {
+                home,
+                dig_target,
+                life_stage,
+                age_ticks,
+                parents,
+                behavior,
+                behavior_ticks,
+                health,
+                max_health,
+                love_ticks,
+                breed_cooldown,
+                raid_cooldown,
+            })
+        }
+        11 if codec_version >= RABBIT_ENTITY_CHUNK_RECORD_VERSION => {
+            let capacity = read_u8(reader)?;
+            let mut residents = [None; 6];
+            for resident in &mut residents {
+                *resident = read_optional_entity_persistent_id(reader)?;
+            }
+            let disturbance_ticks = read_u32(reader)?;
+            if capacity == 0 || usize::from(capacity) > residents.len() {
+                return Err(ChunkStoreError::InvalidData(
+                    "invalid rabbit burrow capacity".to_owned(),
+                ));
+            }
+            Ok(EntitySavePayload::RabbitBurrow {
+                capacity,
+                residents,
+                disturbance_ticks,
+            })
+        }
         value => Err(ChunkStoreError::InvalidData(format!(
             "unknown entity save payload kind {value}"
         ))),
     }
+}
+
+const fn rabbit_behavior_code(behavior: mclone_protocol::RabbitBehavior) -> u8 {
+    match behavior {
+        mclone_protocol::RabbitBehavior::Idle => 0,
+        mclone_protocol::RabbitBehavior::Hop => 1,
+        mclone_protocol::RabbitBehavior::Dig => 2,
+        mclone_protocol::RabbitBehavior::Emerge => 3,
+        mclone_protocol::RabbitBehavior::Forage => 4,
+        mclone_protocol::RabbitBehavior::Raid => 5,
+        mclone_protocol::RabbitBehavior::Flee => 6,
+        mclone_protocol::RabbitBehavior::EnterBurrow => 7,
+        mclone_protocol::RabbitBehavior::Underground => 8,
+        mclone_protocol::RabbitBehavior::Courtship => 9,
+    }
+}
+
+fn rabbit_behavior_from_code(value: u8) -> ChunkStoreResult<mclone_protocol::RabbitBehavior> {
+    Ok(match value {
+        0 => mclone_protocol::RabbitBehavior::Idle,
+        1 => mclone_protocol::RabbitBehavior::Hop,
+        2 => mclone_protocol::RabbitBehavior::Dig,
+        3 => mclone_protocol::RabbitBehavior::Emerge,
+        4 => mclone_protocol::RabbitBehavior::Forage,
+        5 => mclone_protocol::RabbitBehavior::Raid,
+        6 => mclone_protocol::RabbitBehavior::Flee,
+        7 => mclone_protocol::RabbitBehavior::EnterBurrow,
+        8 => mclone_protocol::RabbitBehavior::Underground,
+        9 => mclone_protocol::RabbitBehavior::Courtship,
+        value => {
+            return Err(ChunkStoreError::InvalidData(format!(
+                "unknown rabbit behavior {value}"
+            )));
+        }
+    })
 }
 
 fn write_optional_entity_persistent_id(
@@ -9074,6 +9261,9 @@ mod tests {
             ),
             deer_field_guide: mclone_protocol::DeerFieldGuideProgress::from_bits_retain(0b110101),
             bee_field_guide: mclone_protocol::BeeFieldGuideProgress::from_bits_retain(0b101101),
+            rabbit_field_guide: mclone_protocol::RabbitFieldGuideProgress::from_bits_retain(
+                0b011011,
+            ),
             health: 13.5,
             pending_death_cause: None,
         }

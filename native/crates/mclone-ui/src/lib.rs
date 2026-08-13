@@ -3376,6 +3376,7 @@ pub struct FlatHud {
     pub mallard_field_guide: Option<MallardFieldGuideHud>,
     pub deer_field_guide: Option<DeerFieldGuideHud>,
     pub bee_field_guide: Option<BeeFieldGuideHud>,
+    pub rabbit_field_guide: Option<RabbitFieldGuideHud>,
     pub wheat_target: Option<WheatTargetHud>,
     pub debug: Option<FlatHudDebugOverlay>,
     pub frame_pipeline: Option<FramePipelineHudOverlay>,
@@ -3396,6 +3397,7 @@ impl FlatHud {
             mallard_field_guide: None,
             deer_field_guide: None,
             bee_field_guide: None,
+            rabbit_field_guide: None,
             wheat_target: None,
             debug: None,
             frame_pipeline: None,
@@ -3428,6 +3430,7 @@ impl FlatHud {
             || (self.world_hud_visible && self.mallard_field_guide.is_some())
             || (self.world_hud_visible && self.deer_field_guide.is_some())
             || (self.world_hud_visible && self.bee_field_guide.is_some())
+            || (self.world_hud_visible && self.rabbit_field_guide.is_some())
             || (self.world_hud_visible && self.wheat_target.is_some())
             || self
                 .debug
@@ -3585,6 +3588,7 @@ pub(crate) fn render_flat_hud_transient_layers(
             && hud.wheat_target.is_none())
             && hud.deer_field_guide.is_none()
             && hud.bee_field_guide.is_none()
+            && hud.rabbit_field_guide.is_none()
     {
         return;
     }
@@ -3708,6 +3712,29 @@ pub(crate) fn render_flat_hud_transient_layers(
             },
         );
     }
+    if let Some(guide) = hud.rabbit_field_guide.filter(|guide| guide.discovered > 0) {
+        let rows_above_hotbar = selected_item_rows
+            + u8::from(hud.player_health.is_some())
+            + u8::from(hud.player_statistics.is_some())
+            + u8::from(
+                hud.mallard_field_guide
+                    .is_some_and(|mallard| mallard.discovered > 0),
+            )
+            + u8::from(hud.deer_field_guide.is_some_and(|deer| deer.discovered > 0))
+            + u8::from(hud.bee_field_guide.is_some_and(|bee| bee.discovered > 0));
+        let y = hotbar_top - 14.0 * (f32::from(rows_above_hotbar) + 1.0);
+        Font::default().draw_centered_atlas(
+            draw,
+            &format!("Rabbit field notes {}/{}", guide.discovered, guide.total),
+            scale.width * 0.5,
+            y.max(4.0),
+            if guide.complete {
+                Color::rgba(255, 214, 82, 255)
+            } else {
+                Color::rgba(226, 190, 150, 255)
+            },
+        );
+    }
 }
 
 fn render_player_health(draw: &mut GuiDrawList, center_x: f32, y: f32, health: PlayerHealthHud) {
@@ -3771,6 +3798,13 @@ pub struct DeerFieldGuideHud {
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct BeeFieldGuideHud {
+    pub discovered: u32,
+    pub total: u32,
+    pub complete: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct RabbitFieldGuideHud {
     pub discovered: u32,
     pub total: u32,
     pub complete: bool,

@@ -23,6 +23,8 @@ pub use ecology::{
     DeerUpdateData, MALLARD_FIELD_GUIDE_OBSERVATION_COUNT, MallardCallCue,
     MallardFieldGuideProgress, MallardLifeStage, MallardNestSnapshotData, MallardNestUpdateData,
     MallardObservationKind, MallardSnapshotData, MallardTrackCue, MallardUpdateData,
+    RABBIT_FIELD_GUIDE_OBSERVATION_COUNT, RabbitBehavior, RabbitFieldGuideProgress,
+    RabbitLifeStage, RabbitObservationKind, RabbitSoundCue, RabbitSoundKind,
 };
 pub use ephemeral::{
     ClientEphemeralMessage, EffectiveEphemeralTransport, MAX_EPHEMERAL_MESSAGE_BYTES,
@@ -46,7 +48,7 @@ pub use statistics::{
     SUCCESSFUL_BLOCK_PLACEMENT_STATISTIC_VALUE_KEY, StatisticKey, StatisticKeyError,
 };
 
-pub const PROTOCOL_VERSION: u32 = 41;
+pub const PROTOCOL_VERSION: u32 = 42;
 pub const HOTBAR_SLOT_COUNT: u8 = 9;
 pub const HOTBAR_SLOT_COUNT_USIZE: usize = HOTBAR_SLOT_COUNT as usize;
 pub const MAX_PLAYER_DISPLAY_NAME_BYTES: usize = 16;
@@ -107,6 +109,8 @@ const SERVER_UPDATE_DEER_FIELD_GUIDE: u8 = 26;
 const SERVER_UPDATE_DEER_SOUND: u8 = 27;
 const SERVER_UPDATE_BEE_FIELD_GUIDE: u8 = 28;
 const SERVER_UPDATE_BEE_SOUND: u8 = 29;
+const SERVER_UPDATE_RABBIT_FIELD_GUIDE: u8 = 30;
+const SERVER_UPDATE_RABBIT_SOUND: u8 = 31;
 
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 pub struct SessionCapabilities(u64);
@@ -563,7 +567,9 @@ pub enum ServerUpdate {
     MallardFieldGuide(MallardFieldGuideProgress),
     DeerFieldGuide(DeerFieldGuideProgress),
     BeeFieldGuide(BeeFieldGuideProgress),
+    RabbitFieldGuide(RabbitFieldGuideProgress),
     BeeSound(BeeSoundCue),
+    RabbitSound(RabbitSoundCue),
     DeerSound(DeerSoundCue),
     MallardCall(MallardCallCue),
     MallardTrack(MallardTrackCue),
@@ -637,6 +643,8 @@ pub enum EntityKind {
     Bee,
     BeeNest,
     BeeHotel,
+    Rabbit,
+    RabbitBurrow,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1118,6 +1126,10 @@ pub fn encode_server_update(update: &ServerUpdate) -> ProtocolCodecResult<Vec<u8
             writer.write_u8(SERVER_UPDATE_BEE_FIELD_GUIDE);
             writer.write_u32(progress.bits());
         }
+        ServerUpdate::RabbitFieldGuide(progress) => {
+            writer.write_u8(SERVER_UPDATE_RABBIT_FIELD_GUIDE);
+            writer.write_u32(progress.bits());
+        }
         ServerUpdate::BeeSound(cue) => {
             if !cue.position.is_finite()
                 || !cue.audible_radius.is_finite()
@@ -1130,6 +1142,24 @@ pub fn encode_server_update(update: &ServerUpdate) -> ProtocolCodecResult<Vec<u8
             writer.write_vec3d(cue.position);
             writer.write_u64(cue.sequence);
             writer.write_f32(cue.audible_radius);
+        }
+        ServerUpdate::RabbitSound(cue) => {
+            if !cue.position.is_finite()
+                || !cue.audible_radius.is_finite()
+                || cue.audible_radius <= 0.0
+            {
+                return Err(ProtocolCodecError::InvalidData("invalid rabbit sound cue"));
+            }
+            writer.write_u8(SERVER_UPDATE_RABBIT_SOUND);
+            writer.write_entity_id(cue.source);
+            writer.write_vec3d(cue.position);
+            writer.write_u64(cue.sequence);
+            writer.write_f32(cue.audible_radius);
+            writer.write_u8(match cue.kind {
+                RabbitSoundKind::Thump => 0,
+                RabbitSoundKind::Dig => 1,
+                RabbitSoundKind::Rustle => 2,
+            });
         }
         ServerUpdate::DeerSound(cue) => {
             if !cue.position.is_finite()
@@ -1313,11 +1343,26 @@ pub fn decode_server_update(bytes: &[u8]) -> ProtocolCodecResult<ServerUpdate> {
         SERVER_UPDATE_BEE_FIELD_GUIDE => {
             ServerUpdate::BeeFieldGuide(BeeFieldGuideProgress::from_bits_retain(reader.read_u32()?))
         }
+        SERVER_UPDATE_RABBIT_FIELD_GUIDE => ServerUpdate::RabbitFieldGuide(
+            RabbitFieldGuideProgress::from_bits_retain(reader.read_u32()?),
+        ),
         SERVER_UPDATE_BEE_SOUND => ServerUpdate::BeeSound(BeeSoundCue {
             source: reader.read_entity_id()?,
             position: reader.read_vec3d()?,
             sequence: reader.read_u64()?,
             audible_radius: reader.read_f32()?,
+        }),
+        SERVER_UPDATE_RABBIT_SOUND => ServerUpdate::RabbitSound(RabbitSoundCue {
+            source: reader.read_entity_id()?,
+            position: reader.read_vec3d()?,
+            sequence: reader.read_u64()?,
+            audible_radius: reader.read_f32()?,
+            kind: match reader.read_u8()? {
+                0 => RabbitSoundKind::Thump,
+                1 => RabbitSoundKind::Dig,
+                2 => RabbitSoundKind::Rustle,
+                _ => return Err(ProtocolCodecError::InvalidData("unknown rabbit sound kind")),
+            },
         }),
         SERVER_UPDATE_DEER_SOUND => ServerUpdate::DeerSound(DeerSoundCue {
             source: reader.read_entity_id()?,
@@ -1721,6 +1766,8 @@ impl ByteWriter {
             EntityKind::Bee => 9,
             EntityKind::BeeNest => 10,
             EntityKind::BeeHotel => 11,
+            EntityKind::Rabbit => 12,
+            EntityKind::RabbitBurrow => 13,
         });
     }
 
@@ -2311,6 +2358,8 @@ impl<'a> ByteReader<'a> {
             9 => Ok(EntityKind::Bee),
             10 => Ok(EntityKind::BeeNest),
             11 => Ok(EntityKind::BeeHotel),
+            12 => Ok(EntityKind::Rabbit),
+            13 => Ok(EntityKind::RabbitBurrow),
             kind => Err(ProtocolCodecError::UnknownEntityKind(kind)),
         }
     }
@@ -3157,6 +3206,23 @@ mod tests {
                 position: Vec3d::new(4.5, 66.0, 8.5),
                 sequence: 18,
                 audible_radius: 14.0,
+            }),
+        ] {
+            let bytes = encode_server_update(&update).unwrap();
+            assert_eq!(decode_server_update(&bytes).unwrap(), update);
+        }
+    }
+
+    #[test]
+    fn rabbit_ecology_updates_round_trip() {
+        for update in [
+            ServerUpdate::RabbitFieldGuide(RabbitFieldGuideProgress::from_bits_retain(0b10_1101)),
+            ServerUpdate::RabbitSound(RabbitSoundCue {
+                source: EntityId(44),
+                position: Vec3d::new(9.5, 64.0, 3.5),
+                sequence: 19,
+                audible_radius: 16.0,
+                kind: RabbitSoundKind::Dig,
             }),
         ] {
             let bytes = encode_server_update(&update).unwrap();

@@ -31,8 +31,9 @@ use mclone_protocol::{
     DeerSoundCue, DimensionKey, DisconnectReason, DisconnectReasonCode, EntityId, EntitySnapshot,
     EntityUpdate, ItemStackSnapshot, MallardCallCue, MallardFieldGuideProgress,
     MallardNestSnapshotData, MallardSnapshotData, MallardTrackCue, PlayerLifeState,
-    PlayerPositionUpdate, PlayerStatistics, RemotePlayerId, RemotePlayerUpdate, SectionBlockUpdate,
-    ServerEphemeralMessage, ServerUpdate, SessionConfiguration, validate_body_pose_sample,
+    PlayerPositionUpdate, PlayerStatistics, RabbitFieldGuideProgress, RabbitSoundCue,
+    RemotePlayerId, RemotePlayerUpdate, SectionBlockUpdate, ServerEphemeralMessage, ServerUpdate,
+    SessionConfiguration, validate_body_pose_sample,
 };
 
 pub use actor::{
@@ -119,9 +120,11 @@ pub struct ClientRuntime {
     mallard_field_guide: MallardFieldGuideProgress,
     deer_field_guide: DeerFieldGuideProgress,
     bee_field_guide: BeeFieldGuideProgress,
+    rabbit_field_guide: RabbitFieldGuideProgress,
     mallard_calls: VecDeque<MallardCallCue>,
     deer_sounds: VecDeque<DeerSoundCue>,
     bee_sounds: VecDeque<BeeSoundCue>,
+    rabbit_sounds: VecDeque<RabbitSoundCue>,
     mallard_tracks: VecDeque<MallardTrackCue>,
     player_life: PlayerLifeState,
     player_position_updates: VecDeque<PlayerPositionUpdate>,
@@ -159,9 +162,11 @@ impl ClientRuntime {
             mallard_field_guide: MallardFieldGuideProgress::default(),
             deer_field_guide: DeerFieldGuideProgress::default(),
             bee_field_guide: BeeFieldGuideProgress::default(),
+            rabbit_field_guide: RabbitFieldGuideProgress::default(),
             mallard_calls: VecDeque::new(),
             deer_sounds: VecDeque::new(),
             bee_sounds: VecDeque::new(),
+            rabbit_sounds: VecDeque::new(),
             mallard_tracks: VecDeque::new(),
             player_life: PlayerLifeState::default(),
             player_position_updates: VecDeque::new(),
@@ -357,7 +362,11 @@ impl ClientRuntime {
             ServerUpdate::BeeFieldGuide(progress) => {
                 self.bee_field_guide = progress;
             }
+            ServerUpdate::RabbitFieldGuide(progress) => {
+                self.rabbit_field_guide = progress;
+            }
             ServerUpdate::BeeSound(cue) => self.bee_sounds.push_back(cue),
+            ServerUpdate::RabbitSound(cue) => self.rabbit_sounds.push_back(cue),
             ServerUpdate::DeerSound(cue) => self.deer_sounds.push_back(cue),
             ServerUpdate::MallardCall(cue) => self.mallard_calls.push_back(cue),
             ServerUpdate::MallardTrack(cue) => self.mallard_tracks.push_back(cue),
@@ -471,6 +480,10 @@ impl ClientRuntime {
         self.bee_field_guide
     }
 
+    pub const fn rabbit_field_guide(&self) -> RabbitFieldGuideProgress {
+        self.rabbit_field_guide
+    }
+
     pub fn drain_mallard_calls(&mut self) -> impl Iterator<Item = MallardCallCue> + '_ {
         self.mallard_calls.drain(..)
     }
@@ -481,6 +494,10 @@ impl ClientRuntime {
 
     pub fn drain_bee_sounds(&mut self) -> impl Iterator<Item = BeeSoundCue> + '_ {
         self.bee_sounds.drain(..)
+    }
+
+    pub fn drain_rabbit_sounds(&mut self) -> impl Iterator<Item = RabbitSoundCue> + '_ {
+        self.rabbit_sounds.drain(..)
     }
 
     pub fn drain_mallard_tracks(&mut self) -> impl Iterator<Item = MallardTrackCue> + '_ {

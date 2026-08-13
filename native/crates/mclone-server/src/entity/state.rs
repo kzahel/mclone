@@ -118,10 +118,12 @@ const fn default_animation_for_kind(kind: EntityKind) -> Option<AnimationState> 
         EntityKind::Mallard => AnimationClipId::from_static("waddle"),
         EntityKind::Deer => AnimationClipId::from_static("idle"),
         EntityKind::Bee => AnimationClipId::from_static("hover"),
+        EntityKind::Rabbit => AnimationClipId::from_static("idle"),
         EntityKind::MallardNest
         | EntityKind::DeerBed
         | EntityKind::BeeNest
         | EntityKind::BeeHotel
+        | EntityKind::RabbitBurrow
         | EntityKind::DebugCube
         | EntityKind::Item => return None,
     };

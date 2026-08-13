@@ -108,8 +108,8 @@ use mclone_assets::{ActorFigureId, AssetPackCatalog, AssetPackSelection, BlockSt
 use mclone_audio::PreparedAudioAssets;
 use mclone_audio::{
     AcousticMaterial, AudioOutputCapability, BEE_BUZZ, DEER_ALARM, DEER_CONTACT, DEER_IMPACT,
-    MALLARD_CALL, PlaybackParams, SoundKey, UI_BACK, UI_CONFIRM, UI_ERROR, UI_OPEN, UI_SELECT,
-    WOOD_CREAK, landing_playback_for_impact,
+    MALLARD_CALL, PlaybackParams, RABBIT_DIG, RABBIT_RUSTLE, RABBIT_THUMP, SoundKey, UI_BACK,
+    UI_CONFIRM, UI_ERROR, UI_OPEN, UI_SELECT, WOOD_CREAK, landing_playback_for_impact,
 };
 use mclone_client::block_facts::terrain_id;
 use mclone_client::{
@@ -3614,10 +3614,11 @@ impl McloneSceneHost {
                     runtime.client().mallard_field_guide(),
                     runtime.client().deer_field_guide(),
                     runtime.client().bee_field_guide(),
+                    runtime.client().rabbit_field_guide(),
                 )
             });
-            let (mallard, deer, bee) = guides.unwrap_or_default();
-            let draw = xr_field_guide_draw(mallard, deer, bee);
+            let (mallard, deer, bee, rabbit) = guides.unwrap_or_default();
+            let draw = xr_field_guide_draw(mallard, deer, bee, rabbit);
             if !draw.commands().is_empty() {
                 panel_stats.add(
                     self.world_gui_overlay_renderer
@@ -5203,10 +5204,11 @@ impl McloneSceneHost {
                     runtime.client().mallard_field_guide(),
                     runtime.client().deer_field_guide(),
                     runtime.client().bee_field_guide(),
+                    runtime.client().rabbit_field_guide(),
                 )
             });
-            let (mallard, deer, bee) = guides.unwrap_or_default();
-            let draw = xr_field_guide_draw(mallard, deer, bee);
+            let (mallard, deer, bee, rabbit) = guides.unwrap_or_default();
+            let draw = xr_field_guide_draw(mallard, deer, bee, rabbit);
             if !draw.commands().is_empty() {
                 let guide_start = collect_split_timing.then(|| self.services.clock.now());
                 ui_panel_stats.add(
@@ -5638,6 +5640,7 @@ impl McloneSceneHost {
         let calls = runtime.drain_mallard_calls();
         let deer_sounds = runtime.drain_deer_sounds();
         let bee_sounds = runtime.drain_bee_sounds();
+        let rabbit_sounds = runtime.drain_rabbit_sounds();
         let tracks = runtime.drain_mallard_tracks();
         let topology = runtime.client().topology();
         let positioned_calls = calls
@@ -5682,6 +5685,25 @@ impl McloneSceneHost {
             let gain = (1.0 - distance / f64::from(cue.audible_radius)).clamp(0.0, 1.0) as f32;
             self.services.audio.play_with(
                 BEE_BUZZ,
+                PlaybackParams {
+                    gain,
+                    pan: self.world_sound_pan(position),
+                    seed: cue.sequence,
+                    ..PlaybackParams::default()
+                },
+            );
+        }
+        for cue in rabbit_sounds {
+            let position = topology.nearest_position_lift(cue.position, listener);
+            let distance = position.subtract(listener).length_sqr().sqrt();
+            let gain = (1.0 - distance / f64::from(cue.audible_radius)).clamp(0.0, 1.0) as f32;
+            let key = match cue.kind {
+                mclone_protocol::RabbitSoundKind::Thump => RABBIT_THUMP,
+                mclone_protocol::RabbitSoundKind::Dig => RABBIT_DIG,
+                mclone_protocol::RabbitSoundKind::Rustle => RABBIT_RUSTLE,
+            };
+            self.services.audio.play_with(
+                key,
                 PlaybackParams {
                     gain,
                     pan: self.world_sound_pan(position),
@@ -6922,25 +6944,40 @@ mod tests {
         assert_eq!(panel.height, xr_field_guide_panel_height_blocks());
 
         assert!(
-            xr_field_guide_draw(Default::default(), Default::default(), Default::default())
-                .commands()
-                .is_empty()
+            xr_field_guide_draw(
+                Default::default(),
+                Default::default(),
+                Default::default(),
+                Default::default(),
+            )
+            .commands()
+            .is_empty()
         );
         let complete = mclone_protocol::MallardFieldGuideProgress::from_bits_retain(
             mclone_protocol::MallardFieldGuideProgress::KNOWN_MASK,
         );
         assert!(
-            !xr_field_guide_draw(complete, Default::default(), Default::default())
-                .commands()
-                .is_empty()
+            !xr_field_guide_draw(
+                complete,
+                Default::default(),
+                Default::default(),
+                Default::default(),
+            )
+            .commands()
+            .is_empty()
         );
         let deer = mclone_protocol::DeerFieldGuideProgress::from_bits_retain(
             mclone_protocol::DeerFieldGuideProgress::KNOWN_MASK,
         );
         assert!(
-            !xr_field_guide_draw(Default::default(), deer, Default::default())
-                .commands()
-                .is_empty()
+            !xr_field_guide_draw(
+                Default::default(),
+                deer,
+                Default::default(),
+                Default::default(),
+            )
+            .commands()
+            .is_empty()
         );
     }
 

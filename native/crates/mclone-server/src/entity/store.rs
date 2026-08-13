@@ -2,14 +2,16 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use mclone_blocks::collision_aabb_for_feet_position;
 use mclone_core::{
-    Aabb, AxisTopology, BlockPos, BlockStateId, ChunkPos, HorizontalTopology, Vec3d,
+    Aabb, AnimationClipId, AnimationState, AxisTopology, BlockPos, BlockStateId, ChunkPos,
+    HorizontalTopology, Vec3d,
 };
 #[cfg(feature = "physics-engine")]
 use mclone_protocol::EntityRotation;
 use mclone_protocol::{
     BeeBehavior, BeeSoundCue, DeerSoundCue, DeerSoundKind, EntityId, EntityKind,
     EntityPersistentId, ItemKind, ItemStackSnapshot, MallardCallCue, MallardLifeStage,
-    MallardNestSnapshotData, MallardSnapshotData, MallardTrackCue,
+    MallardNestSnapshotData, MallardSnapshotData, MallardTrackCue, RabbitBehavior, RabbitLifeStage,
+    RabbitSoundCue,
 };
 
 use crate::persistence::{
@@ -24,6 +26,7 @@ use super::metadata::{EntityMetadata, PASSIVE_MOB_KINDS};
 use super::mob::{
     BeeRuntimeSaveData, DeerHerdmateTarget, DeerRuntimeSaveData, MALLARD_GROWTH_REQUIRED_TICKS,
     MallardFlockmateTarget, MallardRuntimeSaveData, MobPlayerTarget, MobRuntimeState,
+    RabbitRuntimeSaveData,
 };
 use super::spawning::habitat::sample_wetland_habitat;
 use super::spawning::mob_category::MobCategory;
@@ -54,6 +57,10 @@ const MALLARD_CALL_AUDIBLE_RADIUS: f32 = 24.0;
 const MALLARD_CALL_FLOCK_SUPPRESSION_RADIUS_SQR: f64 = 12.0 * 12.0;
 const MALLARD_TRACK_SPACING_SQR: f64 = 2.0 * 2.0;
 const DEER_SOUND_HERD_SUPPRESSION_RADIUS_SQR: f64 = 12.0 * 12.0;
+const RABBIT_SOUND_AUDIBLE_RADIUS: f32 = 16.0;
+const RABBIT_RAID_COOLDOWN_TICKS: u32 = 600;
+const RABBIT_LOVE_TICKS: u32 = 600;
+const RABBIT_BREED_COOLDOWN_TICKS: u32 = 6_000;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct MallardNestRuntimeState {
@@ -76,11 +83,30 @@ struct BeeColonyRuntimeState {
     spread_cooldown: u32,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct RabbitBurrowRuntimeState {
+    capacity: u8,
+    residents: [Option<EntityPersistentId>; 6],
+    disturbance_ticks: u32,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct BeePollinationEvent {
     pub(crate) source_flower: BlockPos,
     pub(crate) colony: EntityPersistentId,
     pub(crate) position: Vec3d,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct RabbitDigEvent {
+    pub(crate) rabbit: EntityId,
+    pub(crate) target: BlockPos,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct RabbitRaidEvent {
+    pub(crate) rabbit: EntityId,
+    pub(crate) target: BlockPos,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -98,17 +124,22 @@ pub(crate) struct ServerEntityStore {
     mallard_nests: BTreeMap<EntityId, MallardNestRuntimeState>,
     deer_beds: BTreeMap<EntityId, DeerBedRuntimeState>,
     bee_colonies: BTreeMap<EntityId, BeeColonyRuntimeState>,
+    rabbit_burrows: BTreeMap<EntityId, RabbitBurrowRuntimeState>,
     deer_bedded_site_ticks: BTreeMap<EntityPersistentId, (BlockPos, u32)>,
     mallard_last_tracks: BTreeMap<EntityId, Vec3d>,
     pending_mallard_calls: Vec<MallardCallCue>,
     pending_mallard_tracks: Vec<MallardTrackCue>,
     pending_deer_sounds: Vec<DeerSoundCue>,
     pending_bee_sounds: Vec<BeeSoundCue>,
+    pending_rabbit_sounds: Vec<RabbitSoundCue>,
+    pending_rabbit_digs: Vec<RabbitDigEvent>,
+    pending_rabbit_raids: Vec<RabbitRaidEvent>,
     pending_bee_pollinations: Vec<BeePollinationEvent>,
     hatched_mallard_positions: Vec<Vec3d>,
     mallard_cue_sequence: u64,
     deer_cue_sequence: u64,
     bee_cue_sequence: u64,
+    rabbit_cue_sequence: u64,
     persistent_ids: BTreeMap<EntityId, EntityPersistentId>,
     volatile_entities: BTreeSet<EntityId>,
     tick_list: ServerEntityTickList,
@@ -743,6 +774,80 @@ impl ServerEntityStore {
         std::mem::take(&mut self.pending_bee_pollinations)
     }
 
+    pub(crate) fn drain_rabbit_sounds(&mut self) -> Vec<RabbitSoundCue> {
+        std::mem::take(&mut self.pending_rabbit_sounds)
+    }
+
+    pub(crate) fn drain_rabbit_digs(&mut self) -> Vec<RabbitDigEvent> {
+        std::mem::take(&mut self.pending_rabbit_digs)
+    }
+
+    pub(crate) fn drain_rabbit_raids(&mut self) -> Vec<RabbitRaidEvent> {
+        std::mem::take(&mut self.pending_rabbit_raids)
+    }
+
+    pub(crate) fn complete_rabbit_dig(
+        &mut self,
+        rabbit_id: EntityId,
+        target: BlockPos,
+    ) -> Vec<ServerEntityState> {
+        let Some(rabbit_entity) = self.entities.get(&rabbit_id).copied() else {
+            return Vec::new();
+        };
+        let burrow_id = self.allocate_entity_id();
+        let burrow_persistent_id = self.allocate_persistent_id();
+        let burrow_position = Vec3d::new(
+            f64::from(target.x) + 0.5,
+            f64::from(target.y),
+            f64::from(target.z) + 0.5,
+        );
+        let mut residents = [None; 6];
+        residents[0] = Some(rabbit_entity.persistent_id);
+        let burrow = self.insert_rabbit_burrow_with_persistent_id(
+            burrow_id,
+            burrow_persistent_id,
+            burrow_position,
+            rabbit_entity.y_rot_degrees,
+            RabbitBurrowRuntimeState {
+                capacity: 6,
+                residents,
+                disturbance_ticks: 0,
+            },
+        );
+        let Some(mob) = self.mobs.get_mut(&rabbit_id) else {
+            return vec![burrow];
+        };
+        mob.assign_rabbit_home(burrow_persistent_id, burrow_position);
+        let rabbit = self.entities[&rabbit_id];
+        self.rabbit_cue_sequence = self.rabbit_cue_sequence.wrapping_add(1);
+        self.pending_rabbit_sounds.push(RabbitSoundCue {
+            source: rabbit_id,
+            position: rabbit.position,
+            sequence: self.rabbit_cue_sequence,
+            audible_radius: RABBIT_SOUND_AUDIBLE_RADIUS,
+            kind: mclone_protocol::RabbitSoundKind::Dig,
+        });
+        vec![rabbit, burrow]
+    }
+
+    pub(crate) fn complete_rabbit_raid(
+        &mut self,
+        rabbit_id: EntityId,
+    ) -> Option<ServerEntityState> {
+        let mob = self.mobs.get_mut(&rabbit_id)?;
+        mob.complete_rabbit_raid(RABBIT_RAID_COOLDOWN_TICKS);
+        let entity = *self.entities.get(&rabbit_id)?;
+        self.rabbit_cue_sequence = self.rabbit_cue_sequence.wrapping_add(1);
+        self.pending_rabbit_sounds.push(RabbitSoundCue {
+            source: rabbit_id,
+            position: entity.position,
+            sequence: self.rabbit_cue_sequence,
+            audible_radius: RABBIT_SOUND_AUDIBLE_RADIUS,
+            kind: mclone_protocol::RabbitSoundKind::Rustle,
+        });
+        Some(entity)
+    }
+
     pub(crate) fn drain_hatched_mallard_positions(&mut self) -> Vec<Vec3d> {
         std::mem::take(&mut self.hatched_mallard_positions)
     }
@@ -910,6 +1015,44 @@ impl ServerEntityStore {
             .min_by(|(_, left), (_, right)| left.total_cmp(right))
     }
 
+    pub(crate) fn targeted_rabbit(
+        &self,
+        from: Vec3d,
+        to: Vec3d,
+    ) -> Option<(ServerEntityState, f64)> {
+        self.entities
+            .values()
+            .copied()
+            .filter(|entity| {
+                entity.alive
+                    && entity.kind == EntityKind::Rabbit
+                    && entity.width > 0.01
+                    && entity.height > 0.01
+            })
+            .filter_map(|mut entity| {
+                entity.position = self.topology.nearest_position_lift(entity.position, from);
+                let center =
+                    entity
+                        .position
+                        .add(Vec3d::new(0.0, f64::from(entity.height) * 0.5, 0.0));
+                Aabb::of_size(
+                    center,
+                    f64::from(entity.width) + 0.3,
+                    f64::from(entity.height) + 0.3,
+                    f64::from(entity.width) + 0.3,
+                )
+                .ray_intersection_fraction(from, to)
+                .map(|fraction| (entity, fraction))
+            })
+            .min_by(|(_, left), (_, right)| left.total_cmp(right))
+    }
+
+    pub(crate) fn feed_rabbit(&mut self, id: EntityId) -> Option<ServerEntityState> {
+        let mob = self.mobs.get_mut(&id)?;
+        mob.feed_rabbit(RABBIT_LOVE_TICKS)
+            .then(|| self.entities[&id])
+    }
+
     pub(crate) fn on_block_changed(&mut self, pos: BlockPos) -> usize {
         let mut affected_mobs = 0;
         for (id, mob) in &mut self.mobs {
@@ -977,10 +1120,24 @@ impl ServerEntityStore {
         mob.set_mallard_trace_times_for_test(feather_time, call_time);
     }
 
+    #[cfg(test)]
     pub(crate) fn tick_stationary<F>(
         &mut self,
         entity_ticking_chunks: &[ChunkPos],
         nearby_players: &[MobPlayerTarget],
+        block_state_at: F,
+    ) -> Vec<ServerEntityState>
+    where
+        F: Fn(BlockPos) -> Option<BlockStateId>,
+    {
+        self.tick_stationary_at_time(entity_ticking_chunks, nearby_players, 6_000, block_state_at)
+    }
+
+    pub(crate) fn tick_stationary_at_time<F>(
+        &mut self,
+        entity_ticking_chunks: &[ChunkPos],
+        nearby_players: &[MobPlayerTarget],
+        day_time: u64,
         block_state_at: F,
     ) -> Vec<ServerEntityState>
     where
@@ -1032,6 +1189,15 @@ impl ServerEntityStore {
                     .map(|entity| (entity.persistent_id, entity.position))
             })
             .collect::<BTreeMap<_, _>>();
+        let rabbit_home_positions = self
+            .rabbit_burrows
+            .keys()
+            .filter_map(|id| {
+                self.entities
+                    .get(id)
+                    .map(|entity| (entity.persistent_id, entity.position))
+            })
+            .collect::<BTreeMap<_, _>>();
         let mut bee_colony_members = BTreeMap::<EntityPersistentId, Vec<EntityPersistentId>>::new();
         for (id, mob) in &self.mobs {
             let Some(entity) = self.entities.get(id).filter(|entity| entity.alive) else {
@@ -1066,12 +1232,14 @@ impl ServerEntityStore {
         let mut deer_sound_candidates = Vec::new();
         let mut bee_deposits = Vec::new();
         let mut bee_sound_candidates = Vec::new();
+        let mut rabbit_breeding_candidates = Vec::new();
         for id in &ticking_ids {
             let id = *id;
             if let Some(entity) = self.entities.get_mut(&id) {
                 if let Some(mob) = self.mobs.get_mut(&id) {
                     let previous_position = entity.position;
                     let previous_deer_behavior = entity.deer.map(|deer| deer.behavior);
+                    let previous_rabbit_behavior = mob.rabbit_behavior();
                     if entity.kind == EntityKind::Bee {
                         let home = mob.bee_home();
                         mob.set_bee_home_position(
@@ -1084,6 +1252,12 @@ impl ServerEntityStore {
                             })
                             .unwrap_or(0);
                         mob.set_bee_foraging_band(band);
+                    }
+                    if entity.kind == EntityKind::Rabbit {
+                        let home = mob.rabbit_save_data().and_then(|rabbit| rabbit.home);
+                        mob.set_rabbit_home_position(
+                            home.and_then(|home| rabbit_home_positions.get(&home).copied()),
+                        );
                     }
                     let flockmates = if entity.kind == EntityKind::Mallard {
                         mallard_positions
@@ -1112,11 +1286,12 @@ impl ServerEntityStore {
                     } else {
                         Vec::new()
                     };
-                    mob.tick_entity(
+                    mob.tick_entity_at_time(
                         entity,
                         nearby_players,
                         &flockmates,
                         &herdmates,
+                        day_time,
                         &block_state_at,
                     );
                     let chicken_egg_count = mob.take_chicken_pending_egg_lays();
@@ -1231,6 +1406,38 @@ impl ServerEntityStore {
                             bee_sound_candidates.push((id, entity.position));
                         }
                     }
+                    if entity.kind == EntityKind::Rabbit {
+                        if let Some(target) = mob.take_rabbit_completed_dig() {
+                            self.pending_rabbit_digs
+                                .push(RabbitDigEvent { rabbit: id, target });
+                        }
+                        if let Some(target) = mob.take_rabbit_completed_raid() {
+                            self.pending_rabbit_raids
+                                .push(RabbitRaidEvent { rabbit: id, target });
+                        }
+                        if mob.rabbit_can_breed()
+                            && let Some(home) = mob.rabbit_home()
+                        {
+                            rabbit_breeding_candidates.push((
+                                id,
+                                entity.persistent_id,
+                                entity.position,
+                                home,
+                            ));
+                        }
+                        if previous_rabbit_behavior != mob.rabbit_behavior()
+                            && mob.rabbit_behavior() == Some(RabbitBehavior::Flee)
+                        {
+                            self.rabbit_cue_sequence = self.rabbit_cue_sequence.wrapping_add(1);
+                            self.pending_rabbit_sounds.push(RabbitSoundCue {
+                                source: id,
+                                position: entity.position,
+                                sequence: self.rabbit_cue_sequence,
+                                audible_radius: RABBIT_SOUND_AUDIBLE_RADIUS,
+                                kind: mclone_protocol::RabbitSoundKind::Thump,
+                            });
+                        }
+                    }
                 }
                 if let Some(nest) = self.mallard_nests.get_mut(&id) {
                     let habitat_valid =
@@ -1303,6 +1510,82 @@ impl ServerEntityStore {
         }
         for id in removed_ids {
             self.remove_entity(id);
+        }
+        if let Some((left, right, home)) = rabbit_breeding_pair(&rabbit_breeding_candidates) {
+            let burrow_id = self.entities.iter().find_map(|(id, entity)| {
+                (entity.persistent_id == home && self.rabbit_burrows.contains_key(id))
+                    .then_some(*id)
+            });
+            if let Some(burrow_id) = burrow_id {
+                let has_capacity = self.rabbit_burrows.get(&burrow_id).is_some_and(|burrow| {
+                    burrow.residents.iter().flatten().count() < usize::from(burrow.capacity)
+                });
+                if has_capacity {
+                    if let Some(parent) = self.mobs.get_mut(&left.0) {
+                        parent.complete_rabbit_breeding(RABBIT_BREED_COOLDOWN_TICKS);
+                    }
+                    if let Some(parent) = self.mobs.get_mut(&right.0) {
+                        parent.complete_rabbit_breeding(RABBIT_BREED_COOLDOWN_TICKS);
+                    }
+                    let kit_id = self.allocate_entity_id();
+                    let kit_persistent_id = self.allocate_persistent_id();
+                    let home_position = self.entities[&burrow_id].position;
+                    let kit_position = Vec3d::new(
+                        (left.2.x + right.2.x) * 0.5,
+                        (left.2.y + right.2.y) * 0.5,
+                        (left.2.z + right.2.z) * 0.5,
+                    );
+                    let kit = self.insert_rabbit_with_runtime(
+                        kit_id,
+                        kit_persistent_id,
+                        kit_position,
+                        self.entities[&left.0].y_rot_degrees,
+                        RabbitRuntimeSaveData {
+                            home: Some(home),
+                            dig_target: None,
+                            life_stage: RabbitLifeStage::Kit,
+                            age_ticks: 0,
+                            parents: [Some(left.1), Some(right.1)],
+                            behavior: RabbitBehavior::Courtship,
+                            behavior_ticks: 0,
+                            health: 3,
+                            max_health: 3,
+                            love_ticks: 0,
+                            breed_cooldown: RABBIT_BREED_COOLDOWN_TICKS,
+                            raid_cooldown: 0,
+                        },
+                    );
+                    if let Some(burrow) = self.rabbit_burrows.get_mut(&burrow_id)
+                        && let Some(slot) = burrow.residents.iter_mut().find(|slot| slot.is_none())
+                    {
+                        *slot = Some(kit_persistent_id);
+                    }
+                    if let Some(mob) = self.mobs.get_mut(&kit_id) {
+                        mob.set_rabbit_home_position(Some(home_position));
+                    }
+                    for parent_id in [left.0, right.0] {
+                        if let Some(parent) = self.entities.get_mut(&parent_id) {
+                            parent.animation = Some(AnimationState::elapsed(
+                                AnimationClipId::from_static("courtship"),
+                                parent
+                                    .animation
+                                    .map_or(0, |animation| animation.epoch.wrapping_add(1)),
+                                parent.tick_count,
+                            ));
+                            updated.push(*parent);
+                        }
+                    }
+                    updated.push(kit);
+                    self.rabbit_cue_sequence = self.rabbit_cue_sequence.wrapping_add(1);
+                    self.pending_rabbit_sounds.push(RabbitSoundCue {
+                        source: kit_id,
+                        position: kit_position,
+                        sequence: self.rabbit_cue_sequence,
+                        audible_radius: RABBIT_SOUND_AUDIBLE_RADIUS,
+                        kind: mclone_protocol::RabbitSoundKind::Rustle,
+                    });
+                }
+            }
         }
         for (id, position, y_rot_degrees, parents) in hatched_nests {
             if let Some(removed) = self.remove_entity(id) {
@@ -1625,6 +1908,7 @@ impl ServerEntityStore {
         self.mallard_nests.remove(&id);
         self.deer_beds.remove(&id);
         self.bee_colonies.remove(&id);
+        self.rabbit_burrows.remove(&id);
         if state.kind == EntityKind::Deer {
             self.deer_bedded_site_ticks.remove(&state.persistent_id);
         }
@@ -1763,6 +2047,7 @@ impl ServerEntityStore {
                 Some(saved),
                 None,
                 None,
+                None,
             ),
         );
         self.entities.insert(id, state);
@@ -1830,6 +2115,7 @@ impl ServerEntityStore {
                 None,
                 None,
                 Some(saved),
+                None,
             ),
         );
         self.entities.insert(id, state);
@@ -1859,6 +2145,74 @@ impl ServerEntityStore {
         );
         state.animation = None;
         self.bee_colonies.insert(id, colony);
+        self.entities.insert(id, state);
+        self.persistent_ids.insert(id, persistent_id);
+        state
+    }
+
+    fn insert_rabbit_with_runtime(
+        &mut self,
+        id: EntityId,
+        persistent_id: EntityPersistentId,
+        position: Vec3d,
+        y_rot_degrees: f32,
+        saved: RabbitRuntimeSaveData,
+    ) -> ServerEntityState {
+        let metadata = EntityMetadata::RABBIT;
+        let mut state = ServerEntityState::from_metadata(
+            id,
+            persistent_id,
+            metadata,
+            position,
+            y_rot_degrees,
+            0.0,
+            None,
+            true,
+        );
+        if saved.life_stage == RabbitLifeStage::Kit {
+            state.width *= 0.62;
+            state.height *= 0.62;
+        }
+        self.mobs.insert(
+            id,
+            MobRuntimeState::from_saved(
+                id,
+                metadata,
+                true,
+                y_rot_degrees,
+                Vec3d::ZERO,
+                None,
+                None,
+                None,
+                None,
+                Some(saved),
+            ),
+        );
+        self.entities.insert(id, state);
+        self.persistent_ids.insert(id, persistent_id);
+        state
+    }
+
+    fn insert_rabbit_burrow_with_persistent_id(
+        &mut self,
+        id: EntityId,
+        persistent_id: EntityPersistentId,
+        position: Vec3d,
+        y_rot_degrees: f32,
+        burrow: RabbitBurrowRuntimeState,
+    ) -> ServerEntityState {
+        let mut state = ServerEntityState::from_metadata(
+            id,
+            persistent_id,
+            EntityMetadata::RABBIT_BURROW,
+            position,
+            y_rot_degrees,
+            0.0,
+            None,
+            true,
+        );
+        state.animation = None;
+        self.rabbit_burrows.insert(id, burrow);
         self.entities.insert(id, state);
         self.persistent_ids.insert(id, persistent_id);
         state
@@ -1985,6 +2339,7 @@ impl ServerEntityStore {
                 None,
                 None,
                 None,
+                None,
             )?,
             ("minecraft:chicken", EntitySavePayload::Chicken { egg_time }) => self
                 .insert_saved_passive_mob(
@@ -1993,6 +2348,7 @@ impl ServerEntityStore {
                     canonical_position,
                     EntityKind::Chicken,
                     Some(*egg_time),
+                    None,
                     None,
                     None,
                     None,
@@ -2019,6 +2375,7 @@ impl ServerEntityStore {
                     feather_time: *feather_time,
                     call_time: *call_time,
                 }),
+                None,
                 None,
                 None,
             )?,
@@ -2052,6 +2409,7 @@ impl ServerEntityStore {
                     antler_shed_time: *antler_shed_time,
                 }),
                 None,
+                None,
             )?,
             (
                 "mclone:bee",
@@ -2077,6 +2435,47 @@ impl ServerEntityStore {
                     behavior_ticks: *behavior_ticks,
                     carrying_pollen: *carrying_pollen,
                 }),
+                None,
+            )?,
+            (
+                "mclone:rabbit",
+                EntitySavePayload::Rabbit {
+                    home,
+                    dig_target,
+                    life_stage,
+                    age_ticks,
+                    parents,
+                    behavior,
+                    behavior_ticks,
+                    health,
+                    max_health,
+                    love_ticks,
+                    breed_cooldown,
+                    raid_cooldown,
+                },
+            ) => self.insert_saved_passive_mob(
+                id,
+                saved,
+                canonical_position,
+                EntityKind::Rabbit,
+                None,
+                None,
+                None,
+                None,
+                Some(RabbitRuntimeSaveData {
+                    home: *home,
+                    dig_target: *dig_target,
+                    life_stage: *life_stage,
+                    age_ticks: *age_ticks,
+                    parents: *parents,
+                    behavior: *behavior,
+                    behavior_ticks: *behavior_ticks,
+                    health: *health,
+                    max_health: *max_health,
+                    love_ticks: *love_ticks,
+                    breed_cooldown: *breed_cooldown,
+                    raid_cooldown: *raid_cooldown,
+                }),
             )?,
             (
                 "mclone:bee_nest" | "mclone:bee_hotel",
@@ -2101,6 +2500,24 @@ impl ServerEntityStore {
                     stored_work: *stored_work,
                     work_capacity: *work_capacity,
                     spread_cooldown: *spread_cooldown,
+                },
+            ),
+            (
+                "mclone:rabbit_burrow",
+                EntitySavePayload::RabbitBurrow {
+                    capacity,
+                    residents,
+                    disturbance_ticks,
+                },
+            ) => self.insert_rabbit_burrow_with_persistent_id(
+                id,
+                saved.persistent_id,
+                canonical_position,
+                saved.y_rot_degrees,
+                RabbitBurrowRuntimeState {
+                    capacity: *capacity,
+                    residents: *residents,
+                    disturbance_ticks: *disturbance_ticks,
                 },
             ),
             (
@@ -2135,6 +2552,7 @@ impl ServerEntityStore {
                 saved,
                 canonical_position,
                 EntityKind::Mannequin,
+                None,
                 None,
                 None,
                 None,
@@ -2181,6 +2599,7 @@ impl ServerEntityStore {
         mallard: Option<MallardRuntimeSaveData>,
         deer: Option<DeerRuntimeSaveData>,
         bee: Option<BeeRuntimeSaveData>,
+        rabbit: Option<RabbitRuntimeSaveData>,
     ) -> ChunkStoreResult<ServerEntityState> {
         let metadata = EntityMetadata::for_kind(kind).ok_or_else(|| {
             ChunkStoreError::InvalidData(format!("entity kind {kind:?} has no metadata"))
@@ -2205,6 +2624,7 @@ impl ServerEntityStore {
             mallard,
             deer,
             bee,
+            rabbit,
         );
         let mut state = state;
         if kind == EntityKind::Mallard {
@@ -2224,6 +2644,10 @@ impl ServerEntityStore {
                 state.width *= 0.72;
                 state.height *= 0.72;
             }
+        }
+        if kind == EntityKind::Rabbit && mob.rabbit_life_stage() == Some(RabbitLifeStage::Kit) {
+            state.width *= 0.62;
+            state.height *= 0.62;
         }
         self.mobs.insert(id, mob);
         self.entities.insert(id, state);
@@ -2332,6 +2756,31 @@ impl ServerEntityStore {
                     stored_work: colony.stored_work,
                     work_capacity: colony.work_capacity,
                     spread_cooldown: colony.spread_cooldown,
+                }
+            }
+            EntityKind::Rabbit => {
+                let rabbit = self.mobs.get(&entity.id)?.rabbit_save_data()?;
+                EntitySavePayload::Rabbit {
+                    home: rabbit.home,
+                    dig_target: rabbit.dig_target,
+                    life_stage: rabbit.life_stage,
+                    age_ticks: rabbit.age_ticks,
+                    parents: rabbit.parents,
+                    behavior: rabbit.behavior,
+                    behavior_ticks: rabbit.behavior_ticks,
+                    health: rabbit.health,
+                    max_health: rabbit.max_health,
+                    love_ticks: rabbit.love_ticks,
+                    breed_cooldown: rabbit.breed_cooldown,
+                    raid_cooldown: rabbit.raid_cooldown,
+                }
+            }
+            EntityKind::RabbitBurrow => {
+                let burrow = self.rabbit_burrows.get(&entity.id)?;
+                EntitySavePayload::RabbitBurrow {
+                    capacity: burrow.capacity,
+                    residents: burrow.residents,
+                    disturbance_ticks: burrow.disturbance_ticks,
                 }
             }
             EntityKind::Mannequin => EntitySavePayload::Mannequin,
@@ -2499,6 +2948,8 @@ fn entity_kind_code(kind: EntityKind) -> Option<&'static str> {
         EntityKind::Bee => Some("mclone:bee"),
         EntityKind::BeeNest => Some("mclone:bee_nest"),
         EntityKind::BeeHotel => Some("mclone:bee_hotel"),
+        EntityKind::Rabbit => Some("mclone:rabbit"),
+        EntityKind::RabbitBurrow => Some("mclone:rabbit_burrow"),
         EntityKind::Mannequin => Some("mclone:mannequin"),
         EntityKind::Item => Some("minecraft:item"),
         EntityKind::DebugCube => None,
@@ -2577,6 +3028,25 @@ fn squared_distance_xz(left: Vec3d, right: Vec3d) -> f64 {
     let dx = left.x - right.x;
     let dz = left.z - right.z;
     dx * dx + dz * dz
+}
+
+type RabbitBreedingCandidate = (EntityId, EntityPersistentId, Vec3d, EntityPersistentId);
+
+fn rabbit_breeding_pair(
+    candidates: &[RabbitBreedingCandidate],
+) -> Option<(
+    RabbitBreedingCandidate,
+    RabbitBreedingCandidate,
+    EntityPersistentId,
+)> {
+    for (index, left) in candidates.iter().copied().enumerate() {
+        for right in candidates[index + 1..].iter().copied() {
+            if left.3 == right.3 && squared_distance_xz(left.2, right.2) <= 4.0 * 4.0 {
+                return Some((left, right, left.3));
+            }
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -3157,6 +3627,58 @@ mod tests {
             resaved_chicken.persistent_id, chicken_record.persistent_id,
             "persistent id must survive fresh runtime id assignment"
         );
+    }
+
+    #[test]
+    fn rabbit_and_warren_identity_round_trip_together() {
+        let mut store = ServerEntityStore::default();
+        let rabbit_id =
+            store.insert_passive_mob_for_test(EntityKind::Rabbit, Vec3d::new(4.5, 64.0, 4.5), 90.0);
+        let rabbit_persistent_id = store.state(rabbit_id).unwrap().persistent_id;
+        let updates = store.complete_rabbit_dig(rabbit_id, BlockPos::new(5, 64, 4));
+        let burrow = updates
+            .iter()
+            .find(|entity| entity.kind == EntityKind::RabbitBurrow)
+            .copied()
+            .expect("completed dig creates a semantic burrow");
+        assert_eq!(
+            store.mobs[&rabbit_id].rabbit_home(),
+            Some(burrow.persistent_id)
+        );
+
+        let record = store.entity_chunk_record(ChunkPos::new(0, 0), 11);
+        assert!(record.entities.iter().any(|entity| {
+            matches!(
+                entity.payload,
+                EntitySavePayload::Rabbit {
+                    home: Some(home),
+                    ..
+                } if home == burrow.persistent_id
+            )
+        }));
+        assert!(record.entities.iter().any(|entity| {
+            matches!(
+                entity.payload,
+                EntitySavePayload::RabbitBurrow { residents, .. }
+                    if residents[0] == Some(rabbit_persistent_id)
+            )
+        }));
+
+        let mut loaded = ServerEntityStore::default();
+        let states = loaded.hydrate_entity_chunk_record(&record).unwrap();
+        let loaded_rabbit = states
+            .iter()
+            .find(|entity| entity.kind == EntityKind::Rabbit)
+            .expect("loaded rabbit");
+        let loaded_burrow = states
+            .iter()
+            .find(|entity| entity.kind == EntityKind::RabbitBurrow)
+            .expect("loaded burrow");
+        assert_eq!(
+            loaded.mobs[&loaded_rabbit.id].rabbit_home(),
+            Some(loaded_burrow.persistent_id)
+        );
+        assert_eq!(loaded_rabbit.persistent_id, rabbit_persistent_id);
     }
 
     #[test]

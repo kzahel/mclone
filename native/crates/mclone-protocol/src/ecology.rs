@@ -2,6 +2,113 @@ use mclone_core::Vec3d;
 
 use crate::{EntityId, EntityPersistentId};
 
+pub const RABBIT_FIELD_GUIDE_OBSERVATION_COUNT: u32 = 6;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RabbitLifeStage {
+    Kit,
+    Adult,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RabbitBehavior {
+    Idle,
+    Hop,
+    Dig,
+    Emerge,
+    Forage,
+    Raid,
+    Flee,
+    EnterBurrow,
+    Underground,
+    Courtship,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RabbitObservationKind {
+    Seen,
+    FoundBurrow,
+    WitnessedDig,
+    WitnessedThresholdUse,
+    WitnessedRaid,
+    WitnessedFamily,
+}
+
+impl RabbitObservationKind {
+    pub const ALL: [Self; RABBIT_FIELD_GUIDE_OBSERVATION_COUNT as usize] = [
+        Self::Seen,
+        Self::FoundBurrow,
+        Self::WitnessedDig,
+        Self::WitnessedThresholdUse,
+        Self::WitnessedRaid,
+        Self::WitnessedFamily,
+    ];
+
+    pub const fn bit(self) -> u32 {
+        1 << match self {
+            Self::Seen => 0,
+            Self::FoundBurrow => 1,
+            Self::WitnessedDig => 2,
+            Self::WitnessedThresholdUse => 3,
+            Self::WitnessedRaid => 4,
+            Self::WitnessedFamily => 5,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct RabbitFieldGuideProgress {
+    observations: u32,
+}
+
+impl RabbitFieldGuideProgress {
+    pub const KNOWN_MASK: u32 = (1 << RABBIT_FIELD_GUIDE_OBSERVATION_COUNT) - 1;
+
+    pub const fn from_bits_retain(bits: u32) -> Self {
+        Self {
+            observations: bits & Self::KNOWN_MASK,
+        }
+    }
+
+    pub const fn bits(self) -> u32 {
+        self.observations
+    }
+
+    pub const fn contains(self, observation: RabbitObservationKind) -> bool {
+        self.observations & observation.bit() != 0
+    }
+
+    pub fn observe(&mut self, observation: RabbitObservationKind) -> bool {
+        let before = self.observations;
+        self.observations |= observation.bit();
+        self.observations != before
+    }
+
+    pub const fn discovered_count(self) -> u32 {
+        self.observations.count_ones()
+    }
+
+    pub const fn is_complete(self) -> bool {
+        self.observations == Self::KNOWN_MASK
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RabbitSoundKind {
+    Thump,
+    Dig,
+    Rustle,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RabbitSoundCue {
+    pub source: EntityId,
+    pub position: Vec3d,
+    pub sequence: u64,
+    pub audible_radius: f32,
+    pub kind: RabbitSoundKind,
+}
+
 pub const BEE_FIELD_GUIDE_OBSERVATION_COUNT: u32 = 6;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

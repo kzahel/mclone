@@ -2,7 +2,7 @@ use mclone_blocks::{BlockFluidKind, block_collision_aabb, block_fluid_kind};
 use mclone_core::{BlockPos, BlockStateId};
 use mclone_worldgen::block::{
     ACACIA_LEAVES, ACACIA_LOG, AIR, BIRCH_LEAVES, BIRCH_LOG, DANDELION, DARK_OAK_LEAVES,
-    DARK_OAK_LOG, FERN, GRASS, GRASS_BLOCK, LARGE_FERN_LOWER, LARGE_FERN_UPPER, LILY_PAD,
+    DARK_OAK_LOG, DIRT, FERN, GRASS, GRASS_BLOCK, LARGE_FERN_LOWER, LARGE_FERN_UPPER, LILY_PAD,
     OAK_LEAVES, OAK_LOG, POPPY, RawBlockId, SPRUCE_LEAVES, SPRUCE_LOG, SUGAR_CANE,
     TALL_GRASS_LOWER, TALL_GRASS_UPPER, WATER, WATER_LEVEL_1, WATER_LEVEL_2, WATER_LEVEL_3,
     WATER_LEVEL_4, WATER_LEVEL_5, WATER_LEVEL_6, WATER_LEVEL_7, WATER_LEVEL_8,
@@ -14,6 +14,96 @@ pub(crate) const WETLAND_HABITAT_RADIUS: i32 = 6;
 const WETLAND_HABITAT_MIN_WATER_COLUMNS: u16 = 2;
 pub(crate) const FOREST_EDGE_HABITAT_RADIUS: i32 = 6;
 pub(crate) const FLOWERING_HABITAT_RADIUS: i32 = 6;
+pub(crate) const RABBIT_HABITAT_RADIUS: i32 = 6;
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) struct RabbitHabitatSample {
+    pub(crate) fitness: HabitatFitness,
+    pub(crate) browse_blocks: u16,
+    pub(crate) diggable_banks: u16,
+    pub(crate) open_columns: u16,
+    pub(crate) grass_floor: bool,
+}
+
+impl RabbitHabitatSample {
+    pub(crate) const fn suitable(self) -> bool {
+        self.grass_floor
+            && self.browse_blocks >= 2
+            && self.diggable_banks >= 1
+            && self.open_columns >= 8
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum RabbitHabitatFailure {
+    MissingBlockData,
+}
+
+pub(crate) fn sample_rabbit_habitat(
+    feet: BlockPos,
+    block_at: &mut impl FnMut(BlockPos) -> Option<RawBlockId>,
+) -> Result<RabbitHabitatSample, RabbitHabitatFailure> {
+    let grass_floor =
+        block_at(feet.below()).ok_or(RabbitHabitatFailure::MissingBlockData)? == GRASS_BLOCK;
+    let mut sample = RabbitHabitatSample {
+        grass_floor,
+        ..RabbitHabitatSample::default()
+    };
+    for dx in -RABBIT_HABITAT_RADIUS..=RABBIT_HABITAT_RADIUS {
+        for dz in -RABBIT_HABITAT_RADIUS..=RABBIT_HABITAT_RADIUS {
+            if dx.abs() + dz.abs() > RABBIT_HABITAT_RADIUS {
+                continue;
+            }
+            let column = feet.offset(dx, 0, dz);
+            let foot = block_at(column).ok_or(RabbitHabitatFailure::MissingBlockData)?;
+            let head =
+                block_at(column.offset(0, 1, 0)).ok_or(RabbitHabitatFailure::MissingBlockData)?;
+            sample.open_columns = sample
+                .open_columns
+                .saturating_add(u16::from(foot == AIR && head == AIR));
+            for dy in -1..=2 {
+                let raw = block_at(column.offset(0, dy, 0))
+                    .ok_or(RabbitHabitatFailure::MissingBlockData)?;
+                sample.browse_blocks = sample
+                    .browse_blocks
+                    .saturating_add(u16::from(is_browse(raw)));
+            }
+            for dy in -2..=1 {
+                let bank = column.offset(0, dy, 0);
+                let bank_state = block_at(bank).ok_or(RabbitHabitatFailure::MissingBlockData)?;
+                let roof =
+                    block_at(bank.offset(0, 1, 0)).ok_or(RabbitHabitatFailure::MissingBlockData)?;
+                if !matches!(bank_state, GRASS_BLOCK | DIRT) || !matches!(roof, GRASS_BLOCK | DIRT)
+                {
+                    continue;
+                }
+                let threshold =
+                    [(1, 0), (-1, 0), (0, 1), (0, -1)]
+                        .into_iter()
+                        .any(|(front_x, front_z)| {
+                            let front = bank.offset(front_x, 0, front_z);
+                            let rear = bank.offset(-front_x, 0, -front_z);
+                            block_at(front) == Some(AIR)
+                                && block_at(front.offset(0, 1, 0)) == Some(AIR)
+                                && block_at(front.below()).is_some_and(|raw| raw != AIR)
+                                && block_at(rear).is_some_and(|raw| raw != AIR)
+                        });
+                if threshold {
+                    sample.diggable_banks = sample.diggable_banks.saturating_add(1);
+                    break;
+                }
+            }
+        }
+    }
+    sample.fitness = HabitatFitness::from_dimensions(
+        score(sample.browse_blocks, 8),
+        score(sample.diggable_banks, 2),
+        u8::from(sample.grass_floor) * 100,
+        score(sample.open_columns, 16),
+        100,
+    );
+    Ok(sample)
+}
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) struct HabitatFitness {
@@ -551,5 +641,42 @@ mod tests {
         .unwrap();
         assert!(!sparse.suitable());
         assert_eq!(sparse.fitness.forage, 0);
+    }
+
+    #[test]
+    fn rabbit_habitat_requires_browse_and_a_real_soil_bank() {
+        let mut habitat = |pos: BlockPos| {
+            Some(if pos.y <= 62 {
+                DIRT
+            } else if pos.y == 63 {
+                GRASS_BLOCK
+            } else if (pos.x, pos.y, pos.z) == (3, 64, 0)
+                || (pos.x, pos.y, pos.z) == (3, 65, 0)
+                || (pos.x, pos.y, pos.z) == (4, 64, 0)
+            {
+                DIRT
+            } else if pos.y == 64 && (pos.x + pos.z).rem_euclid(4) == 0 {
+                GRASS
+            } else {
+                AIR
+            })
+        };
+        let sample = sample_rabbit_habitat(BlockPos::new(0, 64, 0), &mut habitat).unwrap();
+        assert!(sample.suitable());
+        assert!(sample.browse_blocks >= 2);
+        assert!(sample.diggable_banks >= 1);
+
+        let flat = sample_rabbit_habitat(BlockPos::new(0, 64, 0), &mut |pos| {
+            Some(if pos.y == 63 {
+                GRASS_BLOCK
+            } else if pos.y == 64 && (pos.x + pos.z).rem_euclid(4) == 0 {
+                GRASS
+            } else {
+                AIR
+            })
+        })
+        .unwrap();
+        assert!(!flat.suitable());
+        assert_eq!(flat.diggable_banks, 0);
     }
 }

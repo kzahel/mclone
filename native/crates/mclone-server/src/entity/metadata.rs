@@ -130,6 +130,24 @@ impl EntityMetadata {
         client_tracking_range: 10,
     };
 
+    pub(crate) const RABBIT: Self = Self {
+        kind: EntityKind::Rabbit,
+        category: EntityCategory::Creature,
+        dimensions: EntityDimensions::scalable(0.4, 0.5),
+        standing_eye_height: StandingEyeHeight::HeightScale(0.78),
+        movement_speed: 0.3,
+        client_tracking_range: 10,
+    };
+
+    pub(crate) const RABBIT_BURROW: Self = Self {
+        kind: EntityKind::RabbitBurrow,
+        category: EntityCategory::Misc,
+        dimensions: EntityDimensions::scalable(0.9, 0.76),
+        standing_eye_height: StandingEyeHeight::HeightScale(0.5),
+        movement_speed: 0.0,
+        client_tracking_range: 10,
+    };
+
     pub(crate) const MANNEQUIN: Self = Self {
         kind: EntityKind::Mannequin,
         category: EntityCategory::Creature,
@@ -159,6 +177,8 @@ impl EntityMetadata {
             EntityKind::Bee => Some(Self::BEE),
             EntityKind::BeeNest => Some(Self::BEE_NEST),
             EntityKind::BeeHotel => Some(Self::BEE_HOTEL),
+            EntityKind::Rabbit => Some(Self::RABBIT),
+            EntityKind::RabbitBurrow => Some(Self::RABBIT_BURROW),
             EntityKind::Mannequin => Some(Self::MANNEQUIN),
             EntityKind::Item => Some(Self::ITEM),
             EntityKind::DebugCube => None,
@@ -177,6 +197,7 @@ impl EntityMetadata {
                 | EntityKind::Mallard
                 | EntityKind::Deer
                 | EntityKind::Bee
+                | EntityKind::Rabbit
                 | EntityKind::Mannequin
         )
     }

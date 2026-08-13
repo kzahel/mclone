@@ -137,6 +137,16 @@ pub(crate) const fn crop_state(block: RawBlockId) -> Option<(CropKind, u8)> {
     }
 }
 
+/// Mirrors the vanilla rabbit garden raid: only a mature carrot is selected,
+/// and one successful feeding removes one growth stage rather than harvesting
+/// an item stack for the rabbit or player.
+pub(crate) const fn rabbit_raid_next_state(block: RawBlockId) -> Option<RawBlockId> {
+    match crop_state(block) {
+        Some((CropKind::Carrots, 7)) => carrots_for_age(6),
+        _ => None,
+    }
+}
+
 const fn crop_for_age(crop: CropKind, age: u8) -> Option<RawBlockId> {
     match crop {
         CropKind::Wheat => wheat_for_age(age),
@@ -305,6 +315,13 @@ mod tests {
                 state: CARROTS_AGE_0
             })
         );
+    }
+
+    #[test]
+    fn rabbit_raids_decrement_only_mature_carrots() {
+        assert_eq!(rabbit_raid_next_state(CARROTS_AGE_7), carrots_for_age(6));
+        assert_eq!(rabbit_raid_next_state(CARROTS_AGE_1), None);
+        assert_eq!(rabbit_raid_next_state(WHEAT_AGE_7), None);
     }
 
     #[test]

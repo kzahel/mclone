@@ -11,6 +11,7 @@ pub const CHICKEN_FIGURE_PATH: &str = "assets/mclone/figures/chicken.figure.json
 pub const MALLARD_DUCK_FIGURE_PATH: &str = "assets/mclone/figures/mallard_duck.figure.json";
 pub const DEER_FIGURE_PATH: &str = "assets/mclone/figures/deer.figure.json";
 pub const BEE_FIGURE_PATH: &str = "assets/mclone/figures/bee.figure.json";
+pub const RABBIT_FIGURE_PATH: &str = "assets/mclone/figures/rabbit.figure.json";
 pub const MALLARD_NEST_FIGURE_PATH: &str = "assets/mclone/figures/mallard_nest.figure.json";
 pub const MALLARD_FEATHER_FIGURE_PATH: &str = "assets/mclone/figures/mallard_feather.figure.json";
 pub const HUNTING_SPEAR_FIGURE_PATH: &str = "assets/mclone/figures/hunting_spear.figure.json";
@@ -28,6 +29,7 @@ pub const CARROT_FIGURE_PATH: &str = "assets/mclone/figures/carrot.figure.json";
 pub const OAK_FENCE_ITEM_FIGURE_PATH: &str = "assets/mclone/figures/oak_fence_item.figure.json";
 pub const OAK_FENCE_GATE_ITEM_FIGURE_PATH: &str =
     "assets/mclone/figures/oak_fence_gate_item.figure.json";
+pub const RABBIT_BURROW_FIGURE_PATH: &str = "assets/mclone/figures/rabbit_burrow.figure.json";
 pub const DEFAULT_PLAYER_FIGURE_ID: ActorFigureId = ActorFigureId::from_static("mclone:player");
 pub const UPRIGHT_BEAR_FIGURE_ID: ActorFigureId = ActorFigureId::from_static("mclone:upright_bear");
 pub const COW_FIGURE_ID: ActorFigureId = ActorFigureId::from_static("mclone:cow");
@@ -35,6 +37,7 @@ pub const CHICKEN_FIGURE_ID: ActorFigureId = ActorFigureId::from_static("mclone:
 pub const MALLARD_DUCK_FIGURE_ID: ActorFigureId = ActorFigureId::from_static("mclone:mallard_duck");
 pub const DEER_FIGURE_ID: ActorFigureId = ActorFigureId::from_static("mclone:deer");
 pub const BEE_FIGURE_ID: ActorFigureId = ActorFigureId::from_static("mclone:bee");
+pub const RABBIT_FIGURE_ID: ActorFigureId = ActorFigureId::from_static("mclone:rabbit");
 pub const MALLARD_NEST_FIGURE_ID: ActorFigureId = ActorFigureId::from_static("mclone:mallard_nest");
 pub const MALLARD_FEATHER_FIGURE_ID: ActorFigureId =
     ActorFigureId::from_static("mclone:mallard_feather");
@@ -57,7 +60,9 @@ pub const OAK_FENCE_ITEM_FIGURE_ID: ActorFigureId =
     ActorFigureId::from_static("mclone:oak_fence_item");
 pub const OAK_FENCE_GATE_ITEM_FIGURE_ID: ActorFigureId =
     ActorFigureId::from_static("mclone:oak_fence_gate_item");
-pub const FIRST_PARTY_ACTOR_FIGURE_IDS: [ActorFigureId; 7] = [
+pub const RABBIT_BURROW_FIGURE_ID: ActorFigureId =
+    ActorFigureId::from_static("mclone:rabbit_burrow");
+pub const FIRST_PARTY_ACTOR_FIGURE_IDS: [ActorFigureId; 8] = [
     DEFAULT_PLAYER_FIGURE_ID,
     UPRIGHT_BEAR_FIGURE_ID,
     COW_FIGURE_ID,
@@ -65,8 +70,9 @@ pub const FIRST_PARTY_ACTOR_FIGURE_IDS: [ActorFigureId; 7] = [
     MALLARD_DUCK_FIGURE_ID,
     DEER_FIGURE_ID,
     BEE_FIGURE_ID,
+    RABBIT_FIGURE_ID,
 ];
-pub const FIRST_PARTY_SEMANTIC_PROP_FIGURE_IDS: [SemanticFigureId; 16] = [
+pub const FIRST_PARTY_SEMANTIC_PROP_FIGURE_IDS: [SemanticFigureId; 17] = [
     MALLARD_NEST_FIGURE_ID,
     MALLARD_FEATHER_FIGURE_ID,
     HUNTING_SPEAR_FIGURE_ID,
@@ -83,6 +89,7 @@ pub const FIRST_PARTY_SEMANTIC_PROP_FIGURE_IDS: [SemanticFigureId; 16] = [
     CARROT_FIGURE_ID,
     OAK_FENCE_ITEM_FIGURE_ID,
     OAK_FENCE_GATE_ITEM_FIGURE_ID,
+    RABBIT_BURROW_FIGURE_ID,
 ];
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -292,6 +299,10 @@ pub fn bee_figure_path() -> AssetPath {
     AssetPath::new(BEE_FIGURE_PATH)
 }
 
+pub fn rabbit_figure_path() -> AssetPath {
+    AssetPath::new(RABBIT_FIGURE_PATH)
+}
+
 pub fn mallard_nest_figure_path() -> AssetPath {
     AssetPath::new(MALLARD_NEST_FIGURE_PATH)
 }
@@ -356,6 +367,10 @@ pub fn oak_fence_gate_item_figure_path() -> AssetPath {
     AssetPath::new(OAK_FENCE_GATE_ITEM_FIGURE_PATH)
 }
 
+pub fn rabbit_burrow_figure_path() -> AssetPath {
+    AssetPath::new(RABBIT_BURROW_FIGURE_PATH)
+}
+
 pub const fn default_player_figure_id() -> ActorFigureId {
     DEFAULT_PLAYER_FIGURE_ID
 }
@@ -382,6 +397,10 @@ pub const fn deer_figure_id() -> ActorFigureId {
 
 pub const fn bee_figure_id() -> ActorFigureId {
     BEE_FIGURE_ID
+}
+
+pub const fn rabbit_figure_id() -> ActorFigureId {
+    RABBIT_FIGURE_ID
 }
 
 pub const fn mallard_nest_figure_id() -> SemanticFigureId {
@@ -448,6 +467,10 @@ pub const fn oak_fence_gate_item_figure_id() -> SemanticFigureId {
     OAK_FENCE_GATE_ITEM_FIGURE_ID
 }
 
+pub const fn rabbit_burrow_figure_id() -> SemanticFigureId {
+    RABBIT_BURROW_FIGURE_ID
+}
+
 fn actor_figure_path(id: ActorFigureId) -> Option<AssetPath> {
     match id.as_str() {
         "mclone:player" => Some(default_player_figure_path()),
@@ -457,6 +480,7 @@ fn actor_figure_path(id: ActorFigureId) -> Option<AssetPath> {
         "mclone:mallard_duck" => Some(mallard_duck_figure_path()),
         "mclone:deer" => Some(deer_figure_path()),
         "mclone:bee" => Some(bee_figure_path()),
+        "mclone:rabbit" => Some(rabbit_figure_path()),
         _ => None,
     }
 }
@@ -479,6 +503,7 @@ pub fn semantic_figure_path(id: SemanticFigureId) -> Option<AssetPath> {
         "mclone:carrot" => Some(carrot_figure_path()),
         "mclone:oak_fence_item" => Some(oak_fence_item_figure_path()),
         "mclone:oak_fence_gate_item" => Some(oak_fence_gate_item_figure_path()),
+        "mclone:rabbit_burrow" => Some(rabbit_burrow_figure_path()),
         _ => None,
     })
 }

@@ -879,7 +879,7 @@ fn persistent_natural_spawning_survives_entity_chunk_unload_and_reload() {
             );
             assert!(reloaded.iter().all(|entity| matches!(
                 entity.kind,
-                EntityKind::Cow | EntityKind::Chicken | EntityKind::Mallard
+                EntityKind::Cow | EntityKind::Chicken | EntityKind::Mallard | EntityKind::Rabbit
             )));
             return;
         }

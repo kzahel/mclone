@@ -1,7 +1,7 @@
-use mclone_core::Vec3d;
+use mclone_core::{BlockPos, Vec3d};
 use mclone_protocol::{
     BeeBehavior, DeerBehavior, DeerLifeStage, DeerSex, DeerSnapshotData, EntityKind,
-    EntityPersistentId, MallardLifeStage,
+    EntityPersistentId, MallardLifeStage, RabbitBehavior, RabbitLifeStage,
 };
 use mclone_worldgen::prng::SimpleRandomSource;
 
@@ -16,6 +16,7 @@ const MALLARD_CALL_TIME_RANGE: i32 = 320;
 const DEER_ANTLER_SHED_TIME_MIN: i32 = 36_000;
 const DEER_ANTLER_SHED_TIME_RANGE: i32 = 36_000;
 pub(crate) const MALLARD_GROWTH_REQUIRED_TICKS: u32 = 2_400;
+pub(crate) const RABBIT_GROWTH_REQUIRED_TICKS: u32 = 2_400;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct DeerRuntimeSaveData {
@@ -47,6 +48,22 @@ pub(crate) struct BeeRuntimeSaveData {
     pub(crate) carrying_pollen: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct RabbitRuntimeSaveData {
+    pub(crate) home: Option<EntityPersistentId>,
+    pub(crate) dig_target: Option<BlockPos>,
+    pub(crate) life_stage: RabbitLifeStage,
+    pub(crate) age_ticks: u32,
+    pub(crate) parents: [Option<EntityPersistentId>; 2],
+    pub(crate) behavior: RabbitBehavior,
+    pub(crate) behavior_ticks: u32,
+    pub(crate) health: u8,
+    pub(crate) max_health: u8,
+    pub(crate) love_ticks: u32,
+    pub(crate) breed_cooldown: u32,
+    pub(crate) raid_cooldown: u32,
+}
+
 #[derive(Debug, PartialEq)]
 pub(super) enum MobSpeciesState {
     Cow,
@@ -54,6 +71,7 @@ pub(super) enum MobSpeciesState {
     Mallard(MallardRuntimeState),
     Deer(DeerRuntimeState),
     Bee(BeeRuntimeState),
+    Rabbit(RabbitRuntimeState),
 }
 
 impl MobSpeciesState {
@@ -73,12 +91,17 @@ impl MobSpeciesState {
                     carrying_pollen: false,
                 }))
             }
+            EntityKind::Rabbit => Self::Rabbit(RabbitRuntimeState::new_founder()),
             EntityKind::DebugCube
             | EntityKind::Item
             | EntityKind::MallardNest
             | EntityKind::DeerBed
             | EntityKind::BeeNest
             | EntityKind::BeeHotel => {
+                debug_assert!(false, "non-mob entities do not use mob species state");
+                Self::Cow
+            }
+            EntityKind::RabbitBurrow => {
                 debug_assert!(false, "non-mob entities do not use mob species state");
                 Self::Cow
             }
@@ -92,6 +115,7 @@ impl MobSpeciesState {
         mallard: Option<MallardRuntimeSaveData>,
         deer: Option<DeerRuntimeSaveData>,
         bee: Option<BeeRuntimeSaveData>,
+        rabbit: Option<RabbitRuntimeSaveData>,
     ) -> Self {
         match kind {
             EntityKind::Cow | EntityKind::Mannequin => Self::Cow,
@@ -119,12 +143,19 @@ impl MobSpeciesState {
                     carrying_pollen: false,
                 },
             ))),
+            EntityKind::Rabbit => Self::Rabbit(RabbitRuntimeState::from_saved(
+                rabbit.unwrap_or_else(RabbitRuntimeState::founder_save_data),
+            )),
             EntityKind::DebugCube
             | EntityKind::Item
             | EntityKind::MallardNest
             | EntityKind::DeerBed
             | EntityKind::BeeNest
             | EntityKind::BeeHotel => {
+                debug_assert!(false, "non-mob entities do not use mob species state");
+                Self::Cow
+            }
+            EntityKind::RabbitBurrow => {
                 debug_assert!(false, "non-mob entities do not use mob species state");
                 Self::Cow
             }
@@ -143,6 +174,7 @@ impl MobSpeciesState {
             Self::Mallard(mallard) => mallard.ai_step(),
             Self::Deer(_) => {}
             Self::Bee(_) => {}
+            Self::Rabbit(_) => {}
         }
     }
 
@@ -153,6 +185,7 @@ impl MobSpeciesState {
             Self::Mallard(_) => None,
             Self::Deer(_) => None,
             Self::Bee(_) => None,
+            Self::Rabbit(_) => None,
         }
     }
 
@@ -163,49 +196,201 @@ impl MobSpeciesState {
             Self::Mallard(_) => None,
             Self::Deer(_) => None,
             Self::Bee(_) => None,
+            Self::Rabbit(_) => None,
         }
     }
 
     pub(super) fn mallard(&self) -> Option<&MallardRuntimeState> {
         match self {
             Self::Mallard(mallard) => Some(mallard),
-            Self::Cow | Self::Chicken(_) | Self::Deer(_) | Self::Bee(_) => None,
+            Self::Cow | Self::Chicken(_) | Self::Deer(_) | Self::Bee(_) | Self::Rabbit(_) => None,
         }
     }
 
     pub(super) fn mallard_mut(&mut self) -> Option<&mut MallardRuntimeState> {
         match self {
             Self::Mallard(mallard) => Some(mallard),
-            Self::Cow | Self::Chicken(_) | Self::Deer(_) | Self::Bee(_) => None,
+            Self::Cow | Self::Chicken(_) | Self::Deer(_) | Self::Bee(_) | Self::Rabbit(_) => None,
         }
     }
 
     pub(super) fn deer(&self) -> Option<&DeerRuntimeState> {
         match self {
             Self::Deer(deer) => Some(deer),
-            Self::Cow | Self::Chicken(_) | Self::Mallard(_) | Self::Bee(_) => None,
+            Self::Cow | Self::Chicken(_) | Self::Mallard(_) | Self::Bee(_) | Self::Rabbit(_) => {
+                None
+            }
         }
     }
 
     pub(super) fn deer_mut(&mut self) -> Option<&mut DeerRuntimeState> {
         match self {
             Self::Deer(deer) => Some(deer),
-            Self::Cow | Self::Chicken(_) | Self::Mallard(_) | Self::Bee(_) => None,
+            Self::Cow | Self::Chicken(_) | Self::Mallard(_) | Self::Bee(_) | Self::Rabbit(_) => {
+                None
+            }
         }
     }
 
     pub(super) fn bee(&self) -> Option<&BeeRuntimeState> {
         match self {
             Self::Bee(bee) => Some(bee),
-            Self::Cow | Self::Chicken(_) | Self::Mallard(_) | Self::Deer(_) => None,
+            Self::Cow | Self::Chicken(_) | Self::Mallard(_) | Self::Deer(_) | Self::Rabbit(_) => {
+                None
+            }
         }
     }
 
     pub(super) fn bee_mut(&mut self) -> Option<&mut BeeRuntimeState> {
         match self {
             Self::Bee(bee) => Some(bee),
-            Self::Cow | Self::Chicken(_) | Self::Mallard(_) | Self::Deer(_) => None,
+            Self::Cow | Self::Chicken(_) | Self::Mallard(_) | Self::Deer(_) | Self::Rabbit(_) => {
+                None
+            }
         }
+    }
+
+    pub(super) fn rabbit(&self) -> Option<&RabbitRuntimeState> {
+        match self {
+            Self::Rabbit(rabbit) => Some(rabbit),
+            Self::Cow | Self::Chicken(_) | Self::Mallard(_) | Self::Deer(_) | Self::Bee(_) => None,
+        }
+    }
+
+    pub(super) fn rabbit_mut(&mut self) -> Option<&mut RabbitRuntimeState> {
+        match self {
+            Self::Rabbit(rabbit) => Some(rabbit),
+            Self::Cow | Self::Chicken(_) | Self::Mallard(_) | Self::Deer(_) | Self::Bee(_) => None,
+        }
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub(super) struct RabbitRuntimeState {
+    saved: RabbitRuntimeSaveData,
+}
+
+impl RabbitRuntimeState {
+    const fn founder_save_data() -> RabbitRuntimeSaveData {
+        RabbitRuntimeSaveData {
+            home: None,
+            dig_target: None,
+            life_stage: RabbitLifeStage::Adult,
+            age_ticks: RABBIT_GROWTH_REQUIRED_TICKS,
+            parents: [None; 2],
+            behavior: RabbitBehavior::Idle,
+            behavior_ticks: 0,
+            health: 3,
+            max_health: 3,
+            love_ticks: 0,
+            breed_cooldown: 0,
+            raid_cooldown: 0,
+        }
+    }
+
+    fn new_founder() -> Self {
+        Self {
+            saved: Self::founder_save_data(),
+        }
+    }
+
+    pub(super) const fn from_saved(saved: RabbitRuntimeSaveData) -> Self {
+        Self { saved }
+    }
+
+    pub(super) const fn save_data(&self) -> RabbitRuntimeSaveData {
+        self.saved
+    }
+
+    pub(super) const fn behavior(&self) -> RabbitBehavior {
+        self.saved.behavior
+    }
+
+    pub(super) const fn behavior_ticks(&self) -> u32 {
+        self.saved.behavior_ticks
+    }
+
+    pub(super) const fn home(&self) -> Option<EntityPersistentId> {
+        self.saved.home
+    }
+
+    pub(super) const fn dig_target(&self) -> Option<BlockPos> {
+        self.saved.dig_target
+    }
+
+    pub(super) const fn life_stage(&self) -> RabbitLifeStage {
+        self.saved.life_stage
+    }
+
+    pub(super) const fn is_underground(&self) -> bool {
+        matches!(self.saved.behavior, RabbitBehavior::Underground)
+    }
+
+    pub(super) const fn is_in_love(&self) -> bool {
+        self.saved.love_ticks > 0
+    }
+
+    pub(super) fn can_breed(&self) -> bool {
+        self.saved.life_stage == RabbitLifeStage::Adult
+            && self.saved.love_ticks > 0
+            && self.saved.breed_cooldown == 0
+            && self.saved.health > 0
+    }
+
+    pub(super) const fn can_raid(&self) -> bool {
+        self.saved.raid_cooldown == 0 && self.saved.health > 0
+    }
+
+    pub(super) fn set_home(&mut self, home: Option<EntityPersistentId>) {
+        self.saved.home = home;
+    }
+
+    pub(super) fn set_dig_target(&mut self, target: Option<BlockPos>) {
+        self.saved.dig_target = target;
+    }
+
+    pub(super) fn set_behavior(&mut self, behavior: RabbitBehavior) -> bool {
+        if self.saved.behavior == behavior {
+            return false;
+        }
+        self.saved.behavior = behavior;
+        self.saved.behavior_ticks = 0;
+        true
+    }
+
+    pub(super) fn advance_tick(&mut self) {
+        self.saved.behavior_ticks = self.saved.behavior_ticks.saturating_add(1);
+        self.saved.love_ticks = self.saved.love_ticks.saturating_sub(1);
+        self.saved.breed_cooldown = self.saved.breed_cooldown.saturating_sub(1);
+        self.saved.raid_cooldown = self.saved.raid_cooldown.saturating_sub(1);
+        if self.saved.life_stage == RabbitLifeStage::Kit {
+            self.saved.age_ticks = self.saved.age_ticks.saturating_add(1);
+            if self.saved.age_ticks >= RABBIT_GROWTH_REQUIRED_TICKS {
+                self.saved.life_stage = RabbitLifeStage::Adult;
+            }
+        }
+    }
+
+    pub(super) fn feed(&mut self, love_ticks: u32) -> bool {
+        if self.saved.life_stage != RabbitLifeStage::Adult
+            || self.saved.health == 0
+            || self.saved.breed_cooldown > 0
+        {
+            return false;
+        }
+        self.saved.love_ticks = self.saved.love_ticks.max(love_ticks);
+        true
+    }
+
+    pub(super) fn complete_breeding(&mut self, cooldown: u32) {
+        self.saved.love_ticks = 0;
+        self.saved.breed_cooldown = cooldown;
+        self.set_behavior(RabbitBehavior::Idle);
+    }
+
+    pub(super) fn complete_raid(&mut self, cooldown: u32) {
+        self.saved.raid_cooldown = cooldown;
+        self.set_behavior(RabbitBehavior::Forage);
     }
 }
 

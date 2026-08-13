@@ -2152,6 +2152,10 @@ mod tests {
         include_str!("../../../../assets/mclone/figures/mallard_nest.figure.json");
     const MALLARD_FEATHER_FIGURE_JSON: &str =
         include_str!("../../../../assets/mclone/figures/mallard_feather.figure.json");
+    const RABBIT_FIGURE_JSON: &str =
+        include_str!("../../../../assets/mclone/figures/rabbit.figure.json");
+    const RABBIT_BURROW_FIGURE_JSON: &str =
+        include_str!("../../../../assets/mclone/figures/rabbit_burrow.figure.json");
 
     #[test]
     fn prepares_player_as_static_box_geometry() {
@@ -3005,6 +3009,25 @@ mod tests {
         assert_eq!(first.diagnostics.cylinder_cuboid_proxy_count, 0);
         assert!(first.clips.contains_key("walk"));
 
+        let rabbit: FigureAsset = serde_json::from_str(RABBIT_FIGURE_JSON).unwrap();
+        let prepared_rabbit = prepare_figure_asset(&rabbit).unwrap();
+        assert_eq!(prepared_rabbit.parts.len(), 18);
+        for required in [
+            "idle",
+            "hop",
+            "flee",
+            "forage",
+            "dig",
+            "enter_burrow",
+            "emerge",
+            "courtship",
+        ] {
+            assert!(
+                prepared_rabbit.clips.contains_key(required),
+                "missing {required}"
+            );
+        }
+
         let bear: FigureAsset = serde_json::from_str(UPRIGHT_BEAR_FIGURE_JSON).unwrap();
         let prepared_bear = prepare_figure_asset(&bear).unwrap();
         assert_eq!(prepared_bear.parts.len(), 15);
@@ -3021,6 +3044,7 @@ mod tests {
         for (json, expected_name, expected_parts) in [
             (MALLARD_NEST_FIGURE_JSON, "mallard_nest", 15),
             (MALLARD_FEATHER_FIGURE_JSON, "mallard_feather", 7),
+            (RABBIT_BURROW_FIGURE_JSON, "rabbit_burrow", 12),
         ] {
             let asset: FigureAsset = serde_json::from_str(json).unwrap();
             let prepared = prepare_figure_asset(&asset).unwrap();

@@ -443,6 +443,47 @@
       ]
     },
     {
+      "gain": 0.34,
+      "key": "mclone:rabbit_dig",
+      "no_immediate_repeat": true,
+      "pitch_max": 1.18,
+      "pitch_min": 1.04,
+      "variants": [
+        "assets/mclone/sounds/kenney/impact/footstep_grass_000.ogg",
+        "assets/mclone/sounds/kenney/impact/footstep_grass_001.ogg",
+        "assets/mclone/sounds/kenney/impact/footstep_grass_002.ogg",
+        "assets/mclone/sounds/kenney/impact/footstep_grass_003.ogg",
+        "assets/mclone/sounds/kenney/impact/footstep_grass_004.ogg"
+      ]
+    },
+    {
+      "gain": 0.28,
+      "key": "mclone:rabbit_rustle",
+      "no_immediate_repeat": true,
+      "pitch_max": 1.14,
+      "pitch_min": 1.02,
+      "variants": [
+        "assets/mclone/sounds/kenney/rpg/cloth1.ogg",
+        "assets/mclone/sounds/kenney/rpg/cloth2.ogg",
+        "assets/mclone/sounds/kenney/rpg/cloth3.ogg",
+        "assets/mclone/sounds/kenney/rpg/cloth4.ogg"
+      ]
+    },
+    {
+      "gain": 0.38,
+      "key": "mclone:rabbit_thump",
+      "no_immediate_repeat": true,
+      "pitch_max": 1.12,
+      "pitch_min": 0.96,
+      "variants": [
+        "assets/mclone/sounds/kenney/impact/impactSoft_medium_000.ogg",
+        "assets/mclone/sounds/kenney/impact/impactSoft_medium_001.ogg",
+        "assets/mclone/sounds/kenney/impact/impactSoft_medium_002.ogg",
+        "assets/mclone/sounds/kenney/impact/impactSoft_medium_003.ogg",
+        "assets/mclone/sounds/kenney/impact/impactSoft_medium_004.ogg"
+      ]
+    },
+    {
       "gain": 0.36,
       "key": "mclone:ui_back",
       "no_immediate_repeat": false,

@@ -1712,7 +1712,7 @@ impl McloneSceneHost {
             let camera = self.active_world.camera.snapshot();
             let direction = mclone_client::view_vector(camera.yaw_radians, camera.pitch_radians);
             let entity_target = self.active_world.runtime.as_ref().and_then(|runtime| {
-                self.active_world.interaction.target_bee_colony(
+                self.active_world.interaction.target_use_entity(
                     runtime.client(),
                     camera.eye,
                     direction,
@@ -2877,6 +2877,12 @@ impl McloneSceneHost {
             discovered: bee_guide.discovered_count(),
             total: mclone_protocol::BEE_FIELD_GUIDE_OBSERVATION_COUNT,
             complete: bee_guide.is_complete(),
+        });
+        let rabbit_guide = runtime.client().rabbit_field_guide();
+        hud.rabbit_field_guide = Some(mclone_ui::RabbitFieldGuideHud {
+            discovered: rabbit_guide.discovered_count(),
+            total: mclone_protocol::RABBIT_FIELD_GUIDE_OBSERVATION_COUNT,
+            complete: rabbit_guide.is_complete(),
         });
         hud.touch = context.touch_overlay;
         hud.frame_pipeline = self

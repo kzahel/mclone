@@ -10,9 +10,10 @@ use mclone_blocks::{
 use mclone_core::{Aabb, AnimationClipId, AnimationState, BlockPos, BlockStateId, Vec3d};
 use mclone_protocol::{EntityId, EntityKind, EntityPersistentId};
 use mclone_worldgen::block::{
-    ACACIA_LEAVES, ACACIA_LOG, BIRCH_LEAVES, BIRCH_LOG, DANDELION, DARK_OAK_LEAVES, DARK_OAK_LOG,
-    FERN, GRASS, LARGE_FERN_LOWER, LARGE_FERN_UPPER, OAK_LEAVES, OAK_LOG, POPPY, SPRUCE_LEAVES,
-    SPRUCE_LOG, TALL_GRASS_LOWER, TALL_GRASS_UPPER, generated_block_state_id,
+    ACACIA_LEAVES, ACACIA_LOG, BIRCH_LEAVES, BIRCH_LOG, CARROTS_AGE_7, DANDELION, DARK_OAK_LEAVES,
+    DARK_OAK_LOG, DIRT, FERN, GRASS, GRASS_BLOCK, LARGE_FERN_LOWER, LARGE_FERN_UPPER, OAK_LEAVES,
+    OAK_LOG, POPPY, SPRUCE_LEAVES, SPRUCE_LOG, TALL_GRASS_LOWER, TALL_GRASS_UPPER,
+    generated_block_state_id,
 };
 use mclone_worldgen::prng::SimpleRandomSource;
 
@@ -34,6 +35,7 @@ use navigation::GroundPathNavigation;
 use species::MobSpeciesState;
 pub(crate) use species::{
     BeeRuntimeSaveData, DeerRuntimeSaveData, MALLARD_GROWTH_REQUIRED_TICKS, MallardRuntimeSaveData,
+    RabbitRuntimeSaveData,
 };
 
 const PLAYER_EYE_HEIGHT: f64 = 1.62;
@@ -77,6 +79,19 @@ const BEE_MIN_FORAGE_DISTANCE_SQR: f64 = 3.5 * 3.5;
 const BEE_MAX_TRAVEL_TICKS: u32 = 520;
 const BEE_STALL_RECOVERY_TICKS: u16 = 6;
 const BEE_PROGRESS_DISTANCE_SQR: f64 = 0.008 * 0.008;
+const RABBIT_FLEE_RADIUS_SQR: f64 = 6.0 * 6.0;
+const RABBIT_HOME_REACHED_DISTANCE_SQR: f64 = 0.42 * 0.42;
+const RABBIT_TARGET_REACHED_DISTANCE_SQR: f64 = 0.45 * 0.45;
+const RABBIT_HOP_SPEED: f64 = 0.07;
+const RABBIT_FLEE_SPEED: f64 = 0.15;
+const RABBIT_DIG_TICKS: u32 = 56;
+const RABBIT_ENTRY_TICKS: u32 = 18;
+const RABBIT_EMERGE_TICKS: u32 = 18;
+const RABBIT_RAID_TICKS: u32 = 26;
+const RABBIT_UNDERGROUND_MIN_TICKS: u32 = 80;
+const RABBIT_INTENT_TICKS: u16 = 280;
+const RABBIT_STALL_TICKS: u16 = 24;
+const RABBIT_SEARCH_RADIUS: i32 = 12;
 pub(crate) const DEER_FALL_PRESENTATION_TICKS: u32 = 30;
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -101,6 +116,7 @@ impl PathfindingMalusTable {
 pub(crate) struct MobPlayerTarget {
     pub(crate) position: Vec3d,
     pub(crate) eye_y: f64,
+    pub(crate) tempting_carrot: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -135,6 +151,24 @@ struct DeerHabitatIntent {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RabbitIntentKind {
+    Dig,
+    Forage,
+    Raid,
+    Home,
+    Tempt,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct RabbitHabitatIntent {
+    kind: RabbitIntentKind,
+    target: Vec3d,
+    block: Option<BlockPos>,
+    ticks_remaining: u16,
+    stall_ticks: u16,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum DeerHabitatKind {
     Forage,
     Water,
@@ -147,6 +181,15 @@ impl MobPlayerTarget {
         Self {
             position,
             eye_y: position.y + PLAYER_EYE_HEIGHT,
+            tempting_carrot: false,
+        }
+    }
+
+    pub(crate) fn from_position_with_carrot(position: Vec3d, tempting_carrot: bool) -> Self {
+        Self {
+            position,
+            eye_y: position.y + PLAYER_EYE_HEIGHT,
+            tempting_carrot,
         }
     }
 }
@@ -182,6 +225,10 @@ pub(crate) struct MobRuntimeState {
     bee_flower: Option<BlockPos>,
     bee_home_position: Option<Vec3d>,
     bee_completed_deposit: Option<BlockPos>,
+    rabbit_home_position: Option<Vec3d>,
+    rabbit_habitat_intent: Option<RabbitHabitatIntent>,
+    rabbit_completed_dig: Option<BlockPos>,
+    rabbit_completed_raid: Option<BlockPos>,
 }
 
 impl MobRuntimeState {
@@ -210,13 +257,15 @@ impl MobRuntimeState {
             EntityKind::Mallard => passive::register_mallard_goals(&mut goal_selector),
             EntityKind::Deer => passive::register_cow_goals(&mut goal_selector),
             EntityKind::Bee => {}
+            EntityKind::Rabbit => {}
             EntityKind::Mannequin => passive::register_mannequin_goals(&mut goal_selector),
             EntityKind::DebugCube
             | EntityKind::Item
             | EntityKind::MallardNest
             | EntityKind::DeerBed
             | EntityKind::BeeNest
-            | EntityKind::BeeHotel => {}
+            | EntityKind::BeeHotel
+            | EntityKind::RabbitBurrow => {}
         }
         let attributes = MobAttributes::from_metadata(metadata);
 
@@ -250,6 +299,10 @@ impl MobRuntimeState {
             bee_flower: None,
             bee_home_position: None,
             bee_completed_deposit: None,
+            rabbit_home_position: None,
+            rabbit_habitat_intent: None,
+            rabbit_completed_dig: None,
+            rabbit_completed_raid: None,
         }
     }
 
@@ -263,6 +316,7 @@ impl MobRuntimeState {
         mallard: Option<MallardRuntimeSaveData>,
         deer: Option<DeerRuntimeSaveData>,
         bee: Option<BeeRuntimeSaveData>,
+        rabbit: Option<RabbitRuntimeSaveData>,
     ) -> Self {
         debug_assert!(
             metadata.is_passive_mob(),
@@ -275,8 +329,15 @@ impl MobRuntimeState {
 
         let mut random = SimpleRandomSource::new(mob_random_seed(id, metadata.kind));
         let bee_flower = bee.and_then(|saved| saved.flower);
-        let species =
-            MobSpeciesState::from_saved(metadata.kind, &mut random, egg_time, mallard, deer, bee);
+        let species = MobSpeciesState::from_saved(
+            metadata.kind,
+            &mut random,
+            egg_time,
+            mallard,
+            deer,
+            bee,
+            rabbit,
+        );
 
         let mut goal_selector = GoalSelector::default();
         match metadata.kind {
@@ -285,13 +346,15 @@ impl MobRuntimeState {
             EntityKind::Mallard => passive::register_mallard_goals(&mut goal_selector),
             EntityKind::Deer => passive::register_cow_goals(&mut goal_selector),
             EntityKind::Bee => {}
+            EntityKind::Rabbit => {}
             EntityKind::Mannequin => passive::register_mannequin_goals(&mut goal_selector),
             EntityKind::DebugCube
             | EntityKind::Item
             | EntityKind::MallardNest
             | EntityKind::DeerBed
             | EntityKind::BeeNest
-            | EntityKind::BeeHotel => {}
+            | EntityKind::BeeHotel
+            | EntityKind::RabbitBurrow => {}
         }
         let attributes = MobAttributes::from_metadata(metadata);
 
@@ -325,6 +388,10 @@ impl MobRuntimeState {
             bee_flower,
             bee_home_position: None,
             bee_completed_deposit: None,
+            rabbit_home_position: None,
+            rabbit_habitat_intent: None,
+            rabbit_completed_dig: None,
+            rabbit_completed_raid: None,
         }
     }
 
@@ -414,6 +481,34 @@ impl MobRuntimeState {
         self.species.bee().map(|bee| bee.save_data())
     }
 
+    pub(crate) fn rabbit_save_data(&self) -> Option<RabbitRuntimeSaveData> {
+        self.species.rabbit().map(|rabbit| rabbit.save_data())
+    }
+
+    pub(crate) fn rabbit_behavior(&self) -> Option<mclone_protocol::RabbitBehavior> {
+        self.species.rabbit().map(|rabbit| rabbit.behavior())
+    }
+
+    pub(crate) fn rabbit_life_stage(&self) -> Option<mclone_protocol::RabbitLifeStage> {
+        self.species.rabbit().map(|rabbit| rabbit.life_stage())
+    }
+
+    pub(crate) fn rabbit_home(&self) -> Option<EntityPersistentId> {
+        self.species.rabbit().and_then(|rabbit| rabbit.home())
+    }
+
+    pub(crate) fn rabbit_can_breed(&self) -> bool {
+        self.species
+            .rabbit()
+            .is_some_and(|rabbit| rabbit.can_breed())
+    }
+
+    pub(crate) fn complete_rabbit_breeding(&mut self, cooldown: u32) {
+        let rabbit = self.species.rabbit_mut().expect("rabbit species");
+        rabbit.complete_breeding(cooldown);
+        rabbit.set_behavior(mclone_protocol::RabbitBehavior::Courtship);
+    }
+
     pub(crate) fn bee_home(&self) -> Option<EntityPersistentId> {
         self.species.bee().map(|bee| bee.home())
     }
@@ -428,6 +523,41 @@ impl MobRuntimeState {
 
     pub(crate) fn take_bee_completed_deposit(&mut self) -> Option<BlockPos> {
         self.bee_completed_deposit.take()
+    }
+
+    pub(crate) fn set_rabbit_home_position(&mut self, position: Option<Vec3d>) {
+        self.rabbit_home_position = position;
+    }
+
+    pub(crate) fn take_rabbit_completed_dig(&mut self) -> Option<BlockPos> {
+        self.rabbit_completed_dig.take()
+    }
+
+    pub(crate) fn take_rabbit_completed_raid(&mut self) -> Option<BlockPos> {
+        self.rabbit_completed_raid.take()
+    }
+
+    pub(crate) fn assign_rabbit_home(&mut self, home: EntityPersistentId, position: Vec3d) {
+        let rabbit = self.species.rabbit_mut().expect("rabbit species");
+        rabbit.set_home(Some(home));
+        rabbit.set_dig_target(None);
+        rabbit.set_behavior(mclone_protocol::RabbitBehavior::Emerge);
+        self.rabbit_home_position = Some(position);
+        self.rabbit_habitat_intent = None;
+    }
+
+    pub(crate) fn complete_rabbit_raid(&mut self, cooldown: u32) {
+        self.species
+            .rabbit_mut()
+            .expect("rabbit species")
+            .complete_raid(cooldown);
+        self.rabbit_habitat_intent = None;
+    }
+
+    pub(crate) fn feed_rabbit(&mut self, love_ticks: u32) -> bool {
+        self.species
+            .rabbit_mut()
+            .is_some_and(|rabbit| rabbit.feed(love_ticks))
     }
 
     pub(crate) fn damage_deer(&mut self, entity: &mut ServerEntityState, damage: u8) -> bool {
@@ -508,8 +638,34 @@ impl MobRuntimeState {
     ) where
         F: Fn(BlockPos) -> Option<BlockStateId>,
     {
+        self.tick_entity_at_time(
+            entity,
+            nearby_players,
+            flockmates,
+            herdmates,
+            6_000,
+            block_state_at,
+        );
+    }
+
+    pub(crate) fn tick_entity_at_time<F>(
+        &mut self,
+        entity: &mut ServerEntityState,
+        nearby_players: &[MobPlayerTarget],
+        flockmates: &[MallardFlockmateTarget],
+        herdmates: &[DeerHerdmateTarget],
+        day_time: u64,
+        block_state_at: &F,
+    ) where
+        F: Fn(BlockPos) -> Option<BlockStateId>,
+    {
         self.on_ground = entity.on_ground;
         self.y_body_rot_degrees = entity.y_rot_degrees;
+
+        if entity.kind == EntityKind::Rabbit {
+            self.tick_rabbit(entity, nearby_players, day_time, block_state_at);
+            return;
+        }
 
         if entity.kind == EntityKind::Deer {
             self.tick_deer(entity, nearby_players, herdmates, block_state_at);
@@ -573,6 +729,228 @@ impl MobRuntimeState {
         self.move_control = context.move_control;
         self.jump_control = context.jump_control;
         self.look_control = context.look_control;
+    }
+
+    fn tick_rabbit<F>(
+        &mut self,
+        entity: &mut ServerEntityState,
+        nearby_players: &[MobPlayerTarget],
+        day_time: u64,
+        blocks: &F,
+    ) where
+        F: Fn(BlockPos) -> Option<BlockStateId>,
+    {
+        let Some(saved) = self.species.rabbit().map(|rabbit| rabbit.save_data()) else {
+            return;
+        };
+        self.species
+            .rabbit_mut()
+            .expect("rabbit species")
+            .advance_tick();
+        let nearest_player = nearby_players.iter().copied().min_by(|left, right| {
+            entity
+                .position
+                .distance_to_sqr(left.position)
+                .total_cmp(&entity.position.distance_to_sqr(right.position))
+        });
+        let threat = nearest_player.filter(|player| {
+            !player.tempting_carrot
+                && entity.position.distance_to_sqr(player.position) <= RABBIT_FLEE_RADIUS_SQR
+        });
+        let active = rabbit_active_time(day_time);
+        let mut next = saved.behavior;
+        let ticks = saved.behavior_ticks.saturating_add(1);
+
+        if threat.is_some() && saved.behavior != mclone_protocol::RabbitBehavior::Underground {
+            next = mclone_protocol::RabbitBehavior::Flee;
+            self.rabbit_habitat_intent = Some(RabbitHabitatIntent {
+                kind: RabbitIntentKind::Home,
+                target: self.rabbit_home_position.unwrap_or_else(|| {
+                    rabbit_escape_target(entity.position, threat.unwrap().position, blocks)
+                }),
+                block: None,
+                ticks_remaining: RABBIT_INTENT_TICKS,
+                stall_ticks: 0,
+            });
+        } else if saved.home.is_none() {
+            if saved.behavior == mclone_protocol::RabbitBehavior::Dig {
+                if ticks >= RABBIT_DIG_TICKS {
+                    self.rabbit_completed_dig = saved.dig_target;
+                    next = mclone_protocol::RabbitBehavior::Idle;
+                }
+            } else {
+                let target = saved
+                    .dig_target
+                    .or_else(|| select_rabbit_dig_site(entity.position, blocks));
+                if let Some(target) = target {
+                    self.species
+                        .rabbit_mut()
+                        .expect("rabbit species")
+                        .set_dig_target(Some(target));
+                    let entrance = rabbit_entrance_position(target, entity.position);
+                    if entity.position.distance_to_sqr(entrance)
+                        <= RABBIT_TARGET_REACHED_DISTANCE_SQR
+                    {
+                        next = mclone_protocol::RabbitBehavior::Dig;
+                        self.rabbit_habitat_intent = None;
+                    } else {
+                        next = mclone_protocol::RabbitBehavior::Hop;
+                        self.rabbit_habitat_intent = Some(RabbitHabitatIntent {
+                            kind: RabbitIntentKind::Dig,
+                            target: entrance,
+                            block: Some(target),
+                            ticks_remaining: RABBIT_INTENT_TICKS,
+                            stall_ticks: 0,
+                        });
+                    }
+                } else {
+                    next = mclone_protocol::RabbitBehavior::Forage;
+                }
+            }
+        } else if saved.behavior == mclone_protocol::RabbitBehavior::Underground {
+            if active && ticks >= RABBIT_UNDERGROUND_MIN_TICKS {
+                next = mclone_protocol::RabbitBehavior::Emerge;
+                if let Some(home) = self.rabbit_home_position {
+                    entity.position = home;
+                }
+            }
+        } else if saved.behavior == mclone_protocol::RabbitBehavior::Emerge
+            && ticks < RABBIT_EMERGE_TICKS
+        {
+            next = saved.behavior;
+        } else if !active {
+            if let Some(home) = self.rabbit_home_position {
+                if entity.position.distance_to_sqr(home) <= RABBIT_HOME_REACHED_DISTANCE_SQR {
+                    next = mclone_protocol::RabbitBehavior::EnterBurrow;
+                    if saved.behavior == mclone_protocol::RabbitBehavior::EnterBurrow
+                        && ticks >= RABBIT_ENTRY_TICKS
+                    {
+                        next = mclone_protocol::RabbitBehavior::Underground;
+                    }
+                } else {
+                    next = mclone_protocol::RabbitBehavior::Hop;
+                    self.rabbit_habitat_intent = Some(RabbitHabitatIntent {
+                        kind: RabbitIntentKind::Home,
+                        target: home,
+                        block: None,
+                        ticks_remaining: RABBIT_INTENT_TICKS,
+                        stall_ticks: 0,
+                    });
+                }
+            }
+        } else if saved.behavior == mclone_protocol::RabbitBehavior::Raid {
+            if ticks >= RABBIT_RAID_TICKS {
+                self.rabbit_completed_raid =
+                    self.rabbit_habitat_intent.and_then(|intent| intent.block);
+                next = mclone_protocol::RabbitBehavior::Forage;
+                self.rabbit_habitat_intent = None;
+            }
+        } else if nearest_player.is_some_and(|player| player.tempting_carrot) {
+            let player = nearest_player.expect("checked player");
+            next = mclone_protocol::RabbitBehavior::Hop;
+            self.rabbit_habitat_intent = Some(RabbitHabitatIntent {
+                kind: RabbitIntentKind::Tempt,
+                target: player.position,
+                block: None,
+                ticks_remaining: 40,
+                stall_ticks: 0,
+            });
+        } else {
+            let target_is_valid = self.rabbit_habitat_intent.is_some_and(|intent| {
+                intent.ticks_remaining > 0
+                    && intent.block.is_none_or(|block| {
+                        intent.kind != RabbitIntentKind::Raid
+                            || blocks(block) == Some(generated_block_state_id(CARROTS_AGE_7))
+                    })
+            });
+            if !target_is_valid {
+                self.rabbit_habitat_intent = if saved.raid_cooldown == 0 && saved.health > 0 {
+                    select_rabbit_carrot_target(entity.position, blocks).map(|block| {
+                        RabbitHabitatIntent {
+                            kind: RabbitIntentKind::Raid,
+                            target: Vec3d::new(
+                                f64::from(block.x) + 0.5,
+                                f64::from(block.y),
+                                f64::from(block.z) + 0.5,
+                            ),
+                            block: Some(block),
+                            ticks_remaining: RABBIT_INTENT_TICKS,
+                            stall_ticks: 0,
+                        }
+                    })
+                } else {
+                    None
+                }
+                .or_else(|| random_rabbit_forage_target(entity.position, &mut self.random, blocks));
+            }
+            if let Some(intent) = self.rabbit_habitat_intent {
+                if entity.position.distance_to_sqr(intent.target)
+                    <= RABBIT_TARGET_REACHED_DISTANCE_SQR
+                {
+                    next = if intent.kind == RabbitIntentKind::Raid {
+                        mclone_protocol::RabbitBehavior::Raid
+                    } else {
+                        mclone_protocol::RabbitBehavior::Forage
+                    };
+                } else {
+                    next = mclone_protocol::RabbitBehavior::Hop;
+                }
+            } else {
+                next = mclone_protocol::RabbitBehavior::Idle;
+            }
+        }
+
+        let behavior_changed = self
+            .species
+            .rabbit_mut()
+            .expect("rabbit species")
+            .set_behavior(next);
+        if behavior_changed {
+            // Intent remains useful across the hop -> forage/raid transition.
+        }
+
+        let behavior = self.species.rabbit().expect("rabbit species").behavior();
+        if matches!(
+            behavior,
+            mclone_protocol::RabbitBehavior::Hop | mclone_protocol::RabbitBehavior::Flee
+        ) && let Some(mut intent) = self.rabbit_habitat_intent
+        {
+            let previous = entity.position;
+            move_rabbit_toward(
+                entity,
+                intent.target,
+                if behavior == mclone_protocol::RabbitBehavior::Flee {
+                    RABBIT_FLEE_SPEED
+                } else {
+                    RABBIT_HOP_SPEED
+                },
+                blocks,
+            );
+            intent.ticks_remaining = intent.ticks_remaining.saturating_sub(1);
+            if squared_horizontal_distance(previous, entity.position) < 1.0e-8 {
+                intent.stall_ticks = intent.stall_ticks.saturating_add(1);
+            } else {
+                intent.stall_ticks = 0;
+            }
+            self.rabbit_habitat_intent = (intent.ticks_remaining > 0
+                && intent.stall_ticks < RABBIT_STALL_TICKS)
+                .then_some(intent);
+        }
+
+        let life_stage = self.species.rabbit().expect("rabbit species").life_stage();
+        let scale = if life_stage == mclone_protocol::RabbitLifeStage::Kit {
+            0.62
+        } else {
+            1.0
+        };
+        if behavior == mclone_protocol::RabbitBehavior::Underground {
+            entity.width = 0.001;
+            entity.height = 0.001;
+        } else {
+            entity.width = EntityMetadata::RABBIT.dimensions.width * scale;
+            entity.height = EntityMetadata::RABBIT.dimensions.height * scale;
+        }
+        set_rabbit_animation(entity, behavior);
     }
 
     fn tick_deer<F>(
@@ -2318,6 +2696,222 @@ fn set_deer_animation(entity: &mut ServerEntityState, behavior: mclone_protocol:
     }
 }
 
+fn rabbit_active_time(day_time: u64) -> bool {
+    matches!(day_time % 24_000, 0..=5_000 | 10_500..=14_500)
+}
+
+fn select_rabbit_dig_site<F>(position: Vec3d, blocks: &F) -> Option<BlockPos>
+where
+    F: Fn(BlockPos) -> Option<BlockStateId>,
+{
+    let origin = BlockPos::containing(position);
+    let soil = [
+        generated_block_state_id(GRASS_BLOCK),
+        generated_block_state_id(DIRT),
+    ];
+    let directions = [
+        mclone_core::Direction::North,
+        mclone_core::Direction::South,
+        mclone_core::Direction::West,
+        mclone_core::Direction::East,
+    ];
+    let mut best = None;
+    let mut best_distance = f64::INFINITY;
+    for radius in 1_i32..=RABBIT_SEARCH_RADIUS {
+        for dx in -radius..=radius {
+            for dz in -radius..=radius {
+                if dx.abs() + dz.abs() != radius {
+                    continue;
+                }
+                for dy in -2..=2 {
+                    let target = origin.offset(dx, dy, dz);
+                    if !blocks(target).is_some_and(|state| soil.contains(&state))
+                        || !blocks(target.offset(0, 1, 0))
+                            .is_some_and(|state| soil.contains(&state))
+                        || block_fluid_kind(blocks(target).unwrap()) == BlockFluidKind::Water
+                    {
+                        continue;
+                    }
+                    let has_threshold = directions.iter().any(|direction| {
+                        let front = target.relative(*direction);
+                        let rear = target.relative(direction.opposite());
+                        rabbit_walkable_feet(front, blocks)
+                            && blocks(rear)
+                                .is_some_and(|state| block_collision_aabb(state, rear).is_some())
+                    });
+                    if !has_threshold {
+                        continue;
+                    }
+                    let center = Vec3d::new(
+                        f64::from(target.x) + 0.5,
+                        f64::from(target.y),
+                        f64::from(target.z) + 0.5,
+                    );
+                    let distance = position.distance_to_sqr(center);
+                    if distance < best_distance {
+                        best_distance = distance;
+                        best = Some(target);
+                    }
+                }
+            }
+        }
+    }
+    best
+}
+
+fn rabbit_entrance_position(target: BlockPos, position: Vec3d) -> Vec3d {
+    let center = Vec3d::new(
+        f64::from(target.x) + 0.5,
+        f64::from(target.y),
+        f64::from(target.z) + 0.5,
+    );
+    let dx = position.x - center.x;
+    let dz = position.z - center.z;
+    if dx.abs() >= dz.abs() {
+        center.add(Vec3d::new(dx.signum() * 0.8, 0.0, 0.0))
+    } else {
+        center.add(Vec3d::new(0.0, 0.0, dz.signum() * 0.8))
+    }
+}
+
+fn select_rabbit_carrot_target<F>(position: Vec3d, blocks: &F) -> Option<BlockPos>
+where
+    F: Fn(BlockPos) -> Option<BlockStateId>,
+{
+    let origin = BlockPos::containing(position);
+    let mature = generated_block_state_id(CARROTS_AGE_7);
+    let mut best = None;
+    let mut best_distance = f64::INFINITY;
+    for dx in -RABBIT_SEARCH_RADIUS..=RABBIT_SEARCH_RADIUS {
+        for dz in -RABBIT_SEARCH_RADIUS..=RABBIT_SEARCH_RADIUS {
+            for dy in -3..=3 {
+                let crop = origin.offset(dx, dy, dz);
+                if blocks(crop) != Some(mature) || !rabbit_walkable_feet(crop, blocks) {
+                    continue;
+                }
+                let center = Vec3d::new(
+                    f64::from(crop.x) + 0.5,
+                    f64::from(crop.y),
+                    f64::from(crop.z) + 0.5,
+                );
+                let distance = position.distance_to_sqr(center);
+                if distance < best_distance {
+                    best_distance = distance;
+                    best = Some(crop);
+                }
+            }
+        }
+    }
+    best
+}
+
+fn random_rabbit_forage_target<F>(
+    position: Vec3d,
+    random: &mut SimpleRandomSource,
+    blocks: &F,
+) -> Option<RabbitHabitatIntent>
+where
+    F: Fn(BlockPos) -> Option<BlockStateId>,
+{
+    let origin = BlockPos::containing(position);
+    for _ in 0..24 {
+        let dx = random.next_int_bound(RABBIT_SEARCH_RADIUS * 2 + 1) - RABBIT_SEARCH_RADIUS;
+        let dz = random.next_int_bound(RABBIT_SEARCH_RADIUS * 2 + 1) - RABBIT_SEARCH_RADIUS;
+        for dy in -3..=3 {
+            let feet = origin.offset(dx, dy, dz);
+            if rabbit_walkable_feet(feet, blocks) {
+                return Some(RabbitHabitatIntent {
+                    kind: RabbitIntentKind::Forage,
+                    target: Vec3d::new(
+                        f64::from(feet.x) + 0.5,
+                        f64::from(feet.y),
+                        f64::from(feet.z) + 0.5,
+                    ),
+                    block: None,
+                    ticks_remaining: RABBIT_INTENT_TICKS,
+                    stall_ticks: 0,
+                });
+            }
+        }
+    }
+    None
+}
+
+fn rabbit_escape_target<F>(position: Vec3d, threat: Vec3d, blocks: &F) -> Vec3d
+where
+    F: Fn(BlockPos) -> Option<BlockStateId>,
+{
+    let away = position.subtract(threat);
+    let length = (away.x * away.x + away.z * away.z).sqrt();
+    let (away_x, away_z) = if length > 1.0e-6 {
+        (away.x / length, away.z / length)
+    } else {
+        (0.0, 1.0)
+    };
+    let origin = BlockPos::containing(position);
+    for distance in (4..=10).rev() {
+        let candidate = BlockPos::new(
+            (position.x + away_x * f64::from(distance)).floor() as i32,
+            origin.y,
+            (position.z + away_z * f64::from(distance)).floor() as i32,
+        );
+        for dy in -2..=2 {
+            let feet = candidate.offset(0, dy, 0);
+            if rabbit_walkable_feet(feet, blocks) {
+                return Vec3d::new(
+                    f64::from(feet.x) + 0.5,
+                    f64::from(feet.y),
+                    f64::from(feet.z) + 0.5,
+                );
+            }
+        }
+    }
+    position.add(Vec3d::new(away_x * 8.0, 0.0, away_z * 8.0))
+}
+
+fn rabbit_walkable_feet<F>(feet: BlockPos, blocks: &F) -> bool
+where
+    F: Fn(BlockPos) -> Option<BlockStateId>,
+{
+    deer_walkable_feet(feet, blocks)
+}
+
+fn move_rabbit_toward<F>(entity: &mut ServerEntityState, target: Vec3d, speed: f64, blocks: &F)
+where
+    F: Fn(BlockPos) -> Option<BlockStateId>,
+{
+    move_deer_toward(entity, target, speed, blocks);
+}
+
+fn set_rabbit_animation(entity: &mut ServerEntityState, behavior: mclone_protocol::RabbitBehavior) {
+    let (clip, elapsed) = match behavior {
+        mclone_protocol::RabbitBehavior::Idle | mclone_protocol::RabbitBehavior::Underground => {
+            ("idle", true)
+        }
+        mclone_protocol::RabbitBehavior::Hop => ("hop", false),
+        mclone_protocol::RabbitBehavior::Flee => ("flee", false),
+        mclone_protocol::RabbitBehavior::Forage | mclone_protocol::RabbitBehavior::Raid => {
+            ("forage", true)
+        }
+        mclone_protocol::RabbitBehavior::Dig => ("dig", true),
+        mclone_protocol::RabbitBehavior::EnterBurrow => ("enter_burrow", true),
+        mclone_protocol::RabbitBehavior::Emerge => ("emerge", true),
+        mclone_protocol::RabbitBehavior::Courtship => ("courtship", true),
+    };
+    let clip = AnimationClipId::from_static(clip);
+    if entity.animation.is_some_and(|current| current.clip == clip) {
+        return;
+    }
+    let epoch = entity
+        .animation
+        .map_or(0, |current| current.epoch.wrapping_add(1));
+    entity.animation = Some(if elapsed {
+        AnimationState::elapsed(clip, epoch, entity.tick_count)
+    } else {
+        AnimationState::distance(clip, epoch)
+    });
+}
+
 fn squared_horizontal_distance(left: Vec3d, right: Vec3d) -> f64 {
     let dx = left.x - right.x;
     let dz = left.z - right.z;
@@ -2430,6 +3024,8 @@ fn mob_random_seed(id: EntityId, kind: EntityKind) -> i64 {
         EntityKind::Bee => 0x00c0_0009_u64,
         EntityKind::BeeNest => 0x00c0_000a_u64,
         EntityKind::BeeHotel => 0x00c0_000b_u64,
+        EntityKind::Rabbit => 0x00c0_000c_u64,
+        EntityKind::RabbitBurrow => 0x00c0_000d_u64,
     };
     let mixed = id.0.wrapping_mul(0x9e37_79b9_7f4a_7c15).rotate_left(17) ^ kind_id;
     mixed as i64
@@ -2512,6 +3108,51 @@ mod tests {
         );
         assert_eq!(returning.start_tick, 180);
         assert!(returning.epoch > outbound.epoch);
+    }
+
+    #[test]
+    fn founder_rabbit_chooses_a_real_bank_and_completes_one_dig() {
+        let metadata = EntityMetadata::RABBIT;
+        let mut entity = ServerEntityState::from_metadata(
+            EntityId(77),
+            EntityPersistentId::new(0, 77),
+            metadata,
+            Vec3d::new(1.5, 64.0, 0.5),
+            -90.0,
+            0.0,
+            None,
+            true,
+        );
+        let mut mob = MobRuntimeState::from_spawn(EntityId(77), metadata, true, -90.0);
+        let bank = |pos: BlockPos| {
+            let raw = if pos.y <= 62 {
+                DIRT
+            } else if pos.y == 63 {
+                GRASS_BLOCK
+            } else if matches!((pos.x, pos.y, pos.z), (3, 64, 0) | (3, 65, 0) | (4, 64, 0)) {
+                DIRT
+            } else {
+                mclone_worldgen::block::AIR
+            };
+            Some(generated_block_state_id(raw))
+        };
+
+        let mut completed = None;
+        for _ in 0..180 {
+            mob.tick_entity_at_time(&mut entity, &[], &[], &[], 12_000, &bank);
+            entity.tick_count += 1;
+            completed = mob.take_rabbit_completed_dig();
+            if completed.is_some() {
+                break;
+            }
+        }
+
+        assert_eq!(completed, Some(BlockPos::new(3, 64, 0)));
+        assert_eq!(
+            mob.rabbit_behavior(),
+            Some(mclone_protocol::RabbitBehavior::Idle)
+        );
+        assert!(entity.position.x > 2.0);
     }
 
     fn one_block_ledge(pos: BlockPos) -> Option<BlockStateId> {

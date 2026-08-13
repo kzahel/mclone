@@ -369,6 +369,7 @@ const fn uses_movement_derived_travel_phase(kind: ActorPresentationKind) -> bool
                     | EntityKind::Mallard
                     | EntityKind::Mannequin
                     | EntityKind::Deer
+                    | EntityKind::Rabbit
             )
     )
 }

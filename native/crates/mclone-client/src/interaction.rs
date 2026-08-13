@@ -172,6 +172,20 @@ impl ClientInteractionController {
         })
     }
 
+    pub fn target_use_entity(
+        &self,
+        client: &ClientRuntime,
+        eye_position: Vec3d,
+        view_vector: Vec3d,
+    ) -> Option<EntityInteractionTarget> {
+        self.target_entity_matching(client, eye_position, view_vector, |entity| {
+            matches!(
+                entity.kind,
+                EntityKind::BeeNest | EntityKind::BeeHotel | EntityKind::Rabbit
+            )
+        })
+    }
+
     fn target_entity_matching(
         &self,
         client: &ClientRuntime,

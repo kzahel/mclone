@@ -64,7 +64,7 @@ use crate::falling_block::{
 };
 use crate::farming::{
     CropKind, FarmingBlockAction, crop_harvest, crop_state, harvest_stacks, plan_plant, plan_till,
-    random_farming_tick, random_farming_tick_candidates,
+    rabbit_raid_next_state, random_farming_tick, random_farming_tick_candidates,
 };
 use crate::game_mode::ServerInteractionContext;
 use crate::garden_blocks::{
@@ -1994,6 +1994,7 @@ impl RealmServer {
             player.mallard_field_guide = record.mallard_field_guide;
             player.deer_field_guide = record.deer_field_guide;
             player.bee_field_guide = record.bee_field_guide;
+            player.rabbit_field_guide = record.rabbit_field_guide;
             player.vitals = mclone_protocol::PlayerVitals::new(
                 record.health,
                 mclone_protocol::DEFAULT_PLAYER_MAX_HEALTH,
@@ -2012,6 +2013,7 @@ impl RealmServer {
         let mallard_field_guide = player.mallard_field_guide;
         let deer_field_guide = player.deer_field_guide;
         let bee_field_guide = player.bee_field_guide;
+        let rabbit_field_guide = player.rabbit_field_guide;
         self.chunk_tracking.queue_update_for_player(
             player_id,
             ServerUpdate::PlayerExperience { total_experience },
@@ -2032,6 +2034,10 @@ impl RealmServer {
             .queue_update_for_player(player_id, ServerUpdate::DeerFieldGuide(deer_field_guide));
         self.chunk_tracking
             .queue_update_for_player(player_id, ServerUpdate::BeeFieldGuide(bee_field_guide));
+        self.chunk_tracking.queue_update_for_player(
+            player_id,
+            ServerUpdate::RabbitFieldGuide(rabbit_field_guide),
+        );
         let life = player_life_state(
             self.players
                 .get(player_id)
@@ -2151,7 +2157,15 @@ impl RealmServer {
         self.players
             .iter()
             .filter(|(_, entry)| &entry.dimension == dimension && !entry.vitals.is_dead())
-            .map(|(_, entry)| MobPlayerTarget::from_position(entry.state.position()))
+            .map(|(_, entry)| {
+                MobPlayerTarget::from_position_with_carrot(
+                    entry.state.position(),
+                    entry
+                        .inventory
+                        .selected_item_stack()
+                        .is_some_and(|stack| stack.kind == ItemKind::Carrot),
+                )
+            })
             .collect()
     }
 
@@ -2520,6 +2534,7 @@ impl RealmServer {
             self.tick_natural_spawning(simulation_tick, &tick_report.entity_ticking_chunks);
         let natural_spawning = natural_spawning_tick.diagnostics;
         let mob_player_targets = self.mob_player_targets();
+        let day_time = self.day_time;
         let runtime = &mut self.active_dimension;
         let scheduler = &runtime.scheduler;
         let mut entity_updates = natural_spawning_tick.spawned_entities;
@@ -2536,9 +2551,10 @@ impl RealmServer {
                 }
             }
         }
-        entity_updates.extend(runtime.entities.tick_stationary(
+        entity_updates.extend(runtime.entities.tick_stationary_at_time(
             &tick_report.entity_ticking_chunks,
             &mob_player_targets,
+            day_time,
             |pos| {
                 scheduler
                     .block_at_world(pos)
@@ -2550,6 +2566,43 @@ impl RealmServer {
         {
             entity_updates.retain(|entity| entity.id != scripted.id);
             entity_updates.push(scripted);
+        }
+        let rabbit_digs = runtime.entities.drain_rabbit_digs();
+        let rabbit_raids = runtime.entities.drain_rabbit_raids();
+        let mut completed_rabbit_digs = Vec::new();
+        let mut completed_rabbit_raids = Vec::new();
+        for event in rabbit_digs {
+            if self
+                .scheduler
+                .block_at_world(event.target)
+                .is_some_and(|block| matches!(block, mclone_worldgen::block::DIRT | GRASS_BLOCK))
+                && self.set_block_from_simulation(event.target, AIR)
+            {
+                entity_updates.extend(
+                    self.active_dimension
+                        .entities
+                        .complete_rabbit_dig(event.rabbit, event.target),
+                );
+                completed_rabbit_digs.push(event.target);
+            }
+        }
+        for event in rabbit_raids {
+            let Some(next) = self
+                .scheduler
+                .block_at_world(event.target)
+                .and_then(rabbit_raid_next_state)
+            else {
+                continue;
+            };
+            if self.set_block_from_simulation(event.target, next)
+                && let Some(updated) = self
+                    .active_dimension
+                    .entities
+                    .complete_rabbit_raid(event.rabbit)
+            {
+                entity_updates.push(updated);
+                completed_rabbit_raids.push(event.target);
+            }
         }
         let item_pickup_targets = self.item_pickup_targets();
         let players = &mut self.players;
@@ -2593,6 +2646,7 @@ impl RealmServer {
         let mallard_calls = self.active_dimension.entities.drain_mallard_calls();
         let deer_sounds = self.active_dimension.entities.drain_deer_sounds();
         let bee_sounds = self.active_dimension.entities.drain_bee_sounds();
+        let rabbit_sounds = self.active_dimension.entities.drain_rabbit_sounds();
         let bee_pollinations = self.active_dimension.entities.drain_bee_pollinations();
         let mallard_tracks = self.active_dimension.entities.drain_mallard_tracks();
         let mallard_hatches = self
@@ -2614,6 +2668,12 @@ impl RealmServer {
             bee_sounds,
             &bee_pollinations,
             &pollinated_positions,
+        );
+        self.route_rabbit_ecology_cues(
+            &entity_updates,
+            rabbit_sounds,
+            &completed_rabbit_digs,
+            &completed_rabbit_raids,
         );
         let entity_tick_us = simulation_timing_elapsed_us(entity_tick_start);
 
@@ -3872,6 +3932,31 @@ impl RealmServer {
         let eye = player.position().add(Vec3d::new(0.0, 1.62, 0.0));
         let direction = look_direction_from_rot(player.y_rot_degrees(), player.x_rot_degrees());
         let to = eye.add(direction.scale(BEE_COLONY_INTERACTION_REACH));
+        if self
+            .inventory_for_target(target)?
+            .selected_item_stack()
+            .is_some_and(|stack| stack.kind == ItemKind::Carrot)
+            && let Some((targeted, hit_fraction)) =
+                self.active_dimension.entities.targeted_rabbit(eye, to)
+            && targeted.id == command.target
+            && deer_attack_line_of_sight(eye, to, hit_fraction, |pos| {
+                self.scheduler.block_at_world(pos)
+            })
+            && let Some(updated) = self.active_dimension.entities.feed_rabbit(command.target)
+        {
+            let consumed = self
+                .inventory_mut_for_target(target)?
+                .consume_selected_item(ItemKind::Carrot);
+            debug_assert!(
+                consumed,
+                "validated carrot disappeared before rabbit feeding"
+            );
+            self.mark_entity_updates_dirty(&[updated]);
+            self.reconcile_entity_subjects(std::iter::once(updated), true);
+            return Ok(vec![ServerUpdate::PlayerInventory {
+                hotbar: self.inventory_for_target(target)?.hotbar_item_stacks(),
+            }]);
+        }
         let Some((targeted, hit_fraction)) =
             self.active_dimension.entities.targeted_bee_colony(eye, to)
         else {
@@ -5163,6 +5248,83 @@ impl RealmServer {
         }
     }
 
+    fn route_rabbit_ecology_cues(
+        &mut self,
+        entity_updates: &[ServerEntityState],
+        sounds: Vec<mclone_protocol::RabbitSoundCue>,
+        completed_digs: &[BlockPos],
+        completed_raids: &[BlockPos],
+    ) {
+        for entity in entity_updates.iter().filter(|entity| entity.alive) {
+            let observation = match entity.kind {
+                EntityKind::RabbitBurrow => {
+                    Some((mclone_protocol::RabbitObservationKind::FoundBurrow, 12.0))
+                }
+                EntityKind::Rabbit => Some((mclone_protocol::RabbitObservationKind::Seen, 18.0)),
+                _ => None,
+            };
+            if let Some((observation, radius)) = observation {
+                for player_id in self.mallard_players_in_range(entity.position, radius) {
+                    self.observe_rabbit(player_id, observation);
+                    if entity.kind == EntityKind::Rabbit {
+                        let clip = entity.animation.map(|animation| animation.clip);
+                        if matches!(
+                            clip,
+                            Some(clip)
+                                if clip == mclone_core::AnimationClipId::from_static("enter_burrow")
+                                    || clip == mclone_core::AnimationClipId::from_static("emerge")
+                        ) {
+                            self.observe_rabbit(
+                                player_id,
+                                mclone_protocol::RabbitObservationKind::WitnessedThresholdUse,
+                            );
+                        }
+                        if entity.width < 0.32 {
+                            self.observe_rabbit(
+                                player_id,
+                                mclone_protocol::RabbitObservationKind::WitnessedFamily,
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        for cue in sounds {
+            for player_id in
+                self.mallard_players_in_range(cue.position, f64::from(cue.audible_radius))
+            {
+                self.chunk_tracking
+                    .queue_update_for_player(player_id, ServerUpdate::RabbitSound(cue));
+            }
+        }
+        for position in completed_digs {
+            let world = Vec3d::new(
+                f64::from(position.x) + 0.5,
+                f64::from(position.y),
+                f64::from(position.z) + 0.5,
+            );
+            for player_id in self.mallard_players_in_range(world, 18.0) {
+                self.observe_rabbit(
+                    player_id,
+                    mclone_protocol::RabbitObservationKind::WitnessedDig,
+                );
+            }
+        }
+        for position in completed_raids {
+            let world = Vec3d::new(
+                f64::from(position.x) + 0.5,
+                f64::from(position.y),
+                f64::from(position.z) + 0.5,
+            );
+            for player_id in self.mallard_players_in_range(world, 18.0) {
+                self.observe_rabbit(
+                    player_id,
+                    mclone_protocol::RabbitObservationKind::WitnessedRaid,
+                );
+            }
+        }
+    }
+
     fn mallard_players_in_range(&self, position: Vec3d, radius: f64) -> Vec<ServerPlayerId> {
         let radius_sqr = radius * radius;
         let topology = self.active_dimension.definition.topology;
@@ -5223,6 +5385,23 @@ impl RealmServer {
         };
         self.chunk_tracking
             .queue_update_for_player(player_id, ServerUpdate::BeeFieldGuide(progress));
+    }
+
+    fn observe_rabbit(
+        &mut self,
+        player_id: ServerPlayerId,
+        observation: mclone_protocol::RabbitObservationKind,
+    ) {
+        let Some(progress) = self.players.get_mut(player_id).and_then(|player| {
+            player
+                .rabbit_field_guide
+                .observe(observation)
+                .then_some(player.rabbit_field_guide)
+        }) else {
+            return;
+        };
+        self.chunk_tracking
+            .queue_update_for_player(player_id, ServerUpdate::RabbitFieldGuide(progress));
     }
 
     fn mark_entity_updates_dirty(&mut self, subjects: &[ServerEntityState]) {
@@ -5753,6 +5932,7 @@ impl RealmServer {
             player.mallard_field_guide = record.mallard_field_guide;
             player.deer_field_guide = record.deer_field_guide;
             player.bee_field_guide = record.bee_field_guide;
+            player.rabbit_field_guide = record.rabbit_field_guide;
             player.vitals = mclone_protocol::PlayerVitals::new(
                 record.health,
                 mclone_protocol::DEFAULT_PLAYER_MAX_HEALTH,
@@ -5767,6 +5947,7 @@ impl RealmServer {
             let mallard_field_guide = player.mallard_field_guide;
             let deer_field_guide = player.deer_field_guide;
             let bee_field_guide = player.bee_field_guide;
+            let rabbit_field_guide = player.rabbit_field_guide;
             let life = player_life_state(player);
             self.chunk_tracking.queue_update_for_player(
                 player_id,
@@ -5790,6 +5971,10 @@ impl RealmServer {
                 .queue_update_for_player(player_id, ServerUpdate::DeerFieldGuide(deer_field_guide));
             self.chunk_tracking
                 .queue_update_for_player(player_id, ServerUpdate::BeeFieldGuide(bee_field_guide));
+            self.chunk_tracking.queue_update_for_player(
+                player_id,
+                ServerUpdate::RabbitFieldGuide(rabbit_field_guide),
+            );
             self.chunk_tracking
                 .queue_update_for_player(player_id, ServerUpdate::PlayerLife(life));
             let center = self
@@ -6948,6 +7133,7 @@ fn player_record_from_entry(
         record.mallard_field_guide = player.mallard_field_guide;
         record.deer_field_guide = player.deer_field_guide;
         record.bee_field_guide = player.bee_field_guide;
+        record.rabbit_field_guide = player.rabbit_field_guide;
         record.health = player.vitals.health();
         record.pending_death_cause = player.pending_death_cause;
         return Some(record);
@@ -6986,6 +7172,7 @@ fn player_record_from_current_state_with_revision(
         mallard_field_guide: player.mallard_field_guide,
         deer_field_guide: player.deer_field_guide,
         bee_field_guide: player.bee_field_guide,
+        rabbit_field_guide: player.rabbit_field_guide,
         health: player.vitals.health(),
         pending_death_cause: player.pending_death_cause,
     })

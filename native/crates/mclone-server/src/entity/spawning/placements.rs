@@ -108,7 +108,11 @@ where
 {
     if !matches!(
         kind,
-        EntityKind::Cow | EntityKind::Chicken | EntityKind::Mallard | EntityKind::Deer
+        EntityKind::Cow
+            | EntityKind::Chicken
+            | EntityKind::Mallard
+            | EntityKind::Deer
+            | EntityKind::Rabbit
     ) {
         return Err(SpawnPlacementFailure::UnsupportedEntity);
     }

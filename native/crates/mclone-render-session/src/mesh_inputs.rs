@@ -324,6 +324,25 @@ pub fn actor_instances_from_presentations_near_observer(
                     .with_dimensions(actor.width, actor.height)
                     .with_packed_light(packed_light)
                 }
+                ActorPresentationKind::Entity(EntityKind::Rabbit) => {
+                    ActorInstance::remote_player_with_figure(
+                        glam_vec3_from_vec3d(feet_position),
+                        actor.y_rot_degrees,
+                        mclone_assets::rabbit_figure_id(),
+                    )
+                    .with_dimensions(actor.width, actor.height)
+                    .with_packed_light(packed_light)
+                }
+                ActorPresentationKind::Entity(EntityKind::RabbitBurrow) => {
+                    ActorInstance::semantic_prop(
+                        glam_vec3_from_vec3d(feet_position),
+                        actor.y_rot_degrees,
+                        mclone_assets::rabbit_burrow_figure_id(),
+                        actor.width,
+                        actor.height,
+                    )
+                    .with_packed_light(packed_light)
+                }
                 ActorPresentationKind::Entity(EntityKind::DeerBed) => ActorInstance::semantic_prop(
                     glam_vec3_from_vec3d(feet_position),
                     actor.y_rot_degrees,
@@ -510,6 +529,8 @@ pub fn actor_light_probe_height(actor: &ActorPresentation) -> f64 {
         ActorPresentationKind::Entity(EntityKind::Bee) => f64::from(actor.height) * 0.5,
         ActorPresentationKind::Entity(EntityKind::BeeNest) => f64::from(actor.height) * 0.5,
         ActorPresentationKind::Entity(EntityKind::BeeHotel) => f64::from(actor.height) * 0.5,
+        ActorPresentationKind::Entity(EntityKind::Rabbit) => f64::from(actor.height) * 0.78,
+        ActorPresentationKind::Entity(EntityKind::RabbitBurrow) => f64::from(actor.height) * 0.5,
         ActorPresentationKind::Entity(EntityKind::Mannequin) => 1.62,
         ActorPresentationKind::Entity(EntityKind::DebugCube) => f64::from(actor.height) * 0.5,
         ActorPresentationKind::Entity(EntityKind::Item) => f64::from(actor.height) * 0.5,

@@ -1306,6 +1306,7 @@ mod tests {
             mallard_field_guide: mclone_protocol::MallardFieldGuideProgress::default(),
             deer_field_guide: mclone_protocol::DeerFieldGuideProgress::default(),
             bee_field_guide: mclone_protocol::BeeFieldGuideProgress::default(),
+            rabbit_field_guide: mclone_protocol::RabbitFieldGuideProgress::default(),
             health: 20.0,
             pending_death_cause: None,
         }
