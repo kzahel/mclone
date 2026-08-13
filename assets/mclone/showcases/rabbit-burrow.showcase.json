@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "rabbit-burrow",
   "title": "Rabbit Burrow and Garden",
-  "revision": 1,
+  "revision": 2,
   "baseTerrain": "rabbit-meadow-v1",
   "seed": 17507,
   "dayTime": 12000,
@@ -23,11 +23,11 @@
     { "position": [24, 65, 8], "block": "minecraft:oak_fence[east=false,north=false,south=true,waterlogged=false,west=true]", "liveInstantiation": "mclone-oak-fence-placement" },
 
     { "position": [16, 65, 9], "block": "minecraft:oak_fence[east=false,north=true,south=true,waterlogged=false,west=false]", "liveInstantiation": "mclone-oak-fence-placement" },
-    { "position": [16, 65, 10], "block": "minecraft:oak_fence_gate[facing=east,in_wall=false,open=false,powered=false]", "liveInstantiation": "mclone-oak-fence-gate-placement-and-use" },
+    { "position": [16, 65, 10], "block": "minecraft:oak_fence[east=false,north=true,south=true,waterlogged=false,west=false]", "liveInstantiation": "mclone-oak-fence-placement" },
     { "position": [16, 65, 11], "block": "minecraft:oak_fence[east=false,north=true,south=true,waterlogged=false,west=false]", "liveInstantiation": "mclone-oak-fence-placement" },
     { "position": [16, 65, 12], "block": "minecraft:oak_fence[east=false,north=true,south=true,waterlogged=false,west=false]", "liveInstantiation": "mclone-oak-fence-placement" },
     { "position": [16, 65, 13], "block": "minecraft:oak_fence[east=false,north=true,south=true,waterlogged=false,west=false]", "liveInstantiation": "mclone-oak-fence-placement" },
-    { "position": [16, 65, 14], "block": "minecraft:oak_fence[east=false,north=true,south=true,waterlogged=false,west=false]", "liveInstantiation": "mclone-oak-fence-placement" },
+    { "position": [16, 65, 14], "block": "minecraft:oak_fence_gate[facing=east,in_wall=false,open=false,powered=false]", "liveInstantiation": "mclone-oak-fence-gate-placement-and-use" },
 
     { "position": [24, 65, 9], "block": "minecraft:oak_fence[east=false,north=true,south=true,waterlogged=false,west=false]", "liveInstantiation": "mclone-oak-fence-placement" },
     { "position": [24, 65, 10], "block": "minecraft:oak_fence[east=false,north=true,south=true,waterlogged=false,west=false]", "liveInstantiation": "mclone-oak-fence-placement" },

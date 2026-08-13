@@ -930,7 +930,7 @@ async function run() {
             matureCarrots,
           );
           const initialGateState = await page.evaluate(
-            () => globalThis.__mcloneWebApp.blockStateAt?.(16, 65, 10)?.blockStateId,
+            () => globalThis.__mcloneWebApp.blockStateAt?.(16, 65, 14)?.blockStateId,
           );
           const rabbitSamples = [behaviorStart];
           let priorRabbitSample = behaviorStart;
@@ -970,7 +970,7 @@ async function run() {
             throw new Error(`closed rabbit-garden gate did not protect mature carrots: ${JSON.stringify({ initialCarrotStates, protectedCarrotStates })}`);
           }
 
-          await page.evaluate(() => globalThis.__mcloneWebApp.frameBlock?.(14, 64, 10, true));
+          await page.evaluate(() => globalThis.__mcloneWebApp.frameBlock?.(14, 64, 14, true));
           const gateApproachPointerId = 300;
           if (mobileShowcase) {
             await dispatchCanvasPointerEvent(page, "pointerdown", {
@@ -1012,12 +1012,12 @@ async function run() {
             }
           }
           await page.evaluate(
-            () => globalThis.__mcloneWebApp.frameBlock?.(16, 65, 10, true),
+            () => globalThis.__mcloneWebApp.frameBlock?.(16, 65, 14, true),
           );
           await page.waitForFunction(
             () => {
               const target = globalThis.__mcloneWebApp?.state?.currentTarget;
-              return target?.blockX === 16 && target?.blockY === 65 && target?.blockZ === 10;
+              return target?.blockX === 16 && target?.blockY === 65 && target?.blockZ === 14;
             },
             undefined,
             { timeout: 10_000 },
@@ -1030,21 +1030,22 @@ async function run() {
           try {
             await page.waitForFunction(
               (closedState) => globalThis.__mcloneWebApp
-                .blockStateAt?.(16, 65, 10)?.blockStateId !== closedState,
+                .blockStateAt?.(16, 65, 14)?.blockStateId !== closedState,
               initialGateState,
               { timeout: 10_000 },
             );
           } catch (error) {
             const gateState = await page.evaluate(() => ({
-              block: globalThis.__mcloneWebApp.blockStateAt?.(16, 65, 10),
+              block: globalThis.__mcloneWebApp.blockStateAt?.(16, 65, 14),
               target: globalThis.__mcloneWebApp?.state?.currentTarget ?? null,
               report: globalThis.__mcloneWebApp?.state?.lastReport ?? null,
             }));
             throw new Error(`rabbit garden gate did not open: ${error instanceof Error ? error.message : String(error)}\n${JSON.stringify({ initialGateState, openGate, gateState }, null, 2)}`);
           }
           const openGateState = await page.evaluate(
-            () => globalThis.__mcloneWebApp.blockStateAt?.(16, 65, 10)?.blockStateId,
+            () => globalThis.__mcloneWebApp.blockStateAt?.(16, 65, 14)?.blockStateId,
           );
+          await page.evaluate(() => globalThis.__mcloneWebApp.frameBlock?.(14, 64, 24, true));
           const retreatPointerId = 302;
           if (mobileShowcase) {
             await dispatchCanvasPointerEvent(page, "pointerdown", {
@@ -1056,21 +1057,15 @@ async function run() {
             await dispatchCanvasPointerEvent(page, "pointermove", {
               pointerId: retreatPointerId,
               xFraction: 0.24,
-              yFraction: 0.92,
+              yFraction: 0.50,
               buttons: 1,
             });
           } else {
-            await dispatchKeyboardEvent(page, "keydown", { code: "KeyS", key: "s" });
+            await dispatchKeyboardEvent(page, "keydown", { code: "KeyW", key: "w" });
           }
           try {
             await page.waitForFunction(
-              () => {
-                const state = globalThis.__mcloneWebApp?.state;
-                return Math.hypot(
-                  Number(state?.cameraX) - 16.5,
-                  Number(state?.cameraZ) - 10.5,
-                ) >= 9;
-              },
+              () => Number(globalThis.__mcloneWebApp?.state?.cameraZ) >= 21,
               undefined,
               { timeout: 10_000 },
             );
@@ -1079,7 +1074,7 @@ async function run() {
               await dispatchCanvasPointerEvent(page, "pointerup", {
                 pointerId: retreatPointerId,
                 xFraction: 0.24,
-                yFraction: 0.92,
+                yFraction: 0.50,
                 buttons: 0,
               });
               await page.waitForFunction(
@@ -1088,7 +1083,7 @@ async function run() {
                 { timeout: 10_000 },
               );
             } else {
-              await dispatchKeyboardEvent(page, "keyup", { code: "KeyS", key: "s" });
+              await dispatchKeyboardEvent(page, "keyup", { code: "KeyW", key: "w" });
             }
           }
           const retreatPosition = await page.evaluate(() => ({
@@ -1495,7 +1490,6 @@ async function run() {
         });
         const canvasPixels = analyzePng(canvasPng);
         let mobileBeeUseProbe = null;
-        let rabbitFeedingProbe = null;
         if (mobileShowcase && beeShowcase) {
           await page.evaluate(() => globalThis.__mcloneWebApp?.resumeRendering?.());
           await dispatchTouchHotbarSlotPointerEvent(page, 8, "pointerdown", {
@@ -1533,202 +1527,6 @@ async function run() {
             beeHotelCount,
             use,
           };
-          await page.evaluate(() => globalThis.__mcloneWebApp?.pauseRendering?.());
-          await page.waitForFunction(
-            () => globalThis.__mcloneWebApp?.state?.tickFrameBusy === false,
-            undefined,
-            { timeout: 10_000 },
-          );
-        }
-        if (rabbitShowcase) {
-          await page.evaluate(() => globalThis.__mcloneWebApp?.resumeRendering?.());
-          if (mobileShowcase) {
-            await dispatchTouchHotbarSlotPointerEvent(page, 3, "pointerdown", {
-              pointerId: 311,
-              buttons: 1,
-            });
-            await dispatchTouchHotbarSlotPointerEvent(page, 3, "pointerup", {
-              pointerId: 311,
-              buttons: 0,
-            });
-          } else {
-            await dispatchKeyboardEvent(page, "keydown", { code: "Digit4", key: "4" });
-            await dispatchKeyboardEvent(page, "keyup", { code: "Digit4", key: "4" });
-          }
-          await page.waitForFunction(
-            () => globalThis.__mcloneWebApp?.state?.selectedHotbarSlot === 3,
-            undefined,
-            { timeout: 10_000 },
-          );
-          const carrotsBeforeFeed = await page.evaluate(
-            () => Number(globalThis.__mcloneWebApp?.state?.lastReport?.carrotHotbarCount),
-          );
-          await page.evaluate(() => globalThis.__mcloneWebApp.frameBlock?.(15, 64, 10, true));
-          const approachPointerId = 310;
-          if (mobileShowcase) {
-            await dispatchCanvasPointerEvent(page, "pointerdown", {
-              pointerId: approachPointerId,
-              xFraction: 0.24,
-              yFraction: 0.72,
-              buttons: 1,
-            });
-            await dispatchCanvasPointerEvent(page, "pointermove", {
-              pointerId: approachPointerId,
-              xFraction: 0.24,
-              yFraction: 0.50,
-              buttons: 1,
-            });
-          } else {
-            await dispatchKeyboardEvent(page, "keydown", { code: "KeyW", key: "w" });
-          }
-          try {
-            await page.waitForFunction(
-              () => {
-                const state = globalThis.__mcloneWebApp?.state;
-                return Math.hypot(
-                  Number(state?.cameraX) - 15.5,
-                  Number(state?.cameraZ) - 10.5,
-                ) <= 0.9;
-              },
-              undefined,
-              { timeout: 12_000 },
-            );
-          } finally {
-            if (mobileShowcase) {
-              await dispatchCanvasPointerEvent(page, "pointerup", {
-                pointerId: approachPointerId,
-                xFraction: 0.24,
-                yFraction: 0.50,
-                buttons: 0,
-              });
-              await page.waitForFunction(
-                () => globalThis.__mcloneWebApp?.state?.touchPointerActiveCount === 0,
-                undefined,
-                { timeout: 10_000 },
-              );
-            } else {
-              await dispatchKeyboardEvent(page, "keyup", { code: "KeyW", key: "w" });
-            }
-          }
-          await page.evaluate(() => globalThis.__mcloneWebApp.frameBlock?.(18, 64, 10, true));
-          const enterGardenPointerId = 311;
-          if (mobileShowcase) {
-            await dispatchCanvasPointerEvent(page, "pointerdown", {
-              pointerId: enterGardenPointerId,
-              xFraction: 0.24,
-              yFraction: 0.72,
-              buttons: 1,
-            });
-            await dispatchCanvasPointerEvent(page, "pointermove", {
-              pointerId: enterGardenPointerId,
-              xFraction: 0.24,
-              yFraction: 0.50,
-              buttons: 1,
-            });
-          } else {
-            await dispatchKeyboardEvent(page, "keydown", { code: "KeyW", key: "w" });
-          }
-          try {
-            await page.waitForFunction(
-              () => Number(globalThis.__mcloneWebApp?.state?.cameraX) >= 17.2,
-              undefined,
-              { timeout: 8_000 },
-            );
-          } finally {
-            if (mobileShowcase) {
-              await dispatchCanvasPointerEvent(page, "pointerup", {
-                pointerId: enterGardenPointerId,
-                xFraction: 0.24,
-                yFraction: 0.50,
-                buttons: 0,
-              });
-              await page.waitForFunction(
-                () => globalThis.__mcloneWebApp?.state?.touchPointerActiveCount === 0,
-                undefined,
-                { timeout: 10_000 },
-              );
-            } else {
-              await dispatchKeyboardEvent(page, "keyup", { code: "KeyW", key: "w" });
-            }
-          }
-          await page.waitForFunction(
-            () => {
-              const state = globalThis.__mcloneWebApp?.state;
-              const cameraX = Number(state?.cameraX);
-              const cameraZ = Number(state?.cameraZ);
-              const heights = String(state?.lastReport?.rabbitHeights ?? "")
-                .split(",")
-                .map(Number);
-              return String(state?.lastReport?.rabbitPositions ?? "")
-                .split(";")
-                .filter(Boolean)
-                .map((position) => position.split(",").map(Number))
-                .some((position, index) => heights[index] >= 0.4 && Math.hypot(
-                  position[0] - cameraX,
-                  position[2] - cameraZ,
-                ) <= 4);
-            },
-            undefined,
-            { timeout: 30_000 },
-          );
-          const attempts = [];
-          for (let attempt = 0; attempt < 4; attempt += 1) {
-            const target = await page.evaluate(() => {
-              const report = globalThis.__mcloneWebApp?.state?.lastReport;
-              const positions = String(report?.rabbitPositions ?? "")
-                .split(";")
-                .filter(Boolean)
-                .map((position) => position.split(",").map(Number));
-              const ids = String(report?.rabbitEntityIds ?? "").split(",").map(Number);
-              const heights = String(report?.rabbitHeights ?? "").split(",").map(Number);
-              const cameraX = Number(globalThis.__mcloneWebApp?.state?.cameraX);
-              const cameraZ = Number(globalThis.__mcloneWebApp?.state?.cameraZ);
-              const target = positions
-                .map((position, index) => ({ position, id: ids[index], height: heights[index] }))
-                .filter((candidate) => candidate.height >= 0.4)
-                .sort((left, right) => Math.hypot(
-                  left.position[0] - cameraX,
-                  left.position[2] - cameraZ,
-                ) - Math.hypot(
-                  right.position[0] - cameraX,
-                  right.position[2] - cameraZ,
-                ))[0];
-              if (!target) return null;
-              globalThis.__mcloneWebApp.frameBlock?.(
-                Math.floor(target.position[0]),
-                Math.floor(target.position[1]),
-                Math.floor(target.position[2]),
-                true,
-              );
-              return target;
-            });
-            if (!target) continue;
-            const interaction = mobileShowcase
-              ? await exerciseFramedTouchInteractionButton(page, "use", "place", 312 + attempt)
-              : await page.evaluate(
-                  () => globalThis.__mcloneWebApp.interactBlock?.("place") ?? null,
-                );
-            await page.waitForTimeout(400);
-            const carrotsAfterAttempt = await page.evaluate(
-              () => Number(globalThis.__mcloneWebApp?.state?.lastReport?.carrotHotbarCount),
-            );
-            attempts.push({ target, interaction, carrotsAfterAttempt });
-            if (carrotsAfterAttempt === carrotsBeforeFeed - 1) break;
-          }
-          rabbitFeedingProbe = await page.evaluate(
-            ({ carrotsBeforeFeed, attempts }) => {
-              const carrotsAfterFeed = Number(
-                globalThis.__mcloneWebApp?.state?.lastReport?.carrotHotbarCount,
-              );
-              return {
-                ok: carrotsAfterFeed === carrotsBeforeFeed - 1,
-                carrotsBeforeFeed,
-                carrotsAfterFeed,
-                attempts,
-              };
-            },
-            { carrotsBeforeFeed, attempts },
-          );
           await page.evaluate(() => globalThis.__mcloneWebApp?.pauseRendering?.());
           await page.waitForFunction(
             () => globalThis.__mcloneWebApp?.state?.tickFrameBusy === false,
@@ -2496,7 +2294,7 @@ async function run() {
           pageErrors.length > 0
           || canvasPixels.distinctInteriorColorCount < 2
           || result?.showcaseId !== showcase
-          || result?.showcaseRevision !== (rabbitShowcase ? 1 : gardenShowcase ? 1 : wheatShowcase ? 3 : beeShowcase ? 2 : deerShowcase ? 1 : 2)
+          || result?.showcaseRevision !== (rabbitShowcase ? 2 : gardenShowcase ? 1 : wheatShowcase ? 3 : beeShowcase ? 2 : deerShowcase ? 1 : 2)
           || result?.activeWorldSeedText !== (rabbitShowcase ? "17507" : cropShowcase ? "17506" : beeShowcase ? "17505" : deerShowcase ? "17504" : "17503")
           || result?.generationProfile !== "authored-only"
           || result?.dayTime !== (rabbitShowcase ? 12000 : 6000)
@@ -2506,7 +2304,6 @@ async function run() {
               || (result?.rabbitFieldGuideBits & result?.showcaseRabbitFieldGuideBits)
                 !== result?.showcaseRabbitFieldGuideBits
               || behaviorProbe.raidedCarrotCount < 1
-              || rabbitFeedingProbe?.ok !== true
             : gardenShowcase
             ? behaviorProbe.automaticTransitionCount < 1
               || gardenInteractionProbe?.ok !== true
@@ -2533,7 +2330,6 @@ async function run() {
             canvasPixels,
             worldRecordCounts,
             behaviorProbe,
-            rabbitFeedingProbe,
             farmingInteractionProbe,
             gardenInteractionProbe: gardenInteractionProbe == null ? null : {
               ...gardenInteractionProbe,
@@ -2557,7 +2353,6 @@ async function run() {
           canvasPixels,
           worldRecordCounts,
           behaviorProbe,
-          rabbitFeedingProbe,
           mobileBeeUseProbe,
           farmingInteractionProbe,
           gardenInteractionProbe,

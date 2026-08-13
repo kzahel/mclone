@@ -21,7 +21,7 @@ const receipt = Object.fromEntries(
     .split(" ")
     .map((field) => field.split("=", 2)) ?? [],
 );
-if (receipt.id !== "rabbit-burrow" || receipt.revision !== "1") {
+if (receipt.id !== "rabbit-burrow" || receipt.revision !== "2") {
   throw new Error("showcase compiler did not emit the expected rabbit receipt");
 }
 

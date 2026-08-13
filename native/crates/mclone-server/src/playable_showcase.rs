@@ -1972,7 +1972,7 @@ mod tests {
         let identity = ClientIdentity::test_default();
         let (manifest, store) =
             playable_showcase_memory_store(PlayableShowcaseId::RabbitBurrow, &identity).unwrap();
-        assert_eq!(manifest.revision, 1);
+        assert_eq!(manifest.revision, 2);
         assert_eq!(manifest.seed, 17_507);
         assert_eq!(manifest.entity_count, 5);
         assert_eq!(manifest.rabbit_count, 4);
@@ -2037,9 +2037,16 @@ mod tests {
         );
         assert!(
             mclone_worldgen::block::oak_fence_gate_state(
-                block_at(BlockPos::new(16, 65, 10)).0 as u16
+                block_at(BlockPos::new(16, 65, 14)).0 as u16
             )
             .is_some_and(|gate| !gate.open)
+        );
+        assert!(
+            mclone_worldgen::block::oak_fence_gate_state(
+                block_at(BlockPos::new(16, 65, 10)).0 as u16
+            )
+            .is_none(),
+            "the old direct-line opening must remain a fence"
         );
         let player = store
             .player(&PlayerRecordKey::from_profile_id(identity.profile_id))
