@@ -3376,6 +3376,7 @@ pub struct FlatHud {
     pub mallard_field_guide: Option<MallardFieldGuideHud>,
     pub deer_field_guide: Option<DeerFieldGuideHud>,
     pub bee_field_guide: Option<BeeFieldGuideHud>,
+    pub wheat_target: Option<WheatTargetHud>,
     pub debug: Option<FlatHudDebugOverlay>,
     pub frame_pipeline: Option<FramePipelineHudOverlay>,
 }
@@ -3395,6 +3396,7 @@ impl FlatHud {
             mallard_field_guide: None,
             deer_field_guide: None,
             bee_field_guide: None,
+            wheat_target: None,
             debug: None,
             frame_pipeline: None,
         }
@@ -3426,6 +3428,7 @@ impl FlatHud {
             || (self.world_hud_visible && self.mallard_field_guide.is_some())
             || (self.world_hud_visible && self.deer_field_guide.is_some())
             || (self.world_hud_visible && self.bee_field_guide.is_some())
+            || (self.world_hud_visible && self.wheat_target.is_some())
             || self
                 .debug
                 .as_ref()
@@ -3489,6 +3492,23 @@ pub fn render_flat_hud(scale: GuiScale, draw: &mut GuiDrawList, hud: &FlatHud) {
     render_flat_hud_debug_layer(scale, draw, hud);
     render_flat_hud_frame_pipeline_layer(scale, draw, hud);
     render_flat_hud_transient_layers(scale, draw, hud);
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum WheatTargetHud {
+    Sprout,
+    Growing,
+    Mature,
+}
+
+impl WheatTargetHud {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Sprout => "Wheat sprout",
+            Self::Growing => "Growing wheat",
+            Self::Mature => "Mature wheat - ATK to harvest",
+        }
+    }
 }
 
 pub(crate) fn render_flat_hud_retained_layer(
@@ -3561,11 +3581,33 @@ pub(crate) fn render_flat_hud_transient_layers(
         || (selected_item.is_none()
             && hud.player_health.is_none()
             && hud.player_statistics.is_none()
-            && hud.mallard_field_guide.is_none())
+            && hud.mallard_field_guide.is_none()
+            && hud.wheat_target.is_none())
             && hud.deer_field_guide.is_none()
             && hud.bee_field_guide.is_none()
     {
         return;
+    }
+    if let Some(target) = hud.wheat_target {
+        let font = Font::default();
+        let label = target.label();
+        let y = scale.height * 0.5 + 14.0;
+        let width = font.width(label) + 8.0;
+        draw.fill(
+            Rect::new(scale.width * 0.5 - width * 0.5, y - 2.0, width, 11.0),
+            Color::rgba(18, 20, 14, 184),
+        );
+        font.draw_centered_atlas(
+            draw,
+            label,
+            scale.width * 0.5,
+            y,
+            if target == WheatTargetHud::Mature {
+                Color::rgba(255, 214, 82, 255)
+            } else {
+                Color::rgba(154, 225, 92, 255)
+            },
+        );
     }
     let touch = hud.effective_touch_overlay();
     let hotbar_top = if touch.visible && touch.hotbar_visible {

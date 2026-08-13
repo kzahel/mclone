@@ -20,9 +20,12 @@ export function defineWheatFarmingTextures(api: TextureLabApi): void {
   const stages: string[][] = [
     [
       empty, empty, empty, empty, empty, empty, empty, empty,
-      empty, empty, empty, empty, empty,
-      ".......g........",
-      "......ggg.......",
+      empty, empty,
+      ".....l...l......",
+      "......lgl.......",
+      "....lgggggl.....",
+      ".....ggggg......",
+      "......gdg.......",
       ".......d........",
     ],
     [

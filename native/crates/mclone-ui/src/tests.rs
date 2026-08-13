@@ -549,6 +549,23 @@ fn flat_hud_renders_crosshair_hotbar_touch_and_status() {
 }
 
 #[test]
+fn flat_hud_labels_targeted_wheat_below_the_crosshair() {
+    let scale = GuiScale::from_pixels(960, 540);
+    let mut draw = GuiDrawList::new();
+    let mut hud = FlatHud::new(resolved_flat_input(false));
+    hud.wheat_target = Some(WheatTargetHud::Mature);
+
+    render_flat_hud(scale, &mut draw, &hud);
+
+    assert!(draw.commands().iter().any(|command| matches!(
+        command,
+        GuiDrawCommand::Text { text, .. } if text == "Mature wheat - ATK to harvest"
+    )));
+    assert_eq!(WheatTargetHud::Sprout.label(), "Wheat sprout");
+    assert_eq!(WheatTargetHud::Growing.label(), "Growing wheat");
+}
+
+#[test]
 fn touch_hotbar_uses_the_same_inventory_contents_as_flat_hotbar() {
     let mut draw = GuiDrawList::new();
     let mut hud = FlatHud::new(resolved_flat_input(true));

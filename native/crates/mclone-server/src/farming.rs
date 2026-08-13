@@ -39,9 +39,16 @@ where
         return None;
     }
     let above = hit_pos.offset(0, 1, 0);
-    is_air_like(block_at(above)?).then_some(FarmingBlockAction::Till {
+    if !is_air_like(block_at(above)?) {
+        return None;
+    }
+    Some(FarmingBlockAction::Till {
         pos: hit_pos,
-        state: FARMLAND_MOISTURE_0,
+        state: if farmland_is_near_water(hit_pos, &block_at) {
+            FARMLAND_MOISTURE_7
+        } else {
+            FARMLAND_MOISTURE_0
+        },
     })
 }
 
@@ -132,10 +139,7 @@ where
 {
     let block = block_at(pos)?;
     if let Some(moisture) = farmland_moisture(block) {
-        let wet = (-4..=4).any(|dx| {
-            (-4..=4)
-                .any(|dz| (0..=1).any(|dy| block_at(pos.offset(dx, dy, dz)).is_some_and(is_water)))
-        });
+        let wet = farmland_is_near_water(pos, &block_at);
         let next_state = if wet && moisture < 7 {
             FARMLAND_MOISTURE_7
         } else if !wet && moisture > 0 {
@@ -163,6 +167,15 @@ where
     (random.next_int_bound(bound) == 0).then(|| RandomFarmingTick {
         pos,
         next_state: wheat_for_age(age + 1).expect("next wheat age exists"),
+    })
+}
+
+fn farmland_is_near_water<F>(pos: BlockPos, block_at: &F) -> bool
+where
+    F: Fn(BlockPos) -> Option<RawBlockId>,
+{
+    (-4..=4).any(|dx| {
+        (-4..=4).any(|dz| (0..=1).any(|dy| block_at(pos.offset(dx, dy, dz)).is_some_and(is_water)))
     })
 }
 
@@ -262,6 +275,36 @@ mod tests {
             Some(RandomFarmingTick {
                 pos: soil,
                 next_state: DIRT
+            })
+        );
+    }
+
+    #[test]
+    fn tilling_beside_water_is_immediately_hydrated() {
+        let soil = BlockPos::new(0, 64, 0);
+        let wet = BTreeMap::from([
+            (soil, GRASS_BLOCK),
+            (soil.offset(0, 1, 0), AIR),
+            (soil.offset(4, 1, 0), WATER),
+        ]);
+        assert_eq!(
+            plan_till(soil, Direction::Up, |pos| {
+                wet.get(&pos).copied().or(Some(AIR))
+            }),
+            Some(FarmingBlockAction::Till {
+                pos: soil,
+                state: FARMLAND_MOISTURE_7,
+            })
+        );
+
+        let dry = BTreeMap::from([(soil, DIRT), (soil.offset(0, 1, 0), AIR)]);
+        assert_eq!(
+            plan_till(soil, Direction::Up, |pos| {
+                dry.get(&pos).copied().or(Some(AIR))
+            }),
+            Some(FarmingBlockAction::Till {
+                pos: soil,
+                state: FARMLAND_MOISTURE_0,
             })
         );
     }

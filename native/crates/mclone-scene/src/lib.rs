@@ -132,7 +132,10 @@ use mclone_input::{
     keyboard_turn_mouse_delta,
 };
 use mclone_mesh::{RenderSectionKey, TexturedRenderSectionMesh, quad_face_count_from_indices};
-use mclone_protocol::{DebugActorKind, DebugHotbarItem, EntitySnapshot, RemotePlayerUpdate};
+use mclone_protocol::{
+    DebugActorKind, DebugHotbarItem, EntitySnapshot, ItemKind, ItemStackSnapshot,
+    RemotePlayerUpdate,
+};
 #[cfg(not(target_arch = "wasm32"))]
 use mclone_render::actor_assets::ActorTextureAssets;
 use mclone_render::actor_assets::ActorTextureImage;
@@ -195,7 +198,7 @@ use mclone_ui::{
     GameXrRenderTransitionState, GameXrTurnMode, GamepadHudOverlay, GuiDrawList, GuiKey, GuiScale,
     LoadingProgressOverlay, Point, Rect, StatusOverlay, StorageProfileBackend,
     StorageProfileUiState, TouchOverlay, UiDebugSnapshot, UiDrawCacheStats, UiPanelRevision,
-    WorldCatalogUiStatus, render_loading_progress_overlay, render_status_overlay,
+    WheatTargetHud, WorldCatalogUiStatus, render_loading_progress_overlay, render_status_overlay,
 };
 
 mod asset_replacement;
@@ -740,6 +743,35 @@ fn acoustic_material_for_state(state: BlockStateId) -> AcousticMaterial {
         })
 }
 
+fn wheat_target_hud_for_state(state: BlockStateId) -> Option<WheatTargetHud> {
+    static BLOCK_STATES: LazyLock<BlockStateRegistry> =
+        LazyLock::new(BlockStateRegistry::terrain_mvp);
+    let record = BLOCK_STATES.by_id(state)?;
+    if record.block.path() != "wheat" {
+        return None;
+    }
+    match record.properties.get("age")?.parse::<u8>().ok()? {
+        0 => Some(WheatTargetHud::Sprout),
+        1..=6 => Some(WheatTargetHud::Growing),
+        7 => Some(WheatTargetHud::Mature),
+        _ => None,
+    }
+}
+
+fn placement_acoustic_material(
+    debug_item: Option<DebugHotbarItem>,
+    inventory_stack: Option<ItemStackSnapshot>,
+) -> Option<AcousticMaterial> {
+    match debug_item {
+        Some(DebugHotbarItem::Block(state)) => Some(acoustic_material_for_state(state)),
+        _ => match inventory_stack?.kind {
+            ItemKind::WoodenHoe => Some(AcousticMaterial::Soft),
+            ItemKind::WheatSeeds => Some(AcousticMaterial::Grass),
+            _ => None,
+        },
+    }
+}
+
 fn block_sound_position(pos: BlockPos) -> Vec3d {
     Vec3d::new(
         f64::from(pos.x) + 0.5,
@@ -892,6 +924,57 @@ mod sound_effect_tests {
                 sound: mclone_audio::PLACE_STONE,
             }
         );
+    }
+
+    #[test]
+    fn farming_items_use_shared_confirmed_placement_feedback() {
+        assert_eq!(
+            placement_acoustic_material(
+                None,
+                Some(ItemStackSnapshot {
+                    kind: ItemKind::WoodenHoe,
+                    count: 1,
+                }),
+            ),
+            Some(AcousticMaterial::Soft)
+        );
+        assert_eq!(
+            placement_acoustic_material(
+                None,
+                Some(ItemStackSnapshot {
+                    kind: ItemKind::WheatSeeds,
+                    count: 4,
+                }),
+            ),
+            Some(AcousticMaterial::Grass)
+        );
+        assert_eq!(
+            placement_acoustic_material(
+                None,
+                Some(ItemStackSnapshot {
+                    kind: ItemKind::HuntingSpear,
+                    count: 1,
+                }),
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn wheat_target_states_have_actionable_hud_labels() {
+        assert_eq!(
+            wheat_target_hud_for_state(BlockStateId(229)),
+            Some(WheatTargetHud::Sprout)
+        );
+        assert_eq!(
+            wheat_target_hud_for_state(BlockStateId(234)),
+            Some(WheatTargetHud::Growing)
+        );
+        assert_eq!(
+            wheat_target_hud_for_state(BlockStateId(236)),
+            Some(WheatTargetHud::Mature)
+        );
+        assert_eq!(wheat_target_hud_for_state(BlockStateId(1)), None);
     }
 }
 
@@ -5417,9 +5500,10 @@ impl McloneSceneHost {
             }
             LocalInteractionSoundIntent::Place => {
                 let selected = usize::from(self.active_world.interaction.selected_hotbar_slot());
-                let Some(DebugHotbarItem::Block(block_state)) =
-                    self.active_world.interaction.hotbar_items()[selected]
-                else {
+                let Some(material) = placement_acoustic_material(
+                    self.active_world.interaction.hotbar_items()[selected],
+                    client.player_inventory()[selected],
+                ) else {
                     return;
                 };
                 let clicked = target.hit.block_pos;
@@ -5431,7 +5515,7 @@ impl McloneSceneHost {
                             (adjacent, client.block_state_at_block_pos(adjacent)),
                         ],
                     },
-                    acoustic_material_for_state(block_state),
+                    material,
                 )
             }
         };

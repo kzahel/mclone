@@ -2836,6 +2836,14 @@ impl McloneSceneHost {
             ),
         )
         .with_item_stacks(*runtime.client().player_inventory());
+        hud.wheat_target = self
+            .current_mono_block_target()
+            .and_then(|target| {
+                runtime
+                    .client()
+                    .block_state_at_block_pos(target.hit.block_pos)
+            })
+            .and_then(wheat_target_hud_for_state);
         hud.status = self.session_projection().status_overlay;
         let vitals = runtime.client().player_vitals();
         hud.player_health = Some(mclone_ui::PlayerHealthHud {
