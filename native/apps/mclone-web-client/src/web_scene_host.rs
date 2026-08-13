@@ -3835,6 +3835,46 @@ impl WebSceneHost {
                             .sum(),
                     )?;
                 }
+                for (prefix, kind) in [
+                    ("wheatDrop", mclone_protocol::ItemKind::Wheat),
+                    ("wheatSeedDrop", mclone_protocol::ItemKind::WheatSeeds),
+                ] {
+                    let drops = client
+                        .entity_snapshots()
+                        .filter(|entity| {
+                            entity.kind == mclone_protocol::EntityKind::Item
+                                && entity.item_stack.is_some_and(|stack| stack.kind == kind)
+                        })
+                        .collect::<Vec<_>>();
+                    report_set_number(
+                        &object,
+                        &format!("{prefix}EntityCount"),
+                        drops.len() as f64,
+                    )?;
+                    report_set_number(
+                        &object,
+                        &format!("{prefix}ItemCount"),
+                        drops
+                            .iter()
+                            .filter_map(|entity| entity.item_stack)
+                            .map(|stack| f64::from(stack.count))
+                            .sum(),
+                    )?;
+                    report_set_string(
+                        &object,
+                        &format!("{prefix}Positions"),
+                        &drops
+                            .iter()
+                            .map(|entity| {
+                                format!(
+                                    "{:.4},{:.4},{:.4}",
+                                    entity.position.x, entity.position.y, entity.position.z
+                                )
+                            })
+                            .collect::<Vec<_>>()
+                            .join(";"),
+                    )?;
+                }
                 report_set_number(
                     &object,
                     "playerJumpStatistic",

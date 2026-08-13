@@ -369,20 +369,15 @@ pub fn actor_instances_from_presentations_near_observer(
                 .with_packed_light(packed_light),
                 ActorPresentationKind::Entity(EntityKind::Item) => {
                     match actor.item_stack.map(|stack| stack.kind) {
-                        Some(
-                            ItemKind::Egg
-                            | ItemKind::MallardEgg
-                            | ItemKind::WoodenHoe
-                            | ItemKind::WheatSeeds
-                            | ItemKind::Wheat,
-                        )
-                        | None => ActorInstance::item_egg(
-                            glam_vec3_from_vec3d(feet_position),
-                            actor.y_rot_degrees,
-                            actor.width,
-                            actor.height,
-                        )
-                        .with_packed_light(packed_light),
+                        Some(ItemKind::Egg | ItemKind::MallardEgg | ItemKind::WoodenHoe) | None => {
+                            ActorInstance::item_egg(
+                                glam_vec3_from_vec3d(feet_position),
+                                actor.y_rot_degrees,
+                                actor.width,
+                                actor.height,
+                            )
+                            .with_packed_light(packed_light)
+                        }
                         Some(ItemKind::MallardFeather) => ActorInstance::mallard_feather(
                             glam_vec3_from_vec3d(feet_position),
                             actor.y_rot_degrees,
@@ -396,7 +391,9 @@ pub fn actor_instances_from_presentations_near_observer(
                             | ItemKind::DeerHide
                             | ItemKind::ShedAntler
                             | ItemKind::BeeHotel
-                            | ItemKind::Beeswax),
+                            | ItemKind::Beeswax
+                            | ItemKind::WheatSeeds
+                            | ItemKind::Wheat),
                         ) => ActorInstance::semantic_prop(
                             glam_vec3_from_vec3d(feet_position),
                             actor.y_rot_degrees,
@@ -407,6 +404,8 @@ pub fn actor_instances_from_presentations_near_observer(
                                 ItemKind::ShedAntler => mclone_assets::shed_antler_figure_id(),
                                 ItemKind::BeeHotel => mclone_assets::bee_hotel_item_figure_id(),
                                 ItemKind::Beeswax => mclone_assets::beeswax_figure_id(),
+                                ItemKind::WheatSeeds => mclone_assets::wheat_seeds_item_figure_id(),
+                                ItemKind::Wheat => mclone_assets::wheat_bundle_figure_id(),
                                 _ => unreachable!(),
                             },
                             actor.width,

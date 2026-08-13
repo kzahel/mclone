@@ -192,6 +192,16 @@ fn direct_asset_requirements() -> Vec<CanonicalAssetRequirement> {
             Required,
         ),
         (
+            "assets/mclone/figures/wheat_bundle.figure.json",
+            SemanticProp,
+            Required,
+        ),
+        (
+            "assets/mclone/figures/wheat_seeds_item.figure.json",
+            SemanticProp,
+            Required,
+        ),
+        (
             "assets/minecraft/textures/misc/underwater.png",
             ScreenEffect,
             Required,
@@ -367,6 +377,8 @@ mod tests {
             "assets/mclone/figures/bee_hotel.figure.json",
             "assets/mclone/figures/bee_hotel_item.figure.json",
             "assets/mclone/figures/beeswax.figure.json",
+            "assets/mclone/figures/wheat_bundle.figure.json",
+            "assets/mclone/figures/wheat_seeds_item.figure.json",
             "assets/minecraft/textures/misc/underwater.png",
             "assets/minecraft/sounds/damage/fallsmall.ogg",
         ] {

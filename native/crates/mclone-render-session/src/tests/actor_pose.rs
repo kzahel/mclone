@@ -521,6 +521,53 @@ fn mallard_egg_item_actor_uses_egg_item_shape() {
 }
 
 #[test]
+fn wheat_drop_items_use_dedicated_semantic_props() {
+    let client = ClientRuntime::local_integrated();
+    for (entity_id, kind, expected) in [
+        (
+            11,
+            mclone_protocol::ItemKind::Wheat,
+            mclone_assets::wheat_bundle_figure_id(),
+        ),
+        (
+            12,
+            mclone_protocol::ItemKind::WheatSeeds,
+            mclone_assets::wheat_seeds_item_figure_id(),
+        ),
+    ] {
+        let presentation = ActorPresentation {
+            id: ActorPresentationId::Entity(mclone_protocol::EntityId(entity_id)),
+            kind: ActorPresentationKind::Entity(mclone_protocol::EntityKind::Item),
+            appearance: ActorAppearance::NONE,
+            item_stack: Some(mclone_protocol::ItemStackSnapshot { kind, count: 1 }),
+            mallard_life_stage: None,
+            in_water: false,
+            mallard_nest: None,
+            deer: None,
+            feet_position: Vec3d::new(1.0, 64.0, 2.0),
+            y_rot_degrees: 0.0,
+            x_rot_degrees: 0.0,
+            rotation: None,
+            on_ground: false,
+            width: 0.25,
+            height: 0.25,
+            animation: None,
+            animation_clock_tick: 0,
+            walk_animation_distance: 0.0,
+            chicken_wing_flap_radians: None,
+        };
+
+        let actors = actor_instances_from_presentations(&[presentation], &client);
+
+        assert_eq!(actors.len(), 1);
+        assert_eq!(
+            actors[0].shape,
+            mclone_render::entity::ActorInstanceShape::SemanticProp(expected)
+        );
+    }
+}
+
+#[test]
 fn mallard_feather_item_actor_uses_live_semantic_prop() {
     let client = ClientRuntime::local_integrated();
     let presentation = ActorPresentation {

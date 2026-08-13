@@ -283,7 +283,7 @@ impl TexturedMeshCatalog {
                 .as_ref()
                 .map(|material| first_party_sprite(material, atlas))
                 .transpose()?;
-            let faces = match (visual.class, sprite) {
+            let mut faces = match (visual.class, sprite) {
                 (FirstPartyVisualClass::Empty | FirstPartyVisualClass::Fluid, _) => Vec::new(),
                 (FirstPartyVisualClass::Solid, Some(sprite)) => {
                     first_party_solid_faces(record.block.path(), sprite)
@@ -311,6 +311,7 @@ impl TexturedMeshCatalog {
                 }
                 (_, None) => Vec::new(),
             };
+            add_wheat_sprout_leaf_surface(record, &mut faces);
             let fluid = sprite
                 .map(|sprite| first_party_fluid_model(record, sprite))
                 .transpose()?
@@ -429,6 +430,7 @@ impl TexturedMeshCatalog {
                         .collect::<Result<Vec<_>, _>>()?,
                 );
             }
+            add_wheat_sprout_leaf_surface(record, &mut faces);
             let fluid = textured_fluid_model(record, atlas)?;
             let leaf_cards = leaf_source_material
                 .as_ref()
@@ -795,6 +797,36 @@ fn first_party_flat_faces(block: &str, sprite: AtlasSpriteUv) -> Vec<TexturedBlo
             )
         })
         .collect()
+}
+
+/// Keep a newly planted crop readable from the steep view used while placing
+/// it. Vanilla's age-zero texture has only seven opaque pixels on vertical
+/// cards; this small horizontal leaf reuses the active pack's own center crop
+/// pixels and leaves the reference selection/collision shape unchanged.
+fn add_wheat_sprout_leaf_surface(
+    record: &mclone_assets::BlockStateRecord,
+    faces: &mut Vec<TexturedBlockFace>,
+) {
+    if record.block.path() != "wheat"
+        || record.properties.get("age").map(String::as_str) != Some("0")
+    {
+        return;
+    }
+    let Some(source) = faces.first() else {
+        return;
+    };
+    faces.push(TexturedBlockFace {
+        direction: ModelFaceDirection::Up,
+        cullface: None,
+        from: [3.5, 2.0, 3.5],
+        to: [12.5, 2.1, 12.5],
+        uv: [5.0, 11.0, 11.0, 16.0],
+        uv_rotation: 0,
+        sprite: source.sprite,
+        tintindex: source.tintindex,
+        tint: source.tint,
+        shade: false,
+    });
 }
 
 fn first_party_fluid_model(
@@ -1342,6 +1374,49 @@ mod tests {
                 .filter(|face| face.direction != ModelFaceDirection::Up)
                 .all(|face| face.sprite == dirt)
         );
+    }
+
+    #[test]
+    fn only_age_zero_wheat_gains_a_top_readable_leaf_surface() {
+        let sprite = AtlasSpriteUv {
+            u0: 0.0,
+            v0: 0.0,
+            u1: 1.0,
+            v1: 1.0,
+        };
+        let source = TexturedBlockFace {
+            direction: ModelFaceDirection::North,
+            cullface: None,
+            from: [0.0, 0.0, 8.0],
+            to: [16.0, 16.0, 8.1],
+            uv: [0.0, 0.0, 16.0, 16.0],
+            uv_rotation: 0,
+            sprite,
+            tintindex: -1,
+            tint: TexturedBlockTint::None,
+            shade: false,
+        };
+        let wheat = |age: u32| {
+            mclone_assets::BlockStateRecord::new(
+                BlockStateId(229 + age),
+                ResourceLocation::parse("minecraft:wheat").unwrap(),
+                [("age", age.to_string())],
+            )
+        };
+
+        let mut sprout_faces = vec![source.clone()];
+        add_wheat_sprout_leaf_surface(&wheat(0), &mut sprout_faces);
+        assert_eq!(sprout_faces.len(), 2);
+        assert!(sprout_faces.iter().any(|face| {
+            face.direction == ModelFaceDirection::Up
+                && face.from == [3.5, 2.0, 3.5]
+                && face.to == [12.5, 2.1, 12.5]
+                && face.uv == [5.0, 11.0, 11.0, 16.0]
+        }));
+
+        let mut older_faces = vec![source];
+        add_wheat_sprout_leaf_surface(&wheat(1), &mut older_faces);
+        assert_eq!(older_faces.len(), 1);
     }
 
     #[test]

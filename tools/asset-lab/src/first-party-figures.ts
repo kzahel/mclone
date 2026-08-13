@@ -39,6 +39,8 @@ export const FIRST_PARTY_SEMANTIC_ASSETS: readonly FirstPartySemanticAsset[] = [
   firstPartyProp("bee_hotel", "world_prop", "ground", "live_gameplay"),
   firstPartyProp("bee_hotel_item", "item_prop", "item_center", "live_gameplay"),
   firstPartyProp("beeswax", "item_prop", "item_center", "live_gameplay"),
+  firstPartyProp("wheat_bundle", "item_prop", "item_center", "live_gameplay"),
+  firstPartyProp("wheat_seeds_item", "item_prop", "item_center", "live_gameplay"),
 ];
 
 export const FIRST_PARTY_FIGURES: readonly FirstPartyFigure[] =

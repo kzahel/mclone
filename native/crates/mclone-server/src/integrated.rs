@@ -20,13 +20,13 @@ use mclone_protocol::EntityRotation;
 use mclone_protocol::{
     AcceptTeleportCommand, AttackEntityCommand, ChunkView, ClientCommand, ClientEphemeralMessage,
     ClientIdentity, DebugActorKind, DebugHotbarItem, DimensionKey, EffectiveEphemeralTransport,
-    EntityKind, InteractEntityCommand, InteractionHand, ItemKind, MallardCallCue,
-    MallardObservationKind, MallardTrackCue, MovePlayerCommand, PlayerActionCommand,
-    PlayerActionKind, PlayerAppearance, PlayerDamageCause, PlayerLifeState, PlayerModelKind,
-    PlayerProfileId, PlayerStatistics, RealmId, SequencedMovePlayerCommand, ServerUpdate,
-    SessionCapabilities, SessionConfiguration, SetCarriedItemCommand, SetDebugHotbarSlotCommand,
-    SetPlayerAppearanceCommand, StatisticKey, UseItemOnCommand, sequence_is_newer,
-    validate_body_pose_sample,
+    EntityKind, InteractEntityCommand, InteractionHand, ItemKind, ItemStackSnapshot,
+    MallardCallCue, MallardObservationKind, MallardTrackCue, MovePlayerCommand,
+    PlayerActionCommand, PlayerActionKind, PlayerAppearance, PlayerDamageCause, PlayerLifeState,
+    PlayerModelKind, PlayerProfileId, PlayerStatistics, RealmId, SequencedMovePlayerCommand,
+    ServerUpdate, SessionCapabilities, SessionConfiguration, SetCarriedItemCommand,
+    SetDebugHotbarSlotCommand, SetPlayerAppearanceCommand, StatisticKey, UseItemOnCommand,
+    sequence_is_newer, validate_body_pose_sample,
 };
 use mclone_worldgen::biome::{OverworldBiomeSource, get_layered_biome_by_id};
 use mclone_worldgen::block::{
@@ -4029,7 +4029,7 @@ impl RealmServer {
 
     fn harvest_wheat_for_target(
         &mut self,
-        target: CommandTarget,
+        _target: CommandTarget,
         pos: BlockPos,
         block: RawBlockId,
     ) {
@@ -4041,28 +4041,39 @@ impl RealmServer {
         let Some(harvest) = wheat_harvest(block, &mut SimpleRandomSource::new(seed)) else {
             return;
         };
-        let player_id = target.player_id();
-        let Some(next_inventory) = self.players.get(player_id).and_then(|player| {
-            player
-                .inventory
-                .with_added_item_stacks(harvest_stacks(harvest))
-        }) else {
-            return;
-        };
         if !self.set_block_from_simulation(pos, AIR) {
             return;
         }
-        if let Some(player) = self.players.get_mut(player_id) {
-            player.inventory = next_inventory;
+        let mut drop_random = SimpleRandomSource::new(seed ^ 0x6a09_e667_f3bc_c909_u64 as i64);
+        self.spawn_block_item_drops(pos, harvest_stacks(harvest), &mut drop_random);
+    }
+
+    /// Spawn ordinary block loot through the shared item-entity lifecycle.
+    ///
+    /// This follows Java 1.17.1 `Block.popResource`: each stack begins within
+    /// the broken block, receives the item entity's default motion and pickup
+    /// delay, and is immediately available to normal tracking and persistence.
+    fn spawn_block_item_drops(
+        &mut self,
+        pos: BlockPos,
+        stacks: impl IntoIterator<Item = ItemStackSnapshot>,
+        random: &mut SimpleRandomSource,
+    ) {
+        let mut drops = Vec::new();
+        for stack in stacks {
+            let position = Vec3d::new(
+                f64::from(pos.x) + 0.25 + random.next_double() * 0.5,
+                f64::from(pos.y) + 0.125 + random.next_double() * 0.5,
+                f64::from(pos.z) + 0.25 + random.next_double() * 0.5,
+            );
+            drops.push(self.active_dimension.entities.insert_item_entity(
+                stack,
+                position,
+                random.next_float() * 360.0,
+            ));
         }
-        if let Some(hotbar) = self
-            .players
-            .get(player_id)
-            .map(|player| player.inventory.hotbar_item_stacks())
-        {
-            self.chunk_tracking
-                .queue_update_for_player(player_id, ServerUpdate::PlayerInventory { hotbar });
-        }
+        self.mark_entity_updates_dirty(&drops);
+        self.reconcile_entity_subjects(drops, true);
     }
 
     fn handle_mallard_nest_use_item_on_for_target(

@@ -1219,6 +1219,7 @@ async function run() {
           );
         }
         let farmingInteractionProbe = null;
+        let harvestedWheatScreenshotPath = null;
         let plantedWheatScreenshotPath = null;
         if (wheatShowcase) {
           await page.evaluate(() => globalThis.__mcloneWebApp?.resumeRendering?.());
@@ -1268,7 +1269,7 @@ async function run() {
           );
           if (
             initialHarvestTarget?.hit !== true
-            || initialHarvestTarget.blockX !== 9
+            || initialHarvestTarget.blockX !== 11
             || initialHarvestTarget.blockY !== 64
             || initialHarvestTarget.blockZ !== 10
             || initialHarvestTarget.hitBlockStateId !== 236
@@ -1278,25 +1279,135 @@ async function run() {
           const wheatBeforeHarvest = await page.evaluate(
             () => Number(globalThis.__mcloneWebApp?.state?.lastReport?.wheatHotbarCount),
           );
+          const harvestStartMeshBuildCount = await page.evaluate(
+            () => Number(globalThis.__mcloneWebApp?.state?.lastCompileReport?.meshBuildCount) || 0,
+          );
           // Exercise the initial recipe camera exactly as a person receives
           // it. No smoke-only coordinate framing is allowed before harvest.
           const harvest = await interact("attack", "break", 101);
           try {
             await page.waitForFunction(
-              ({ wheatBeforeHarvest }) => globalThis.__mcloneWebApp
-                  .blockStateAt?.(9, 64, 10)?.blockStateId === 0
+              ({ wheatBeforeHarvest, harvestStartMeshBuildCount }) => globalThis.__mcloneWebApp
+                  .blockStateAt?.(11, 64, 10)?.blockStateId === 0
                 && Number(globalThis.__mcloneWebApp?.state?.lastReport?.wheatHotbarCount)
-                  === wheatBeforeHarvest + 1,
-              { wheatBeforeHarvest },
+                  === wheatBeforeHarvest
+                && Number(globalThis.__mcloneWebApp?.state?.lastReport?.wheatDropEntityCount) >= 1
+                && Number(globalThis.__mcloneWebApp?.state?.pendingCompileJobCount) === 0
+                && Number(globalThis.__mcloneWebApp?.state?.lastCompileReport?.pendingCompileJobCount) === 0
+                && Number(globalThis.__mcloneWebApp?.state?.lastCompileReport?.acceptedCompileSectionCount) > 0
+                && Number(globalThis.__mcloneWebApp?.state?.lastCompileReport?.meshBuildCount)
+                  > harvestStartMeshBuildCount,
+              { wheatBeforeHarvest, harvestStartMeshBuildCount },
               { timeout: 10_000 },
             );
           } catch (error) {
             const harvestState = await page.evaluate(() => ({
-              crop: globalThis.__mcloneWebApp.blockStateAt?.(9, 64, 10),
+              crop: globalThis.__mcloneWebApp.blockStateAt?.(11, 64, 10),
               report: globalThis.__mcloneWebApp?.state?.lastReport,
             }));
             throw new Error(`wheat harvest did not settle: ${error instanceof Error ? error.message : String(error)}\nharvest=${JSON.stringify(harvest)}\nstate=${JSON.stringify(harvestState)}`);
           }
+          const harvestCompileFrame = await page.evaluate(
+            () => Number(globalThis.__mcloneWebApp?.state?.frameCount) || 0,
+          );
+          await page.waitForFunction(
+            ({ harvestCompileFrame }) => {
+              const state = globalThis.__mcloneWebApp?.state;
+              return Number(state?.frameCount) >= harvestCompileFrame + 2
+                && state?.renderPendingWork === false
+                && Number(state?.pendingCompileJobCount) === 0;
+            },
+            { harvestCompileFrame },
+            { timeout: 10_000 },
+          );
+
+          const dropBeforePickup = await page.evaluate(() => {
+            const state = globalThis.__mcloneWebApp.state;
+            return {
+              cameraX: Number(state.cameraX),
+              cameraZ: Number(state.cameraZ),
+              wheatDropEntityCount: Number(state.lastReport?.wheatDropEntityCount) || 0,
+              wheatDropItemCount: Number(state.lastReport?.wheatDropItemCount) || 0,
+              wheatDropPositions: String(state.lastReport?.wheatDropPositions ?? ""),
+              wheatSeedDropEntityCount:
+                Number(state.lastReport?.wheatSeedDropEntityCount) || 0,
+              wheatSeedDropItemCount: Number(state.lastReport?.wheatSeedDropItemCount) || 0,
+              wheatSeedDropPositions: String(state.lastReport?.wheatSeedDropPositions ?? ""),
+              wheatHotbarCount: Number(state.lastReport?.wheatHotbarCount) || 0,
+              wheatSeedHotbarCount: Number(state.lastReport?.wheatSeedHotbarCount) || 0,
+              debugOverlayVisible: state.debugOverlayVisible === true,
+            };
+          });
+          await page.evaluate(async () => {
+            globalThis.__mcloneWebApp?.pauseRendering?.();
+            await globalThis.__mcloneWebApp?.renderOneFrameForSmoke?.();
+          });
+          harvestedWheatScreenshotPath = screenshotPath.replace(/\.png$/i, "-harvested.png");
+          await page.screenshot({
+            path: harvestedWheatScreenshotPath,
+            fullPage: false,
+            timeout: 60_000,
+          });
+          await page.evaluate(() => globalThis.__mcloneWebApp?.resumeRendering?.());
+
+          if (useTouchControls) {
+            await dispatchCanvasPointerEvent(page, "pointerdown", {
+              pointerId: 106,
+              xFraction: 0.24,
+              yFraction: 0.72,
+              buttons: 1,
+            });
+            await dispatchCanvasPointerEvent(page, "pointermove", {
+              pointerId: 106,
+              xFraction: 0.24,
+              yFraction: 0.50,
+              buttons: 1,
+            });
+          } else {
+            await dispatchKeyboardEvent(page, "keydown", { code: "KeyW", key: "w" });
+          }
+          try {
+            await page.waitForFunction(
+              ({ wheatBeforeHarvest }) => {
+                const report = globalThis.__mcloneWebApp?.state?.lastReport;
+                return Number(report?.wheatHotbarCount) === wheatBeforeHarvest + 1
+                  && Number(report?.wheatDropEntityCount) === 0
+                  && Number(report?.wheatSeedDropEntityCount) === 0;
+              },
+              { wheatBeforeHarvest },
+              { timeout: 15_000 },
+            );
+          } finally {
+            if (useTouchControls) {
+              await dispatchCanvasPointerEvent(page, "pointerup", {
+                pointerId: 106,
+                xFraction: 0.24,
+                yFraction: 0.50,
+                buttons: 0,
+              });
+              await page.waitForFunction(
+                () => globalThis.__mcloneWebApp?.state?.touchPointerActiveCount === 0,
+                undefined,
+                { timeout: 10_000 },
+              );
+            } else {
+              await dispatchKeyboardEvent(page, "keyup", { code: "KeyW", key: "w" });
+            }
+          }
+          const pickup = await page.evaluate((before) => {
+            const state = globalThis.__mcloneWebApp.state;
+            return {
+              ok: Number(state.lastReport?.wheatHotbarCount) === before.wheatHotbarCount + 1
+                && Number(state.lastReport?.wheatDropEntityCount) === 0
+                && Number(state.lastReport?.wheatSeedDropEntityCount) === 0,
+              distance: Math.hypot(
+                Number(state.cameraX) - before.cameraX,
+                Number(state.cameraZ) - before.cameraZ,
+              ),
+              wheatHotbarCount: Number(state.lastReport?.wheatHotbarCount) || 0,
+              wheatSeedHotbarCount: Number(state.lastReport?.wheatSeedHotbarCount) || 0,
+            };
+          }, dropBeforePickup);
 
           await selectSlot(7, 102);
           await page.evaluate(() => globalThis.__mcloneWebApp.frameBlock?.(8, 63, 14));
@@ -1306,22 +1417,55 @@ async function run() {
             undefined,
             { timeout: 10_000 },
           );
+          const tillCompileFrame = await page.evaluate(
+            () => Number(globalThis.__mcloneWebApp?.state?.frameCount) || 0,
+          );
+          await page.waitForFunction(
+            ({ tillCompileFrame }) => {
+              const state = globalThis.__mcloneWebApp?.state;
+              return Number(state?.frameCount) >= tillCompileFrame + 2
+                && state?.renderPendingWork === false
+                && Number(state?.pendingCompileJobCount) === 0;
+            },
+            { tillCompileFrame },
+            { timeout: 10_000 },
+          );
 
           await selectSlot(8, 104);
           const seedsBeforePlant = await page.evaluate(
             () => Number(globalThis.__mcloneWebApp?.state?.lastReport?.wheatSeedHotbarCount),
           );
+          const plantStartMeshBuildCount = await page.evaluate(
+            () => Number(globalThis.__mcloneWebApp?.state?.lastCompileReport?.meshBuildCount) || 0,
+          );
           await page.evaluate(() => globalThis.__mcloneWebApp.frameBlock?.(8, 63, 14));
           const plant = await interact("use", "place", 105);
           await page.waitForFunction(
-            ({ seedsBeforePlant }) => {
+            ({ seedsBeforePlant, plantStartMeshBuildCount }) => {
               const crop = globalThis.__mcloneWebApp.blockStateAt?.(8, 64, 14)?.blockStateId;
+              const state = globalThis.__mcloneWebApp?.state;
               return crop >= 229
                 && crop <= 236
-                && Number(globalThis.__mcloneWebApp?.state?.lastReport?.wheatSeedHotbarCount)
-                  === seedsBeforePlant - 1;
+                && Number(state?.lastReport?.wheatSeedHotbarCount) === seedsBeforePlant - 1
+                && Number(state?.pendingCompileJobCount) === 0
+                && Number(state?.lastCompileReport?.pendingCompileJobCount) === 0
+                && Number(state?.lastCompileReport?.acceptedCompileSectionCount) > 0
+                && Number(state?.lastCompileReport?.meshBuildCount) > plantStartMeshBuildCount;
             },
-            { seedsBeforePlant },
+            { seedsBeforePlant, plantStartMeshBuildCount },
+            { timeout: 10_000 },
+          );
+          const plantCompileFrame = await page.evaluate(
+            () => Number(globalThis.__mcloneWebApp?.state?.frameCount) || 0,
+          );
+          await page.waitForFunction(
+            ({ plantCompileFrame }) => {
+              const state = globalThis.__mcloneWebApp?.state;
+              return Number(state?.frameCount) >= plantCompileFrame + 2
+                && state?.renderPendingWork === false
+                && Number(state?.pendingCompileJobCount) === 0;
+            },
+            { plantCompileFrame },
             { timeout: 10_000 },
           );
           const seedsAfterPlant = await page.evaluate(
@@ -1338,15 +1482,21 @@ async function run() {
             timeout: 60_000,
           });
           farmingInteractionProbe = await page.evaluate(
-            ({ initialHarvestTarget, till, plant, harvest, seedsBeforePlant, seedsAfterPlant, wheatBeforeHarvest }) => ({
-              ok: initialHarvestTarget?.blockX === 9
+            ({ initialHarvestTarget, till, plant, harvest, pickup, dropBeforePickup, seedsBeforePlant, seedsAfterPlant, wheatBeforeHarvest }) => ({
+              ok: initialHarvestTarget?.blockX === 11
                 && initialHarvestTarget?.blockY === 64
                 && initialHarvestTarget?.blockZ === 10
                 && initialHarvestTarget?.hitBlockStateId === 236
+                && dropBeforePickup.wheatDropEntityCount >= 1
+                && dropBeforePickup.wheatDropItemCount === 1
+                && dropBeforePickup.wheatHotbarCount === wheatBeforeHarvest
+                && dropBeforePickup.debugOverlayVisible === false
+                && pickup.ok === true
+                && pickup.distance > 0.5
                 && globalThis.__mcloneWebApp.blockStateAt?.(8, 63, 14)?.blockStateId === 228
                 && globalThis.__mcloneWebApp.blockStateAt?.(8, 64, 14)?.blockStateId >= 229
                 && globalThis.__mcloneWebApp.blockStateAt?.(8, 64, 14)?.blockStateId <= 236
-                && globalThis.__mcloneWebApp.blockStateAt?.(9, 64, 10)?.blockStateId === 0
+                && globalThis.__mcloneWebApp.blockStateAt?.(11, 64, 10)?.blockStateId === 0
                 && seedsAfterPlant === seedsBeforePlant - 1
                 && Number(globalThis.__mcloneWebApp?.state?.lastReport?.wheatHotbarCount)
                   === wheatBeforeHarvest + 1,
@@ -1354,6 +1504,8 @@ async function run() {
               till,
               plant,
               harvest,
+              dropBeforePickup,
+              pickup,
               seedsBeforePlant,
               seedsAfterPlant,
               seedsAfterHarvest: Number(
@@ -1369,6 +1521,8 @@ async function run() {
               till,
               plant,
               harvest,
+              pickup,
+              dropBeforePickup,
               seedsBeforePlant,
               seedsAfterPlant,
               wheatBeforeHarvest,
@@ -1413,7 +1567,7 @@ async function run() {
           pageErrors.length > 0
           || canvasPixels.distinctInteriorColorCount < 2
           || result?.showcaseId !== showcase
-          || result?.showcaseRevision !== (wheatShowcase ? 2 : beeShowcase ? 2 : deerShowcase ? 1 : 2)
+          || result?.showcaseRevision !== (wheatShowcase ? 3 : beeShowcase ? 2 : deerShowcase ? 1 : 2)
           || result?.activeWorldSeedText !== (wheatShowcase ? "17506" : beeShowcase ? "17505" : deerShowcase ? "17504" : "17503")
           || result?.generationProfile !== "authored-only"
           || result?.dayTime !== 6000
@@ -1453,6 +1607,7 @@ async function run() {
           mobileBeeUseProbe,
           farmingInteractionProbe,
           plantedWheatScreenshotPath,
+          harvestedWheatScreenshotPath,
           result,
         }, null, 2));
         return;

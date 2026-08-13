@@ -19,7 +19,7 @@ const receipt = Object.fromEntries(
     .split(" ")
     .map((field) => field.split("=", 2)) ?? [],
 );
-if (receipt.id !== "wheat-farming" || receipt.revision !== "2") {
+if (receipt.id !== "wheat-farming" || receipt.revision !== "3") {
   throw new Error("showcase compiler did not emit the expected wheat receipt");
 }
 

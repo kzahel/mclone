@@ -1,0 +1,259 @@
+{
+  "schemaVersion": 1,
+  "name": "wheat_bundle",
+  "materials": {
+    "stalk": {
+      "color": "#b98a2f"
+    },
+    "grain": {
+      "color": "#e2bd58"
+    },
+    "grain_light": {
+      "color": "#f0d477"
+    },
+    "tie": {
+      "color": "#76502a"
+    }
+  },
+  "textures": {},
+  "parts": [
+    {
+      "name": "stalk_0",
+      "at": [
+        -0.13,
+        0,
+        -0.018
+      ],
+      "rot": [
+        0,
+        0,
+        -7
+      ],
+      "material": "stalk",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.025,
+          0.44,
+          0.025
+        ]
+      }
+    },
+    {
+      "name": "grain_0",
+      "at": [
+        -0.11950000000000001,
+        0.235,
+        -0.018
+      ],
+      "rot": [
+        0,
+        0,
+        -7
+      ],
+      "material": "grain_light",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.052,
+          0.13,
+          0.055
+        ]
+      }
+    },
+    {
+      "name": "stalk_1",
+      "at": [
+        -0.065,
+        0,
+        0.012
+      ],
+      "rot": [
+        0,
+        0,
+        4
+      ],
+      "material": "stalk",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.025,
+          0.44,
+          0.025
+        ]
+      }
+    },
+    {
+      "name": "grain_1",
+      "at": [
+        -0.07100000000000001,
+        0.235,
+        0.012
+      ],
+      "rot": [
+        0,
+        0,
+        4
+      ],
+      "material": "grain",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.052,
+          0.13,
+          0.055
+        ]
+      }
+    },
+    {
+      "name": "stalk_2",
+      "at": [
+        0,
+        0,
+        -0.01
+      ],
+      "rot": [
+        0,
+        0,
+        -2
+      ],
+      "material": "stalk",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.025,
+          0.44,
+          0.025
+        ]
+      }
+    },
+    {
+      "name": "grain_2",
+      "at": [
+        0.003,
+        0.235,
+        -0.01
+      ],
+      "rot": [
+        0,
+        0,
+        -2
+      ],
+      "material": "grain_light",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.052,
+          0.13,
+          0.055
+        ]
+      }
+    },
+    {
+      "name": "stalk_3",
+      "at": [
+        0.065,
+        0,
+        0.018
+      ],
+      "rot": [
+        0,
+        0,
+        7
+      ],
+      "material": "stalk",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.025,
+          0.44,
+          0.025
+        ]
+      }
+    },
+    {
+      "name": "grain_3",
+      "at": [
+        0.0545,
+        0.235,
+        0.018
+      ],
+      "rot": [
+        0,
+        0,
+        7
+      ],
+      "material": "grain",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.052,
+          0.13,
+          0.055
+        ]
+      }
+    },
+    {
+      "name": "stalk_4",
+      "at": [
+        0.13,
+        0,
+        -0.015
+      ],
+      "rot": [
+        0,
+        0,
+        -5
+      ],
+      "material": "stalk",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.025,
+          0.44,
+          0.025
+        ]
+      }
+    },
+    {
+      "name": "grain_4",
+      "at": [
+        0.1375,
+        0.235,
+        -0.015
+      ],
+      "rot": [
+        0,
+        0,
+        -5
+      ],
+      "material": "grain_light",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.052,
+          0.13,
+          0.055
+        ]
+      }
+    },
+    {
+      "name": "tie",
+      "at": [
+        0,
+        -0.015,
+        0
+      ],
+      "material": "tie",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.32,
+          0.075,
+          0.08
+        ]
+      }
+    }
+  ],
+  "clips": {}
+}

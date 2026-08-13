@@ -52,7 +52,7 @@ fn wooden_hoe_seed_and_harvest_form_an_authoritative_inventory_loop() {
             .set_block_at_world(crop, mclone_worldgen::block::WHEAT_AGE_7)
     );
     server.scheduler_mut().drain_pending_block_delta_events();
-    server
+    let harvested = server
         .try_handle_command(ClientCommand::PlayerAction(PlayerActionCommand {
             pos: crop,
             direction: Direction::Up,
@@ -60,8 +60,108 @@ fn wooden_hoe_seed_and_harvest_form_an_authoritative_inventory_loop() {
         }))
         .expect("harvest mature wheat");
     assert_eq!(server.scheduler().block_at_world(crop), Some(AIR));
+    assert_eq!(server.inventory().item_count(ItemKind::Wheat), 0);
+    let drops = server
+        .entities
+        .states()
+        .into_iter()
+        .filter(|entity| entity.kind == EntityKind::Item)
+        .collect::<Vec<_>>();
+    assert!(drops.iter().any(|entity| {
+        entity.item_stack
+            == Some(ItemStackSnapshot {
+                kind: ItemKind::Wheat,
+                count: 1,
+            })
+    }));
+    assert!(harvested.iter().any(|update| {
+        matches!(
+            update,
+            ServerUpdate::EntitySnapshot(snapshot)
+                if snapshot.kind == EntityKind::Item
+                    && snapshot.item_stack == Some(ItemStackSnapshot {
+                        kind: ItemKind::Wheat,
+                        count: 1,
+                    })
+        )
+    }));
+
+    let dropped_seed_count = drops
+        .iter()
+        .filter_map(|entity| entity.item_stack)
+        .filter(|stack| stack.kind == ItemKind::WheatSeeds)
+        .map(|stack| stack.count)
+        .sum::<u8>();
+    for drop in &drops {
+        server.entities.set_item_pickup_delay_for_test(drop.id, 0);
+    }
+    sync_player(&mut server, Vec3d::new(8.5, 65.0, 8.5));
+    server
+        .try_simulation_tick_report()
+        .expect("ordinary item pickup tick");
     assert_eq!(server.inventory().item_count(ItemKind::Wheat), 1);
-    assert!(server.inventory().item_count(ItemKind::WheatSeeds) >= 7);
+    assert_eq!(
+        server.inventory().item_count(ItemKind::WheatSeeds),
+        7 + u32::from(dropped_seed_count)
+    );
+    assert!(
+        drops
+            .iter()
+            .all(|drop| server.entities.state(drop.id).is_none())
+    );
+}
+
+#[test]
+fn full_inventory_leaves_harvest_loot_in_the_world() {
+    let mut server = LocalRealmSession::new(33);
+    load_center_chunk(&mut server);
+    sync_player(&mut server, Vec3d::new(8.5, 65.0, 8.5));
+    let crop = BlockPos::new(8, 65, 8);
+    assert!(
+        server
+            .scheduler_mut()
+            .set_block_at_world(crop, mclone_worldgen::block::WHEAT_AGE_7)
+    );
+    server.scheduler_mut().drain_pending_block_delta_events();
+    for slot in 0..server.inventory().item_stacks().len() {
+        server.inventory_mut().set_item_stack_for_test(
+            slot,
+            Some(ItemStackSnapshot {
+                kind: ItemKind::Wheat,
+                count: 64,
+            }),
+        );
+    }
+
+    server
+        .try_handle_command(ClientCommand::PlayerAction(PlayerActionCommand {
+            pos: crop,
+            direction: Direction::Up,
+            kind: PlayerActionKind::DebugInstantBreak,
+        }))
+        .expect("harvest into a full inventory");
+
+    assert_eq!(server.scheduler().block_at_world(crop), Some(AIR));
+    let wheat_drop = server
+        .entities
+        .states()
+        .into_iter()
+        .find(|entity| {
+            entity.item_stack
+                == Some(ItemStackSnapshot {
+                    kind: ItemKind::Wheat,
+                    count: 1,
+                })
+        })
+        .expect("full inventory must leave wheat in the world");
+    server
+        .entities
+        .set_item_pickup_delay_for_test(wheat_drop.id, 0);
+    server
+        .try_simulation_tick_report()
+        .expect("rejected pickup tick");
+    assert_eq!(server.inventory().item_count(ItemKind::Wheat), 64 * 36);
+    assert!(server.entities.state(wheat_drop.id).is_some());
 }
 
 #[test]

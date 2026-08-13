@@ -1491,12 +1491,12 @@ mod tests {
         let identity = ClientIdentity::test_default();
         let (manifest, store) =
             playable_showcase_memory_store(PlayableShowcaseId::WheatFarming, &identity).unwrap();
-        assert_eq!(manifest.revision, 2);
+        assert_eq!(manifest.revision, 3);
         assert_eq!(manifest.seed, 17_506);
         assert_eq!(manifest.entity_count, 0);
         assert_eq!(manifest.entry_feet, [8.5, 64.0, 14.5]);
         assert_eq!(manifest.entry_eye, [8.5, 65.62, 14.5]);
-        assert_eq!(manifest.entry_look_at, [9.5, 64.5, 10.5]);
+        assert_eq!(manifest.entry_look_at, [11.5, 64.5, 10.5]);
         let center = store.chunk(ChunkPos::new(0, 0)).unwrap();
         let block_at = |pos: BlockPos| {
             center
@@ -1523,6 +1523,10 @@ mod tests {
         );
         assert_eq!(
             block_at(BlockPos::new(9, 64, 6)),
+            generated_block_state_id(wheat_for_age(7).unwrap())
+        );
+        assert_eq!(
+            block_at(BlockPos::new(11, 64, 10)),
             generated_block_state_id(wheat_for_age(7).unwrap())
         );
         let player = store
