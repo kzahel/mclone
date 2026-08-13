@@ -2,11 +2,10 @@
 
 Topic: `rabbit-burrow-ecology`
 
-Status: live shared implementation completed under Tactical
-[`292`](../tactical/292-rabbit-burrow-ecology.md), with the A* routing and deep
-burrow tracking correction active under Tactical
-[`293`](../tactical/293-rabbit-navigation-and-burrow-visibility.md) on
-2026-08-13.
+Status: **live shared implementation complete under Tacticals
+[`292`](../tactical/292-rabbit-burrow-ecology.md) and
+[`293`](../tactical/293-rabbit-navigation-and-burrow-visibility.md), including
+the shared A* routing and deep-burrow visibility correction on 2026-08-13.**
 
 ## Purpose
 
@@ -95,6 +94,13 @@ Tactical 292 has landed the complete first chapter:
   legible daily loop;
 - closed fences and gates protect live mature carrots, while an open gate lets
   rabbits reach and decrement one real crop age under cooldown;
+- every habitat intent now accepts only a complete route from the shared
+  `GroundPathNavigation` A* owner and follows its intermediate waypoints, so
+  unreachable carrots are rejected and newly opened off-axis gates are
+  reconsidered after the ordinary block update;
+- the visible entry animation remains at the mouth, but the same alive saved
+  rabbit leaves client tracking in the deeper `Underground` state and is
+  snapshotted again with the same entity and persistent identity on emergence;
 - a held carrot tempts rabbits; using one on a reachable adult consumes the
   item and two compatible fed residents can create one durable smaller kit;
 - six normal evidence paths drive field notes, and real rabbit state emits
@@ -102,11 +108,17 @@ Tactical 292 has landed the complete first chapter:
 - the deny-unknown-fields `rabbit-burrow` recipe composes these facts without
   behavior scripts or showcase-specific game logic.
 
-Exact implementation revision `3a950022` passed native flat/stereo, local
-desktop/phone, and public desktop/phone review. The public gates observed four
-rabbits travel roughly 21–30 blocks, a second ordinary excavation, two
-gate-dependent carrot raids, feeding consumption `12 -> 11`, and zero records
-in all browser world stores. The temporary review link is
+The original implementation revision `3a950022` passed native flat/stereo,
+local desktop/phone, and public desktop/phone review. Tactical 293 then showed
+that its near-line gate proved collision but did not force A* waypoint use.
+Correction commits `b0f7c28b` and `9a9ec120` route live rabbits through the
+shared navigator and move revision 2's gate off-axis. Local desktop and phone
+acceptance observed all four rabbits travel roughly 24–30 blocks, create a
+second ordinary excavation, and mutate two protected carrots only after the
+gate opened; all browser world stores remained empty. Feeding remains covered
+by the focused authoritative interaction test and the original public
+`12 -> 11` receipt rather than being coupled to this autonomous-route gate.
+The temporary review link is
 `https://mclone.kzahel.com/app.html?showcase=rabbit-burrow`.
 
 ## Deliberate Later Work
@@ -133,10 +145,10 @@ in all browser world stores. The temporary review link is
 
 ## Recommended Next Direction
 
-Human review should now judge the rabbit hop/entry animation, whether the mouth
-reads as an actual shallow excavation, and whether garden pressure, retreat,
-and family life stay interesting outside the bounded receipt. Address any
-observed motion or legibility defect in the shared live system before adding
-more species. If this chapter holds up, the next ecology slice should deepen a
-reusable stewardship consequence—food/cooking, crop yield, protected habitat,
-or predator pressure—rather than immediately add another decorative animal.
+Human review should now judge whether the off-axis opening produces believable
+garden navigation, whether deep sheltering reads cleanly as disappearance into
+the compact warren, and whether garden pressure, retreat, and family life stay
+interesting outside the bounded receipt. If this chapter holds up, the next
+ecology slice should deepen a reusable stewardship consequence—food/cooking,
+crop yield, protected habitat, or predator pressure—rather than immediately
+add another decorative animal.

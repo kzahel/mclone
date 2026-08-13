@@ -420,3 +420,12 @@ inspected public desktop and phone capture digests are
 `81133b9bc7bfcb5f1aed0314838b5fd976bd0a2ee5b04b09b599556082c89895`
 and
 `4803f1656053c21dd700652707d91c336efe1ed1a274e66f8f1d2abb1e9be1e9`.
+
+### Post-closeout correction
+
+Human review later demonstrated that revision 1's near-line gate allowed the
+behavior receipt to pass without proving shared A* waypoint use. Tactical
+[`293`](293-rabbit-navigation-and-burrow-visibility.md) supersedes the
+navigation and deep-shelter portions of this record. The original collision,
+feeding, persistence, and public receipts remain valid historical evidence;
+they must not be cited as proof of an off-axis route.

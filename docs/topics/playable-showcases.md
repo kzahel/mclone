@@ -533,6 +533,20 @@ capture digests are
 and
 `4803f1656053c21dd700652707d91c336efe1ed1a274e66f8f1d2abb1e9be1e9`.
 
+Interactive review then found that revision 1's gate sat close to the direct
+family-to-carrot line. Its real raid proved fence collision, but not use of
+shared A* waypoints. Tactical
+[`293`](../tactical/293-rabbit-navigation-and-burrow-visibility.md) corrects
+the live owner and advances the data recipe to revision 2: the old opening at
+`16,65,10` is an ordinary fence and the gate is off-axis at `16,65,14`.
+The local desktop and phone gates both preserved mature states
+`308,308,308,308` while closed, opened state `270 -> 274` through ordinary
+controls, then observed two real age decrements. All four rabbits accumulated
+roughly 24–30 blocks of travel, a second live burrow appeared, and every
+browser world-record store stayed empty. Feeding is no longer part of this
+autonomous-route window; the ordinary authoritative feeding interaction keeps
+focused server coverage and its earlier public receipt.
+
 ## Code and Documentation Map
 
 - `assets/mclone/showcases/`: readable showcase recipes

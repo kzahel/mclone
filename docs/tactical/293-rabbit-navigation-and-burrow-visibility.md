@@ -2,7 +2,7 @@
 
 Topic: `rabbit-burrow-ecology`
 
-Status: active corrective slice started 2026-08-13.
+Status: complete 2026-08-13.
 
 ## Motivation
 
@@ -74,4 +74,65 @@ after the exact pushed revision is verified.
 
 ## Execution Record
 
-Pending.
+Commits `b0f7c28b` and `9a9ec120` completed the live correction and its
+adversarial showcase acceptance. The shared server now:
+
+- orders real habitat candidates, accepts only complete exact routes from
+  `GroundPathNavigation`, and advances rabbit hop steering through the current
+  waypoint;
+- clears rabbit intent and navigation after a nearby ordinary block edit, but
+  leaves distant edits alone, so opening a gate causes an autonomous replan;
+- rejects partial A* results and clears a failed dig target rather than
+  steering into the obstruction; and
+- keeps entry and emergence visible while removing `Underground` rabbits from
+  client tracking. Persistence hydrates that deep state hidden, and emergence
+  republishes the same entity and persistent identities.
+
+The recipe advanced to revision 2. The former near-line opening at
+`16,65,10` is now fence and the ordinary oak gate moved off-axis to
+`16,65,14`. Both the compiler test and browser harness bind those cells so the
+old direct-steering implementation cannot satisfy acceptance.
+
+Focused server tests prove the closed crop is unreachable, a later block edit
+opens a complete route, the rabbit takes the off-axis detour and performs the
+real raid, and deep shelter emits remove/resnapshot tracking around the same
+identity. Saved-underground hydration also starts hidden. The authoritative
+carrot-feeding test remains focused coverage; feeding was deliberately removed
+from this route-specific browser window rather than coupling an unrelated
+interaction to camera retreat.
+
+Local desktop and phone browser runs used recipe revision 2 and seed `17507`.
+Both preserved carrot states `308,308,308,308` while the boundary was closed,
+opened the real gate from state `270` to `274`, then observed two real raids.
+All four rabbits travelled roughly 24–30 blocks, exercised hop, emerge, dig,
+and forage clips, created one additional live burrow, and left all eight
+IndexedDB world-record stores empty. Inspected desktop and phone capture
+digests are
+`4304b9a8a4ee5f885ed66d33eb4a3a25c9a0ce0503fbb8ad909f6e3858ba6d30`
+and
+`8e444f5d399db07b4b8d1406c64dd84a6c2a6bf85feed2fe790077c5859a99f6`.
+
+`pnpm native:rabbit-burrow:capture` passed flat and stereo capture; inspected
+digests are
+`3fe3147309f10387544b7875f2f76bf344b6fb552e40f119e7d4ecc807a24e64`
+and
+`32a8947fa83b9c923f1cd88bbabe4dec82f849d50f2e31e8c2bfe0054ed4e232`.
+The ordinary offscreen smoke also produced credible inspected pixels with two
+drawn actors.
+
+Validation passed:
+
+- `cargo fmt --manifest-path native/Cargo.toml --all --check`;
+- `cargo check --manifest-path native/Cargo.toml -p mclone-server`;
+- `cargo test --manifest-path native/Cargo.toml`;
+- `pnpm native:thin-adapters:purity`;
+- `pnpm native:web:build`;
+- `pnpm native:desktop-offscreen:smoke`;
+- `pnpm native:web:rabbit-showcase-smoke`; and
+- `pnpm native:web:rabbit-showcase-mobile-smoke`.
+
+The first broad workspace attempt saw one transient failure in the unrelated
+homestead-resident removal persistence test. A clean current-source rebuild,
+five consecutive isolated repeats, and the complete workspace rerun all
+passed; no rabbit change was made to suppress or bypass it. The deployment
+receipt is recorded below after verification of the pushed revision.
