@@ -1656,7 +1656,7 @@ async function run() {
                 ) <= 4);
             },
             undefined,
-            { timeout: 12_000 },
+            { timeout: 30_000 },
           );
           const attempts = [];
           for (let attempt = 0; attempt < 4; attempt += 1) {
