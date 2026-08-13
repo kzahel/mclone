@@ -971,6 +971,8 @@ async function run() {
           const minRadiusByBee = sampleIds.map(() => Number.POSITIVE_INFINITY);
           const stationaryStreakByBee = sampleIds.map(() => 0);
           const longestStationaryStreakByBee = sampleIds.map(() => 0);
+          const flyPhaseTravelByBee = sampleIds.map(() => 0);
+          const flyPhaseTickAdvanceByBee = sampleIds.map(() => 0);
           const sampledClips = new Set();
           for (let sampleNumber = 0; sampleNumber < beeBehaviorSamples.length; sampleNumber += 1) {
             const sample = beeBehaviorSamples[sampleNumber];
@@ -1005,6 +1007,62 @@ async function run() {
                     stationaryStreakByBee[index] = 0;
                   }
                 }
+
+                const presentationIds = String(
+                  sample.beePresentationEntityIds ?? "",
+                ).split(",");
+                const presentationIndex = presentationIds.indexOf(sampleIds[index]);
+                const priorPresentationIds = String(
+                  prior.beePresentationEntityIds ?? "",
+                ).split(",");
+                const priorPresentationIndex = priorPresentationIds.indexOf(sampleIds[index]);
+                const presentationPositions = parsePositions(sample.beePresentationPositions);
+                const priorPresentationPositions = parsePositions(prior.beePresentationPositions);
+                const clips = String(sample.beePresentationAnimationClips ?? "").split(",");
+                const priorClips = String(
+                  prior.beePresentationAnimationClips ?? "",
+                ).split(",");
+                const phaseSources = String(
+                  sample.beePresentationAnimationPhaseSources ?? "",
+                ).split(",");
+                const priorPhaseSources = String(
+                  prior.beePresentationAnimationPhaseSources ?? "",
+                ).split(",");
+                const phaseTicks = String(
+                  sample.beePresentationAnimationPhaseTicks ?? "",
+                ).split(",").map(Number);
+                const priorPhaseTicks = String(
+                  prior.beePresentationAnimationPhaseTicks ?? "",
+                ).split(",").map(Number);
+                if (
+                  presentationIndex >= 0
+                  && priorPresentationIndex >= 0
+                  && clips[presentationIndex] === "fly"
+                  && priorClips[priorPresentationIndex] === "fly"
+                  && phaseSources[presentationIndex] === "elapsed"
+                  && priorPhaseSources[priorPresentationIndex] === "elapsed"
+                ) {
+                  const phaseAdvance = phaseTicks[presentationIndex]
+                    - priorPhaseTicks[priorPresentationIndex];
+                  const currentPresentation = presentationPositions[presentationIndex];
+                  const priorPresentation = priorPresentationPositions[priorPresentationIndex];
+                  if (
+                    Number.isFinite(phaseAdvance)
+                    && phaseAdvance > 0
+                    && currentPresentation
+                    && priorPresentation
+                  ) {
+                    const presentationTravel = Math.hypot(
+                      currentPresentation[0] - priorPresentation[0],
+                      currentPresentation[1] - priorPresentation[1],
+                      currentPresentation[2] - priorPresentation[2],
+                    );
+                    if (presentationTravel > 0.02) {
+                      flyPhaseTravelByBee[index] += presentationTravel;
+                      flyPhaseTickAdvanceByBee[index] += phaseAdvance;
+                    }
+                  }
+                }
               }
             }
           }
@@ -1013,6 +1071,8 @@ async function run() {
             beeMaxRadiusByBee: maxRadiusByBee,
             beeMinRadiusByBee: minRadiusByBee,
             beeLongestStationaryStreakByBee: longestStationaryStreakByBee,
+            beeFlyPhaseTravelByBee: flyPhaseTravelByBee,
+            beeFlyPhaseTickAdvanceByBee: flyPhaseTickAdvanceByBee,
             beeSampledClips: [...sampledClips],
           });
           if (
@@ -1021,6 +1081,8 @@ async function run() {
             || maxRadiusByBee.filter((radius) => radius >= 9).length < 2
             || Math.max(...maxRadiusByBee) - Math.min(...maxRadiusByBee) < 3
             || longestStationaryStreakByBee.some((count) => count > 4)
+            || flyPhaseTravelByBee.some((distance) => !Number.isFinite(distance) || distance < 0.5)
+            || flyPhaseTickAdvanceByBee.some((ticks) => !Number.isFinite(ticks) || ticks < 20)
             || !sampledClips.has("forage")
             || !sampledClips.has("fly")
             || (behaviorProbe.finalFieldGuideBits & 16) !== 16

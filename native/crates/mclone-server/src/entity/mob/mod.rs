@@ -1998,7 +1998,7 @@ fn set_bee_animation(entity: &mut ServerEntityState, behavior: mclone_protocol::
         ),
         mclone_protocol::BeeBehavior::FlyToFlower | mclone_protocol::BeeBehavior::ReturnHome => (
             AnimationClipId::from_static("fly"),
-            mclone_core::AnimationPhaseSource::Distance,
+            mclone_core::AnimationPhaseSource::Elapsed,
         ),
         mclone_protocol::BeeBehavior::Forage => (
             AnimationClipId::from_static("forage"),
@@ -2467,6 +2467,51 @@ mod tests {
 
     fn no_blocks(_pos: BlockPos) -> Option<BlockStateId> {
         None
+    }
+
+    #[test]
+    fn bee_flight_uses_a_continuous_elapsed_wingbeat_phase() {
+        let mut entity = ServerEntityState::from_metadata(
+            EntityId(41),
+            mclone_protocol::EntityPersistentId::new(0, 41),
+            EntityMetadata::BEE,
+            Vec3d::new(0.5, 66.0, 0.5),
+            0.0,
+            0.0,
+            None,
+            false,
+        );
+        entity.tick_count = 120;
+        entity.animation = Some(AnimationState::distance(
+            AnimationClipId::from_static("fly"),
+            5,
+        ));
+
+        set_bee_animation(&mut entity, mclone_protocol::BeeBehavior::FlyToFlower);
+        let outbound = entity.animation.expect("outbound flight animation");
+        assert_eq!(outbound.clip.as_str(), "fly");
+        assert_eq!(
+            outbound.phase_source,
+            mclone_core::AnimationPhaseSource::Elapsed
+        );
+        assert_eq!(outbound.start_tick, 120);
+        assert_eq!(outbound.epoch, 6);
+
+        entity.tick_count = 145;
+        set_bee_animation(&mut entity, mclone_protocol::BeeBehavior::FlyToFlower);
+        assert_eq!(entity.animation, Some(outbound));
+
+        set_bee_animation(&mut entity, mclone_protocol::BeeBehavior::Forage);
+        entity.tick_count = 180;
+        set_bee_animation(&mut entity, mclone_protocol::BeeBehavior::ReturnHome);
+        let returning = entity.animation.expect("return flight animation");
+        assert_eq!(returning.clip.as_str(), "fly");
+        assert_eq!(
+            returning.phase_source,
+            mclone_core::AnimationPhaseSource::Elapsed
+        );
+        assert_eq!(returning.start_tick, 180);
+        assert!(returning.epoch > outbound.epoch);
     }
 
     fn one_block_ledge(pos: BlockPos) -> Option<BlockStateId> {

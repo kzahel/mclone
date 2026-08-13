@@ -270,6 +270,47 @@ fn elapsed_action_uses_the_replicated_world_clock_without_restarting() {
 }
 
 #[test]
+fn flying_bee_uses_elapsed_wingbeat_time_while_translating() {
+    let client = ClientRuntime::local_integrated();
+    let presentation = ActorPresentation {
+        id: ActorPresentationId::Entity(mclone_protocol::EntityId(92)),
+        kind: ActorPresentationKind::Entity(mclone_protocol::EntityKind::Bee),
+        appearance: ActorAppearance::NONE,
+        item_stack: None,
+        mallard_life_stage: None,
+        in_water: false,
+        mallard_nest: None,
+        deer: None,
+        feet_position: Vec3d::new(12.0, 67.5, 4.0),
+        y_rot_degrees: 45.0,
+        x_rot_degrees: 0.0,
+        rotation: None,
+        on_ground: false,
+        width: 0.5,
+        height: 0.5,
+        animation: Some(mclone_core::AnimationState::elapsed(
+            mclone_core::AnimationClipId::from_static("fly"),
+            3,
+            200,
+        )),
+        animation_clock_tick: 229,
+        walk_animation_distance: 0.0,
+        chicken_wing_flap_radians: None,
+    };
+
+    let actor = actor_instances_from_presentations(&[presentation], &client)[0];
+
+    assert_eq!(actor.feet_position, Vec3::new(12.0, 67.5, 4.0));
+    assert_eq!(
+        actor.animation,
+        Some(mclone_render::entity::ActorAnimation {
+            clip: mclone_core::AnimationClipId::from_static("fly"),
+            phase: mclone_render::entity::ActorAnimationPhase::ElapsedSeconds(1.45),
+        })
+    );
+}
+
+#[test]
 fn swimming_mallard_sinks_its_figure_below_the_waterline() {
     let client = ClientRuntime::local_integrated();
     let presentation = ActorPresentation {

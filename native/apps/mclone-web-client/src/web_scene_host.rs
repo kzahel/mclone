@@ -3658,6 +3658,100 @@ impl WebSceneHost {
                         .collect::<Vec<_>>()
                         .join(","),
                 )?;
+                let bee_presentations = host
+                    .mono_actor_presentations()
+                    .into_iter()
+                    .filter(|presentation| {
+                        presentation.kind
+                            == mclone_client::ActorPresentationKind::Entity(
+                                mclone_protocol::EntityKind::Bee,
+                            )
+                    })
+                    .collect::<Vec<_>>();
+                report_set_string(
+                    &object,
+                    "beePresentationEntityIds",
+                    &bee_presentations
+                        .iter()
+                        .filter_map(|presentation| {
+                            let mclone_client::ActorPresentationId::Entity(entity_id) =
+                                presentation.id
+                            else {
+                                return None;
+                            };
+                            Some(entity_id.0.to_string())
+                        })
+                        .collect::<Vec<_>>()
+                        .join(","),
+                )?;
+                report_set_string(
+                    &object,
+                    "beePresentationPositions",
+                    &bee_presentations
+                        .iter()
+                        .map(|presentation| {
+                            format!(
+                                "{:.4},{:.4},{:.4}",
+                                presentation.feet_position.x,
+                                presentation.feet_position.y,
+                                presentation.feet_position.z
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join(";"),
+                )?;
+                report_set_string(
+                    &object,
+                    "beePresentationAnimationClips",
+                    &bee_presentations
+                        .iter()
+                        .map(|presentation| {
+                            presentation.animation.map_or_else(
+                                || "none".to_owned(),
+                                |animation| animation.clip.to_string(),
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join(","),
+                )?;
+                report_set_string(
+                    &object,
+                    "beePresentationAnimationPhaseSources",
+                    &bee_presentations
+                        .iter()
+                        .map(|presentation| {
+                            match presentation
+                                .animation
+                                .map(|animation| animation.phase_source)
+                            {
+                                Some(mclone_core::AnimationPhaseSource::Elapsed) => "elapsed",
+                                Some(mclone_core::AnimationPhaseSource::Distance) => "distance",
+                                None => "none",
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                        .join(","),
+                )?;
+                report_set_string(
+                    &object,
+                    "beePresentationAnimationPhaseTicks",
+                    &bee_presentations
+                        .iter()
+                        .map(|presentation| {
+                            presentation.animation.map_or_else(
+                                || "0".to_owned(),
+                                |animation| match animation.phase_source {
+                                    mclone_core::AnimationPhaseSource::Elapsed => presentation
+                                        .animation_clock_tick
+                                        .saturating_sub(animation.start_tick)
+                                        .to_string(),
+                                    mclone_core::AnimationPhaseSource::Distance => "0".to_owned(),
+                                },
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join(","),
+                )?;
                 report_set_number(
                     &object,
                     "beeFieldGuideBits",
