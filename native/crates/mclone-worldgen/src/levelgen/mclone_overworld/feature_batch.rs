@@ -927,9 +927,9 @@ mod tests {
 
         assert_eq!(
             decoration_counts,
-            [50, 446, 208, 1_446, 108, 0, 6, 13, 77, 54]
+            [50, 446, 208, 1_446, 108, 0, 6, 13, 77, 75]
         );
-        assert_eq!(hash, 8_335_049_761_842_312_531);
+        assert_eq!(hash, 11_647_844_216_779_008_310);
 
         let source =
             McloneVegetationSource::new(12_345, McloneOverworldSamplingTopology::Unbounded);

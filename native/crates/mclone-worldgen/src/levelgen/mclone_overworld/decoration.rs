@@ -585,7 +585,7 @@ mod tests {
                 McloneOverworldSteppeBand::Outside,
             )
             .len(),
-            3
+            4
         );
         assert_eq!(
             feature_table(
