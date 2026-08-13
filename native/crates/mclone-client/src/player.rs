@@ -3413,6 +3413,41 @@ mod tests {
     }
 
     #[test]
+    fn walking_auto_jump_cannot_clear_closed_fence_gate() {
+        let mut blocks = (4..=7)
+            .map(|x| (BlockPos::new(x, 0, 8), BlockStateId(7)))
+            .collect::<Vec<_>>();
+        blocks.push((BlockPos::new(5, 1, 8), BlockStateId(270)));
+        let client = client_with_blocks(&blocks);
+        let mut controller = LocalPlayerController::new();
+        controller.set_pose(LocalPlayerPose {
+            position: Vec3d::new(6.86, 1.0, 8.5),
+            ..Default::default()
+        });
+        settle_controller_on_ground(&mut controller, &client);
+        controller.set_key(PlayerInputKey::Forward, true);
+
+        for _ in 0..120 {
+            controller
+                .tick_walking_movement(
+                    &client,
+                    WalkingMovementStep {
+                        y_rot_degrees: 90.0,
+                        speed_multiplier: 1.0,
+                        dt_seconds: 1.0 / 60.0,
+                    },
+                )
+                .expect("walking movement");
+        }
+
+        assert!(
+            controller.pose().position.x >= 5.925,
+            "closed gate was cleared at {:?}",
+            controller.pose()
+        );
+    }
+
+    #[test]
     fn walking_movement_auto_jumps_over_one_block_obstacle() {
         let client = forward_step_client(&[(BlockPos::new(0, 1, 1), BlockStateId(7))]);
         let mut controller = controller_on_ground();

@@ -57,7 +57,11 @@ where
     }
 
     let min_x = area.min_x.floor() as i32;
-    let min_y = area.min_y.floor() as i32;
+    // Fence and gate collision may rise above their owning block cell. Keep
+    // the cell immediately below the queried body in the candidate set so a
+    // jumping body cannot lose a still-overlapping 1.5-block-tall shape once
+    // its feet cross the next integer Y boundary.
+    let min_y = (area.min_y.floor() as i32).saturating_sub(1);
     let min_z = area.min_z.floor() as i32;
     let max_x = area.max_x.floor() as i32;
     let max_y = area.max_y.floor() as i32;
@@ -236,5 +240,30 @@ mod tests {
         let requested = Vec3d::new(2.0, 0.0, 0.0);
 
         assert_eq!(collide_movement(blocks, box_, requested), requested);
+    }
+
+    #[test]
+    fn closed_fence_gate_blocks_crossing_and_open_gate_does_not() {
+        let gate_pos = BlockPos::new(5, 64, 8);
+        let box_ = collision_aabb_for_feet_position(Vec3d::new(6.86, 64.0, 8.5), 0.6, 1.8);
+        let requested = Vec3d::new(-2.0, 0.0, 0.0);
+        let gate = |state| move |pos| (pos == gate_pos).then_some(BlockStateId(state));
+
+        let blocked = collide_movement(
+            gate(terrain_id::OAK_FENCE_GATE_STATE_START + 1),
+            box_,
+            requested,
+        );
+        assert!((blocked.x + 0.935).abs() < 1.0e-12);
+        assert_eq!(blocked.y, 0.0);
+        assert_eq!(blocked.z, 0.0);
+        assert_eq!(
+            collide_movement(
+                gate(terrain_id::OAK_FENCE_GATE_STATE_START + 1 + 4),
+                box_,
+                requested,
+            ),
+            requested
+        );
     }
 }
