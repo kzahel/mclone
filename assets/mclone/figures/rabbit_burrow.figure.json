@@ -1,0 +1,332 @@
+{
+  "schemaVersion": 1,
+  "name": "rabbit_burrow",
+  "materials": {
+    "cavity": {
+      "color": "#17130f"
+    },
+    "deep_cavity": {
+      "color": "#090807"
+    },
+    "earth": {
+      "color": "#745134"
+    },
+    "earth_dark": {
+      "color": "#543823"
+    },
+    "dry_soil": {
+      "color": "#98704a"
+    },
+    "root": {
+      "color": "#aa8861"
+    },
+    "moss": {
+      "color": "#65723d"
+    }
+  },
+  "textures": {
+    "soil_break": {
+      "palette": {
+        ".": "#745134",
+        "d": "#543823",
+        "l": "#98704a",
+        "m": "#65723d"
+      },
+      "pixels": [
+        "dd..l...dd",
+        ".ll...dd..",
+        "d...m...ld",
+        "..dd...l..",
+        "l...dd...m",
+        "..m...ll.."
+      ]
+    }
+  },
+  "parts": [
+    {
+      "name": "deep_back",
+      "at": [
+        0,
+        0.34,
+        0.37
+      ],
+      "material": "deep_cavity",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.56,
+          0.5,
+          0.035
+        ]
+      }
+    },
+    {
+      "name": "cavity_floor",
+      "at": [
+        0,
+        0.035,
+        0.08
+      ],
+      "rot": [
+        2,
+        0,
+        0
+      ],
+      "material": "cavity",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.6,
+          0.07,
+          0.66
+        ]
+      }
+    },
+    {
+      "name": "rim_left",
+      "at": [
+        -0.36,
+        0.28,
+        -0.31
+      ],
+      "rot": [
+        0,
+        7,
+        -8
+      ],
+      "material": "earth",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.2,
+          0.58,
+          0.16
+        ],
+        "faces": {
+          "north": {
+            "texture": "soil_break"
+          }
+        }
+      }
+    },
+    {
+      "name": "rim_right",
+      "at": [
+        0.35,
+        0.26,
+        -0.3
+      ],
+      "rot": [
+        0,
+        -6,
+        7
+      ],
+      "material": "earth_dark",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.19,
+          0.53,
+          0.17
+        ],
+        "faces": {
+          "north": {
+            "texture": "soil_break"
+          }
+        }
+      }
+    },
+    {
+      "name": "rim_crown_left",
+      "at": [
+        -0.2,
+        0.6,
+        -0.29
+      ],
+      "rot": [
+        0,
+        3,
+        13
+      ],
+      "material": "earth",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.42,
+          0.18,
+          0.17
+        ],
+        "faces": {
+          "north": {
+            "texture": "soil_break"
+          }
+        }
+      }
+    },
+    {
+      "name": "rim_crown_right",
+      "at": [
+        0.2,
+        0.61,
+        -0.29
+      ],
+      "rot": [
+        0,
+        -4,
+        -11
+      ],
+      "material": "earth_dark",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.4,
+          0.17,
+          0.16
+        ],
+        "faces": {
+          "north": {
+            "texture": "soil_break"
+          }
+        }
+      }
+    },
+    {
+      "name": "threshold_soil",
+      "at": [
+        0.02,
+        0.055,
+        -0.35
+      ],
+      "rot": [
+        0,
+        -3,
+        0
+      ],
+      "material": "dry_soil",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.78,
+          0.1,
+          0.25
+        ],
+        "faces": {
+          "up": {
+            "texture": "soil_break"
+          }
+        }
+      }
+    },
+    {
+      "name": "loose_clod_left",
+      "at": [
+        -0.4,
+        0.11,
+        -0.46
+      ],
+      "rot": [
+        0,
+        18,
+        7
+      ],
+      "material": "earth_dark",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.19,
+          0.12,
+          0.24
+        ]
+      }
+    },
+    {
+      "name": "loose_clod_right",
+      "at": [
+        0.38,
+        0.09,
+        -0.49
+      ],
+      "rot": [
+        0,
+        -23,
+        -4
+      ],
+      "material": "dry_soil",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.24,
+          0.1,
+          0.18
+        ]
+      }
+    },
+    {
+      "name": "root_left",
+      "at": [
+        -0.25,
+        0.59,
+        -0.405
+      ],
+      "rot": [
+        17,
+        4,
+        8
+      ],
+      "material": "root",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.035,
+          0.34,
+          0.035
+        ]
+      }
+    },
+    {
+      "name": "root_right",
+      "at": [
+        0.24,
+        0.57,
+        -0.4
+      ],
+      "rot": [
+        -10,
+        -5,
+        -9
+      ],
+      "material": "root",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.035,
+          0.25,
+          0.035
+        ]
+      }
+    },
+    {
+      "name": "moss_tuft",
+      "at": [
+        -0.31,
+        0.69,
+        -0.32
+      ],
+      "rot": [
+        0,
+        9,
+        4
+      ],
+      "material": "moss",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.27,
+          0.045,
+          0.19
+        ]
+      }
+    }
+  ],
+  "clips": {}
+}

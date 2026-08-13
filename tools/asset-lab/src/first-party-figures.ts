@@ -28,6 +28,7 @@ export const FIRST_PARTY_SEMANTIC_ASSETS: readonly FirstPartySemanticAsset[] = [
   firstPartyActor("upright_bear"),
   firstPartyActor("deer"),
   firstPartyActor("bee", "live_gameplay"),
+  firstPartyActor("rabbit", "live_gameplay"),
   firstPartyProp("mallard_nest", "world_prop", "ground"),
   firstPartyProp("mallard_feather", "item_prop", "item_center"),
   firstPartyProp("hunting_spear", "item_prop", "item_center"),
@@ -41,6 +42,10 @@ export const FIRST_PARTY_SEMANTIC_ASSETS: readonly FirstPartySemanticAsset[] = [
   firstPartyProp("beeswax", "item_prop", "item_center", "live_gameplay"),
   firstPartyProp("wheat_bundle", "item_prop", "item_center", "live_gameplay"),
   firstPartyProp("wheat_seeds_item", "item_prop", "item_center", "live_gameplay"),
+  firstPartyProp("carrot", "item_prop", "item_center", "live_gameplay"),
+  firstPartyProp("oak_fence_item", "item_prop", "item_center", "live_gameplay"),
+  firstPartyProp("oak_fence_gate_item", "item_prop", "item_center", "live_gameplay"),
+  firstPartyProp("rabbit_burrow", "world_prop", "ground", "live_gameplay"),
 ];
 
 export const FIRST_PARTY_FIGURES: readonly FirstPartyFigure[] =
