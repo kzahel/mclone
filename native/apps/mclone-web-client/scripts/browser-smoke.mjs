@@ -1103,7 +1103,7 @@ async function run() {
           priorRabbitSample = behaviorStart;
           rabbitSamples.push(behaviorStart);
           try {
-            for (let sampleIndex = 0; sampleIndex < 18; sampleIndex += 1) {
+            for (let sampleIndex = 0; sampleIndex < 36; sampleIndex += 1) {
               await page.waitForFunction(
                 ({ startTickCounts }) => {
                   const current = String(
@@ -1121,6 +1121,19 @@ async function run() {
                 () => globalThis.__mcloneWebApp?.state?.lastReport ?? null,
               );
               rabbitSamples.push(priorRabbitSample);
+              if (sampleIndex >= 17 && Number(priorRabbitSample.rabbitBurrowCount) >= 2) {
+                const currentCarrotStates = await page.evaluate(
+                  (positions) => positions.map(
+                    ([x, y, z]) => globalThis.__mcloneWebApp.blockStateAt?.(x, y, z)?.blockStateId,
+                  ),
+                  matureCarrots,
+                );
+                if (currentCarrotStates.some(
+                  (state, index) => state !== initialCarrotStates[index],
+                )) {
+                  break;
+                }
+              }
             }
           } catch (error) {
             const state = await page.evaluate(
