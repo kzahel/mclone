@@ -394,6 +394,36 @@ frames match local acceptance byte-for-byte at
 and
 `c09833fac7bb6ca09496383cd1ac1cc58dcbc08158d3e7aa21033011f357ef74`.
 
+Human review then rejected revision 2: the crop appeared to remain after
+harvest, no generic pickup was visible, the crosshair label carried primary
+gameplay meaning, and the planted seed still lacked readable green. Tactical
+[`290`](../tactical/290-wheat-world-drops-and-visual-language.md) withdraws
+that acceptance and owns revision 3.
+
+Revision 3 keeps the recipe data-only and behavior-free. It moves the entry
+target to isolated crop `11,64,10`, where shared harvest removes the crop and
+spawns normal wheat/seed item entities with dedicated Asset Lab props. Desktop
+and phone gates capture those entities before inventory collection, move the
+player through ordinary keyboard or rendered touch controls to pick them up,
+then till and plant a separate cell. The planted capture shows green age-zero
+geometry with debug labels disabled. Both gates retain zero records in all
+eight browser stores.
+
+Pixel review of this showcase also exposed a shared Web render-worker mirror
+defect: section block deltas changed client snapshots without advancing their
+content revisions. The shared client fix now sends changed columns before
+compilation, so the showcase's Y=64 crop removal and planting are ordinary live
+render behavior rather than showcase-specific compensation. Local harvested
+desktop/phone digests are
+`b43edcee22b7aa9e7083955f748e0d60ff9d960fdeab012fac48b89365b76984`
+and
+`d7e62749744f345cc1935918d77d611155cac45be1a5901e9bd73df916e65ae3`;
+planted digests are
+`01c66226e3b29d96985b2b6b378f22ad09781c71cd43393093d2c912c1c78a66`
+and
+`c17abedc91702af4fcea639bf7dbf5c200fa48b7ac5db657c2aee533c87e488f`.
+Exact public deployment acceptance remains pending.
+
 ## Code and Documentation Map
 
 - `assets/mclone/showcases/`: readable showcase recipes

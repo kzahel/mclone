@@ -1,7 +1,7 @@
 # Tactical 290: Wheat World Drops and Visual Language
 
-Status: **in progress 2026-08-13 after human rejection of deployed revision
-2.**
+Status: **implementation and local desktop/phone acceptance complete
+2026-08-13; exact pushed deployment acceptance pending.**
 
 Topics:
 
@@ -78,3 +78,57 @@ silhouette.
 - Do not make a permanent tutorial banner substitute for object-level visual
   language.
 
+## Execution Record
+
+Commits `040b2ffa` and `a6729567` implement the shared correction. Harvest now
+sets the crop to air and emits its reference-shaped wheat/seed stacks through
+the existing persistent item-entity store. Ordinary delay, gravity, movement,
+tracking, merging, capacity-aware pickup, and saving own the rest of the
+lifecycle. A full-inventory test confirms that breaking succeeds while all
+unaccepted loot remains in the world.
+
+Wheat and seeds now map to dedicated checked Asset Lab semantic props. The
+first-party asset inventory requires both files, so native and Web staging
+cannot silently omit them. Age-zero wheat gains a small top-readable surface
+using its active pack sprite; the normal collision and selection facts remain
+unchanged. Crop target text is no longer populated in the ordinary HUD and is
+available only when debug diagnostics are visible.
+
+Pixel inspection uncovered and corrected a general Web rendering fault rather
+than hiding it in the recipe: `SectionBlockUpdates` patched the client snapshot
+without advancing its content revision, so the browser render-worker mirror
+did not receive the changed column. Effective section deltas now advance that
+revision, while idempotent deltas do not. This makes section-boundary additions
+and removals remesh from current state for all live blocks.
+
+Revision 3 keeps seed `17506` and entry eye `8.5,65.62,14.5`, moves the
+untouched-camera target to isolated crop `11,64,10`, and changes no behavior.
+Both local desktop and 390x844 phone gates:
+
+- remove state 236 to visible air;
+- capture one wheat sheaf and the reference seed roll as normal item entities
+  before the inventory changes;
+- use real keyboard or rendered touch movement to collect those entities;
+- till and plant through ordinary controls;
+- capture bright green age-zero geometry with debug labels disabled; and
+- retain zero records in all eight browser world stores.
+
+Inspected desktop initial, harvested, and planted SHA-256 digests are
+`1a624c6dd7785a948137f2a69190fc623ee1e3d00b96a46360aa3aec9952097c`,
+`b43edcee22b7aa9e7083955f748e0d60ff9d960fdeab012fac48b89365b76984`,
+and
+`01c66226e3b29d96985b2b6b378f22ad09781c71cd43393093d2c912c1c78a66`.
+The corresponding phone digests are
+`238cbbcf901e065decc4c57f0bd011d10188c736ffc56065cc9a138f0302e69c`,
+`d7e62749744f345cc1935918d77d611155cac45be1a5901e9bd73df916e65ae3`,
+and
+`c17abedc91702af4fcea639bf7dbf5c200fa48b7ac5db657c2aee533c87e488f`.
+The inspected native initial frame is
+`affb5450ceff18f072d9e236bd4529db2eb745b7df198f0921d2ce783aec9562`.
+
+Asset Lab checks and the full affected Rust suites pass: 77 asset, 143 client,
+103 mesh, 132 render-session, 175 scene plus contract, and 670 server tests.
+The one broad server-suite resident-chicken failure passed alone and the full
+suite passed on rerun, so it remains an unrelated order-sensitive flake rather
+than accepted farming evidence. Deployment remains the only open acceptance
+item.

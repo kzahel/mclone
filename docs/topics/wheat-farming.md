@@ -2,10 +2,10 @@
 
 Topic: `wheat-farming`
 
-Status: **live foundation and corrective usability pass deployed and accepted
-under Tacticals [`288`](../tactical/288-wheat-farming-foundation.md) and
-[`289`](../tactical/289-wheat-farming-feedback-and-harvest.md) on
-2026-08-13.**
+Status: **live foundation deployed; world-drop and object-level visual
+correction locally accepted under Tactical
+[`290`](../tactical/290-wheat-world-drops-and-visual-language.md), with exact
+deployment acceptance pending on 2026-08-13.**
 
 ## Purpose
 
@@ -40,9 +40,12 @@ unwatered soil dries toward 0 and eventually returns to dirt if no crop
 protects it. Wheat grows from age 0 to 7 when light and the surrounding
 farmland/crop layout pass the reference-shaped growth calculation.
 
-Breaking immature wheat returns one seed. Breaking mature wheat adds one wheat
-and the no-Fortune reference seed roll atomically to the real inventory; a full
-inventory leaves the crop intact. Removing farmland support cleans up the crop.
+Breaking immature wheat removes the crop and spawns one seed as an ordinary
+item entity. Breaking mature wheat removes the crop and spawns one wheat plus
+the no-Fortune reference seed roll. The shared item lifecycle owns motion,
+pickup delay, merging, tracking, persistence, capacity-aware collection, and
+inventory publication. A full inventory therefore leaves loot in the world
+instead of preventing harvest. Removing farmland support cleans up the crop.
 Tilling, planting, growth results, moisture, harvest output, remaining seeds,
 and the selected hotbar slot all use ordinary authoritative state and save
 records.
@@ -50,11 +53,15 @@ records.
 The first-party Texture Lab source owns dry and hydrated farmland plus eight
 visually distinct green-to-gold crop stages. Farmland has its 15/16-height
 support shape; wheat is cutout, selectable by age-relative height, and has no
-collision. `WoodenHoe`, `WheatSeeds`, and `Wheat` travel through the shared
-protocol, persistence, inventory, item-entity, HUD, and item-label paths.
-Replicated wheat under the crosshair also drives ordinary shared flat-HUD
-labels for a sprout, a growing crop, or a mature crop with its `ATK` harvest
-action. Confirmed hoe and seed mutations use the normal interaction sound path.
+collision. Age zero also reuses the active pack's green crop pixels on a small
+top-readable leaf surface, so planting reads from the normal steep view without
+changing selection or collision. `WoodenHoe`, `WheatSeeds`, and `Wheat` travel
+through the shared protocol, persistence, inventory, item-entity, HUD, and
+item-label paths. World wheat and seed entities use dedicated checked Asset Lab
+props rather than the egg compatibility mesh. Crop-state target labels remain
+available behind debug diagnostics but are absent from the ordinary HUD;
+object geometry and world loot are the primary language. Confirmed hoe and
+seed mutations use the normal interaction sound path.
 
 The compact runtime terrain-state lane is still an interim identity map backed
 by `u8` raw IDs. This slice can represent the sixteen required states, but it
@@ -157,3 +164,37 @@ initial frames are byte-identical to the local digests above; the public
 desktop planted frame is likewise byte-identical. The inspected public phone
 planted frame is
 `175d4502904c2be544afb2800790bf56d240236b287b3c892872994382f9b47c`.
+
+Human review then rejected revision 2's harvest and planting language. Harvest
+appeared not to remove the crop and offered no collectible world loot like a
+hunted deer's drops. The target text was useful as optional diagnostics but
+had become required to understand the crop, while the newly planted pixels
+still did not visibly contain green from the player's placement view.
+Tactical 290 withdraws that usability acceptance.
+
+Commits `040b2ffa` and `a6729567` implement the local correction. Revision 3
+targets isolated mature crop `11,64,10`. Harvest removes it to air and spawns a
+dedicated wheat-sheaf prop plus any seed-pouch drops through generic item
+entities; the player's inventory changes only after walking into them. A full
+inventory leaves those drops in the world. Age-zero wheat gains a clearly
+green top-readable leaf surface, and crop target labels are disabled in the
+ordinary HUD.
+
+The correction also fixes a general browser live-edit defect. Client section
+deltas now advance the resident snapshot content revision, causing the Web
+render-worker mirror to upsert changed columns before compiling. This is why
+both the removed Y=64 crop and newly added Y=64 sprout now produce current
+pixels rather than stale section-boundary geometry.
+
+Local desktop and phone gates exercise real attack, movement, pickup, till,
+and plant controls and retain zero browser world records. Inspected harvested
+frames are
+`b43edcee22b7aa9e7083955f748e0d60ff9d960fdeab012fac48b89365b76984`
+and
+`d7e62749744f345cc1935918d77d611155cac45be1a5901e9bd73df916e65ae3`;
+inspected planted frames are
+`01c66226e3b29d96985b2b6b378f22ad09781c71cd43393093d2c912c1c78a66`
+and
+`c17abedc91702af4fcea639bf7dbf5c200fa48b7ac5db657c2aee533c87e488f`.
+Full affected shared suites pass. Exact public deployment acceptance remains
+open.
