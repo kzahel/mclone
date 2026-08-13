@@ -462,6 +462,13 @@ event, and no ambient soundtrack pretends that a flock exists.
   ninth item slot and creates a real hotel. Both leave zero IndexedDB records.
   The temporary play link remains
   `https://mclone.kzahel.com/app.html?showcase=bee-pollination`.
+- Follow-up phone review found that bees could translate toward flowers while
+  displaying one frozen wing pose. Tactical
+  [`287`](../tactical/287-bee-wingbeat-presentation.md) replaces the incorrect
+  distance-phased flight with an authoritative elapsed loop. Exact public
+  desktop and phone gates now require and observe all three bees moving
+  `14.57`-`20.84` rendered blocks while their uninterrupted flight phases
+  advance `199`-`280` ticks; a clip-name-only claim can no longer pass.
 
 ## Known Gaps and Recommended Next Work
 

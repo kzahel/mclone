@@ -1,6 +1,7 @@
 # Tactical 287: Continuous Bee Wingbeat Presentation
 
-Status: **planned 2026-08-13; implementation pending.**
+Status: **complete 2026-08-13; exact public desktop/phone wing-phase evidence
+accepted.**
 
 Topics:
 
@@ -53,3 +54,32 @@ entity displacement; it can therefore accept a moving bee with frozen wings.
 5. Inspect native flat/stereo and headed Web desktop/phone output, then deploy
    the exact pushed revision and repeat the public gates.
 
+## Execution Record
+
+- `9734d7f3` records the human-reported failure, root cause, and phase-aware
+  acceptance contract before implementation.
+- `8ff5a196` changes ordinary shared bee `fly` animation from distance to
+  elapsed phase. Hover and forage retain their elapsed clocks, and bees remain
+  outside the ground-gait distance accumulator.
+- The server test begins with the legacy distance-phased `fly` state, proves
+  ordinary reconciliation repairs it to elapsed, retains one outbound start
+  tick across repeated snapshots, and starts a later epoch on return. The
+  render-session test proves 29 replicated ticks become `1.45` seconds of
+  authored `fly` phase even when gait distance is zero.
+- The complete server suite passes `658` tests, the complete render-session
+  suite passes `131`, workspace all-target checks and formatting pass, and the
+  existing native flat/stereo captures remain structurally correct.
+- Local headed desktop and phone gates retain the prior 360-tick ecology
+  acceptance. Every bee additionally accumulates `14.56`-`20.89` blocks of
+  rendered movement while its uninterrupted elapsed `fly` phase advances
+  `198`-`281` ticks. Phone still places one authoritative hotel, and all eight
+  browser persistence counts remain zero.
+- Exact pushed revision
+  `8ff5a196c46a874837cd64ef34817816e2cfde46` deployed as Worker version
+  `660f5e52-624f-48ba-a15f-13e5113643c5`. Public desktop and phone gates
+  repeat the phase-aware acceptance: rendered in-flight travel is
+  `14.57`-`20.84` blocks and advancing flight phase is `199`-`280` ticks per
+  bee. The inspected public desktop and phone screenshot SHA-256 digests are
+  `8217cdb05c37ec3e1e9666e70505594794fc5cb2c612eb5158030401fbe738a3`
+  and
+  `bf9dc0155c7f097ab44c24fb36e43f7e18fe1e8a3f1bc43542e5a26e64dddf6c`.

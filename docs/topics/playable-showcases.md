@@ -324,6 +324,16 @@ canvas digests are
 and
 `bbbf89ca53f1f52052da570a634412fce308c1c7b14dea9631ba0a0cd78b8029`.
 
+Human review then found that flight translation could retain one frozen wing
+pose. Tactical [`287`](../tactical/287-bee-wingbeat-presentation.md) corrects
+the shared semantic contract: outbound and return `fly` are elapsed-time loops,
+not ground-gait distance loops. The browser gate now correlates presentation
+position and animation phase by stable bee ID. Exact public desktop and phone
+acceptance observed each bee move `14.57`-`20.84` rendered blocks during
+uninterrupted `fly` intervals while its phase advanced `199`-`280` ticks. This
+retains the existing range, recovery, pollination, hotel-use, and zero-storage
+requirements.
+
 ## Code and Documentation Map
 
 - `assets/mclone/showcases/`: readable showcase recipes
