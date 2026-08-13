@@ -206,48 +206,14 @@ struct RgbaTexture {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mclone_assets::{
-        chicken_figure_id, chicken_figure_path, cow_figure_id, cow_figure_path,
-        default_player_figure_id, default_player_figure_path, mallard_duck_figure_id,
-        mallard_duck_figure_path, upright_bear_figure_id, upright_bear_figure_path,
-    };
     use std::io::Cursor;
 
-    fn actor_asset_test_source() -> mclone_assets::MemoryAssetSource {
-        let mut source = mclone_assets::MemoryAssetSource::new();
-        source.insert(AssetPath::new(COW_TEXTURE_PATH), solid_png_bytes(64, 32));
-        source.insert_text(
-            default_player_figure_path(),
-            include_str!("../../../../assets/mclone/figures/player.figure.json"),
-        );
-        source.insert_text(
-            upright_bear_figure_path(),
-            include_str!("../../../../assets/mclone/figures/upright_bear.figure.json"),
-        );
-        source.insert_text(
-            chicken_figure_path(),
-            include_str!("../../../../assets/mclone/figures/chicken.figure.json"),
-        );
-        source.insert_text(
-            cow_figure_path(),
-            include_str!("../../../../assets/mclone/figures/cow.figure.json"),
-        );
-        source.insert_text(
-            mallard_duck_figure_path(),
-            include_str!("../../../../assets/mclone/figures/mallard_duck.figure.json"),
-        );
-        source.insert_text(
-            mclone_assets::deer_figure_path(),
-            include_str!("../../../../assets/mclone/figures/deer.figure.json"),
-        );
-        source.insert_text(
-            mclone_assets::mallard_nest_figure_path(),
-            include_str!("../../../../assets/mclone/figures/mallard_nest.figure.json"),
-        );
-        source.insert_text(
-            mclone_assets::mallard_feather_figure_path(),
-            include_str!("../../../../assets/mclone/figures/mallard_feather.figure.json"),
-        );
+    fn actor_asset_test_source() -> mclone_assets::AssetSourceChain {
+        let mut overrides = mclone_assets::MemoryAssetSource::new();
+        overrides.insert(AssetPath::new(COW_TEXTURE_PATH), solid_png_bytes(64, 32));
+        let mut source = mclone_assets::AssetSourceChain::new();
+        source.push(overrides);
+        source.push(mclone_assets::FilesystemAssetSource::new("../../.."));
         source
     }
 
@@ -284,43 +250,26 @@ mod tests {
         let source = actor_asset_test_source();
         let assets = load_actor_texture_assets(&source).unwrap();
 
-        assert!(assets.figures.get(default_player_figure_id()).is_some());
-        assert!(assets.figures.get(upright_bear_figure_id()).is_some());
-        assert!(assets.figures.get(chicken_figure_id()).is_some());
-        assert!(assets.figures.get(cow_figure_id()).is_some());
-        assert!(assets.figures.get(mallard_duck_figure_id()).is_some());
-        assert!(
-            assets
-                .figures
-                .get(mclone_assets::deer_figure_id())
-                .is_some()
+        for id in mclone_assets::FIRST_PARTY_ACTOR_FIGURE_IDS {
+            assert!(assets.figures.get(id).is_some(), "figure {}", id.as_str());
+            assert!(
+                assets.figures.prepared(id).is_some(),
+                "prepared figure {}",
+                id.as_str()
+            );
+        }
+        for id in mclone_assets::FIRST_PARTY_SEMANTIC_PROP_FIGURE_IDS {
+            assert!(assets.figures.get(id).is_some(), "prop {}", id.as_str());
+            assert!(
+                assets.figures.prepared(id).is_some(),
+                "prepared prop {}",
+                id.as_str()
+            );
+        }
+        assert_eq!(
+            assets.figures.len(),
+            mclone_assets::FIRST_PARTY_ACTOR_FIGURE_IDS.len()
+                + mclone_assets::FIRST_PARTY_SEMANTIC_PROP_FIGURE_IDS.len()
         );
-        assert!(
-            assets
-                .figures
-                .prepared(default_player_figure_id())
-                .is_some()
-        );
-        assert!(assets.figures.prepared(chicken_figure_id()).is_some());
-        assert!(assets.figures.prepared(mallard_duck_figure_id()).is_some());
-        assert!(
-            assets
-                .figures
-                .prepared(mclone_assets::deer_figure_id())
-                .is_some()
-        );
-        assert!(
-            assets
-                .figures
-                .prepared(mclone_assets::mallard_nest_figure_id())
-                .is_some()
-        );
-        assert!(
-            assets
-                .figures
-                .prepared(mclone_assets::mallard_feather_figure_id())
-                .is_some()
-        );
-        assert_eq!(assets.figures.len(), 8);
     }
 }

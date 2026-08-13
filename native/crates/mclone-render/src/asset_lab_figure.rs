@@ -1095,9 +1095,6 @@ mod tests {
         include_str!("../../../../assets/mclone/figures/player.figure.json");
     const CHICKEN_FIGURE_JSON: &str =
         include_str!("../../../../assets/mclone/figures/chicken.figure.json");
-    const MALLARD_DUCK_FIGURE_JSON: &str =
-        include_str!("../../../../assets/mclone/figures/mallard_duck.figure.json");
-
     #[test]
     fn compiles_player_figure_asset() {
         let figure = compile_test_player_figure();
@@ -1292,34 +1289,12 @@ mod tests {
         compile_figure_asset(&asset).unwrap()
     }
 
-    fn first_party_memory_source(player_json: &str) -> mclone_assets::MemoryAssetSource {
-        let mut source = mclone_assets::MemoryAssetSource::new();
-        source.insert_text(mclone_assets::default_player_figure_path(), player_json);
-        source.insert_text(
-            mclone_assets::upright_bear_figure_path(),
-            include_str!("../../../../assets/mclone/figures/upright_bear.figure.json"),
-        );
-        source.insert_text(
-            mclone_assets::cow_figure_path(),
-            include_str!("../../../../assets/mclone/figures/cow.figure.json"),
-        );
-        source.insert_text(mclone_assets::chicken_figure_path(), CHICKEN_FIGURE_JSON);
-        source.insert_text(
-            mclone_assets::mallard_duck_figure_path(),
-            MALLARD_DUCK_FIGURE_JSON,
-        );
-        source.insert_text(
-            mclone_assets::deer_figure_path(),
-            include_str!("../../../../assets/mclone/figures/deer.figure.json"),
-        );
-        source.insert_text(
-            mclone_assets::mallard_nest_figure_path(),
-            include_str!("../../../../assets/mclone/figures/mallard_nest.figure.json"),
-        );
-        source.insert_text(
-            mclone_assets::mallard_feather_figure_path(),
-            include_str!("../../../../assets/mclone/figures/mallard_feather.figure.json"),
-        );
+    fn first_party_memory_source(player_json: &str) -> mclone_assets::AssetSourceChain {
+        let mut overrides = mclone_assets::MemoryAssetSource::new();
+        overrides.insert_text(mclone_assets::default_player_figure_path(), player_json);
+        let mut source = mclone_assets::AssetSourceChain::new();
+        source.push(overrides);
+        source.push(mclone_assets::FilesystemAssetSource::new("../../.."));
         source
     }
 

@@ -1634,39 +1634,7 @@ mod tests {
     use mclone_assets::mallard_duck_figure_id;
 
     fn prepared_actor_figures() -> ActorFigureSet {
-        let mut source = mclone_assets::MemoryAssetSource::new();
-        source.insert_text(
-            mclone_assets::default_player_figure_path(),
-            include_str!("../../../../assets/mclone/figures/player.figure.json"),
-        );
-        source.insert_text(
-            mclone_assets::upright_bear_figure_path(),
-            include_str!("../../../../assets/mclone/figures/upright_bear.figure.json"),
-        );
-        source.insert_text(
-            mclone_assets::chicken_figure_path(),
-            include_str!("../../../../assets/mclone/figures/chicken.figure.json"),
-        );
-        source.insert_text(
-            mclone_assets::cow_figure_path(),
-            include_str!("../../../../assets/mclone/figures/cow.figure.json"),
-        );
-        source.insert_text(
-            mclone_assets::mallard_duck_figure_path(),
-            include_str!("../../../../assets/mclone/figures/mallard_duck.figure.json"),
-        );
-        source.insert_text(
-            mclone_assets::deer_figure_path(),
-            include_str!("../../../../assets/mclone/figures/deer.figure.json"),
-        );
-        source.insert_text(
-            mclone_assets::mallard_nest_figure_path(),
-            include_str!("../../../../assets/mclone/figures/mallard_nest.figure.json"),
-        );
-        source.insert_text(
-            mclone_assets::mallard_feather_figure_path(),
-            include_str!("../../../../assets/mclone/figures/mallard_feather.figure.json"),
-        );
+        let source = mclone_assets::FilesystemAssetSource::new("../../..");
         crate::asset_lab_figure::load_first_party_semantic_figures(&source).unwrap()
     }
 
