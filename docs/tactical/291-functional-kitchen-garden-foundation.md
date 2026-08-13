@@ -1,6 +1,7 @@
 # Tactical 291: Functional Kitchen Garden Foundation
 
-Status: **active 2026-08-13.**
+Status: **implementation and local desktop/phone acceptance complete
+2026-08-13; exact-revision deployment verification pending.**
 
 Topics:
 
@@ -267,5 +268,102 @@ At minimum:
 
 ## Execution Record
 
-Implementation and evidence will be appended as slices land.
+### Slice 1 — contract and state capacity
 
+Commit `f91c32f0` recorded this tactical, the living garden topic, and the
+shared-first/non-goal boundary. Commit `7fb0d534` then widened `RawBlockId`
+from `u8` to `u16` throughout generated chunks, lighting, terrain views,
+structure placement, and native/Web worker frames. Raw job frames now encode
+little-endian `u16`; persisted raw structure-placement arrays write snapshot
+format 7 while format 6 remains readable. Canonical `BlockStateId(u32)` and
+palette-packed chunk records did not change. Focused native and Web codec,
+snapshot, generation, mesh, and above-255 round trips pass.
+
+### Slice 2 — ordinary boundary and crop mechanics
+
+Commit `99f3cfc4` added exact states 237–268 for connected oak fences, 269–300
+for oak gates, and 301–308 for carrot ages. The shared implementation includes
+state transforms, connected model baking, five-box selection/collision,
+placement and horizontal-neighbor refresh, manual gate use, wood feedback,
+path classification, inventory and persistence, a generic `CropKind` growth
+path, direct carrot planting, and ordinary randomized carrot item drops.
+
+Browser interaction found a real shared tall-shape defect: once jumping feet
+crossed the next integer Y boundary, collision lookup omitted the lower cell
+that still owned the overlapping 1.5-block fence/gate shape. Commit `89cc073d`
+keeps that cell in the query and adds primitive plus walking-auto-jump
+regressions. A closed gate now blocks the player and ground navigation; its
+open state is actually traversable.
+
+### Slice 3 — one source-first place
+
+Commit `fec07279` authored and promoted
+`farmstead-kitchen-garden-v1` from
+`tools/structure-lab/examples/kitchen_garden/structure.ts`. The 13×2×13
+record contains 253 blocks: a 35-fence/one-gate perimeter, seven-block
+approach, eight-block irrigation run, 48 hydrated soil cells, and 48 mixed
+wheat/carrot crop cells. Its checked preview contains 1,841 faces and zero
+Minecraft-reference or unknown asset resolutions.
+
+The intro homestead's `garden-v1` piece now consumes this canonical record and
+projects it onto its surveyed site with a bounded feathered grade. The
+realized seed-0 plan checksum intentionally changed from the disposable
+internal value `5daca45d...` to
+`5ea0fc552ed3b131a4329b3fae9ca658a831157f15679ed84e665c18c0a75064`.
+Pure base-generator output is unchanged. Structure source/drift, Rust load,
+preview, first-party provenance, deterministic plan, clipped order,
+persistence, and player-edit precedence gates pass.
+
+Inspected local pixels:
+
+- Structure Lab: `/tmp/mclone-structure-lab-kitchen-garden.png`, SHA-256
+  `9cef0e891095209ce6b9da4900c8fc9e54d84fefbc326926fce1dfc76e6e4e09`;
+- ordinary graded homestead:
+  `/tmp/mclone-homestead-kitchen-garden-graded.png`, SHA-256
+  `5a86b5f074527ee738dbe791d3c9eb33f66da7cc3ae2682f3006a87003d5fb85`.
+
+### Slice 4 — bounded review save and behavioral acceptance
+
+Commits `d7c81050` and `e6bc36b2` add the deny-unknown-fields
+`kitchen-garden` revision-1 recipe. It uses seed `17506`, entry eye
+`2.5,65.62,8.5`, target `5.5,64.75,8.5`, the ordinary wheat-farming base,
+and typed live evidence for every fence, gate, crop, and inventory fact. A
+generic native fixture compiler now accepts any registered showcase ID; the
+garden adds no simulation or renderer branch.
+
+Local headed WebGPU desktop and 390×844 phone acceptance both:
+
+1. observed an automatic crop transition;
+2. opened the real gate and crossed its former collision line;
+3. closed it and collided at X `5.925` instead of auto-jumping through;
+4. harvested mature carrot state 308 to air and observed one ordinary item
+   entity holding a 2–3 carrot stack before collection;
+5. collected the randomized moving drop through normal proximity pickup;
+6. selected the carrot in the real keyboard or rendered touch hotbar and
+   replanted age-zero state 301; and
+7. retained zero records in all eight IndexedDB world stores.
+
+The browser proof reused the existing smoke-only block-framing ABI with an
+optional position-preserving mode; the product `WebSceneHost` ABI and the
+number of smoke exports did not grow. The native capture is
+`/tmp/mclone-kitchen-garden.png`, SHA-256
+`d2d3a181fe9ffe60b85e57c84df1680fdcc5549a2f45f6d4d44d4349fd549c36`.
+Inspected initial desktop and phone frames have SHA-256
+`1f5173416ec3bbc46338937911957e6a9c274bda17b2e2c0a95a7a5a4fec0de1`
+and
+`abd18032ce71f331e8f11c5b724bf9b870a346e035574ddc595d6e0f95931dee`.
+Harvested frames are
+`4e7ce57848f3c128d2c3739d5bd2d749ea238eab510f486edfea64b932285bb5`
+and
+`4e8787276467afbc2a11f4362d18b1c7b6cd9c246abaf87bd6141cfb6d462cb8`;
+planted frames are
+`7d9cc28eb2b8bf2f2a064d26c1ce2b07d0ade0a5b07af6ac42edbea3ed265da0`
+and
+`24a19c5a332562e4c1cf8877d24620f6c3ec459b7b98f25ef39f04c65ad3651a`.
+
+### Remaining closeout
+
+- Run the final proportional shared and host validation matrix.
+- Push and deploy the exact revision.
+- Repeat the desktop and phone gates against the public URL, inspect their
+  captures, and record the deployment receipt here.

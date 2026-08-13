@@ -2,9 +2,10 @@
 
 Topic: `functional-kitchen-gardens`
 
-Status: **active under Tactical
+Status: **live shared implementation and local desktop/phone acceptance
+complete under Tactical
 [`291`](../tactical/291-functional-kitchen-garden-foundation.md) on
-2026-08-13.**
+2026-08-13; exact public deployment verification remains.**
 
 ## Purpose
 
@@ -52,18 +53,35 @@ topic owns their intersection as a repeatable gameplay place.
 
 ## Current Contract
 
-Tactical 291 is responsible for the first complete chapter:
+Tactical 291 has landed the first complete chapter:
 
-- widen the compact raw block-state lane so new exact property families do not
-  alias or compress mechanics;
-- implement oak fences and gates through shared state, asset, physical,
-  interaction, navigation, audio, persistence, and placement paths;
-- generalize the accepted wheat implementation and add carrots;
-- author and promote one source-first kitchen-garden recipe;
-- replace the intro homestead's placeholder flower-bed garden with the working
-  recipe through ordinary starter-content materialization; and
-- provide a bounded transient desktop/phone review save backed entirely by
-  those live producers.
+- the compact live raw-state lane is `u16`, with little-endian native/Web
+  worker transport and above-255 persistence and mesh coverage;
+- oak fences own exact four-way connections and five-box geometry, while oak
+  gates own facing/open/powered/in-wall state, normal placement/use, 1.5-block
+  closed collision, open traversal, path semantics, wood feedback, inventory,
+  and persistence;
+- wheat and carrots share `CropKind` support, hydration-density growth,
+  support cleanup, harvest, and item-drop decisions while retaining distinct
+  states, silhouettes, planting items, and loot;
+- `farmstead-kitchen-garden-v1` is a promoted 13×2×13 Structure Lab source
+  with 253 blocks, a connected 35-fence/one-gate boundary, central irrigation,
+  and mixed hydrated crop beds;
+- intro-homestead `garden-v1` projects that same canonical record onto its
+  surveyed grade and remains ordinary editable/persisted starter content; and
+- `kitchen-garden` revision 1 is a bounded data-only review save whose typed
+  evidence points back to those live placement, farming, and homestead
+  producers.
+
+The local desktop and phone gates prove gate opening/traversal/closing and
+restored collision, automatic crop growth, mature carrot removal, generic
+moving world drops, proximity pickup, age-zero replanting, real keyboard/touch
+controls, and zero browser persistence. The gate exposed and fixed a shared
+tall-collision lookup defect rather than compensating in the showcase.
+
+Implementation commits are `7fb0d534`, `99f3cfc4`, `fec07279`, `d7c81050`,
+`89cc073d`, and `e6bc36b2`. Exact captures, digests, commands, and the pending
+deployment closeout live in Tactical 291.
 
 ## Deliberate Later Work
 
@@ -94,12 +112,14 @@ versions of its mechanics.
 
 ## Recommended Next Work
 
-After Tactical 291 is accepted, promote rabbits as the next contrasting
+After Tactical 291's public acceptance, promote rabbits as the next contrasting
 creature chapter: substrate-qualified burrows, dawn/dusk emergence, wary
 foraging, carrot attraction, bounded crop raids, fence/gate-aware escape and
 exclusion, breeding with real food, persistent family/burrow state, and field
 notes based on ordinary evidence. Decide whether burrow mouths need a terrain
-decal/surface-patch owner before adding raised track-like geometry.
+decal/surface-patch owner before adding raised track-like geometry. Potatoes
+remain later crop breadth; they are not a prerequisite for the first rabbit
+loop.
 
 ## Code And Documentation Map
 
@@ -117,4 +137,3 @@ decal/surface-patch owner before adding raised track-like geometry.
 - [`habitat-driven-creature-ecology.md`](habitat-driven-creature-ecology.md):
   terrain/creature mechanics cycle
 - [`playable-showcases.md`](playable-showcases.md): review-save guardrails
-

@@ -6,7 +6,8 @@ Status: **vertical slice complete 2026-07-21. The TypeScript DSL and generated
 JSON drift gate, strict Rust loader, promoted cottage/barn families,
 Rust preview compiler, original first-party farmstead materials, and read-only
 Three.js catalogue are implemented. The first Structure-Lab-native outbuilding
-is implemented and visually accepted. The temporary Rust authoring oracles
+and the first working garden are implemented and visually accepted. The
+temporary Rust authoring oracles
 have been removed after exact parity. The aggregate deployment stages the
 catalogue under `/structures/`, and all closeout gates pass. In-browser block
 editing is indefinitely deferred.**
@@ -41,6 +42,12 @@ Last reconciled: **2026-07-21**.
   direct TypeScript recipe creates a raised henhouse, gabled roof, nests, ramp,
   timber run, yard socket, and chicken marker without any Rust authoring body.
   The lab-only preview contains 346 placed blocks and 1,641 visible faces.
+- `farmstead-kitchen-garden-v1` is the first Lab-native working landscape
+  place. Its direct TypeScript recipe owns a 13×2×13 connected fence/gate
+  enclosure, gate approach, central irrigation, and mixed wheat/carrot beds.
+  The promoted record contains 253 blocks and its preview contains 1,841
+  faces. Runtime homestead projection consumes the canonical record rather
+  than maintaining a decorative duplicate.
 - The catalogue shell uses React, Zustand, Vite, Three.js, one retained canvas,
   stable URL state, build-layer clipping, component/marker/bounds controls,
   material and provenance facts, and responsive light/dark layouts.
@@ -49,8 +56,9 @@ Last reconciled: **2026-07-21**.
   clay, bound hay, flowers, and wall torch.
   Texture Lab review sheets and full desktop/mobile catalogue captures were
   inspected before accepting the presentation baseline.
-- The final catalogue contains thirteen recipes, three families, 10,715 placed
-  blocks, and twelve runtime-promoted members. Its clean deployed subtree is
+- The current catalogue contains fourteen recipes, four families, 10,968
+  placed blocks, and thirteen runtime-promoted members. Its accepted baseline
+  clean deployed subtree was
   9,497,407 bytes; the 801.63 KB JavaScript bundle is 214.70 KB gzip.
 - The aggregate native-web build stages the production-base Vite output under
   `/structures/`. A clean committed-tree bundle audit verified all 26 mesh and

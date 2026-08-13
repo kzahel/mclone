@@ -4,7 +4,9 @@ Topic: `wheat-farming`
 
 Status: **live foundation plus world-drop and object-level visual correction
 deployed and accepted under Tactical
-[`290`](../tactical/290-wheat-world-drops-and-visual-language.md) on
+[`290`](../tactical/290-wheat-world-drops-and-visual-language.md); generalized
+crop ownership and carrots landed under Tactical
+[`291`](../tactical/291-functional-kitchen-garden-foundation.md) on
 2026-08-13.**
 
 ## Purpose
@@ -63,11 +65,21 @@ available behind debug diagnostics but are absent from the ordinary HUD;
 object geometry and world loot are the primary language. Confirmed hoe and
 seed mutations use the normal interaction sound path.
 
-The compact runtime terrain-state lane is still an interim identity map backed
-by `u8` raw IDs. This slice can represent the sixteen required states, but it
-leaves little remaining ID space. Do not compress future crop state or alias
-distinct mechanics to evade that limit; widen or replace the interim lane when
-the next content family needs it.
+The compact runtime terrain-state lane remains an interim identity map, but
+Tactical 291 widened its raw identity from `u8` to `u16`. Native and browser
+worker frames carry little-endian `u16` elements; canonical `BlockStateId(u32)`
+and palette-packed chunk records remain unchanged. Fence/gate/carrot states
+above 255 now round-trip without aliases. Future content must still use exact
+states rather than treating the wider interim lane as an excuse to avoid a
+registry-backed palette design.
+
+Tactical 291 also extracted the wheat-named decisions into `CropKind` and
+added carrots without duplicating hydration or growth. Carrots use eight ages,
+their own shorter outlines and first-party Texture Lab stages, direct carrot
+planting, and ordinary item-entity harvest. An immature crop yields one
+carrot; mature no-Fortune harvest yields the guaranteed carrot plus the
+reference-shaped binomial extras. The source-first kitchen garden and intro
+homestead consume both crops through those ordinary mechanics.
 
 ## Deliberate Gaps
 
@@ -76,7 +88,7 @@ the next content family needs it.
 - bone meal and enchantment-aware loot;
 - grass/fern seed drops, crafting, bread, hunger, and cooking;
 - bee-to-crop pollination effects;
-- additional crops, crop genetics, seasons, pests, and soil fertility;
+- crops beyond carrots, crop genetics, seasons, pests, and soil fertility;
 - villager farming and generated village/farmstead crop parcels; and
 - unloaded-time catch-up.
 

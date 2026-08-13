@@ -2,8 +2,9 @@
 
 Topic: `playable-showcases`
 
-Status: implemented with three accepted public creature showcases and one
-accepted public farming showcase as of 2026-08-13.
+Status: implemented with three accepted public creature showcases, one
+accepted public field showcase, and one locally accepted working-garden
+showcase awaiting exact public deployment verification as of 2026-08-13.
 `mallard-ecology` proves a wetland motion/hatching/discovery loop;
 `deer-forest-edge` proves a contrasting multi-chunk habitat, authoritative
 named actions, durable sign, field notes, and an ordinary hunting tool. Bees
@@ -31,6 +32,7 @@ https://mclone.kzahel.com/app.html?showcase=mallard-ecology
 https://mclone.kzahel.com/app.html?showcase=deer-forest-edge
 https://mclone.kzahel.com/app.html?showcase=bee-pollination
 https://mclone.kzahel.com/app.html?showcase=wheat-farming
+https://mclone.kzahel.com/app.html?showcase=kitchen-garden
 ```
 
 Opening it compiles a fresh in-memory world in the browser process. No world is
@@ -179,6 +181,16 @@ pnpm native:web:wheat-showcase-smoke
 pnpm native:web:wheat-showcase-mobile-smoke
 pnpm native:web:wheat-showcase-deployed-smoke
 pnpm native:web:wheat-showcase-mobile-deployed-smoke
+```
+
+The working-garden commands are:
+
+```bash
+pnpm native:kitchen-garden:capture
+pnpm native:web:garden-showcase-smoke
+pnpm native:web:garden-showcase-mobile-smoke
+pnpm native:web:garden-showcase-deployed-smoke
+pnpm native:web:garden-showcase-mobile-deployed-smoke
 ```
 
 Captures belong under `/tmp`. The deployed smoke must confirm the recipe ID and
@@ -437,6 +449,37 @@ planted digests are
 and
 `af7a0cd01f76ee8eb0a05abff7f7f4b40dae0ae30c863e1a63a7602f58a63172`.
 
+Tactical
+[`291`](../tactical/291-functional-kitchen-garden-foundation.md) adds
+`kitchen-garden` revision 1 as the first mixed place-mechanic review save. It
+uses seed `17506`, entry eye `2.5,65.62,8.5`, and target
+`5.5,64.75,8.5`. The recipe contains only ordinary connected fence, closed
+gate, hydrated farmland, wheat/carrot crop, and starter-inventory facts, each
+bound to typed live placement, farming, or homestead evidence.
+
+Local desktop and phone gates observe automatic crop growth, open and cross
+the gate, close it and collide against the restored 1.5-block barrier, harvest
+mature carrot state 308 to a visible generic moving item drop, collect it by
+normal proximity, select the carrot through real keyboard or rendered phone
+hotbar controls, and plant age-zero state 301. All eight browser world stores
+remain empty. The acceptance uses the existing smoke-only block-framing export
+with a position-preserving option; it adds no product-host ABI and no
+showcase-specific gameplay branch.
+
+Initial local desktop/phone frame digests are
+`1f5173416ec3bbc46338937911957e6a9c274bda17b2e2c0a95a7a5a4fec0de1`
+and
+`abd18032ce71f331e8f11c5b724bf9b870a346e035574ddc595d6e0f95931dee`.
+Harvested frame digests are
+`4e7ce57848f3c128d2c3739d5bd2d749ea238eab510f486edfea64b932285bb5`
+and
+`4e8787276467afbc2a11f4362d18b1c7b6cd9c246abaf87bd6141cfb6d462cb8`;
+planted frame digests are
+`7d9cc28eb2b8bf2f2a064d26c1ce2b07d0ade0a5b07af6ac42edbea3ed265da0`
+and
+`24a19c5a332562e4c1cf8877d24620f6c3ec459b7b98f25ef39f04c65ad3651a`.
+Exact public evidence remains Tactical 291's final closeout gate.
+
 ## Code and Documentation Map
 
 - `assets/mclone/showcases/`: readable showcase recipes
@@ -448,8 +491,10 @@ and
   tiny-save materialization receipt
 - `native/crates/mclone-server/src/bin/bee_pollination_fixture.rs`: bee
   tiny-save materialization receipt
-- `native/crates/mclone-server/src/bin/wheat_farming_fixture.rs`: wheat field
-  tiny-save materialization receipt
+- `native/crates/mclone-server/src/bin/wheat_farming_fixture.rs`: historical
+  wheat-specific native materialization receipt
+- `native/crates/mclone-server/src/bin/playable_showcase_fixture.rs`: generic
+  native tiny-save materialization receipt for any registered showcase
 - `native/apps/mclone-web-client/src/web_canvas.rs`: URL selection and strict
   transient/conflict policy
 - `native/apps/mclone-web-client/src/web_server_worker.rs`: worker-side shared
@@ -462,6 +507,8 @@ and
 - `scripts/bee-pollination-capture.mjs`: bee native flat/stereo receipt and
   capture
 - `scripts/wheat-farming-capture.mjs`: wheat native receipt and capture
+- `scripts/kitchen-garden-capture.mjs`: working-garden native receipt and
+  capture
 - [`habitat-driven-creature-ecology.md`](habitat-driven-creature-ecology.md):
   ordinary mallard habitat and gameplay contract
 - [`../tactical/280-playable-showcase-links.md`](../tactical/280-playable-showcase-links.md):
@@ -475,6 +522,8 @@ and
   longer all-bee behavior gate
 - [`wheat-farming.md`](wheat-farming.md): ordinary field creation, crop state,
   persistence, and deliberate gaps
+- [`functional-kitchen-gardens.md`](functional-kitchen-gardens.md): ordinary
+  enclosure, mixed-crop, homestead, and future rabbit contract
 
 ## Recommended Next Work
 
