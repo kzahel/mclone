@@ -253,6 +253,8 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
 - `playable-showcases` — bounded data-driven tiny-save recipes, live-game
   instantiation evidence, matched capture/browser review, and temporary hosted
   play links
+- `wheat-farming` — player-created irrigated farmland, loaded-world crop
+  growth, renewable harvest, persistence, and later farmstead/pollinator use
 - `semantic-figure-assets` — one checked TypeScript-to-semantic-JSON asset path
   for actor figures plus world and item props, beginning with mallard prop
   migration and deer runtime promotion
