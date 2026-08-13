@@ -98,6 +98,10 @@ impl GroundPathNavigation {
         self.path.as_ref().map(GroundPath::target)
     }
 
+    pub(crate) fn path_reaches_target(&self) -> bool {
+        self.path.as_ref().is_some_and(GroundPath::can_reach)
+    }
+
     pub(crate) fn stop(&mut self) {
         self.path = None;
     }
@@ -184,6 +188,36 @@ impl GroundPathNavigation {
     where
         F: Fn(BlockPos) -> Option<BlockStateId> + ?Sized,
     {
+        self.move_to_with_reach_range(
+            mob_position,
+            target,
+            speed_modifier,
+            mob_width,
+            mob_height,
+            follow_range,
+            max_up_step,
+            DEFAULT_REACH_RANGE_BLOCKS,
+            block_state_at,
+            pathfinding_malus,
+        )
+    }
+
+    pub(crate) fn move_to_with_reach_range<F>(
+        &mut self,
+        mob_position: Vec3d,
+        target: Vec3d,
+        speed_modifier: f64,
+        mob_width: f32,
+        mob_height: f32,
+        follow_range: f32,
+        max_up_step: f64,
+        reach_range: i32,
+        block_state_at: &F,
+        pathfinding_malus: impl Fn(BlockPathType) -> f32 + Copy,
+    ) -> bool
+    where
+        F: Fn(BlockPos) -> Option<BlockStateId> + ?Sized,
+    {
         let Some(mut path) = self.create_path(
             mob_position,
             target,
@@ -191,7 +225,7 @@ impl GroundPathNavigation {
             mob_height,
             follow_range,
             max_up_step,
-            DEFAULT_REACH_RANGE_BLOCKS,
+            reach_range,
             block_state_at,
             pathfinding_malus,
         ) else {
@@ -208,7 +242,7 @@ impl GroundPathNavigation {
         self.last_stuck_check = self.tick;
         self.last_stuck_check_pos = mob_position;
         self.target_pos = Some(path.target());
-        self.reach_range = DEFAULT_REACH_RANGE_BLOCKS;
+        self.reach_range = reach_range;
         self.reset_stuck_timeout();
         self.path = Some(path);
         true

@@ -5260,7 +5260,10 @@ impl RealmServer {
         completed_digs: &[BlockPos],
         completed_raids: &[BlockPos],
     ) {
-        for entity in entity_updates.iter().filter(|entity| entity.alive) {
+        for entity in entity_updates
+            .iter()
+            .filter(|entity| entity.client_visible())
+        {
             let observation = match entity.kind {
                 EntityKind::RabbitBurrow => {
                     Some((mclone_protocol::RabbitObservationKind::FoundBurrow, 12.0))

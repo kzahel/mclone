@@ -79,7 +79,7 @@ impl EntityTracking {
         routes: &mut Vec<RoutedEntityUpdate>,
     ) {
         let observers = self.seen_by_entity.entry(subject.id).or_default();
-        let should_see = subject.alive && tracks_chunk(observer, subject.chunk_pos());
+        let should_see = subject.client_visible() && tracks_chunk(observer, subject.chunk_pos());
         if should_see {
             if observers.insert(observer) {
                 routes.push(RoutedEntityUpdate {
@@ -138,6 +138,7 @@ mod tests {
             height: 1.4,
             tick_count: 0,
             alive: true,
+            hidden_from_clients: false,
         }
     }
 
@@ -201,6 +202,40 @@ mod tests {
             vec![RoutedEntityUpdate {
                 recipient: observer,
                 update: ServerUpdate::EntityUpdate(moved.update()),
+            }]
+        );
+    }
+
+    #[test]
+    fn hidden_subject_is_removed_then_resnapshotted_with_the_same_identity() {
+        let observer = DimensionInterestSource::Player(player(1));
+        let initial = state(7, 8.0, 8.0);
+        let mut tracking = EntityTracking::default();
+        tracking.reconcile_subject(initial, [observer], |_, _| true, false);
+
+        let hidden = ServerEntityState {
+            hidden_from_clients: true,
+            ..initial
+        };
+        assert_eq!(
+            tracking.reconcile_subject(hidden, [observer], |_, _| true, true),
+            vec![RoutedEntityUpdate {
+                recipient: observer,
+                update: ServerUpdate::EntityRemove { id: initial.id },
+            }]
+        );
+
+        let emerged = ServerEntityState {
+            tick_count: 80,
+            hidden_from_clients: false,
+            ..hidden
+        };
+        assert_eq!(emerged.persistent_id, initial.persistent_id);
+        assert_eq!(
+            tracking.reconcile_subject(emerged, [observer], |_, _| true, true),
+            vec![RoutedEntityUpdate {
+                recipient: observer,
+                update: ServerUpdate::EntitySnapshot(emerged.snapshot()),
             }]
         );
     }

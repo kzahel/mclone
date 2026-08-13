@@ -26,6 +26,7 @@ pub(crate) struct ServerEntityState {
     pub(crate) height: f32,
     pub(crate) tick_count: u64,
     pub(crate) alive: bool,
+    pub(crate) hidden_from_clients: bool,
 }
 
 impl ServerEntityState {
@@ -57,11 +58,16 @@ impl ServerEntityState {
             height: metadata.dimensions.height,
             tick_count: 0,
             alive: true,
+            hidden_from_clients: false,
         }
     }
 
     pub(crate) fn chunk_pos(self) -> ChunkPos {
         BlockPos::containing(self.position).chunk_pos()
+    }
+
+    pub(crate) const fn client_visible(self) -> bool {
+        self.alive && !self.hidden_from_clients
     }
 
     pub(crate) fn snapshot(self) -> EntitySnapshot {

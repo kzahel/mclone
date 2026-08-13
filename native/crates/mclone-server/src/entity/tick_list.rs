@@ -78,6 +78,7 @@ mod tests {
             height: 1.4,
             tick_count: 0,
             alive,
+            hidden_from_clients: false,
         }
     }
 

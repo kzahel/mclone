@@ -1016,6 +1016,9 @@ impl ServerEntityStore {
     }
 
     pub(crate) fn feed_rabbit(&mut self, id: EntityId) -> Option<ServerEntityState> {
+        if self.entities.get(&id)?.hidden_from_clients {
+            return None;
+        }
         let mob = self.mobs.get_mut(&id)?;
         mob.feed_rabbit(RABBIT_LOVE_TICKS)
             .then(|| self.entities[&id])
@@ -2613,9 +2616,15 @@ impl ServerEntityStore {
                 state.height *= 0.72;
             }
         }
-        if kind == EntityKind::Rabbit && mob.rabbit_life_stage() == Some(RabbitLifeStage::Kit) {
-            state.width *= 0.62;
-            state.height *= 0.62;
+        if kind == EntityKind::Rabbit {
+            if mob.rabbit_behavior() == Some(RabbitBehavior::Underground) {
+                state.width = 0.001;
+                state.height = 0.001;
+                state.hidden_from_clients = true;
+            } else if mob.rabbit_life_stage() == Some(RabbitLifeStage::Kit) {
+                state.width *= 0.62;
+                state.height *= 0.62;
+            }
         }
         self.mobs.insert(id, mob);
         self.entities.insert(id, state);
@@ -2828,6 +2837,7 @@ fn debug_physics_cube_state(
         height: 1.0,
         tick_count,
         alive: true,
+        hidden_from_clients: false,
     }
 }
 
@@ -3647,6 +3657,53 @@ mod tests {
             Some(loaded_burrow.persistent_id)
         );
         assert_eq!(loaded_rabbit.persistent_id, rabbit_persistent_id);
+    }
+
+    #[test]
+    fn saved_underground_rabbit_hydrates_hidden_without_losing_identity() {
+        let mut store = ServerEntityStore::default();
+        let rabbit_id =
+            store.insert_passive_mob_for_test(EntityKind::Rabbit, Vec3d::new(4.5, 64.0, 4.5), 90.0);
+        let persistent_id = store.state(rabbit_id).unwrap().persistent_id;
+        let mut record = store.entity_chunk_record(ChunkPos::new(0, 0), 12);
+        let saved_rabbit = record
+            .entities
+            .iter_mut()
+            .find(|entity| entity.persistent_id == persistent_id)
+            .expect("saved rabbit");
+        let EntitySavePayload::Rabbit { behavior, .. } = &mut saved_rabbit.payload else {
+            panic!("rabbit must use rabbit persistence payload");
+        };
+        *behavior = RabbitBehavior::Underground;
+
+        let mut loaded = ServerEntityStore::default();
+        let states = loaded.hydrate_entity_chunk_record(&record).unwrap();
+        let rabbit = states
+            .iter()
+            .find(|entity| entity.persistent_id == persistent_id)
+            .expect("underground rabbit remains a durable loaded entity");
+
+        assert!(rabbit.alive);
+        assert!(rabbit.hidden_from_clients);
+        assert!(!rabbit.client_visible());
+        assert_eq!(rabbit.width, 0.001);
+        assert_eq!(
+            loaded.mobs[&rabbit.id].rabbit_behavior(),
+            Some(RabbitBehavior::Underground)
+        );
+        assert!(
+            loaded
+                .entity_chunk_record(ChunkPos::new(0, 0), 13)
+                .entities
+                .iter()
+                .any(|entity| matches!(
+                    entity.payload,
+                    EntitySavePayload::Rabbit {
+                        behavior: RabbitBehavior::Underground,
+                        ..
+                    }
+                ) && entity.persistent_id == persistent_id)
+        );
     }
 
     #[test]
