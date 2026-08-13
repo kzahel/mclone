@@ -2246,29 +2246,26 @@ impl GameGrassDetail {
     }
 }
 
-/// Player-facing selection for exact-only or composed distant terrain.
-///
-/// `Experimental` keeps the product language honest while the procedural
-/// horizon is being accepted across mobile and XR hardware.
+/// Player-facing selection for exact-only or composed terrain horizon rendering.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum GameTerrainPresentation {
     #[default]
     ExactOnly,
-    Experimental,
+    Composed,
 }
 
 impl GameTerrainPresentation {
     pub const fn next(self) -> Self {
         match self {
-            Self::ExactOnly => Self::Experimental,
-            Self::Experimental => Self::ExactOnly,
+            Self::ExactOnly => Self::Composed,
+            Self::Composed => Self::ExactOnly,
         }
     }
 
     pub const fn label(self) -> &'static str {
         match self {
-            Self::ExactOnly => "Off",
-            Self::Experimental => "Experimental",
+            Self::ExactOnly => "Exact Only",
+            Self::Composed => "Composed",
         }
     }
 }

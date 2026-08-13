@@ -207,14 +207,7 @@ fn vertex_main(
     return tree_vertex(input, vertex_index, 0u);
 }
 
-@vertex
-fn vertex_multiview_main(
-    input: TreeInstance,
-    @builtin(vertex_index) vertex_index: u32,
-    @builtin(view_index) view_index: i32,
-) -> VertexOutput {
-    return tree_vertex(input, vertex_index, u32(view_index));
-}
+// __MCLONE_MULTIVIEW_VERTEX_ENTRY__
 
 @fragment
 fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {

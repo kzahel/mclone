@@ -147,6 +147,10 @@ pnpm native:web:serve
 # Validate the interactive browser app with Playwright screenshots in /tmp.
 pnpm native:web:app-smoke
 
+# On a phone viewport, toggle Terrain Horizon to Composed through the shared
+# Graphics UI, inspect pixels, reload, and verify the persisted choice/pixels.
+pnpm native:web:terrain-horizon-smoke
+
 # Compile and capture the first playable showcase locally, then verify the
 # already-deployed public URL. Both commands assert exact state, credible
 # pixels, and zero browser persistent-world records.

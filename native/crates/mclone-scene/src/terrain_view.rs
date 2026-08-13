@@ -311,7 +311,7 @@ impl McloneSceneHost {
         self.reset_terrain_view();
         self.persist_graphics_preferences();
         log::info!(
-            "distant terrain preference set to {}; active={}",
+            "terrain horizon preference set to {}; active={}",
             presentation.label(),
             self.effective_terrain_presentation_mode().label(),
         );

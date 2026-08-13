@@ -182,7 +182,31 @@ pub fn terrain_preview_compute_wgsl() -> String {
 pub fn terrain_preview_render_wgsl(
     transform: mclone_render_color::RenderTargetColorTransform,
 ) -> String {
-    let source = mclone_render::fog::inject_fog_wgsl(TERRAIN_PREVIEW_RENDER_WGSL);
+    terrain_preview_render_wgsl_with_multiview(transform, false)
+}
+
+pub(crate) fn terrain_preview_render_multiview_wgsl(
+    transform: mclone_render_color::RenderTargetColorTransform,
+) -> String {
+    terrain_preview_render_wgsl_with_multiview(transform, true)
+}
+
+fn terrain_preview_render_wgsl_with_multiview(
+    transform: mclone_render_color::RenderTargetColorTransform,
+    multiview: bool,
+) -> String {
+    let multiview_entry = multiview.then_some(
+        r#"@vertex
+fn vertex_multiview_main(
+    @builtin(vertex_index) vertex_index: u32,
+    @builtin(instance_index) instance_index: u32,
+    @builtin(view_index) view_index: i32,
+) -> VertexOutput {
+    return terrain_vertex(vertex_index, instance_index, u32(view_index));
+}"#,
+    );
+    let source = inject_multiview_vertex_entry(TERRAIN_PREVIEW_RENDER_WGSL, multiview_entry);
+    let source = mclone_render::fog::inject_fog_wgsl(&source);
     mclone_render_color::inject_target_color_transform_wgsl(&source, transform)
         .expect("terrain preview render WGSL has one color transfer and transform marker")
 }
@@ -190,9 +214,43 @@ pub fn terrain_preview_render_wgsl(
 pub fn terrain_preview_tree_wgsl(
     transform: mclone_render_color::RenderTargetColorTransform,
 ) -> String {
-    let source = mclone_render::fog::inject_fog_wgsl(TERRAIN_PREVIEW_TREE_WGSL);
+    terrain_preview_tree_wgsl_with_multiview(transform, false)
+}
+
+pub(crate) fn terrain_preview_tree_multiview_wgsl(
+    transform: mclone_render_color::RenderTargetColorTransform,
+) -> String {
+    terrain_preview_tree_wgsl_with_multiview(transform, true)
+}
+
+fn terrain_preview_tree_wgsl_with_multiview(
+    transform: mclone_render_color::RenderTargetColorTransform,
+    multiview: bool,
+) -> String {
+    let multiview_entry = multiview.then_some(
+        r#"@vertex
+fn vertex_multiview_main(
+    input: TreeInstance,
+    @builtin(vertex_index) vertex_index: u32,
+    @builtin(view_index) view_index: i32,
+) -> VertexOutput {
+    return tree_vertex(input, vertex_index, u32(view_index));
+}"#,
+    );
+    let source = inject_multiview_vertex_entry(TERRAIN_PREVIEW_TREE_WGSL, multiview_entry);
+    let source = mclone_render::fog::inject_fog_wgsl(&source);
     mclone_render_color::inject_target_color_transform_wgsl(&source, transform)
         .expect("terrain preview tree WGSL has one color transfer and transform marker")
+}
+
+fn inject_multiview_vertex_entry(template: &str, entry: Option<&str>) -> String {
+    const MARKER: &str = "// __MCLONE_MULTIVIEW_VERTEX_ENTRY__";
+    assert_eq!(
+        template.matches(MARKER).count(),
+        1,
+        "terrain preview WGSL must have exactly one multiview entry marker"
+    );
+    template.replace(MARKER, entry.unwrap_or_default())
 }
 
 fn write_field_constants(
@@ -1502,6 +1560,14 @@ mod tests {
     use mclone_worldgen::terrain_preview::TerrainPreviewRequest;
 
     fn validate_shader(source: &str, entry_point: &str) {
+        validate_shader_with_capabilities(source, entry_point, naga::valid::Capabilities::all());
+    }
+
+    fn validate_shader_with_capabilities(
+        source: &str,
+        entry_point: &str,
+        capabilities: naga::valid::Capabilities,
+    ) {
         let module = naga::front::wgsl::parse_str(source).expect("terrain preview WGSL parses");
         assert!(
             module
@@ -1509,12 +1575,9 @@ mod tests {
                 .iter()
                 .any(|entry| entry.name == entry_point)
         );
-        naga::valid::Validator::new(
-            naga::valid::ValidationFlags::all(),
-            naga::valid::Capabilities::all(),
-        )
-        .validate(&module)
-        .expect("terrain preview WGSL validates");
+        naga::valid::Validator::new(naga::valid::ValidationFlags::all(), capabilities)
+            .validate(&module)
+            .expect("terrain preview WGSL validates");
     }
 
     #[test]
@@ -1524,10 +1587,25 @@ mod tests {
             terrain_preview_render_wgsl(mclone_render_color::RenderTargetColorTransform::Identity);
         let tree =
             terrain_preview_tree_wgsl(mclone_render_color::RenderTargetColorTransform::Identity);
-        validate_shader(&render, "vertex_main");
-        validate_shader(&render, "fragment_main");
-        validate_shader(&tree, "vertex_main");
-        validate_shader(&tree, "fragment_main");
+        let browser_capabilities =
+            naga::valid::Capabilities::all() - naga::valid::Capabilities::MULTIVIEW;
+        validate_shader_with_capabilities(&render, "vertex_main", browser_capabilities);
+        validate_shader_with_capabilities(&render, "fragment_main", browser_capabilities);
+        validate_shader_with_capabilities(&tree, "vertex_main", browser_capabilities);
+        validate_shader_with_capabilities(&tree, "fragment_main", browser_capabilities);
+        assert!(!render.contains("@builtin(view_index)"));
+        assert!(!tree.contains("@builtin(view_index)"));
+
+        let multiview_render = terrain_preview_render_multiview_wgsl(
+            mclone_render_color::RenderTargetColorTransform::Identity,
+        );
+        let multiview_tree = terrain_preview_tree_multiview_wgsl(
+            mclone_render_color::RenderTargetColorTransform::Identity,
+        );
+        validate_shader(&multiview_render, "vertex_multiview_main");
+        validate_shader(&multiview_tree, "vertex_multiview_main");
+        assert!(multiview_render.contains("@builtin(view_index) view_index: i32"));
+        assert!(multiview_tree.contains("@builtin(view_index) view_index: i32"));
     }
 
     #[test]
@@ -1538,6 +1616,13 @@ mod tests {
         );
         assert!(TERRAIN_PREVIEW_RENDER_WGSL.contains("out.surface_y = sample.terrain.x"));
         assert!(TERRAIN_PREVIEW_RENDER_WGSL.contains("let physical_channel_alpha = smoothstep("));
+        let physical_channel_derivative = TERRAIN_PREVIEW_RENDER_WGSL
+            .find("let physical_channel_edge = max(fwidth")
+            .expect("physical channel derivative");
+        let textured_control_flow = TERRAIN_PREVIEW_RENDER_WGSL
+            .find("if input.textured != 0u")
+            .expect("textured fragment control flow");
+        assert!(physical_channel_derivative < textured_control_flow);
         assert!(TERRAIN_PREVIEW_RENDER_WGSL.contains("input.river.z"));
         assert!(TERRAIN_PREVIEW_RENDER_WGSL.contains("input.river.w > 0.0"));
         assert!(
@@ -2049,8 +2134,8 @@ mod tests {
         assert!(TERRAIN_PREVIEW_RENDER_WGSL.contains("visible_half_width"));
         assert!(TERRAIN_PREVIEW_RENDER_WGSL.contains("view_projection * vec4<f32>"));
         assert!(TERRAIN_PREVIEW_TREE_WGSL.contains("view_projection * vec4<f32>"));
-        assert!(TERRAIN_PREVIEW_RENDER_WGSL.contains("@builtin(view_index) view_index: i32"));
-        assert!(TERRAIN_PREVIEW_TREE_WGSL.contains("@builtin(view_index) view_index: i32"));
+        assert!(TERRAIN_PREVIEW_RENDER_WGSL.contains("// __MCLONE_MULTIVIEW_VERTEX_ENTRY__"));
+        assert!(TERRAIN_PREVIEW_TREE_WGSL.contains("// __MCLONE_MULTIVIEW_VERTEX_ENTRY__"));
         assert!(TERRAIN_PREVIEW_RENDER_WGSL.contains("params.view_projection_right"));
         assert!(TERRAIN_PREVIEW_TREE_WGSL.contains("params.view_projection_right"));
         assert!(!TERRAIN_PREVIEW_RENDER_WGSL.contains("clip_z = 1.0 - clamp"));

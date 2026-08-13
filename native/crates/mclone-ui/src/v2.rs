@@ -4065,12 +4065,11 @@ fn options_category_rows(
                     UiWidget::cycle(
                         UI_V2_OPTIONS_TERRAIN_PRESENTATION,
                         ph,
-                        "Distant Terrain",
-                        if state.terrain_presentation
-                            == crate::GameTerrainPresentation::Experimental
+                        "Terrain Horizon",
+                        if state.terrain_presentation == crate::GameTerrainPresentation::Composed
                             && !state.terrain_presentation_available
                         {
-                            "Experimental (Unavailable)"
+                            "Composed (Unavailable)"
                         } else {
                             state.terrain_presentation.label()
                         },

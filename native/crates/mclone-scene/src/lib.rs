@@ -259,7 +259,7 @@ pub(crate) const fn engine_terrain_presentation(
         GameTerrainPresentation::ExactOnly => {
             mclone_app_runtime::startup_args::TerrainPresentationMode::ExactOnly
         }
-        GameTerrainPresentation::Experimental => {
+        GameTerrainPresentation::Composed => {
             mclone_app_runtime::startup_args::TerrainPresentationMode::Composed
         }
     }
@@ -273,7 +273,7 @@ pub(crate) const fn game_terrain_presentation(
             GameTerrainPresentation::ExactOnly
         }
         mclone_app_runtime::startup_args::TerrainPresentationMode::Composed => {
-            GameTerrainPresentation::Experimental
+            GameTerrainPresentation::Composed
         }
     }
 }

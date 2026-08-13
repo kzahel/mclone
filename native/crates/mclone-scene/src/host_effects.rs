@@ -276,7 +276,7 @@ mod tests {
                 ClientExperienceSettingEffect::SetLeafDetail(GameLeafDetail::Bushy),
                 ClientExperienceSettingEffect::SetGrassDetail(GameGrassDetail::Lush),
                 ClientExperienceSettingEffect::SetTerrainPresentation(
-                    GameTerrainPresentation::Experimental,
+                    GameTerrainPresentation::Composed,
                 ),
                 ClientExperienceSettingEffect::SetFogSettings(GameFogSettings::default()),
                 ClientExperienceSettingEffect::SetFullbright(true),

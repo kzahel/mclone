@@ -16,6 +16,20 @@ capability disables the row and forces exact-only before rendering. Native,
 browser-Wasm, flat-Android APK, and Android-XR APK builds pass; physical
 Android/XR pixel and performance acceptance remain later work.
 
+The 2026-08-13 phone-browser black-frame regression is resolved. XR
+multiview support had added `@builtin(view_index)` entry points to the same
+WGSL modules used by ordinary single-view clients. Chrome validates the whole
+module even when the device has no multiview feature, so selecting Composed
+invalidated both terrain pipelines. Once that was unmasked, Chrome also
+rejected one river-coverage derivative inside non-uniform fragment control
+flow. Single-view terrain and tree modules now contain no multiview builtin;
+XR-capable devices construct separate multiview modules, and all derivatives
+run in the uniform fragment prelude. `pnpm native:web:terrain-horizon-smoke`
+now exercises the real phone-sized Graphics row, captures Composed, reloads
+without a URL override, verifies the persisted `composed` choice, and captures
+again. The inspected 780-by-1688 toggle and reload images contain 46,737 and
+47,422 colors respectively instead of a black frame.
+
 This is the current system meant by unqualified **LOD** or **LOD system** in
 project discussion. **Terrain Horizon** is its player-facing settings name.
 World Explorer was its first proof host and remains a consumer, but the shared
@@ -70,7 +84,7 @@ system remains usable on desktop, Android, and XR. Tactical
 [`245`](../tactical/245-retire-chunk-far-lod-runtime.md) remains the completed
 removal boundary for the rejected chunk-based Far LOD system. Tactical
 [`274`](../tactical/274-all-client-distant-terrain-control.md) now owns the
-experimental all-client Graphics control, runtime preference, and default
+all-client Graphics control, runtime preference, and default
 per-eye XR projection reach. Full-frame multiview terrain and vegetation are
 now implemented and physically accepted on Quest 3 standalone plus Linux
 Vulkan/WiVRn. The live mode remains an experimental diagnostic choice rather
@@ -160,13 +174,14 @@ coverage from the active draw store's traversal-ready columns, exact
 opaque/cutout terrain establishes the ordinary reversed-Z depth, and the
 shared procedural backdrop
 loads and extends the same target before actors and translucent terrain. The
-player-facing opt-in is now `Graphics -> Distant Terrain -> Experimental`,
-with `terrainPresentation=composed` / `--terrain-presentation composed`
-retained as explicit developer inputs. Composition is currently restricted to
-local `mclone-overworld-v1`; exact-only remains allocation-free by default. A
-stored Experimental choice reads `Experimental (Unavailable)` while an
-incompatible world is active instead of silently pretending that composition
-is live.
+player-facing opt-in is `Graphics -> Terrain Horizon -> Composed`, with
+`terrainPresentation=composed` / `--terrain-presentation composed` retained
+as explicit developer inputs. Composition is currently restricted to local
+`mclone-overworld-v1`; exact-only remains allocation-free by default. A stored
+Composed choice reads `Composed (Unavailable)` while an incompatible world is
+active instead of silently pretending that composition is live. Schema-one
+preferences written by the briefly used `experimental` label migrate to
+`composed` when read.
 Native low-angle and elevated captures show the exact foreground silhouette
 correctly occluding the surrounding procedural terrain. Native thread and
 browser Worker executors now feed the same vegetation coordinator; exact

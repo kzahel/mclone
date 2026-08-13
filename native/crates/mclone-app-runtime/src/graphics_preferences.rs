@@ -76,7 +76,7 @@ impl From<ClientGraphicsPreferences> for StoredGraphicsPreferences {
             },
             terrain_presentation: match value.terrain_presentation {
                 GameTerrainPresentation::ExactOnly => StoredTerrainPresentation::ExactOnly,
-                GameTerrainPresentation::Experimental => StoredTerrainPresentation::Experimental,
+                GameTerrainPresentation::Composed => StoredTerrainPresentation::Composed,
             },
             fog: StoredFogSettings::from(value.fog),
         }
@@ -98,7 +98,7 @@ impl From<StoredGraphicsPreferences> for ClientGraphicsPreferences {
             },
             terrain_presentation: match value.terrain_presentation {
                 StoredTerrainPresentation::ExactOnly => GameTerrainPresentation::ExactOnly,
-                StoredTerrainPresentation::Experimental => GameTerrainPresentation::Experimental,
+                StoredTerrainPresentation::Composed => GameTerrainPresentation::Composed,
             },
             fog: value.fog.into(),
         }
@@ -128,7 +128,8 @@ enum StoredGrassDetail {
 enum StoredTerrainPresentation {
     #[default]
     ExactOnly,
-    Experimental,
+    #[serde(alias = "experimental")]
+    Composed,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
@@ -399,7 +400,7 @@ mod tests {
         let preferences = ClientGraphicsPreferences {
             leaf_detail: GameLeafDetail::Bushy,
             grass_detail: GameGrassDetail::Lush,
-            terrain_presentation: GameTerrainPresentation::Experimental,
+            terrain_presentation: GameTerrainPresentation::Composed,
             fog: GameFogSettings {
                 mode: GameFogMode::GroundHaze,
                 visibility_blocks: 12_288.0,
@@ -414,6 +415,31 @@ mod tests {
         assert_eq!(
             ClientGraphicsPreferences::load(&store).unwrap(),
             preferences
+        );
+        assert!(
+            store
+                .get(GRAPHICS_PREFERENCE_STORAGE_KEY)
+                .unwrap()
+                .expect("stored graphics preferences")
+                .contains(r#""terrainPresentation": "composed""#)
+        );
+    }
+
+    #[test]
+    fn graphics_preferences_migrate_experimental_terrain_presentation() {
+        let preferences = ClientGraphicsPreferences::from_json(
+            r#"{"schema":1,"preferences":{"terrainPresentation":"experimental"}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            preferences.terrain_presentation,
+            GameTerrainPresentation::Composed
+        );
+        assert!(
+            preferences
+                .to_json()
+                .unwrap()
+                .contains(r#""terrainPresentation": "composed""#)
         );
     }
 
@@ -472,7 +498,7 @@ mod tests {
         let preferences = ClientGraphicsPreferences {
             leaf_detail: GameLeafDetail::Bushy,
             grass_detail: GameGrassDetail::Ultra,
-            terrain_presentation: GameTerrainPresentation::Experimental,
+            terrain_presentation: GameTerrainPresentation::Composed,
             fog: GameFogSettings {
                 mode: GameFogMode::Classic,
                 classic_start: 0.6,

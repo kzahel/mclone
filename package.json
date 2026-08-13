@@ -149,6 +149,7 @@
     "native:web:canvas-smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --require-canvas",
     "native:web:chunk-smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --require-canvas --require-chunk",
     "native:web:app-smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --app-loop",
+    "native:web:terrain-horizon-smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --terrain-horizon-probe --generation-profile mclone-overworld-v1 --screenshot-eye 8,105,8 --screenshot-target 8,72,-300",
     "native:web:menu-smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --menu-entry-probe",
     "native:web:lobby-scenario-smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --lobby-scenario-probe",
     "native:web:lobby-scenario-catalog-smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --lobby-scenario-catalog-probe",

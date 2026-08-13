@@ -862,14 +862,7 @@ fn vertex_main(
     return terrain_vertex(vertex_index, instance_index, 0u);
 }
 
-@vertex
-fn vertex_multiview_main(
-    @builtin(vertex_index) vertex_index: u32,
-    @builtin(instance_index) instance_index: u32,
-    @builtin(view_index) view_index: i32,
-) -> VertexOutput {
-    return terrain_vertex(vertex_index, instance_index, u32(view_index));
-}
+// __MCLONE_MULTIVIEW_VERTEX_ENTRY__
 
 @fragment
 fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
@@ -891,6 +884,7 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let blocks_per_pixel = max(length(world_dx), length(world_dy));
     let river_anti_alias = max(fwidth(input.river.x), blocks_per_pixel * 0.35);
     let pool_anti_alias = max(fwidth(input.semantics.y), 0.01);
+    let physical_channel_edge = max(fwidth(input.river.z), 0.001);
     var color = input.color;
     let face_normal = normalize(cross(
         dpdx(input.world_position),
@@ -924,7 +918,6 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
             visible_half_width + river_anti_alias,
             abs(input.river.x),
         );
-        let physical_channel_edge = max(fwidth(input.river.z), 0.001);
         let physical_channel_alpha = smoothstep(
             0.0,
             physical_channel_edge,

@@ -36,7 +36,8 @@ use super::{
         TerrainHorizonBeginTransition, TerrainHorizonLevelPresentation, TerrainHorizonResourceTile,
     },
     mclone_tree_ownership_snapshot, parse_samples, terrain_preview_compute_wgsl,
-    terrain_preview_focus_y_for_profile, terrain_preview_render_wgsl, terrain_preview_tree_wgsl,
+    terrain_preview_focus_y_for_profile, terrain_preview_render_multiview_wgsl,
+    terrain_preview_render_wgsl, terrain_preview_tree_multiview_wgsl, terrain_preview_tree_wgsl,
     viewport_uniform_bytes_for_request, viewport_uniform_bytes_for_request_with_presentation,
 };
 
@@ -1146,6 +1147,8 @@ impl TerrainViewportRenderer {
             TerrainPreviewMaterialResources::new(device, queue, &material_layout, material_atlas)?;
         let exact_coverage =
             TerrainExactCoverageResources::new(device, queue, &exact_coverage_layout)?;
+        let multiview_enabled = pipeline_set == TerrainViewportPipelineSet::Horizon
+            && device.features().contains(wgpu::Features::MULTIVIEW);
         let compute_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("mclone_terrain_viewport_compute_shader"),
             source: wgpu::ShaderSource::Wgsl(terrain_preview_compute_wgsl().into()),
@@ -1161,6 +1164,22 @@ impl TerrainViewportRenderer {
             source: wgpu::ShaderSource::Wgsl(
                 terrain_preview_tree_wgsl(target_color_transform).into(),
             ),
+        });
+        let multiview_render_shader = multiview_enabled.then(|| {
+            device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("mclone_terrain_horizon_multiview_render_shader"),
+                source: wgpu::ShaderSource::Wgsl(
+                    terrain_preview_render_multiview_wgsl(target_color_transform).into(),
+                ),
+            })
+        });
+        let multiview_tree_shader = multiview_enabled.then(|| {
+            device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("mclone_terrain_horizon_multiview_tree_shader"),
+                source: wgpu::ShaderSource::Wgsl(
+                    terrain_preview_tree_multiview_wgsl(target_color_transform).into(),
+                ),
+            })
         });
         let compute_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -1297,14 +1316,14 @@ impl TerrainViewportRenderer {
                     cache: None,
                 })
             });
-        let multiview_enabled = pipeline_set == TerrainViewportPipelineSet::Horizon
-            && device.features().contains(wgpu::Features::MULTIVIEW);
         let horizon_multiview_render_pipeline = multiview_enabled.then(|| {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some("mclone_terrain_horizon_multiview_render_pipeline"),
                 layout: Some(&render_pipeline_layout),
                 vertex: wgpu::VertexState {
-                    module: &render_shader,
+                    module: multiview_render_shader
+                        .as_ref()
+                        .expect("multiview shader exists when multiview is enabled"),
                     entry_point: Some("vertex_multiview_main"),
                     buffers: &[],
                     compilation_options: wgpu::PipelineCompilationOptions {
@@ -1401,7 +1420,9 @@ impl TerrainViewportRenderer {
                 label: Some("mclone_terrain_viewport_tree_multiview_pipeline"),
                 layout: Some(&tree_pipeline_layout),
                 vertex: wgpu::VertexState {
-                    module: &tree_shader,
+                    module: multiview_tree_shader
+                        .as_ref()
+                        .expect("multiview tree shader exists when multiview is enabled"),
                     entry_point: Some("vertex_multiview_main"),
                     buffers: &[wgpu::VertexBufferLayout {
                         array_stride: TERRAIN_PREVIEW_TREE_INSTANCE_BYTES,

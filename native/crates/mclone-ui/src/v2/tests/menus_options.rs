@@ -560,7 +560,7 @@ fn graphics_options_show_and_cycle_grass_detail() {
 }
 
 #[test]
-fn graphics_options_show_and_cycle_distant_terrain() {
+fn graphics_options_show_and_cycle_terrain_horizon() {
     let mut surface = UiSurface::new();
     surface.set_screen(Some(UiScreenId::OptionsCategory {
         parent: GameOptionsParent::Pause,
@@ -568,21 +568,22 @@ fn graphics_options_show_and_cycle_distant_terrain() {
     }));
     surface.set_scale(GuiScale::from_pixels(960, 540));
     let state = GameUiRenderState {
-        terrain_presentation: GameTerrainPresentation::Experimental,
+        terrain_presentation: GameTerrainPresentation::Composed,
         ..GameUiRenderState::default()
     };
     surface.set_render_state(state);
 
-    let distant_terrain = surface
+    let terrain_horizon = surface
         .layout()
         .widget(UI_V2_OPTIONS_TERRAIN_PRESENTATION)
-        .expect("distant terrain row")
+        .expect("terrain horizon row")
         .clone();
-    assert_eq!(distant_terrain.value.as_deref(), Some("Experimental"));
-    assert!(distant_terrain.enabled);
-    assert!(surface.pointer_down(point_in(distant_terrain.rect), state));
+    assert_eq!(terrain_horizon.label, "Terrain Horizon");
+    assert_eq!(terrain_horizon.value.as_deref(), Some("Composed"));
+    assert!(terrain_horizon.enabled);
+    assert!(surface.pointer_down(point_in(terrain_horizon.rect), state));
     assert_eq!(
-        surface.pointer_up(point_in(distant_terrain.rect), state).1,
+        surface.pointer_up(point_in(terrain_horizon.rect), state).1,
         Some(GameUiAction::SetTerrainPresentation(
             GameTerrainPresentation::ExactOnly,
         ))
@@ -598,7 +599,7 @@ fn graphics_options_show_and_cycle_distant_terrain() {
             .layout()
             .widget(UI_V2_OPTIONS_TERRAIN_PRESENTATION)
             .and_then(|widget| widget.value.as_deref()),
-        Some("Experimental (Unavailable)")
+        Some("Composed (Unavailable)")
     );
 }
 

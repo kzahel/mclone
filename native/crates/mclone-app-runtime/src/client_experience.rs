@@ -2396,17 +2396,17 @@ mod tests {
         );
 
         let effects = settings.apply_ui_action(
-            GameUiAction::SetTerrainPresentation(GameTerrainPresentation::Experimental),
+            GameUiAction::SetTerrainPresentation(GameTerrainPresentation::Composed),
             ClientExperienceSettingsProfile::default(),
         );
         assert_eq!(
             settings.state().terrain_presentation,
-            GameTerrainPresentation::Experimental
+            GameTerrainPresentation::Composed
         );
         assert_eq!(
             effects.setting_effects,
             vec![ClientExperienceSettingEffect::SetTerrainPresentation(
-                GameTerrainPresentation::Experimental
+                GameTerrainPresentation::Composed
             )]
         );
 

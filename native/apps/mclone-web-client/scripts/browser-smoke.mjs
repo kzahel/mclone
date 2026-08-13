@@ -75,8 +75,15 @@ if (terrainPresentation && !["exact-only", "composed"].includes(terrainPresentat
 }
 const terrainCompositionProbe = process.argv.includes("--terrain-composition-probe")
   || process.env.MCLONE_NATIVE_WEB_TERRAIN_COMPOSITION_PROBE === "1";
+const terrainHorizonProbe = process.argv.includes("--terrain-horizon-probe")
+  || process.env.MCLONE_NATIVE_WEB_TERRAIN_HORIZON_PROBE === "1";
 if (terrainCompositionProbe && terrainPresentation !== "composed") {
   throw new Error("--terrain-composition-probe requires --terrain-presentation composed");
+}
+if (terrainHorizonProbe && terrainPresentation) {
+  throw new Error(
+    "--terrain-horizon-probe starts exact-only and requires no --terrain-presentation override",
+  );
 }
 // The composition probe deliberately runs the full shared quality tier. Keep
 // its slow correctness capture separate from ordinary app-smoke timing so the
@@ -93,9 +100,9 @@ const screenshotTarget = screenshotTargetArgIndex >= 0
 if (Boolean(screenshotEye) !== Boolean(screenshotTarget)) {
   throw new Error("--screenshot-eye and --screenshot-target must be provided together");
 }
-if (terrainCompositionProbe && !screenshotEye) {
+if ((terrainCompositionProbe || terrainHorizonProbe) && !screenshotEye) {
   throw new Error(
-    "--terrain-composition-probe requires --screenshot-eye and --screenshot-target",
+    "terrain composition probes require --screenshot-eye and --screenshot-target",
   );
 }
 for (const [label, value] of [
@@ -245,6 +252,7 @@ const appLoop = movementPerf
   || preparedFigureProbe
   || halfSpaceTerrainProbe
   || actorCompositionProbe
+  || terrainHorizonProbe
   || Boolean(showcase)
   || lobbyRuntimeProbe
   || lobbyScenarioProbe
@@ -263,7 +271,8 @@ if (mobileShowcase && !showcase) {
 const mobileViewport = mobileAppLoop
   || mobileShowcase
   || movementPerf
-  || lobbyScenarioMobileProbe;
+  || lobbyScenarioMobileProbe
+  || terrainHorizonProbe;
 const serveOnly = process.argv.includes("--serve")
   || process.env.MCLONE_NATIVE_WEB_SERVE === "1";
 const screenshotPath = process.env.MCLONE_NATIVE_WEB_SMOKE_SCREENSHOT
@@ -291,6 +300,8 @@ const screenshotPath = process.env.MCLONE_NATIVE_WEB_SMOKE_SCREENSHOT
       : `/tmp/mclone-native-web-${mobileShowcase ? "mobile-" : ""}showcase-${showcase}.png`
     : actorCompositionProbe
     ? "/tmp/mclone-native-web-actor-composition-probe.png"
+    : terrainHorizonProbe
+    ? "/tmp/mclone-native-web-terrain-horizon-reload.png"
     : lobbyRuntimeProbe
     ? "/tmp/mclone-native-web-lobby-runtime-probe.png"
     : lobbyScenarioProbe
@@ -325,6 +336,8 @@ const canvasScreenshotPath = process.env.MCLONE_NATIVE_WEB_CANVAS_SCREENSHOT
       : `/tmp/mclone-native-web-${mobileShowcase ? "mobile-" : ""}showcase-${showcase}-canvas.png`
     : actorCompositionProbe
     ? "/tmp/mclone-native-web-actor-composition-probe-canvas.png"
+    : terrainHorizonProbe
+    ? "/tmp/mclone-native-web-terrain-horizon-reload-canvas.png"
     : lobbyRuntimeProbe
     ? "/tmp/mclone-native-web-lobby-runtime-probe-canvas.png"
     : lobbyScenarioProbe
@@ -340,6 +353,8 @@ const mobileNativeUiCanvasScreenshotPath = process.env.MCLONE_NATIVE_WEB_MOBILE_
   ?? "/tmp/mclone-native-web-mobile-ui-canvas.png";
 const mobileNativeOptionsCanvasScreenshotPath = process.env.MCLONE_NATIVE_WEB_MOBILE_OPTIONS_CANVAS_SCREENSHOT
   ?? "/tmp/mclone-native-web-mobile-options-canvas.png";
+const terrainHorizonToggleCanvasScreenshotPath = process.env.MCLONE_NATIVE_WEB_TERRAIN_HORIZON_TOGGLE_CANVAS_SCREENSHOT
+  ?? "/tmp/mclone-native-web-terrain-horizon-toggle-canvas.png";
 const mobileStartupScreenshotPath = process.env.MCLONE_NATIVE_WEB_MOBILE_STARTUP_SCREENSHOT
   ?? "/tmp/mclone-native-web-mobile-startup.png";
 const mobileBootstrapScreenshotPath = process.env.MCLONE_NATIVE_WEB_MOBILE_BOOTSTRAP_SCREENSHOT
@@ -730,7 +745,9 @@ async function run() {
       if (terrainPresentation) {
         startupParameters.set("terrainPresentation", terrainPresentation);
       }
-      if (terrainCompositionProbe) startupParameters.set("qualityCapture", "1");
+      if (terrainCompositionProbe || terrainHorizonProbe) {
+        startupParameters.set("qualityCapture", "1");
+      }
       if (screenshotEye) startupParameters.set("screenshotEye", screenshotEye);
       if (screenshotTarget) startupParameters.set("screenshotTarget", screenshotTarget);
       if (worldTopology) startupParameters.set("worldTopology", worldTopology);
@@ -791,7 +808,7 @@ async function run() {
           },
           undefined,
           {
-            timeout: terrainCompositionProbe
+            timeout: terrainCompositionProbe || terrainHorizonProbe
               ? terrainCompositionProbeTimeoutMs
               : 60_000,
           },
@@ -2615,6 +2632,66 @@ async function run() {
           plantedCarrotScreenshotPath,
           harvestedCarrotScreenshotPath,
           result,
+        }, null, 2));
+        return;
+      }
+      if (terrainHorizonProbe) {
+        const initial = await page.evaluate(() => ({
+          terrainViewActive: globalThis.__mcloneWebApp?.state?.terrainViewActive,
+          storedPreferences: globalThis.localStorage?.getItem(
+            "mclone.graphics.preferences.v1",
+          ) ?? null,
+        }));
+        if (initial.terrainViewActive !== false) {
+          throw new Error(
+            `terrain horizon probe did not start exact-only: ${JSON.stringify(initial)}`,
+          );
+        }
+        const eye = /** @type {[number, number, number]} */ (
+          screenshotEye.split(",").map(Number)
+        );
+        const target = /** @type {[number, number, number]} */ (
+          screenshotTarget.split(",").map(Number)
+        );
+        const probe = await runTerrainHorizonRegressionProbe(
+          page,
+          canvas,
+          eye,
+          target,
+          terrainHorizonToggleCanvasScreenshotPath,
+          canvasScreenshotPath,
+        );
+        const pageScreenshotCaptured = await page.screenshot({
+          path: screenshotPath,
+          fullPage: false,
+          timeout: 60_000,
+        }).then(() => true, () => false);
+        if (
+          pageErrors.length > 0
+          || probe.togglePixels.distinctInteriorColorCount < 2
+          || probe.reloadPixels.distinctInteriorColorCount < 2
+          || probe.toggleResult?.terrainViewActive !== true
+          || probe.toggleResult?.terrainViewDrawnTiles <= 0
+          || probe.reloadResult?.terrainViewActive !== true
+          || probe.reloadResult?.terrainViewDrawnTiles <= 0
+          || probe.storedPresentation !== "composed"
+          || probe.reloadedStoredPresentation !== "composed"
+        ) {
+          throw new Error(`browser terrain-horizon probe failed:\n${JSON.stringify({
+            pageErrors,
+            initial,
+            probe,
+          }, null, 2)}`);
+        }
+        console.log(JSON.stringify({
+          url: appUrl,
+          mobileViewport,
+          screenshotPath,
+          pageScreenshotCaptured,
+          terrainHorizonToggleCanvasScreenshotPath,
+          canvasScreenshotPath,
+          initial,
+          probe,
         }, null, 2));
         return;
       }
@@ -8930,6 +9007,202 @@ async function readNativeUiState(page) {
       menuHidden: menu?.hidden ?? null,
     };
   });
+}
+
+/**
+ * Exercise the shared Graphics row from its exact-only default, prove that the
+ * composed renderer produces pixels, then reload without a query override and
+ * prove that the stored preference restores the same renderer.
+ *
+ * @param {Page} page
+ * @param {Locator} canvas
+ * @param {[number, number, number]} eye
+ * @param {[number, number, number]} target
+ * @param {string} toggleScreenshotPath
+ * @param {string} reloadScreenshotPath
+ */
+async function runTerrainHorizonRegressionProbe(
+  page,
+  canvas,
+  eye,
+  target,
+  toggleScreenshotPath,
+  reloadScreenshotPath,
+) {
+  await page.evaluate(() => globalThis.__mcloneWebApp?.openNativePauseUi?.());
+  await waitForNativeUiScreen(page, "pause");
+  await clickNativeMenuButton(canvas, "pause", 1);
+  await waitForNativeUiScreen(page, "options");
+  // The regression lane owns a fixed 390-by-844 phone viewport. Exercise the
+  // first Options category and the first row in Graphics' right column.
+  await clickCanvasFraction(canvas, 0.5, 0.392);
+  await waitForNativeUiScreen(page, "optionsCategory");
+  await clickCanvasFraction(canvas, 0.72, 0.409);
+  try {
+    await page.waitForFunction(
+      () => {
+        try {
+          const stored = JSON.parse(
+            globalThis.localStorage?.getItem("mclone.graphics.preferences.v1") ?? "null",
+          );
+          return stored?.schema === 1
+            && stored?.preferences?.terrainPresentation === "composed";
+        } catch {
+          return false;
+        }
+      },
+      undefined,
+      { timeout: 10_000 },
+    );
+  } catch (error) {
+    const diagnosticPath = "/tmp/mclone-native-web-terrain-horizon-options.png";
+    await canvas.screenshot({ path: diagnosticPath, timeout: 60_000 });
+    const diagnostic = await page.evaluate(() => ({
+      screen: globalThis.__mcloneWebApp?.state?.nativeUiScreen ?? null,
+      action: globalThis.__mcloneWebApp?.state?.action ?? null,
+      terrainViewActive: globalThis.__mcloneWebApp?.state?.terrainViewActive ?? null,
+      stored: globalThis.localStorage?.getItem("mclone.graphics.preferences.v1") ?? null,
+    }));
+    throw new Error(
+      `Terrain Horizon row did not persist after its UI tap; screenshot=${diagnosticPath}; `
+        + `${error instanceof Error ? error.message : String(error)}\n`
+        + JSON.stringify(diagnostic, null, 2),
+    );
+  }
+  const storedPresentation = await readStoredTerrainPresentation(page);
+  await page.evaluate(() => globalThis.__mcloneWebApp?.closeNativeUi?.());
+  const toggleProof = await captureTerrainHorizonFrame(
+    page,
+    canvas,
+    eye,
+    target,
+    toggleScreenshotPath,
+  );
+
+  await page.reload({ waitUntil: "load" });
+  await page.waitForFunction(
+    () => {
+      const app = globalThis.__mcloneWebApp;
+      return app?.ready === true || app?.state?.failed === true;
+    },
+    undefined,
+    { timeout: terrainCompositionProbeTimeoutMs },
+  );
+  const reloadedBootState = await page.evaluate(() => globalThis.__mcloneWebApp?.state ?? null);
+  if (!reloadedBootState?.ready || !reloadedBootState?.ok) {
+    throw new Error(
+      `terrain horizon preference reload failed to boot: ${JSON.stringify(reloadedBootState)}`,
+    );
+  }
+  const reloadedStoredPresentation = await readStoredTerrainPresentation(page);
+  const reloadProof = await captureTerrainHorizonFrame(
+    page,
+    canvas,
+    eye,
+    target,
+    reloadScreenshotPath,
+  );
+  return {
+    storedPresentation,
+    reloadedStoredPresentation,
+    toggleResult: summarizeTerrainHorizonResult(toggleProof.result),
+    togglePixels: toggleProof.pixels,
+    reloadResult: summarizeTerrainHorizonResult(reloadProof.result),
+    reloadPixels: reloadProof.pixels,
+  };
+}
+
+/** @param {Record<string, any> | null} result */
+function summarizeTerrainHorizonResult(result) {
+  if (result == null) return null;
+  return {
+    terrainViewActive: result.terrainViewActive,
+    terrainViewTargetReady: result.terrainViewTargetReady,
+    terrainViewExactColumnCount: result.terrainViewExactColumnCount,
+    terrainViewDrawnLevels: result.terrainViewDrawnLevels,
+    terrainViewDrawnTiles: result.terrainViewDrawnTiles,
+    terrainViewTreeInstanceCount: result.terrainViewTreeInstanceCount,
+    terrainViewVegetationSubmittedJobs: result.terrainViewVegetationSubmittedJobs,
+    terrainViewVegetationCompletedJobs: result.terrainViewVegetationCompletedJobs,
+  };
+}
+
+/** @param {Page} page */
+async function readStoredTerrainPresentation(page) {
+  return page.evaluate(() => {
+    try {
+      return JSON.parse(
+        globalThis.localStorage?.getItem("mclone.graphics.preferences.v1") ?? "null",
+      )?.preferences?.terrainPresentation ?? null;
+    } catch {
+      return null;
+    }
+  });
+}
+
+/**
+ * @param {Page} page
+ * @param {Locator} canvas
+ * @param {[number, number, number]} eye
+ * @param {[number, number, number]} target
+ * @param {string} screenshotPath
+ */
+async function captureTerrainHorizonFrame(page, canvas, eye, target, screenshotPath) {
+  await page.evaluate(() => globalThis.__mcloneWebApp?.resumeRendering?.());
+  await page.waitForFunction(
+    () => {
+      const state = globalThis.__mcloneWebApp?.state;
+      return state?.streamingSettled === true
+        && state.pendingCompileJobCount === 0
+        && state.terrainViewActive === true
+        && state.terrainViewTargetReady === true
+        && state.terrainViewExactColumnCount > 0
+        && state.terrainViewVegetationSubmittedJobs
+          === state.terrainViewVegetationCompletedJobs;
+    },
+    undefined,
+    { timeout: terrainCompositionProbeTimeoutMs },
+  );
+  await page.evaluate(() => globalThis.__mcloneWebApp?.pauseRendering?.());
+  await page.waitForFunction(
+    () => globalThis.__mcloneWebApp?.state?.tickFrameBusy === false,
+    undefined,
+    { timeout: 10_000 },
+  );
+  await page.evaluate(
+    ({ eye, target }) => {
+      globalThis.__mcloneWebApp?.setDebugOverlay?.(false);
+      globalThis.__mcloneWebApp?.frameTerrainComposition?.(eye, target);
+    },
+    { eye, target },
+  );
+  await page.evaluate(() => globalThis.__mcloneWebApp?.resumeRendering?.());
+  await page.waitForFunction(
+    (eye) => {
+      const state = globalThis.__mcloneWebApp?.state;
+      return state?.streamingSettled === true
+        && state.pendingCompileJobCount === 0
+        && state.terrainViewTargetReady === true
+        && state.terrainViewVegetationSubmittedJobs
+          === state.terrainViewVegetationCompletedJobs
+        && Math.abs(state.cameraX - eye[0]) < 0.01
+        && Math.abs(state.cameraY - eye[1]) < 0.01
+        && Math.abs(state.cameraZ - eye[2]) < 0.01;
+    },
+    eye,
+    { timeout: terrainCompositionProbeTimeoutMs },
+  );
+  await page.evaluate(() => globalThis.__mcloneWebApp?.pauseRendering?.());
+  await page.waitForFunction(
+    () => globalThis.__mcloneWebApp?.state?.tickFrameBusy === false,
+    undefined,
+    { timeout: 10_000 },
+  );
+  const result = await page.evaluate(
+    async () => await globalThis.__mcloneWebApp?.renderOneFrameForSmoke?.() ?? null,
+  );
+  const png = await canvas.screenshot({ path: screenshotPath, timeout: 60_000 });
+  return { result, pixels: analyzePng(png) };
 }
 
 /**
