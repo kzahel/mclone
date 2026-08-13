@@ -1,24 +1,24 @@
 {
   "asset_set": "mclone-game-1.17.1",
   "format_version": 1,
-  "generated_at": "2026-08-10T21:05:13.287259Z",
+  "generated_at": "2026-08-13T05:23:55.642576Z",
   "minecraft_version": "1.17.1",
   "pack": {
     "asset_set": "mclone-game-1.17.1",
-    "content_manifest_sha256": "fc23cdf024145d4c25e32b4b4fa9981bcc3a57d21429480d3a9d4b821ef3fb42",
-    "file_count": 7026,
+    "content_manifest_sha256": "1b6de3477016666de9e78182af209512cbf5fa185bfd435f9916269d0ed2b5b2",
+    "file_count": 7180,
     "fingerprints": {
       "payload_raw_v1": {
         "algorithm": "sha256",
-        "bytes": 13998537,
-        "file_count": 7026,
-        "sha256": "dda2814c145f5f3cc30cdc602f9154568d900bf916ea2b0f0d864c29fb98c40a"
+        "bytes": 15372707,
+        "file_count": 7180,
+        "sha256": "34f9e3b24a663d6930a03a946067bc6dcda040014556ce264bdfd532ad139f8c"
       },
       "portable_json_text_v1": {
         "algorithm": "sha256",
-        "excluded_file_count": 3087,
-        "fingerprinted_file_count": 3939,
-        "sha256": "fc23cdf024145d4c25e32b4b4fa9981bcc3a57d21429480d3a9d4b821ef3fb42"
+        "excluded_file_count": 3217,
+        "fingerprinted_file_count": 3963,
+        "sha256": "1b6de3477016666de9e78182af209512cbf5fa185bfd435f9916269d0ed2b5b2"
       }
     },
     "manifest_path": "reference/minecraft-1.17.1/extracted.zip.json",
@@ -26,6 +26,66 @@
     "payload_raw_manifest": {
       "algorithm": "sha256",
       "files": [
+        {
+          "bytes": 1389,
+          "path": "assets/mclone/audio/README.md",
+          "sha256": "250949070a789a3f5459d4b7f1699887d887ed1c8e3c4ee1b33ef4bd1513ca08"
+        },
+        {
+          "bytes": 586,
+          "path": "assets/mclone/audio/licenses/kenney/impact-License.txt",
+          "sha256": "48d20ed2f4fd9146e76b7f558d09a1c27e62554d9897beb93dee57d269006d02"
+        },
+        {
+          "bytes": 553,
+          "path": "assets/mclone/audio/licenses/kenney/interface-License.txt",
+          "sha256": "f7e58f21a053c54110a27e7da3510d73e50640a0dc85328afe077fc36191702f"
+        },
+        {
+          "bytes": 458,
+          "path": "assets/mclone/audio/licenses/kenney/rpg-License.txt",
+          "sha256": "842c42cc1942963f6fcdc18fe57e9e0631e8a4936f9803688e8152e830088eb9"
+        },
+        {
+          "bytes": 269,
+          "path": "assets/mclone/audio/licenses/mclone-original/CC0.txt",
+          "sha256": "a63606fda22e109505571dde88fc2c997a439fa2e84f8bbb76c4a9b8a5fdc19d"
+        },
+        {
+          "bytes": 46521,
+          "path": "assets/mclone/audio/provenance.v1.json",
+          "sha256": "0234e6710ddc14ddf340f2dd57bf3b32c3036e6bf0dfbf853ddcd89a6b68fb77"
+        },
+        {
+          "bytes": 18112,
+          "path": "assets/mclone/audio/sound-bank.v1.json",
+          "sha256": "141218bacd768aaca9b77b869d1039e0a2b7a315e45e0e1c05945e40a3577498"
+        },
+        {
+          "bytes": 89947,
+          "path": "assets/mclone/figures/bee.figure.json",
+          "sha256": "f7e4f016dd3ceb5249fd76cdf1be36a8b5f4f2b3df4ea8fca89e99a906e4d607"
+        },
+        {
+          "bytes": 2625,
+          "path": "assets/mclone/figures/bee_hotel.figure.json",
+          "sha256": "d8fd07db38f0907c927079b77bf87f63e09ec4c3b41ab04af602f5d47639772a"
+        },
+        {
+          "bytes": 2351,
+          "path": "assets/mclone/figures/bee_hotel_item.figure.json",
+          "sha256": "9ed94b910e04089b293903fe17248a29599f163be097ad9f623ff32eb984940e"
+        },
+        {
+          "bytes": 3595,
+          "path": "assets/mclone/figures/bee_nest.figure.json",
+          "sha256": "9f786bc4a8705b7a48316e87c8502303b271cb0a567947d37692d5d1870a36bb"
+        },
+        {
+          "bytes": 1579,
+          "path": "assets/mclone/figures/beeswax.figure.json",
+          "sha256": "bf5e00388fc3f74cdf41f848111d3a087bc2a3a8c9595f24b6712fdc20f277ee"
+        },
         {
           "bytes": 23923,
           "path": "assets/mclone/figures/chicken.figure.json",
@@ -37,14 +97,724 @@
           "sha256": "ace00cd97d8f81035df495d908bb1711ce6a278edb54d800907f61af9e01a3fd"
         },
         {
+          "bytes": 124531,
+          "path": "assets/mclone/figures/deer.figure.json",
+          "sha256": "b8f16092ab0faae21c6eb89044940a9e758049828b0d3bec0c9da99e2330efbb"
+        },
+        {
+          "bytes": 2138,
+          "path": "assets/mclone/figures/deer_bed.figure.json",
+          "sha256": "44f8ed3156f61af90e89279f6cecf26e3c33619f29c1885fc9ce88317bcad9e7"
+        },
+        {
+          "bytes": 1165,
+          "path": "assets/mclone/figures/deer_hide.figure.json",
+          "sha256": "9161eaee9718ec2c56d68a55312d30a5a0615694480a4ee656502af3c670151b"
+        },
+        {
+          "bytes": 1357,
+          "path": "assets/mclone/figures/hunting_spear.figure.json",
+          "sha256": "b89b39713cce314facdfdb146464d0e329b9dd019049322852f7b76e1e932c25"
+        },
+        {
+          "bytes": 34312,
+          "path": "assets/mclone/figures/mallard_duck.figure.json",
+          "sha256": "5980045c552bd149a08728534e6ea1ccfc0f61b8beadcf525aee48e4ccb1ae8b"
+        },
+        {
+          "bytes": 2557,
+          "path": "assets/mclone/figures/mallard_feather.figure.json",
+          "sha256": "ec701e619cae7e61b7ba762c8b25ee08e6368591b0afc31a79a574e95e78c5c8"
+        },
+        {
+          "bytes": 5511,
+          "path": "assets/mclone/figures/mallard_nest.figure.json",
+          "sha256": "3807b6559c22877ba32200946e05162997dec89d9df8aa7b87d2c8b8520eb602"
+        },
+        {
           "bytes": 17365,
           "path": "assets/mclone/figures/player.figure.json",
           "sha256": "3e5f885ed57fa86051e647cb98ca8c2238285e2fc14b511159601acb33f300fc"
         },
         {
+          "bytes": 2182,
+          "path": "assets/mclone/figures/shed_antler.figure.json",
+          "sha256": "9fba6299b3cb61c4a007591f7db2d27029488e80b9d0abb0f7e7ff1840cd724c"
+        },
+        {
           "bytes": 11493,
           "path": "assets/mclone/figures/upright_bear.figure.json",
           "sha256": "80b5db57d2b49bd57d7945740eacbb76637e84b68e512dd4532bd61c8adc02b9"
+        },
+        {
+          "bytes": 1195,
+          "path": "assets/mclone/figures/venison.figure.json",
+          "sha256": "08da142cfc511fc1f8a84ced74c3ea1033f69aea774ffc6ecfb52d88f529ad3a"
+        },
+        {
+          "bytes": 2308,
+          "path": "assets/mclone/showcases/bee-pollination.showcase.json",
+          "sha256": "8b9955a3895aed5d3ee15f303a739446ea0683147bdf2cf10c9067d3de9c0895"
+        },
+        {
+          "bytes": 2400,
+          "path": "assets/mclone/showcases/deer-forest-edge.showcase.json",
+          "sha256": "a915ddc66e7e1e0a059fbbe3311cd079b6c775da085108e143d9b5826eb420b2"
+        },
+        {
+          "bytes": 2691,
+          "path": "assets/mclone/showcases/mallard-ecology.showcase.json",
+          "sha256": "b263d435f395126bbdf6ef12a8af76e1b16e043bbbfdb5fa52377636f8dfc1a5"
+        },
+        {
+          "bytes": 7141,
+          "path": "assets/mclone/showcases/wheat-farming.showcase.json",
+          "sha256": "0683eb9ae096ec27bcbe69fcd5654fd4ee5c4769c4f359028b5617cb96a85258"
+        },
+        {
+          "bytes": 6353,
+          "path": "assets/mclone/sounds/kenney/impact/footstep_carpet_000.ogg",
+          "sha256": "b9524658b52a99a20590f8feefc103088637fd13ea8ec35811aee785e1f2f330"
+        },
+        {
+          "bytes": 6411,
+          "path": "assets/mclone/sounds/kenney/impact/footstep_carpet_001.ogg",
+          "sha256": "9af3c3f76705107339e72036e4053bdca3eaa50ad31c8c929f42ce8d40e5d781"
+        },
+        {
+          "bytes": 6411,
+          "path": "assets/mclone/sounds/kenney/impact/footstep_carpet_002.ogg",
+          "sha256": "9af3c3f76705107339e72036e4053bdca3eaa50ad31c8c929f42ce8d40e5d781"
+        },
+        {
+          "bytes": 6301,
+          "path": "assets/mclone/sounds/kenney/impact/footstep_carpet_003.ogg",
+          "sha256": "4ae7454338d57c7d102145919ae653c7d010eb542797c4f25a1c7470be3a7e4c"
+        },
+        {
+          "bytes": 6301,
+          "path": "assets/mclone/sounds/kenney/impact/footstep_carpet_004.ogg",
+          "sha256": "4ae7454338d57c7d102145919ae653c7d010eb542797c4f25a1c7470be3a7e4c"
+        },
+        {
+          "bytes": 5808,
+          "path": "assets/mclone/sounds/kenney/impact/footstep_concrete_000.ogg",
+          "sha256": "d7267e183067757c92c169de2a379abea592cfca6b39bb2e8feea15221ad79fe"
+        },
+        {
+          "bytes": 6308,
+          "path": "assets/mclone/sounds/kenney/impact/footstep_concrete_001.ogg",
+          "sha256": "507a75eb19b897087855a3be3cf11a12d7fa37d143ad535eeebe0b8031c7325d"
+        },
+        {
+          "bytes": 6255,
+          "path": "assets/mclone/sounds/kenney/impact/footstep_concrete_002.ogg",
+          "sha256": "b21fa546d74941196b25da8a20b7010abd8c05c4fcf93545d1f344e66a664e13"
+        },
+        {
+          "bytes": 5805,
+          "path": "assets/mclone/sounds/kenney/impact/footstep_concrete_003.ogg",
+          "sha256": "8b513c2f0316324060b9174b8f28df6c2147418c506e6a53b77f18e149a5547b"
+        },
+        {
+          "bytes": 5912,
+          "path": "assets/mclone/sounds/kenney/impact/footstep_concrete_004.ogg",
+          "sha256": "24dd8db2413e5b81ad181e1205c12a1c7801da5f85715d471b92a4b2f632e45e"
+        },
+        {
+          "bytes": 8290,
+          "path": "assets/mclone/sounds/kenney/impact/footstep_grass_000.ogg",
+          "sha256": "9d49497777405d78d7cf7f2888e28277f3a23192300cfd1d79d54876b20f479f"
+        },
+        {
+          "bytes": 8313,
+          "path": "assets/mclone/sounds/kenney/impact/footstep_grass_001.ogg",
+          "sha256": "fb28781bd22b2eefdc14077f1adf5c94d7fe9c3a130194633b55f3e0d39d9f04"
+        },
+        {
+          "bytes": 8278,
+          "path": "assets/mclone/sounds/kenney/impact/footstep_grass_002.ogg",
+          "sha256": "73a520139f5be716a403bfe9c80e0e94d1e61d8e9de04a354b336392164b53dc"
+        },
+        {
+          "bytes": 8129,
+          "path": "assets/mclone/sounds/kenney/impact/footstep_grass_003.ogg",
+          "sha256": "0546e1d8ab2def714425701a18bd34c5ee2794b12e858e5b595aabcf38a34137"
+        },
+        {
+          "bytes": 7800,
+          "path": "assets/mclone/sounds/kenney/impact/footstep_grass_004.ogg",
+          "sha256": "086fd4ab3546a507ea5f5c759a9a10e535c95ade13705c238bc0eeffd7d4e8ba"
+        },
+        {
+          "bytes": 7880,
+          "path": "assets/mclone/sounds/kenney/impact/footstep_snow_000.ogg",
+          "sha256": "c05fa4a9dc9a7aabc04996466fb589537e49af76de9998d8f9e6270ec92dcef7"
+        },
+        {
+          "bytes": 7794,
+          "path": "assets/mclone/sounds/kenney/impact/footstep_snow_001.ogg",
+          "sha256": "980fb9a1c9227aed7995067b0357f373053337f2416316db8ea0438418542fb4"
+        },
+        {
+          "bytes": 7694,
+          "path": "assets/mclone/sounds/kenney/impact/footstep_snow_002.ogg",
+          "sha256": "db52bafdc66304f3b999f2c29227826c65993916e630ac2ffbca17d07b263178"
+        },
+        {
+          "bytes": 7860,
+          "path": "assets/mclone/sounds/kenney/impact/footstep_snow_003.ogg",
+          "sha256": "68272e3f1cabcabd02d328fd344454d7c04cb58b5a86972fcdd858f845e3d007"
+        },
+        {
+          "bytes": 7630,
+          "path": "assets/mclone/sounds/kenney/impact/footstep_snow_004.ogg",
+          "sha256": "7fe9ce5f5732aaa0a50ef02bb1ac162c27f6bd85214e86aaea6e13e7a41dbc00"
+        },
+        {
+          "bytes": 5949,
+          "path": "assets/mclone/sounds/kenney/impact/footstep_wood_000.ogg",
+          "sha256": "5f1c252942a220d658121bd9417448cd19649ded9fff2ff15f6e50899373ce8e"
+        },
+        {
+          "bytes": 5929,
+          "path": "assets/mclone/sounds/kenney/impact/footstep_wood_001.ogg",
+          "sha256": "e4f68e1c9fd55b4dc8ca89ed2bbab6f200171bc54bdc18aa96b80d8e7336f462"
+        },
+        {
+          "bytes": 5895,
+          "path": "assets/mclone/sounds/kenney/impact/footstep_wood_002.ogg",
+          "sha256": "9ff095b05cee5eec40b081defe3f0eef7232bb16d4865ce03b9f6dbab875cfdd"
+        },
+        {
+          "bytes": 6207,
+          "path": "assets/mclone/sounds/kenney/impact/footstep_wood_003.ogg",
+          "sha256": "2a68a083daa9eda08fed0ea5da5280dfbe0de226196c576be02f95259dd139d9"
+        },
+        {
+          "bytes": 5799,
+          "path": "assets/mclone/sounds/kenney/impact/footstep_wood_004.ogg",
+          "sha256": "b33e0854e2b3f6b6492e25c25ef8f90447a332f7c6bb25dd02edced9581d3441"
+        },
+        {
+          "bytes": 5827,
+          "path": "assets/mclone/sounds/kenney/impact/impactGeneric_light_000.ogg",
+          "sha256": "f0e982611e97512fee5f777986b67e8b435434b601f94992ec044f7e89fb5acb"
+        },
+        {
+          "bytes": 5636,
+          "path": "assets/mclone/sounds/kenney/impact/impactGeneric_light_001.ogg",
+          "sha256": "c3cd1c073d186ae8fa35788ba94de581f1826e7427a7bb26490b2695fac18efa"
+        },
+        {
+          "bytes": 5795,
+          "path": "assets/mclone/sounds/kenney/impact/impactGeneric_light_002.ogg",
+          "sha256": "d0bf60905b59ff630ffe01eb0edeeacd2504eaa8fb6523aeef7d2458b78264d3"
+        },
+        {
+          "bytes": 5792,
+          "path": "assets/mclone/sounds/kenney/impact/impactGeneric_light_003.ogg",
+          "sha256": "0e8896706130f6bc88cdf1f0157aaacdbe88dce86cf0330f9136e44eb1209e81"
+        },
+        {
+          "bytes": 5747,
+          "path": "assets/mclone/sounds/kenney/impact/impactGeneric_light_004.ogg",
+          "sha256": "f906fa3a37acc4372787b496efcedefa2856045d5ec9456a3bd6c303c0eabb41"
+        },
+        {
+          "bytes": 7403,
+          "path": "assets/mclone/sounds/kenney/impact/impactGlass_heavy_000.ogg",
+          "sha256": "b44b39a940e8948e74b9bd3776bff980df43cf220abdaf0d467dc4c43c0244a5"
+        },
+        {
+          "bytes": 8946,
+          "path": "assets/mclone/sounds/kenney/impact/impactGlass_heavy_001.ogg",
+          "sha256": "58686e0e562612cc566791844a10e269f8d1921f4766c14ba43976fd0a429f4e"
+        },
+        {
+          "bytes": 7661,
+          "path": "assets/mclone/sounds/kenney/impact/impactGlass_heavy_002.ogg",
+          "sha256": "4978654ac840ad519692d5d5ba48a8101cabce13b9a577be73ad589185e5e9ed"
+        },
+        {
+          "bytes": 6956,
+          "path": "assets/mclone/sounds/kenney/impact/impactGlass_heavy_003.ogg",
+          "sha256": "aed07b154f24410c17e5262bbef832842fb275d41fe297f721af7501d0e9c23a"
+        },
+        {
+          "bytes": 8300,
+          "path": "assets/mclone/sounds/kenney/impact/impactGlass_heavy_004.ogg",
+          "sha256": "c7742b0e33c1733ddaf902aa68464a4f5364e4d4cb6ff11b76a7aa4151a138dd"
+        },
+        {
+          "bytes": 6526,
+          "path": "assets/mclone/sounds/kenney/impact/impactGlass_light_000.ogg",
+          "sha256": "d750cf88097d0c3e69920e6e14496e1444e1a9da01aa4cca8f5ec8cb44c57b4f"
+        },
+        {
+          "bytes": 6544,
+          "path": "assets/mclone/sounds/kenney/impact/impactGlass_light_001.ogg",
+          "sha256": "05e513fbd42829060eb37855f8c3866722ec5c39a8937c9bfde518cc609effa2"
+        },
+        {
+          "bytes": 6562,
+          "path": "assets/mclone/sounds/kenney/impact/impactGlass_light_002.ogg",
+          "sha256": "710db7451bb7857b9140dfe6afe4621ea2188ad65eda3919c569d1bb285b933d"
+        },
+        {
+          "bytes": 6618,
+          "path": "assets/mclone/sounds/kenney/impact/impactGlass_light_003.ogg",
+          "sha256": "765290ce32fa108c939a0dbd6fbacbcd05abde622b57b708eb8a64058ef4225a"
+        },
+        {
+          "bytes": 6641,
+          "path": "assets/mclone/sounds/kenney/impact/impactGlass_light_004.ogg",
+          "sha256": "f535b7cb7835400d8d28bcf9e1cf047ce3c0eb7a6456bdb1a4a27acbec1ed2cb"
+        },
+        {
+          "bytes": 8400,
+          "path": "assets/mclone/sounds/kenney/impact/impactGlass_medium_000.ogg",
+          "sha256": "9252d50bfb85edb17d6073c4a7806e10cdb9de56d3dbfc93a4b9727146d2df6d"
+        },
+        {
+          "bytes": 8605,
+          "path": "assets/mclone/sounds/kenney/impact/impactGlass_medium_001.ogg",
+          "sha256": "d3d806cb3012c9ddd87010b30295ccb74d6d8b690077d19e67afd09a9d8feb03"
+        },
+        {
+          "bytes": 8341,
+          "path": "assets/mclone/sounds/kenney/impact/impactGlass_medium_002.ogg",
+          "sha256": "48616f22c95589ed9fe55babf0fd012721d7b2ef1b9e85c2ad6408a2cd7c164f"
+        },
+        {
+          "bytes": 8596,
+          "path": "assets/mclone/sounds/kenney/impact/impactGlass_medium_003.ogg",
+          "sha256": "dccea1ecc3d942ee5fd217c684632638f6c039c97cd3ae59c75ab15d0c3f0b59"
+        },
+        {
+          "bytes": 8397,
+          "path": "assets/mclone/sounds/kenney/impact/impactGlass_medium_004.ogg",
+          "sha256": "853fe77ad46bd0cf106e40e741b039e15b90f73edecd92cde524fbad9e3ebe00"
+        },
+        {
+          "bytes": 6110,
+          "path": "assets/mclone/sounds/kenney/impact/impactMetal_heavy_000.ogg",
+          "sha256": "e07045693e4a2b3d165c424e3dab4c781d9ff8880a386880ac89a51315d7f831"
+        },
+        {
+          "bytes": 7279,
+          "path": "assets/mclone/sounds/kenney/impact/impactMetal_heavy_001.ogg",
+          "sha256": "83554049f81f4db9209379e103c30bfa63f65c42189a03f300b045c2c82e23ae"
+        },
+        {
+          "bytes": 5634,
+          "path": "assets/mclone/sounds/kenney/impact/impactMetal_heavy_002.ogg",
+          "sha256": "b914c8f1eb7c0f34bb165d7c77f4be0351f6be0660c13c53e65424e262e2c093"
+        },
+        {
+          "bytes": 6209,
+          "path": "assets/mclone/sounds/kenney/impact/impactMetal_heavy_003.ogg",
+          "sha256": "b0f2ba4dabde9a87eb9c188a19d31e0c2300fd321adeba08d3b9b8aa011d7037"
+        },
+        {
+          "bytes": 5788,
+          "path": "assets/mclone/sounds/kenney/impact/impactMetal_heavy_004.ogg",
+          "sha256": "6d65b463c0555dd5be16b8db6d2cbe23a94e07a4637779b8ad17d0db3e500a87"
+        },
+        {
+          "bytes": 7651,
+          "path": "assets/mclone/sounds/kenney/impact/impactMetal_light_000.ogg",
+          "sha256": "33b5e6e37c6e9d54e07bf5a89b12c76e879f40c1ea83cdd82714df1d6f9fec6d"
+        },
+        {
+          "bytes": 6967,
+          "path": "assets/mclone/sounds/kenney/impact/impactMetal_light_001.ogg",
+          "sha256": "fba69c467ddd85da7b1d82e259f936b876d9ba6a3d6f1b24bdd10468e46bfe08"
+        },
+        {
+          "bytes": 6804,
+          "path": "assets/mclone/sounds/kenney/impact/impactMetal_light_002.ogg",
+          "sha256": "25a96f90a9a1f88a531e824e126f0519504625e5635e65a72e4f31611428db29"
+        },
+        {
+          "bytes": 9023,
+          "path": "assets/mclone/sounds/kenney/impact/impactMetal_light_003.ogg",
+          "sha256": "92d5db6bfc672d9dc1b4f390b2900504f013187fa36335472554fafefa9050b1"
+        },
+        {
+          "bytes": 6675,
+          "path": "assets/mclone/sounds/kenney/impact/impactMetal_light_004.ogg",
+          "sha256": "9b1c35820fba507081261f19ab5f461f69a5e2627a7d91acdb73ca3cfc997979"
+        },
+        {
+          "bytes": 7117,
+          "path": "assets/mclone/sounds/kenney/impact/impactMetal_medium_000.ogg",
+          "sha256": "a96f879fec0864a8938e0c745b6996a6c5679c16a234ce31a01cc995e8401003"
+        },
+        {
+          "bytes": 6151,
+          "path": "assets/mclone/sounds/kenney/impact/impactMetal_medium_001.ogg",
+          "sha256": "e8a9eaba7c4d27422e4eeb3e6c7100d5d7dc0f83e005efc98c960adcc5265337"
+        },
+        {
+          "bytes": 5857,
+          "path": "assets/mclone/sounds/kenney/impact/impactMetal_medium_002.ogg",
+          "sha256": "7e89ce2ca0dbda95ea2b78d4b50791cab35c10d20e9f5ccd45dd0b00e99ff548"
+        },
+        {
+          "bytes": 6964,
+          "path": "assets/mclone/sounds/kenney/impact/impactMetal_medium_003.ogg",
+          "sha256": "2a185e2e57211d02c1bdd33b872d6b6a2fe83e6c14f4e56f426a95e717acf08e"
+        },
+        {
+          "bytes": 5744,
+          "path": "assets/mclone/sounds/kenney/impact/impactMetal_medium_004.ogg",
+          "sha256": "03e10f800199c7166208e41c11cf4acfac6cc265467f02357da71972bc967295"
+        },
+        {
+          "bytes": 12035,
+          "path": "assets/mclone/sounds/kenney/impact/impactMining_000.ogg",
+          "sha256": "36b4ea107222d073c67ca64dde26944975609202d5090b2f2021213c1a7e35cd"
+        },
+        {
+          "bytes": 11481,
+          "path": "assets/mclone/sounds/kenney/impact/impactMining_001.ogg",
+          "sha256": "61235a18de3f3d92118235398222dbf51d448f1be70b1c8bc962b10b86f2d9c6"
+        },
+        {
+          "bytes": 11235,
+          "path": "assets/mclone/sounds/kenney/impact/impactMining_002.ogg",
+          "sha256": "059558ec751115ca6b1441e00f0adc837c1a3eeb0a066b109e0fd879fc5d0b0c"
+        },
+        {
+          "bytes": 12160,
+          "path": "assets/mclone/sounds/kenney/impact/impactMining_003.ogg",
+          "sha256": "4237fa2cd80364ad81cd0af44f67d7497f1c5edcc7bdb02cd22be2ba4580c83d"
+        },
+        {
+          "bytes": 11668,
+          "path": "assets/mclone/sounds/kenney/impact/impactMining_004.ogg",
+          "sha256": "8ca3a99d85d845751ad8ce7b40509da58263a62e48cde70e5a30b5ccef4c9a3b"
+        },
+        {
+          "bytes": 12016,
+          "path": "assets/mclone/sounds/kenney/impact/impactPlank_medium_000.ogg",
+          "sha256": "8403cd7a043f0391574c88c55dd205743725b5363d2407f6de145f201690b68f"
+        },
+        {
+          "bytes": 12082,
+          "path": "assets/mclone/sounds/kenney/impact/impactPlank_medium_001.ogg",
+          "sha256": "d7c304319f8beac616231b62041fa8da74045b62d7155965516efb9b19303df4"
+        },
+        {
+          "bytes": 12313,
+          "path": "assets/mclone/sounds/kenney/impact/impactPlank_medium_002.ogg",
+          "sha256": "f6a14da45994229676b4f29e6a35f504b5c2ec2b8166fb1a3b1aa004bc6911ef"
+        },
+        {
+          "bytes": 12138,
+          "path": "assets/mclone/sounds/kenney/impact/impactPlank_medium_003.ogg",
+          "sha256": "0602a7b3eab5f53484f10fe775ee4204e7a2ba9703c886b302e012f7f6fab8de"
+        },
+        {
+          "bytes": 12084,
+          "path": "assets/mclone/sounds/kenney/impact/impactPlank_medium_004.ogg",
+          "sha256": "6a51318c1c63821ea757622b57fafbf44c16c28129f6d39406a784260d87c447"
+        },
+        {
+          "bytes": 6570,
+          "path": "assets/mclone/sounds/kenney/impact/impactSoft_heavy_000.ogg",
+          "sha256": "49e7ca88743fca974bb8676ea138b751cfd8f9033b5e7af8736c2a215d6edbc1"
+        },
+        {
+          "bytes": 6689,
+          "path": "assets/mclone/sounds/kenney/impact/impactSoft_heavy_001.ogg",
+          "sha256": "4d0096364ba9e46119d2ff6df493fdc101bd2e1efae061da5e5f77a53b3fdcb6"
+        },
+        {
+          "bytes": 6749,
+          "path": "assets/mclone/sounds/kenney/impact/impactSoft_heavy_002.ogg",
+          "sha256": "d130ae541951243d3f6ed963d0057450a445ffe117fbf9a084d34eb1635cb563"
+        },
+        {
+          "bytes": 6665,
+          "path": "assets/mclone/sounds/kenney/impact/impactSoft_heavy_003.ogg",
+          "sha256": "d00286a2dc62ee5cb4d42bf56120e7050a855f69e655fc1294410aadd337eba3"
+        },
+        {
+          "bytes": 6478,
+          "path": "assets/mclone/sounds/kenney/impact/impactSoft_heavy_004.ogg",
+          "sha256": "e008f0b6b14f62339c8fe9f9b45cbd6317ba4f66604c4899053b8017020a36f0"
+        },
+        {
+          "bytes": 5351,
+          "path": "assets/mclone/sounds/kenney/impact/impactSoft_medium_000.ogg",
+          "sha256": "7d3ba0bb5e60a11b5d3e558c141303dcf494256675fbf753c0d252d2cf0481e3"
+        },
+        {
+          "bytes": 5506,
+          "path": "assets/mclone/sounds/kenney/impact/impactSoft_medium_001.ogg",
+          "sha256": "7642a4fd43e547afe4f7adfadb3dabb681c0ff512f52c1674bae30a726841faf"
+        },
+        {
+          "bytes": 5358,
+          "path": "assets/mclone/sounds/kenney/impact/impactSoft_medium_002.ogg",
+          "sha256": "5069e3571a77d7f7aae9ef71d0364aa245fb7d64a7c8cc9956f221d03088c089"
+        },
+        {
+          "bytes": 5392,
+          "path": "assets/mclone/sounds/kenney/impact/impactSoft_medium_003.ogg",
+          "sha256": "5c4a1f35fde7e14046931da7bc3d1b23736541b7190ba107e08a379c4ca43cd6"
+        },
+        {
+          "bytes": 5438,
+          "path": "assets/mclone/sounds/kenney/impact/impactSoft_medium_004.ogg",
+          "sha256": "b0a4dea90eed47accf50b768beff1166f2f1486fb139e4d025b2427637624bca"
+        },
+        {
+          "bytes": 6233,
+          "path": "assets/mclone/sounds/kenney/impact/impactWood_heavy_000.ogg",
+          "sha256": "15ff82332f342c30e469215539e1cc57e11b221aa2cf7e11e811d313a9927f3d"
+        },
+        {
+          "bytes": 6239,
+          "path": "assets/mclone/sounds/kenney/impact/impactWood_heavy_001.ogg",
+          "sha256": "f1b07a53ac10c615fff9ba470511fdeb722b5902e1a8520759fc20ad6f546015"
+        },
+        {
+          "bytes": 6146,
+          "path": "assets/mclone/sounds/kenney/impact/impactWood_heavy_002.ogg",
+          "sha256": "ce1e06f2a05f2634c645cb72f6a1623e64bc2d92be34917430a61031fb6597d4"
+        },
+        {
+          "bytes": 6181,
+          "path": "assets/mclone/sounds/kenney/impact/impactWood_heavy_003.ogg",
+          "sha256": "af07511902b309b3f6d8f0e1fafbe93869127fb88099ebdc0aa6a00a98dc3cb0"
+        },
+        {
+          "bytes": 6253,
+          "path": "assets/mclone/sounds/kenney/impact/impactWood_heavy_004.ogg",
+          "sha256": "2c647ae6bd29c72ae2523f7e16e325d8d331b75cc99ab4f637c48a0e11c34677"
+        },
+        {
+          "bytes": 6343,
+          "path": "assets/mclone/sounds/kenney/impact/impactWood_light_000.ogg",
+          "sha256": "eb45e35b4bed784d3f120de4afec4b0d6ac09d9e143cce8cfcb7d739e1b1f3c3"
+        },
+        {
+          "bytes": 6373,
+          "path": "assets/mclone/sounds/kenney/impact/impactWood_light_001.ogg",
+          "sha256": "4b76bf3ccc8e60d19188f3165b778a7817786faa6887c55d9049bcbeef3b425f"
+        },
+        {
+          "bytes": 6366,
+          "path": "assets/mclone/sounds/kenney/impact/impactWood_light_002.ogg",
+          "sha256": "b183cf7a5bd783817e0e4b82af34ac6658fa1927049089dadc8b15c2ecc771dc"
+        },
+        {
+          "bytes": 6381,
+          "path": "assets/mclone/sounds/kenney/impact/impactWood_light_003.ogg",
+          "sha256": "cdfbe8af2fe7ff9ee28f337a0a989deee0f327620da456c8413644880e9d0004"
+        },
+        {
+          "bytes": 6395,
+          "path": "assets/mclone/sounds/kenney/impact/impactWood_light_004.ogg",
+          "sha256": "e10009f67ddaeb3a59a3e1129cfc1615d84ba60ab578eae07e7092ac223f099c"
+        },
+        {
+          "bytes": 6575,
+          "path": "assets/mclone/sounds/kenney/impact/impactWood_medium_000.ogg",
+          "sha256": "1723a9fd25103ed41af06054814e84e65f4a772bac86ab2dc927da93d9592ff5"
+        },
+        {
+          "bytes": 6555,
+          "path": "assets/mclone/sounds/kenney/impact/impactWood_medium_001.ogg",
+          "sha256": "15271dbe8e2872dbb0ff1aeb7b12b2d2b92b7c1951c88532b9ab9158c36dfc73"
+        },
+        {
+          "bytes": 6607,
+          "path": "assets/mclone/sounds/kenney/impact/impactWood_medium_002.ogg",
+          "sha256": "3f3f1917428b828f733a963167833c707bf88296ff158e1559c57c5cb813d799"
+        },
+        {
+          "bytes": 6598,
+          "path": "assets/mclone/sounds/kenney/impact/impactWood_medium_003.ogg",
+          "sha256": "635c37cfcd854b187d643d450ff0397798dcc29ae94da32192b814fae6bd854c"
+        },
+        {
+          "bytes": 6481,
+          "path": "assets/mclone/sounds/kenney/impact/impactWood_medium_004.ogg",
+          "sha256": "7ba48f2f99c91c71be420841a91f1e69c0cbc4fe887fcd7213144d67bb87b13a"
+        },
+        {
+          "bytes": 6997,
+          "path": "assets/mclone/sounds/kenney/interface/back_001.ogg",
+          "sha256": "07db973f79f6ae0f2edc34561e7592e24d0577455919fb602cb8ecc0da991dcf"
+        },
+        {
+          "bytes": 8968,
+          "path": "assets/mclone/sounds/kenney/interface/confirmation_001.ogg",
+          "sha256": "063564703b6094d70718a3e787a55cc9141611e4ecd6b6637f8828f79b4a8c3a"
+        },
+        {
+          "bytes": 7373,
+          "path": "assets/mclone/sounds/kenney/interface/error_001.ogg",
+          "sha256": "46e67425d16339772e8d328fb36a49426c9467418686e11beeb71ff84b0f6433"
+        },
+        {
+          "bytes": 9834,
+          "path": "assets/mclone/sounds/kenney/interface/open_001.ogg",
+          "sha256": "a27c6bb0df7da1e6af5dd5937593c98bc58b6e513f42fe6a3254cd6a6949c648"
+        },
+        {
+          "bytes": 5468,
+          "path": "assets/mclone/sounds/kenney/interface/select_001.ogg",
+          "sha256": "aec0c31ea934a35936ae0d2ab8fac8123c93aa5647f935853a58dbaf90278b7a"
+        },
+        {
+          "bytes": 16508,
+          "path": "assets/mclone/sounds/kenney/rpg/cloth1.ogg",
+          "sha256": "ddb93a3671233f95da0e0b10367f082f7eb42fa6caaddcf776410aa8833c747d"
+        },
+        {
+          "bytes": 11787,
+          "path": "assets/mclone/sounds/kenney/rpg/cloth2.ogg",
+          "sha256": "8a7451193c38bc05483aec25dd193e163a15d44cf7fff04ac7912573231b0201"
+        },
+        {
+          "bytes": 12432,
+          "path": "assets/mclone/sounds/kenney/rpg/cloth3.ogg",
+          "sha256": "a48632d17a4f1416541d261a32a31612e01267144c407fa3ecab3ff410f0085b"
+        },
+        {
+          "bytes": 11043,
+          "path": "assets/mclone/sounds/kenney/rpg/cloth4.ogg",
+          "sha256": "e7ab9a6c4466dea874196c61f59bf1da05cfe58748f42fadd695d441a154a99b"
+        },
+        {
+          "bytes": 15761,
+          "path": "assets/mclone/sounds/kenney/rpg/creak1.ogg",
+          "sha256": "8a346186fd297254248cab8e8117060a52a5cf2a84f603153a762108550ea95e"
+        },
+        {
+          "bytes": 19012,
+          "path": "assets/mclone/sounds/kenney/rpg/creak2.ogg",
+          "sha256": "8a990afdc03aebb91d528f5385e2f95582dbfa8e2c12c71098ab01be9142294a"
+        },
+        {
+          "bytes": 10408,
+          "path": "assets/mclone/sounds/kenney/rpg/creak3.ogg",
+          "sha256": "f9638787f95004b9d2d06f8eff8e99d4e594c21b51947daf562856fbcec905d1"
+        },
+        {
+          "bytes": 9475,
+          "path": "assets/mclone/sounds/kenney/rpg/footstep00.ogg",
+          "sha256": "6fe61ef1fc3bcf0e253bf2eb64759db6cb69e2fe452f4d88cc597ecf78a3d601"
+        },
+        {
+          "bytes": 9900,
+          "path": "assets/mclone/sounds/kenney/rpg/footstep01.ogg",
+          "sha256": "313472dba31fd0c855376069fa368bb5a198c27251cc8398ef464578b7047a4c"
+        },
+        {
+          "bytes": 9528,
+          "path": "assets/mclone/sounds/kenney/rpg/footstep02.ogg",
+          "sha256": "2d9575b7dead6e1217ca113991fc5229e9b6d998ea0726ebbb277e7398ab888f"
+        },
+        {
+          "bytes": 10559,
+          "path": "assets/mclone/sounds/kenney/rpg/footstep03.ogg",
+          "sha256": "a86756b9af9f370455ab47844239bb07fd1bee7a113068c91f0fcd9b72703fae"
+        },
+        {
+          "bytes": 11303,
+          "path": "assets/mclone/sounds/kenney/rpg/footstep04.ogg",
+          "sha256": "fd264d72a7cd622b82abde202f4ed09fa7de95d34c36473ee938ce66cdf39830"
+        },
+        {
+          "bytes": 10288,
+          "path": "assets/mclone/sounds/kenney/rpg/footstep05.ogg",
+          "sha256": "817957e1f95d97fd36870064c41673895575cde17bccb245f50364c86ed10198"
+        },
+        {
+          "bytes": 9885,
+          "path": "assets/mclone/sounds/kenney/rpg/footstep06.ogg",
+          "sha256": "6cabfe7ae95d227a84066c6e17014ac31cc7c89b14ef51d7877e98352d4a64fb"
+        },
+        {
+          "bytes": 10264,
+          "path": "assets/mclone/sounds/kenney/rpg/footstep07.ogg",
+          "sha256": "42924cdbf998d5b3db180a339fd74afc94c570d594a536687e337ef1bdfdb346"
+        },
+        {
+          "bytes": 9242,
+          "path": "assets/mclone/sounds/kenney/rpg/footstep08.ogg",
+          "sha256": "668f14dc1254d0d0f33025e9c7dbcdf2c2f00462ed0e07fb8f099c1d711c1337"
+        },
+        {
+          "bytes": 9356,
+          "path": "assets/mclone/sounds/kenney/rpg/footstep09.ogg",
+          "sha256": "9324ebb9b2c5bcd078dcb523c6518d38a9f34081069d511602c2efb14ce06ce2"
+        },
+        {
+          "bytes": 25394,
+          "path": "assets/mclone/sounds/kenney/rpg/handleCoins.ogg",
+          "sha256": "8a91f969e932df709df80ee124d86a51389eed9b67f22e5e716bc2bbf60d8dab"
+        },
+        {
+          "bytes": 13094,
+          "path": "assets/mclone/sounds/kenney/rpg/handleCoins2.ogg",
+          "sha256": "4b857968d64f9ac9336a10ffac6694d7547e1f01566ad6857b30bc8db3ee6c32"
+        },
+        {
+          "bytes": 6616,
+          "path": "assets/mclone/sounds/mclone-original/bee_buzz_00.ogg",
+          "sha256": "75fbca9b8b3d4c974ffe859ba31b3d73bed0d5e83c3658dab950dc7e2748ca49"
+        },
+        {
+          "bytes": 6385,
+          "path": "assets/mclone/sounds/mclone-original/bee_buzz_01.ogg",
+          "sha256": "a8f82c523598852148d4a9e127fcd32ffa6cc7b0da9b474180b88058d08884bd"
+        },
+        {
+          "bytes": 4857,
+          "path": "assets/mclone/sounds/mclone-original/deer_alarm_00.ogg",
+          "sha256": "6613e4730b6e6bb598e1081affbb9550530cf3259bb6cf2072b363089fe98768"
+        },
+        {
+          "bytes": 4940,
+          "path": "assets/mclone/sounds/mclone-original/deer_alarm_01.ogg",
+          "sha256": "0487fe31bf712d9412f5a99bd59b4fdc2262001415241ea5dd4a2df225938355"
+        },
+        {
+          "bytes": 5073,
+          "path": "assets/mclone/sounds/mclone-original/deer_contact_00.ogg",
+          "sha256": "e2125e752b9b6710072a67766010f5b5d8d359727a2401ed888a7335ced3be47"
+        },
+        {
+          "bytes": 5196,
+          "path": "assets/mclone/sounds/mclone-original/deer_contact_01.ogg",
+          "sha256": "5f374fec3e24cbe822480c0e37b7130b89268b9b5e6884cd5e049e06ea0f7f9f"
+        },
+        {
+          "bytes": 4256,
+          "path": "assets/mclone/sounds/mclone-original/deer_impact_00.ogg",
+          "sha256": "87f958c19dedac5c6a306dc9171659b2a26930e0713ac048a6d0431aecea5647"
+        },
+        {
+          "bytes": 4314,
+          "path": "assets/mclone/sounds/mclone-original/deer_impact_01.ogg",
+          "sha256": "e42d29ba9fcdfec8a7f6bfadfb1434f86a784f1c4ac21aaf50a95459608baec8"
+        },
+        {
+          "bytes": 5719,
+          "path": "assets/mclone/sounds/mclone-original/mallard_call_00.ogg",
+          "sha256": "8a7eba33728aa64ae1c38e70c0509e8a8c165c70a3df65793c77e7a2576946e1"
+        },
+        {
+          "bytes": 5750,
+          "path": "assets/mclone/sounds/mclone-original/mallard_call_01.ogg",
+          "sha256": "be50c35e8e2be59e1b4a1d4d33a64433b00b713d94012bc77baeccc8d811c087"
         },
         {
           "bytes": 102944,
@@ -35161,19 +35931,19 @@
     }
   },
   "source": {
-    "file_count": 7026,
+    "file_count": 7180,
     "fingerprints": {
       "payload_raw_v1": {
         "algorithm": "sha256",
-        "bytes": 13998537,
-        "file_count": 7026,
-        "sha256": "dda2814c145f5f3cc30cdc602f9154568d900bf916ea2b0f0d864c29fb98c40a"
+        "bytes": 15372707,
+        "file_count": 7180,
+        "sha256": "34f9e3b24a663d6930a03a946067bc6dcda040014556ce264bdfd532ad139f8c"
       },
       "portable_json_text_v1": {
         "algorithm": "sha256",
-        "excluded_file_count": 3087,
-        "fingerprinted_file_count": 3939,
-        "sha256": "fc23cdf024145d4c25e32b4b4fa9981bcc3a57d21429480d3a9d4b821ef3fb42"
+        "excluded_file_count": 3217,
+        "fingerprinted_file_count": 3963,
+        "sha256": "1b6de3477016666de9e78182af209512cbf5fa185bfd435f9916269d0ed2b5b2"
       }
     },
     "root": "reference/minecraft-1.17.1/extracted",
