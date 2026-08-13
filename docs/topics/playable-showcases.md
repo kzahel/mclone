@@ -555,7 +555,13 @@ and later return, no sustained near-zero overlap, the protected off-axis
 garden route and two raids, three player attacks that collapsed the exact
 initial mouth, survival of all four initial rabbits, and newly excavated
 replacement mouths. All eight browser world-record stores remained empty in
-both lanes. Exact public revision 3 acceptance is pending.
+both lanes. Exact pushed revision `013d9303` reproduced the full receipt on
+public desktop and phone under Cloudflare Worker version
+`7c6e4167-517c-435f-ad23-8203b0bd3048`. The inspected end-of-window frame
+digests are
+`3aafa8ffa5c364b28d524939555d5ddfdaad5350b6da1ee09199c8a778c8e4b4`
+and
+`e4e5a29dc03d4d02bd5b320b589e1c50dedcb7126f08ae9dd21daa28071f4218`.
 
 ## Code and Documentation Map
 

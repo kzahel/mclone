@@ -1,7 +1,6 @@
 # Tactical 294: Rabbit Warren Lifecycle and Separation
 
-Status: implementation and local desktop/phone acceptance complete 2026-08-13;
-exact public deployment pending
+Status: complete 2026-08-13, including exact public desktop/phone acceptance
 
 Topic: `rabbit-burrow-ecology`
 
@@ -206,4 +205,15 @@ hit the pre-existing timing-sensitive
 that test passes alone, and the complete `mclone-server` library passes 699/699
 with `--test-threads=1`. No unrelated timing policy was changed in this slice.
 
-Exact pushed/deployed desktop and phone receipts remain the close condition.
+Exact pushed revision `013d93037dec3f26125fdccb825767507f40d9a4`
+deployed as asset version `013d93037dec-20260813185002` and Cloudflare
+Worker version `7c6e4167-517c-435f-ad23-8203b0bd3048`. Public desktop and
+phone gates reproduced the entire local lifecycle receipt: all four IDs hid
+and returned, overlap stayed bounded, two protected carrots were raided after
+the gate opened, the exact initial mouth collapsed after three ordinary
+attacks, all residents survived, and replacement mouth IDs `6,7,8` appeared.
+Every browser world-record store remained empty. The inspected end-of-window
+desktop and phone captures have digests
+`3aafa8ffa5c364b28d524939555d5ddfdaad5350b6da1ee09199c8a778c8e4b4`
+and
+`e4e5a29dc03d4d02bd5b320b589e1c50dedcb7126f08ae9dd21daa28071f4218`.

@@ -8,8 +8,8 @@ Status: **live shared implementation complete under Tacticals
 the shared A* routing and deep-burrow visibility correction, with Tactical
 [`294`](../tactical/294-rabbit-warren-lifecycle-and-separation.md) locally
 accepted for shelter cadence, soft separation, disturbance, collapse,
-resident-safe resettlement, and full-warren dispersal on 2026-08-13. Exact
-public revision 3 deployment remains pending.**
+resident-safe resettlement, and full-warren dispersal on 2026-08-13. Revision
+3 has exact public desktop/phone acceptance.**
 
 ## Purpose
 
@@ -158,7 +158,9 @@ hide and return, no sustained near-zero pair overlap, the protected-garden
 route and two real raids, three normal attacks that removed the exact initial
 mouth, survival of all initial residents, and ordinary replacement mouths in
 both desktop and phone lanes. All browser world-record stores remained empty.
-Its exact public receipt is pending.
+Exact pushed revision `013d9303` repeated those results on public desktop and
+phone under Cloudflare Worker version
+`7c6e4167-517c-435f-ad23-8203b0bd3048`.
 
 ## Deliberate Later Work
 
