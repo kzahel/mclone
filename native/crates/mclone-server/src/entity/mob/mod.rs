@@ -3458,8 +3458,10 @@ fn rabbit_player_threat(
     if nearest.tempting_carrot {
         return None;
     }
-    let continuing = behavior == mclone_protocol::RabbitBehavior::Flee
-        || intent.is_some_and(|intent| intent.kind == RabbitIntentKind::Escape);
+    let continuing = matches!(
+        behavior,
+        mclone_protocol::RabbitBehavior::Flee | mclone_protocol::RabbitBehavior::Underground
+    ) || intent.is_some_and(|intent| intent.kind == RabbitIntentKind::Escape);
     let radius_sqr = if continuing {
         RABBIT_FLEE_EXIT_RADIUS_SQR
     } else {
@@ -4105,7 +4107,10 @@ mod tests {
             )),
         );
         mob.rabbit_refuge = Some((home, position));
-        let player = MobPlayerTarget::from_position(Vec3d::new(1.5, 64.0, 0.5));
+        // Nine blocks is outside the initial alarm radius but inside the
+        // continuation radius. Once sheltered, the rabbit should wait for the
+        // player to clear that larger radius before it considers emerging.
+        let player = MobPlayerTarget::from_position(Vec3d::new(9.5, 64.0, 0.5));
 
         for _ in 0..RABBIT_ENTRY_TICKS {
             mob.tick_entity_at_time(&mut entity, &[player], &[], &[], 12_000, &flat_ground);
