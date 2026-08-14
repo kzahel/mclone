@@ -1464,7 +1464,18 @@ async function run() {
             { timeout: 10_000 },
           );
           const openGate = mobileShowcase
-            ? await exerciseFramedTouchInteractionButton(page, "use", "place", 301)
+            ? await exerciseFramedTouchInteractionButton(
+                page,
+                "use",
+                "place",
+                301,
+                () => page.waitForFunction(
+                  (closedState) => globalThis.__mcloneWebApp
+                    .blockStateAt?.(16, 65, 14)?.blockStateId !== closedState,
+                  initialGateState,
+                  { timeout: 10_000 },
+                ),
+              )
             : await page.evaluate(
                 () => globalThis.__mcloneWebApp.interactBlock?.("place") ?? null,
               );
@@ -9410,8 +9421,15 @@ async function exerciseTouchInteractionButton(page, key, action, pointerId) {
  * @param {"attack" | "use"} key
  * @param {"break" | "place"} action
  * @param {number} pointerId
+ * @param {(() => Promise<void>) | null} [acceptance]
  */
-async function exerciseFramedTouchInteractionButton(page, key, action, pointerId) {
+async function exerciseFramedTouchInteractionButton(
+  page,
+  key,
+  action,
+  pointerId,
+  acceptance = null,
+) {
   // Selection and movement commands can still be crossing the worker boundary
   // after their pointers are released. Do not let one of those commands make a
   // subsequent interaction button look accepted before its own command lands.
@@ -9434,28 +9452,38 @@ async function exerciseFramedTouchInteractionButton(page, key, action, pointerId
   }
   const startCommandCount = priorCommandCount;
   await dispatchTouchButtonPointerEvent(page, key, "pointerdown", { pointerId, buttons: 1 });
-  await page.waitForFunction(
-    (startCommandCount) => {
-      const state = globalThis.__mcloneWebApp?.state;
-      return state?.touchPointerActiveCount > 0
-        && (state?.lastReport?.commandCount ?? 0) > startCommandCount;
-    },
-    startCommandCount,
-    { timeout: 10_000 },
-  );
-  const down = await page.evaluate(() => ({
-    activeCount: globalThis.__mcloneWebApp.state.touchPointerActiveCount,
-    commandCount: globalThis.__mcloneWebApp.state.lastReport?.commandCount,
-  }));
-  await dispatchTouchButtonPointerEvent(page, key, "pointerup", { pointerId, buttons: 0 });
-  await page.waitForFunction(
-    () => globalThis.__mcloneWebApp?.state?.touchPointerActiveCount === 0,
-    undefined,
-    { timeout: 10_000 },
-  );
+  let effectObserved = false;
+  let down;
+  try {
+    if (acceptance == null) {
+      await page.waitForFunction(
+        (startCommandCount) => {
+          const state = globalThis.__mcloneWebApp?.state;
+          return state?.touchPointerActiveCount > 0
+            && (state?.lastReport?.commandCount ?? 0) > startCommandCount;
+        },
+        startCommandCount,
+        { timeout: 10_000 },
+      );
+    } else {
+      await acceptance();
+      effectObserved = true;
+    }
+    down = await page.evaluate(() => ({
+      activeCount: globalThis.__mcloneWebApp.state.touchPointerActiveCount,
+      commandCount: globalThis.__mcloneWebApp.state.lastReport?.commandCount,
+    }));
+  } finally {
+    await dispatchTouchButtonPointerEvent(page, key, "pointerup", { pointerId, buttons: 0 });
+    await page.waitForFunction(
+      () => globalThis.__mcloneWebApp?.state?.touchPointerActiveCount === 0,
+      undefined,
+      { timeout: 10_000 },
+    );
+  }
   return {
     ok: down.activeCount > 0
-      && down.commandCount > startCommandCount,
+      && (effectObserved || down.commandCount > startCommandCount),
     expectedAction: action,
     startCommandCount,
     down,
