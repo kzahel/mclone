@@ -1,7 +1,6 @@
 # Tactical 295: Rabbit Refuge Memory and Ecology Agent Foundation
 
-Status: implementation and local acceptance complete 2026-08-14; exact public
-deployment acceptance pending
+Status: complete 2026-08-14; exact public desktop and phone acceptance passed
 
 Topic: `wildlife-ecology-state-model`
 
@@ -224,7 +223,21 @@ the preceding `eff9f619` records the architecture and tactical.
   surviving alternate mouth, and zero records in all eight IndexedDB world
   stores.
 
-Remaining completion work is to push the exact review revision, let the normal
-deployment route publish it, rerun deployed desktop and phone gates, inspect
-the clean first-frame public captures, record the asset/Worker receipts, and
-share the fresh URL.
+Exact pushed revision
+`df837bf06ae268eb12fb7fc563ed2c2aaf06dc1a` deployed through the normal
+after-main-push route as asset version
+`df837bf06ae2-20260814130525` and Cloudflare Worker version
+`89e80b4e-75b4-4f9d-b52c-6d150f95589d`. Public desktop and phone gates both
+repeated alternate-refuge approach, deep hiding, and return without adding a
+third mouth; two real carrot raids; zero sustained overlap; exact primary-mouth
+collapse after three ordinary attacks; all four rabbit identities surviving;
+and the alternate mouth remaining. Every browser world-record store remained
+empty in both lanes.
+
+The clean first-frame desktop and phone captures were inspected at the recipe's
+seed `17507` and entry camera. Their SHA-256 digests are
+`3df1c05815b1b609af8f3e6f832c740808924059e99ef59f27ba97bf648bc5cb`
+and
+`866cbed8a4be978c199df3aaf6abe2149e92412d2b9ea23ed165ee00718a564c`.
+The fresh transient review URL is
+`https://mclone.kzahel.com/app.html?showcase=rabbit-burrow`.

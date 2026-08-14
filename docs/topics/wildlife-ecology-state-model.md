@@ -330,10 +330,14 @@ contains only machinery rabbits use today:
   is derived from sheltered or in-flight claims;
 - active unhomed rabbits forage normally, seek shelter only for rest or safety,
   reuse remembered or nearby active capacity first, and excavate one qualified
-  cell only when no adequate active refuge exists; and
+  cell only when no adequate active refuge exists;
 - 16-block refuge cells and bounded rabbit-neighbor buckets replace hot-path
   broad candidate work. A 1,000-rabbit fixture proves hard admission limits,
-  nonquadratic neighbor candidates, and fair eventual decisions.
+  nonquadratic neighbor candidates, and fair eventual decisions; and
+- revision 4's exact public desktop and phone gates prove one founder can
+  retain an unsuitable familiar mouth, discover and reuse another mouth, hide
+  and return without excavation, then survive exact collapse reconciliation
+  while a transient showcase writes no persistent world records.
 
 This is a common persistence/execution vocabulary, not a generic behavior
 tree, public mod API, or universal home trait. The next extraction decision

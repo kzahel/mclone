@@ -13,8 +13,8 @@ resident-safe resettlement, and full-warren dispersal on 2026-08-13. Revision
 [`295`](../tactical/295-rabbit-refuge-memory-and-ecology-agent-foundation.md)
 lands the 2026-08-14 evolution to bounded rabbit-owned refuge memories,
 replaceable current shelter, derived occupancy, needs-driven reuse, and
-budgeted decisions. Revision 4 has native and local Web desktop/phone
-acceptance; exact public deployment is pending.**
+budgeted decisions. Revision 4 has native, local Web, and exact public
+desktop/phone acceptance.**
 
 ## Purpose
 
@@ -193,7 +193,16 @@ phone gates also preserved four carrots while closed, opened the off-axis gate
 through their ordinary controls, recorded two raids, found no sustained
 overlap, collapsed the exact primary mouth after three hits, retained every
 rabbit identity, kept the alternate mouth, and left all eight browser
-world-record stores empty. Public revision evidence remains pending.
+world-record stores empty. Exact pushed revision `df837bf0` repeated the full
+receipt on public desktop and phone as asset version
+`df837bf06ae2-20260814130525` under Cloudflare Worker version
+`89e80b4e-75b4-4f9d-b52c-6d150f95589d`. The inspected clean first-frame
+desktop and phone digests are
+`3df1c05815b1b609af8f3e6f832c740808924059e99ef59f27ba97bf648bc5cb`
+and
+`866cbed8a4be978c199df3aaf6abe2149e92412d2b9ea23ed165ee00718a564c`.
+The transient review link remains
+`https://mclone.kzahel.com/app.html?showcase=rabbit-burrow`.
 
 ## Deliberate Later Work
 

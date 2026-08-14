@@ -582,7 +582,16 @@ three-hit collapse, survivor identity, alternate-refuge, and zero-persistence
 contracts. Native flat/stereo and local headed WebGPU pixels were inspected.
 The runner now stores a separate first-frame image before its ordinary timed
 interactions mutate the tiny save, so the shared review image matches a fresh
-link. Exact public acceptance remains pending.
+link. Exact pushed revision
+`df837bf06ae268eb12fb7fc563ed2c2aaf06dc1a` deployed as asset version
+`df837bf06ae2-20260814130525` under Cloudflare Worker version
+`89e80b4e-75b4-4f9d-b52c-6d150f95589d`. Public desktop and phone gates
+repeated the full refuge-reuse, garden-route, hiding, separation, collapse,
+identity, surviving-mouth, and zero-persistence receipt. The inspected clean
+first-frame desktop and phone digests are
+`3df1c05815b1b609af8f3e6f832c740808924059e99ef59f27ba97bf648bc5cb`
+and
+`866cbed8a4be978c199df3aaf6abe2149e92412d2b9ea23ed165ee00718a564c`.
 
 ## Code and Documentation Map
 
