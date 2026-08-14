@@ -27,6 +27,7 @@ export type TerrainLabPane =
   | "runtime"
   | "canonical"
   | "plan"
+  | "wildlife"
   | "atlas"
   | "semantic"
   | "cpu"
@@ -224,6 +225,7 @@ const PANES = new Set<TerrainLabPane>([
   "runtime",
   "canonical",
   "plan",
+  "wildlife",
   "atlas",
   "semantic",
   "cpu",
@@ -480,6 +482,7 @@ export function toggleTerrainLabPane(
     (state.profile === "overworld" && pane === "gpu")
     || (state.profile === "overworld" && pane === "runtime")
     || (state.profile === "overworld" && pane === "plan")
+    || (state.profile === "overworld" && pane === "wildlife")
     || (state.profile === "overworld" && pane === "atlas")
     || (state.profile === "overworld" && pane === "semantic")
     || (state.profile !== "overworld" && pane === "macro")
@@ -512,6 +515,7 @@ export function switchTerrainLabProfile(
         pane === "gpu"
         || pane === "runtime"
         || pane === "plan"
+        || pane === "wildlife"
         || pane === "atlas"
         || pane === "semantic"
       )
@@ -538,6 +542,7 @@ export function normalizeTerrainLabProfileState(
       ? pane !== "gpu"
         && pane !== "runtime"
         && pane !== "plan"
+        && pane !== "wildlife"
         && pane !== "atlas"
         && pane !== "semantic"
       : pane !== "macro"
@@ -668,6 +673,7 @@ function paneOrder(pane: TerrainLabPane): number {
     "runtime",
     "canonical",
     "plan",
+    "wildlife",
     "atlas",
     "semantic",
     "cpu",

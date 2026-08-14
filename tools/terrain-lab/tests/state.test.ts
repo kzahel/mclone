@@ -168,8 +168,8 @@ test("maps legacy source links and keeps at least one pane visible", () => {
   assert.equal(toggleTerrainLabPane(onlyCanonical, "canonical"), onlyCanonical);
   assert.deepEqual(toggleTerrainLabPane(onlyCanonical, "gpu").panes, ["canonical", "gpu"]);
   assert.deepEqual(
-    parseTerrainLabState("?panes=runtime,canonical,plan,gpu").panes,
-    ["runtime", "canonical", "plan", "gpu"],
+    parseTerrainLabState("?panes=runtime,canonical,plan,wildlife,gpu").panes,
+    ["runtime", "canonical", "plan", "wildlife", "gpu"],
   );
 });
 
@@ -192,6 +192,7 @@ test("the vanilla profile replaces GPU with fast macro and excludes Mclone-only 
   assert.equal(toggleTerrainLabPane(vanilla, "gpu"), vanilla);
   assert.equal(toggleTerrainLabPane(vanilla, "runtime"), vanilla);
   assert.equal(toggleTerrainLabPane(vanilla, "plan"), vanilla);
+  assert.equal(toggleTerrainLabPane(vanilla, "wildlife"), vanilla);
   assert.equal(toggleTerrainLabPane(vanilla, "atlas"), vanilla);
   assert.equal(toggleTerrainLabPane(vanilla, "semantic"), vanilla);
   assert.deepEqual(

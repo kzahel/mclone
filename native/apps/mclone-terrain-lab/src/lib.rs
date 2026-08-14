@@ -32,6 +32,8 @@ mod streamed_plan_atlas_web;
 mod visual_assets;
 #[cfg(target_arch = "wasm32")]
 mod web;
+#[cfg(target_arch = "wasm32")]
+mod wildlife_population_web;
 
 #[cfg(target_arch = "wasm32")]
 pub use canonical_web::{CanonicalTerrainLab, mclone_terrain_lab_create_canonical};
@@ -57,6 +59,8 @@ pub use semantic_terrain_sandbox_web::{
 pub use streamed_plan_atlas_web::TerrainLabStreamedPlanAtlasCompiler;
 #[cfg(target_arch = "wasm32")]
 pub use web::{TerrainLab, mclone_terrain_lab_create};
+#[cfg(target_arch = "wasm32")]
+pub use wildlife_population_web::TerrainLabWildlifePopulationCompiler;
 
 pub fn terrain_preview_options(
     source: &str,

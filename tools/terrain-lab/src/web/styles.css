@@ -368,6 +368,11 @@ h1 {
   background: rgba(8, 20, 21, 0.9);
 }
 
+.previewToolbar.wildlifePreviewToolbar {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 9px;
+}
+
 .mapToolbar {
   min-height: 62px;
   display: grid;
@@ -663,6 +668,135 @@ h1 {
   display: flex;
   align-items: center;
   gap: 7px;
+}
+
+.wildlifeLegend {
+  position: absolute;
+  z-index: 4;
+  bottom: 48px;
+  left: 16px;
+  display: grid;
+  grid-template-columns: repeat(2, max-content);
+  gap: 7px 16px;
+  padding: 10px 12px;
+  border: 1px solid rgba(235, 245, 238, 0.14);
+  border-radius: 3px;
+  background: rgba(5, 14, 15, 0.82);
+  backdrop-filter: blur(10px);
+  color: #c3cfca;
+  font-family: "DM Mono", monospace;
+  font-size: 8px;
+  letter-spacing: 0.06em;
+  pointer-events: none;
+  text-transform: uppercase;
+}
+
+.wildlifeLegend > span {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.wildlifeLegend i {
+  width: 8px;
+  height: 8px;
+  display: inline-block;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(4, 11, 12, 0.8);
+}
+
+.wildlifeLegend i.empty {
+  background: transparent;
+  border: 1px solid rgba(235, 245, 238, 0.55);
+  box-shadow: none;
+}
+
+.wildlifeLegend i.unsuitable {
+  width: 7px;
+  height: 7px;
+  background: rgba(151, 165, 161, 0.22);
+  box-shadow: none;
+}
+
+.wildlifeInspector {
+  position: absolute;
+  z-index: 5;
+  top: 58px;
+  right: 16px;
+  width: min(310px, calc(100% - 32px));
+  padding: 13px 14px;
+  border: 1px solid rgba(255, 244, 168, 0.28);
+  border-radius: 3px;
+  background: rgba(5, 14, 15, 0.9);
+  backdrop-filter: blur(12px);
+  color: #c6d1cc;
+  font-family: "DM Mono", monospace;
+  font-size: 9px;
+  line-height: 1.45;
+  pointer-events: none;
+}
+
+.wildlifeInspector > div:first-child {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: #95a7a0;
+  text-transform: uppercase;
+}
+
+.wildlifeInspector strong {
+  color: #fff4a8;
+}
+
+.wildlifeInspector p,
+.wildlifeInspector small {
+  display: block;
+  margin: 8px 0;
+  color: #aab9b3;
+}
+
+.wildlifeInspector dl {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5px 12px;
+  margin: 8px 0;
+}
+
+.wildlifeInspector dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.wildlifeInspector dt {
+  color: #7f928a;
+}
+
+.wildlifeInspector dd {
+  margin: 0;
+  color: #e1e8e4;
+}
+
+.wildlifeWeights {
+  display: grid;
+  gap: 4px;
+  margin: 10px 0;
+}
+
+.wildlifeWeights span {
+  position: relative;
+  overflow: hidden;
+  padding: 3px 5px;
+  background: rgba(235, 245, 238, 0.045);
+  color: #d7dfdb;
+  text-transform: uppercase;
+}
+
+.wildlifeWeights i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  max-width: 100%;
+  background: rgba(214, 235, 146, 0.13);
 }
 
 .planLegendSwatch {
@@ -1344,6 +1478,26 @@ button:hover {
     max-width: calc(100% - 20px);
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  .wildlifeLegend {
+    bottom: 40px;
+    left: 10px;
+    gap: 5px 10px;
+    padding: 8px 9px;
+    font-size: 7px;
+  }
+
+  .wildlifeInspector {
+    top: 48px;
+    right: 10px;
+    width: min(270px, calc(100% - 20px));
+    padding: 10px 11px;
+    font-size: 8px;
+  }
+
+  .wildlifeInspector dl {
+    gap: 3px 8px;
   }
 
   .desktopHint {

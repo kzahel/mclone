@@ -46,6 +46,10 @@ import {
   type LandformPlanReport,
 } from "./LandformPlanCanvas";
 import {
+  WildlifePopulationCanvas,
+  type WildlifePopulationReport,
+} from "./WildlifePopulationCanvas";
+import {
   StreamedPlanAtlasCanvas,
   type StreamedPlanAtlasReport,
 } from "./StreamedPlanAtlasCanvas";
@@ -56,6 +60,9 @@ import {
 import type {
   LandformPlanPointReceipt,
 } from "./landform-plan-worker-protocol";
+import type {
+  WildlifePopulationCellReceipt,
+} from "./wildlife-population-worker-protocol";
 import {
   panTerrainLabByFraction,
   zoomTerrainLabByFactor,
@@ -86,6 +93,11 @@ const PANE_OPTIONS: Array<{ value: TerrainLabPane; label: string; note: string }
     value: "plan",
     label: "Landform plan",
     note: "Research basins, divides, drainage, sinks, and quiet space",
+  },
+  {
+    value: "wildlife",
+    label: "Wildlife",
+    note: "Production initial population density, habitat weights, and encounter groups",
   },
   {
     value: "atlas",
@@ -178,6 +190,10 @@ export function App(): React.JSX.Element {
   const [planReport, setPlanReport] = useState<LandformPlanReport>();
   const [planPointReceipt, setPlanPointReceipt] =
     useState<LandformPlanPointReceipt>();
+  const [wildlifeReport, setWildlifeReport] =
+    useState<WildlifePopulationReport>();
+  const [wildlifeReceipt, setWildlifeReceipt] =
+    useState<WildlifePopulationCellReceipt>();
   const [atlasReport, setAtlasReport] = useState<StreamedPlanAtlasReport>();
   const [semanticReport, setSemanticReport] = useState<SemanticTerrainReport>();
   const [atlasCacheEpoch, setAtlasCacheEpoch] = useState(0);
@@ -261,6 +277,7 @@ export function App(): React.JSX.Element {
   const runtimeVisible = state.panes.includes("runtime");
   const canonicalVisible = state.panes.includes("canonical");
   const planVisible = state.panes.includes("plan");
+  const wildlifeVisible = state.panes.includes("wildlife");
   const atlasVisible = state.panes.includes("atlas");
   const semanticVisible = state.panes.includes("semantic");
   const cpuVisible = state.panes.includes("cpu");
@@ -270,7 +287,8 @@ export function App(): React.JSX.Element {
   const terrainPaneVisible =
     runtimeVisible || canonicalVisible || proceduralVisible;
   const viewPaneVisible = terrainPaneVisible || semanticVisible;
-  const diagnosticOnly = (planVisible || atlasVisible) && !viewPaneVisible;
+  const diagnosticOnly = (planVisible || wildlifeVisible || atlasVisible)
+    && !viewPaneVisible;
   const proceduralSource = proceduralSourceForPanes(state.panes);
   const playHref = terrainLabPlayHref(state);
   const primaryVisualUnavailable = visualAssetsReady
@@ -308,6 +326,7 @@ export function App(): React.JSX.Element {
       && (!canonicalVisible || primaryVisualUnavailable || canonicalReport?.complete)
       && (!runtimeVisible || primaryVisualUnavailable || runtimeReport?.targetReady)
       && (!planVisible || planReport)
+      && (!wildlifeVisible || wildlifeReport)
       && (!atlasVisible || atlasReport)
       && (!semanticVisible || semanticReport)
       && (!visualComparisonVisible
@@ -356,6 +375,12 @@ export function App(): React.JSX.Element {
       data-plan-build-ms={planReport?.buildMs ?? ""}
       data-plan-transfer-bytes={planReport?.transferBytes ?? 0}
       data-plan-checksum={planReport?.checksum ?? ""}
+      data-wildlife-ready={wildlifeReport ? "true" : "false"}
+      data-wildlife-build-ms={wildlifeReport?.buildMs ?? ""}
+      data-wildlife-checksum={wildlifeReport?.checksum ?? ""}
+      data-wildlife-cells={wildlifeReport?.cellCount ?? 0}
+      data-wildlife-occupied={wildlifeReport?.occupiedCells ?? 0}
+      data-wildlife-animals={wildlifeReport?.animalCount ?? 0}
       data-atlas-ready={atlasReport ? "true" : "false"}
       data-atlas-topology={atlasReport?.topology ?? ""}
       data-atlas-query-ms={atlasReport?.queryMs ?? ""}
@@ -534,7 +559,10 @@ export function App(): React.JSX.Element {
 
       <main className="labWorkbench">
         <section className="viewerColumn" aria-label="Terrain preview">
-          <div className="previewToolbar" data-testid="preview-source-controls">
+          <div
+            className={`previewToolbar${wildlifeVisible ? " wildlifePreviewToolbar" : ""}`}
+            data-testid="preview-source-controls"
+          >
             <PaneToggles
               profile={state.profile}
               panes={state.panes}
@@ -557,7 +585,9 @@ export function App(): React.JSX.Element {
                 <strong>
                   {atlasVisible
                     ? "2D streamed structural atlas · four synchronized views"
-                    : "2D structural map · fixed 32-block cells"}
+                    : wildlifeVisible
+                      ? "2D production population map · fixed 64-block cells"
+                      : "2D structural map · fixed 32-block cells"}
                 </strong>
                 <small>
                   Terrain view, projection, and surface controls resume when a
@@ -664,6 +694,7 @@ export function App(): React.JSX.Element {
           <div
             className={`paneWorkspace logicalPanes${state.panes.length}${
               !planVisible
+              && !wildlifeVisible
               && !atlasVisible
               && !semanticVisible
               && canonicalVisible
@@ -787,6 +818,19 @@ export function App(): React.JSX.Element {
                 />
               </div>
             ) : null}
+            {wildlifeVisible ? (
+              <div className="paneFrame wildlifePopulationPaneFrame">
+                <WildlifePopulationCanvas
+                  state={state}
+                  camera={camera}
+                  onStateChange={updateState}
+                  onCameraChange={setCamera}
+                  onReport={setWildlifeReport}
+                  onInspect={setWildlifeReceipt}
+                  onError={setError}
+                />
+              </div>
+            ) : null}
             {atlasVisible ? (
               <div className="paneFrame streamedPlanAtlasPaneFrame">
                 <StreamedPlanAtlasCanvas
@@ -868,7 +912,9 @@ export function App(): React.JSX.Element {
             <div>
               <span className="footerLabel">resolution</span>
               <strong>
-                {atlasVisible && !terrainPaneVisible
+                {wildlifeVisible && !terrainPaneVisible
+                  ? "1:64 population cells"
+                  : atlasVisible && !terrainPaneVisible
                   ? "1:1024 plan regions"
                   : semanticVisible && !terrainPaneVisible
                   ? "65 × adaptive lattice"
@@ -1597,6 +1643,12 @@ export function App(): React.JSX.Element {
                 report={planReport}
               />
             ) : null}
+            {wildlifeVisible ? (
+              <WildlifePopulationEvidence
+                receipt={wildlifeReceipt}
+                report={wildlifeReport}
+              />
+            ) : null}
             {atlasVisible ? (
               <StreamedPlanAtlasEvidence report={atlasReport} />
             ) : null}
@@ -1718,6 +1770,67 @@ function planPointFlags(receipt: LandformPlanPointReceipt): string[] {
     receipt.quietCore && "quiet core",
     receipt.cropEdge && "study edge",
   ].filter((flag): flag is string => flag !== false);
+}
+
+function WildlifePopulationEvidence({
+  receipt,
+  report,
+}: {
+  receipt: WildlifePopulationCellReceipt | undefined;
+  report: WildlifePopulationReport | undefined;
+}): React.JSX.Element {
+  if (!report) {
+    return (
+      <div className="pointReceipt empty" data-testid="wildlife-population-evidence">
+        <strong>Planning initial wildlife</strong>
+        <span>The production population cells are compiling off the main thread.</span>
+      </div>
+    );
+  }
+  return (
+    <div className="pointReceipt" data-testid="wildlife-population-evidence">
+      <div className="pointReceiptHeading">
+        <strong>
+          {receipt
+            ? `Cell ${receipt.cellX}, ${receipt.cellZ}`
+            : "Tap the wildlife map to inspect it"}
+        </strong>
+        <span>production · 1:64</span>
+      </div>
+      {receipt ? (
+        <dl className="pointReceiptGrid">
+          <div><dt>Outcome</dt><dd>{receipt.species ?? "empty"}</dd></div>
+          <div><dt>Group size</dt><dd>{receipt.groupSize || "—"}</dd></div>
+          <div><dt>Biome</dt><dd>{receipt.biome}</dd></div>
+          <div><dt>Landform</dt><dd>{receipt.landform}</dd></div>
+          <div><dt>Density / roll</dt><dd>{receipt.desiredDensity} / {receipt.occupancyRoll}</dd></div>
+          <div><dt>Rabbit / deer</dt><dd>{receipt.rabbitWeight} / {receipt.deerWeight}</dd></div>
+          <div><dt>Mallard / bee</dt><dd>{receipt.mallardWeight} / {receipt.beeWeight}</dd></div>
+          <div><dt>Productivity</dt><dd>{receipt.productivity}</dd></div>
+          <div><dt>Open / cover</dt><dd>{receipt.openness} / {receipt.forestCover}</dd></div>
+          <div><dt>Wetland / water</dt><dd>{receipt.wetland} / {receipt.water}</dd></div>
+        </dl>
+      ) : (
+        <span className="pointReceiptPrompt">
+          Inspection exposes desired density, the seed roll, habitat evidence,
+          every species weight, selected anchor, and owning chunk.
+        </span>
+      )}
+      <details className="pointReceiptDetails">
+        <summary>Population build evidence</summary>
+        <dl className="pointReceiptGrid">
+          <div><dt>Build</dt><dd>{report.buildMs.toFixed(2)} ms</dd></div>
+          <div><dt>Cells</dt><dd>{formatInteger(report.cellCount)}</dd></div>
+          <div><dt>Encounters</dt><dd>{formatInteger(report.occupiedCells)}</dd></div>
+          <div><dt>Animals</dt><dd>{formatInteger(report.animalCount)}</dd></div>
+          <div><dt>Rabbit / deer</dt><dd>{report.speciesCounts[0]} / {report.speciesCounts[1]}</dd></div>
+          <div><dt>Mallard / bee</dt><dd>{report.speciesCounts[2]} / {report.speciesCounts[3]}</dd></div>
+          <div><dt>Schema</dt><dd>{report.schema}</dd></div>
+          <div><dt>Checksum</dt><dd>{report.checksum}</dd></div>
+        </dl>
+      </details>
+    </div>
+  );
 }
 
 function StreamedPlanAtlasEvidence({
@@ -2010,6 +2123,7 @@ function PaneToggles({
             ? option.value !== "gpu"
               && option.value !== "runtime"
               && option.value !== "plan"
+              && option.value !== "wildlife"
               && option.value !== "atlas"
               && option.value !== "semantic"
             : option.value !== "macro"
@@ -2052,6 +2166,7 @@ function WorkspaceGuide({
 }): React.JSX.Element {
   const exact = panes.includes("canonical");
   const plan = panes.includes("plan");
+  const wildlife = panes.includes("wildlife");
   const atlas = panes.includes("atlas");
   const semantic = panes.includes("semantic");
   const cpu = panes.includes("cpu");
@@ -2085,6 +2200,9 @@ function WorkspaceGuide({
           : ""}
         {plan
           ? "Landform plan is a research-only 2D structural diagnostic over the fixed 6.144 km study domain. "
+          : ""}
+        {wildlife
+          ? "Wildlife runs the production initial-population planner over seed-addressed habitat cells and shows its exact density, species weights, and encounter owners. "
           : ""}
         {atlas
           ? "Planner atlas queries deterministic canonical regions around the freely pannable viewport and compares the Phase 2 fallback, hierarchy, bounded graphs, and multiscale refinement witness. "
@@ -2125,6 +2243,16 @@ function SourceFootnote({
         Research-only hybrid structure over the fixed 6.144 km Tactical 267
         plane domain. The 32-block cells and skeleton are diagnostic summaries;
         production terrain does not consume this plan.
+      </>
+    );
+  }
+  if (panes.length === 1 && panes[0] === "wildlife") {
+    return (
+      <>
+        Production initial-population decisions from the same coordinate-pure
+        Rust planner used when entity chunks are first realized. The browser
+        only draws habitat receipts and encounter records; it does not simulate
+        or spawn animals.
       </>
     );
   }
