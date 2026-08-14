@@ -40,6 +40,12 @@ Tactical [`292`](../tactical/292-rabbit-burrow-ecology.md) completes the fourth
 chapter: rabbits qualify and excavate one real shallow bank threshold, persist
 as a warren family, emerge on world time, consume/raid real carrots, and make
 ordinary fence/gate state into ecological gameplay.
+Tactical
+[`295`](../tactical/295-rabbit-refuge-memory-and-ecology-agent-foundation.md)
+then replaces permanent warren ownership with rabbit-owned bounded refuge
+knowledge, current derived occupancy, needs-driven reuse before excavation,
+and deterministic bounded ecology work. The reusable state model remains
+server-internal until deer or fox supplies a contrasting second consumer.
 
 ## Scope
 

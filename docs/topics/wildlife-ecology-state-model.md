@@ -2,12 +2,15 @@
 
 Topic: `wildlife-ecology-state-model`
 
-Status: **active design direction recorded 2026-08-14. The current rabbit,
-deer, mallard, and bee implementations provide concrete behavior to preserve,
-but the generalized knowledge, social-memory, and unavailable-world contracts
-described here have not yet landed as one shared implementation. Cadence,
-overload, and bounded crash-rollback policy are also recorded here as target
-semantics rather than completed shared ecology machinery.**
+Status: **active architecture with its first concrete foundation landed under
+Tactical
+[`295`](../tactical/295-rabbit-refuge-memory-and-ecology-agent-foundation.md)
+on 2026-08-14. Rabbits now consume server-internal bounded place knowledge,
+explicit availability outcomes, stable decision schedules, deterministic work
+admission, and spatially bounded refuge/neighbor queries. Deer and fox remain
+the intended contrasting consumers before this becomes a public generalized
+ecology API. Social memory, multi-record crash-atomic persistence, and any
+coarse population layer remain deliberate later work.**
 
 ## Scope
 
@@ -292,11 +295,10 @@ no persistence duplication before quality controls become a product setting.
 
 ## Rabbit Refuge Evolution
 
-The implemented warren is the first durable-refuge pattern, not the owner of a
-universal animal lifecycle. Preserve its one-cell excavation, readable mouth,
-compact hidden interior, capacity, condition, and reuse. Evolve rabbits toward
-remembering scored refuge candidates and using this response when they need
-shelter:
+The warren remains the first durable-refuge pattern, not the owner of a
+universal animal lifecycle. Tactical 295 preserves its one-cell excavation,
+readable mouth, compact hidden interior, capacity, condition, and reuse while
+landing the following response:
 
 1. Try a suitable reachable remembered mouth.
 2. Learn of or locally discover another mouth with capacity.
@@ -307,8 +309,35 @@ shelter:
 An unloaded familiar warren stays remembered rather than becoming destroyed.
 The rabbit may use or establish a local alternative without forcing the old
 chunk to load. Repeated use can change affinity and make dispersal legible.
-Suitability, local density, cooldown or energy cost, reuse, abandonment, and
-collapse must prevent uncontrolled burrow spam.
+Suitability, local density, cooldown, reuse, and collapse prevent uncontrolled
+burrow spam. Energy cost and eventual abandonment remain later tuning.
+
+### Landed rabbit foundation
+
+The first implementation is intentionally internal to `mclone-server` and
+contains only machinery rabbits use today:
+
+- `WorldFactLocator` and up to three `KnownPlace` records preserve stable
+  refuge identity, last-known block position, optional revision, observation
+  time, and familiarity;
+- `Availability` keeps available, currently unavailable, confirmed unsuitable,
+  and confirmed gone outcomes distinct;
+- `DecisionSchedule` makes stable-ID-staggered work due and rejects stale
+  attempt generations, while `EcologyWorkBudget` admits bounded decision,
+  habitat-query, and path-request units without replaying missed work;
+- the entity codec is version 11. Legacy homes migrate to unresolved memories,
+  old permanent warren residents cease to be authority, and current occupancy
+  is derived from sheltered or in-flight claims;
+- active unhomed rabbits forage normally, seek shelter only for rest or safety,
+  reuse remembered or nearby active capacity first, and excavate one qualified
+  cell only when no adequate active refuge exists; and
+- 16-block refuge cells and bounded rabbit-neighbor buckets replace hot-path
+  broad candidate work. A 1,000-rabbit fixture proves hard admission limits,
+  nonquadratic neighbor candidates, and fair eventual decisions.
+
+This is a common persistence/execution vocabulary, not a generic behavior
+tree, public mod API, or universal home trait. The next extraction decision
+must be based on deer replaceable bedding or fox prey/den behavior.
 
 ## Species As Model Pressure Tests
 

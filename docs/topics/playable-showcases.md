@@ -563,6 +563,27 @@ digests are
 and
 `e4e5a29dc03d4d02bd5b320b589e1c50dedcb7126f08ae9dd21daa28071f4218`.
 
+Tactical
+[`295`](../tactical/295-rabbit-refuge-memory-and-ecology-agent-foundation.md)
+advances `rabbit-burrow` to revision 4 using current version-11 persistence
+facts: each rabbit declares at most three `knownRefuges` and an optional
+behavior-consistent `shelteredIn`, while mouths persist capacity, disturbance,
+damage, and last use without resident lists. Validation requires every refuge
+reference to name an actual typed burrow entity.
+
+The tiny save now contains two ordinary excavated mouths and four rabbits. The
+primary capacity-one mouth begins occupied by a truly underground kit. The
+independent founder remembers that unsuitable mouth but starts near the second
+capacity-two refuge. Local desktop and phone gates observed the founder
+approach, enter, disappear, and return through the alternate while all thirteen
+protected samples retained exactly two mouths, proving reuse before digging.
+They also retained the closed-garden/A* raid, hide/return, separation, exact
+three-hit collapse, survivor identity, alternate-refuge, and zero-persistence
+contracts. Native flat/stereo and local headed WebGPU pixels were inspected.
+The runner now stores a separate first-frame image before its ordinary timed
+interactions mutate the tiny save, so the shared review image matches a fresh
+link. Exact public acceptance remains pending.
+
 ## Code and Documentation Map
 
 - `assets/mclone/showcases/`: readable showcase recipes

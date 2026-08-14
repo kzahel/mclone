@@ -1,6 +1,7 @@
 # Tactical 295: Rabbit Refuge Memory and Ecology Agent Foundation
 
-Status: active 2026-08-14
+Status: implementation and local acceptance complete 2026-08-14; exact public
+deployment acceptance pending
 
 Topic: `wildlife-ecology-state-model`
 
@@ -196,4 +197,34 @@ gates, inspect public pixels, and share the fresh URL.
 
 ## Execution Record
 
-Pending implementation.
+Commits `98c36dc8` and `17166e55` land the implementation and showcase proof;
+the preceding `eff9f619` records the architecture and tactical.
+
+- `mclone-server::ecology` now owns the private pure locator, known-place,
+  availability, decision-generation, and deterministic work-budget
+  primitives. Rabbit is the only consumer; no public generic animal API was
+  introduced.
+- Entity persistence is version 11. Rabbits own up to three refuge memories
+  and an optional current shelter; mouths no longer persist residents. Version
+  10 migration, arbitrary entity-record load order, exact collapse
+  invalidation, current occupancy, and SQLite-compatible roundtrip are covered.
+- Rabbit decisions are need-driven and stable-ID staggered. Fixed 64 decision,
+  32 habitat-query, and 32 path-request units per tick defer idle work without
+  catch-up. Spatial refuge cells and bounded neighbor buckets replace broad
+  hot-path candidate scans.
+- The full `cargo test -p mclone-server --lib` lane passed 708 tests, including
+  unavailable memory, alternate reuse, no overbooking, delayed one-cell dig,
+  pathing, hiding, collapse, and the 1,000-rabbit bounded/fair fixture.
+- `rabbit-burrow` revision 4 compiles six saved entities: four rabbits and two
+  typed reusable mouths. Native flat and XR-emulated stereo captures passed.
+- Local headed WebGPU desktop and phone gates both observed the founder use the
+  alternate mouth with all thirteen pre-dig samples fixed at two mouths. Both
+  then recorded two carrot raids, hide/return, zero overlap streak, exact
+  three-hit primary collapse, all four rabbit identities after collapse, the
+  surviving alternate mouth, and zero records in all eight IndexedDB world
+  stores.
+
+Remaining completion work is to push the exact review revision, let the normal
+deployment route publish it, rerun deployed desktop and phone gates, inspect
+the clean first-frame public captures, record the asset/Worker receipts, and
+share the fresh URL.

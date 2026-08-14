@@ -897,6 +897,12 @@ async function run() {
             /\.png$/,
             "-initial.png",
           );
+          await page.evaluate(() => globalThis.__mcloneWebApp?.setDebugOverlay?.(false));
+          await page.waitForFunction(
+            () => globalThis.__mcloneWebApp?.state?.debugOverlayVisible === false,
+            undefined,
+            { timeout: 10_000 },
+          );
           await page.evaluate(() => globalThis.__mcloneWebApp?.pauseRendering?.());
           await page.waitForFunction(
             () => globalThis.__mcloneWebApp?.state?.tickFrameBusy === false,
@@ -904,10 +910,7 @@ async function run() {
             { timeout: 10_000 },
           );
           await page.evaluate(
-            async () => {
-              globalThis.__mcloneWebApp?.setDebugOverlay?.(false);
-              await globalThis.__mcloneWebApp?.renderOneFrameForSmoke?.();
-            },
+            async () => globalThis.__mcloneWebApp?.renderOneFrameForSmoke?.(),
           );
           await page.screenshot({
             path: initialShowcaseScreenshotPath,

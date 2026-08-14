@@ -9,10 +9,12 @@ the shared A* routing and deep-burrow visibility correction, with Tactical
 [`294`](../tactical/294-rabbit-warren-lifecycle-and-separation.md) locally
 accepted for shelter cadence, soft separation, disturbance, collapse,
 resident-safe resettlement, and full-warren dispersal on 2026-08-13. Revision
-3 has exact public desktop/phone acceptance. The 2026-08-14 continuing design
-direction treats this implemented permanent-home relationship as the first
-refuge pattern, not a universal ecology abstraction, and makes replaceable
-warren knowledge the next rabbit evolution.**
+3 has exact public desktop/phone acceptance. Tactical
+[`295`](../tactical/295-rabbit-refuge-memory-and-ecology-agent-foundation.md)
+lands the 2026-08-14 evolution to bounded rabbit-owned refuge memories,
+replaceable current shelter, derived occupancy, needs-driven reuse, and
+budgeted decisions. Revision 4 has native and local Web desktop/phone
+acceptance; exact public deployment is pending.**
 
 ## Purpose
 
@@ -165,6 +167,34 @@ Exact pushed revision `013d9303` repeated those results on public desktop and
 phone under Cloudflare Worker version
 `7c6e4167-517c-435f-ad23-8203b0bd3048`.
 
+Tactical 295 removes permanent warren resident authority. Each rabbit now
+persists up to three refuge memories with stable ID, last-known position,
+optional revision, confirmation time, and familiarity, plus a current
+`sheltered_in` relationship only during actual shelter phases. Version 10
+records migrate into version 11 without interpreting an unloaded mouth as
+destroyed. Current occupancy and navigation reservations are derived from
+rabbit facts, and collapse invalidates only the exact mouth while preserving
+lineage and other knowledge.
+
+An active unhomed rabbit forages instead of immediately excavating. Rest or
+safety need first resolves remembered active capacity, then discovers a nearby
+active mouth, and only then considers one-cell excavation under cooldown and
+local-density bounds. Stable decision deadlines and fixed per-tick decision,
+habitat-query, and path-request units defer idle thought without catch-up;
+16-block mouth lookup and bounded neighbor buckets keep dense populations from
+becoming quadratic. The full 708-test server suite includes a 1,000-rabbit
+fairness and work-bound fixture.
+
+Revision 4's data-only tiny save starts with two ordinary mouths. One familiar
+mouth is temporarily full with a truly underground kit, so the independent
+founder must discover, approach, enter, disappear into, and return from the
+second mouth while the burrow count remains exactly two. Local desktop and
+phone gates also preserved four carrots while closed, opened the off-axis gate
+through their ordinary controls, recorded two raids, found no sustained
+overlap, collapsed the exact primary mouth after three hits, retained every
+rabbit identity, kept the alternate mouth, and left all eight browser
+world-record stores empty. Public revision evidence remains pending.
+
 ## Deliberate Later Work
 
 - player-accessible tunnels, expanding warrens, multiple linked entrances,
@@ -176,15 +206,15 @@ phone under Cloudflare Worker version
   exists; and
 - broader small-animal navigation only when rabbits expose a reusable need.
 
-## Continuing Refuge Direction
+## Refuge Model Boundary
 
-The current implementation correctly proves durable excavation, identity,
-capacity, hiding, destruction, and resettlement. Its `home` relationship must
-not become the template for deer beds, broad territories, nomadic animals, or
-every other spatial behavior. The shared direction now lives in
+The current implementation proves durable excavation, identity, capacity,
+hiding, destruction, reuse, and resettlement without making a `home`
+relationship the template for deer beds, broad territories, nomadic animals,
+or every other spatial behavior. The shared direction lives in
 [`wildlife-ecology-state-model.md`](wildlife-ecology-state-model.md).
 
-For rabbits specifically, evolve the existing shape toward:
+For rabbits specifically, the landed shape is:
 
 - each animal retaining scored knowledge of one or more refuge candidates
   instead of requiring one universally reachable permanent home;
@@ -193,13 +223,14 @@ For rabbits specifically, evolve the existing shape toward:
 - an unloaded remembered mouth producing "no current path" rather than
   "missing," so the rabbit can choose a local alternative without falsely
   deleting or replacing distant truth;
-- nearby family or colony members optionally sharing timestamped refuge,
-  forage, and alarm observations through one bounded social record;
 - a tired or threatened rabbit first trying a suitable reachable known mouth,
   then a locally discovered mouth with capacity, and finally excavating one
   qualifying dirt/grass cell when necessary; and
-- cooldown or energy cost, habitat suitability, local density, reuse, and
-  eventual abandonment/collapse bounding new excavation.
+- cooldown, habitat suitability, local density, reuse, and collapse bounding
+  new excavation.
+
+Bounded social sharing, energy cost, and eventual abandonment remain possible
+later refinements rather than requirements hidden inside the first foundation.
 
 This retains the readable one-cell mouth and compact hidden interior. It does
 not require underground tunnel simulation. It turns inaccessible shelter into
@@ -219,10 +250,7 @@ persistence race or state-machine failure.
 
 ## Recommended Next Direction
 
-Before fox pressure depends on warrens, introduce the shared knowledge and
-unavailable-target vocabulary at the narrowest rabbit-owned boundary. Preserve
-the already accepted shelter, separation, collapse, and resettlement behavior,
-then prove that a rabbit can retain an unavailable familiar refuge, use a
-reachable alternative with capacity, and excavate only when local conditions
-justify it. Deer should provide the contrasting replaceable-site and herd
-memory proof before this vocabulary is declared a general ecology framework.
+Use deer as the contrasting replaceable-site and herd-memory proof before this
+vocabulary is declared a general ecology framework. Fox can then pressure
+rabbit knowledge through prey observation, interruptible pursuit, and
+life-stage-relevant den use without turning warrens into universal homes.
