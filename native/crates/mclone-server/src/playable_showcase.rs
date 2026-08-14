@@ -20,7 +20,7 @@ use sha2::{Digest, Sha256};
 
 use crate::persistence::{
     EntityChunkRecord, EntityPersistentId, EntitySavePayload, EntitySaveRecord, PlayerRecord,
-    PlayerRecordKey,
+    PlayerRecordKey, RabbitRefugeSaveRecord,
 };
 use crate::{
     AUTHORED_WORLD_HEIGHT, AUTHORED_WORLD_MIN_Y, AuthoredWorldFixtureKind, ChunkStoreError,
@@ -1016,12 +1016,38 @@ fn write_entities(
                 raid_cooldown,
                 ..
             } => EntitySavePayload::Rabbit {
-                home: home.as_ref().map(|home| {
+                known_refuges: [
+                    home.as_ref().map(|home| RabbitRefugeSaveRecord {
+                        persistent_id: *persistent_ids
+                            .get(home.as_str())
+                            .expect("validated rabbit burrow reference"),
+                        last_known_position: None,
+                        revision: None,
+                        last_confirmed_tick: 0,
+                        familiarity: 1,
+                    }),
+                    None,
+                    None,
+                ],
+                sheltered_in: matches!(
+                    behavior.protocol(),
+                    RabbitBehavior::EnterBurrow
+                        | RabbitBehavior::Underground
+                        | RabbitBehavior::Emerge
+                )
+                .then(|| {
                     *persistent_ids
-                        .get(home.as_str())
+                        .get(
+                            home.as_ref()
+                                .expect("sheltered showcase rabbit needs a burrow")
+                                .as_str(),
+                        )
                         .expect("validated rabbit burrow reference")
                 }),
                 dig_target: dig_target.map(|target| BlockPos::new(target[0], target[1], target[2])),
+                next_decision_tick: 0,
+                decision_generation: 0,
+                dig_cooldown: 0,
                 life_stage: life_stage.protocol(),
                 age_ticks: *age_ticks,
                 parents,
@@ -1035,20 +1061,14 @@ fn write_entities(
             },
             ShowcaseEntityState::RabbitBurrow {
                 capacity,
-                residents,
+                residents: _,
                 disturbance_ticks,
                 damage,
             } => EntitySavePayload::RabbitBurrow {
                 capacity: *capacity,
-                residents: residents.clone().map(|resident| {
-                    resident.map(|resident| {
-                        *persistent_ids
-                            .get(resident.as_str())
-                            .expect("validated rabbit resident reference")
-                    })
-                }),
                 disturbance_ticks: *disturbance_ticks,
                 damage: *damage,
+                last_used_tick: 0,
             },
         };
         let kind = match &recipe.state {
@@ -1995,11 +2015,7 @@ mod tests {
             .expect("semantic burrow record");
         assert!(matches!(
             burrow.payload,
-            EntitySavePayload::RabbitBurrow {
-                capacity: 6,
-                residents: [Some(_), Some(_), Some(_), None, None, None],
-                ..
-            }
+            EntitySavePayload::RabbitBurrow { capacity: 6, .. }
         ));
         assert_eq!(
             center_entities
@@ -2013,7 +2029,10 @@ mod tests {
             matches!(
                 entity.payload,
                 EntitySavePayload::Rabbit {
-                    home: Some(home),
+                    known_refuges: [Some(RabbitRefugeSaveRecord {
+                        persistent_id: home,
+                        ..
+                    }), None, None],
                     life_stage: RabbitLifeStage::Kit,
                     ..
                 } if home == burrow.persistent_id

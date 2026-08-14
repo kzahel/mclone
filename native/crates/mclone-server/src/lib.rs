@@ -7,6 +7,7 @@ mod cadence;
 mod deer_population;
 mod dimension;
 mod distance_manager;
+mod ecology;
 mod entity;
 mod falling_block;
 mod farming;
@@ -116,8 +117,8 @@ pub use persistence::{
     PersistenceRecordExecutor, PersistenceRecordKeyPart, PersistenceRecordMutation,
     PersistenceRecordNamespace, PersistenceRecordPayload, PersistenceRecordRequest,
     PersistenceRecordRequestId, PersistenceRecordResponse, PersistenceRequestId, PlayerRecord,
-    PlayerRecordKey, RecordExecutorWorldStore, SaveDurability, SavedDataRecord,
-    ScheduledTickRecord, StoreWriteOutcome, SynchronousPersistenceFacade,
+    PlayerRecordKey, RabbitRefugeSaveRecord, RecordExecutorWorldStore, SaveDurability,
+    SavedDataRecord, ScheduledTickRecord, StoreWriteOutcome, SynchronousPersistenceFacade,
     WORLD_METADATA_TARGET_MINECRAFT_VERSION, WORLD_METADATA_VERSION, WorldMetadata,
     WorldMetadataLoad, WorldRecordKey, WorldStore, WorldStoreCompletion, WorldStoreRequest,
     chunk_record_address, decode_chunk_record, decode_dimension_record, decode_entity_chunk_record,

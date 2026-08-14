@@ -80,8 +80,9 @@ const DEER_ANTLER_SHED_ENTITY_CHUNK_RECORD_VERSION: u32 = 7;
 const BEE_ENTITY_CHUNK_RECORD_VERSION: u32 = 8;
 const RABBIT_ENTITY_CHUNK_RECORD_VERSION: u32 = 9;
 const RABBIT_WARREN_LIFECYCLE_ENTITY_CHUNK_RECORD_VERSION: u32 = 10;
+const RABBIT_REFUGE_MEMORY_ENTITY_CHUNK_RECORD_VERSION: u32 = 11;
 const DEER_ANTLER_SHED_LEGACY_REMAINING_TICKS: i32 = 36_000;
-pub const ENTITY_CHUNK_RECORD_VERSION: u32 = 10;
+pub const ENTITY_CHUNK_RECORD_VERSION: u32 = 11;
 const LEGACY_PLAYER_RECORD_VERSION: u32 = 1;
 const STATISTICS_PLAYER_RECORD_VERSION: u32 = 2;
 const PLAYER_LIFE_RECORD_VERSION: u32 = 3;
@@ -494,6 +495,15 @@ pub struct EntitySaveRecord {
     pub payload: EntitySavePayload,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RabbitRefugeSaveRecord {
+    pub persistent_id: EntityPersistentId,
+    pub last_known_position: Option<BlockPos>,
+    pub revision: Option<u64>,
+    pub last_confirmed_tick: u64,
+    pub familiarity: u8,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum EntitySavePayload {
     Cow,
@@ -540,8 +550,12 @@ pub enum EntitySavePayload {
         spread_cooldown: u32,
     },
     Rabbit {
-        home: Option<EntityPersistentId>,
+        known_refuges: [Option<RabbitRefugeSaveRecord>; 3],
+        sheltered_in: Option<EntityPersistentId>,
         dig_target: Option<BlockPos>,
+        next_decision_tick: u64,
+        decision_generation: u32,
+        dig_cooldown: u32,
         life_stage: mclone_protocol::RabbitLifeStage,
         age_ticks: u32,
         parents: [Option<EntityPersistentId>; 2],
@@ -555,9 +569,9 @@ pub enum EntitySavePayload {
     },
     RabbitBurrow {
         capacity: u8,
-        residents: [Option<EntityPersistentId>; 6],
         disturbance_ticks: u32,
         damage: u8,
+        last_used_tick: u64,
     },
     Item {
         stack: ItemStackSaveRecord,
@@ -6540,8 +6554,12 @@ fn write_entity_save_payload(
             write_u32(writer, *spread_cooldown)
         }
         EntitySavePayload::Rabbit {
-            home,
+            known_refuges,
+            sheltered_in,
             dig_target,
+            next_decision_tick,
+            decision_generation,
+            dig_cooldown,
             life_stage,
             age_ticks,
             parents,
@@ -6554,13 +6572,35 @@ fn write_entity_save_payload(
             raid_cooldown,
         } => {
             write_u8(writer, 10)?;
-            write_optional_entity_persistent_id(writer, *home)?;
+            for refuge in known_refuges {
+                write_bool(writer, refuge.is_some())?;
+                if let Some(refuge) = refuge {
+                    write_u64(writer, refuge.persistent_id.most)?;
+                    write_u64(writer, refuge.persistent_id.least)?;
+                    write_bool(writer, refuge.last_known_position.is_some())?;
+                    if let Some(position) = refuge.last_known_position {
+                        write_i32(writer, position.x)?;
+                        write_i32(writer, position.y)?;
+                        write_i32(writer, position.z)?;
+                    }
+                    write_bool(writer, refuge.revision.is_some())?;
+                    if let Some(revision) = refuge.revision {
+                        write_u64(writer, revision)?;
+                    }
+                    write_u64(writer, refuge.last_confirmed_tick)?;
+                    write_u8(writer, refuge.familiarity)?;
+                }
+            }
+            write_optional_entity_persistent_id(writer, *sheltered_in)?;
             write_bool(writer, dig_target.is_some())?;
             if let Some(target) = dig_target {
                 write_i32(writer, target.x)?;
                 write_i32(writer, target.y)?;
                 write_i32(writer, target.z)?;
             }
+            write_u64(writer, *next_decision_tick)?;
+            write_u32(writer, *decision_generation)?;
+            write_u32(writer, *dig_cooldown)?;
             write_u8(
                 writer,
                 match life_stage {
@@ -6582,17 +6622,15 @@ fn write_entity_save_payload(
         }
         EntitySavePayload::RabbitBurrow {
             capacity,
-            residents,
             disturbance_ticks,
             damage,
+            last_used_tick,
         } => {
             write_u8(writer, 11)?;
             write_u8(writer, *capacity)?;
-            for resident in residents {
-                write_optional_entity_persistent_id(writer, *resident)?;
-            }
             write_u32(writer, *disturbance_ticks)?;
-            write_u8(writer, *damage)
+            write_u8(writer, *damage)?;
+            write_u64(writer, *last_used_tick)
         }
         EntitySavePayload::Item {
             stack,
@@ -6779,7 +6817,57 @@ fn read_entity_save_payload(
             })
         }
         10 if codec_version >= RABBIT_ENTITY_CHUNK_RECORD_VERSION => {
-            let home = read_optional_entity_persistent_id(reader)?;
+            let (known_refuges, sheltered_in) =
+                if codec_version >= RABBIT_REFUGE_MEMORY_ENTITY_CHUNK_RECORD_VERSION {
+                    let mut known_refuges = [None; 3];
+                    for refuge in &mut known_refuges {
+                        if !read_bool(reader)? {
+                            continue;
+                        }
+                        let persistent_id =
+                            EntityPersistentId::new(read_u64(reader)?, read_u64(reader)?);
+                        let last_known_position = if read_bool(reader)? {
+                            Some(BlockPos::new(
+                                read_i32(reader)?,
+                                read_i32(reader)?,
+                                read_i32(reader)?,
+                            ))
+                        } else {
+                            None
+                        };
+                        let revision = if read_bool(reader)? {
+                            Some(read_u64(reader)?)
+                        } else {
+                            None
+                        };
+                        let last_confirmed_tick = read_u64(reader)?;
+                        let familiarity = read_u8(reader)?;
+                        if familiarity == 0 {
+                            return Err(ChunkStoreError::InvalidData(
+                                "rabbit refuge familiarity must be nonzero".to_owned(),
+                            ));
+                        }
+                        *refuge = Some(RabbitRefugeSaveRecord {
+                            persistent_id,
+                            last_known_position,
+                            revision,
+                            last_confirmed_tick,
+                            familiarity,
+                        });
+                    }
+                    (known_refuges, read_optional_entity_persistent_id(reader)?)
+                } else {
+                    let home = read_optional_entity_persistent_id(reader)?;
+                    let mut known_refuges = [None; 3];
+                    known_refuges[0] = home.map(|persistent_id| RabbitRefugeSaveRecord {
+                        persistent_id,
+                        last_known_position: None,
+                        revision: None,
+                        last_confirmed_tick: 0,
+                        familiarity: 1,
+                    });
+                    (known_refuges, home)
+                };
             let dig_target = if read_bool(reader)? {
                 Some(BlockPos::new(
                     read_i32(reader)?,
@@ -6789,6 +6877,12 @@ fn read_entity_save_payload(
             } else {
                 None
             };
+            let (next_decision_tick, decision_generation, dig_cooldown) =
+                if codec_version >= RABBIT_REFUGE_MEMORY_ENTITY_CHUNK_RECORD_VERSION {
+                    (read_u64(reader)?, read_u32(reader)?, read_u32(reader)?)
+                } else {
+                    (0, 0, 0)
+                };
             let life_stage = match read_u8(reader)? {
                 0 => mclone_protocol::RabbitLifeStage::Kit,
                 1 => mclone_protocol::RabbitLifeStage::Adult,
@@ -6815,9 +6909,33 @@ fn read_entity_save_payload(
                     "invalid rabbit health state".to_owned(),
                 ));
             }
+            let sheltered_in = if matches!(
+                behavior,
+                mclone_protocol::RabbitBehavior::EnterBurrow
+                    | mclone_protocol::RabbitBehavior::Underground
+                    | mclone_protocol::RabbitBehavior::Emerge
+            ) {
+                sheltered_in
+            } else {
+                None
+            };
+            if sheltered_in.is_some_and(|shelter| {
+                !known_refuges
+                    .iter()
+                    .flatten()
+                    .any(|known| known.persistent_id == shelter)
+            }) {
+                return Err(ChunkStoreError::InvalidData(
+                    "rabbit shelter must also be a known refuge".to_owned(),
+                ));
+            }
             Ok(EntitySavePayload::Rabbit {
-                home,
+                known_refuges,
+                sheltered_in,
                 dig_target,
+                next_decision_tick,
+                decision_generation,
+                dig_cooldown,
                 life_stage,
                 age_ticks,
                 parents,
@@ -6832,26 +6950,34 @@ fn read_entity_save_payload(
         }
         11 if codec_version >= RABBIT_ENTITY_CHUNK_RECORD_VERSION => {
             let capacity = read_u8(reader)?;
-            let mut residents = [None; 6];
-            for resident in &mut residents {
-                *resident = read_optional_entity_persistent_id(reader)?;
-            }
-            let disturbance_ticks = read_u32(reader)?;
-            let damage = if codec_version >= RABBIT_WARREN_LIFECYCLE_ENTITY_CHUNK_RECORD_VERSION {
-                read_u8(reader)?
-            } else {
-                0
-            };
-            if capacity == 0 || usize::from(capacity) > residents.len() {
+            let (disturbance_ticks, damage, last_used_tick) =
+                if codec_version >= RABBIT_REFUGE_MEMORY_ENTITY_CHUNK_RECORD_VERSION {
+                    (read_u32(reader)?, read_u8(reader)?, read_u64(reader)?)
+                } else {
+                    let mut legacy_residents = [None; 6];
+                    for resident in &mut legacy_residents {
+                        *resident = read_optional_entity_persistent_id(reader)?;
+                    }
+                    (
+                        read_u32(reader)?,
+                        if codec_version >= RABBIT_WARREN_LIFECYCLE_ENTITY_CHUNK_RECORD_VERSION {
+                            read_u8(reader)?
+                        } else {
+                            0
+                        },
+                        0,
+                    )
+                };
+            if capacity == 0 || usize::from(capacity) > 6 {
                 return Err(ChunkStoreError::InvalidData(
                     "invalid rabbit burrow capacity".to_owned(),
                 ));
             }
             Ok(EntitySavePayload::RabbitBurrow {
                 capacity,
-                residents,
                 disturbance_ticks,
                 damage,
+                last_used_tick,
             })
         }
         value => Err(ChunkStoreError::InvalidData(format!(
@@ -7628,9 +7754,9 @@ mod tests {
         let resident = EntityPersistentId::new(0xCAFE, 0xBABE);
         let payload = EntitySavePayload::RabbitBurrow {
             capacity: 6,
-            residents: [Some(resident), None, None, None, None, None],
             disturbance_ticks: 17,
             damage: 2,
+            last_used_tick: 44,
         };
         let mut current = Vec::new();
         write_entity_save_payload(&mut current, &payload).unwrap();
@@ -7652,9 +7778,69 @@ mod tests {
                 .unwrap(),
             EntitySavePayload::RabbitBurrow {
                 capacity: 6,
-                residents: [Some(resident), None, None, None, None, None],
                 disturbance_ticks: 17,
                 damage: 0,
+                last_used_tick: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn legacy_rabbit_home_migrates_to_unresolved_memory_and_current_shelter() {
+        let home = EntityPersistentId::new(0xCAFE, 0xBABE);
+        let mut legacy = Vec::new();
+        write_u8(&mut legacy, 10).unwrap();
+        write_optional_entity_persistent_id(&mut legacy, Some(home)).unwrap();
+        write_bool(&mut legacy, false).unwrap();
+        write_u8(&mut legacy, 1).unwrap();
+        write_u32(&mut legacy, 2_400).unwrap();
+        write_optional_entity_persistent_id(&mut legacy, None).unwrap();
+        write_optional_entity_persistent_id(&mut legacy, None).unwrap();
+        write_u8(
+            &mut legacy,
+            rabbit_behavior_code(mclone_protocol::RabbitBehavior::Underground),
+        )
+        .unwrap();
+        write_u32(&mut legacy, 5).unwrap();
+        write_u8(&mut legacy, 3).unwrap();
+        write_u8(&mut legacy, 3).unwrap();
+        write_u32(&mut legacy, 0).unwrap();
+        write_u32(&mut legacy, 0).unwrap();
+        write_u32(&mut legacy, 0).unwrap();
+
+        assert_eq!(
+            read_entity_save_payload(
+                &mut legacy.as_slice(),
+                RABBIT_WARREN_LIFECYCLE_ENTITY_CHUNK_RECORD_VERSION,
+            )
+            .unwrap(),
+            EntitySavePayload::Rabbit {
+                known_refuges: [
+                    Some(RabbitRefugeSaveRecord {
+                        persistent_id: home,
+                        last_known_position: None,
+                        revision: None,
+                        last_confirmed_tick: 0,
+                        familiarity: 1,
+                    }),
+                    None,
+                    None,
+                ],
+                sheltered_in: Some(home),
+                dig_target: None,
+                next_decision_tick: 0,
+                decision_generation: 0,
+                dig_cooldown: 0,
+                life_stage: mclone_protocol::RabbitLifeStage::Adult,
+                age_ticks: 2_400,
+                parents: [None; 2],
+                behavior: mclone_protocol::RabbitBehavior::Underground,
+                behavior_ticks: 5,
+                health: 3,
+                max_health: 3,
+                love_ticks: 0,
+                breed_cooldown: 0,
+                raid_cooldown: 0,
             }
         );
     }

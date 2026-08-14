@@ -114,7 +114,12 @@ fn ordinary_attack_disturbs_then_collapses_a_burrow_without_deleting_residents()
             .expect("ordinary attack should disturb a visible burrow");
         assert!(server.entities.state(burrow.id).is_some());
         assert_eq!(
-            server.entities.mob_state(rabbit_id).unwrap().rabbit_home(),
+            server
+                .entities
+                .mob_state(rabbit_id)
+                .unwrap()
+                .rabbit_familiar_refuge()
+                .map(|known| known.locator.persistent_id),
             Some(burrow.persistent_id)
         );
     }
@@ -138,7 +143,11 @@ fn ordinary_attack_disturbs_then_collapses_a_burrow_without_deleting_residents()
     assert!(rabbit.alive);
     assert!(!rabbit.hidden_from_clients);
     assert_eq!(
-        server.entities.mob_state(rabbit_id).unwrap().rabbit_home(),
+        server
+            .entities
+            .mob_state(rabbit_id)
+            .unwrap()
+            .rabbit_familiar_refuge(),
         None
     );
 }

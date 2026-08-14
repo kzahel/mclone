@@ -5,6 +5,10 @@ use mclone_protocol::{
 };
 use mclone_worldgen::prng::SimpleRandomSource;
 
+use crate::ecology::{
+    DecisionSchedule, KnownPlace, MAX_KNOWN_PLACES, invalidate_known_place, remember_known_place,
+};
+
 const CHICKEN_EGG_TIME_MIN: i32 = 6_000;
 const CHICKEN_EGG_TIME_RANGE: i32 = 6_000;
 const MALLARD_EGG_TIME_MIN: i32 = 8_000;
@@ -50,8 +54,11 @@ pub(crate) struct BeeRuntimeSaveData {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct RabbitRuntimeSaveData {
-    pub(crate) home: Option<EntityPersistentId>,
+    pub(crate) known_refuges: [Option<KnownPlace>; MAX_KNOWN_PLACES],
+    pub(crate) sheltered_in: Option<EntityPersistentId>,
     pub(crate) dig_target: Option<BlockPos>,
+    pub(crate) decision_schedule: DecisionSchedule,
+    pub(crate) dig_cooldown: u32,
     pub(crate) life_stage: RabbitLifeStage,
     pub(crate) age_ticks: u32,
     pub(crate) parents: [Option<EntityPersistentId>; 2],
@@ -273,8 +280,11 @@ pub(super) struct RabbitRuntimeState {
 impl RabbitRuntimeState {
     const fn founder_save_data() -> RabbitRuntimeSaveData {
         RabbitRuntimeSaveData {
-            home: None,
+            known_refuges: [None; MAX_KNOWN_PLACES],
+            sheltered_in: None,
             dig_target: None,
+            decision_schedule: DecisionSchedule::new(0, 0),
+            dig_cooldown: 0,
             life_stage: RabbitLifeStage::Adult,
             age_ticks: RABBIT_GROWTH_REQUIRED_TICKS,
             parents: [None; 2],
@@ -310,8 +320,27 @@ impl RabbitRuntimeState {
         self.saved.behavior_ticks
     }
 
-    pub(super) const fn home(&self) -> Option<EntityPersistentId> {
-        self.saved.home
+    pub(super) const fn known_refuges(&self) -> [Option<KnownPlace>; MAX_KNOWN_PLACES] {
+        self.saved.known_refuges
+    }
+
+    pub(super) const fn sheltered_in(&self) -> Option<EntityPersistentId> {
+        self.saved.sheltered_in
+    }
+
+    pub(super) fn familiar_refuge(&self) -> Option<KnownPlace> {
+        self.saved
+            .known_refuges
+            .iter()
+            .flatten()
+            .copied()
+            .max_by_key(|place| {
+                (
+                    place.familiarity,
+                    place.last_confirmed_tick,
+                    place.locator.persistent_id,
+                )
+            })
     }
 
     pub(super) const fn dig_target(&self) -> Option<BlockPos> {
@@ -341,8 +370,52 @@ impl RabbitRuntimeState {
         self.saved.raid_cooldown == 0 && self.saved.health > 0
     }
 
-    pub(super) fn set_home(&mut self, home: Option<EntityPersistentId>) {
-        self.saved.home = home;
+    pub(super) fn remember_refuge(&mut self, refuge: KnownPlace) {
+        remember_known_place(&mut self.saved.known_refuges, refuge);
+    }
+
+    pub(super) fn confirm_refuge(&mut self, refuge: KnownPlace) {
+        if let Some(known) = self
+            .saved
+            .known_refuges
+            .iter_mut()
+            .flatten()
+            .find(|known| known.locator.persistent_id == refuge.locator.persistent_id)
+        {
+            known.locator = refuge.locator;
+            known.last_confirmed_tick = known.last_confirmed_tick.max(refuge.last_confirmed_tick);
+        } else {
+            remember_known_place(&mut self.saved.known_refuges, refuge);
+        }
+    }
+
+    pub(super) fn invalidate_refuge(&mut self, refuge: EntityPersistentId) -> bool {
+        if self.saved.sheltered_in == Some(refuge) {
+            self.saved.sheltered_in = None;
+        }
+        invalidate_known_place(&mut self.saved.known_refuges, refuge)
+    }
+
+    pub(super) fn set_sheltered_in(&mut self, refuge: Option<EntityPersistentId>) {
+        self.saved.sheltered_in = refuge;
+    }
+
+    pub(super) const fn decision_schedule(&self) -> DecisionSchedule {
+        self.saved.decision_schedule
+    }
+
+    pub(super) fn complete_decision(&mut self, now: u64, interval: u64) -> u32 {
+        let generation = self.saved.decision_schedule.complete(now, interval);
+        debug_assert!(self.saved.decision_schedule.accepts(generation));
+        generation
+    }
+
+    pub(super) fn wake_decision(&mut self, now: u64) {
+        self.saved.decision_schedule.wake(now);
+    }
+
+    pub(super) fn set_dig_cooldown(&mut self, cooldown: u32) {
+        self.saved.dig_cooldown = cooldown;
     }
 
     pub(super) fn set_dig_target(&mut self, target: Option<BlockPos>) {
@@ -363,6 +436,7 @@ impl RabbitRuntimeState {
         self.saved.love_ticks = self.saved.love_ticks.saturating_sub(1);
         self.saved.breed_cooldown = self.saved.breed_cooldown.saturating_sub(1);
         self.saved.raid_cooldown = self.saved.raid_cooldown.saturating_sub(1);
+        self.saved.dig_cooldown = self.saved.dig_cooldown.saturating_sub(1);
         if self.saved.life_stage == RabbitLifeStage::Kit {
             self.saved.age_ticks = self.saved.age_ticks.saturating_add(1);
             if self.saved.age_ticks >= RABBIT_GROWTH_REQUIRED_TICKS {
