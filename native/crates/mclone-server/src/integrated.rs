@@ -44,8 +44,7 @@ use crate::entity::spawning::dry_run::{
 };
 use crate::entity::spawning::initial::{InitialWildlifePlacement, plan_initial_wildlife_placement};
 use crate::entity::spawning::live::{
-    CREATURE_SPAWN_MAX_SPAWNS_PER_TICK, CreatureSpawnDiagnostics, CreatureSpawnProfile,
-    plan_creature_spawns,
+    CREATURE_SPAWN_MAX_SPAWNS_PER_TICK, CreatureSpawnDiagnostics, plan_creature_spawns,
 };
 use crate::entity::spawning::mob_category::MobCategory;
 use crate::entity::spawning::natural::{
@@ -2878,7 +2877,6 @@ impl RealmServer {
                     &evaluation.chunk_inputs.eligible_entity_ticking_chunks,
                     &evaluation.player_positions,
                     max_spawns,
-                    CreatureSpawnProfile::ReferenceFarmAnimals,
                     &mut random,
                     |pos| self.scheduler.block_at_world(pos),
                     |pos| {
@@ -2887,31 +2885,9 @@ impl RealmServer {
                             .map(get_layered_biome_by_id)
                     },
                     |pos| self.scheduler.raw_brightness_at_world(pos, 0),
-                    |_| None,
                 );
                 live = result.diagnostics;
                 let persistent = self.scheduler.entity_chunks_supported();
-                if persistent {
-                    for colony in result.bee_colonies {
-                        if self
-                            .active_dimension
-                            .entities
-                            .has_bee_colony_near(colony.position, 12.0)
-                        {
-                            continue;
-                        }
-                        if let Some(states) =
-                            self.active_dimension.entities.spawn_persistent_bee_colony(
-                                EntityKind::BeeNest,
-                                colony.position,
-                                colony.y_rot_degrees,
-                                &colony.bees,
-                            )
-                        {
-                            spawned_entities.extend(states);
-                        }
-                    }
-                }
                 let requests = result
                     .requests
                     .into_iter()
@@ -3070,12 +3046,6 @@ impl RealmServer {
             live_blocked_player_distance: live.blocked_player_distance,
             live_blocked_world_predicate: live.blocked_world_predicate,
             live_blocked_unsupported: live.blocked_unsupported,
-            live_wetland_habitats_detected: live.wetland_habitats_detected,
-            live_blocked_missing_wetland_data: live.blocked_missing_wetland_data,
-            live_mallard_flocks_spawned: live.mallard_flocks_spawned,
-            live_flowering_habitats_detected: live.flowering_habitats_detected,
-            live_blocked_missing_flowering_data: live.blocked_missing_flowering_data,
-            live_bee_colonies_spawned: live.bee_colonies_spawned,
             dry_run_chunks_checked: evaluation.dry_run.chunks_checked,
             dry_run_chunk_budget_exhausted: evaluation.dry_run.chunk_budget_exhausted,
             dry_run_positions_checked: evaluation.dry_run.positions_checked,

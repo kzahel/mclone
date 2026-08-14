@@ -1033,52 +1033,19 @@ fn generated_wetland_mallard_flock_and_due_egg_survive_reload() {
     let player = server.add_player();
     set_dedicated_chunk_view_and_poll(&mut server, player, wetland, 4);
 
-    let chunks = BTreeSet::from([wetland]);
-    let habitat_observer = Vec3d::new(
-        f64::from(wetland.min_block_x()) + 88.0,
-        64.0,
-        f64::from(wetland.min_block_z()) + 8.0,
-    );
-    let planned = (0..4_096_i64)
-        .find_map(|random_seed| {
-            let mut random = SimpleRandomSource::new(random_seed);
-            let result = plan_creature_spawns(
-                &chunks,
-                &[habitat_observer],
-                CREATURE_SPAWN_MAX_SPAWNS_PER_TICK,
-                CreatureSpawnProfile::McloneOverworld,
-                &mut random,
-                |pos| server.scheduler.block_at_world(pos),
-                |pos| {
-                    server
-                        .scheduler
-                        .biome_id_at_world(pos)
-                        .map(get_layered_biome_by_id)
-                },
-                |pos| server.scheduler.raw_brightness_at_world(pos, 0),
-                |_| None,
-            );
-            result
-                .requests
-                .iter()
-                .all(|request| request.kind == EntityKind::Mallard)
-                .then_some(result)
-                .filter(|result| result.requests.len() >= 2)
-        })
-        .expect("generated wetland should admit a deterministic mallard flock");
-    assert!((2..=4).contains(&planned.requests.len()));
-    assert!(planned.diagnostics.wetland_habitats_detected > 0);
-    assert!(planned.diagnostics.mallard_flocks_spawned > 0);
-
-    let spawned = planned
-        .requests
+    // These positions are a pinned suitable wetland pair for this generated
+    // seed. The test owns mallard/egg durability, not the retired live-spawn
+    // search policy.
+    let positions = [
+        Vec3d::new(-2257.5, 65.0, -815.5),
+        Vec3d::new(-2256.5, 65.0, -817.5),
+    ];
+    let spawned = positions
         .into_iter()
-        .map(|request| {
-            server.entities.spawn_persistent_passive_mob(
-                request.kind,
-                request.position,
-                request.y_rot_degrees,
-            )
+        .map(|position| {
+            server
+                .entities
+                .spawn_persistent_passive_mob(EntityKind::Mallard, position, 180.0)
         })
         .collect::<Vec<_>>();
     server.mark_entity_updates_dirty(&spawned);
