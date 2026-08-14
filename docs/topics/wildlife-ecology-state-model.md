@@ -11,8 +11,12 @@ consume server-internal bounded place knowledge, explicit availability
 outcomes, stable decision schedules, deterministic work admission, spatially
 bounded refuge/neighbor queries, and fair budgeted open-ground escape. Deer
 and fox remain the intended contrasting consumers before this becomes a
-public generalized ecology API. Social memory, multi-record crash-atomic
-persistence, and any coarse population layer remain deliberate later work.**
+public generalized ecology API. Tactical
+[`298`](../tactical/298-deterministic-initial-wildlife-population.md) adds a
+separate seed-authored initial-population geography, shared with Terrain Lab;
+it does not tick unloaded animals or introduce a coarse offscreen population
+simulation. Social memory, multi-record crash-atomic persistence, and any
+coarse population layer remain deliberate later work.**
 
 ## Scope
 

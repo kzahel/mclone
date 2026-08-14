@@ -46,6 +46,13 @@ then replaces permanent warren ownership with rabbit-owned bounded refuge
 knowledge, current derived occupancy, needs-driven reuse before excavation,
 and deterministic bounded ecology work. The reusable state model remains
 server-internal until deer or fox supplies a contrasting second consumer.
+Tactical
+[`298`](../tactical/298-deterministic-initial-wildlife-population.md) now owns
+the population-geography correction: one coordinate-pure initial population
+plan, broad desired-density and species weights, first entity-chunk
+realization, and a Terrain Lab view over the exact production decisions. This
+retains durable individual animals while removing traversal order and repeated
+live habitat scans from Mclone's initial wildlife distribution.
 
 ## Scope
 
