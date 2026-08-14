@@ -234,6 +234,15 @@ Admission priority is:
 5. new paths, broad perception, and social coordination; and
 6. idle wandering and slow memory maintenance.
 
+Urgent safety does not imply a fixed-home requirement. The first rabbit
+correction under Tactical
+[`296`](../tactical/296-rabbit-player-avoidance.md) treats an approaching
+player as an immediate wake, then commits to a bounded complete path whose
+endpoint is farther from the threat. Refuge memory remains an independent
+later shelter input. This is the intended reusable distinction: danger can
+change locomotion now without assuming a loaded home, a reachable habitat
+record, or a species that owns either one.
+
 A thousand densely housed chickens also stress contact, neighbor queries,
 replication, and rendering, not only AI. Budgets limit spikes but do not excuse
 quadratic algorithms. Use spatial buckets for neighbors and contact pairs,

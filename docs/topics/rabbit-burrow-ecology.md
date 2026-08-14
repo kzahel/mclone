@@ -14,7 +14,10 @@ resident-safe resettlement, and full-warren dispersal on 2026-08-13. Revision
 lands the 2026-08-14 evolution to bounded rabbit-owned refuge memories,
 replaceable current shelter, derived occupancy, needs-driven reuse, and
 budgeted decisions. Revision 4 has native, local Web, and exact public
-desktop/phone acceptance.**
+desktop/phone acceptance. Tactical
+[`296`](../tactical/296-rabbit-player-avoidance.md) is active to correct
+player avoidance so a rabbit commits to a reachable open-ground escape instead
+of repeatedly converging on a remembered mouth.**
 
 ## Purpose
 
@@ -86,6 +89,21 @@ recipe guardrails in [`playable-showcases.md`](playable-showcases.md).
 - Java 1.17.1 `Rabbit` remains the source reference for recognizable hop,
   temptation, avoidance, breeding, persistence, and garden-raid semantics.
   Persistent excavated warrens are an explicit Mclone-profile extension.
+
+### Immediate player avoidance
+
+Refuge knowledge is not the rabbit's only safety behavior. An approaching
+non-tempting player must first provoke ordinary locomotion away from the
+threat, even when every remembered mouth is full, disturbed, unloaded, or in
+the wrong direction. This escape owns a committed complete path and a wider
+continuation radius so per-tick retargeting cannot turn flight into rotation or
+mouth congestion. Only the player's selected carrot suppresses avoidance.
+
+Burrows retain a narrower action boundary: an entry already at its threshold
+may finish, and an underground rabbit remains hidden while the threat is near.
+The immediate flee decision does not search, reserve, or excavate a mouth.
+Later sensing refinements such as crouch, field of view, hearing, scent, cover,
+and group alarms require separate evidence after reliable basic avoidance.
 
 ## Acceptance Themes
 
