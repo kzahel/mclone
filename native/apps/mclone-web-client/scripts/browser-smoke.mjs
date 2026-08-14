@@ -1069,7 +1069,182 @@ async function run() {
             throw new Error(`rabbit founder did not reuse the loaded field refuge: ${JSON.stringify({ founderId, founderApproachedFieldRefuge, founderHiddenAtFieldRefuge, protectedBurrowCounts, rabbitSamples })}`);
           }
 
-          await page.evaluate(() => globalThis.__mcloneWebApp.frameBlock?.(14, 64, 14, true));
+          const avoidanceStart = await page.evaluate(() => {
+            const report = globalThis.__mcloneWebApp?.state?.lastReport ?? null;
+            return {
+              report,
+              cameraX: Number(globalThis.__mcloneWebApp?.state?.cameraX),
+              cameraZ: Number(globalThis.__mcloneWebApp?.state?.cameraZ),
+              selectedHotbarSlot: Number(
+                globalThis.__mcloneWebApp?.state?.selectedHotbarSlot,
+              ),
+            };
+          });
+          const avoidanceIds = String(avoidanceStart.report?.rabbitEntityIds ?? "")
+            .split(",")
+            .filter(Boolean);
+          const avoidancePositions = parseRabbitPositions(
+            avoidanceStart.report?.rabbitPositions,
+          );
+          const avoidanceHeights = String(avoidanceStart.report?.rabbitHeights ?? "")
+            .split(",")
+            .map(Number);
+          const avoidanceClips = String(
+            avoidanceStart.report?.rabbitAnimationClips ?? "",
+          ).split(",");
+          const avoidanceSubject = avoidanceIds
+            .map((entityId, index) => ({
+              entityId,
+              index,
+              distance: Math.hypot(
+                avoidancePositions[index][0] - avoidanceStart.cameraX,
+                avoidancePositions[index][2] - avoidanceStart.cameraZ,
+              ),
+            }))
+            .filter(({ index }) => (
+              avoidanceHeights[index] >= 0.4 && avoidanceClips[index] !== "flee"
+            ))
+            .sort((left, right) => left.distance - right.distance)[0];
+          if (!avoidanceSubject || avoidanceStart.selectedHotbarSlot !== 0) {
+            throw new Error(`rabbit avoidance needs one visible adult and an unselected carrot: ${JSON.stringify({ avoidanceStart, avoidanceSubject })}`);
+          }
+          const avoidanceFraming = await page.evaluate(
+            (entityId) => globalThis.__mcloneWebApp.frameEntity?.(Number(entityId), true),
+            avoidanceSubject.entityId,
+          );
+          if (avoidanceFraming?.ok !== true) {
+            throw new Error(`could not frame rabbit avoidance subject: ${JSON.stringify({ avoidanceSubject, avoidanceFraming })}`);
+          }
+          const avoidancePointerId = 299;
+          if (mobileShowcase) {
+            await dispatchCanvasPointerEvent(page, "pointerdown", {
+              pointerId: avoidancePointerId,
+              xFraction: 0.24,
+              yFraction: 0.72,
+              buttons: 1,
+            });
+            await dispatchCanvasPointerEvent(page, "pointermove", {
+              pointerId: avoidancePointerId,
+              xFraction: 0.24,
+              yFraction: 0.50,
+              buttons: 1,
+            });
+          } else {
+            await dispatchKeyboardEvent(page, "keydown", { code: "KeyW", key: "w" });
+          }
+          try {
+            await page.waitForFunction(
+              ({ entityId, startCameraX, startCameraZ }) => {
+                const state = globalThis.__mcloneWebApp?.state;
+                const report = state?.lastReport;
+                const ids = String(report?.rabbitEntityIds ?? "").split(",");
+                const index = ids.indexOf(String(entityId));
+                const clips = String(report?.rabbitAnimationClips ?? "").split(",");
+                const moved = Math.hypot(
+                  Number(state?.cameraX) - startCameraX,
+                  Number(state?.cameraZ) - startCameraZ,
+                );
+                return index >= 0 && clips[index] === "flee" && moved >= 0.5;
+              },
+              {
+                entityId: avoidanceSubject.entityId,
+                startCameraX: avoidanceStart.cameraX,
+                startCameraZ: avoidanceStart.cameraZ,
+              },
+              { timeout: 12_000 },
+            );
+          } finally {
+            if (mobileShowcase) {
+              await dispatchCanvasPointerEvent(page, "pointerup", {
+                pointerId: avoidancePointerId,
+                xFraction: 0.24,
+                yFraction: 0.50,
+                buttons: 0,
+              });
+              await page.waitForFunction(
+                () => globalThis.__mcloneWebApp?.state?.touchPointerActiveCount === 0,
+                undefined,
+                { timeout: 10_000 },
+              );
+            } else {
+              await dispatchKeyboardEvent(page, "keyup", { code: "KeyW", key: "w" });
+            }
+          }
+          const avoidanceDetection = await page.evaluate((entityId) => {
+            const state = globalThis.__mcloneWebApp?.state;
+            const report = state?.lastReport;
+            const ids = String(report?.rabbitEntityIds ?? "").split(",");
+            const index = ids.indexOf(String(entityId));
+            const position = String(report?.rabbitPositions ?? "")
+              .split(";")[index]?.split(",").map(Number);
+            return {
+              entityId,
+              clip: String(report?.rabbitAnimationClips ?? "").split(",")[index],
+              position,
+              player: [Number(state?.cameraX), Number(state?.cameraZ)],
+              distance: position == null ? null : Math.hypot(
+                position[0] - Number(state?.cameraX),
+                position[2] - Number(state?.cameraZ),
+              ),
+            };
+          }, avoidanceSubject.entityId);
+          await page.waitForFunction(
+            ({ entityId, startPosition, startDistance }) => {
+              const state = globalThis.__mcloneWebApp?.state;
+              const report = state?.lastReport;
+              const ids = String(report?.rabbitEntityIds ?? "").split(",");
+              const index = ids.indexOf(String(entityId));
+              if (index < 0) return false;
+              const position = String(report?.rabbitPositions ?? "")
+                .split(";")[index]?.split(",").map(Number);
+              if (!position) return false;
+              const distance = Math.hypot(
+                position[0] - Number(state?.cameraX),
+                position[2] - Number(state?.cameraZ),
+              );
+              const travel = Math.hypot(
+                position[0] - startPosition[0],
+                position[2] - startPosition[2],
+              );
+              return distance >= startDistance + 1.5 && travel >= 1.5;
+            },
+            {
+              entityId: avoidanceSubject.entityId,
+              startPosition: avoidanceDetection.position,
+              startDistance: avoidanceDetection.distance,
+            },
+            { timeout: 12_000 },
+          );
+          const avoidanceFinal = await page.evaluate((entityId) => {
+            const state = globalThis.__mcloneWebApp?.state;
+            const report = state?.lastReport;
+            const ids = String(report?.rabbitEntityIds ?? "").split(",");
+            const index = ids.indexOf(String(entityId));
+            const position = String(report?.rabbitPositions ?? "")
+              .split(";")[index]?.split(",").map(Number);
+            return {
+              clip: String(report?.rabbitAnimationClips ?? "").split(",")[index],
+              position,
+              player: [Number(state?.cameraX), Number(state?.cameraZ)],
+              distance: Math.hypot(
+                position[0] - Number(state?.cameraX),
+                position[2] - Number(state?.cameraZ),
+              ),
+            };
+          }, avoidanceSubject.entityId);
+          const rabbitAvoidanceProbe = {
+            entityId: avoidanceSubject.entityId,
+            selectedHotbarSlot: avoidanceStart.selectedHotbarSlot,
+            detection: avoidanceDetection,
+            final: avoidanceFinal,
+            distanceGain: avoidanceFinal.distance - avoidanceDetection.distance,
+            subjectTravel: Math.hypot(
+              avoidanceFinal.position[0] - avoidanceDetection.position[0],
+              avoidanceFinal.position[2] - avoidanceDetection.position[2],
+            ),
+          };
+
+          await page.evaluate(() => globalThis.__mcloneWebApp.frameBlock?.(16, 65, 14, true));
           const gateApproachPointerId = 300;
           if (mobileShowcase) {
             await dispatchCanvasPointerEvent(page, "pointerdown", {
@@ -1089,7 +1264,10 @@ async function run() {
           }
           try {
             await page.waitForFunction(
-              () => Number(globalThis.__mcloneWebApp?.state?.cameraZ) <= 13,
+              () => Math.hypot(
+                Number(globalThis.__mcloneWebApp?.state?.cameraX) - 16.5,
+                Number(globalThis.__mcloneWebApp?.state?.cameraZ) - 14.5,
+              ) <= 2.4,
               undefined,
               { timeout: 12_000 },
             );
@@ -1144,7 +1322,7 @@ async function run() {
           const openGateState = await page.evaluate(
             () => globalThis.__mcloneWebApp.blockStateAt?.(16, 65, 14)?.blockStateId,
           );
-          await page.evaluate(() => globalThis.__mcloneWebApp.frameBlock?.(14, 64, 24, true));
+          await page.evaluate(() => globalThis.__mcloneWebApp.frameBlock?.(14, 64, 34, true));
           const retreatPointerId = 302;
           if (mobileShowcase) {
             await dispatchCanvasPointerEvent(page, "pointerdown", {
@@ -1164,7 +1342,7 @@ async function run() {
           }
           try {
             await page.waitForFunction(
-              () => Number(globalThis.__mcloneWebApp?.state?.cameraZ) >= 21,
+              () => Number(globalThis.__mcloneWebApp?.state?.cameraZ) >= 30,
               undefined,
               { timeout: 10_000 },
             );
@@ -1542,6 +1720,7 @@ async function run() {
             openGateState,
             gateCommandSent: openGate?.commandSent === true || openGate?.ok === true,
             retreatPosition,
+            rabbitAvoidanceProbe,
           };
           if (
             rabbitIds.length !== 4
@@ -1559,6 +1738,9 @@ async function run() {
             || !rabbitIds.every((id) => postCollapseSeenRabbitIds.has(id))
             || openGateState === initialGateState
             || behaviorProbe.gateCommandSent !== true
+            || rabbitAvoidanceProbe.detection.clip !== "flee"
+            || rabbitAvoidanceProbe.distanceGain < 1.5
+            || rabbitAvoidanceProbe.subjectTravel < 1.5
           ) {
             throw new Error(`rabbit showcase behavior window failed:\n${JSON.stringify({
               behaviorStart,
