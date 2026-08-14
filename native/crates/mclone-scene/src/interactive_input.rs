@@ -1153,11 +1153,16 @@ impl MonoInteractiveInputRouter {
             log::info!("camera view mode {}", view.label());
             disposition.scene_changed = true;
         }
+        let carried_selection_input =
+            frame.selected_hotbar_slot.is_some() || frame.hotbar_step != 0;
         if let Some(slot) = frame.selected_hotbar_slot {
             disposition.scene_changed |= host.select_mono_hotbar_slot(slot);
         }
         if frame.hotbar_step != 0 {
             disposition.scene_changed |= host.step_mono_hotbar_slot(frame.hotbar_step);
+        }
+        if carried_selection_input {
+            disposition.scene_changed |= host.sync_carried_item()?;
         }
         for (pressed, action) in [
             (frame.attack, FlatInputAction::Attack),

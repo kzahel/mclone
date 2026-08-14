@@ -995,6 +995,10 @@ impl McloneSceneHost {
             self.active_world.local_participant.reset_movement();
             return Ok(MonoInputFrameOutcome::default());
         }
+        // Match Java's client-tick carried-item reconciliation: the hotbar
+        // selection itself defines the held item. World actions retain their
+        // own ordering check, but must not be required to publish a change.
+        self.sync_carried_item()?;
         let activation_was_active = self.embedded_world_activation.phase.active();
         let activation_changed = self.advance_embedded_world_activation(dt_seconds);
         let mut camera_changed = false;

@@ -1245,16 +1245,19 @@ impl McloneSceneHost {
     }
 
     pub(crate) fn sync_carried_item(&mut self) -> Result<bool> {
+        if self.active_world.runtime.is_none() {
+            return Ok(false);
+        }
         let Some(command) = self.active_world.interaction.ensure_has_sent_carried_item() else {
             return Ok(false);
         };
-        let Some(runtime) = &mut self.active_world.runtime else {
-            return Ok(false);
-        };
-        runtime
+        self.active_world
+            .runtime
+            .as_mut()
+            .expect("runtime presence checked")
             .send_gameplay_command(command)
             .map(|_| true)
-            .context("failed to sync XR carried item to server")
+            .context("failed to sync carried item to server")
     }
 
     pub(crate) fn sync_player_appearance(&mut self) -> Result<bool> {
