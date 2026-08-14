@@ -1108,6 +1108,152 @@ async function run() {
           if (!avoidanceSubject || avoidanceStart.selectedHotbarSlot !== 0) {
             throw new Error(`rabbit avoidance needs one visible adult and an unselected carrot: ${JSON.stringify({ avoidanceStart, avoidanceSubject })}`);
           }
+          /** @param {number} slot @param {number} pointerId */
+          const selectRabbitHotbarSlot = async (slot, pointerId) => {
+            if (mobileShowcase) {
+              await dispatchTouchHotbarSlotPointerEvent(page, slot, "pointerdown", {
+                pointerId,
+                buttons: 1,
+              });
+              await dispatchTouchHotbarSlotPointerEvent(page, slot, "pointerup", {
+                pointerId,
+                buttons: 0,
+              });
+            } else {
+              const digit = String(slot + 1);
+              await dispatchKeyboardEvent(page, "keydown", {
+                code: `Digit${digit}`,
+                key: digit,
+              });
+              await dispatchKeyboardEvent(page, "keyup", {
+                code: `Digit${digit}`,
+                key: digit,
+              });
+            }
+            await page.waitForFunction(
+              (selected) => globalThis.__mcloneWebApp?.state?.selectedHotbarSlot === selected
+                && globalThis.__mcloneWebApp?.state?.touchPointerActiveCount === 0,
+              slot,
+              { timeout: 10_000 },
+            );
+          };
+          await selectRabbitHotbarSlot(3, 296);
+          const temptationStart = await page.evaluate(() => {
+            const state = globalThis.__mcloneWebApp?.state;
+            const report = state?.lastReport;
+            return {
+              ids: String(report?.rabbitEntityIds ?? "").split(",").filter(Boolean),
+              positions: String(report?.rabbitPositions ?? "")
+                .split(";").filter(Boolean).map(
+                  (position) => position.split(",").map(Number),
+                ),
+              heights: String(report?.rabbitHeights ?? "").split(",").map(Number),
+              player: [Number(state?.cameraX), Number(state?.cameraZ)],
+              interactionCount: Number(state?.interactionCount),
+            };
+          });
+          const temptationStartSubjects = temptationStart.ids.map((entityId, index) => ({
+            entityId,
+            position: temptationStart.positions[index],
+            height: temptationStart.heights[index],
+            distance: Math.hypot(
+              temptationStart.positions[index][0] - temptationStart.player[0],
+              temptationStart.positions[index][2] - temptationStart.player[1],
+            ),
+          }));
+          try {
+            await page.waitForFunction(
+              ({ startSubjects }) => {
+                const state = globalThis.__mcloneWebApp?.state;
+                const report = state?.lastReport;
+                const ids = String(report?.rabbitEntityIds ?? "").split(",");
+                const positions = String(report?.rabbitPositions ?? "")
+                  .split(";").map((position) => position.split(",").map(Number));
+                const clips = String(report?.rabbitAnimationClips ?? "").split(",");
+                return startSubjects.some((start) => {
+                  const index = ids.indexOf(String(start.entityId));
+                  if (index < 0 || start.height < 0.4) return false;
+                  const position = positions[index];
+                  const distance = Math.hypot(
+                    position[0] - Number(state?.cameraX),
+                    position[2] - Number(state?.cameraZ),
+                  );
+                  const travel = Math.hypot(
+                    position[0] - start.position[0],
+                    position[2] - start.position[2],
+                  );
+                  return clips[index] === "hop"
+                    && distance <= start.distance - 0.5
+                    && travel >= 0.5;
+                });
+              },
+              { startSubjects: temptationStartSubjects },
+              { timeout: 12_000 },
+            );
+          } catch (error) {
+            const current = await page.evaluate(() => {
+              const state = globalThis.__mcloneWebApp?.state;
+              const report = state?.lastReport;
+              return {
+                selectedHotbarSlot: state?.selectedHotbarSlot,
+                cameraX: state?.cameraX,
+                cameraZ: state?.cameraZ,
+                interactionCount: state?.interactionCount,
+                commandCount: state?.commandCount,
+                rabbitEntityIds: report?.rabbitEntityIds,
+                rabbitPositions: report?.rabbitPositions,
+                rabbitAnimationClips: report?.rabbitAnimationClips,
+                rabbitTickCounts: report?.rabbitTickCounts,
+              };
+            });
+            throw new Error(`selected carrot did not tempt the framed rabbit without use: ${error instanceof Error ? error.message : String(error)}\n${JSON.stringify({ avoidanceSubject, temptationStart, current }, null, 2)}`);
+          }
+          const temptationFinal = await page.evaluate(() => {
+            const state = globalThis.__mcloneWebApp?.state;
+            const report = state?.lastReport;
+            return {
+              ids: String(report?.rabbitEntityIds ?? "").split(",").filter(Boolean),
+              positions: String(report?.rabbitPositions ?? "")
+                .split(";").filter(Boolean).map(
+                  (position) => position.split(",").map(Number),
+                ),
+              heights: String(report?.rabbitHeights ?? "").split(",").map(Number),
+              clips: String(report?.rabbitAnimationClips ?? "").split(","),
+              player: [Number(state?.cameraX), Number(state?.cameraZ)],
+              interactionCount: Number(state?.interactionCount),
+            };
+          });
+          const temptationSubjects = temptationFinal.ids.map((entityId, index) => {
+            const start = temptationStartSubjects.find(
+              (candidate) => candidate.entityId === entityId,
+            );
+            const position = temptationFinal.positions[index];
+            const distance = Math.hypot(
+              position[0] - temptationFinal.player[0],
+              position[2] - temptationFinal.player[1],
+            );
+            return {
+              entityId,
+              clip: temptationFinal.clips[index],
+              position,
+              distance,
+              approachDistance: start == null ? 0 : start.distance - distance,
+              subjectTravel: start == null ? 0 : Math.hypot(
+                position[0] - start.position[0],
+                position[2] - start.position[2],
+              ),
+            };
+          });
+          const temptationSubject = temptationSubjects
+            .filter((subject) => (
+              subject.clip === "hop"
+              && subject.approachDistance >= 0.5
+              && subject.subjectTravel >= 0.5
+            ))
+            .sort((left, right) => left.distance - right.distance)[0];
+          if (!temptationSubject) {
+            throw new Error(`selected carrot produced no reusable temptation subject: ${JSON.stringify({ temptationStartSubjects, temptationSubjects })}`);
+          }
           const avoidanceFraming = await page.evaluate(
             (entityId) => globalThis.__mcloneWebApp.frameEntity?.(Number(entityId), true),
             avoidanceSubject.entityId,
@@ -1115,6 +1261,11 @@ async function run() {
           if (avoidanceFraming?.ok !== true) {
             throw new Error(`could not frame rabbit avoidance subject: ${JSON.stringify({ avoidanceSubject, avoidanceFraming })}`);
           }
+          await selectRabbitHotbarSlot(0, 297);
+          const avoidanceMovementStart = await page.evaluate(() => ({
+            cameraX: Number(globalThis.__mcloneWebApp?.state?.cameraX),
+            cameraZ: Number(globalThis.__mcloneWebApp?.state?.cameraZ),
+          }));
           const avoidancePointerId = 299;
           if (mobileShowcase) {
             await dispatchCanvasPointerEvent(page, "pointerdown", {
@@ -1148,8 +1299,8 @@ async function run() {
               },
               {
                 entityId: avoidanceSubject.entityId,
-                startCameraX: avoidanceStart.cameraX,
-                startCameraZ: avoidanceStart.cameraZ,
+                startCameraX: avoidanceMovementStart.cameraX,
+                startCameraZ: avoidanceMovementStart.cameraZ,
               },
               { timeout: 12_000 },
             );
@@ -1234,7 +1385,7 @@ async function run() {
           }, avoidanceSubject.entityId);
           const rabbitAvoidanceProbe = {
             entityId: avoidanceSubject.entityId,
-            selectedHotbarSlot: avoidanceStart.selectedHotbarSlot,
+            selectedHotbarSlot: 0,
             detection: avoidanceDetection,
             final: avoidanceFinal,
             distanceGain: avoidanceFinal.distance - avoidanceDetection.distance,
@@ -1242,6 +1393,19 @@ async function run() {
               avoidanceFinal.position[0] - avoidanceDetection.position[0],
               avoidanceFinal.position[2] - avoidanceDetection.position[2],
             ),
+          };
+          const rabbitHeldItemProbe = {
+            entityId: temptationSubject.entityId,
+            selectedCarrotSlot: 3,
+            selectedAwaySlot: 0,
+            temptationStart: temptationStartSubjects.find(
+              (candidate) => candidate.entityId === temptationSubject.entityId,
+            ),
+            temptationFinal: temptationSubject,
+            approachDistance: temptationSubject.approachDistance,
+            subjectTravel: temptationSubject.subjectTravel,
+            worldInteractionCountDelta:
+              temptationFinal.interactionCount - temptationStart.interactionCount,
           };
 
           await page.evaluate(() => globalThis.__mcloneWebApp.frameBlock?.(16, 65, 14, true));
@@ -1720,6 +1884,7 @@ async function run() {
             openGateState,
             gateCommandSent: openGate?.commandSent === true || openGate?.ok === true,
             retreatPosition,
+            rabbitHeldItemProbe,
             rabbitAvoidanceProbe,
           };
           if (
@@ -1738,6 +1903,10 @@ async function run() {
             || !rabbitIds.every((id) => postCollapseSeenRabbitIds.has(id))
             || openGateState === initialGateState
             || behaviorProbe.gateCommandSent !== true
+            || rabbitHeldItemProbe.temptationFinal.clip !== "hop"
+            || rabbitHeldItemProbe.approachDistance < 0.5
+            || rabbitHeldItemProbe.subjectTravel < 0.5
+            || rabbitHeldItemProbe.worldInteractionCountDelta !== 0
             || rabbitAvoidanceProbe.detection.clip !== "flee"
             || rabbitAvoidanceProbe.distanceGain < 1.5
             || rabbitAvoidanceProbe.subjectTravel < 1.5
@@ -9243,9 +9412,27 @@ async function exerciseTouchInteractionButton(page, key, action, pointerId) {
  * @param {number} pointerId
  */
 async function exerciseFramedTouchInteractionButton(page, key, action, pointerId) {
-  const startCommandCount = await page.evaluate(
+  // Selection and movement commands can still be crossing the worker boundary
+  // after their pointers are released. Do not let one of those commands make a
+  // subsequent interaction button look accepted before its own command lands.
+  let stableCommandSamples = 0;
+  let priorCommandCount = await page.evaluate(
     () => globalThis.__mcloneWebApp?.state?.lastReport?.commandCount ?? 0,
   );
+  for (let sample = 0; sample < 30 && stableCommandSamples < 5; sample += 1) {
+    await page.waitForTimeout(20);
+    const commandCount = await page.evaluate(
+      () => globalThis.__mcloneWebApp?.state?.lastReport?.commandCount ?? 0,
+    );
+    stableCommandSamples = commandCount === priorCommandCount
+      ? stableCommandSamples + 1
+      : 0;
+    priorCommandCount = commandCount;
+  }
+  if (stableCommandSamples < 5) {
+    throw new Error("touch interaction command stream did not settle");
+  }
+  const startCommandCount = priorCommandCount;
   await dispatchTouchButtonPointerEvent(page, key, "pointerdown", { pointerId, buttons: 1 });
   await page.waitForFunction(
     (startCommandCount) => {
