@@ -75,7 +75,8 @@ Tactical 291 has landed the first complete chapter:
   producers;
 - Tactical 292 now consumes those same facts in ordinary rabbit ecology:
   closed boundaries protect mature carrots, open gates expose them to bounded
-  raids, and carried carrots tempt and feed persistent rabbits for breeding.
+  raids, and the selected carried carrot automatically tempts persistent
+  rabbits without use while an intentional use feeds them for breeding.
 - Tactical 293 closes the navigation side of that agreement: rabbits use the
   shared A* ground path, reject partial routes, and replan after an ordinary
   nearby gate edit. Its off-axis review garden cannot pass by steering toward

@@ -144,8 +144,9 @@ Tactical 292 has landed the complete first chapter:
 - the visible entry animation remains at the mouth, but the same alive saved
   rabbit leaves client tracking in the deeper `Underground` state and is
   snapshotted again with the same entity and persistent identity on emergence;
-- a held carrot tempts rabbits; using one on a reachable adult consumes the
-  item and two compatible fed residents can create one durable smaller kit;
+- the selected carried carrot automatically tempts rabbits without requiring
+  use; using it on a reachable adult consumes one item, and two compatible fed
+  residents can create one durable smaller kit;
 - a harvested raid target cancels on that block-change tick instead of letting
   a rabbit finish a chew epoch at air;
 - active-hour rests now exercise the full mouth-entry, untracked underground,
@@ -243,6 +244,22 @@ asset version `1d7a37826016-20260814172024` under Cloudflare Worker version
 `770dcd53-927c-4055-a344-c8a0b6f2efbd`. Public desktop/phone avoidance gained
 1.57/1.62 blocks of separation over 1.95 blocks of rabbit travel, and every
 browser world-record store remained empty.
+
+Tactical 297 corrects the shared carried-item publication beneath that
+contract. The hotbar selection now synchronizes immediately on ordinary slot
+input and reconciles on the shared client cadence, matching Java 1.17.1's
+tick-time `ensureHasSentCarriedItem` behavior. Selecting the carrot alone makes
+nearby rabbits approach; selecting an empty slot alone restores avoidance.
+Attack, use, feeding, and showcase-specific simulation are not involved.
+
+The unchanged revision-4 showcase selects both slots through real keyboard or
+rendered phone hotbar controls. Exact pushed revision
+`55bce155f1c39765be42731d3b73a8c609d31896` deployed as asset version
+`55bce155f1c3-20260814191357` under Cloudflare Worker version
+`9f8a9a5f-689e-4653-91d1-101f8024d4c1`. Public desktop/phone gates observed a
+0.54-block approach with zero world interactions, then 1.51/1.55 blocks of
+additional separation after selecting away. The broader refuge, garden,
+hiding, collapse, identity, and zero-persistence receipt remained green.
 
 ## Deliberate Later Work
 

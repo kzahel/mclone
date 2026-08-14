@@ -615,6 +615,26 @@ The phone frame is byte-identical to local; the desktop differs only in 842
 live-rabbit pose pixels while preserving the exact recipe, seed, camera,
 terrain, habitat, and HUD receipt.
 
+Tactical [`297`](../tactical/297-held-item-selection-sync.md) again keeps
+revision 4 data unchanged and adds a held-item transition gate. Ordinary
+desktop or rendered phone hotbar input selects the carrot and observes an
+adult approach without any use/attack/world interaction, then selects an
+empty slot and observes an open-ground adult sustain `flee` with material
+travel and separation. The separate subjects respect the fixture bank's real
+reachability while testing one player-global selected-item state; the harness
+does not command either animal.
+
+Exact pushed revision `55bce155f1c39765be42731d3b73a8c609d31896`
+deployed as asset version `55bce155f1c3-20260814191357` under Worker version
+`9f8a9a5f-689e-4653-91d1-101f8024d4c1`. Public desktop and phone gates saw
+the tempted adult approach by 0.54 blocks with zero interactions, then saw
+avoidance gain 1.51 and 1.55 blocks of separation after selecting away. All
+eight browser world-record stores remained empty. Inspected clean first-frame
+digests are
+`a7b790ba21fb17fc82bbf64703fb5ebcec2489b805f7e08f2324e229dd86f088`
+and
+`866cbed8a4be978c199df3aaf6abe2149e92412d2b9ea23ed165ee00718a564c`.
+
 ## Code and Documentation Map
 
 - `assets/mclone/showcases/`: readable showcase recipes
