@@ -4,13 +4,14 @@ Topic: `playable-showcases`
 
 Status: implemented with four accepted public creature showcases, one accepted
 public field showcase, and one accepted public working-garden showcase as of
-2026-08-13.
+2026-08-14.
 `mallard-ecology` proves a wetland motion/hatching/discovery loop;
 `deer-forest-edge` proves a contrasting multi-chunk habitat, authoritative
 named actions, durable sign, field notes, and an ordinary hunting tool. Bees
 add real flower mutation plus phone-tested managed-habitat placement. Wheat
 adds real till/plant/grow/harvest interactions and phone controls. Rabbits add
-terrain excavation, fence-mediated crop pressure, and feeding. All six
+terrain excavation, fence-mediated crop pressure, feeding, and ordinary-input
+open-ground avoidance. All six
 compile checked data recipes into transient tiny saves through the shared
 native and Web game path.
 
@@ -592,6 +593,27 @@ first-frame desktop and phone digests are
 `3df1c05815b1b609af8f3e6f832c740808924059e99ef59f27ba97bf648bc5cb`
 and
 `866cbed8a4be978c199df3aaf6abe2149e92412d2b9ea23ed165ee00718a564c`.
+
+Tactical [`296`](../tactical/296-rabbit-player-avoidance.md) keeps revision 4
+data unchanged and strengthens its time-window contract. The gate selects a
+visible adult while carrots remain outside the selected slot, approaches via
+ordinary keyboard or rendered touch controls, observes that same rabbit enter
+`flee`, and requires at least 1.5 blocks each of net separation and subject
+travel before continuing the existing refuge, garden, hiding, separation,
+collapse, identity, and persistence checks.
+
+Exact pushed revision `1d7a37826016ce7126ee3558734c88c9acdaf680`
+deployed as asset version `1d7a37826016-20260814172024` under Worker version
+`770dcd53-927c-4055-a344-c8a0b6f2efbd`. Public desktop and phone gates saw
+the avoidance subject gain 1.57 and 1.62 blocks of separation while travelling
+1.95 blocks, and all eight browser stores remained empty. The inspected public
+clean first-frame digests are
+`673c158aaa159472670e21aedf06a4984223dbf6b7ab4cf61b3313ff395ffab4`
+and
+`866cbed8a4be978c199df3aaf6abe2149e92412d2b9ea23ed165ee00718a564c`.
+The phone frame is byte-identical to local; the desktop differs only in 842
+live-rabbit pose pixels while preserving the exact recipe, seed, camera,
+terrain, habitat, and HUD receipt.
 
 ## Code and Documentation Map
 

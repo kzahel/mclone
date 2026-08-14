@@ -1,6 +1,6 @@
 # Tactical 296: Rabbit Player Avoidance
 
-Status: active 2026-08-14
+Status: complete 2026-08-14, including exact public desktop/phone acceptance
 
 Topic: `wildlife-ecology-state-model`
 
@@ -111,4 +111,55 @@ desktop/phone acceptance, inspect captures, and share the fresh transient URL.
 
 ## Execution Record
 
-Pending implementation and exact-revision acceptance.
+The authoritative rabbit owner now treats a nearby non-tempting player as an
+urgent open-ground escape rather than a request to return home. It samples a
+small deterministic set of farther away-side endpoints, accepts only a
+complete shared A* route, commits to that route through the ten-block
+continuation radius, and retries another bounded candidate if the route is
+blocked. Refuge reservations and dig targets are cleared without selecting,
+reserving, or excavating a mouth for the immediate reaction.
+
+Only the selected carrot suppresses avoidance. Entry already in progress
+finishes, and a rabbit that actually observes a threat while entering or
+underground retains a transient threat hold through the continuation radius.
+Underground state alone does not manufacture that history; an exact local
+showcase replay caught and corrected that distinction before deployment.
+
+Urgent escape requests consume the existing 32-path-request tick budget ahead
+of idle habitat work. Persistent-ID ordering with a deterministic rotating
+start preserves eventual admission when early identities remain unroutable.
+The 1,000-rabbit regression proves both the hard per-tick bound and fair
+eventual attempts.
+
+The ordinary data-only `rabbit-burrow` revision remains 4. Its browser gate
+now chooses a visible adult, verifies that carrots are not selected, approaches
+through keyboard or rendered touch-joystick input, observes the same replicated
+rabbit enter `flee`, then requires at least 1.5 blocks of net separation and
+1.5 blocks of subject travel. It continues through the existing refuge reuse,
+hiding and same-ID return, off-axis gate, two raids, separation, three-hit
+collapse, survivor, and zero-persistence gates.
+
+Validation completed with:
+
+- the exact 715-test `mclone-server` suite and the broad native workspace gate;
+- exact native flat and synthetic-stereo revision-4 captures at seed `17507`,
+  entry eye `14.5,66.62,18.5`, and target `15,65.5,9.5`;
+- local desktop Web detection at 7.78 blocks, 1.57 blocks of gained separation,
+  and 1.95 blocks of rabbit travel;
+- local phone Web detection at 7.83 blocks, 1.62 blocks of gained separation,
+  and 1.95 blocks of rabbit travel; and
+- exact public desktop and phone repetitions with comparable 7.78/7.88-block
+  detection, 1.57/1.62-block separation gain, and 1.95-block subject travel.
+
+All eight IndexedDB world-record stores remained empty in every browser lane.
+Exact pushed revision `1d7a37826016ce7126ee3558734c88c9acdaf680`
+deployed as asset version `1d7a37826016-20260814172024` under Cloudflare
+Worker version `770dcd53-927c-4055-a344-c8a0b6f2efbd`. Inspected public clean
+first-frame desktop and phone digests are
+`673c158aaa159472670e21aedf06a4984223dbf6b7ab4cf61b3313ff395ffab4`
+and
+`866cbed8a4be978c199df3aaf6abe2149e92412d2b9ea23ed165ee00718a564c`.
+The phone frame is byte-identical to local. The desktop frame differs in only
+842 of 1,440,000 pixels because its live rabbit pose advanced slightly; seed,
+camera, terrain, habitat, HUD, and behavior receipts match. The fresh review
+link is `https://mclone.kzahel.com/app.html?showcase=rabbit-burrow`.

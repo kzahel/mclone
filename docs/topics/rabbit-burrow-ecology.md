@@ -15,9 +15,10 @@ lands the 2026-08-14 evolution to bounded rabbit-owned refuge memories,
 replaceable current shelter, derived occupancy, needs-driven reuse, and
 budgeted decisions. Revision 4 has native, local Web, and exact public
 desktop/phone acceptance. Tactical
-[`296`](../tactical/296-rabbit-player-avoidance.md) is active to correct
-player avoidance so a rabbit commits to a reachable open-ground escape instead
-of repeatedly converging on a remembered mouth.**
+[`296`](../tactical/296-rabbit-player-avoidance.md) completes reliable player
+avoidance: rabbits now commit to reachable open-ground escape independently
+of refuge memory, with bounded fair path work and exact public ordinary-input
+separation proof.**
 
 ## Purpose
 
@@ -221,6 +222,27 @@ and
 `866cbed8a4be978c199df3aaf6abe2149e92412d2b9ea23ed165ee00718a564c`.
 The transient review link remains
 `https://mclone.kzahel.com/app.html?showcase=rabbit-burrow`.
+
+Tactical 296 separates immediate safety from later shelter selection. A
+non-tempting player inside eight blocks wakes the rabbit immediately; the
+rabbit accepts only a complete shared A* path to a farther away-side endpoint
+and commits through a ten-block continuation radius. Remembered, full,
+disturbed, or inconvenient mouths cannot replace that open-ground response.
+Only the selected carrot suppresses it. Already-started entry finishes, while
+an observed threat can hold the same rabbit underground until the wider radius
+clears without treating every underground rest as prior flight.
+
+Urgent paths retain the shared 32-request tick bound and rotate deterministic
+admission so 1,000 permanently unroutable early identities cannot starve later
+rabbits. The unchanged data-only revision-4 showcase now approaches one adult
+through ordinary desktop or phone controls with carrots unselected, observes
+`flee`, and requires material subject travel and net separation before running
+the existing refuge, garden, hiding, collapse, identity, and persistence
+checks. Exact pushed revision `1d7a3782` repeated the full receipt publicly as
+asset version `1d7a37826016-20260814172024` under Cloudflare Worker version
+`770dcd53-927c-4055-a344-c8a0b6f2efbd`. Public desktop/phone avoidance gained
+1.57/1.62 blocks of separation over 1.95 blocks of rabbit travel, and every
+browser world-record store remained empty.
 
 ## Deliberate Later Work
 

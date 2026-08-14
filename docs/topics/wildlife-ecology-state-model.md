@@ -5,12 +5,14 @@ Topic: `wildlife-ecology-state-model`
 Status: **active architecture with its first concrete foundation landed under
 Tactical
 [`295`](../tactical/295-rabbit-refuge-memory-and-ecology-agent-foundation.md)
-on 2026-08-14. Rabbits now consume server-internal bounded place knowledge,
-explicit availability outcomes, stable decision schedules, deterministic work
-admission, and spatially bounded refuge/neighbor queries. Deer and fox remain
-the intended contrasting consumers before this becomes a public generalized
-ecology API. Social memory, multi-record crash-atomic persistence, and any
-coarse population layer remain deliberate later work.**
+and urgent safety proof completed under Tactical
+[`296`](../tactical/296-rabbit-player-avoidance.md) on 2026-08-14. Rabbits now
+consume server-internal bounded place knowledge, explicit availability
+outcomes, stable decision schedules, deterministic work admission, spatially
+bounded refuge/neighbor queries, and fair budgeted open-ground escape. Deer
+and fox remain the intended contrasting consumers before this becomes a
+public generalized ecology API. Social memory, multi-record crash-atomic
+persistence, and any coarse population layer remain deliberate later work.**
 
 ## Scope
 
@@ -342,7 +344,11 @@ contains only machinery rabbits use today:
   cell only when no adequate active refuge exists;
 - 16-block refuge cells and bounded rabbit-neighbor buckets replace hot-path
   broad candidate work. A 1,000-rabbit fixture proves hard admission limits,
-  nonquadratic neighbor candidates, and fair eventual decisions; and
+  nonquadratic neighbor candidates, and fair eventual decisions;
+- urgent player avoidance bypasses idle decision cadence, consumes the same
+  fixed path budget ahead of habitat work, commits only to complete paths away
+  from danger, and rotates admission so permanently unroutable identities do
+  not starve the rest of a dense population; and
 - revision 4's exact public desktop and phone gates prove one founder can
   retain an unsuitable familiar mouth, discover and reuse another mouth, hide
   and return without excavation, then survive exact collapse reconciliation
