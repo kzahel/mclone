@@ -9,7 +9,10 @@ the shared A* routing and deep-burrow visibility correction, with Tactical
 [`294`](../tactical/294-rabbit-warren-lifecycle-and-separation.md) locally
 accepted for shelter cadence, soft separation, disturbance, collapse,
 resident-safe resettlement, and full-warren dispersal on 2026-08-13. Revision
-3 has exact public desktop/phone acceptance.**
+3 has exact public desktop/phone acceptance. The 2026-08-14 continuing design
+direction treats this implemented permanent-home relationship as the first
+refuge pattern, not a universal ecology abstraction, and makes replaceable
+warren knowledge the next rabbit evolution.**
 
 ## Purpose
 
@@ -173,6 +176,36 @@ phone under Cloudflare Worker version
   exists; and
 - broader small-animal navigation only when rabbits expose a reusable need.
 
+## Continuing Refuge Direction
+
+The current implementation correctly proves durable excavation, identity,
+capacity, hiding, destruction, and resettlement. Its `home` relationship must
+not become the template for deer beds, broad territories, nomadic animals, or
+every other spatial behavior. The shared direction now lives in
+[`wildlife-ecology-state-model.md`](wildlife-ecology-state-model.md).
+
+For rabbits specifically, evolve the existing shape toward:
+
+- each animal retaining scored knowledge of one or more refuge candidates
+  instead of requiring one universally reachable permanent home;
+- a warren remaining a durable, reusable feature with capacity and condition,
+  but not owning the rabbit's identity or entire behavior lifecycle;
+- an unloaded remembered mouth producing "no current path" rather than
+  "missing," so the rabbit can choose a local alternative without falsely
+  deleting or replacing distant truth;
+- nearby family or colony members optionally sharing timestamped refuge,
+  forage, and alarm observations through one bounded social record;
+- a tired or threatened rabbit first trying a suitable reachable known mouth,
+  then a locally discovered mouth with capacity, and finally excavating one
+  qualifying dirt/grass cell when necessary; and
+- cooldown or energy cost, habitat suitability, local density, reuse, and
+  eventual abandonment/collapse bounding new excavation.
+
+This retains the readable one-cell mouth and compact hidden interior. It does
+not require underground tunnel simulation. It turns inaccessible shelter into
+a behavioral decision—search, follow, hide locally, or dig—instead of a
+persistence race or state-machine failure.
+
 ## Code and Content Map
 
 - `reference/minecraft-1.17.1/src/net/minecraft/world/entity/animal/Rabbit.java`
@@ -186,10 +219,10 @@ phone under Cloudflare Worker version
 
 ## Recommended Next Direction
 
-Human review should now judge whether staggered sheltering reads clearly as
-disappearance into the compact warren, whether mutual pushes make groups feel
-alive without looking slippery, and whether alarm, collapse, and autonomous
-resettlement form a legible stewardship consequence outside the bounded
-receipt. The next ecology slice should deepen food/cooking, crop yield,
-protected habitat, or predator pressure rather than immediately add another
-decorative animal.
+Before fox pressure depends on warrens, introduce the shared knowledge and
+unavailable-target vocabulary at the narrowest rabbit-owned boundary. Preserve
+the already accepted shelter, separation, collapse, and resettlement behavior,
+then prove that a rabbit can retain an unavailable familiar refuge, use a
+reachable alternative with capacity, and excavate only when local conditions
+justify it. Deer should provide the contrasting replaceable-site and herd
+memory proof before this vocabulary is declared a general ecology framework.

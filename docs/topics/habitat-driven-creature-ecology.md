@@ -3,7 +3,12 @@
 Topic: `habitat-driven-creature-ecology`
 
 Status: active direction with its biome-habitat foundation and four complete
-original creature-life chapters landed through 2026-08-13. Tactical
+original creature-life chapters landed through 2026-08-13. The continuing
+architecture direction recorded 2026-08-14 keeps one durable animal and
+active-tick model while composing a few bounded spatial, social, and habitat
+patterns; it explicitly rejects a universal permanent-home abstraction and is
+owned by
+[`wildlife-ecology-state-model.md`](wildlife-ecology-state-model.md). Tactical
 [`277`](../tactical/277-habitat-driven-creature-ecology-foundation.md) binds
 natural cow/chicken habitat to generated chunk biomes and proves immediate
 durability across persistent chunk unload/reload. Rich habitat fitness and
@@ -173,6 +178,12 @@ Keep these sources distinct even when they eventually share habitat tests:
 
 The implemented slices use authored residents plus live natural cow, chicken,
 and Mclone mallard spawns. They do not claim a population-summary simulation.
+
+The continuing animal-record, knowledge, unavailable-world, social-memory,
+and bounded spatial-pattern contract lives in
+[`wildlife-ecology-state-model.md`](wildlife-ecology-state-model.md). This
+topic supplies its terrain and habitat inputs rather than owning another AI or
+persistence architecture.
 
 ## Mechanics Ladder
 
@@ -503,6 +514,20 @@ notes, and zero browser-world records. The temporary play link is
 - Decide which consumer actually needs the now-shared habitat-fitness record
   outside server spawning before making it a public cross-crate API. Avoid a
   generic ecology framework without a concrete query or simulation owner.
+- Evolve rabbits from one authoritative permanent-home relationship toward
+  individual refuge knowledge and replaceable warrens. An inaccessible
+  remembered warren should remain remembered; a rabbit needing shelter may
+  locate a reachable mouth with capacity or excavate one suitable cell nearby.
+  Density, suitability, cost/cooldown, reuse, abandonment, and collapse must
+  prevent uncontrolled burrow spam.
+- Use deer as the contrasting proof for replaceable bedding memories, familiar
+  range, and bounded herd knowledge. Persistent player disturbance should
+  lower a bed site's preference and encourage another site rather than leave a
+  deer permanently unable to rest.
+- Add fox predator pressure only after the shared unavailable-target and
+  interruptible-action semantics are explicit. A den should matter during the
+  appropriate life stages without making all fox behavior orbit a permanent
+  home pointer.
 - Build a first stewardship choice around mallards—food attraction, protected
   nesting cover, or restrained hunting—using the now-shared inventory,
   interaction, lineage, and persistence contracts.
@@ -540,3 +565,6 @@ notes, and zero browser-world records. The temporary play link is
   links and enforced live-instantiation evidence
 - [`mclone-overworld-breadth.md`](mclone-overworld-breadth.md): original
   terrain/ecology breadth ledger
+- [`wildlife-ecology-state-model.md`](wildlife-ecology-state-model.md): durable
+  animal knowledge, availability semantics, social memory, spatial patterns,
+  and candidate species pressure tests

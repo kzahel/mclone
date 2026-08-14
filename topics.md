@@ -261,6 +261,9 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
 - `rabbit-burrow-ecology` — one genuinely excavated shallow bank threshold,
   persistent rabbit families, time-aware emergence, garden pressure, carrot
   breeding, and a bounded ordinary-system showcase
+- `wildlife-ecology-state-model` — persistent individual knowledge,
+  unavailable-world semantics, bounded social/habitat patterns, staggered AI
+  work, and consistent lazy checkpoints across varied wildlife
 - `semantic-figure-assets` — one checked TypeScript-to-semantic-JSON asset path
   for actor figures plus world and item props, beginning with mallard prop
   migration and deer runtime promotion
