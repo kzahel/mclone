@@ -264,6 +264,8 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
 - `wildlife-ecology-state-model` — persistent individual knowledge,
   unavailable-world semantics, bounded social/habitat patterns, staggered AI
   work, and consistent lazy checkpoints across varied wildlife
+- `held-item-selection-sync` — automatic shared client-to-server carried-slot
+  synchronization, interaction ordering, and held-item-driven creature behavior
 - `semantic-figure-assets` — one checked TypeScript-to-semantic-JSON asset path
   for actor figures plus world and item props, beginning with mallard prop
   migration and deer runtime promotion
