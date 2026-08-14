@@ -1543,22 +1543,68 @@ impl ServerEntityStore {
             RABBIT_HABITAT_WORK_PER_TICK,
             RABBIT_PATH_WORK_PER_TICK,
         );
+        let threatened_rabbits = ticking_ids
+            .iter()
+            .filter_map(|id| {
+                let entity = self.entities.get(id)?;
+                let mob = self.mobs.get(id)?;
+                mob.rabbit_has_player_threat(*entity, nearby_players)
+                    .then_some((*id, entity.persistent_id))
+            })
+            .collect::<Vec<_>>();
+        let threatened_ids = threatened_rabbits
+            .iter()
+            .map(|(id, _)| *id)
+            .collect::<BTreeSet<_>>();
+        let mut urgent_paths = threatened_rabbits
+            .iter()
+            .filter_map(|(id, persistent_id)| {
+                let entity = self.entities.get(id)?;
+                let mob = self.mobs.get(id)?;
+                mob.rabbit_escape_path_needed(*entity, nearby_players)
+                    .then_some((*id, *persistent_id))
+            })
+            .collect::<Vec<_>>();
+        urgent_paths.sort_unstable_by_key(|(_, persistent_id)| *persistent_id);
+        if !urgent_paths.is_empty() {
+            let fairness_offset = day_time
+                .wrapping_mul(u64::from(RABBIT_PATH_WORK_PER_TICK))
+                .rem_euclid(urgent_paths.len() as u64) as usize;
+            urgent_paths.rotate_left(fairness_offset);
+        }
         let mut rabbit_admissions = BTreeMap::new();
+        for (id, _) in urgent_paths {
+            let path_request = ecology_budget.admit(EcologyWorkClass::PathRequest, 0);
+            rabbit_admissions.insert(
+                id,
+                RabbitEcologyAdmission {
+                    path_request,
+                    ..RabbitEcologyAdmission::default()
+                },
+            );
+        }
         for (id, _, now, schedule) in &due_rabbits {
+            if threatened_ids.contains(id) {
+                continue;
+            }
             let debt = now.saturating_sub(schedule.next_due_tick);
             let decision = ecology_budget.admit(EcologyWorkClass::Decision, debt);
             let habitat_query =
                 decision && ecology_budget.admit(EcologyWorkClass::HabitatQuery, debt);
             let path_request =
                 decision && ecology_budget.admit(EcologyWorkClass::PathRequest, debt);
-            rabbit_admissions.insert(
-                *id,
-                RabbitEcologyAdmission {
+            rabbit_admissions
+                .entry(*id)
+                .and_modify(|admission: &mut RabbitEcologyAdmission| {
+                    admission.decision |= decision;
+                    admission.habitat_query |= habitat_query;
+                    admission.path_request |= path_request;
+                })
+                .or_insert(RabbitEcologyAdmission {
                     decision,
                     habitat_query,
                     path_request,
-                },
-            );
+                });
         }
         let mut bee_colony_members = BTreeMap::<EntityPersistentId, Vec<EntityPersistentId>>::new();
         for (id, mob) in &self.mobs {
@@ -4547,6 +4593,36 @@ mod tests {
         assert!(store.mobs.values().all(|mob| {
             mob.rabbit_save_data()
                 .is_some_and(|rabbit| rabbit.decision_schedule.attempt_generation > 0)
+        }));
+    }
+
+    #[test]
+    fn thousand_threatened_rabbits_bound_and_fairly_receive_escape_paths() {
+        let mut store = ServerEntityStore::default();
+        for index in 0..1_000 {
+            let offset = f64::from(index % 20) * 0.02;
+            store.insert_passive_mob_for_test(
+                EntityKind::Rabbit,
+                Vec3d::new(8.0 + offset, 64.0, 8.0 + offset),
+                0.0,
+            );
+        }
+        let player = MobPlayerTarget::from_position(Vec3d::new(8.0, 64.0, 8.0));
+        for tick in 0..40 {
+            store.tick_stationary_at_time(
+                &[ChunkPos::new(0, 0)],
+                &[player],
+                12_000 + tick,
+                no_blocks,
+            );
+            let diagnostics = store.rabbit_ecology_diagnostics();
+            assert_eq!(diagnostics.active, 1_000);
+            assert!(diagnostics.work.admitted[EcologyWorkClass::PathRequest as usize] <= 32);
+        }
+
+        assert!(store.mobs.values().all(|mob| {
+            mob.rabbit_escape_attempts_for_test()
+                .is_some_and(|attempts| attempts > 0)
         }));
     }
 

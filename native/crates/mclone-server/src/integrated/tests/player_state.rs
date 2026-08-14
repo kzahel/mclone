@@ -1651,3 +1651,30 @@ fn set_carried_item_updates_server_selected_hotbar_slot_without_world_updates() 
     assert!(updates.is_empty());
     assert_eq!(server.inventory().selected_hotbar_slot(), 4);
 }
+
+#[test]
+fn rabbit_temptation_signal_uses_only_the_selected_inventory_slot() {
+    let mut server = LocalRealmSession::new(0);
+    assert_eq!(server.inventory().item_count(ItemKind::Carrot), 8);
+    assert!(
+        server
+            .mob_player_targets()
+            .iter()
+            .all(|target| !target.tempting_carrot),
+        "carrots elsewhere in inventory must not suppress rabbit avoidance"
+    );
+
+    server
+        .try_handle_command(ClientCommand::SetCarriedItem(SetCarriedItemCommand {
+            slot: 3,
+        }))
+        .expect("select carrot slot");
+
+    assert!(
+        server
+            .mob_player_targets()
+            .iter()
+            .all(|target| target.tempting_carrot),
+        "the selected carrot should retain ordinary temptation"
+    );
+}
