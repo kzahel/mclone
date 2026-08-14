@@ -265,6 +265,7 @@ pub(crate) struct MobRuntimeState {
     rabbit_reserved_refuge: Option<EntityPersistentId>,
     rabbit_habitat_intent: Option<RabbitHabitatIntent>,
     rabbit_escape_attempt: u8,
+    rabbit_underground_threat_hold: bool,
     rabbit_completed_dig: Option<BlockPos>,
     rabbit_completed_raid: Option<BlockPos>,
 }
@@ -341,6 +342,7 @@ impl MobRuntimeState {
             rabbit_reserved_refuge: None,
             rabbit_habitat_intent: None,
             rabbit_escape_attempt: 0,
+            rabbit_underground_threat_hold: false,
             rabbit_completed_dig: None,
             rabbit_completed_raid: None,
         }
@@ -432,6 +434,7 @@ impl MobRuntimeState {
             rabbit_reserved_refuge: None,
             rabbit_habitat_intent: None,
             rabbit_escape_attempt: 0,
+            rabbit_underground_threat_hold: false,
             rabbit_completed_dig: None,
             rabbit_completed_raid: None,
         }
@@ -576,6 +579,7 @@ impl MobRuntimeState {
             entity.position,
             behavior,
             self.rabbit_habitat_intent,
+            self.rabbit_underground_threat_hold,
             nearby_players,
         ) else {
             return false;
@@ -593,6 +597,7 @@ impl MobRuntimeState {
                 entity.position,
                 behavior,
                 self.rabbit_habitat_intent,
+                self.rabbit_underground_threat_hold,
                 nearby_players,
             )
             .is_some()
@@ -1029,6 +1034,7 @@ impl MobRuntimeState {
             entity.position,
             saved.behavior,
             self.rabbit_habitat_intent,
+            self.rabbit_underground_threat_hold,
             nearby_players,
         );
         let active = rabbit_active_time(day_time);
@@ -1047,6 +1053,7 @@ impl MobRuntimeState {
         }
 
         if saved.behavior == mclone_protocol::RabbitBehavior::EnterBurrow {
+            self.rabbit_underground_threat_hold = threat.is_some();
             next = if ticks >= RABBIT_ENTRY_TICKS {
                 self.species
                     .rabbit_mut()
@@ -1058,13 +1065,16 @@ impl MobRuntimeState {
                 saved.behavior
             };
         } else if saved.behavior == mclone_protocol::RabbitBehavior::Underground {
+            self.rabbit_underground_threat_hold = threat.is_some();
             if threat.is_none() && active && ticks >= RABBIT_UNDERGROUND_MIN_TICKS {
                 next = mclone_protocol::RabbitBehavior::Emerge;
                 if let Some((_, position)) = self.rabbit_refuge {
                     entity.position = position;
                 }
+                self.rabbit_underground_threat_hold = false;
             }
         } else if let Some(threat) = threat {
+            self.rabbit_underground_threat_hold = false;
             next = mclone_protocol::RabbitBehavior::Flee;
             self.clear_rabbit_shelter_reservation();
             if saved.behavior == mclone_protocol::RabbitBehavior::Emerge {
@@ -1092,6 +1102,7 @@ impl MobRuntimeState {
                     self.start_rabbit_escape_navigation(*entity, threat.position, blocks);
             }
         } else if saved.behavior == mclone_protocol::RabbitBehavior::Emerge {
+            self.rabbit_underground_threat_hold = false;
             if ticks < RABBIT_EMERGE_TICKS {
                 next = saved.behavior;
             } else {
@@ -3448,6 +3459,7 @@ fn rabbit_player_threat(
     position: Vec3d,
     behavior: mclone_protocol::RabbitBehavior,
     intent: Option<RabbitHabitatIntent>,
+    underground_threat_hold: bool,
     nearby_players: &[MobPlayerTarget],
 ) -> Option<MobPlayerTarget> {
     let nearest = nearby_players.iter().copied().min_by(|left, right| {
@@ -3458,10 +3470,13 @@ fn rabbit_player_threat(
     if nearest.tempting_carrot {
         return None;
     }
-    let continuing = matches!(
-        behavior,
-        mclone_protocol::RabbitBehavior::Flee | mclone_protocol::RabbitBehavior::Underground
-    ) || intent.is_some_and(|intent| intent.kind == RabbitIntentKind::Escape);
+    let continuing = matches!(behavior, mclone_protocol::RabbitBehavior::Flee)
+        || (matches!(
+            behavior,
+            mclone_protocol::RabbitBehavior::EnterBurrow
+                | mclone_protocol::RabbitBehavior::Underground
+        ) && underground_threat_hold)
+        || intent.is_some_and(|intent| intent.kind == RabbitIntentKind::Escape);
     let radius_sqr = if continuing {
         RABBIT_FLEE_EXIT_RADIUS_SQR
     } else {
@@ -4107,13 +4122,10 @@ mod tests {
             )),
         );
         mob.rabbit_refuge = Some((home, position));
-        // Nine blocks is outside the initial alarm radius but inside the
-        // continuation radius. Once sheltered, the rabbit should wait for the
-        // player to clear that larger radius before it considers emerging.
-        let player = MobPlayerTarget::from_position(Vec3d::new(9.5, 64.0, 0.5));
+        let close_player = MobPlayerTarget::from_position(Vec3d::new(1.5, 64.0, 0.5));
 
         for _ in 0..RABBIT_ENTRY_TICKS {
-            mob.tick_entity_at_time(&mut entity, &[player], &[], &[], 12_000, &flat_ground);
+            mob.tick_entity_at_time(&mut entity, &[close_player], &[], &[], 12_000, &flat_ground);
             entity.tick_count += 1;
         }
         assert_eq!(
@@ -4122,8 +4134,19 @@ mod tests {
         );
         assert!(entity.hidden_from_clients);
 
+        // Nine blocks is outside the initial alarm radius but inside the
+        // continuation radius. Because this rabbit saw the closer threat while
+        // entering, it should wait for the larger radius to clear.
+        let continuation_player = MobPlayerTarget::from_position(Vec3d::new(9.5, 64.0, 0.5));
         for _ in 0..=RABBIT_UNDERGROUND_MIN_TICKS + 20 {
-            mob.tick_entity_at_time(&mut entity, &[player], &[], &[], 12_000, &flat_ground);
+            mob.tick_entity_at_time(
+                &mut entity,
+                &[continuation_player],
+                &[],
+                &[],
+                12_000,
+                &flat_ground,
+            );
             entity.tick_count += 1;
         }
         assert_eq!(
@@ -4647,7 +4670,16 @@ mod tests {
             mob.tick_entity_at_time(&mut entity, &[], &[], &[], 6_000, &flat_ground);
         }
         assert!(entity.hidden_from_clients);
-        mob.tick_entity_at_time(&mut entity, &[], &[], &[], 12_000, &flat_ground);
+        let player_outside_initial_radius =
+            MobPlayerTarget::from_position(Vec3d::new(9.5, 64.0, 0.5));
+        mob.tick_entity_at_time(
+            &mut entity,
+            &[player_outside_initial_radius],
+            &[],
+            &[],
+            12_000,
+            &flat_ground,
+        );
         assert_eq!(
             mob.rabbit_behavior(),
             Some(mclone_protocol::RabbitBehavior::Emerge)
