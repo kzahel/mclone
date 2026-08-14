@@ -33,9 +33,7 @@ use mclone_worldgen::block::{
     AIR, DANDELION, GRASS_BLOCK, POPPY, RawBlockId, block_name, farmland_moisture,
     generated_block_state_id, material_blocks_motion,
 };
-use mclone_worldgen::levelgen::{
-    McloneOverworldSamplingTopology, McloneOverworldVegetationPlanCache, McloneVegetationSource,
-};
+use mclone_worldgen::levelgen::{McloneOverworldSamplingTopology, McloneOverworldWildlifePlanner};
 use mclone_worldgen::prng::SimpleRandomSource;
 
 #[cfg(target_arch = "wasm32")]
@@ -44,6 +42,7 @@ use crate::deer_population::{DEER_POPULATION_HISTORY_KEY, DeerPopulationHistory}
 use crate::entity::spawning::dry_run::{
     NaturalSpawnDryRunDiagnostics, dry_run_creature_spawn_eligibility,
 };
+use crate::entity::spawning::initial::{InitialWildlifePlacement, plan_initial_wildlife_placement};
 use crate::entity::spawning::live::{
     CREATURE_SPAWN_MAX_SPAWNS_PER_TICK, CreatureSpawnDiagnostics, CreatureSpawnProfile,
     plan_creature_spawns,
@@ -191,6 +190,8 @@ pub struct DimensionRuntime {
     dirty_entity_chunks: BTreeSet<ChunkPos>,
     intro_homestead_resident_chunks_seen: BTreeSet<ChunkPos>,
     pending_intro_homestead_resident_chunks: BTreeSet<ChunkPos>,
+    initial_wildlife_chunks_seen: BTreeSet<ChunkPos>,
+    pending_initial_wildlife_chunks: BTreeSet<ChunkPos>,
     #[cfg(feature = "physics-engine")]
     physics: ServerPhysicsRuntime,
     #[cfg(feature = "physics-engine")]
@@ -229,6 +230,8 @@ impl DimensionRuntime {
             dirty_entity_chunks: BTreeSet::new(),
             intro_homestead_resident_chunks_seen: BTreeSet::new(),
             pending_intro_homestead_resident_chunks: BTreeSet::new(),
+            initial_wildlife_chunks_seen: BTreeSet::new(),
+            pending_initial_wildlife_chunks: BTreeSet::new(),
             #[cfg(feature = "physics-engine")]
             physics: ServerPhysicsRuntime::new(),
             #[cfg(feature = "physics-engine")]
@@ -2871,28 +2874,11 @@ impl RealmServer {
                     as usize;
                 let mut random =
                     SimpleRandomSource::new(natural_spawn_tick_seed(self.seed, game_time));
-                let mut forest_edge_cache = (self.scheduler.world_generation_profile()
-                    == WorldGenerationProfile::McloneOverworldV1)
-                    .then(|| {
-                        let topology = McloneOverworldSamplingTopology::from_horizontal_topology(
-                            self.scheduler.topology(),
-                        )
-                        .expect("Mclone Overworld profile already validated its topology");
-                        McloneOverworldVegetationPlanCache::new(McloneVegetationSource::new(
-                            self.seed, topology,
-                        ))
-                    });
                 let result = plan_creature_spawns(
                     &evaluation.chunk_inputs.eligible_entity_ticking_chunks,
                     &evaluation.player_positions,
                     max_spawns,
-                    if self.scheduler.world_generation_profile()
-                        == WorldGenerationProfile::McloneOverworldV1
-                    {
-                        CreatureSpawnProfile::McloneOverworld
-                    } else {
-                        CreatureSpawnProfile::ReferenceFarmAnimals
-                    },
+                    CreatureSpawnProfile::ReferenceFarmAnimals,
                     &mut random,
                     |pos| self.scheduler.block_at_world(pos),
                     |pos| {
@@ -2901,11 +2887,7 @@ impl RealmServer {
                             .map(get_layered_biome_by_id)
                     },
                     |pos| self.scheduler.raw_brightness_at_world(pos, 0),
-                    |pos| {
-                        forest_edge_cache
-                            .as_mut()
-                            .and_then(|cache| cache.forest_edge_intent_at(pos.x, pos.z).ok())
-                    },
+                    |_| None,
                 );
                 live = result.diagnostics;
                 let persistent = self.scheduler.entity_chunks_supported();
@@ -2990,16 +2972,20 @@ impl RealmServer {
         let category_counts = self.entities.natural_spawn_category_counts();
         let spawnable_chunk_count =
             u32::try_from(chunk_inputs.player_distance_chunk_count()).unwrap_or(u32::MAX);
-        let dry_run = dry_run_creature_spawn_eligibility(
-            &chunk_inputs.eligible_entity_ticking_chunks,
-            |pos| self.scheduler.block_at_world(pos),
-            |pos| {
-                self.scheduler
-                    .biome_id_at_world(pos)
-                    .map(get_layered_biome_by_id)
-            },
-            |pos| self.scheduler.raw_brightness_at_world(pos, 0),
-        );
+        let dry_run = if self.natural_spawning_runtime_enabled() {
+            dry_run_creature_spawn_eligibility(
+                &chunk_inputs.eligible_entity_ticking_chunks,
+                |pos| self.scheduler.block_at_world(pos),
+                |pos| {
+                    self.scheduler
+                        .biome_id_at_world(pos)
+                        .map(get_layered_biome_by_id)
+                },
+                |pos| self.scheduler.raw_brightness_at_world(pos, 0),
+            )
+        } else {
+            NaturalSpawnDryRunDiagnostics::default()
+        };
 
         let mut context = NaturalSpawnContext::with_live_chunk_and_count_inputs(
             game_time,
@@ -3044,7 +3030,10 @@ impl RealmServer {
     }
 
     fn natural_spawning_runtime_enabled(&self) -> bool {
-        self.natural_spawning_enabled && self.active_dimension.definition.topology.is_unbounded()
+        self.natural_spawning_enabled
+            && self.active_dimension.definition.topology.is_unbounded()
+            && self.scheduler.world_generation_profile()
+                != WorldGenerationProfile::McloneOverworldV1
     }
 
     fn natural_spawning_diagnostics_from_evaluation(
@@ -3128,6 +3117,10 @@ impl RealmServer {
         self.activate_dimension(&DimensionKey::overworld())?;
         self.scheduler.set_world_generation_profile(profile)?;
         self.active_dimension.definition.generation_profile = profile;
+        self.active_dimension.initial_wildlife_chunks_seen.clear();
+        self.active_dimension
+            .pending_initial_wildlife_chunks
+            .clear();
         self.dimensions.set_overworld_generation_profile(profile);
         Ok(())
     }
@@ -4728,6 +4721,17 @@ impl RealmServer {
                         self.pending_intro_homestead_resident_chunks
                             .insert(snapshot.pos);
                     }
+                    if !self.scheduler.entity_chunks_supported()
+                        && self.initial_wildlife_population_enabled()
+                        && self
+                            .active_dimension
+                            .initial_wildlife_chunks_seen
+                            .insert(snapshot.pos)
+                    {
+                        self.active_dimension
+                            .pending_initial_wildlife_chunks
+                            .insert(snapshot.pos);
+                    }
                     self.chunk_tracking
                         .queue_snapshot_for_tracking_sources(snapshot);
                 }
@@ -4748,12 +4752,23 @@ impl RealmServer {
                 }
                 ChunkSchedulerEvent::EntityChunkLoaded { pos, record } => {
                     self.dirty_entity_chunks.remove(&pos);
+                    let entity_record_missing = record.is_none();
                     let realizes_homestead_residents =
                         self.intro_homestead_has_residents_in_chunk(pos)?;
                     if realizes_homestead_residents {
                         self.intro_homestead_resident_chunks_seen.insert(pos);
                         if record.is_none() {
                             self.pending_intro_homestead_resident_chunks.insert(pos);
+                        }
+                    }
+                    if self.initial_wildlife_population_enabled() {
+                        self.active_dimension
+                            .initial_wildlife_chunks_seen
+                            .insert(pos);
+                        if entity_record_missing {
+                            self.active_dimension
+                                .pending_initial_wildlife_chunks
+                                .insert(pos);
                         }
                     }
                     if let Some(record) = record {
@@ -4792,7 +4807,104 @@ impl RealmServer {
         }
         let residents = self.realize_pending_intro_homestead_residents()?;
         self.reconcile_entity_subjects(residents, true);
+        let wildlife = self.realize_pending_initial_wildlife()?;
+        self.reconcile_entity_subjects(wildlife, true);
         Ok(())
+    }
+
+    fn initial_wildlife_population_enabled(&self) -> bool {
+        self.natural_spawning_enabled
+            && self.active_dimension.key == DimensionKey::overworld()
+            && self.scheduler.world_generation_profile()
+                == WorldGenerationProfile::McloneOverworldV1
+    }
+
+    fn realize_pending_initial_wildlife(&mut self) -> ChunkStoreResult<Vec<ServerEntityState>> {
+        let ready_chunks = self
+            .active_dimension
+            .pending_initial_wildlife_chunks
+            .iter()
+            .copied()
+            .filter(|pos| self.scheduler.client_visible_snapshot(*pos).is_some())
+            .collect::<Vec<_>>();
+        if ready_chunks.is_empty() {
+            return Ok(Vec::new());
+        }
+        let topology = McloneOverworldSamplingTopology::from_horizontal_topology(
+            self.active_dimension.definition.topology,
+        )
+        .map_err(ChunkStoreError::InvalidData)?;
+        let planner =
+            McloneOverworldWildlifePlanner::new(self.active_dimension.definition.seed, topology);
+        let persistent = self.scheduler.entity_chunks_supported();
+        let mut realized = Vec::new();
+        for pos in ready_chunks {
+            let plan = planner
+                .plan_for_chunk(pos)
+                .map_err(|error| ChunkStoreError::InvalidData(error.to_string()))?;
+            if let Some(encounter) = plan.encounter_for_chunk(pos)
+                && let Some(placement) = plan_initial_wildlife_placement(encounter, |block| {
+                    self.scheduler.block_at_world(block)
+                })
+            {
+                let y_rot_degrees =
+                    initial_wildlife_y_rot_degrees(encounter.anchor_x, encounter.anchor_z, 0);
+                match placement {
+                    InitialWildlifePlacement::Group { kind, positions } => {
+                        realized.extend(positions.into_iter().enumerate().map(
+                            |(index, position)| {
+                                let y_rot_degrees = initial_wildlife_y_rot_degrees(
+                                    encounter.anchor_x,
+                                    encounter.anchor_z,
+                                    index,
+                                );
+                                if persistent {
+                                    self.active_dimension.entities.spawn_persistent_passive_mob(
+                                        kind,
+                                        position,
+                                        y_rot_degrees,
+                                    )
+                                } else {
+                                    self.active_dimension.entities.spawn_volatile_passive_mob(
+                                        kind,
+                                        position,
+                                        y_rot_degrees,
+                                    )
+                                }
+                            },
+                        ));
+                    }
+                    InitialWildlifePlacement::BeeColony {
+                        position,
+                        bee_positions,
+                    } => {
+                        let spawned = if persistent {
+                            self.active_dimension.entities.spawn_persistent_bee_colony(
+                                EntityKind::BeeNest,
+                                position,
+                                y_rot_degrees,
+                                &bee_positions,
+                            )
+                        } else {
+                            self.active_dimension.entities.spawn_volatile_bee_colony(
+                                EntityKind::BeeNest,
+                                position,
+                                y_rot_degrees,
+                                &bee_positions,
+                            )
+                        };
+                        realized.extend(spawned.unwrap_or_default());
+                    }
+                }
+            }
+            if persistent {
+                self.active_dimension.dirty_entity_chunks.insert(pos);
+            }
+            self.active_dimension
+                .pending_initial_wildlife_chunks
+                .remove(&pos);
+        }
+        Ok(realized)
     }
 
     fn intro_homestead_has_residents_in_chunk(&self, pos: ChunkPos) -> ChunkStoreResult<bool> {
@@ -7415,6 +7527,15 @@ fn natural_spawn_tick_seed(world_seed: i64, game_time: u64) -> i64 {
         .wrapping_mul(31)
         .wrapping_add((game_time as i64).wrapping_mul(NATURAL_SPAWN_TICK_SEED_MULTIPLIER))
         .wrapping_add(0x5DEECE66D)
+}
+
+fn initial_wildlife_y_rot_degrees(anchor_x: i32, anchor_z: i32, member_index: usize) -> f32 {
+    let member_index = i64::try_from(member_index).unwrap_or(i64::MAX);
+    (i64::from(anchor_x)
+        .wrapping_mul(31)
+        .wrapping_add(i64::from(anchor_z).wrapping_mul(17))
+        .wrapping_add(member_index.wrapping_mul(97))
+        .rem_euclid(360)) as f32
 }
 
 fn current_unix_millis() -> u64 {

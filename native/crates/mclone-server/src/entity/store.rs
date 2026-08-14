@@ -622,6 +622,20 @@ impl ServerEntityStore {
         Some(spawned)
     }
 
+    pub(crate) fn spawn_volatile_bee_colony(
+        &mut self,
+        kind: EntityKind,
+        position: Vec3d,
+        y_rot_degrees: f32,
+        bee_positions: &[Vec3d],
+    ) -> Option<Vec<ServerEntityState>> {
+        let spawned =
+            self.spawn_persistent_bee_colony(kind, position, y_rot_degrees, bee_positions)?;
+        self.volatile_entities
+            .extend(spawned.iter().map(|entity| entity.id));
+        Some(spawned)
+    }
+
     pub(crate) fn place_empty_bee_hotel<F>(
         &mut self,
         position: Vec3d,
