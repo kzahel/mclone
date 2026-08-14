@@ -12,8 +12,8 @@ uses composed presentation; vanilla-reference terrain falls back to exact-only
 because the procedural horizon is not defined for that profile.
 
 - `mclone-overworld-v1` (the default) provides exact Mclone terrain, a
-  research landform plan, the streamed planner atlas, Mclone CPU LOD, and
-  optional Mclone GPU LOD.
+  research landform plan, the production wildlife-population diagnostic, the
+  streamed planner atlas, Mclone CPU LOD, and optional Mclone GPU LOD.
 - `overworld` provides exact Minecraft Java 1.17.1 terrain and a direct
   Worker-backed vanilla CPU LOD. It has no GPU LOD.
 
@@ -30,6 +30,13 @@ The profiles cannot be mixed in one workspace. Within the selected profile:
   Tactical 267 plane domain. It shows independently selectable basin, quiet
   space, drainage, divide, confluence, and protected-sink facts. Production
   terrain does not consume this plan.
+- `Wildlife` is a production diagnostic over fixed 64-by-64-block initial-
+  population cells. A dedicated Worker calls the exact coordinate-pure Rust
+  planner used by first entity-chunk realization. It shows quiet biome and
+  landform substrate, desired density and occupancy rolls, all species
+  weights, encounter anchors/group sizes, owner chunks, and aggregate visible
+  counts. The browser draws receipts only; it does not simulate or spawn
+  animals.
 - `Planner atlas` is a research-only, freely pannable comparison of the
   coordinate-pure fallback, hierarchical shared facts, and feature-owned
   bounded graphs. Rust owns canonical region queries, plane/cylinder/torus
@@ -87,8 +94,9 @@ The URL owns the review state:
 - `blocks`: continuous viewport width from 1 through 131,072 blocks
 - `detail`: `auto` or a power-of-two sample spacing from 1 through 1,024
   blocks
-- `panes`: comma-separated `runtime`, `canonical`, `plan`, `atlas`, `cpu`,
-  `macro`, and/or `gpu`; `runtime`, `plan`, and `atlas` are Mclone-only
+- `panes`: comma-separated `runtime`, `canonical`, `plan`, `wildlife`, `atlas`,
+  `semantic`, `cpu`, `macro`, and/or `gpu`; `runtime`, `plan`, `wildlife`,
+  `atlas`, and `semantic` are Mclone-only
 - `canonical`: `surface` or `final`
 - `radius`: one of `0`, `1`, `2`, `3`, `4`, `5`, `7`, `10`, or `15`,
   corresponding to centered footprints from `1x1` through `31x31 = 961`
@@ -131,6 +139,9 @@ ray. Vanilla point receipts are explicitly unavailable in the bounded first
 pass. Tapping the landform plan instead requests a Rust-owned cell receipt
 with basin/receiver identity, drainage accumulation/order, envelope strengths,
 and structural flags.
+Tapping the wildlife pane selects one production population-cell receipt with
+habitat evidence, desired density, occupancy and species rolls, every species
+weight, selected anchor, group size, and owning chunk.
 `Auto` selects approximately two CSS pixels per sample cell. A manual detail
 request remains visible even when the bounded eight-tile-per-axis interactive
 budget must raise its effective spacing; zooming in eventually admits every
@@ -239,6 +250,15 @@ panels while panning:
 <http://127.0.0.1:5180/terrain/?seed=-98765&x=0&z=0&blocks=6144&panes=atlas&view=map&atlasTopology=plane>
 
 Switch `atlasTopology` to `cylinder-x` or `torus` to inspect periodic seams.
+
+For the deterministic initial-wildlife review, use **Wildlife** at the accepted
+mixed meadow/woodland/water site:
+
+<http://127.0.0.1:5180/terrain/?profile=mclone-overworld-v1&seed=-98765&x=0&z=-2048&blocks=1024&panes=wildlife&view=map>
+
+The wildlife pane is not a second tuning implementation. The Wasm facade must
+continue calling `McloneOverworldWildlifePlanner`, and the source-ownership
+test rejects density or species arithmetic in the TypeScript canvas.
 
 ## Validate
 

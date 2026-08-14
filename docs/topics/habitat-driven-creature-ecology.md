@@ -152,7 +152,7 @@ This follows the understandable Minecraft semantic and keeps one entity
 lifecycle:
 
 ```text
-eligible habitat + live spawn
+eligible habitat + an authorized initial/live producer
   -> authoritative entity with stable persistent identity
   -> chunk-addressed entity record
   -> unload/save
@@ -189,8 +189,20 @@ Keep these sources distinct even when they eventually share habitat tests:
 | population summary | unloaded abundance, migration, or recovery model | compact ecological state, not an entity impostor |
 | ambient presentation | bounded flock/insect/call effect with no individual gameplay identity | explicitly ephemeral |
 
-The implemented slices use authored residents plus live natural cow, chicken,
-and Mclone mallard spawns. They do not claim a population-summary simulation.
+The current Mclone profile uses authored residents plus the revision-1
+generation-time population layer for rabbit, deer, mallard, and bee. A
+64-by-64-block cell chooses zero or one small group from broad productivity,
+openness, cover, wetland, and water evidence. Only its seed-selected owner
+chunk can realize the group, and a saved empty entity record is authoritative:
+death or removal never reruns the seed plan. The former Mclone 400-tick
+wetland, forest-edge, flowering, rabbit-bank, and farm-animal fallback chain
+has been deleted. The reference Java 1.17.1 profile retains its independent
+live natural-spawn subset.
+
+This is initial geography, not equilibrium. It neither replenishes a depleted
+area nor advances populations while unloaded, and it does not claim a
+population-summary simulation. Recolonization must become an explicit later
+ecology producer rather than reviving generic random passive spawning.
 
 The continuing animal-record, knowledge, unavailable-world, social-memory,
 and bounded spatial-pattern contract lives in

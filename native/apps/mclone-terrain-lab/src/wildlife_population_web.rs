@@ -114,8 +114,7 @@ impl TerrainLabWildlifePopulationCompiler {
             .ok_or_else(|| js_error("wildlife view cell count overflow"))?;
         if cell_count > MAX_VISIBLE_CELLS {
             return Err(js_error(format!(
-                "wildlife view needs {cell_count} population cells; zoom inside {} blocks across (maximum {MAX_VISIBLE_CELLS} cells)",
-                MCLONE_WILDLIFE_POPULATION_CELL_BLOCKS * 128
+                "wildlife view needs {cell_count} population cells; zoom in until the visible window is at most {MAX_VISIBLE_CELLS} cells"
             )));
         }
         let min_cell_x = i32::try_from(min_cell_x)

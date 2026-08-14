@@ -1,6 +1,6 @@
 # Tactical 298: Deterministic Initial Wildlife Population
 
-Status: active 2026-08-14
+Status: complete 2026-08-14
 
 Topic: `habitat-driven-creature-ecology`
 
@@ -181,6 +181,63 @@ worlds may be regenerated. No change is made to the reference-locked Java
 - Rust, Wasm, TypeScript, ownership, focused server, and relevant workspace
   tests pass; rendered screenshots are inspected from `/tmp`.
 
+## Execution Record
+
+The implementation landed in five logical slices:
+
+- `c22cbda7` recorded this binding plan and the living direction;
+- `0923dfea` added the coordinate-pure revision-1 planner;
+- `84fb2699` connected first entity-chunk realization and persistence;
+- `1785aee4` added the Worker-backed Terrain Lab population map; and
+- `57e41dc7` deleted the retired Mclone live habitat policy instead of
+  retaining it as unreachable alternate spawn logic.
+
+Revision 1 uses one 64-by-64-block cell, nine fixed stratified candidate
+samples, and at most one owner chunk/group. Its pinned seed-`-98765` survey of
+4,096 cells yields 1,519 occupied cells and 4,331 animals, with encounter
+counts `[854 rabbit, 286 deer, 163 mallard, 216 bee]`. Randomized query order,
+negative Euclidean coordinates, and periodic-X alias tests are exact.
+
+Persistent realization waits for both the entity-record result and a usable
+terrain snapshot. A missing record plans once; any present record, including
+saved empty state, suppresses seed resurrection. Null-store worlds remember
+attempted chunks once per session. Exact placement remains bounded to the
+selected owner chunk and creates ordinary rabbit, deer, mallard, or bee-colony
+state through the existing entity lifecycle.
+
+Terrain Lab accepts `panes=wildlife` only for `mclone-overworld-v1`. The Rust
+Wasm facade calls `McloneOverworldWildlifePlanner::plan_cell`; a dedicated
+Worker builds only the bounded visible cell window; and TypeScript draws the
+receipts. A source-ownership test rejects copied density/species arithmetic in
+the canvas. The accepted review URL is:
+
+<http://127.0.0.1:5180/terrain/?profile=mclone-overworld-v1&seed=-98765&x=0&z=-2048&blocks=1024&panes=wildlife&view=map>
+
+Inspected acceptance captures are:
+
+- [desktop UI](/tmp/mclone-terrain-lab-desktop-chrome-wildlife-ui.png);
+- [phone UI](/tmp/mclone-terrain-lab-phone-chrome-wildlife-ui.png);
+- [desktop canvas](/tmp/mclone-terrain-lab-desktop-chrome-wildlife.png); and
+- [phone canvas](/tmp/mclone-terrain-lab-phone-chrome-wildlife.png).
+
+Validation completed:
+
+- `cargo test --manifest-path native/Cargo.toml` passed the full Rust
+  workspace; after final live-policy deletion, all five focused live-planner
+  tests and all 22 integrated entity tests passed;
+- `pnpm terrain-lab:typecheck` and all 28 Terrain Lab state/ownership tests
+  passed;
+- the focused wildlife Playwright gate passed on desktop and phone, including
+  deterministic reload, pan, inspection, and captures; and
+- the production desktop Terrain Lab build/smoke passed.
+
+The broad Playwright sweep also exposed two unrelated existing phone click
+interception failures in the ordinary terrain and semantic-terrain controls;
+both desktop cases pass, and the wildlife phone case passes. The broad mobile
+smoke likewise waits for a status pill intentionally hidden by the existing
+phone header. These adjacent harness issues do not exercise or block the
+wildlife pane and remain separate Terrain Lab maintenance.
+
 ## Non-Goals
 
 - season simulation, catch-up ecology, offscreen predation, or population
@@ -190,4 +247,3 @@ worlds may be regenerated. No change is made to the reference-locked Java
 - forcing exact regional ratios or preventing all local population variance;
 - changing Java 1.17.1 worldgen parity; or
 - turning Terrain Lab into a playable fixture or world editor.
-

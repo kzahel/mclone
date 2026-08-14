@@ -111,12 +111,34 @@ mallard life and discovery chapter:
 - six authoritative observations persist per player and project through the
   shared flat, stereo, and multiview UI paths.
 
+Tactical
+[`298`](tactical/298-deterministic-initial-wildlife-population.md) replaces
+Mclone Overworld's traversal-sensitive 400-tick passive habitat chain with one
+seed-authored initial-population policy:
+
+- coordinate-pure 64-by-64-block cells choose zero or one rabbit, deer,
+  mallard, or bee encounter from broad habitat weights;
+- one selected owner chunk realizes the ordinary entities only when its first
+  entity-record load and terrain snapshot are ready;
+- a present saved entity record, including an empty one, prevents
+  seed-resurrection after death or removal; and
+- Terrain Lab's Mclone-only `panes=wildlife` view executes the exact production
+  Rust planner and exposes its density, rolls, weights, anchors, and owner
+  chunks.
+
+The retired Mclone wetland, forest-edge, flowering, rabbit-radius, and
+farm-animal fallback branches have been deleted from the live planner. The
+Java 1.17.1 `overworld` profile still owns the reference-shaped live
+cow/chicken subset described below; Mclone does not call it.
+
 Still not landed: complete Java group attempt geometry, shared-spawn exclusion,
 all vanilla passive entity kinds, hostile/ambient/aquatic categories, despawn,
 synchronized gamerules and dedicated flags, full vanilla
-`LivingEntity.travel(...)`/`Entity.move(...)`, breeding/hunting/farming and
-drop loops beyond the mallard evidence/nest chapter, or broad species-specific
-gameplay. The original Mclone
+`LivingEntity.travel(...)`/`Entity.move(...)`, broad vanilla breeding and
+drop parity, predator/prey population response, or a coarse population
+simulation. Original Mclone rabbit breeding, deer hunting, mallard life,
+bee pollination, and garden farming exist as separate gameplay chapters. The
+original Mclone
 terrain/creature co-design direction lives in
 [`topics/habitat-driven-creature-ecology.md`](topics/habitat-driven-creature-ecology.md).
 
@@ -153,6 +175,9 @@ Read these files before writing the port. Spawn algorithms, category caps, place
 - **Creature**: vanilla's `MobCategory.CREATURE`, which includes common passive land animals and is treated as a persistent category for natural-spawn frequency.
 - **Original mobs**: passive creatures added during chunk generation by `ChunkStatus.SPAWN` through `ChunkGenerator.spawnOriginalMobs(...)`.
 - **Natural spawn**: live server-tick spawning through `NaturalSpawner.spawnForChunk(...)`.
+- **Mclone initial population**: seed-addressed first entity-chunk realization
+  for `mclone-overworld-v1`; it is durable generation content, not a live
+  natural spawn or an unloaded population simulation.
 - **Spawner data**: biome weighted entries: entity type, weight, minimum group size, maximum group size.
 - **Tracked entity**: an entity visible to server queries and potentially to clients, but not necessarily ticking.
 - **Ticking entity**: an entity currently in `ServerLevel.entityTickList`.
@@ -163,6 +188,13 @@ Read these files before writing the port. Spawn algorithms, category caps, place
 ## Vanilla Model
 
 Vanilla has two different paths that people often blur together.
+
+Mclone Overworld now makes the same lifecycle distinction with a different
+generation policy: its initial wildlife planner is deterministic by seed and
+population-cell coordinate, while its materialized animals are ordinary
+durable entities. It currently has no periodic generic passive replenishment.
+The sections below remain the Java 1.17.1 reference model and the contract for
+the reference-locked `overworld` profile.
 
 ### Generation-Time Original Mobs
 

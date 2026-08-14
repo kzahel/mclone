@@ -178,6 +178,13 @@ world.
   replaces its disposable internal plan checksum with `5ea0fc55...` because
   `garden-v1` now projects the promoted working kitchen-garden record. Existing
   internal overlay worlds are disposable or require explicit rebuild.
+- **Reviewed for Tactical 298:** 2026-08-14; Mclone wildlife spawn policy is
+  explicitly mutable under the existing `mclone-overworld-v1` row. Terrain
+  blocks and fingerprints are unchanged, while never-realized entity chunks
+  now receive revision-1 seed-addressed rabbit, deer, mallard, or bee groups.
+  Existing entity records, including empty records, remain authoritative;
+  disposable internal worlds may be regenerated for a complete new
+  population.
 - **Project release state:** `internal-unshipped`
 - **Known external world/save consumers:** none
 - **Default fixture meaning:** refactor and determinism regression guard, not a

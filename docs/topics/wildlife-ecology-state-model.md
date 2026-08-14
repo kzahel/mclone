@@ -12,8 +12,9 @@ outcomes, stable decision schedules, deterministic work admission, spatially
 bounded refuge/neighbor queries, and fair budgeted open-ground escape. Deer
 and fox remain the intended contrasting consumers before this becomes a
 public generalized ecology API. Tactical
-[`298`](../tactical/298-deterministic-initial-wildlife-population.md) adds a
-separate seed-authored initial-population geography, shared with Terrain Lab;
+[`298`](../tactical/298-deterministic-initial-wildlife-population.md) has now
+landed a separate seed-authored initial-population geography, shared with
+Terrain Lab;
 it does not tick unloaded animals or introduce a coarse offscreen population
 simulation. Social memory, multi-record crash-atomic persistence, and any
 coarse population layer remain deliberate later work.**
@@ -155,6 +156,23 @@ rigid-body physics. It can supply flat synthetic observations and inject
 unavailable, delayed, duplicated, or contradictory resolutions. The live
 runtime remains Minecraft-shaped and freezes inactive state even if the test
 harness can advance many deterministic steps quickly.
+
+### Initial population is not offscreen simulation
+
+The landed revision-1 Mclone population planner is a seed-authored initial
+condition, not a coarse ecology record. It plans each 64-by-64-block cell
+independently from terrain semantics and assigns at most one encounter to one
+owner chunk. First entity-chunk realization turns that encounter into ordinary
+durable animals. After that moment, individual records, active-tick behavior,
+birth, death, movement, and player action are authoritative.
+
+The entity-record load result is also the realization marker. Missing means
+the owner chunk may attempt its seed plan; present empty means the ecology was
+already realized and is now empty. This keeps initial geography compatible
+with the durable-animal model without pretending that a planner cell is a
+living population or using it to refill losses. A later population summary,
+if justified, needs its own identity, producer, cadence, and reconciliation
+contract.
 
 ## Cadence, Work Budgets, and Checkpoint Durability
 
