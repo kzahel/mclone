@@ -457,7 +457,7 @@ fn author_rabbit_meadow_chunk(chunk: &mut MutableChunkBlockBuffer) {
                 chunk.set_block_at_y(local_x, 65, local_z, DIRT);
                 chunk.set_block_at_y(local_x, 66, local_z, GRASS_BLOCK);
             }
-            if (world_x, world_z) == (8, 8) {
+            if matches!((world_x, world_z), (8, 8) | (-8, 8)) {
                 chunk.set_block_at_y(local_x, 65, local_z, AIR);
             }
 

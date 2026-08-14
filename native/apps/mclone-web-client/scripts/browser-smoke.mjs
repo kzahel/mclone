@@ -889,6 +889,37 @@ async function run() {
         let behaviorEnd = behaviorStart;
         /** @type {Record<string, any>} */
         let behaviorProbe = {};
+        let initialShowcaseScreenshotPath = null;
+        let initialShowcaseCanvasScreenshotPath = null;
+        if (rabbitShowcase) {
+          initialShowcaseScreenshotPath = screenshotPath.replace(/\.png$/, "-initial.png");
+          initialShowcaseCanvasScreenshotPath = canvasScreenshotPath.replace(
+            /\.png$/,
+            "-initial.png",
+          );
+          await page.evaluate(() => globalThis.__mcloneWebApp?.pauseRendering?.());
+          await page.waitForFunction(
+            () => globalThis.__mcloneWebApp?.state?.tickFrameBusy === false,
+            undefined,
+            { timeout: 10_000 },
+          );
+          await page.evaluate(
+            async () => {
+              globalThis.__mcloneWebApp?.setDebugOverlay?.(false);
+              await globalThis.__mcloneWebApp?.renderOneFrameForSmoke?.();
+            },
+          );
+          await page.screenshot({
+            path: initialShowcaseScreenshotPath,
+            fullPage: false,
+            timeout: 60_000,
+          });
+          await canvas.screenshot({
+            path: initialShowcaseCanvasScreenshotPath,
+            timeout: 60_000,
+          });
+          await page.evaluate(() => globalThis.__mcloneWebApp?.resumeRendering?.());
+        }
         if (cropShowcase) {
           const cropPositions = gardenShowcase ? [
             [6, 64, 6], [7, 64, 6], [6, 64, 7],
@@ -949,10 +980,15 @@ async function run() {
           const initialGateState = await page.evaluate(
             () => globalThis.__mcloneWebApp.blockStateAt?.(16, 65, 14)?.blockStateId,
           );
+          /** @param {unknown} value */
+          const parseRabbitPositions = (value) => String(value ?? "")
+            .split(";")
+            .filter(Boolean)
+            .map((position) => position.split(",").map(Number));
           const rabbitSamples = [behaviorStart];
           let priorRabbitSample = behaviorStart;
           try {
-            for (let sampleIndex = 0; sampleIndex < 5; sampleIndex += 1) {
+            for (let sampleIndex = 0; sampleIndex < 12; sampleIndex += 1) {
               await page.waitForFunction(
                 ({ startTickCounts }) => {
                   const report = globalThis.__mcloneWebApp?.state?.lastReport;
@@ -991,6 +1027,43 @@ async function run() {
           );
           if (protectedCarrotStates.some((state, index) => state !== initialCarrotStates[index])) {
             throw new Error(`closed rabbit-garden gate did not protect mature carrots: ${JSON.stringify({ initialCarrotStates, protectedCarrotStates })}`);
+          }
+          const initialRabbitIds = String(rabbitSamples[0].rabbitEntityIds ?? "")
+            .split(",")
+            .filter(Boolean);
+          const initialRabbitPositions = parseRabbitPositions(
+            rabbitSamples[0].rabbitPositions,
+          );
+          const founderIndex = initialRabbitPositions
+            .map((position) => Math.hypot(position[0] + 12.5, position[2] - 10.5))
+            .reduce(
+              (best, distance, index, distances) => distance < distances[best] ? index : best,
+              0,
+            );
+          const founderId = initialRabbitIds[founderIndex];
+          let founderApproachedFieldRefuge = false;
+          let founderHiddenAtFieldRefuge = false;
+          for (const sample of rabbitSamples) {
+            const sampleIds = String(sample.rabbitEntityIds ?? "").split(",").filter(Boolean);
+            const samplePositions = parseRabbitPositions(sample.rabbitPositions);
+            const visibleIndex = sampleIds.indexOf(founderId);
+            if (visibleIndex >= 0) {
+              const position = samplePositions[visibleIndex];
+              founderApproachedFieldRefuge ||= Math.hypot(
+                position[0] + 7.5,
+                position[2] - 8.5,
+              ) <= 3;
+            } else if (founderApproachedFieldRefuge) {
+              founderHiddenAtFieldRefuge = true;
+            }
+          }
+          const protectedBurrowCounts = rabbitSamples.map(
+            (sample) => Number(sample.rabbitBurrowCount),
+          );
+          const reusedFieldRefugeWithoutDigging = founderHiddenAtFieldRefuge
+            && protectedBurrowCounts.every((count) => count === 2);
+          if (!founderId || !reusedFieldRefugeWithoutDigging) {
+            throw new Error(`rabbit founder did not reuse the loaded field refuge: ${JSON.stringify({ founderId, founderApproachedFieldRefuge, founderHiddenAtFieldRefuge, protectedBurrowCounts, rabbitSamples })}`);
           }
 
           await page.evaluate(() => globalThis.__mcloneWebApp.frameBlock?.(14, 64, 14, true));
@@ -1161,11 +1234,6 @@ async function run() {
             ),
             matureCarrots,
           );
-          /** @param {unknown} value */
-          const parseRabbitPositions = (value) => String(value ?? "")
-            .split(";")
-            .filter(Boolean)
-            .map((position) => position.split(",").map(Number));
           const rabbitIds = String(rabbitSamples[0].rabbitEntityIds ?? "").split(",");
           const rabbitTravel = rabbitIds.map(() => 0);
           const sampledClips = new Set();
@@ -1247,7 +1315,10 @@ async function run() {
               0,
             );
           const homeBurrowId = burrowIdsBeforeCollapse[homeBurrowIndex];
-          if (!homeBurrowId || Number(behaviorEnd.rabbitBurrowCount) < 2) {
+          const fieldBurrowId = burrowIdsBeforeCollapse.find(
+            (entityId) => entityId !== homeBurrowId,
+          );
+          if (!homeBurrowId || !fieldBurrowId || Number(behaviorEnd.rabbitBurrowCount) < 2) {
             throw new Error(`rabbit home mouth was not available for collapse: ${JSON.stringify({ behaviorEnd, burrowIdsBeforeCollapse, burrowPositionsBeforeCollapse })}`);
           }
           await page.evaluate(() => globalThis.__mcloneWebApp.frameBlock?.(8, 64, 8, true));
@@ -1427,15 +1498,17 @@ async function run() {
               .filter(Boolean)
               .forEach((id) => postCollapseSeenRabbitIds.add(id));
             if (
-              Number(replacementEnd.rabbitBurrowCount) > collapsedBurrowCount
-              && rabbitIds.every((id) => postCollapseSeenRabbitIds.has(id))
+              rabbitIds.every((id) => postCollapseSeenRabbitIds.has(id))
+              && String(replacementEnd.rabbitBurrowEntityIds ?? "")
+                .split(",")
+                .includes(fieldBurrowId)
             ) {
               break;
             }
             await page.waitForTimeout(250);
           }
           behaviorEnd = replacementEnd;
-          const replacementBurrowIds = String(behaviorEnd.rabbitBurrowEntityIds ?? "")
+          const survivingBurrowIds = String(behaviorEnd.rabbitBurrowEntityIds ?? "")
             .split(",")
             .filter(Boolean);
           behaviorProbe = {
@@ -1443,6 +1516,11 @@ async function run() {
             protectedCarrotStates,
             finalCarrotStates,
             raidedCarrotCount,
+            founderId,
+            founderApproachedFieldRefuge,
+            founderHiddenAtFieldRefuge,
+            protectedBurrowCounts,
+            reusedFieldRefugeWithoutDigging,
             rabbitTravel,
             sampledClips: [...sampledClips],
             initialBurrowCount: Number(rabbitSamples[0].rabbitBurrowCount),
@@ -1452,10 +1530,11 @@ async function run() {
             hiddenThenReturnedIds: [...hiddenThenReturnedIds],
             maxOverlapSampleStreak,
             homeBurrowId,
+            fieldBurrowId,
             collapseCommands,
             collapsedBurrowCount,
             postCollapseSeenRabbitIds: [...postCollapseSeenRabbitIds],
-            replacementBurrowIds,
+            survivingBurrowIds,
             initialGateState,
             openGateState,
             gateCommandSent: openGate?.commandSent === true || openGate?.ok === true,
@@ -1463,6 +1542,7 @@ async function run() {
           };
           if (
             rabbitIds.length !== 4
+            || !reusedFieldRefugeWithoutDigging
             || rabbitTravel.filter((distance) => Number.isFinite(distance) && distance > 1).length < 2
             || !sampledClips.has("hop")
             || raidedCarrotCount < 1
@@ -1470,8 +1550,9 @@ async function run() {
             || minimumVisibleRabbitCount >= rabbitIds.length
             || maxOverlapSampleStreak > 2
             || collapsedBurrowCount >= Number(rabbitSamples.at(-1).rabbitBurrowCount)
-            || Number(behaviorEnd.rabbitBurrowCount) <= collapsedBurrowCount
-            || replacementBurrowIds.includes(homeBurrowId)
+            || Number(behaviorEnd.rabbitBurrowCount) < collapsedBurrowCount
+            || survivingBurrowIds.includes(homeBurrowId)
+            || !survivingBurrowIds.includes(fieldBurrowId)
             || !rabbitIds.every((id) => postCollapseSeenRabbitIds.has(id))
             || openGateState === initialGateState
             || behaviorProbe.gateCommandSent !== true
@@ -1482,6 +1563,30 @@ async function run() {
               behaviorProbe,
             }, null, 2)}`);
           }
+          const reviewEye = [14.5, 66.62, 18.5];
+          const reviewTarget = [15, 65.5, 9.5];
+          await page.evaluate(() => globalThis.__mcloneWebApp?.pauseRendering?.());
+          await page.waitForFunction(
+            () => globalThis.__mcloneWebApp?.state?.tickFrameBusy === false,
+            undefined,
+            { timeout: 10_000 },
+          );
+          await page.evaluate(
+            ({ eye, target }) => globalThis.__mcloneWebApp
+              ?.frameTerrainComposition?.(eye, target),
+            { eye: reviewEye, target: reviewTarget },
+          );
+          await page.evaluate(() => globalThis.__mcloneWebApp?.resumeRendering?.());
+          await page.waitForFunction(
+            (eye) => {
+              const state = globalThis.__mcloneWebApp?.state;
+              return Math.abs(state.cameraX - eye[0]) < 0.01
+                && Math.abs(state.cameraY - eye[1]) < 0.01
+                && Math.abs(state.cameraZ - eye[2]) < 0.01;
+            },
+            reviewEye,
+            { timeout: 10_000 },
+          );
         } else {
         const beeBehaviorSamples = beeShowcase ? [behaviorStart] : [];
         try {
@@ -2565,13 +2670,13 @@ async function run() {
           pageErrors.length > 0
           || canvasPixels.distinctInteriorColorCount < 2
           || result?.showcaseId !== showcase
-          || result?.showcaseRevision !== (rabbitShowcase ? 3 : gardenShowcase ? 1 : wheatShowcase ? 3 : beeShowcase ? 2 : deerShowcase ? 1 : 2)
+          || result?.showcaseRevision !== (rabbitShowcase ? 4 : gardenShowcase ? 1 : wheatShowcase ? 3 : beeShowcase ? 2 : deerShowcase ? 1 : 2)
           || result?.activeWorldSeedText !== (rabbitShowcase ? "17507" : cropShowcase ? "17506" : beeShowcase ? "17505" : deerShowcase ? "17504" : "17503")
           || result?.generationProfile !== "authored-only"
           || result?.dayTime !== (rabbitShowcase ? 12000 : 6000)
           || (rabbitShowcase
             ? result?.rabbitCount < 3
-              || result?.rabbitBurrowCount < 2
+              || result?.rabbitBurrowCount < 1
               || (result?.rabbitFieldGuideBits & result?.showcaseRabbitFieldGuideBits)
                 !== result?.showcaseRabbitFieldGuideBits
               || behaviorProbe.raidedCarrotCount < 1
@@ -2621,6 +2726,8 @@ async function run() {
           screenshotPath,
           pageScreenshotCaptured,
           canvasScreenshotPath,
+          initialShowcaseScreenshotPath,
+          initialShowcaseCanvasScreenshotPath,
           canvasPixels,
           worldRecordCounts,
           behaviorProbe,

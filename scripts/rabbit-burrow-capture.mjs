@@ -21,7 +21,7 @@ const receipt = Object.fromEntries(
     .split(" ")
     .map((field) => field.split("=", 2)) ?? [],
 );
-if (receipt.id !== "rabbit-burrow" || receipt.revision !== "3") {
+if (receipt.id !== "rabbit-burrow" || receipt.revision !== "4") {
   throw new Error("showcase compiler did not emit the expected rabbit receipt");
 }
 
@@ -46,7 +46,7 @@ const output = run([
   "--screenshot-target", receipt.entry_target,
 ], env);
 if (!/[56] entities, [56] actors, [56] drawn actors/.test(output)) {
-  throw new Error("rabbit capture did not draw four rabbits and at least one burrow");
+  throw new Error("rabbit capture did not draw three or four visible rabbits and two burrows");
 }
 if (!/GUI commands/.test(output)) {
   throw new Error("rabbit capture did not include the shared HUD/field-guide draw list");

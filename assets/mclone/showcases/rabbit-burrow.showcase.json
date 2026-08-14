@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "rabbit-burrow",
   "title": "Rabbit Burrow and Garden",
-  "revision": 3,
+  "revision": 4,
   "baseTerrain": "rabbit-meadow-v1",
   "seed": 17507,
   "dayTime": 12000,
@@ -73,10 +73,24 @@
       "liveInstantiation": "mclone-rabbit-burrow-excavation",
       "state": {
         "kind": "rabbit-burrow",
-        "capacity": 6,
-        "residents": ["doe", "buck", "kit", null, null, null],
+        "capacity": 1,
         "disturbanceTicks": 0,
-        "damage": 0
+        "damage": 0,
+        "lastUsedTick": 0
+      }
+    },
+    {
+      "id": "field-refuge",
+      "position": [-7.5, 65.0, 8.5],
+      "yRotDegrees": 0.0,
+      "onGround": true,
+      "liveInstantiation": "mclone-rabbit-burrow-excavation",
+      "state": {
+        "kind": "rabbit-burrow",
+        "capacity": 2,
+        "disturbanceTicks": 0,
+        "damage": 0,
+        "lastUsedTick": 0
       }
     },
     {
@@ -87,7 +101,8 @@
       "liveInstantiation": "mclone-rabbit-warren-family",
       "state": {
         "kind": "rabbit",
-        "home": "home-warren",
+        "knownRefuges": ["home-warren"],
+        "shelteredIn": null,
         "digTarget": null,
         "lifeStage": "adult",
         "ageTicks": 2400,
@@ -109,7 +124,8 @@
       "liveInstantiation": "mclone-rabbit-warren-family",
       "state": {
         "kind": "rabbit",
-        "home": "home-warren",
+        "knownRefuges": ["home-warren"],
+        "shelteredIn": null,
         "digTarget": null,
         "lifeStage": "adult",
         "ageTicks": 2400,
@@ -131,13 +147,14 @@
       "liveInstantiation": "mclone-rabbit-warren-family",
       "state": {
         "kind": "rabbit",
-        "home": "home-warren",
+        "knownRefuges": ["home-warren"],
+        "shelteredIn": "home-warren",
         "digTarget": null,
         "lifeStage": "kit",
         "ageTicks": 600,
         "parents": ["doe", "buck"],
-        "behavior": "emerge",
-        "behaviorTicks": 4,
+        "behavior": "underground",
+        "behaviorTicks": 0,
         "health": 3,
         "maxHealth": 3,
         "loveTicks": 0,
@@ -147,13 +164,14 @@
     },
     {
       "id": "founder",
-      "position": [-4.5, 65.0, 10.5],
+      "position": [-12.5, 65.0, 10.5],
       "yRotDegrees": 0.0,
       "onGround": true,
       "liveInstantiation": "mclone-rabbit-natural-founder",
       "state": {
         "kind": "rabbit",
-        "home": null,
+        "knownRefuges": ["home-warren"],
+        "shelteredIn": null,
         "digTarget": null,
         "lifeStage": "adult",
         "ageTicks": 2400,

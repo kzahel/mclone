@@ -576,6 +576,14 @@ fn validate_recipe(
         };
         validate_evidence(&entity.live_instantiation, expected)?;
     }
+    let rabbit_burrow_ids = recipe
+        .entities
+        .iter()
+        .filter_map(|entity| {
+            matches!(&entity.state, ShowcaseEntityState::RabbitBurrow { .. })
+                .then_some(entity.id.as_str())
+        })
+        .collect::<BTreeSet<_>>();
     for entity in &recipe.entities {
         for parent in entity.state.parents().into_iter().flatten() {
             if parent == entity.id {
@@ -659,21 +667,36 @@ fn validate_recipe(
             )));
         }
         if let ShowcaseEntityState::Rabbit {
-            home,
+            known_refuges,
+            sheltered_in,
             dig_target,
             life_stage,
             age_ticks,
             health,
             max_health,
+            behavior,
             ..
         } = &entity.state
         {
-            if home
-                .as_ref()
-                .is_some_and(|home| !entity_ids.contains(home.as_str()))
+            let distinct_refuges = known_refuges.iter().collect::<BTreeSet<_>>();
+            if known_refuges.len() > 3
+                || distinct_refuges.len() != known_refuges.len()
+                || known_refuges
+                    .iter()
+                    .any(|refuge| !rabbit_burrow_ids.contains(refuge.as_str()))
+                || sheltered_in
+                    .as_ref()
+                    .is_some_and(|shelter| !known_refuges.iter().any(|refuge| refuge == shelter))
+                || sheltered_in.is_some()
+                    != matches!(
+                        behavior.protocol(),
+                        RabbitBehavior::EnterBurrow
+                            | RabbitBehavior::Underground
+                            | RabbitBehavior::Emerge
+                    )
             {
                 return Err(PlayableShowcaseError::invalid(format!(
-                    "showcase rabbit `{}` references a missing burrow",
+                    "showcase rabbit `{}` has invalid bounded refuge references",
                     entity.id
                 )));
             }
@@ -692,22 +715,12 @@ fn validate_recipe(
             }
         }
         if let ShowcaseEntityState::RabbitBurrow {
-            capacity,
-            residents,
-            damage,
-            ..
+            capacity, damage, ..
         } = &entity.state
         {
-            if *capacity == 0
-                || usize::from(*capacity) > residents.len()
-                || *damage >= 3
-                || residents
-                    .iter()
-                    .flatten()
-                    .any(|resident| !entity_ids.contains(resident.as_str()))
-            {
+            if *capacity == 0 || *capacity > 6 || *damage >= 3 {
                 return Err(PlayableShowcaseError::invalid(format!(
-                    "showcase rabbit burrow `{}` has invalid capacity or resident references",
+                    "showcase rabbit burrow `{}` has invalid capacity or condition",
                     entity.id
                 )));
             }
@@ -915,6 +928,19 @@ fn write_entities(
             )
         })
         .collect::<BTreeMap<_, _>>();
+    let entity_positions = recipes
+        .iter()
+        .map(|recipe| {
+            (
+                recipe.id.as_str(),
+                BlockPos::containing(Vec3d::new(
+                    recipe.position[0],
+                    recipe.position[1],
+                    recipe.position[2],
+                )),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
     let mut chunks: BTreeMap<ChunkPos, Vec<EntitySaveRecord>> = BTreeMap::new();
     for recipe in recipes {
         let parents = recipe
@@ -1003,7 +1029,8 @@ fn write_entities(
                 spread_cooldown: *spread_cooldown,
             },
             ShowcaseEntityState::Rabbit {
-                home,
+                known_refuges,
+                sheltered_in,
                 dig_target,
                 life_stage,
                 age_ticks,
@@ -1016,33 +1043,29 @@ fn write_entities(
                 raid_cooldown,
                 ..
             } => EntitySavePayload::Rabbit {
-                known_refuges: [
-                    home.as_ref().map(|home| RabbitRefugeSaveRecord {
-                        persistent_id: *persistent_ids
-                            .get(home.as_str())
-                            .expect("validated rabbit burrow reference"),
-                        last_known_position: None,
-                        revision: None,
-                        last_confirmed_tick: 0,
-                        familiarity: 1,
-                    }),
-                    None,
-                    None,
-                ],
-                sheltered_in: matches!(
-                    behavior.protocol(),
-                    RabbitBehavior::EnterBurrow
-                        | RabbitBehavior::Underground
-                        | RabbitBehavior::Emerge
-                )
-                .then(|| {
+                known_refuges: {
+                    let mut saved = [None; 3];
+                    for (slot, refuge) in saved.iter_mut().zip(known_refuges) {
+                        *slot = Some(RabbitRefugeSaveRecord {
+                            persistent_id: *persistent_ids
+                                .get(refuge.as_str())
+                                .expect("validated rabbit burrow reference"),
+                            last_known_position: Some(
+                                *entity_positions
+                                    .get(refuge.as_str())
+                                    .expect("validated rabbit burrow position"),
+                            ),
+                            revision: None,
+                            last_confirmed_tick: 0,
+                            familiarity: 1,
+                        });
+                    }
+                    saved
+                },
+                sheltered_in: sheltered_in.as_ref().map(|shelter| {
                     *persistent_ids
-                        .get(
-                            home.as_ref()
-                                .expect("sheltered showcase rabbit needs a burrow")
-                                .as_str(),
-                        )
-                        .expect("validated rabbit burrow reference")
+                        .get(shelter.as_str())
+                        .expect("validated current rabbit shelter")
                 }),
                 dig_target: dig_target.map(|target| BlockPos::new(target[0], target[1], target[2])),
                 next_decision_tick: 0,
@@ -1061,14 +1084,14 @@ fn write_entities(
             },
             ShowcaseEntityState::RabbitBurrow {
                 capacity,
-                residents: _,
                 disturbance_ticks,
                 damage,
+                last_used_tick,
             } => EntitySavePayload::RabbitBurrow {
                 capacity: *capacity,
                 disturbance_ticks: *disturbance_ticks,
                 damage: *damage,
-                last_used_tick: 0,
+                last_used_tick: *last_used_tick,
             },
         };
         let kind = match &recipe.state {
@@ -1423,7 +1446,10 @@ enum ShowcaseEntityState {
         spread_cooldown: u32,
     },
     Rabbit {
-        home: Option<String>,
+        #[serde(rename = "knownRefuges")]
+        known_refuges: Vec<String>,
+        #[serde(rename = "shelteredIn")]
+        sheltered_in: Option<String>,
         #[serde(rename = "digTarget")]
         dig_target: Option<[i32; 3]>,
         #[serde(rename = "lifeStage")]
@@ -1446,10 +1472,11 @@ enum ShowcaseEntityState {
     },
     RabbitBurrow {
         capacity: u8,
-        residents: [Option<String>; 6],
         #[serde(rename = "disturbanceTicks")]
         disturbance_ticks: u32,
         damage: u8,
+        #[serde(rename = "lastUsedTick")]
+        last_used_tick: u64,
     },
 }
 
@@ -1993,15 +2020,15 @@ mod tests {
     }
 
     #[test]
-    fn rabbit_burrow_recipe_is_data_only_and_links_one_family_home() {
+    fn rabbit_burrow_recipe_has_bounded_memories_and_two_reusable_mouths() {
         let identity = ClientIdentity::test_default();
         let (manifest, store) =
             playable_showcase_memory_store(PlayableShowcaseId::RabbitBurrow, &identity).unwrap();
-        assert_eq!(manifest.revision, 3);
+        assert_eq!(manifest.revision, 4);
         assert_eq!(manifest.seed, 17_507);
-        assert_eq!(manifest.entity_count, 5);
+        assert_eq!(manifest.entity_count, 6);
         assert_eq!(manifest.rabbit_count, 4);
-        assert_eq!(manifest.rabbit_burrow_count, 1);
+        assert_eq!(manifest.rabbit_burrow_count, 2);
         assert_eq!(
             manifest.rabbit_field_guide_bits,
             RabbitObservationKind::Seen.bit() | RabbitObservationKind::FoundBurrow.bit()
@@ -2015,7 +2042,7 @@ mod tests {
             .expect("semantic burrow record");
         assert!(matches!(
             burrow.payload,
-            EntitySavePayload::RabbitBurrow { capacity: 6, .. }
+            EntitySavePayload::RabbitBurrow { capacity: 1, .. }
         ));
         assert_eq!(
             center_entities
@@ -2034,6 +2061,30 @@ mod tests {
                         ..
                     }), None, None],
                     life_stage: RabbitLifeStage::Kit,
+                    ..
+                } if home == burrow.persistent_id
+            )
+        }));
+
+        let west_entities = store.entity_chunk(ChunkPos::new(-1, 0)).unwrap();
+        assert_eq!(
+            west_entities
+                .entities
+                .iter()
+                .filter(|entity| matches!(entity.payload, EntitySavePayload::RabbitBurrow { .. }))
+                .count(),
+            1
+        );
+        assert!(west_entities.entities.iter().any(|entity| {
+            matches!(
+                entity.payload,
+                EntitySavePayload::Rabbit {
+                    known_refuges: [Some(RabbitRefugeSaveRecord {
+                        persistent_id: home,
+                        last_known_position: Some(BlockPos { x: 8, y: 65, z: 8 }),
+                        ..
+                    }), None, None],
+                    sheltered_in: None,
                     ..
                 } if home == burrow.persistent_id
             )
@@ -2135,6 +2186,30 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(error.contains("missing parent"), "{error}");
+    }
+
+    #[test]
+    fn rabbit_schema_requires_typed_bounded_refuges_and_consistent_shelter() {
+        let non_burrow = RABBIT_BURROW_RECIPE.replacen(
+            "\"knownRefuges\": [\"home-warren\"]",
+            "\"knownRefuges\": [\"doe\"]",
+            1,
+        );
+        let error = parse_and_validate_recipe(PlayableShowcaseId::RabbitBurrow, &non_burrow)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("bounded refuge references"), "{error}");
+
+        let impossible_shelter = RABBIT_BURROW_RECIPE.replacen(
+            "\"behavior\": \"underground\"",
+            "\"behavior\": \"idle\"",
+            1,
+        );
+        let error =
+            parse_and_validate_recipe(PlayableShowcaseId::RabbitBurrow, &impossible_shelter)
+                .unwrap_err()
+                .to_string();
+        assert!(error.contains("bounded refuge references"), "{error}");
     }
 
     #[test]
