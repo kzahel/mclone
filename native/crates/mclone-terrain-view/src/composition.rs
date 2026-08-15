@@ -10,7 +10,13 @@ pub const TERRAIN_EXACT_COVERAGE_WORD_COUNT: usize = (TERRAIN_EXACT_COVERAGE_MAX
     / u32::BITS as usize;
 pub const TERRAIN_EXACT_COVERAGE_MASK_BYTES: u64 =
     (TERRAIN_EXACT_COVERAGE_WORD_COUNT * size_of::<u32>()) as u64;
-pub const TERRAIN_EXACT_FRONTIER_COLLAR_BLOCKS: f32 = 1.5;
+/// Horizontal inset used when assigning whole procedural tree records to an
+/// exact-painted footprint.
+///
+/// Terrain no longer retains an overlapping procedural collar. A tree whose
+/// complete working bounds are covered by exact-painted chunks can therefore
+/// use the exact owner all the way to the chunk boundary.
+pub const TERRAIN_EXACT_FRONTIER_TREE_INSET_BLOCKS: f32 = 0.0;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct BoundedRepresentationBounds {
@@ -469,6 +475,11 @@ mod tests {
         assert!(
             !snapshot
                 .contains_exact_safe_horizontal_bounds(bounds(2, 2, 32, 29), 1.5)
+                .unwrap()
+        );
+        assert!(
+            snapshot
+                .contains_exact_safe_horizontal_bounds(bounds(0, 0, 31, 31), 0.0)
                 .unwrap()
         );
     }

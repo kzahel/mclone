@@ -330,7 +330,7 @@ impl ExplorerTerrain {
              exact_vertices={} exact_indices={}/{} exact_bytes={} exact_trees={}:{}:{} \
              exact_tree_draw={}:{} exact_compile_ms={:.2} \
              exact_present_ms={:.2} exact_mesh_ms={:.2} exact_pack_ms={:.2} \
-             exact_anchor={}({}, {}) frontier=procedural-collar-1.5-blocks",
+             exact_anchor={}({}, {}) frontier=single-owner-voxel-curtain",
             self.session.diagnostics(),
             self.composition.label(),
             exact.painted_chunks,

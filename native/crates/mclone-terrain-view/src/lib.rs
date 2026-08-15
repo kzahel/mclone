@@ -65,7 +65,7 @@ pub use composition::{
     BoundedRepresentationOwnershipSnapshot, BoundedRepresentationReadiness,
     BoundedRepresentationUnit, ExactPaintedCoverageSnapshot, TERRAIN_EXACT_COVERAGE_MASK_BYTES,
     TERRAIN_EXACT_COVERAGE_MAX_CHUNKS_PER_AXIS, TERRAIN_EXACT_COVERAGE_WORD_COUNT,
-    TERRAIN_EXACT_FRONTIER_COLLAR_BLOCKS, TerrainCompositionSourceIdentity,
+    TERRAIN_EXACT_FRONTIER_TREE_INSET_BLOCKS, TerrainCompositionSourceIdentity,
     TerrainExactCoverageMask, TerrainExactCoverageMode,
 };
 pub use engine::{TerrainViewEngine, TerrainViewEngineConfig};

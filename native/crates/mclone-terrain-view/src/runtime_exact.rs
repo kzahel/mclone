@@ -9,7 +9,7 @@ use std::time::Duration;
 use crate::{
     BoundedRepresentationOwnershipSnapshot, CanonicalMeshBatch, CanonicalMeshCoordinate,
     CanonicalPackedAdmission, ExactPaintedCoverageSnapshot, McloneTreeOccurrenceId,
-    McloneTreeOwnershipCandidate, TERRAIN_EXACT_FRONTIER_COLLAR_BLOCKS,
+    McloneTreeOwnershipCandidate, TERRAIN_EXACT_FRONTIER_TREE_INSET_BLOCKS,
     TerrainCompositionSourceIdentity, TerrainPreparedExactFrame, TerrainViewSourceIdentity,
     canonical_terrain_chunk_order, mclone_tree_ownership_snapshot,
 };
@@ -690,7 +690,7 @@ impl TerrainRuntimeExactRenderer {
             self.source,
             self.coverage_generation,
             &coverage,
-            TERRAIN_EXACT_FRONTIER_COLLAR_BLOCKS,
+            TERRAIN_EXACT_FRONTIER_TREE_INSET_BLOCKS,
             self.tree_occurrences.values().copied().map(|occurrence| {
                 let id = McloneTreeOccurrenceId::from(occurrence);
                 McloneTreeOwnershipCandidate::new(

@@ -22,7 +22,7 @@ use mclone_worldgen::terrain_vegetation::{
 use super::{
     BoundedRepresentationOwnershipSnapshot, ExactPaintedCoverageSnapshot, McloneTreeOccurrenceId,
     McloneTreeOwnershipCandidate, TERRAIN_EXACT_COVERAGE_MASK_BYTES,
-    TERRAIN_EXACT_FRONTIER_COLLAR_BLOCKS, TERRAIN_PREVIEW_DEPTH_FORMAT,
+    TERRAIN_EXACT_FRONTIER_TREE_INSET_BLOCKS, TERRAIN_PREVIEW_DEPTH_FORMAT,
     TERRAIN_PREVIEW_SAMPLE_BYTES, TERRAIN_PREVIEW_UNIFORM_BYTES, TERRAIN_PREVIEW_WORKGROUP_AXIS,
     TerrainClipmap, TerrainClipmapConfig, TerrainClipmapDiagnostics, TerrainClipmapTile,
     TerrainCompositionSourceIdentity, TerrainExactCoverageMask, TerrainExactCoverageMode,
@@ -78,6 +78,8 @@ const TERRAIN_HORIZON_NORMAL_EDGE_WEST: u32 = 1 << 27;
 const TERRAIN_HORIZON_NORMAL_EDGE_EAST: u32 = 1 << 28;
 const TERRAIN_HORIZON_NORMAL_EDGE_NORTH: u32 = 1 << 29;
 const TERRAIN_HORIZON_NORMAL_EDGE_SOUTH: u32 = 1 << 30;
+const TERRAIN_HORIZON_SMOOTH_VERTICES_PER_CELL: u32 = 6;
+const TERRAIN_HORIZON_VOXEL_SHELL_VERTICES_PER_CELL: u32 = 30;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct TerrainViewportFrameStats {
@@ -1132,12 +1134,12 @@ impl TerrainViewportRenderer {
                 entries: &[
                     uniform_layout_entry_with_size(
                         0,
-                        wgpu::ShaderStages::FRAGMENT,
+                        wgpu::ShaderStages::VERTEX_FRAGMENT,
                         TERRAIN_EXACT_COVERAGE_UNIFORM_BYTES,
                     ),
                     storage_layout_entry(
                         1,
-                        wgpu::ShaderStages::FRAGMENT,
+                        wgpu::ShaderStages::VERTEX_FRAGMENT,
                         true,
                         TERRAIN_EXACT_COVERAGE_MASK_BYTES,
                     ),
@@ -3547,7 +3549,11 @@ impl TerrainHorizonRenderer {
                     pass.set_bind_group(0, &self.slots[slot_index].render_bind_group, &[]);
                     let render_cells = TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS
                         / self.renderer.horizon_render_cell_stride;
-                    pass.draw(0..render_cells.pow(2) * 6, 0..1);
+                    pass.draw(
+                        0..render_cells.pow(2)
+                            * terrain_horizon_vertices_per_cell(level.snapshot.sample_spacing),
+                        0..1,
+                    );
                     drawn_tiles = drawn_tiles.saturating_add(1);
                     level_drawn = true;
                 }
@@ -3651,11 +3657,25 @@ impl TerrainHorizonRenderer {
             tree_instance_count.saturating_mul(TERRAIN_PREVIEW_TREE_VERTICES_PER_INSTANCE);
         let render_cells =
             TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS / self.renderer.horizon_render_cell_stride;
-        let vertex_count = drawn_tiles
-            .saturating_mul(render_cells.pow(2) * 6)
-            .saturating_add(
-                drawn_tree_instances.saturating_mul(TERRAIN_PREVIEW_TREE_VERTICES_PER_INSTANCE),
-            );
+        let terrain_vertex_count = terrain_levels.iter().fold(0_u32, |count, level| {
+            let visible_tiles = level
+                .tiles
+                .iter()
+                .filter(|resource| self.visible_terrain_slots[resource.resource_slot as usize])
+                .count()
+                .try_into()
+                .unwrap_or(u32::MAX);
+            count.saturating_add(
+                visible_tiles
+                    .saturating_mul(render_cells.pow(2))
+                    .saturating_mul(terrain_horizon_vertices_per_cell(
+                        level.snapshot.sample_spacing,
+                    )),
+            )
+        });
+        let vertex_count = terrain_vertex_count.saturating_add(
+            drawn_tree_instances.saturating_mul(TERRAIN_PREVIEW_TREE_VERTICES_PER_INSTANCE),
+        );
         let normal_halo_samples_per_tile = terrain_horizon_normal_halo_samples_per_tile();
         let normal_halo_fixed_bytes = u64::from(self.admission.resource_slots())
             .saturating_mul(u64::from(normal_halo_samples_per_tile))
@@ -3940,7 +3960,7 @@ impl TerrainHorizonRenderer {
             coverage.source(),
             coverage.generation(),
             &coverage,
-            TERRAIN_EXACT_FRONTIER_COLLAR_BLOCKS,
+            TERRAIN_EXACT_FRONTIER_TREE_INSET_BLOCKS,
             occurrences
                 .into_values()
                 // Exact-ready coverage owns both a present tree and an edited
@@ -3966,6 +3986,14 @@ fn terrain_horizon_samples_per_axis() -> u32 {
     TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS
         .saturating_add(1)
         .saturating_add(TERRAIN_HORIZON_NORMAL_HALO_RADIUS.saturating_mul(2))
+}
+
+const fn terrain_horizon_vertices_per_cell(sample_spacing: u32) -> u32 {
+    if sample_spacing == 1 {
+        TERRAIN_HORIZON_VOXEL_SHELL_VERTICES_PER_CELL
+    } else {
+        TERRAIN_HORIZON_SMOOTH_VERTICES_PER_CELL
+    }
 }
 
 fn terrain_horizon_normal_halo_samples_per_tile() -> u32 {
@@ -4699,6 +4727,36 @@ mod tests {
             shared_boundary + coarse.snapshot.sample_spacing as i32,
         );
         assert_eq!(fine_wide_footprint, coarse_narrow_footprint);
+    }
+
+    #[test]
+    fn horizon_finest_level_uses_one_bounded_voxel_shell() {
+        assert_eq!(
+            terrain_horizon_vertices_per_cell(1),
+            TERRAIN_HORIZON_VOXEL_SHELL_VERTICES_PER_CELL
+        );
+        for spacing in [2, 4, 8, 16, 32, 64, 128, 256, 512] {
+            assert_eq!(
+                terrain_horizon_vertices_per_cell(spacing),
+                TERRAIN_HORIZON_SMOOTH_VERTICES_PER_CELL
+            );
+        }
+
+        let shader = super::super::TERRAIN_PREVIEW_RENDER_WGSL;
+        assert!(shader.contains("let voxel_shell = sample_halo_radius() > 0"));
+        assert!(shader.contains("let vertices_per_cell = select(6u, 30u, voxel_shell);"));
+        assert!(shader.contains("bottom_y = top_y - 32.0;"));
+        assert!(shader.contains("surface_kind = 2u;"));
+    }
+
+    #[test]
+    fn horizon_exact_coverage_has_one_horizontal_owner() {
+        let shader = super::super::TERRAIN_PREVIEW_RENDER_WGSL;
+        assert!(!shader.contains("exact_chunk_painted_interior"));
+        assert!(!shader.contains("let collar = 1.5"));
+        assert!(shader.contains("&& input.surface_kind == 0u"));
+        assert!(shader.contains("&& exact_chunk_painted(input.world_xz)"));
+        assert_eq!(TERRAIN_EXACT_FRONTIER_TREE_INSET_BLOCKS, 0.0);
     }
 
     #[test]

@@ -90,6 +90,8 @@ struct VertexOutput {
     @location(8) @interpolate(flat) biome: u32,
     @location(9) surface_y: f32,
     @location(10) @interpolate(flat) view_index: u32,
+    @location(11) world_uv: vec2<f32>,
+    @location(12) @interpolate(flat) surface_kind: u32,
 };
 
 fn exact_chunk_masked(chunk: vec2<i32>) -> bool {
@@ -110,28 +112,6 @@ fn exact_chunk_masked(chunk: vec2<i32>) -> bool {
 
 fn exact_chunk_painted(world_xz: vec2<f32>) -> bool {
     return exact_chunk_masked(vec2<i32>(floor(world_xz / 16.0)));
-}
-
-fn exact_chunk_painted_interior(world_xz: vec2<f32>) -> bool {
-    let chunk = vec2<i32>(floor(world_xz / 16.0));
-    if !exact_chunk_masked(chunk) {
-        return false;
-    }
-    let local = fract(world_xz / 16.0) * 16.0;
-    let collar = 1.5;
-    if local.x < collar && !exact_chunk_masked(chunk + vec2<i32>(-1, 0)) {
-        return false;
-    }
-    if local.x > 16.0 - collar && !exact_chunk_masked(chunk + vec2<i32>(1, 0)) {
-        return false;
-    }
-    if local.y < collar && !exact_chunk_masked(chunk + vec2<i32>(0, -1)) {
-        return false;
-    }
-    if local.y > 16.0 - collar && !exact_chunk_masked(chunk + vec2<i32>(0, 1)) {
-        return false;
-    }
-    return true;
 }
 
 fn grid_corner(vertex_in_cell: u32) -> vec2<u32> {
@@ -643,12 +623,20 @@ fn terrain_vertex(
     let cells = u32(params.origin_spacing_cells.w);
     let cell_stride = max(terrain_render_cell_stride, 1u);
     let render_cells = cells / cell_stride;
-    let cell_index = vertex_index / 6u;
+    let voxel_shell = sample_halo_radius() > 0
+        && params.origin_spacing_cells.z == 1
+        && cell_stride == 1u;
+    let vertices_per_cell = select(6u, 30u, voxel_shell);
+    let cell_index = vertex_index / vertices_per_cell;
     let cell_x = (cell_index % render_cells) * cell_stride;
     let cell_z = (cell_index / render_cells) * cell_stride;
-    let corner = grid_corner(vertex_index % 6u);
-    let sample_x = cell_x + corner.x * cell_stride;
-    let sample_z = cell_z + corner.y * cell_stride;
+    let vertex_in_cell = vertex_index % vertices_per_cell;
+    let face_index = select(0u, vertex_in_cell / 6u, voxel_shell);
+    let corner = grid_corner(vertex_in_cell % 6u);
+    let smooth_sample_x = cell_x + corner.x * cell_stride;
+    let smooth_sample_z = cell_z + corner.y * cell_stride;
+    let sample_x = select(smooth_sample_x, cell_x, voxel_shell);
+    let sample_z = select(smooth_sample_z, cell_z, voxel_shell);
     let logical_x = i32(sample_x);
     let logical_z = i32(sample_z);
     let index = sample_z * params.layer_samples_size.y + sample_x;
@@ -751,15 +739,126 @@ fn terrain_vertex(
         slope_z = mix(narrow_slope_z, wide_slope_z, coarse_footprint_weight);
     }
     let normal = normalize(vec3<f32>(-slope_x * 4.0, 1.0, -slope_z * 4.0));
-    let light = clamp(dot(normal, normalize(vec3<f32>(-0.45, 0.82, -0.35))) * 0.48 + 0.58, 0.34, 1.05);
+    var light = clamp(dot(normal, normalize(vec3<f32>(-0.45, 0.82, -0.35))) * 0.48 + 0.58, 0.34, 1.05);
 
-    let world_x = params.origin_spacing_cells.x
-        + i32(sample_x) * params.origin_spacing_cells.z;
-    let world_z = params.origin_spacing_cells.y
-        + i32(sample_z) * params.origin_spacing_cells.z;
-    let relative_x = f32(world_x - params.viewport_center_extent.x)
+    let cell_world_x = params.origin_spacing_cells.x
+        + i32(cell_x) * params.origin_spacing_cells.z;
+    let cell_world_z = params.origin_spacing_cells.y
+        + i32(cell_z) * params.origin_spacing_cells.z;
+    var vertex_world_x = f32(params.origin_spacing_cells.x
+        + i32(smooth_sample_x) * params.origin_spacing_cells.z);
+    var vertex_world_z = f32(params.origin_spacing_cells.y
+        + i32(smooth_sample_z) * params.origin_spacing_cells.z);
+    var vertex_world_y = stitched_height + 1.0;
+    var world_uv = vec2<f32>(vertex_world_x, vertex_world_z);
+    var surface_kind = 0u;
+
+    if voxel_shell {
+        let top_y = round(stitched_height) + 1.0;
+        vertex_world_x = f32(cell_world_x) + f32(corner.x);
+        vertex_world_z = f32(cell_world_z) + f32(corner.y);
+        vertex_world_y = top_y;
+        world_uv = vec2<f32>(vertex_world_x, vertex_world_z);
+        light = 1.0;
+
+        if face_index != 0u {
+            var neighbor_x = i32(cell_x);
+            var neighbor_z = i32(cell_z);
+            if face_index == 1u {
+                neighbor_x -= 1;
+            } else if face_index == 2u {
+                neighbor_x += 1;
+            } else if face_index == 3u {
+                neighbor_z -= 1;
+            } else {
+                neighbor_z += 1;
+            }
+            let neighbor_y = round(terrain_horizon_geometry_height(
+                neighbor_x,
+                neighbor_z,
+                i32(cells),
+                1,
+                instance_index,
+            )) + 1.0;
+            let discard_exact = exact_coverage.mode_count_generation.x == 1u;
+            let current_exact = discard_exact && exact_chunk_painted(vec2<f32>(
+                f32(cell_world_x) + 0.5,
+                f32(cell_world_z) + 0.5,
+            ));
+            let neighbor_exact = discard_exact && exact_chunk_painted(vec2<f32>(
+                f32(cell_world_x + (neighbor_x - i32(cell_x))) + 0.5,
+                f32(cell_world_z + (neighbor_z - i32(cell_z))) + 0.5,
+            ));
+            let flags = params.content_stage_flags.w;
+            let outer_edge = (
+                face_index == 1u
+                    && cell_x == 0u
+                    && (flags & TERRAIN_HORIZON_NORMAL_EDGE_WEST) != 0u
+            ) || (
+                face_index == 2u
+                    && cell_x + 1u == cells
+                    && (flags & TERRAIN_HORIZON_NORMAL_EDGE_EAST) != 0u
+            ) || (
+                face_index == 3u
+                    && cell_z == 0u
+                    && (flags & TERRAIN_HORIZON_NORMAL_EDGE_NORTH) != 0u
+            ) || (
+                face_index == 4u
+                    && cell_z + 1u == cells
+                    && (flags & TERRAIN_HORIZON_NORMAL_EDGE_SOUTH) != 0u
+            );
+            var bottom_y = top_y;
+            var upper_y = top_y;
+            if !current_exact && neighbor_exact {
+                // The exact coverage contract currently supplies readiness but
+                // not a complete surface profile. Keep a bounded curtain on
+                // the procedural side of the ownership plane as the explicit
+                // fallback connector.
+                bottom_y = top_y - 32.0;
+                surface_kind = 2u;
+            } else if !current_exact && outer_edge {
+                bottom_y = min(top_y, neighbor_y);
+                upper_y = max(top_y, neighbor_y);
+                surface_kind = 1u;
+            } else if !current_exact && top_y > neighbor_y {
+                bottom_y = neighbor_y;
+                surface_kind = 1u;
+            }
+
+            let horizontal = f32(corner.x);
+            vertex_world_y = mix(bottom_y, upper_y, f32(corner.y));
+            if face_index == 1u {
+                vertex_world_x = f32(cell_world_x)
+                    + select(0.0, 0.001, neighbor_exact);
+                vertex_world_z = f32(cell_world_z) + 1.0 - horizontal;
+                light = 0.6;
+            } else if face_index == 2u {
+                vertex_world_x = f32(cell_world_x) + 1.0
+                    - select(0.0, 0.001, neighbor_exact);
+                vertex_world_z = f32(cell_world_z) + horizontal;
+                light = 0.6;
+            } else if face_index == 3u {
+                vertex_world_x = f32(cell_world_x) + horizontal;
+                vertex_world_z = f32(cell_world_z)
+                    + select(0.0, 0.001, neighbor_exact);
+                light = 0.8;
+            } else {
+                vertex_world_x = f32(cell_world_x) + 1.0 - horizontal;
+                vertex_world_z = f32(cell_world_z) + 1.0
+                    - select(0.0, 0.001, neighbor_exact);
+                light = 0.8;
+            }
+            world_uv = select(
+                vec2<f32>(vertex_world_z, vertex_world_y),
+                vec2<f32>(vertex_world_x, vertex_world_y),
+                face_index >= 3u,
+            );
+        }
+    }
+
+    let relative_x = vertex_world_x - f32(params.viewport_center_extent.x)
         - params.presentation_center_extent.x;
-    let relative_z = f32(world_z - params.viewport_center_extent.y)
+    let relative_z = vertex_world_z - f32(params.viewport_center_extent.y)
         - params.presentation_center_extent.y;
     let compare = params.seed_source_view.z == 2u;
     let stacked_compare = compare && params.content_stage_flags.z == 1u;
@@ -770,7 +869,7 @@ fn terrain_vertex(
     var clip_position = view_projection * vec4<f32>(
         vec3<f32>(
             relative_x,
-            stitched_height + 1.0,
+            vertex_world_y,
             relative_z,
         ),
         1.0,
@@ -793,7 +892,7 @@ fn terrain_vertex(
     var out: VertexOutput;
     out.position = clip_position;
     out.color = sample_color(sample, reference, gpu, light);
-    out.world_xz = vec2<f32>(f32(world_x), f32(world_z));
+    out.world_xz = vec2<f32>(vertex_world_x, vertex_world_z);
     out.light = light;
     out.material = terrain_material(sample);
     out.textured = select(
@@ -814,13 +913,15 @@ fn terrain_vertex(
         select(0.0, sample.forest_summary.x, params.content_stage_flags.x >= 4u),
     );
     out.world_position = vec3<f32>(
-        f32(world_x),
-        stitched_height + 1.0,
-        f32(world_z),
+        vertex_world_x,
+        vertex_world_y,
+        vertex_world_z,
     );
     out.biome = u32(round(sample.semantics.y));
     out.surface_y = sample.terrain.x;
     out.view_index = view_index;
+    out.world_uv = world_uv;
+    out.surface_kind = surface_kind;
     return out;
 }
 
@@ -876,7 +977,8 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
     }
     let exact_painted = exact_chunk_painted(input.world_xz);
     if exact_coverage.mode_count_generation.x == 1u
-        && exact_chunk_painted_interior(input.world_xz) {
+        && input.surface_kind == 0u
+        && exact_chunk_painted(input.world_xz) {
         discard;
     }
     let world_dx = dpdx(input.world_xz);
@@ -902,9 +1004,9 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
         color = apply_material_texture(
             color,
             input.material,
-            input.world_xz,
-            world_dx,
-            world_dy,
+            input.world_uv,
+            dpdx(input.world_uv),
+            dpdy(input.world_uv),
             blocks_per_pixel,
         );
     }
