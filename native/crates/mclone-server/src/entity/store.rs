@@ -2640,10 +2640,15 @@ impl ServerEntityStore {
                 }
                 let kit_id = self.allocate_entity_id();
                 let kit_persistent_id = self.allocate_persistent_id();
-                let kit_position = Vec3d::new(
-                    (left.2.x + right.2.x) * 0.5,
-                    (left.2.y + right.2.y) * 0.5,
-                    (left.2.z + right.2.z) * 0.5,
+                let kit_position = home_details.map_or_else(
+                    || {
+                        Vec3d::new(
+                            (left.2.x + right.2.x) * 0.5,
+                            (left.2.y + right.2.y) * 0.5,
+                            (left.2.z + right.2.z) * 0.5,
+                        )
+                    },
+                    |(_, _, position)| position,
                 );
                 let now = self.entities[&left.0].tick_count;
                 let known_refuges = home_details.map_or([None; 3], |(home, _, position)| {
@@ -4491,10 +4496,18 @@ fn rabbit_breeding_pair(
     RabbitBreedingCandidate,
     Option<EntityPersistentId>,
 )> {
+    const CLOSE_COURTSHIP_DISTANCE: f64 = 4.0;
+    const SHARED_REFUGE_COURTSHIP_DISTANCE: f64 = 32.0;
+
     for (index, left) in candidates.iter().copied().enumerate() {
         for right in candidates[index + 1..].iter().copied() {
-            if squared_distance_xz(left.2, right.2) <= 4.0 * 4.0 {
-                let common_home = (left.3 == right.3).then_some(left.3).flatten();
+            let common_home = (left.3 == right.3).then_some(left.3).flatten();
+            let courtship_distance = if common_home.is_some() {
+                SHARED_REFUGE_COURTSHIP_DISTANCE
+            } else {
+                CLOSE_COURTSHIP_DISTANCE
+            };
+            if squared_distance_xz(left.2, right.2) <= courtship_distance * courtship_distance {
                 return Some((left, right, common_home));
             }
         }
@@ -4506,6 +4519,42 @@ fn rabbit_breeding_pair(
 mod tests {
     use super::*;
     use mclone_worldgen::block::generated_block_state_id;
+
+    #[test]
+    fn rabbit_pairing_uses_a_bounded_shared_refuge_home_range() {
+        let refuge = EntityPersistentId { most: 9, least: 9 };
+        let left = (
+            EntityId(1),
+            EntityPersistentId { most: 1, least: 1 },
+            Vec3d::new(0.0, 64.0, 0.0),
+            Some(refuge),
+        );
+        let within_home_range = (
+            EntityId(2),
+            EntityPersistentId { most: 1, least: 2 },
+            Vec3d::new(31.0, 64.0, 0.0),
+            Some(refuge),
+        );
+        let beyond_home_range = (
+            EntityId(3),
+            EntityPersistentId { most: 1, least: 3 },
+            Vec3d::new(33.0, 64.0, 0.0),
+            Some(refuge),
+        );
+        let unrelated = (
+            EntityId(4),
+            EntityPersistentId { most: 1, least: 4 },
+            Vec3d::new(5.0, 64.0, 0.0),
+            None,
+        );
+
+        assert_eq!(
+            rabbit_breeding_pair(&[left, within_home_range]),
+            Some((left, within_home_range, Some(refuge)))
+        );
+        assert_eq!(rabbit_breeding_pair(&[left, beyond_home_range]), None);
+        assert_eq!(rabbit_breeding_pair(&[left, unrelated]), None);
+    }
 
     fn adult_rabbit_with_refuge(
         refuge: EntityPersistentId,
