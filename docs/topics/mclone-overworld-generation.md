@@ -23,7 +23,8 @@ Flat Grass cylinder proof and
 [`196`](../tactical/196-periodic-mclone-terrain-fields.md) are complete. The
 entire accepted terrain, biome, surface, spawn, and vegetation pipeline now
 supports either the ordinary plane or the exact 6,144-block / 384-chunk
-X-periodic cylinder. Product world creation now defaults to this profile.
+X-periodic cylinder. Product world creation defaults to this profile across
+catalog, startup, dedicated, and integrated-runner entry points.
 Its deterministic spawn policy keeps the existing exact dry-surface gate and
 adds a 129-by-129-block sparse neighborhood survey, so the first locally safe
 chunk beside a dominant ocean is no longer accepted as the world entry region.

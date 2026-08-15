@@ -23,9 +23,7 @@ pub const LOCAL_WORLD_ID_MAX_LEN: usize = 64;
 pub const LOCAL_WORLD_DISPLAY_NAME_MAX_CHARS: usize = 64;
 pub const NATIVE_WORLD_METADATA_FILE: &str = "world.json";
 pub const NATIVE_WORLD_BACKEND_LABEL: &str = "native-sqlite";
-/// Product choice for newly created local worlds. This is intentionally
-/// separate from `WorldGenerationProfile::default()`, which preserves legacy
-/// records whose stored profile field is absent as reference Overworld.
+/// Product choice for newly created local worlds.
 pub const DEFAULT_LOCAL_WORLD_GENERATION_PROFILE: WorldGenerationProfile =
     WorldGenerationProfile::McloneOverworldV1;
 pub const LOCAL_WORLD_PROCEDURAL_GENERATION_PROFILES: [WorldGenerationProfile; 7] = [
@@ -157,7 +155,6 @@ impl TryFrom<&str> for LocalWorldId {
 pub struct LocalWorldCreateOptions {
     pub display_name: String,
     pub seed: i64,
-    #[serde(default)]
     pub world_generation_profile: WorldGenerationProfile,
     #[serde(default)]
     pub starter_content: StarterContentDescriptor,
@@ -211,7 +208,6 @@ pub struct LocalWorldSummary {
     pub id: LocalWorldId,
     pub display_name: String,
     pub seed: i64,
-    #[serde(default)]
     pub world_generation_profile: WorldGenerationProfile,
     #[serde(default)]
     pub starter_content: StarterContentDescriptor,
@@ -1149,23 +1145,16 @@ mod tests {
     }
 
     #[test]
-    fn legacy_catalog_records_default_to_overworld_and_wild_start() {
+    fn catalog_records_require_a_generation_profile() {
         let summary =
-            LocalWorldSummary::new(LocalWorldId::new("legacy").unwrap(), "Legacy", 7, 100).unwrap();
+            LocalWorldSummary::new(LocalWorldId::new("world").unwrap(), "World", 7, 100).unwrap();
         let mut encoded = serde_json::to_value(summary).unwrap();
         encoded
             .as_object_mut()
             .unwrap()
             .remove("worldGenerationProfile");
-        encoded.as_object_mut().unwrap().remove("starterContent");
 
-        let decoded: LocalWorldSummary = serde_json::from_value(encoded).unwrap();
-
-        assert_eq!(
-            decoded.world_generation_profile,
-            WorldGenerationProfile::Overworld
-        );
-        assert_eq!(decoded.starter_content, StarterContentDescriptor::Wild);
+        assert!(serde_json::from_value::<LocalWorldSummary>(encoded).is_err());
     }
 
     #[test]

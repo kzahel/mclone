@@ -68,7 +68,7 @@ impl WorldGenerationProfile {
 
     pub fn parse_label(value: &str) -> Result<Self, String> {
         match value.trim() {
-            "overworld" | "default" => Ok(Self::Overworld),
+            "overworld" => Ok(Self::Overworld),
             "flat-grass-v1" | "flat_grass_v1" | "flatGrassV1" => Ok(Self::FlatGrassV1),
             "small-island-v1" | "small_island_v1" | "smallIslandV1" => Ok(Self::SmallIslandV1),
             "mclone-overworld-v1" | "mclone_overworld_v1" | "mcloneOverworldV1" => {
@@ -396,7 +396,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn profile_defaults_and_labels_are_backward_compatible() {
+    fn profile_labels_and_low_level_default_are_stable() {
         assert_eq!(
             WorldGenerationProfile::default(),
             WorldGenerationProfile::Overworld
@@ -425,10 +425,7 @@ mod tests {
             WorldGenerationProfile::authored_only().label(),
             "authored-only"
         );
-        assert_eq!(
-            WorldGenerationProfile::parse_label("default").unwrap(),
-            WorldGenerationProfile::Overworld
-        );
+        assert!(WorldGenerationProfile::parse_label("default").is_err());
         assert_eq!(
             WorldGenerationProfile::parse_label("authored-only").unwrap(),
             WorldGenerationProfile::authored_only()

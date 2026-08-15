@@ -199,7 +199,7 @@ impl Default for StartupSceneOptions {
     fn default() -> Self {
         Self {
             seed: DEFAULT_STARTUP_SEED,
-            world_generation_profile: WorldGenerationProfile::default(),
+            world_generation_profile: WorldGenerationProfile::McloneOverworldV1,
             starter_content: StarterContentDescriptor::Wild,
             world_topology: HorizontalTopology::UNBOUNDED,
             chunk_x: DEFAULT_STARTUP_CHUNK_X,
@@ -917,7 +917,7 @@ mod tests {
             StartupSceneOptions::default(),
             StartupSceneOptions {
                 seed: 12_345,
-                world_generation_profile: WorldGenerationProfile::Overworld,
+                world_generation_profile: WorldGenerationProfile::McloneOverworldV1,
                 starter_content: StarterContentDescriptor::Wild,
                 world_topology: HorizontalTopology::UNBOUNDED,
                 chunk_x: 0,

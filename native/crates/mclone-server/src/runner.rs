@@ -691,7 +691,7 @@ mod native {
         pub fn new(seed: i64) -> Self {
             Self {
                 seed,
-                world_generation_profile: WorldGenerationProfile::default(),
+                world_generation_profile: WorldGenerationProfile::McloneOverworldV1,
                 starter_content: crate::StarterContentDescriptor::Wild,
                 world_topology: HorizontalTopology::UNBOUNDED,
                 world_behavior_profile: WorldBehaviorProfile::default(),
