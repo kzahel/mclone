@@ -94,6 +94,8 @@ let indexedDbWriterLease: HeldWorldWriterLease | null = null;
 let tickTimer: ReturnType<typeof setInterval> | 0 = 0;
 let tickInFlight = false;
 let serverOperationInFlight = false;
+let persistenceFenceInFlight = false;
+let persistenceContinuationTail: Promise<void> = Promise.resolve();
 let runnerTransportKind: "shared-memory" | "message-transfer" = "message-transfer";
 let nextRunnerSharedBufferId = 1;
 const runnerSharedPool: RunnerSharedSlot[] = [];
@@ -190,7 +192,17 @@ async function driveActorMessage(message: IntegratedServerWorkerMessage): Promis
     postFailure(message.requestId, "integrated server worker is not started");
     return;
   }
+  const persistenceFence = message.kind === "flush-persistence" || message.kind === "shutdown";
+  if (persistenceFence) {
+    persistenceFenceInFlight = true;
+    await persistenceContinuationTail;
+  } else {
+    while (persistenceFenceInFlight) {
+      await waitForJobTurn();
+    }
+  }
   await acquireServerOperation();
+  let detachedPersistenceRequests: PersistenceRecordRequest[] = [];
   try {
     const activeServer = server;
     if (!activeServer) {
@@ -198,27 +210,34 @@ async function driveActorMessage(message: IntegratedServerWorkerMessage): Promis
       return;
     }
     const initial = activeServer.beginMessage(message, commandFrame(message));
-    await driveActorOperation(
-      activeServer,
-      initial as Record<string, any>,
-      message,
-    );
+    if (persistenceFence) {
+      await drivePersistenceFenceOperation(activeServer, initial as Record<string, any>, message);
+    } else {
+      detachedPersistenceRequests = finishActorOperation(
+        activeServer,
+        initial as Record<string, any>,
+        message,
+      );
+    }
   } catch (error) {
     markRunnerSharedFailure(message);
     postActorFailure(message.requestId, error);
   } finally {
     serverOperationInFlight = false;
+    if (persistenceFence) persistenceFenceInFlight = false;
   }
+  schedulePersistenceRequests(detachedPersistenceRequests);
 }
 
 async function tickServer(): Promise<void> {
-  if (!server || tickInFlight || serverOperationInFlight) return;
+  if (!server || tickInFlight || serverOperationInFlight || persistenceFenceInFlight) return;
   const activeServer = server;
   tickInFlight = true;
   serverOperationInFlight = true;
   try {
     const initial = activeServer.beginTick();
-    await driveActorOperation(activeServer, initial as Record<string, any>, null);
+    const requests = finishActorOperation(activeServer, initial as Record<string, any>, null);
+    schedulePersistenceRequests(requests);
   } catch (error) {
     postActorFailure(0, error);
   } finally {
@@ -234,14 +253,29 @@ async function acquireServerOperation(): Promise<void> {
   serverOperationInFlight = true;
 }
 
-async function driveActorOperation(
+function finishActorOperation(
   activeServer: WebIntegratedServerActor,
   initialResult: Record<string, any>,
   requestMessage: IntegratedServerWorkerMessage | null,
+): PersistenceRecordRequest[] {
+  const updates = Array.isArray(initialResult?.updates) ? [...initialResult.updates] : [];
+  const report = activeServer.finishOperation(initialResult, updates) as Record<string, any>;
+  if (report.closeWorker === true) {
+    throw new Error("durable integrated-server close bypassed its persistence fence");
+  }
+  if (report.postMessage === true) {
+    postUpdates(report.message as RunnerOutboundMessage, requestMessage);
+  }
+  return persistenceRecordRequestsFromValue(report.message?.persistenceRecordRequests);
+}
+
+async function drivePersistenceFenceOperation(
+  activeServer: WebIntegratedServerActor,
+  initialResult: Record<string, any>,
+  requestMessage: IntegratedServerWorkerMessage,
 ): Promise<void> {
-  const serviced = await servicePersistenceResultForCurrentWorld(activeServer, initialResult);
-  const updates = [...serviced.updates];
-  const report = activeServer.finishOperation(serviced.result, updates) as Record<string, any>;
+  const serviced = await servicePersistenceFenceResultForCurrentWorld(activeServer, initialResult);
+  const report = activeServer.finishOperation(serviced.result, serviced.updates) as Record<string, any>;
   if (report.closeWorker === true) {
     if (tickTimer) {
       clearInterval(tickTimer);
@@ -262,7 +296,43 @@ async function driveActorOperation(
   }
 }
 
-async function servicePersistenceResultForCurrentWorld(
+function schedulePersistenceRequests(requests: PersistenceRecordRequest[]): void {
+  if (requests.length === 0) return;
+  const scheduled = persistenceContinuationTail.then(() => drivePersistenceRequests(requests));
+  persistenceContinuationTail = scheduled.catch((error) => {
+    postActorFailure(0, error);
+  });
+}
+
+async function drivePersistenceRequests(initialRequests: PersistenceRecordRequest[]): Promise<void> {
+  let requests = initialRequests;
+  for (let attempt = 0; attempt < MAX_BROWSER_PERSISTENCE_CONTINUATIONS; attempt += 1) {
+    const worldId = indexedDbWorldId;
+    if (!worldId) {
+      throw new Error("persistence record requests were emitted without an active browser world");
+    }
+    const completions = await executeIndexedDbRecordRequests(worldId, requests);
+    await acquireServerOperation();
+    try {
+      const activeServer = server;
+      if (!activeServer) {
+        throw new Error("integrated server stopped before persistence completion");
+      }
+      const initial = activeServer.beginPersistenceCompletion(completions) as Record<string, any>;
+      requests = finishActorOperation(activeServer, initial, null);
+    } catch (error) {
+      postActorFailure(0, error);
+      return;
+    } finally {
+      serverOperationInFlight = false;
+    }
+    if (requests.length === 0) return;
+    await waitForJobTurn();
+  }
+  throw new Error("timed out servicing detached IndexedDB persistence record requests");
+}
+
+async function servicePersistenceFenceResultForCurrentWorld(
   activeServer: WebIntegratedServerActor,
   initialResult: Record<string, any>,
 ): Promise<ServicedServerResult> {
@@ -280,7 +350,7 @@ async function servicePersistenceResultForCurrentWorld(
       throw new Error("persistence record requests were emitted without an active browser world");
     }
     const completions = await executeIndexedDbRecordRequests(indexedDbWorldId, requests);
-    result = activeServer.completeIndexedDbRecordRequests(completions) as Record<string, any>;
+    result = activeServer.continuePersistenceFence(completions) as Record<string, any>;
     if (Array.isArray(result?.updates)) {
       updates.push(...result.updates);
       result.updates = [];

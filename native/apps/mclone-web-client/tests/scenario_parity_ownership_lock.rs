@@ -155,6 +155,7 @@ fn integrated_server_startup_domain_is_an_opaque_rust_frame() {
     assert!(INTEGRATED_SERVER_WORKER.contains("startup.indexedDbBootstrapRequests()"));
     assert!(INTEGRATED_SERVER_WORKER.contains("startup.createIndexedDb("));
     assert!(INTEGRATED_SERVER_WORKER.contains("activeServer.beginMessage("));
+    assert!(INTEGRATED_SERVER_WORKER.contains("activeServer.beginPersistenceCompletion("));
     assert!(!INTEGRATED_SERVER_WORKER.contains("activeServer.hasPendingJobs()"));
     assert!(!INTEGRATED_SERVER_WORKER.contains("activeServer.pollPendingJobs()"));
     assert!(INTEGRATED_SERVER_WORKER.contains("activeServer.finishOperation("));
@@ -169,6 +170,16 @@ fn integrated_server_startup_domain_is_an_opaque_rust_frame() {
     assert!(command_handler.contains(".try_handle_command(command)"));
     assert!(!command_handler.contains(".try_poll()"));
     assert!(!command_handler.contains("autosave_indexed_db_dirty_chunks"));
+
+    let ordinary_operation = INTEGRATED_SERVER_WORKER
+        .split("function finishActorOperation(")
+        .nth(1)
+        .expect("ordinary actor completion helper exists")
+        .split("async function drivePersistenceFenceOperation(")
+        .next()
+        .expect("ordinary actor completion helper has a bounded source region");
+    assert!(!ordinary_operation.contains("await "));
+    assert!(ordinary_operation.contains("activeServer.finishOperation("));
     for forbidden in [
         "generationProfile",
         "worldTopology",

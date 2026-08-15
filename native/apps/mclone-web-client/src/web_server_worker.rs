@@ -2003,8 +2003,8 @@ pub struct WebIntegratedServerStartup {
 ///
 /// Browser code retains event-loop serialization, IndexedDB transactions and
 /// external SAB views. This actor admits one domain operation at a time,
-/// selects the authoritative session transition, owns pending-job polling
-/// policy, and authors completion/failure envelopes.
+/// selects the authoritative session transition, and authors
+/// completion/failure envelopes.
 #[wasm_bindgen]
 pub struct WebIntegratedServerActor {
     server: McloneWebIntegratedServerWorker,
@@ -2015,6 +2015,7 @@ pub struct WebIntegratedServerActor {
 enum WebIntegratedServerOperationKind {
     Command,
     Tick,
+    PersistenceCompletion,
     FlushPersistence,
     PromoteObserver,
     DemotePlayer,
@@ -2025,7 +2026,7 @@ impl WebIntegratedServerOperationKind {
     const fn response_kind(self) -> &'static str {
         match self {
             Self::Command => "command-result",
-            Self::Tick => "updates",
+            Self::Tick | Self::PersistenceCompletion => "updates",
             Self::FlushPersistence => "flush-complete",
             Self::PromoteObserver => "observer-promoted",
             Self::DemotePlayer => "player-demoted",
@@ -2034,7 +2035,7 @@ impl WebIntegratedServerOperationKind {
     }
 
     const fn posts_empty_response(self) -> bool {
-        !matches!(self, Self::Tick)
+        !matches!(self, Self::Tick | Self::PersistenceCompletion)
     }
 
     const fn closes_worker(self) -> bool {
@@ -2595,6 +2596,9 @@ impl WebIntegratedServerActor {
             }
             WebIntegratedServerOperationKind::Shutdown => self.server.shutdown(),
             WebIntegratedServerOperationKind::Tick => unreachable!("ticks have a dedicated entry"),
+            WebIntegratedServerOperationKind::PersistenceCompletion => {
+                unreachable!("persistence completions have a dedicated entry")
+            }
         };
         if result.is_err() {
             self.operation = None;
@@ -2613,11 +2617,36 @@ impl WebIntegratedServerActor {
         result
     }
 
-    #[wasm_bindgen(js_name = completeIndexedDbRecordRequests)]
-    pub fn complete_indexed_db_record_requests(
+    #[wasm_bindgen(js_name = beginPersistenceCompletion)]
+    pub fn begin_persistence_completion(
         &mut self,
         completions: JsValue,
     ) -> Result<JsValue, JsValue> {
+        self.begin_operation(WebIntegratedServerOperationKind::PersistenceCompletion, 0)
+            .map_err(|error| JsValue::from_str(&error))?;
+        let result = self.server.complete_indexed_db_record_requests(completions);
+        if result.is_err() {
+            self.operation = None;
+        }
+        result
+    }
+
+    #[wasm_bindgen(js_name = continuePersistenceFence)]
+    pub fn continue_persistence_fence(&mut self, completions: JsValue) -> Result<JsValue, JsValue> {
+        let Some(operation) = self.operation else {
+            return Err(JsValue::from_str(
+                "integrated-server actor has no active persistence fence",
+            ));
+        };
+        if !matches!(
+            operation.kind,
+            WebIntegratedServerOperationKind::FlushPersistence
+                | WebIntegratedServerOperationKind::Shutdown
+        ) {
+            return Err(JsValue::from_str(
+                "integrated-server persistence continuation requires a flush or shutdown fence",
+            ));
+        }
         self.server.complete_indexed_db_record_requests(completions)
     }
 

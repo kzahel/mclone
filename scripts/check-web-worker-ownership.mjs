@@ -289,6 +289,13 @@ const domainDebt = [
     destination: "independent native-equivalent runner steps",
   },
   {
+    id: "integrated-worker-inline-persistence-completion",
+    file: "mclone-integrated-server-worker.ts",
+    needle: "activeServer.completeIndexedDbRecordRequests(",
+    maximum: 0,
+    destination: "bounded Rust persistence-completion actor operations",
+  },
+  {
     id: "integrated-worker-command-dispatch",
     file: "mclone-integrated-server-worker.ts",
     needle: "handleCommandFrame",
