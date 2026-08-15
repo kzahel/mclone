@@ -988,6 +988,17 @@ fn write_entities(
                 health: *health,
                 max_health: *max_health,
                 antler_shed_time: *antler_shed_time,
+                age_ticks: if life_stage.protocol() == mclone_protocol::DeerLifeStage::Fawn {
+                    0
+                } else {
+                    120_000
+                },
+                lifespan_ticks: 0,
+                energy: 800,
+                deficit_ticks: 0,
+                recent_intake: 0,
+                reproductive_condition: 640,
+                reproduction_cooldown: 0,
             },
             ShowcaseEntityState::DeerBed { source } => EntitySavePayload::DeerBed {
                 source: *persistent_ids
@@ -1081,6 +1092,11 @@ fn write_entities(
                 love_ticks: *love_ticks,
                 breed_cooldown: *breed_cooldown,
                 raid_cooldown: *raid_cooldown,
+                lifespan_ticks: 0,
+                energy: 800,
+                deficit_ticks: 0,
+                recent_intake: 0,
+                reproductive_condition: 640,
             },
             ShowcaseEntityState::RabbitBurrow {
                 capacity,

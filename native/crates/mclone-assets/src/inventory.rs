@@ -179,6 +179,11 @@ fn direct_asset_requirements() -> Vec<CanonicalAssetRequirement> {
             Required,
         ),
         (
+            "assets/mclone/figures/wildlife_remains.figure.json",
+            SemanticProp,
+            Required,
+        ),
+        (
             "assets/mclone/figures/bee_nest.figure.json",
             SemanticProp,
             Required,
@@ -430,6 +435,7 @@ mod tests {
             "assets/mclone/figures/deer_hide.figure.json",
             "assets/mclone/figures/shed_antler.figure.json",
             "assets/mclone/figures/deer_bed.figure.json",
+            "assets/mclone/figures/wildlife_remains.figure.json",
             "assets/mclone/figures/bee_nest.figure.json",
             "assets/mclone/figures/bee_hotel.figure.json",
             "assets/mclone/figures/bee_hotel_item.figure.json",

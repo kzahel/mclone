@@ -645,6 +645,7 @@ pub enum EntityKind {
     BeeHotel,
     Rabbit,
     RabbitBurrow,
+    WildlifeRemains,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1768,6 +1769,7 @@ impl ByteWriter {
             EntityKind::BeeHotel => 11,
             EntityKind::Rabbit => 12,
             EntityKind::RabbitBurrow => 13,
+            EntityKind::WildlifeRemains => 14,
         });
     }
 
@@ -2360,6 +2362,7 @@ impl<'a> ByteReader<'a> {
             11 => Ok(EntityKind::BeeHotel),
             12 => Ok(EntityKind::Rabbit),
             13 => Ok(EntityKind::RabbitBurrow),
+            14 => Ok(EntityKind::WildlifeRemains),
             kind => Err(ProtocolCodecError::UnknownEntityKind(kind)),
         }
     }

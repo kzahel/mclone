@@ -130,6 +130,7 @@ const fn default_animation_for_kind(kind: EntityKind) -> Option<AnimationState> 
         | EntityKind::BeeNest
         | EntityKind::BeeHotel
         | EntityKind::RabbitBurrow
+        | EntityKind::WildlifeRemains
         | EntityKind::DebugCube
         | EntityKind::Item => return None,
     };

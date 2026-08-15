@@ -1,0 +1,168 @@
+{
+  "schemaVersion": 1,
+  "name": "wildlife_remains",
+  "materials": {
+    "leaf_dark": {
+      "color": "#55452d"
+    },
+    "leaf_dry": {
+      "color": "#806744"
+    },
+    "weathered": {
+      "color": "#b8ad8c"
+    }
+  },
+  "textures": {},
+  "parts": [
+    {
+      "name": "litter_center",
+      "at": [
+        0,
+        0.035,
+        0
+      ],
+      "material": "leaf_dark",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.68,
+          0.07,
+          0.78
+        ]
+      }
+    },
+    {
+      "name": "leaf_north",
+      "at": [
+        -0.16,
+        0.07,
+        -0.35
+      ],
+      "rot": [
+        0,
+        -18,
+        4
+      ],
+      "material": "leaf_dry",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.38,
+          0.035,
+          0.17
+        ]
+      }
+    },
+    {
+      "name": "leaf_south",
+      "at": [
+        0.2,
+        0.065,
+        0.34
+      ],
+      "rot": [
+        0,
+        24,
+        -3
+      ],
+      "material": "leaf_dry",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.42,
+          0.04,
+          0.16
+        ]
+      }
+    },
+    {
+      "name": "leaf_west",
+      "at": [
+        -0.34,
+        0.06,
+        0.04
+      ],
+      "rot": [
+        0,
+        67,
+        2
+      ],
+      "material": "leaf_dry",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.34,
+          0.035,
+          0.15
+        ]
+      }
+    },
+    {
+      "name": "leaf_east",
+      "at": [
+        0.34,
+        0.075,
+        -0.08
+      ],
+      "rot": [
+        0,
+        -63,
+        -2
+      ],
+      "material": "leaf_dry",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.36,
+          0.04,
+          0.14
+        ]
+      }
+    },
+    {
+      "name": "weathered_stem_a",
+      "at": [
+        -0.08,
+        0.11,
+        0.02
+      ],
+      "rot": [
+        2,
+        -31,
+        5
+      ],
+      "material": "weathered",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.055,
+          0.055,
+          0.56
+        ]
+      }
+    },
+    {
+      "name": "weathered_stem_b",
+      "at": [
+        0.1,
+        0.115,
+        0
+      ],
+      "rot": [
+        -3,
+        28,
+        -4
+      ],
+      "material": "weathered",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.045,
+          0.05,
+          0.42
+        ]
+      }
+    }
+  ],
+  "clips": {}
+}

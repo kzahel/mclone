@@ -53,6 +53,7 @@ pub use figure::{
     semantic_figure_path, shed_antler_figure_id, shed_antler_figure_path, upright_bear_figure_id,
     upright_bear_figure_path, venison_figure_id, venison_figure_path, wheat_bundle_figure_id,
     wheat_bundle_figure_path, wheat_seeds_item_figure_id, wheat_seeds_item_figure_path,
+    wildlife_remains_figure_id, wildlife_remains_figure_path,
 };
 pub use first_party::{
     FIRST_PARTY_AUDIO_POLICY_PATH, FIRST_PARTY_MISSING_REGISTRY_PATH,

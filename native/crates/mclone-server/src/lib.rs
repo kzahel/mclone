@@ -53,6 +53,7 @@ mod timing;
 mod types;
 #[cfg(target_arch = "wasm32")]
 mod wasm_job_worker;
+mod wildlife_resources;
 mod wildlife_simulation;
 mod world_behavior_profile;
 mod world_generation_profile;
@@ -80,6 +81,7 @@ pub use cadence::{
     SimulationCadenceFrame,
 };
 pub use dimension::DimensionRegistry;
+pub use ecology::{WILDLIFE_LIFECYCLE_RULE_REVISION, WildlifeLifecycleTuning};
 pub use holder::{ChunkHolder, ChunkStatusSlot};
 pub use homestead_plan::{
     HomesteadContentFingerprint, HomesteadGradeRegion, HomesteadPathControl, HomesteadPathPlan,
@@ -120,13 +122,13 @@ pub use persistence::{
     PersistenceRecordRequestId, PersistenceRecordResponse, PersistenceRequestId, PlayerRecord,
     PlayerRecordKey, RabbitRefugeSaveRecord, RecordExecutorWorldStore, SaveDurability,
     SavedDataRecord, ScheduledTickRecord, StoreWriteOutcome, SynchronousPersistenceFacade,
-    WORLD_METADATA_TARGET_MINECRAFT_VERSION, WORLD_METADATA_VERSION, WorldMetadata,
-    WorldMetadataLoad, WorldRecordKey, WorldStore, WorldStoreCompletion, WorldStoreRequest,
-    chunk_record_address, decode_chunk_record, decode_dimension_record, decode_entity_chunk_record,
-    decode_player_record, decode_world_metadata, dimension_record_address, encode_chunk_record,
-    encode_dimension_record, encode_entity_chunk_record, encode_player_record,
-    encode_world_metadata, player_record_address, record_read_for_world_store_request,
-    saved_data_record_address, world_metadata_record_address,
+    WORLD_METADATA_TARGET_MINECRAFT_VERSION, WORLD_METADATA_VERSION, WildlifeRemainsCause,
+    WildlifeRemainsSpecies, WorldMetadata, WorldMetadataLoad, WorldRecordKey, WorldStore,
+    WorldStoreCompletion, WorldStoreRequest, chunk_record_address, decode_chunk_record,
+    decode_dimension_record, decode_entity_chunk_record, decode_player_record,
+    decode_world_metadata, dimension_record_address, encode_chunk_record, encode_dimension_record,
+    encode_entity_chunk_record, encode_player_record, encode_world_metadata, player_record_address,
+    record_read_for_world_store_request, saved_data_record_address, world_metadata_record_address,
     world_store_completion_from_record_read,
 };
 #[cfg(not(target_arch = "wasm32"))]
@@ -196,9 +198,16 @@ pub use types::{
     LightStatusMailboxKind, MAX_CHUNK_DISTANCE, PLAYER_TICKET_LEVEL, ServerMode,
     UNLOADED_CHUNK_LEVEL, WorldBlockPos, WorldgenMailboxKind,
 };
+pub use wildlife_resources::{
+    WILDLIFE_RESOURCE_CELL_WIDTH_BLOCKS, WILDLIFE_RESOURCE_RULE_REVISION, WildlifeForageCellPos,
+    WildlifeForageCellSnapshot,
+};
 pub use wildlife_simulation::{
     WildlifePopulationSnapshot, WildlifePopulationSubject, WildlifeSimulationConfig,
-    WildlifeSimulationSession, WildlifeSimulationSpecies,
+    WildlifeSimulationDeathCause, WildlifeSimulationEvent, WildlifeSimulationEventKind,
+    WildlifeSimulationIdentity, WildlifeSimulationLifeStage, WildlifeSimulationRemainsSnapshot,
+    WildlifeSimulationSession, WildlifeSimulationSex, WildlifeSimulationSpecies,
+    WildlifeSimulationSuppressionReason,
 };
 pub use world_behavior_profile::WorldBehaviorProfile;
 pub use world_generation_profile::{

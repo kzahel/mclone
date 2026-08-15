@@ -7,8 +7,221 @@
 
 use mclone_core::BlockPos;
 use mclone_protocol::EntityPersistentId;
+use serde::{Deserialize, Serialize};
 
 pub(crate) const MAX_KNOWN_PLACES: usize = 3;
+
+pub const WILDLIFE_LIFECYCLE_RULE_REVISION: u32 = 1;
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub(crate) enum WildlifeSpecies {
+    Rabbit,
+    Deer,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum WildlifeDeathCause {
+    OldAge,
+    Starvation,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum WildlifeReproductionSuppression {
+    LowCondition,
+    Cooldown,
+    Crowding,
+    NoMate,
+    NoRefugeCapacity,
+    HardOverload,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum WildlifeEcologyEventKind {
+    Intake {
+        amount: u16,
+    },
+    Birth {
+        child: EntityPersistentId,
+        parents: [EntityPersistentId; 2],
+    },
+    Death {
+        cause: WildlifeDeathCause,
+    },
+    RemainsCreated {
+        biomass: u32,
+    },
+    RemainsDecayed {
+        amount: u32,
+    },
+    ReproductionSuppressed {
+        reason: WildlifeReproductionSuppression,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct WildlifeEcologyEvent {
+    pub(crate) tick: u64,
+    pub(crate) species: WildlifeSpecies,
+    pub(crate) subject: EntityPersistentId,
+    pub(crate) kind: WildlifeEcologyEventKind,
+}
+
+/// Versioned production hypotheses shared by loaded rabbit/deer lifecycle
+/// accounting. Species policy still decides when an animal actually forages,
+/// flees, courts, or gives birth.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WildlifeLifecycleTuning {
+    pub revision: u32,
+    pub cadence_ticks: u32,
+    pub maximum_energy: u16,
+    pub rabbit_maturation_ticks: u32,
+    pub rabbit_lifespan_ticks: u32,
+    pub rabbit_lifespan_variance_ticks: u32,
+    pub rabbit_breeding_cooldown_ticks: u32,
+    pub rabbit_reproductive_energy: u16,
+    pub rabbit_birth_energy_cost: u16,
+    pub rabbit_starvation_ticks: u32,
+    pub deer_maturation_ticks: u32,
+    pub deer_lifespan_ticks: u32,
+    pub deer_lifespan_variance_ticks: u32,
+    pub deer_breeding_cooldown_ticks: u32,
+    pub deer_reproductive_energy: u16,
+    pub deer_birth_energy_cost: u16,
+    pub deer_starvation_ticks: u32,
+    pub hard_population_guard: u32,
+    pub rabbit_soft_cell_density: u16,
+    pub deer_soft_cell_density: u16,
+}
+
+impl Default for WildlifeLifecycleTuning {
+    fn default() -> Self {
+        Self {
+            revision: WILDLIFE_LIFECYCLE_RULE_REVISION,
+            cadence_ticks: 20,
+            maximum_energy: 1_000,
+            rabbit_maturation_ticks: 24_000,
+            rabbit_lifespan_ticks: 480_000,
+            rabbit_lifespan_variance_ticks: 120_000,
+            rabbit_breeding_cooldown_ticks: 18_000,
+            rabbit_reproductive_energy: 720,
+            rabbit_birth_energy_cost: 240,
+            rabbit_starvation_ticks: 48_000,
+            deer_maturation_ticks: 120_000,
+            deer_lifespan_ticks: 1_920_000,
+            deer_lifespan_variance_ticks: 480_000,
+            deer_breeding_cooldown_ticks: 96_000,
+            deer_reproductive_energy: 800,
+            deer_birth_energy_cost: 320,
+            deer_starvation_ticks: 96_000,
+            hard_population_guard: 4_096,
+            rabbit_soft_cell_density: 12,
+            deer_soft_cell_density: 8,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct WildlifeLifeState {
+    pub(crate) age_ticks: u32,
+    pub(crate) lifespan_ticks: u32,
+    pub(crate) energy: u16,
+    pub(crate) deficit_ticks: u32,
+    pub(crate) recent_intake: u16,
+    pub(crate) reproductive_condition: u16,
+    pub(crate) reproduction_cooldown: u32,
+}
+
+impl WildlifeLifeState {
+    pub(crate) fn founder(
+        identity: EntityPersistentId,
+        age_ticks: u32,
+        lifespan_ticks: u32,
+        lifespan_variance_ticks: u32,
+    ) -> Self {
+        Self {
+            age_ticks,
+            lifespan_ticks: identity_lifespan(identity, lifespan_ticks, lifespan_variance_ticks),
+            energy: 800,
+            deficit_ticks: 0,
+            recent_intake: 0,
+            reproductive_condition: 640,
+            reproduction_cooldown: 0,
+        }
+    }
+
+    pub(crate) fn offspring(
+        identity: EntityPersistentId,
+        lifespan_ticks: u32,
+        lifespan_variance_ticks: u32,
+        reproduction_cooldown: u32,
+    ) -> Self {
+        let mut state = Self::founder(identity, 0, lifespan_ticks, lifespan_variance_ticks);
+        state.energy = 700;
+        state.reproductive_condition = 0;
+        state.reproduction_cooldown = reproduction_cooldown;
+        state
+    }
+
+    pub(crate) fn normalize_lifespan(
+        &mut self,
+        identity: EntityPersistentId,
+        base: u32,
+        variance: u32,
+    ) {
+        if self.lifespan_ticks == 0 {
+            self.lifespan_ticks = identity_lifespan(identity, base, variance);
+        }
+    }
+
+    pub(crate) fn advance_tick(&mut self) {
+        self.age_ticks = self.age_ticks.saturating_add(1);
+        self.reproduction_cooldown = self.reproduction_cooldown.saturating_sub(1);
+    }
+
+    pub(crate) fn apply_energy_step(
+        &mut self,
+        intake: u16,
+        cost: u16,
+        cadence_ticks: u32,
+        maximum_energy: u16,
+    ) {
+        self.recent_intake = intake;
+        self.energy = self.energy.saturating_add(intake).min(maximum_energy);
+        self.energy = self.energy.saturating_sub(cost);
+        if self.energy == 0 {
+            self.deficit_ticks = self.deficit_ticks.saturating_add(cadence_ticks);
+        } else {
+            self.deficit_ticks = self.deficit_ticks.saturating_sub(cadence_ticks * 2);
+        }
+        if intake > cost {
+            self.reproductive_condition = self
+                .reproductive_condition
+                .saturating_add((intake - cost) / 2)
+                .min(maximum_energy);
+        } else {
+            self.reproductive_condition = self
+                .reproductive_condition
+                .saturating_sub((cost - intake).max(1));
+        }
+    }
+
+    pub(crate) fn spend_reproduction(&mut self, energy: u16, cooldown: u32) {
+        self.energy = self.energy.saturating_sub(energy);
+        self.reproductive_condition = self.reproductive_condition.saturating_sub(energy);
+        self.reproduction_cooldown = cooldown;
+    }
+}
+
+fn identity_lifespan(identity: EntityPersistentId, base: u32, variance: u32) -> u32 {
+    if variance == 0 {
+        return base;
+    }
+    let mixed = identity.most.rotate_left(17)
+        ^ identity.least.rotate_right(11)
+        ^ identity.least.wrapping_mul(0x9e37_79b9_7f4a_7c15);
+    base.saturating_add((mixed % u64::from(variance)) as u32)
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct WorldFactLocator {

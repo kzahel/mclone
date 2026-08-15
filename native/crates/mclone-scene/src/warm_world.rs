@@ -756,7 +756,10 @@ pub(crate) fn persistent_passive_actor_identity_summary(
                 | EntityKind::DeerBed => {
                     unreachable!("filtered above")
                 }
-                EntityKind::BeeNest | EntityKind::BeeHotel | EntityKind::RabbitBurrow => {
+                EntityKind::BeeNest
+                | EntityKind::BeeHotel
+                | EntityKind::RabbitBurrow
+                | EntityKind::WildlifeRemains => {
                     unreachable!("filtered above")
                 }
             };

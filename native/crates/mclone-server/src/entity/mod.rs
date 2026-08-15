@@ -19,5 +19,8 @@ pub(crate) use mob::{MALLARD_GROWTH_REQUIRED_TICKS, MobPlayerTarget};
 pub(crate) use state::ServerEntityState;
 #[cfg(feature = "physics-engine")]
 pub(crate) use store::DebugPhysicsCubeEntitySpawn;
-pub(crate) use store::{BeePollinationEvent, ItemPickupTarget, ServerEntityStore};
+pub(crate) use store::{
+    BeePollinationEvent, ItemPickupTarget, ServerEntityStore, WildlifeLifeDiagnostic,
+    WildlifeRemainsDiagnostic,
+};
 pub(crate) use tracking::{EntityTracking, RoutedEntityUpdate};

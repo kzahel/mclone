@@ -197,6 +197,7 @@ pub struct DimensionRuntime {
     debug_physics_player_target: Option<CommandTarget>,
     loading_progress: ChunkLoadingProgress,
     deer_population: DeerPopulationHistory,
+    wildlife_resources: crate::wildlife_resources::WildlifeResourceLedger,
 }
 
 impl DimensionRuntime {
@@ -237,6 +238,7 @@ impl DimensionRuntime {
             debug_physics_player_target: None,
             loading_progress,
             deer_population: DeerPopulationHistory::default(),
+            wildlife_resources: crate::wildlife_resources::WildlifeResourceLedger::default(),
         }
     }
 
@@ -453,17 +455,6 @@ struct NaturalSpawningTickResult {
 }
 
 impl RealmServer {
-    pub(crate) fn wildlife_population_subjects(&self) -> Vec<ServerEntityState> {
-        self.active_dimension
-            .entities
-            .states()
-            .into_iter()
-            .filter(|entity| {
-                entity.alive && matches!(entity.kind, EntityKind::Rabbit | EntityKind::Deer)
-            })
-            .collect()
-    }
-
     pub(crate) fn pending_initial_wildlife_entity_ticking_chunk_count(&self) -> usize {
         let entity_ticking = self
             .active_dimension
@@ -476,6 +467,36 @@ impl RealmServer {
             .iter()
             .filter(|chunk| entity_ticking.contains(chunk))
             .count()
+    }
+
+    pub(crate) fn wildlife_life_diagnostics(&self) -> Vec<crate::entity::WildlifeLifeDiagnostic> {
+        self.active_dimension.entities.wildlife_life_diagnostics()
+    }
+
+    pub(crate) fn drain_wildlife_ecology_events(
+        &mut self,
+    ) -> Vec<crate::ecology::WildlifeEcologyEvent> {
+        self.active_dimension.entities.drain_wildlife_events()
+    }
+
+    pub(crate) fn wildlife_remains_diagnostics(
+        &self,
+    ) -> Vec<crate::entity::WildlifeRemainsDiagnostic> {
+        self.active_dimension
+            .entities
+            .wildlife_remains_diagnostics()
+    }
+
+    pub fn set_wildlife_lifecycle_tuning(&mut self, tuning: crate::WildlifeLifecycleTuning) {
+        self.active_dimension.entities.set_wildlife_tuning(tuning);
+    }
+
+    pub fn wildlife_lifecycle_tuning(&self) -> crate::WildlifeLifecycleTuning {
+        self.active_dimension.entities.wildlife_tuning()
+    }
+
+    pub fn wildlife_forage_cells(&self) -> Vec<crate::WildlifeForageCellSnapshot> {
+        self.active_dimension.wildlife_resources.snapshots()
     }
 
     pub fn new(seed: i64) -> Self {
@@ -1230,6 +1251,14 @@ impl RealmServer {
             .scheduler
             .load_saved_data_blocking(DEER_POPULATION_HISTORY_KEY.to_owned())?
             .map(DeerPopulationHistory::from_saved)
+            .transpose()?
+            .unwrap_or_default();
+        self.active_dimension.wildlife_resources = self
+            .scheduler
+            .load_saved_data_blocking(
+                crate::wildlife_resources::WILDLIFE_RESOURCE_SAVED_DATA_KEY.to_owned(),
+            )?
+            .map(crate::wildlife_resources::WildlifeResourceLedger::from_saved)
             .transpose()?
             .unwrap_or_default();
         if !metadata_was_present || metadata_needs_migration {
@@ -2587,6 +2616,26 @@ impl RealmServer {
                 scheduler
                     .block_at_world(pos)
                     .map(|block| BlockStateId(u32::from(block)))
+            },
+        ));
+        let entity_ticking_set = tick_report
+            .entity_ticking_chunks
+            .iter()
+            .copied()
+            .collect::<BTreeSet<_>>();
+        entity_updates.extend(runtime.entities.tick_wildlife_lifecycle(
+            simulation_tick,
+            &tick_report.entity_ticking_chunks,
+            &mut runtime.wildlife_resources,
+            &|pos| {
+                entity_ticking_set
+                    .contains(&pos.chunk_pos())
+                    .then(|| {
+                        scheduler
+                            .block_at_world(pos)
+                            .map(|block| BlockStateId(u32::from(block)))
+                    })
+                    .flatten()
             },
         ));
         if self.debug_passive_showcase_enabled
@@ -7485,6 +7534,17 @@ fn save_dirty_dimension_runtime(
         match runtime.scheduler.save_saved_data_blocking(record)? {
             StoreWriteOutcome::Written | StoreWriteOutcome::Superseded => {
                 runtime.deer_population.mark_saved(revision);
+                queued = queued.saturating_add(1);
+            }
+            StoreWriteOutcome::SkippedCachePressure | StoreWriteOutcome::SkippedOnClose => {}
+        }
+    }
+    if runtime.wildlife_resources.is_dirty() {
+        let record = runtime.wildlife_resources.saved_record()?;
+        let revision = record.revision;
+        match runtime.scheduler.save_saved_data_blocking(record)? {
+            StoreWriteOutcome::Written | StoreWriteOutcome::Superseded => {
+                runtime.wildlife_resources.mark_saved(revision);
                 queued = queued.saturating_add(1);
             }
             StoreWriteOutcome::SkippedCachePressure | StoreWriteOutcome::SkippedOnClose => {}

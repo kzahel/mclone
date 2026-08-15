@@ -81,8 +81,10 @@ const BEE_ENTITY_CHUNK_RECORD_VERSION: u32 = 8;
 const RABBIT_ENTITY_CHUNK_RECORD_VERSION: u32 = 9;
 const RABBIT_WARREN_LIFECYCLE_ENTITY_CHUNK_RECORD_VERSION: u32 = 10;
 const RABBIT_REFUGE_MEMORY_ENTITY_CHUNK_RECORD_VERSION: u32 = 11;
+const WILDLIFE_LIFECYCLE_ENTITY_CHUNK_RECORD_VERSION: u32 = 12;
+const WILDLIFE_REMAINS_ENTITY_CHUNK_RECORD_VERSION: u32 = 13;
 const DEER_ANTLER_SHED_LEGACY_REMAINING_TICKS: i32 = 36_000;
-pub const ENTITY_CHUNK_RECORD_VERSION: u32 = 11;
+pub const ENTITY_CHUNK_RECORD_VERSION: u32 = 13;
 const LEGACY_PLAYER_RECORD_VERSION: u32 = 1;
 const STATISTICS_PLAYER_RECORD_VERSION: u32 = 2;
 const PLAYER_LIFE_RECORD_VERSION: u32 = 3;
@@ -532,6 +534,13 @@ pub enum EntitySavePayload {
         health: u8,
         max_health: u8,
         antler_shed_time: i32,
+        age_ticks: u32,
+        lifespan_ticks: u32,
+        energy: u16,
+        deficit_ticks: u32,
+        recent_intake: u16,
+        reproductive_condition: u16,
+        reproduction_cooldown: u32,
     },
     DeerBed {
         source: EntityPersistentId,
@@ -566,6 +575,11 @@ pub enum EntitySavePayload {
         love_ticks: u32,
         breed_cooldown: u32,
         raid_cooldown: u32,
+        lifespan_ticks: u32,
+        energy: u16,
+        deficit_ticks: u32,
+        recent_intake: u16,
+        reproductive_condition: u16,
     },
     RabbitBurrow {
         capacity: u8,
@@ -573,11 +587,31 @@ pub enum EntitySavePayload {
         damage: u8,
         last_used_tick: u64,
     },
+    WildlifeRemains {
+        source_species: WildlifeRemainsSpecies,
+        source: EntityPersistentId,
+        biomass: u32,
+        cause: WildlifeRemainsCause,
+        creation_tick: u64,
+        decay_remainder: u32,
+    },
     Item {
         stack: ItemStackSaveRecord,
         age: u64,
         pickup_delay: i32,
     },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum WildlifeRemainsSpecies {
+    Rabbit,
+    Deer,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum WildlifeRemainsCause {
+    OldAge,
+    Starvation,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -6469,6 +6503,13 @@ fn write_entity_save_payload(
             health,
             max_health,
             antler_shed_time,
+            age_ticks,
+            lifespan_ticks,
+            energy,
+            deficit_ticks,
+            recent_intake,
+            reproductive_condition,
+            reproduction_cooldown,
         } => {
             write_u8(writer, 6)?;
             write_u8(
@@ -6505,7 +6546,14 @@ fn write_entity_save_payload(
             write_u32(writer, *behavior_ticks)?;
             write_u8(writer, *health)?;
             write_u8(writer, *max_health)?;
-            write_i32(writer, *antler_shed_time)
+            write_i32(writer, *antler_shed_time)?;
+            write_u32(writer, *age_ticks)?;
+            write_u32(writer, *lifespan_ticks)?;
+            write_u16(writer, *energy)?;
+            write_u32(writer, *deficit_ticks)?;
+            write_u16(writer, *recent_intake)?;
+            write_u16(writer, *reproductive_condition)?;
+            write_u32(writer, *reproduction_cooldown)
         }
         EntitySavePayload::DeerBed { source } => {
             write_u8(writer, 7)?;
@@ -6570,6 +6618,11 @@ fn write_entity_save_payload(
             love_ticks,
             breed_cooldown,
             raid_cooldown,
+            lifespan_ticks,
+            energy,
+            deficit_ticks,
+            recent_intake,
+            reproductive_condition,
         } => {
             write_u8(writer, 10)?;
             for refuge in known_refuges {
@@ -6618,7 +6671,12 @@ fn write_entity_save_payload(
             write_u8(writer, *max_health)?;
             write_u32(writer, *love_ticks)?;
             write_u32(writer, *breed_cooldown)?;
-            write_u32(writer, *raid_cooldown)
+            write_u32(writer, *raid_cooldown)?;
+            write_u32(writer, *lifespan_ticks)?;
+            write_u16(writer, *energy)?;
+            write_u32(writer, *deficit_ticks)?;
+            write_u16(writer, *recent_intake)?;
+            write_u16(writer, *reproductive_condition)
         }
         EntitySavePayload::RabbitBurrow {
             capacity,
@@ -6631,6 +6689,35 @@ fn write_entity_save_payload(
             write_u32(writer, *disturbance_ticks)?;
             write_u8(writer, *damage)?;
             write_u64(writer, *last_used_tick)
+        }
+        EntitySavePayload::WildlifeRemains {
+            source_species,
+            source,
+            biomass,
+            cause,
+            creation_tick,
+            decay_remainder,
+        } => {
+            write_u8(writer, 12)?;
+            write_u8(
+                writer,
+                match source_species {
+                    WildlifeRemainsSpecies::Rabbit => 0,
+                    WildlifeRemainsSpecies::Deer => 1,
+                },
+            )?;
+            write_u64(writer, source.most)?;
+            write_u64(writer, source.least)?;
+            write_u32(writer, *biomass)?;
+            write_u8(
+                writer,
+                match cause {
+                    WildlifeRemainsCause::OldAge => 0,
+                    WildlifeRemainsCause::Starvation => 1,
+                },
+            )?;
+            write_u64(writer, *creation_tick)?;
+            write_u32(writer, *decay_remainder)
         }
         EntitySavePayload::Item {
             stack,
@@ -6742,6 +6829,39 @@ fn read_entity_save_payload(
             } else {
                 -1
             };
+            let (
+                age_ticks,
+                lifespan_ticks,
+                energy,
+                deficit_ticks,
+                recent_intake,
+                reproductive_condition,
+                reproduction_cooldown,
+            ) = if codec_version >= WILDLIFE_LIFECYCLE_ENTITY_CHUNK_RECORD_VERSION {
+                (
+                    read_u32(reader)?,
+                    read_u32(reader)?,
+                    read_u16(reader)?,
+                    read_u32(reader)?,
+                    read_u16(reader)?,
+                    read_u16(reader)?,
+                    read_u32(reader)?,
+                )
+            } else {
+                (
+                    if life_stage == mclone_protocol::DeerLifeStage::Fawn {
+                        0
+                    } else {
+                        120_000
+                    },
+                    0,
+                    800,
+                    0,
+                    0,
+                    640,
+                    0,
+                )
+            };
             if max_health == 0
                 || health > max_health
                 || (antlered
@@ -6761,6 +6881,13 @@ fn read_entity_save_payload(
                 health,
                 max_health,
                 antler_shed_time,
+                age_ticks,
+                lifespan_ticks,
+                energy,
+                deficit_ticks,
+                recent_intake,
+                reproductive_condition,
+                reproduction_cooldown,
             })
         }
         7 if codec_version >= DEER_BED_ENTITY_CHUNK_RECORD_VERSION => {
@@ -6904,6 +7031,18 @@ fn read_entity_save_payload(
             let love_ticks = read_u32(reader)?;
             let breed_cooldown = read_u32(reader)?;
             let raid_cooldown = read_u32(reader)?;
+            let (lifespan_ticks, energy, deficit_ticks, recent_intake, reproductive_condition) =
+                if codec_version >= WILDLIFE_LIFECYCLE_ENTITY_CHUNK_RECORD_VERSION {
+                    (
+                        read_u32(reader)?,
+                        read_u16(reader)?,
+                        read_u32(reader)?,
+                        read_u16(reader)?,
+                        read_u16(reader)?,
+                    )
+                } else {
+                    (0, 800, 0, 0, 640)
+                };
             if max_health == 0 || health > max_health {
                 return Err(ChunkStoreError::InvalidData(
                     "invalid rabbit health state".to_owned(),
@@ -6946,6 +7085,11 @@ fn read_entity_save_payload(
                 love_ticks,
                 breed_cooldown,
                 raid_cooldown,
+                lifespan_ticks,
+                energy,
+                deficit_ticks,
+                recent_intake,
+                reproductive_condition,
             })
         }
         11 if codec_version >= RABBIT_ENTITY_CHUNK_RECORD_VERSION => {
@@ -6978,6 +7122,43 @@ fn read_entity_save_payload(
                 disturbance_ticks,
                 damage,
                 last_used_tick,
+            })
+        }
+        12 if codec_version >= WILDLIFE_REMAINS_ENTITY_CHUNK_RECORD_VERSION => {
+            let source_species = match read_u8(reader)? {
+                0 => WildlifeRemainsSpecies::Rabbit,
+                1 => WildlifeRemainsSpecies::Deer,
+                value => {
+                    return Err(ChunkStoreError::InvalidData(format!(
+                        "unknown wildlife remains species {value}"
+                    )));
+                }
+            };
+            let source = EntityPersistentId::new(read_u64(reader)?, read_u64(reader)?);
+            let biomass = read_u32(reader)?;
+            let cause = match read_u8(reader)? {
+                0 => WildlifeRemainsCause::OldAge,
+                1 => WildlifeRemainsCause::Starvation,
+                value => {
+                    return Err(ChunkStoreError::InvalidData(format!(
+                        "unknown wildlife remains cause {value}"
+                    )));
+                }
+            };
+            let creation_tick = read_u64(reader)?;
+            let decay_remainder = read_u32(reader)?;
+            if biomass == 0 {
+                return Err(ChunkStoreError::InvalidData(
+                    "wildlife remains biomass must be nonzero".to_owned(),
+                ));
+            }
+            Ok(EntitySavePayload::WildlifeRemains {
+                source_species,
+                source,
+                biomass,
+                cause,
+                creation_tick,
+                decay_remainder,
             })
         }
         value => Err(ChunkStoreError::InvalidData(format!(
@@ -7737,6 +7918,13 @@ mod tests {
                         health: 18,
                         max_health: 20,
                         antler_shed_time: 24_000,
+                        age_ticks: 150_000,
+                        lifespan_ticks: 2_000_000,
+                        energy: 780,
+                        deficit_ticks: 0,
+                        recent_intake: 42,
+                        reproductive_condition: 700,
+                        reproduction_cooldown: 300,
                     },
                 },
             ],
@@ -7841,6 +8029,11 @@ mod tests {
                 love_ticks: 0,
                 breed_cooldown: 0,
                 raid_cooldown: 0,
+                lifespan_ticks: 0,
+                energy: 800,
+                deficit_ticks: 0,
+                recent_intake: 0,
+                reproductive_condition: 640,
             }
         );
     }

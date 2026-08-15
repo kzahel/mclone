@@ -6,7 +6,8 @@ use mclone_protocol::{
 use mclone_worldgen::prng::SimpleRandomSource;
 
 use crate::ecology::{
-    DecisionSchedule, KnownPlace, MAX_KNOWN_PLACES, invalidate_known_place, remember_known_place,
+    DecisionSchedule, KnownPlace, MAX_KNOWN_PLACES, WildlifeLifeState, WildlifeLifecycleTuning,
+    invalidate_known_place, remember_known_place,
 };
 
 const CHICKEN_EGG_TIME_MIN: i32 = 6_000;
@@ -20,7 +21,7 @@ const MALLARD_CALL_TIME_RANGE: i32 = 320;
 const DEER_ANTLER_SHED_TIME_MIN: i32 = 36_000;
 const DEER_ANTLER_SHED_TIME_RANGE: i32 = 36_000;
 pub(crate) const MALLARD_GROWTH_REQUIRED_TICKS: u32 = 2_400;
-pub(crate) const RABBIT_GROWTH_REQUIRED_TICKS: u32 = 2_400;
+pub(crate) const RABBIT_GROWTH_REQUIRED_TICKS: u32 = 24_000;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct DeerRuntimeSaveData {
@@ -32,6 +33,7 @@ pub(crate) struct DeerRuntimeSaveData {
     pub(crate) health: u8,
     pub(crate) max_health: u8,
     pub(crate) antler_shed_time: i32,
+    pub(crate) lifecycle: WildlifeLifeState,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -60,15 +62,14 @@ pub(crate) struct RabbitRuntimeSaveData {
     pub(crate) decision_schedule: DecisionSchedule,
     pub(crate) dig_cooldown: u32,
     pub(crate) life_stage: RabbitLifeStage,
-    pub(crate) age_ticks: u32,
     pub(crate) parents: [Option<EntityPersistentId>; 2],
     pub(crate) behavior: RabbitBehavior,
     pub(crate) behavior_ticks: u32,
     pub(crate) health: u8,
     pub(crate) max_health: u8,
     pub(crate) love_ticks: u32,
-    pub(crate) breed_cooldown: u32,
     pub(crate) raid_cooldown: u32,
+    pub(crate) lifecycle: WildlifeLifeState,
 }
 
 #[derive(Debug, PartialEq)]
@@ -82,12 +83,16 @@ pub(super) enum MobSpeciesState {
 }
 
 impl MobSpeciesState {
-    pub(super) fn from_spawn(kind: EntityKind, random: &mut SimpleRandomSource) -> Self {
+    pub(super) fn from_spawn(
+        kind: EntityKind,
+        persistent_id: EntityPersistentId,
+        random: &mut SimpleRandomSource,
+    ) -> Self {
         match kind {
             EntityKind::Cow | EntityKind::Mannequin => Self::Cow,
             EntityKind::Chicken => Self::Chicken(ChickenRuntimeState::new(random)),
             EntityKind::Mallard => Self::Mallard(MallardRuntimeState::new(random)),
-            EntityKind::Deer => Self::Deer(DeerRuntimeState::new(random)),
+            EntityKind::Deer => Self::Deer(DeerRuntimeState::new(persistent_id, random)),
             EntityKind::Bee => {
                 debug_assert!(false, "bee spawn requires a durable colony home");
                 Self::Bee(BeeRuntimeState::from_saved(BeeRuntimeSaveData {
@@ -98,7 +103,7 @@ impl MobSpeciesState {
                     carrying_pollen: false,
                 }))
             }
-            EntityKind::Rabbit => Self::Rabbit(RabbitRuntimeState::new_founder()),
+            EntityKind::Rabbit => Self::Rabbit(RabbitRuntimeState::new_founder(persistent_id)),
             EntityKind::DebugCube
             | EntityKind::Item
             | EntityKind::MallardNest
@@ -112,11 +117,16 @@ impl MobSpeciesState {
                 debug_assert!(false, "non-mob entities do not use mob species state");
                 Self::Cow
             }
+            EntityKind::WildlifeRemains => {
+                debug_assert!(false, "non-mob entities do not use mob species state");
+                Self::Cow
+            }
         }
     }
 
     pub(super) fn from_saved(
         kind: EntityKind,
+        persistent_id: EntityPersistentId,
         random: &mut SimpleRandomSource,
         egg_time: Option<i32>,
         mallard: Option<MallardRuntimeSaveData>,
@@ -139,7 +149,8 @@ impl MobSpeciesState {
                 }),
             )),
             EntityKind::Deer => Self::Deer(DeerRuntimeState::from_saved(
-                deer.unwrap_or_else(|| DeerRuntimeState::new(random).save_data()),
+                persistent_id,
+                deer.unwrap_or_else(|| DeerRuntimeState::new(persistent_id, random).save_data()),
             )),
             EntityKind::Bee => Self::Bee(BeeRuntimeState::from_saved(bee.unwrap_or(
                 BeeRuntimeSaveData {
@@ -151,7 +162,8 @@ impl MobSpeciesState {
                 },
             ))),
             EntityKind::Rabbit => Self::Rabbit(RabbitRuntimeState::from_saved(
-                rabbit.unwrap_or_else(RabbitRuntimeState::founder_save_data),
+                persistent_id,
+                rabbit.unwrap_or_else(|| RabbitRuntimeState::founder_save_data(persistent_id)),
             )),
             EntityKind::DebugCube
             | EntityKind::Item
@@ -163,6 +175,10 @@ impl MobSpeciesState {
                 Self::Cow
             }
             EntityKind::RabbitBurrow => {
+                debug_assert!(false, "non-mob entities do not use mob species state");
+                Self::Cow
+            }
+            EntityKind::WildlifeRemains => {
                 debug_assert!(false, "non-mob entities do not use mob species state");
                 Self::Cow
             }
@@ -278,7 +294,8 @@ pub(super) struct RabbitRuntimeState {
 }
 
 impl RabbitRuntimeState {
-    const fn founder_save_data() -> RabbitRuntimeSaveData {
+    fn founder_save_data(identity: EntityPersistentId) -> RabbitRuntimeSaveData {
+        let tuning = WildlifeLifecycleTuning::default();
         RabbitRuntimeSaveData {
             known_refuges: [None; MAX_KNOWN_PLACES],
             sheltered_in: None,
@@ -286,25 +303,38 @@ impl RabbitRuntimeState {
             decision_schedule: DecisionSchedule::new(0, 0),
             dig_cooldown: 0,
             life_stage: RabbitLifeStage::Adult,
-            age_ticks: RABBIT_GROWTH_REQUIRED_TICKS,
             parents: [None; 2],
             behavior: RabbitBehavior::Idle,
             behavior_ticks: 0,
             health: 3,
             max_health: 3,
             love_ticks: 0,
-            breed_cooldown: 0,
             raid_cooldown: 0,
+            lifecycle: WildlifeLifeState::founder(
+                identity,
+                tuning.rabbit_maturation_ticks,
+                tuning.rabbit_lifespan_ticks,
+                tuning.rabbit_lifespan_variance_ticks,
+            ),
         }
     }
 
-    fn new_founder() -> Self {
+    fn new_founder(identity: EntityPersistentId) -> Self {
         Self {
-            saved: Self::founder_save_data(),
+            saved: Self::founder_save_data(identity),
         }
     }
 
-    pub(super) const fn from_saved(saved: RabbitRuntimeSaveData) -> Self {
+    pub(super) fn from_saved(
+        identity: EntityPersistentId,
+        mut saved: RabbitRuntimeSaveData,
+    ) -> Self {
+        let tuning = WildlifeLifecycleTuning::default();
+        saved.lifecycle.normalize_lifespan(
+            identity,
+            tuning.rabbit_lifespan_ticks,
+            tuning.rabbit_lifespan_variance_ticks,
+        );
         Self { saved }
     }
 
@@ -362,7 +392,7 @@ impl RabbitRuntimeState {
     pub(super) fn can_breed(&self) -> bool {
         self.saved.life_stage == RabbitLifeStage::Adult
             && self.saved.love_ticks > 0
-            && self.saved.breed_cooldown == 0
+            && self.saved.lifecycle.reproduction_cooldown == 0
             && self.saved.health > 0
     }
 
@@ -434,12 +464,11 @@ impl RabbitRuntimeState {
     pub(super) fn advance_tick(&mut self) {
         self.saved.behavior_ticks = self.saved.behavior_ticks.saturating_add(1);
         self.saved.love_ticks = self.saved.love_ticks.saturating_sub(1);
-        self.saved.breed_cooldown = self.saved.breed_cooldown.saturating_sub(1);
+        self.saved.lifecycle.advance_tick();
         self.saved.raid_cooldown = self.saved.raid_cooldown.saturating_sub(1);
         self.saved.dig_cooldown = self.saved.dig_cooldown.saturating_sub(1);
         if self.saved.life_stage == RabbitLifeStage::Kit {
-            self.saved.age_ticks = self.saved.age_ticks.saturating_add(1);
-            if self.saved.age_ticks >= RABBIT_GROWTH_REQUIRED_TICKS {
+            if self.saved.lifecycle.age_ticks >= RABBIT_GROWTH_REQUIRED_TICKS {
                 self.saved.life_stage = RabbitLifeStage::Adult;
             }
         }
@@ -448,7 +477,38 @@ impl RabbitRuntimeState {
     pub(super) fn feed(&mut self, love_ticks: u32) -> bool {
         if self.saved.life_stage != RabbitLifeStage::Adult
             || self.saved.health == 0
-            || self.saved.breed_cooldown > 0
+            || self.saved.lifecycle.reproduction_cooldown > 0
+        {
+            return false;
+        }
+        self.saved.love_ticks = self.saved.love_ticks.max(love_ticks);
+        self.saved.lifecycle.energy = self.saved.lifecycle.energy.saturating_add(180).min(1_000);
+        self.saved.lifecycle.reproductive_condition = self
+            .saved
+            .lifecycle
+            .reproductive_condition
+            .saturating_add(260)
+            .min(1_000);
+        true
+    }
+
+    pub(super) fn complete_breeding(&mut self, cooldown: u32) {
+        self.saved.love_ticks = 0;
+        self.saved.lifecycle.reproduction_cooldown = cooldown;
+        self.set_behavior(RabbitBehavior::Idle);
+    }
+
+    pub(super) fn complete_raid(&mut self, cooldown: u32) {
+        self.saved.raid_cooldown = cooldown;
+        self.set_behavior(RabbitBehavior::Forage);
+    }
+
+    pub(super) fn enter_natural_love(&mut self, threshold: u16, love_ticks: u32) -> bool {
+        if self.saved.life_stage != RabbitLifeStage::Adult
+            || self.saved.health == 0
+            || self.saved.lifecycle.reproduction_cooldown > 0
+            || self.saved.lifecycle.energy < threshold
+            || self.saved.lifecycle.reproductive_condition < threshold
         {
             return false;
         }
@@ -456,15 +516,26 @@ impl RabbitRuntimeState {
         true
     }
 
-    pub(super) fn complete_breeding(&mut self, cooldown: u32) {
-        self.saved.love_ticks = 0;
-        self.saved.breed_cooldown = cooldown;
-        self.set_behavior(RabbitBehavior::Idle);
+    pub(super) fn spend_reproduction(&mut self, cost: u16, cooldown: u32) {
+        self.saved.lifecycle.spend_reproduction(cost, cooldown);
     }
 
-    pub(super) fn complete_raid(&mut self, cooldown: u32) {
-        self.saved.raid_cooldown = cooldown;
-        self.set_behavior(RabbitBehavior::Forage);
+    pub(super) const fn lifecycle(&self) -> WildlifeLifeState {
+        self.saved.lifecycle
+    }
+
+    pub(super) fn lifecycle_mut(&mut self) -> &mut WildlifeLifeState {
+        &mut self.saved.lifecycle
+    }
+
+    #[cfg(test)]
+    pub(super) fn set_lifecycle_for_test(&mut self, lifecycle: WildlifeLifeState) {
+        self.saved.lifecycle = lifecycle;
+        self.saved.life_stage = if lifecycle.age_ticks >= RABBIT_GROWTH_REQUIRED_TICKS {
+            RabbitLifeStage::Adult
+        } else {
+            RabbitLifeStage::Kit
+        };
     }
 }
 
@@ -528,7 +599,8 @@ pub(super) struct DeerRuntimeState {
 }
 
 impl DeerRuntimeState {
-    fn new(random: &mut SimpleRandomSource) -> Self {
+    fn new(identity: EntityPersistentId, random: &mut SimpleRandomSource) -> Self {
+        let tuning = WildlifeLifecycleTuning::default();
         let life_stage = if random.next_int_bound(5) == 0 {
             DeerLifeStage::Fawn
         } else {
@@ -561,11 +633,27 @@ impl DeerRuntimeState {
                 } else {
                     -1
                 },
+                lifecycle: WildlifeLifeState::founder(
+                    identity,
+                    if life_stage == DeerLifeStage::Fawn {
+                        0
+                    } else {
+                        tuning.deer_maturation_ticks
+                    },
+                    tuning.deer_lifespan_ticks,
+                    tuning.deer_lifespan_variance_ticks,
+                ),
             },
         }
     }
 
-    fn from_saved(saved: DeerRuntimeSaveData) -> Self {
+    fn from_saved(identity: EntityPersistentId, mut saved: DeerRuntimeSaveData) -> Self {
+        let tuning = WildlifeLifecycleTuning::default();
+        saved.lifecycle.normalize_lifespan(
+            identity,
+            tuning.deer_lifespan_ticks,
+            tuning.deer_lifespan_variance_ticks,
+        );
         Self { saved }
     }
 
@@ -644,6 +732,15 @@ impl DeerRuntimeState {
 
     pub(super) fn advance_behavior_tick(&mut self) {
         self.saved.behavior_ticks = self.saved.behavior_ticks.saturating_add(1);
+        self.saved.lifecycle.advance_tick();
+        let tuning = WildlifeLifecycleTuning::default();
+        if self.saved.life_stage == DeerLifeStage::Fawn
+            && self.saved.lifecycle.age_ticks >= tuning.deer_maturation_ticks
+        {
+            self.saved.life_stage = DeerLifeStage::Adult;
+            self.saved.max_health = 20;
+            self.saved.health = self.saved.health.max(12).min(self.saved.max_health);
+        }
     }
 
     pub(super) fn set_behavior(&mut self, behavior: DeerBehavior) -> bool {
@@ -653,6 +750,50 @@ impl DeerRuntimeState {
         self.saved.behavior = behavior;
         self.saved.behavior_ticks = 0;
         true
+    }
+
+    pub(super) const fn lifecycle(&self) -> WildlifeLifeState {
+        self.saved.lifecycle
+    }
+
+    pub(super) fn lifecycle_mut(&mut self) -> &mut WildlifeLifeState {
+        &mut self.saved.lifecycle
+    }
+
+    pub(super) const fn sex(&self) -> DeerSex {
+        self.saved.sex
+    }
+
+    pub(super) const fn life_stage(&self) -> DeerLifeStage {
+        self.saved.life_stage
+    }
+
+    pub(super) fn can_breed(&self, threshold: u16) -> bool {
+        self.saved.life_stage == DeerLifeStage::Adult
+            && self.saved.health > 0
+            && self.saved.lifecycle.reproduction_cooldown == 0
+            && self.saved.lifecycle.energy >= threshold
+            && self.saved.lifecycle.reproductive_condition >= threshold
+            && !matches!(
+                self.saved.behavior,
+                DeerBehavior::Alert | DeerBehavior::Flee
+            )
+    }
+
+    pub(super) fn spend_reproduction(&mut self, cost: u16, cooldown: u32) {
+        self.saved.lifecycle.spend_reproduction(cost, cooldown);
+    }
+
+    #[cfg(test)]
+    pub(super) fn set_lifecycle_for_test(&mut self, lifecycle: WildlifeLifeState, sex: DeerSex) {
+        self.saved.lifecycle = lifecycle;
+        self.saved.sex = sex;
+        self.saved.life_stage =
+            if lifecycle.age_ticks >= WildlifeLifecycleTuning::default().deer_maturation_ticks {
+                DeerLifeStage::Adult
+            } else {
+                DeerLifeStage::Fawn
+            };
     }
 }
 

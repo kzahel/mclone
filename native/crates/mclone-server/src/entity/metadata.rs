@@ -148,6 +148,15 @@ impl EntityMetadata {
         client_tracking_range: 10,
     };
 
+    pub(crate) const WILDLIFE_REMAINS: Self = Self {
+        kind: EntityKind::WildlifeRemains,
+        category: EntityCategory::Misc,
+        dimensions: EntityDimensions::scalable(0.75, 0.24),
+        standing_eye_height: StandingEyeHeight::HeightScale(0.5),
+        movement_speed: 0.0,
+        client_tracking_range: 10,
+    };
+
     pub(crate) const MANNEQUIN: Self = Self {
         kind: EntityKind::Mannequin,
         category: EntityCategory::Creature,
@@ -179,6 +188,7 @@ impl EntityMetadata {
             EntityKind::BeeHotel => Some(Self::BEE_HOTEL),
             EntityKind::Rabbit => Some(Self::RABBIT),
             EntityKind::RabbitBurrow => Some(Self::RABBIT_BURROW),
+            EntityKind::WildlifeRemains => Some(Self::WILDLIFE_REMAINS),
             EntityKind::Mannequin => Some(Self::MANNEQUIN),
             EntityKind::Item => Some(Self::ITEM),
             EntityKind::DebugCube => None,

@@ -16,13 +16,16 @@ use mclone_protocol::{
 
 use crate::ecology::{
     DecisionSchedule, EcologyWorkBudget, EcologyWorkClass, EcologyWorkDiagnostics, KnownPlace,
-    WorldFactLocator,
+    WildlifeEcologyEvent, WildlifeEcologyEventKind, WildlifeLifeState, WildlifeLifecycleTuning,
+    WildlifeReproductionSuppression, WildlifeSpecies, WorldFactLocator,
 };
 use crate::persistence::{
     ChunkStoreError, ChunkStoreResult, ENTITY_CHUNK_RECORD_VERSION, EntityChunkRecord,
     EntitySavePayload, EntitySaveRecord, ItemStackSaveRecord, RabbitRefugeSaveRecord,
+    WildlifeRemainsCause, WildlifeRemainsSpecies,
 };
 use crate::players::ServerPlayerId;
+use crate::wildlife_resources::{WildlifeForageConsumer, WildlifeResourceLedger};
 
 use super::ServerEntityState;
 use super::item::{ITEM_ENTITY_LIFETIME_TICKS, ItemEntityRuntimeState};
@@ -64,7 +67,6 @@ const DEER_SOUND_HERD_SUPPRESSION_RADIUS_SQR: f64 = 12.0 * 12.0;
 const RABBIT_SOUND_AUDIBLE_RADIUS: f32 = 16.0;
 const RABBIT_RAID_COOLDOWN_TICKS: u32 = 600;
 const RABBIT_LOVE_TICKS: u32 = 600;
-const RABBIT_BREED_COOLDOWN_TICKS: u32 = 6_000;
 const RABBIT_PAIR_PUSH_MAX: f64 = 0.04;
 const RABBIT_NEIGHBORS_PER_CELL: usize = 2;
 const RABBIT_BURROW_DISTURBANCE_PER_HIT: u32 = 40;
@@ -72,6 +74,8 @@ const RABBIT_BURROW_COLLAPSE_DAMAGE: u8 = 3;
 const RABBIT_DECISION_WORK_PER_TICK: u32 = 64;
 const RABBIT_HABITAT_WORK_PER_TICK: u32 = 32;
 const RABBIT_PATH_WORK_PER_TICK: u32 = 32;
+const WILDLIFE_REMAINS_MAX_PER_CELL: usize = 8;
+const WILDLIFE_REMAINS_DECAY_DENOMINATOR: u32 = 1_200;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct MallardNestRuntimeState {
@@ -100,6 +104,16 @@ struct RabbitBurrowRuntimeState {
     disturbance_ticks: u32,
     damage: u8,
     last_used_tick: u64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct WildlifeRemainsRuntimeState {
+    source_species: WildlifeRemainsSpecies,
+    source: EntityPersistentId,
+    biomass: u32,
+    cause: WildlifeRemainsCause,
+    creation_tick: u64,
+    decay_remainder: u32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -149,6 +163,7 @@ pub(crate) struct ServerEntityStore {
     deer_beds: BTreeMap<EntityId, DeerBedRuntimeState>,
     bee_colonies: BTreeMap<EntityId, BeeColonyRuntimeState>,
     rabbit_burrows: BTreeMap<EntityId, RabbitBurrowRuntimeState>,
+    wildlife_remains: BTreeMap<EntityId, WildlifeRemainsRuntimeState>,
     deer_bedded_site_ticks: BTreeMap<EntityPersistentId, (BlockPos, u32)>,
     mallard_last_tracks: BTreeMap<EntityId, Vec3d>,
     pending_mallard_calls: Vec<MallardCallCue>,
@@ -165,6 +180,8 @@ pub(crate) struct ServerEntityStore {
     bee_cue_sequence: u64,
     rabbit_cue_sequence: u64,
     last_rabbit_ecology: RabbitEcologyTickDiagnostics,
+    wildlife_tuning: WildlifeLifecycleTuning,
+    pending_wildlife_events: Vec<WildlifeEcologyEvent>,
     persistent_ids: BTreeMap<EntityId, EntityPersistentId>,
     volatile_entities: BTreeSet<EntityId>,
     tick_list: ServerEntityTickList,
@@ -186,6 +203,29 @@ pub(crate) struct RabbitEcologyTickDiagnostics {
     pub(crate) work: EcologyWorkDiagnostics,
     pub(crate) habitat_candidates: u32,
     pub(crate) neighbor_candidates: u32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct WildlifeLifeDiagnostic {
+    pub(crate) persistent_id: EntityPersistentId,
+    pub(crate) kind: EntityKind,
+    pub(crate) position: Vec3d,
+    pub(crate) rabbit_life_stage: Option<RabbitLifeStage>,
+    pub(crate) deer_life_stage: Option<mclone_protocol::DeerLifeStage>,
+    pub(crate) deer_sex: Option<mclone_protocol::DeerSex>,
+    pub(crate) parents: [Option<EntityPersistentId>; 2],
+    pub(crate) lifecycle: WildlifeLifeState,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct WildlifeRemainsDiagnostic {
+    pub(crate) persistent_id: EntityPersistentId,
+    pub(crate) source_species: WildlifeRemainsSpecies,
+    pub(crate) source: EntityPersistentId,
+    pub(crate) biomass: u32,
+    pub(crate) cause: WildlifeRemainsCause,
+    pub(crate) creation_tick: u64,
+    pub(crate) position: Vec3d,
 }
 
 #[cfg(feature = "physics-engine")]
@@ -448,6 +488,534 @@ impl ServerEntityStore {
 
     pub(crate) fn states(&self) -> Vec<ServerEntityState> {
         self.entities.values().copied().collect()
+    }
+
+    pub(crate) fn set_wildlife_tuning(&mut self, tuning: WildlifeLifecycleTuning) {
+        self.wildlife_tuning = tuning;
+    }
+
+    pub(crate) const fn wildlife_tuning(&self) -> WildlifeLifecycleTuning {
+        self.wildlife_tuning
+    }
+
+    pub(crate) fn drain_wildlife_events(&mut self) -> Vec<WildlifeEcologyEvent> {
+        std::mem::take(&mut self.pending_wildlife_events)
+    }
+
+    pub(crate) fn wildlife_life_diagnostics(&self) -> Vec<WildlifeLifeDiagnostic> {
+        self.entities
+            .values()
+            .filter(|entity| entity.alive)
+            .filter_map(|entity| {
+                let mob = self.mobs.get(&entity.id)?;
+                match entity.kind {
+                    EntityKind::Rabbit => {
+                        let rabbit = mob.rabbit_save_data()?;
+                        Some(WildlifeLifeDiagnostic {
+                            persistent_id: entity.persistent_id,
+                            kind: entity.kind,
+                            position: entity.position,
+                            rabbit_life_stage: Some(rabbit.life_stage),
+                            deer_life_stage: None,
+                            deer_sex: None,
+                            parents: rabbit.parents,
+                            lifecycle: rabbit.lifecycle,
+                        })
+                    }
+                    EntityKind::Deer => {
+                        let deer = mob.deer_save_data()?;
+                        Some(WildlifeLifeDiagnostic {
+                            persistent_id: entity.persistent_id,
+                            kind: entity.kind,
+                            position: entity.position,
+                            rabbit_life_stage: None,
+                            deer_life_stage: Some(deer.life_stage),
+                            deer_sex: Some(deer.sex),
+                            parents: [None; 2],
+                            lifecycle: deer.lifecycle,
+                        })
+                    }
+                    _ => None,
+                }
+            })
+            .collect()
+    }
+
+    pub(crate) fn wildlife_remains_diagnostics(&self) -> Vec<WildlifeRemainsDiagnostic> {
+        self.wildlife_remains
+            .iter()
+            .filter_map(|(id, remains)| {
+                let entity = self.entities.get(id).filter(|entity| entity.alive)?;
+                Some(WildlifeRemainsDiagnostic {
+                    persistent_id: entity.persistent_id,
+                    source_species: remains.source_species,
+                    source: remains.source,
+                    biomass: remains.biomass,
+                    cause: remains.cause,
+                    creation_tick: remains.creation_tick,
+                    position: entity.position,
+                })
+            })
+            .collect()
+    }
+
+    pub(crate) fn tick_wildlife_lifecycle<F>(
+        &mut self,
+        simulation_tick: u64,
+        entity_ticking_chunks: &[ChunkPos],
+        resources: &mut WildlifeResourceLedger,
+        block_state_at: &F,
+    ) -> Vec<ServerEntityState>
+    where
+        F: Fn(BlockPos) -> Option<BlockStateId>,
+    {
+        let tuning = self.wildlife_tuning;
+        if tuning.cadence_ticks == 0
+            || !simulation_tick.is_multiple_of(u64::from(tuning.cadence_ticks))
+        {
+            return Vec::new();
+        }
+        let ticking_chunks = entity_ticking_chunks
+            .iter()
+            .copied()
+            .collect::<BTreeSet<_>>();
+        resources.recover_loaded(&ticking_chunks);
+        let mut wildlife_ids = self
+            .entities
+            .values()
+            .filter(|entity| {
+                entity.alive
+                    && ticking_chunks.contains(&entity.chunk_pos())
+                    && matches!(entity.kind, EntityKind::Rabbit | EntityKind::Deer)
+            })
+            .map(|entity| (entity.persistent_id, entity.id))
+            .collect::<Vec<_>>();
+        wildlife_ids.sort_unstable();
+        let overloaded = wildlife_ids.len() >= tuning.hard_population_guard as usize;
+        let mut cell_density = BTreeMap::<(WildlifeSpecies, i32, i32), u16>::new();
+        for (_, id) in &wildlife_ids {
+            let entity = self.entities[id];
+            let feet = BlockPos::containing(entity.position);
+            let cell = (
+                if entity.kind == EntityKind::Rabbit {
+                    WildlifeSpecies::Rabbit
+                } else {
+                    WildlifeSpecies::Deer
+                },
+                feet.x.div_euclid(64),
+                feet.z.div_euclid(64),
+            );
+            *cell_density.entry(cell).or_default() = cell_density
+                .get(&cell)
+                .copied()
+                .unwrap_or(0)
+                .saturating_add(1);
+        }
+
+        let mut updated = Vec::new();
+        let mut natural_deaths = Vec::new();
+        let mut deer_reproduction_blocked = BTreeMap::new();
+        for (_, id) in wildlife_ids.iter().copied() {
+            let Some(entity) = self.entities.get(&id).copied() else {
+                continue;
+            };
+            let feet = BlockPos::containing(entity.position);
+            let density = cell_density
+                .get(&(
+                    if entity.kind == EntityKind::Rabbit {
+                        WildlifeSpecies::Rabbit
+                    } else {
+                        WildlifeSpecies::Deer
+                    },
+                    feet.x.div_euclid(64),
+                    feet.z.div_euclid(64),
+                ))
+                .copied()
+                .unwrap_or(1);
+            let (consumer, foraging, cost, soft_density, species) = match entity.kind {
+                EntityKind::Rabbit => {
+                    let behavior = self
+                        .mobs
+                        .get(&id)
+                        .and_then(MobRuntimeState::rabbit_behavior)
+                        .unwrap_or(RabbitBehavior::Idle);
+                    (
+                        WildlifeForageConsumer::Rabbit,
+                        behavior == RabbitBehavior::Forage,
+                        match behavior {
+                            RabbitBehavior::Flee => 16,
+                            RabbitBehavior::Hop => 9,
+                            RabbitBehavior::Underground => 2,
+                            _ => 5,
+                        },
+                        tuning.rabbit_soft_cell_density,
+                        WildlifeSpecies::Rabbit,
+                    )
+                }
+                EntityKind::Deer => {
+                    let behavior = self
+                        .mobs
+                        .get(&id)
+                        .and_then(MobRuntimeState::deer_behavior)
+                        .unwrap_or(mclone_protocol::DeerBehavior::Idle);
+                    (
+                        WildlifeForageConsumer::Deer,
+                        behavior == mclone_protocol::DeerBehavior::Graze,
+                        match behavior {
+                            mclone_protocol::DeerBehavior::Flee => 22,
+                            mclone_protocol::DeerBehavior::Walk => 12,
+                            mclone_protocol::DeerBehavior::Bedded => 4,
+                            _ => 8,
+                        },
+                        tuning.deer_soft_cell_density,
+                        WildlifeSpecies::Deer,
+                    )
+                }
+                _ => continue,
+            };
+            let intake = if foraging && is_local_wildlife_forage_site(feet, block_state_at) {
+                resources.consume_at(
+                    consumer,
+                    feet,
+                    if entity.kind == EntityKind::Rabbit {
+                        24
+                    } else {
+                        42
+                    },
+                    simulation_tick,
+                    block_state_at,
+                )
+            } else {
+                0
+            };
+            let Some(mob) = self.mobs.get_mut(&id) else {
+                continue;
+            };
+            mob.apply_wildlife_energy_step(
+                intake,
+                cost,
+                tuning.cadence_ticks,
+                tuning.maximum_energy,
+            );
+            let lifecycle = if entity.kind == EntityKind::Rabbit {
+                mob.rabbit_save_data().expect("rabbit state").lifecycle
+            } else {
+                mob.deer_save_data().expect("deer state").lifecycle
+            };
+            let starvation_ticks = if entity.kind == EntityKind::Rabbit {
+                tuning.rabbit_starvation_ticks
+            } else {
+                tuning.deer_starvation_ticks
+            };
+            let death_cause = if lifecycle.age_ticks >= lifecycle.lifespan_ticks {
+                Some(crate::ecology::WildlifeDeathCause::OldAge)
+            } else if lifecycle.deficit_ticks >= starvation_ticks {
+                Some(crate::ecology::WildlifeDeathCause::Starvation)
+            } else {
+                None
+            };
+            if let Some(cause) = death_cause {
+                natural_deaths.push((id, entity, species, cause));
+                continue;
+            }
+            if intake > 0 {
+                self.pending_wildlife_events.push(WildlifeEcologyEvent {
+                    tick: simulation_tick,
+                    species,
+                    subject: entity.persistent_id,
+                    kind: WildlifeEcologyEventKind::Intake { amount: intake },
+                });
+            }
+            if entity.kind == EntityKind::Rabbit {
+                let reason = if overloaded {
+                    Some(WildlifeReproductionSuppression::HardOverload)
+                } else if density > soft_density {
+                    Some(WildlifeReproductionSuppression::Crowding)
+                } else if !mob
+                    .rabbit_enter_natural_love(tuning.rabbit_reproductive_energy, RABBIT_LOVE_TICKS)
+                {
+                    let lifecycle = mob.rabbit_save_data().expect("rabbit state").lifecycle;
+                    Some(if lifecycle.reproduction_cooldown > 0 {
+                        WildlifeReproductionSuppression::Cooldown
+                    } else {
+                        WildlifeReproductionSuppression::LowCondition
+                    })
+                } else {
+                    None
+                };
+                if let Some(reason) = reason {
+                    self.pending_wildlife_events.push(WildlifeEcologyEvent {
+                        tick: simulation_tick,
+                        species,
+                        subject: entity.persistent_id,
+                        kind: WildlifeEcologyEventKind::ReproductionSuppressed { reason },
+                    });
+                }
+            } else {
+                let reason = if overloaded {
+                    Some(WildlifeReproductionSuppression::HardOverload)
+                } else if density > soft_density {
+                    Some(WildlifeReproductionSuppression::Crowding)
+                } else if !mob.deer_can_breed(tuning.deer_reproductive_energy) {
+                    let lifecycle = mob.deer_save_data().expect("deer state").lifecycle;
+                    Some(if lifecycle.reproduction_cooldown > 0 {
+                        WildlifeReproductionSuppression::Cooldown
+                    } else {
+                        WildlifeReproductionSuppression::LowCondition
+                    })
+                } else {
+                    None
+                };
+                if let Some(reason) = reason {
+                    deer_reproduction_blocked.insert(id, reason);
+                }
+            }
+            updated.push(self.entities[&id]);
+        }
+
+        for (id, entity, species, cause) in natural_deaths {
+            if let Some(removed) = self.remove_entity(id) {
+                updated.push(removed);
+            }
+            let biomass = if species == WildlifeSpecies::Rabbit {
+                120
+            } else {
+                900
+            };
+            let source_species = if species == WildlifeSpecies::Rabbit {
+                WildlifeRemainsSpecies::Rabbit
+            } else {
+                WildlifeRemainsSpecies::Deer
+            };
+            let remains_cause = match cause {
+                crate::ecology::WildlifeDeathCause::OldAge => WildlifeRemainsCause::OldAge,
+                crate::ecology::WildlifeDeathCause::Starvation => WildlifeRemainsCause::Starvation,
+            };
+            let remains = self.insert_or_merge_wildlife_remains(
+                source_species,
+                entity.persistent_id,
+                entity.position,
+                entity.y_rot_degrees,
+                biomass,
+                remains_cause,
+                simulation_tick,
+            );
+            updated.extend(remains);
+            self.pending_wildlife_events.push(WildlifeEcologyEvent {
+                tick: simulation_tick,
+                species,
+                subject: entity.persistent_id,
+                kind: WildlifeEcologyEventKind::Death { cause },
+            });
+            self.pending_wildlife_events.push(WildlifeEcologyEvent {
+                tick: simulation_tick,
+                species,
+                subject: entity.persistent_id,
+                kind: WildlifeEcologyEventKind::RemainsCreated { biomass },
+            });
+        }
+        updated.extend(self.tick_wildlife_remains_decay(simulation_tick, &ticking_chunks));
+        let (deer_updates, paired_deer) = self.try_deer_birth(
+            simulation_tick,
+            &deer_reproduction_blocked.keys().copied().collect(),
+        );
+        updated.extend(deer_updates);
+        for (_, id) in wildlife_ids {
+            let Some(entity) = self.entities.get(&id) else {
+                continue;
+            };
+            if entity.kind != EntityKind::Deer || paired_deer.contains(&id) {
+                continue;
+            }
+            let reason = deer_reproduction_blocked
+                .get(&id)
+                .copied()
+                .unwrap_or(WildlifeReproductionSuppression::NoMate);
+            self.pending_wildlife_events.push(WildlifeEcologyEvent {
+                tick: simulation_tick,
+                species: WildlifeSpecies::Deer,
+                subject: entity.persistent_id,
+                kind: WildlifeEcologyEventKind::ReproductionSuppressed { reason },
+            });
+        }
+        updated
+    }
+
+    fn insert_or_merge_wildlife_remains(
+        &mut self,
+        source_species: WildlifeRemainsSpecies,
+        source: EntityPersistentId,
+        position: Vec3d,
+        y_rot_degrees: f32,
+        biomass: u32,
+        cause: WildlifeRemainsCause,
+        creation_tick: u64,
+    ) -> Vec<ServerEntityState> {
+        let feet = BlockPos::containing(position);
+        let cell = (feet.x.div_euclid(64), feet.z.div_euclid(64));
+        let mut in_cell = self
+            .wildlife_remains
+            .keys()
+            .filter_map(|id| {
+                let entity = self.entities.get(id)?;
+                let block = BlockPos::containing(entity.position);
+                ((block.x.div_euclid(64), block.z.div_euclid(64)) == cell)
+                    .then_some((entity.persistent_id, *id))
+            })
+            .collect::<Vec<_>>();
+        in_cell.sort_unstable();
+        if in_cell.len() >= WILDLIFE_REMAINS_MAX_PER_CELL
+            && let Some((_, merge_id)) = in_cell.first().copied()
+            && let Some(remains) = self.wildlife_remains.get_mut(&merge_id)
+        {
+            remains.biomass = remains.biomass.saturating_add(biomass);
+            return self.entities.get(&merge_id).copied().into_iter().collect();
+        }
+        let id = self.allocate_entity_id();
+        let persistent_id = self.allocate_persistent_id();
+        let mut entity = ServerEntityState::from_metadata(
+            id,
+            persistent_id,
+            EntityMetadata::WILDLIFE_REMAINS,
+            position,
+            y_rot_degrees,
+            0.0,
+            None,
+            true,
+        );
+        entity.animation = None;
+        self.wildlife_remains.insert(
+            id,
+            WildlifeRemainsRuntimeState {
+                source_species,
+                source,
+                biomass,
+                cause,
+                creation_tick,
+                decay_remainder: 0,
+            },
+        );
+        self.entities.insert(id, entity);
+        self.persistent_ids.insert(id, persistent_id);
+        vec![entity]
+    }
+
+    fn tick_wildlife_remains_decay(
+        &mut self,
+        simulation_tick: u64,
+        ticking_chunks: &BTreeSet<ChunkPos>,
+    ) -> Vec<ServerEntityState> {
+        let mut updated = Vec::new();
+        let mut exhausted = Vec::new();
+        let mut ids = self.wildlife_remains.keys().copied().collect::<Vec<_>>();
+        ids.sort_unstable();
+        for id in ids {
+            let Some(entity) = self.entities.get(&id).copied() else {
+                continue;
+            };
+            if !ticking_chunks.contains(&entity.chunk_pos()) {
+                continue;
+            }
+            let remains = self.wildlife_remains.get_mut(&id).expect("remains state");
+            remains.decay_remainder = remains.decay_remainder.saturating_add(100);
+            let decayed =
+                (remains.decay_remainder / WILDLIFE_REMAINS_DECAY_DENOMINATOR).min(remains.biomass);
+            remains.decay_remainder %= WILDLIFE_REMAINS_DECAY_DENOMINATOR;
+            if decayed == 0 {
+                continue;
+            }
+            remains.biomass -= decayed;
+            let species = match remains.source_species {
+                WildlifeRemainsSpecies::Rabbit => WildlifeSpecies::Rabbit,
+                WildlifeRemainsSpecies::Deer => WildlifeSpecies::Deer,
+            };
+            self.pending_wildlife_events.push(WildlifeEcologyEvent {
+                tick: simulation_tick,
+                species,
+                subject: entity.persistent_id,
+                kind: WildlifeEcologyEventKind::RemainsDecayed { amount: decayed },
+            });
+            if remains.biomass == 0 {
+                exhausted.push(id);
+            } else {
+                updated.push(entity);
+            }
+        }
+        for id in exhausted {
+            if let Some(removed) = self.remove_entity(id) {
+                updated.push(removed);
+            }
+        }
+        updated
+    }
+
+    fn try_deer_birth(
+        &mut self,
+        simulation_tick: u64,
+        blocked: &BTreeSet<EntityId>,
+    ) -> (Vec<ServerEntityState>, BTreeSet<EntityId>) {
+        let tuning = self.wildlife_tuning;
+        let mut females = Vec::new();
+        let mut males = Vec::new();
+        for (id, mob) in &self.mobs {
+            let Some(entity) = self.entities.get(id).filter(|entity| entity.alive) else {
+                continue;
+            };
+            if entity.kind != EntityKind::Deer
+                || blocked.contains(id)
+                || !mob.deer_can_breed(tuning.deer_reproductive_energy)
+            {
+                continue;
+            }
+            let entry = (entity.persistent_id, *id, entity.position);
+            match mob.deer_sex() {
+                Some(mclone_protocol::DeerSex::Female) => females.push(entry),
+                Some(mclone_protocol::DeerSex::Male) => males.push(entry),
+                None => {}
+            }
+        }
+        females.sort_unstable_by_key(|entry| entry.0);
+        males.sort_unstable_by_key(|entry| entry.0);
+        let Some((female_pid, female_id, female_position, male_pid, male_id)) =
+            females.iter().find_map(|female| {
+                males
+                    .iter()
+                    .find(|male| squared_distance_xz(female.2, male.2) <= 12.0 * 12.0)
+                    .map(|male| (female.0, female.1, female.2, male.0, male.1))
+            })
+        else {
+            return (Vec::new(), BTreeSet::new());
+        };
+        for parent_id in [female_id, male_id] {
+            self.mobs
+                .get_mut(&parent_id)
+                .expect("selected deer parent")
+                .spend_deer_reproduction(
+                    tuning.deer_birth_energy_cost,
+                    tuning.deer_breeding_cooldown_ticks,
+                );
+        }
+        let child_id = self.allocate_entity_id();
+        let child_pid = self.allocate_persistent_id();
+        let child = self.insert_deer_fawn_with_runtime(
+            child_id,
+            child_pid,
+            female_position,
+            self.entities[&female_id].y_rot_degrees,
+        );
+        self.pending_wildlife_events.push(WildlifeEcologyEvent {
+            tick: simulation_tick,
+            species: WildlifeSpecies::Deer,
+            subject: child_pid,
+            kind: WildlifeEcologyEventKind::Birth {
+                child: child_pid,
+                parents: [female_pid, male_pid],
+            },
+        });
+        (
+            vec![self.entities[&female_id], self.entities[&male_id], child],
+            BTreeSet::from([female_id, male_id]),
+        )
     }
 
     pub(crate) fn entity_chunk_record(&self, pos: ChunkPos, revision: u64) -> EntityChunkRecord {
@@ -1919,16 +2487,13 @@ impl ServerEntityStore {
                             self.pending_rabbit_raids
                                 .push(RabbitRaidEvent { rabbit: id, target });
                         }
-                        if mob.rabbit_can_breed()
-                            && let Some(home) = mob
-                                .rabbit_familiar_refuge()
-                                .map(|known| known.locator.persistent_id)
-                        {
+                        if mob.rabbit_can_breed() {
                             rabbit_breeding_candidates.push((
                                 id,
                                 entity.persistent_id,
                                 entity.position,
-                                home,
+                                mob.rabbit_familiar_refuge()
+                                    .map(|known| known.locator.persistent_id),
                             ));
                         }
                         if previous_rabbit_behavior != mob.rabbit_behavior()
@@ -2022,97 +2587,124 @@ impl ServerEntityStore {
             self.remove_entity(id);
         }
         if let Some((left, right, home)) = rabbit_breeding_pair(&rabbit_breeding_candidates) {
-            let burrow_id = self.entities.iter().find_map(|(id, entity)| {
-                (entity.persistent_id == home && self.rabbit_burrows.contains_key(id))
-                    .then_some(*id)
+            let home_details = home.and_then(|home| {
+                self.entities.iter().find_map(|(id, entity)| {
+                    (entity.persistent_id == home && self.rabbit_burrows.contains_key(id))
+                        .then_some((home, *id, entity.position))
+                })
             });
-            if let Some(burrow_id) = burrow_id {
-                let occupancy = self
-                    .mobs
-                    .values()
-                    .filter(|mob| mob.rabbit_refuge_claim() == Some(home))
-                    .count();
-                let has_capacity = self
-                    .rabbit_burrows
-                    .get(&burrow_id)
-                    .is_some_and(|burrow| occupancy < usize::from(burrow.capacity));
-                if has_capacity {
-                    if let Some(parent) = self.mobs.get_mut(&left.0) {
-                        parent.complete_rabbit_breeding(RABBIT_BREED_COOLDOWN_TICKS);
-                    }
-                    if let Some(parent) = self.mobs.get_mut(&right.0) {
-                        parent.complete_rabbit_breeding(RABBIT_BREED_COOLDOWN_TICKS);
-                    }
-                    let kit_id = self.allocate_entity_id();
-                    let kit_persistent_id = self.allocate_persistent_id();
-                    let home_position = self.entities[&burrow_id].position;
-                    let kit_position = Vec3d::new(
-                        (left.2.x + right.2.x) * 0.5,
-                        (left.2.y + right.2.y) * 0.5,
-                        (left.2.z + right.2.z) * 0.5,
-                    );
-                    let kit = self.insert_rabbit_with_runtime(
-                        kit_id,
-                        kit_persistent_id,
-                        kit_position,
-                        self.entities[&left.0].y_rot_degrees,
-                        RabbitRuntimeSaveData {
-                            known_refuges: [
-                                Some(KnownPlace::observed(
-                                    home,
-                                    BlockPos::containing(home_position),
-                                    self.entities[&left.0].tick_count,
-                                )),
-                                None,
-                                None,
-                            ],
-                            sheltered_in: None,
-                            dig_target: None,
-                            decision_schedule: DecisionSchedule::new(
-                                self.entities[&left.0].tick_count.saturating_add(20),
-                                0,
-                            ),
-                            dig_cooldown: 1_200,
-                            life_stage: RabbitLifeStage::Kit,
-                            age_ticks: 0,
-                            parents: [Some(left.1), Some(right.1)],
-                            behavior: RabbitBehavior::Courtship,
-                            behavior_ticks: 0,
-                            health: 3,
-                            max_health: 3,
-                            love_ticks: 0,
-                            breed_cooldown: RABBIT_BREED_COOLDOWN_TICKS,
-                            raid_cooldown: 0,
-                        },
-                    );
-                    if let Some(mob) = self.mobs.get_mut(&kit_id) {
-                        mob.set_rabbit_refuge(
-                            Some((home, home_position)),
-                            self.entities[&left.0].tick_count,
+            let has_capacity = home.is_none()
+                || home_details.is_some_and(|(home, burrow_id, _)| {
+                    let occupancy = self
+                        .mobs
+                        .values()
+                        .filter(|mob| mob.rabbit_refuge_claim() == Some(home))
+                        .count();
+                    self.rabbit_burrows
+                        .get(&burrow_id)
+                        .is_some_and(|burrow| occupancy < usize::from(burrow.capacity))
+                });
+            if has_capacity {
+                let tuning = self.wildlife_tuning;
+                for parent_id in [left.0, right.0] {
+                    if let Some(parent) = self.mobs.get_mut(&parent_id) {
+                        parent.complete_rabbit_breeding(tuning.rabbit_breeding_cooldown_ticks);
+                        parent.spend_rabbit_reproduction(
+                            tuning.rabbit_birth_energy_cost,
+                            tuning.rabbit_breeding_cooldown_ticks,
                         );
                     }
-                    for parent_id in [left.0, right.0] {
-                        if let Some(parent) = self.entities.get_mut(&parent_id) {
-                            parent.animation = Some(AnimationState::elapsed(
-                                AnimationClipId::from_static("courtship"),
-                                parent
-                                    .animation
-                                    .map_or(0, |animation| animation.epoch.wrapping_add(1)),
-                                parent.tick_count,
-                            ));
-                            updated.push(*parent);
-                        }
-                    }
-                    updated.push(kit);
-                    self.rabbit_cue_sequence = self.rabbit_cue_sequence.wrapping_add(1);
-                    self.pending_rabbit_sounds.push(RabbitSoundCue {
-                        source: kit_id,
-                        position: kit_position,
-                        sequence: self.rabbit_cue_sequence,
-                        audible_radius: RABBIT_SOUND_AUDIBLE_RADIUS,
-                        kind: mclone_protocol::RabbitSoundKind::Rustle,
-                    });
                 }
+                let kit_id = self.allocate_entity_id();
+                let kit_persistent_id = self.allocate_persistent_id();
+                let kit_position = Vec3d::new(
+                    (left.2.x + right.2.x) * 0.5,
+                    (left.2.y + right.2.y) * 0.5,
+                    (left.2.z + right.2.z) * 0.5,
+                );
+                let now = self.entities[&left.0].tick_count;
+                let known_refuges = home_details.map_or([None; 3], |(home, _, position)| {
+                    [
+                        Some(KnownPlace::observed(
+                            home,
+                            BlockPos::containing(position),
+                            now,
+                        )),
+                        None,
+                        None,
+                    ]
+                });
+                let kit = self.insert_rabbit_with_runtime(
+                    kit_id,
+                    kit_persistent_id,
+                    kit_position,
+                    self.entities[&left.0].y_rot_degrees,
+                    RabbitRuntimeSaveData {
+                        known_refuges,
+                        sheltered_in: None,
+                        dig_target: None,
+                        decision_schedule: DecisionSchedule::new(now.saturating_add(20), 0),
+                        dig_cooldown: 1_200,
+                        life_stage: RabbitLifeStage::Kit,
+                        parents: [Some(left.1), Some(right.1)],
+                        behavior: RabbitBehavior::Courtship,
+                        behavior_ticks: 0,
+                        health: 3,
+                        max_health: 3,
+                        love_ticks: 0,
+                        raid_cooldown: 0,
+                        lifecycle: WildlifeLifeState::offspring(
+                            kit_persistent_id,
+                            tuning.rabbit_lifespan_ticks,
+                            tuning.rabbit_lifespan_variance_ticks,
+                            tuning.rabbit_breeding_cooldown_ticks,
+                        ),
+                    },
+                );
+                if let Some((home, _, home_position)) = home_details
+                    && let Some(mob) = self.mobs.get_mut(&kit_id)
+                {
+                    mob.set_rabbit_refuge(Some((home, home_position)), now);
+                }
+                for parent_id in [left.0, right.0] {
+                    if let Some(parent) = self.entities.get_mut(&parent_id) {
+                        parent.animation = Some(AnimationState::elapsed(
+                            AnimationClipId::from_static("courtship"),
+                            parent
+                                .animation
+                                .map_or(0, |animation| animation.epoch.wrapping_add(1)),
+                            parent.tick_count,
+                        ));
+                        updated.push(*parent);
+                    }
+                }
+                updated.push(kit);
+                self.pending_wildlife_events.push(WildlifeEcologyEvent {
+                    tick: now,
+                    species: WildlifeSpecies::Rabbit,
+                    subject: kit_persistent_id,
+                    kind: WildlifeEcologyEventKind::Birth {
+                        child: kit_persistent_id,
+                        parents: [left.1, right.1],
+                    },
+                });
+                self.rabbit_cue_sequence = self.rabbit_cue_sequence.wrapping_add(1);
+                self.pending_rabbit_sounds.push(RabbitSoundCue {
+                    source: kit_id,
+                    position: kit_position,
+                    sequence: self.rabbit_cue_sequence,
+                    audible_radius: RABBIT_SOUND_AUDIBLE_RADIUS,
+                    kind: mclone_protocol::RabbitSoundKind::Rustle,
+                });
+            } else {
+                self.pending_wildlife_events.push(WildlifeEcologyEvent {
+                    tick: self.entities[&left.0].tick_count,
+                    species: WildlifeSpecies::Rabbit,
+                    subject: left.1,
+                    kind: WildlifeEcologyEventKind::ReproductionSuppressed {
+                        reason: WildlifeReproductionSuppression::NoRefugeCapacity,
+                    },
+                });
             }
         }
         for (id, position, y_rot_degrees, parents) in hatched_nests {
@@ -2451,6 +3043,7 @@ impl ServerEntityStore {
         self.deer_beds.remove(&id);
         self.bee_colonies.remove(&id);
         self.rabbit_burrows.remove(&id);
+        self.wildlife_remains.remove(&id);
         if state.kind == EntityKind::Deer {
             self.deer_bedded_site_ticks.remove(&state.persistent_id);
         }
@@ -2499,7 +3092,13 @@ impl ServerEntityStore {
         );
         self.mobs.insert(
             id,
-            MobRuntimeState::from_spawn(id, metadata, state.on_ground, state.y_rot_degrees),
+            MobRuntimeState::from_spawn_with_persistent(
+                id,
+                persistent_id,
+                metadata,
+                state.on_ground,
+                state.y_rot_degrees,
+            ),
         );
         let state = if kind == EntityKind::Mallard {
             let mut state = state;
@@ -2579,8 +3178,9 @@ impl ServerEntityStore {
         }
         self.mobs.insert(
             id,
-            MobRuntimeState::from_saved(
+            MobRuntimeState::from_saved_with_persistent(
                 id,
+                persistent_id,
                 metadata,
                 on_ground,
                 y_rot_degrees,
@@ -2647,8 +3247,9 @@ impl ServerEntityStore {
         );
         self.mobs.insert(
             id,
-            MobRuntimeState::from_saved(
+            MobRuntimeState::from_saved_with_persistent(
                 id,
+                persistent_id,
                 metadata,
                 false,
                 y_rot_degrees,
@@ -2717,8 +3318,9 @@ impl ServerEntityStore {
         }
         self.mobs.insert(
             id,
-            MobRuntimeState::from_saved(
+            MobRuntimeState::from_saved_with_persistent(
                 id,
+                persistent_id,
                 metadata,
                 true,
                 y_rot_degrees,
@@ -2728,6 +3330,77 @@ impl ServerEntityStore {
                 None,
                 None,
                 Some(saved),
+            ),
+        );
+        self.entities.insert(id, state);
+        self.persistent_ids.insert(id, persistent_id);
+        state
+    }
+
+    fn insert_deer_fawn_with_runtime(
+        &mut self,
+        id: EntityId,
+        persistent_id: EntityPersistentId,
+        position: Vec3d,
+        y_rot_degrees: f32,
+    ) -> ServerEntityState {
+        let tuning = self.wildlife_tuning;
+        let metadata = EntityMetadata::DEER;
+        let mut state = ServerEntityState::from_metadata(
+            id,
+            persistent_id,
+            metadata,
+            position,
+            y_rot_degrees,
+            0.0,
+            None,
+            true,
+        );
+        let sex = if persistent_id.least.is_multiple_of(2) {
+            mclone_protocol::DeerSex::Female
+        } else {
+            mclone_protocol::DeerSex::Male
+        };
+        let saved = DeerRuntimeSaveData {
+            sex,
+            life_stage: mclone_protocol::DeerLifeStage::Fawn,
+            antlered: false,
+            behavior: mclone_protocol::DeerBehavior::Idle,
+            behavior_ticks: 0,
+            health: 12,
+            max_health: 12,
+            antler_shed_time: -1,
+            lifecycle: WildlifeLifeState::offspring(
+                persistent_id,
+                tuning.deer_lifespan_ticks,
+                tuning.deer_lifespan_variance_ticks,
+                tuning.deer_breeding_cooldown_ticks,
+            ),
+        };
+        state.deer = Some(mclone_protocol::DeerSnapshotData {
+            sex,
+            life_stage: mclone_protocol::DeerLifeStage::Fawn,
+            antlered: false,
+            behavior: mclone_protocol::DeerBehavior::Idle,
+            health: 12,
+            max_health: 12,
+        });
+        state.width *= 0.72;
+        state.height *= 0.72;
+        self.mobs.insert(
+            id,
+            MobRuntimeState::from_saved_with_persistent(
+                id,
+                persistent_id,
+                metadata,
+                true,
+                y_rot_degrees,
+                Vec3d::ZERO,
+                None,
+                None,
+                Some(saved),
+                None,
+                None,
             ),
         );
         self.entities.insert(id, state);
@@ -2755,6 +3428,31 @@ impl ServerEntityStore {
         );
         state.animation = None;
         self.rabbit_burrows.insert(id, burrow);
+        self.entities.insert(id, state);
+        self.persistent_ids.insert(id, persistent_id);
+        state
+    }
+
+    fn insert_wildlife_remains_with_persistent_id(
+        &mut self,
+        id: EntityId,
+        persistent_id: EntityPersistentId,
+        position: Vec3d,
+        y_rot_degrees: f32,
+        remains: WildlifeRemainsRuntimeState,
+    ) -> ServerEntityState {
+        let mut state = ServerEntityState::from_metadata(
+            id,
+            persistent_id,
+            EntityMetadata::WILDLIFE_REMAINS,
+            position,
+            y_rot_degrees,
+            0.0,
+            None,
+            true,
+        );
+        state.animation = None;
+        self.wildlife_remains.insert(id, remains);
         self.entities.insert(id, state);
         self.persistent_ids.insert(id, persistent_id);
         state
@@ -2932,6 +3630,13 @@ impl ServerEntityStore {
                     health,
                     max_health,
                     antler_shed_time,
+                    age_ticks,
+                    lifespan_ticks,
+                    energy,
+                    deficit_ticks,
+                    recent_intake,
+                    reproductive_condition,
+                    reproduction_cooldown,
                 },
             ) => self.insert_saved_passive_mob(
                 id,
@@ -2949,6 +3654,15 @@ impl ServerEntityStore {
                     health: *health,
                     max_health: *max_health,
                     antler_shed_time: *antler_shed_time,
+                    lifecycle: WildlifeLifeState {
+                        age_ticks: *age_ticks,
+                        lifespan_ticks: *lifespan_ticks,
+                        energy: *energy,
+                        deficit_ticks: *deficit_ticks,
+                        recent_intake: *recent_intake,
+                        reproductive_condition: *reproductive_condition,
+                        reproduction_cooldown: *reproduction_cooldown,
+                    },
                 }),
                 None,
                 None,
@@ -2998,6 +3712,11 @@ impl ServerEntityStore {
                     love_ticks,
                     breed_cooldown,
                     raid_cooldown,
+                    lifespan_ticks,
+                    energy,
+                    deficit_ticks,
+                    recent_intake,
+                    reproductive_condition,
                 },
             ) => self.insert_saved_passive_mob(
                 id,
@@ -3018,15 +3737,22 @@ impl ServerEntityStore {
                     ),
                     dig_cooldown: *dig_cooldown,
                     life_stage: *life_stage,
-                    age_ticks: *age_ticks,
                     parents: *parents,
                     behavior: *behavior,
                     behavior_ticks: *behavior_ticks,
                     health: *health,
                     max_health: *max_health,
                     love_ticks: *love_ticks,
-                    breed_cooldown: *breed_cooldown,
                     raid_cooldown: *raid_cooldown,
+                    lifecycle: WildlifeLifeState {
+                        age_ticks: *age_ticks,
+                        lifespan_ticks: *lifespan_ticks,
+                        energy: *energy,
+                        deficit_ticks: *deficit_ticks,
+                        recent_intake: *recent_intake,
+                        reproductive_condition: *reproductive_condition,
+                        reproduction_cooldown: *breed_cooldown,
+                    },
                 }),
             )?,
             (
@@ -3072,6 +3798,30 @@ impl ServerEntityStore {
                     disturbance_ticks: *disturbance_ticks,
                     damage: *damage,
                     last_used_tick: *last_used_tick,
+                },
+            ),
+            (
+                "mclone:wildlife_remains",
+                EntitySavePayload::WildlifeRemains {
+                    source_species,
+                    source,
+                    biomass,
+                    cause,
+                    creation_tick,
+                    decay_remainder,
+                },
+            ) => self.insert_wildlife_remains_with_persistent_id(
+                id,
+                saved.persistent_id,
+                canonical_position,
+                saved.y_rot_degrees,
+                WildlifeRemainsRuntimeState {
+                    source_species: *source_species,
+                    source: *source,
+                    biomass: *biomass,
+                    cause: *cause,
+                    creation_tick: *creation_tick,
+                    decay_remainder: *decay_remainder,
                 },
             ),
             (
@@ -3168,8 +3918,9 @@ impl ServerEntityStore {
             saved.rotation,
             saved.on_ground,
         );
-        let mob = MobRuntimeState::from_saved(
+        let mob = MobRuntimeState::from_saved_with_persistent(
             id,
+            saved.persistent_id,
             metadata,
             state.on_ground,
             state.y_rot_degrees,
@@ -3294,6 +4045,13 @@ impl ServerEntityStore {
                     health: deer.health,
                     max_health: deer.max_health,
                     antler_shed_time: deer.antler_shed_time,
+                    age_ticks: deer.lifecycle.age_ticks,
+                    lifespan_ticks: deer.lifecycle.lifespan_ticks,
+                    energy: deer.lifecycle.energy,
+                    deficit_ticks: deer.lifecycle.deficit_ticks,
+                    recent_intake: deer.lifecycle.recent_intake,
+                    reproductive_condition: deer.lifecycle.reproductive_condition,
+                    reproduction_cooldown: deer.lifecycle.reproduction_cooldown,
                 }
             }
             EntityKind::DeerBed => EntitySavePayload::DeerBed {
@@ -3330,15 +4088,20 @@ impl ServerEntityStore {
                     decision_generation: rabbit.decision_schedule.attempt_generation,
                     dig_cooldown: rabbit.dig_cooldown,
                     life_stage: rabbit.life_stage,
-                    age_ticks: rabbit.age_ticks,
+                    age_ticks: rabbit.lifecycle.age_ticks,
                     parents: rabbit.parents,
                     behavior: rabbit.behavior,
                     behavior_ticks: rabbit.behavior_ticks,
                     health: rabbit.health,
                     max_health: rabbit.max_health,
                     love_ticks: rabbit.love_ticks,
-                    breed_cooldown: rabbit.breed_cooldown,
+                    breed_cooldown: rabbit.lifecycle.reproduction_cooldown,
                     raid_cooldown: rabbit.raid_cooldown,
+                    lifespan_ticks: rabbit.lifecycle.lifespan_ticks,
+                    energy: rabbit.lifecycle.energy,
+                    deficit_ticks: rabbit.lifecycle.deficit_ticks,
+                    recent_intake: rabbit.lifecycle.recent_intake,
+                    reproductive_condition: rabbit.lifecycle.reproductive_condition,
                 }
             }
             EntityKind::RabbitBurrow => {
@@ -3348,6 +4111,17 @@ impl ServerEntityStore {
                     disturbance_ticks: burrow.disturbance_ticks,
                     damage: burrow.damage,
                     last_used_tick: burrow.last_used_tick,
+                }
+            }
+            EntityKind::WildlifeRemains => {
+                let remains = self.wildlife_remains.get(&entity.id)?;
+                EntitySavePayload::WildlifeRemains {
+                    source_species: remains.source_species,
+                    source: remains.source,
+                    biomass: remains.biomass,
+                    cause: remains.cause,
+                    creation_tick: remains.creation_tick,
+                    decay_remainder: remains.decay_remainder,
                 }
             }
             EntityKind::Mannequin => EntitySavePayload::Mannequin,
@@ -3518,6 +4292,7 @@ fn entity_kind_code(kind: EntityKind) -> Option<&'static str> {
         EntityKind::BeeHotel => Some("mclone:bee_hotel"),
         EntityKind::Rabbit => Some("mclone:rabbit"),
         EntityKind::RabbitBurrow => Some("mclone:rabbit_burrow"),
+        EntityKind::WildlifeRemains => Some("mclone:wildlife_remains"),
         EntityKind::Mannequin => Some("mclone:mannequin"),
         EntityKind::Item => Some("minecraft:item"),
         EntityKind::DebugCube => None,
@@ -3659,19 +4434,44 @@ fn rabbit_release_position(mouth: ServerEntityState, rabbit: EntityPersistentId)
     ))
 }
 
-type RabbitBreedingCandidate = (EntityId, EntityPersistentId, Vec3d, EntityPersistentId);
+fn is_local_wildlife_forage_site<F>(feet: BlockPos, block_state_at: &F) -> bool
+where
+    F: Fn(BlockPos) -> Option<BlockStateId>,
+{
+    use mclone_worldgen::block::{
+        DANDELION, DIRT, GRASS_BLOCK, OAK_LEAVES, POPPY, generated_block_state_id,
+    };
+
+    let floor = block_state_at(BlockPos::new(feet.x, feet.y - 1, feet.z));
+    let at_feet = block_state_at(feet);
+    floor.is_some_and(|state| {
+        state == generated_block_state_id(GRASS_BLOCK) || state == generated_block_state_id(DIRT)
+    }) || at_feet.is_some_and(|state| {
+        state == generated_block_state_id(DANDELION)
+            || state == generated_block_state_id(POPPY)
+            || state == generated_block_state_id(OAK_LEAVES)
+    })
+}
+
+type RabbitBreedingCandidate = (
+    EntityId,
+    EntityPersistentId,
+    Vec3d,
+    Option<EntityPersistentId>,
+);
 
 fn rabbit_breeding_pair(
     candidates: &[RabbitBreedingCandidate],
 ) -> Option<(
     RabbitBreedingCandidate,
     RabbitBreedingCandidate,
-    EntityPersistentId,
+    Option<EntityPersistentId>,
 )> {
     for (index, left) in candidates.iter().copied().enumerate() {
         for right in candidates[index + 1..].iter().copied() {
-            if left.3 == right.3 && squared_distance_xz(left.2, right.2) <= 4.0 * 4.0 {
-                return Some((left, right, left.3));
+            if squared_distance_xz(left.2, right.2) <= 4.0 * 4.0 {
+                let common_home = (left.3 == right.3).then_some(left.3).flatten();
+                return Some((left, right, common_home));
             }
         }
     }
@@ -3703,7 +4503,6 @@ mod tests {
             decision_schedule: DecisionSchedule::new(0, 0),
             dig_cooldown: 0,
             life_stage: RabbitLifeStage::Adult,
-            age_ticks: 2_400,
             parents: [None; 2],
             behavior: if sheltered {
                 RabbitBehavior::Underground
@@ -3714,8 +4513,13 @@ mod tests {
             health: 3,
             max_health: 3,
             love_ticks: 0,
-            breed_cooldown: 0,
             raid_cooldown: 0,
+            lifecycle: WildlifeLifeState::founder(
+                EntityPersistentId::new(0, 9_001),
+                24_000,
+                480_000,
+                120_000,
+            ),
         }
     }
 
@@ -3755,6 +4559,201 @@ mod tests {
         } else {
             BlockStateId(mclone_blocks::terrain_id::AIR)
         })
+    }
+
+    fn flat_meadow(pos: BlockPos) -> Option<BlockStateId> {
+        Some(if pos.y == 63 {
+            generated_block_state_id(mclone_worldgen::block::GRASS_BLOCK)
+        } else {
+            BlockStateId(mclone_blocks::terrain_id::AIR)
+        })
+    }
+
+    fn ready_wildlife_lifecycle(age_ticks: u32) -> WildlifeLifeState {
+        WildlifeLifeState {
+            age_ticks,
+            lifespan_ticks: 1_000_000,
+            energy: 1_000,
+            deficit_ticks: 0,
+            recent_intake: 0,
+            reproductive_condition: 1_000,
+            reproduction_cooldown: 0,
+        }
+    }
+
+    #[test]
+    fn wild_rabbits_breed_without_a_burrow_when_condition_allows() {
+        let mut store = ServerEntityStore::default();
+        let left =
+            store.insert_passive_mob_for_test(EntityKind::Rabbit, Vec3d::new(4.5, 64.0, 4.5), 0.0);
+        let right =
+            store.insert_passive_mob_for_test(EntityKind::Rabbit, Vec3d::new(5.5, 64.0, 4.5), 0.0);
+        for id in [left, right] {
+            store
+                .mobs
+                .get_mut(&id)
+                .unwrap()
+                .set_wildlife_lifecycle_for_test(ready_wildlife_lifecycle(24_000), None);
+        }
+        let mut resources = WildlifeResourceLedger::default();
+        store.tick_wildlife_lifecycle(20, &[ChunkPos::new(0, 0)], &mut resources, &flat_meadow);
+        store.tick_stationary(&[ChunkPos::new(0, 0)], &[], flat_meadow);
+
+        let rabbits = store
+            .wildlife_life_diagnostics()
+            .into_iter()
+            .filter(|animal| animal.kind == EntityKind::Rabbit)
+            .collect::<Vec<_>>();
+        assert_eq!(rabbits.len(), 3);
+        let kit = rabbits
+            .iter()
+            .find(|animal| animal.rabbit_life_stage == Some(RabbitLifeStage::Kit))
+            .expect("eligible wild pair should create a kit without a refuge");
+        assert!(kit.parents.iter().all(Option::is_some));
+        assert!(store.drain_wildlife_events().iter().any(|event| {
+            matches!(
+                event.kind,
+                WildlifeEcologyEventKind::Birth { child, .. } if child == kit.persistent_id
+            )
+        }));
+    }
+
+    #[test]
+    fn eligible_deer_pair_creates_one_fawn_and_parent_cooldowns() {
+        let mut store = ServerEntityStore::default();
+        let female =
+            store.insert_passive_mob_for_test(EntityKind::Deer, Vec3d::new(4.5, 64.0, 4.5), 0.0);
+        let male =
+            store.insert_passive_mob_for_test(EntityKind::Deer, Vec3d::new(7.5, 64.0, 4.5), 0.0);
+        store
+            .mobs
+            .get_mut(&female)
+            .unwrap()
+            .set_wildlife_lifecycle_for_test(
+                ready_wildlife_lifecycle(120_000),
+                Some(mclone_protocol::DeerSex::Female),
+            );
+        store
+            .mobs
+            .get_mut(&male)
+            .unwrap()
+            .set_wildlife_lifecycle_for_test(
+                ready_wildlife_lifecycle(120_000),
+                Some(mclone_protocol::DeerSex::Male),
+            );
+
+        let mut resources = WildlifeResourceLedger::default();
+        store.tick_wildlife_lifecycle(20, &[ChunkPos::new(0, 0)], &mut resources, &flat_meadow);
+        let deer = store
+            .wildlife_life_diagnostics()
+            .into_iter()
+            .filter(|animal| animal.kind == EntityKind::Deer)
+            .collect::<Vec<_>>();
+        assert_eq!(deer.len(), 3);
+        assert_eq!(
+            deer.iter()
+                .filter(
+                    |animal| animal.deer_life_stage == Some(mclone_protocol::DeerLifeStage::Fawn)
+                )
+                .count(),
+            1
+        );
+        assert_eq!(
+            deer.iter()
+                .filter(
+                    |animal| animal.deer_life_stage == Some(mclone_protocol::DeerLifeStage::Adult)
+                )
+                .filter(|animal| animal.lifecycle.reproduction_cooldown > 0)
+                .count(),
+            2
+        );
+        let events = store.drain_wildlife_events();
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event.kind, WildlifeEcologyEventKind::Birth { .. }))
+                .count(),
+            1
+        );
+        assert!(!events.iter().any(|event| matches!(
+            event.kind,
+            WildlifeEcologyEventKind::ReproductionSuppressed {
+                reason: WildlifeReproductionSuppression::NoMate
+            }
+        )));
+    }
+
+    #[test]
+    fn natural_death_persists_remains_and_decay_conserves_biomass() {
+        let mut store = ServerEntityStore::default();
+        let rabbit =
+            store.insert_passive_mob_for_test(EntityKind::Rabbit, Vec3d::new(4.5, 64.0, 4.5), 0.0);
+        let mut terminal = ready_wildlife_lifecycle(40_000);
+        terminal.lifespan_ticks = terminal.age_ticks;
+        store
+            .mobs
+            .get_mut(&rabbit)
+            .unwrap()
+            .set_wildlife_lifecycle_for_test(terminal, None);
+        let source = store.state(rabbit).unwrap().persistent_id;
+        let mut resources = WildlifeResourceLedger::default();
+        store.tick_wildlife_lifecycle(20, &[ChunkPos::new(0, 0)], &mut resources, &flat_meadow);
+        assert!(store.state(rabbit).is_none());
+        let remains = store.wildlife_remains_diagnostics();
+        assert_eq!(remains.len(), 1);
+        assert_eq!(remains[0].source, source);
+        assert_eq!(remains[0].biomass, 120);
+        let first_events = store.drain_wildlife_events();
+        assert!(first_events.iter().any(|event| matches!(
+            event.kind,
+            WildlifeEcologyEventKind::Death {
+                cause: crate::ecology::WildlifeDeathCause::OldAge
+            }
+        )));
+        assert_eq!(
+            first_events
+                .iter()
+                .filter_map(|event| match event.kind {
+                    WildlifeEcologyEventKind::RemainsCreated { biomass } => Some(biomass),
+                    _ => None,
+                })
+                .sum::<u32>(),
+            120
+        );
+
+        let record = store.entity_chunk_record(ChunkPos::new(0, 0), 13);
+        assert!(record.entities.iter().any(|entity| matches!(
+            entity.payload,
+            EntitySavePayload::WildlifeRemains { biomass: 120, .. }
+        )));
+        let mut loaded = ServerEntityStore::default();
+        loaded.hydrate_entity_chunk_record(&record).unwrap();
+        assert_eq!(loaded.wildlife_remains_diagnostics()[0].biomass, 120);
+
+        let mut decayed = 0_u32;
+        for step in 1..=1_500_u64 {
+            loaded.tick_wildlife_lifecycle(
+                20 + step * 20,
+                &[ChunkPos::new(0, 0)],
+                &mut resources,
+                &flat_meadow,
+            );
+            decayed = decayed.saturating_add(
+                loaded
+                    .drain_wildlife_events()
+                    .iter()
+                    .filter_map(|event| match event.kind {
+                        WildlifeEcologyEventKind::RemainsDecayed { amount } => Some(amount),
+                        _ => None,
+                    })
+                    .sum::<u32>(),
+            );
+            if loaded.wildlife_remains_diagnostics().is_empty() {
+                break;
+            }
+        }
+        assert_eq!(decayed, 120);
+        assert!(loaded.wildlife_remains_diagnostics().is_empty());
     }
 
     fn wetland_ground(pos: BlockPos) -> Option<BlockStateId> {

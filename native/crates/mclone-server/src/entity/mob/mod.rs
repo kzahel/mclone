@@ -17,6 +17,8 @@ use mclone_worldgen::block::{
 };
 use mclone_worldgen::prng::SimpleRandomSource;
 
+#[cfg(test)]
+use crate::ecology::WildlifeLifeState;
 use crate::ecology::{Availability, KnownPlace};
 
 use super::metadata::EntityMetadata;
@@ -271,8 +273,25 @@ pub(crate) struct MobRuntimeState {
 }
 
 impl MobRuntimeState {
+    #[cfg(test)]
     pub(crate) fn from_spawn(
         id: EntityId,
+        metadata: EntityMetadata,
+        on_ground: bool,
+        y_rot_degrees: f32,
+    ) -> Self {
+        Self::from_spawn_with_persistent(
+            id,
+            EntityPersistentId::new(0, id.0),
+            metadata,
+            on_ground,
+            y_rot_degrees,
+        )
+    }
+
+    pub(crate) fn from_spawn_with_persistent(
+        id: EntityId,
+        persistent_id: EntityPersistentId,
         metadata: EntityMetadata,
         on_ground: bool,
         y_rot_degrees: f32,
@@ -287,7 +306,7 @@ impl MobRuntimeState {
         }
 
         let mut random = SimpleRandomSource::new(mob_random_seed(id, metadata.kind));
-        let species = MobSpeciesState::from_spawn(metadata.kind, &mut random);
+        let species = MobSpeciesState::from_spawn(metadata.kind, persistent_id, &mut random);
 
         let mut goal_selector = GoalSelector::default();
         match metadata.kind {
@@ -305,6 +324,7 @@ impl MobRuntimeState {
             | EntityKind::BeeNest
             | EntityKind::BeeHotel
             | EntityKind::RabbitBurrow => {}
+            EntityKind::WildlifeRemains => {}
         }
         let attributes = MobAttributes::from_metadata(metadata);
 
@@ -348,8 +368,39 @@ impl MobRuntimeState {
         }
     }
 
+    #[cfg(test)]
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn from_saved(
         id: EntityId,
+        metadata: EntityMetadata,
+        on_ground: bool,
+        y_rot_degrees: f32,
+        delta_movement: Vec3d,
+        egg_time: Option<i32>,
+        mallard: Option<MallardRuntimeSaveData>,
+        deer: Option<DeerRuntimeSaveData>,
+        bee: Option<BeeRuntimeSaveData>,
+        rabbit: Option<RabbitRuntimeSaveData>,
+    ) -> Self {
+        Self::from_saved_with_persistent(
+            id,
+            EntityPersistentId::new(0, id.0),
+            metadata,
+            on_ground,
+            y_rot_degrees,
+            delta_movement,
+            egg_time,
+            mallard,
+            deer,
+            bee,
+            rabbit,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn from_saved_with_persistent(
+        id: EntityId,
+        persistent_id: EntityPersistentId,
         metadata: EntityMetadata,
         on_ground: bool,
         y_rot_degrees: f32,
@@ -373,6 +424,7 @@ impl MobRuntimeState {
         let bee_flower = bee.and_then(|saved| saved.flower);
         let species = MobSpeciesState::from_saved(
             metadata.kind,
+            persistent_id,
             &mut random,
             egg_time,
             mallard,
@@ -397,6 +449,7 @@ impl MobRuntimeState {
             | EntityKind::BeeNest
             | EntityKind::BeeHotel
             | EntityKind::RabbitBurrow => {}
+            EntityKind::WildlifeRemains => {}
         }
         let attributes = MobAttributes::from_metadata(metadata);
 
@@ -536,6 +589,53 @@ impl MobRuntimeState {
 
     pub(crate) fn rabbit_life_stage(&self) -> Option<mclone_protocol::RabbitLifeStage> {
         self.species.rabbit().map(|rabbit| rabbit.life_stage())
+    }
+
+    pub(crate) fn apply_wildlife_energy_step(
+        &mut self,
+        intake: u16,
+        cost: u16,
+        cadence_ticks: u32,
+        maximum_energy: u16,
+    ) {
+        if let Some(rabbit) = self.species.rabbit_mut() {
+            rabbit
+                .lifecycle_mut()
+                .apply_energy_step(intake, cost, cadence_ticks, maximum_energy);
+        } else if let Some(deer) = self.species.deer_mut() {
+            deer.lifecycle_mut()
+                .apply_energy_step(intake, cost, cadence_ticks, maximum_energy);
+        }
+    }
+
+    pub(crate) fn rabbit_enter_natural_love(&mut self, threshold: u16, love_ticks: u32) -> bool {
+        self.species
+            .rabbit_mut()
+            .is_some_and(|rabbit| rabbit.enter_natural_love(threshold, love_ticks))
+    }
+
+    pub(crate) fn spend_rabbit_reproduction(&mut self, cost: u16, cooldown: u32) {
+        self.species
+            .rabbit_mut()
+            .expect("rabbit species")
+            .spend_reproduction(cost, cooldown);
+    }
+
+    pub(crate) fn deer_can_breed(&self, threshold: u16) -> bool {
+        self.species
+            .deer()
+            .is_some_and(|deer| deer.can_breed(threshold))
+    }
+
+    pub(crate) fn deer_sex(&self) -> Option<mclone_protocol::DeerSex> {
+        self.species.deer().map(|deer| deer.sex())
+    }
+
+    pub(crate) fn spend_deer_reproduction(&mut self, cost: u16, cooldown: u32) {
+        self.species
+            .deer_mut()
+            .expect("deer species")
+            .spend_reproduction(cost, cooldown);
     }
 
     pub(crate) fn rabbit_familiar_refuge(&self) -> Option<KnownPlace> {
@@ -1755,6 +1855,24 @@ impl MobRuntimeState {
             .deer_mut()
             .expect("test expected deer species state")
             .set_behavior(behavior);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_wildlife_lifecycle_for_test(
+        &mut self,
+        lifecycle: WildlifeLifeState,
+        deer_sex: Option<mclone_protocol::DeerSex>,
+    ) {
+        if let Some(rabbit) = self.species.rabbit_mut() {
+            rabbit.set_lifecycle_for_test(lifecycle);
+        } else if let Some(deer) = self.species.deer_mut() {
+            deer.set_lifecycle_for_test(
+                lifecycle,
+                deer_sex.expect("deer lifecycle test requires a sex"),
+            );
+        } else {
+            panic!("wildlife lifecycle test requires rabbit or deer state");
+        }
     }
 
     fn tick_bee<F>(&mut self, entity: &mut ServerEntityState, block_state_at: &F)
@@ -3799,6 +3917,7 @@ fn mob_random_seed(id: EntityId, kind: EntityKind) -> i64 {
         EntityKind::BeeHotel => 0x00c0_000b_u64,
         EntityKind::Rabbit => 0x00c0_000c_u64,
         EntityKind::RabbitBurrow => 0x00c0_000d_u64,
+        EntityKind::WildlifeRemains => 0x00c0_000e_u64,
     };
     let mixed = id.0.wrapping_mul(0x9e37_79b9_7f4a_7c15).rotate_left(17) ^ kind_id;
     mixed as i64
@@ -3860,15 +3979,14 @@ mod tests {
             decision_schedule: crate::ecology::DecisionSchedule::new(0, 0),
             dig_cooldown: 0,
             life_stage: mclone_protocol::RabbitLifeStage::Adult,
-            age_ticks: 2_400,
             parents: [None, None],
             behavior,
             behavior_ticks,
             health: 3,
             max_health: 3,
             love_ticks: 0,
-            breed_cooldown: 0,
             raid_cooldown,
+            lifecycle: crate::ecology::WildlifeLifeState::founder(refuge, 24_000, 480_000, 120_000),
         }
     }
 
