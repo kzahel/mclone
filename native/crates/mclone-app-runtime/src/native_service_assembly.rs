@@ -2420,7 +2420,12 @@ where
     S: RemoteDedicatedServerSession,
 {
     pub fn local(options: LocalIntegratedSceneOptions) -> Result<Self> {
-        let request = SessionStartRequest::new_seed_local_world(options.seed);
+        let request =
+            SessionStartRequest::new_seed_local_world_with_generation_profile_and_starter_content(
+                options.seed,
+                options.world_generation_profile,
+                options.starter_content,
+            );
         Self::start_with(request, || NativeSceneServices::local(options))
     }
 
@@ -2428,7 +2433,12 @@ where
         options: LocalIntegratedSceneOptions,
         mesh_assets: TexturedMeshAssets,
     ) -> Result<Self> {
-        let request = SessionStartRequest::new_seed_local_world(options.seed);
+        let request =
+            SessionStartRequest::new_seed_local_world_with_generation_profile_and_starter_content(
+                options.seed,
+                options.world_generation_profile,
+                options.starter_content,
+            );
         Self::start_with(request, || {
             NativeSceneServices::local_with_mesh_assets(options, mesh_assets)
         })

@@ -50,7 +50,10 @@ pub use fields::{
     McloneOverworldSamplingTopology, McloneOverworldTerrainSample,
     McloneOverworldWatercourseSample,
 };
-pub use spawn::{mclone_overworld_spawn_chunk, mclone_overworld_spawn_chunk_with_topology};
+pub use spawn::{
+    mclone_overworld_homestead_scout_origin_chunk_with_topology, mclone_overworld_spawn_chunk,
+    mclone_overworld_spawn_chunk_with_topology,
+};
 pub use streams::{
     MCLONE_OVERWORLD_STREAM_MAX_EXPANDED_NODES, MCLONE_OVERWORLD_STREAM_MAX_LENGTH_BLOCKS,
     MCLONE_OVERWORLD_STREAM_MIN_LENGTH_BLOCKS, MCLONE_OVERWORLD_STREAM_PLACEMENT_SEPARATION_CHUNKS,

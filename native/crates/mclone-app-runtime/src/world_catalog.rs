@@ -23,11 +23,16 @@ pub const LOCAL_WORLD_ID_MAX_LEN: usize = 64;
 pub const LOCAL_WORLD_DISPLAY_NAME_MAX_CHARS: usize = 64;
 pub const NATIVE_WORLD_METADATA_FILE: &str = "world.json";
 pub const NATIVE_WORLD_BACKEND_LABEL: &str = "native-sqlite";
+/// Product choice for newly created local worlds. This is intentionally
+/// separate from `WorldGenerationProfile::default()`, which preserves legacy
+/// records whose stored profile field is absent as reference Overworld.
+pub const DEFAULT_LOCAL_WORLD_GENERATION_PROFILE: WorldGenerationProfile =
+    WorldGenerationProfile::McloneOverworldV1;
 pub const LOCAL_WORLD_PROCEDURAL_GENERATION_PROFILES: [WorldGenerationProfile; 7] = [
+    WorldGenerationProfile::McloneOverworldV1,
     WorldGenerationProfile::Overworld,
     WorldGenerationProfile::FlatGrassV1,
     WorldGenerationProfile::SmallIslandV1,
-    WorldGenerationProfile::McloneOverworldV1,
     WorldGenerationProfile::AlphaV1 { winter: false },
     WorldGenerationProfile::AlphaV1 { winter: true },
     WorldGenerationProfile::BetaV1,
@@ -55,16 +60,16 @@ pub const fn next_local_world_generation_profile(
     profile: WorldGenerationProfile,
 ) -> WorldGenerationProfile {
     match profile {
+        WorldGenerationProfile::McloneOverworldV1 => WorldGenerationProfile::Overworld,
         WorldGenerationProfile::Overworld => WorldGenerationProfile::FlatGrassV1,
         WorldGenerationProfile::FlatGrassV1 => WorldGenerationProfile::SmallIslandV1,
-        WorldGenerationProfile::SmallIslandV1 => WorldGenerationProfile::McloneOverworldV1,
-        WorldGenerationProfile::McloneOverworldV1 => WorldGenerationProfile::alpha_v1(false),
+        WorldGenerationProfile::SmallIslandV1 => WorldGenerationProfile::alpha_v1(false),
         WorldGenerationProfile::AlphaV1 { winter: false } => WorldGenerationProfile::alpha_v1(true),
         WorldGenerationProfile::AlphaV1 { winter: true } => WorldGenerationProfile::BetaV1,
         WorldGenerationProfile::BetaV1 | WorldGenerationProfile::AuthoredOnly { .. } => {
-            WorldGenerationProfile::Overworld
+            DEFAULT_LOCAL_WORLD_GENERATION_PROFILE
         }
-        WorldGenerationProfile::TopologyProbeV1 => WorldGenerationProfile::Overworld,
+        WorldGenerationProfile::TopologyProbeV1 => DEFAULT_LOCAL_WORLD_GENERATION_PROFILE,
     }
 }
 
@@ -164,7 +169,7 @@ impl LocalWorldCreateOptions {
         Ok(Self {
             display_name: normalize_display_name(display_name.into())?,
             seed,
-            world_generation_profile: WorldGenerationProfile::default(),
+            world_generation_profile: DEFAULT_LOCAL_WORLD_GENERATION_PROFILE,
             starter_content: StarterContentDescriptor::Wild,
             requested_id: None,
         })
@@ -1134,6 +1139,10 @@ mod tests {
 
         assert_eq!(options.display_name, "New World");
         assert_eq!(
+            options.world_generation_profile,
+            WorldGenerationProfile::McloneOverworldV1
+        );
+        assert_eq!(
             options.resolve_id(existing.iter()).unwrap().as_str(),
             "new-world-2"
         );
@@ -1201,10 +1210,10 @@ mod tests {
         assert_eq!(
             LOCAL_WORLD_PROCEDURAL_GENERATION_PROFILES,
             [
+                WorldGenerationProfile::McloneOverworldV1,
                 WorldGenerationProfile::Overworld,
                 WorldGenerationProfile::FlatGrassV1,
                 WorldGenerationProfile::SmallIslandV1,
-                WorldGenerationProfile::McloneOverworldV1,
                 WorldGenerationProfile::alpha_v1(false),
                 WorldGenerationProfile::alpha_v1(true),
                 WorldGenerationProfile::BetaV1,
@@ -1243,6 +1252,10 @@ mod tests {
             "Beta 1.7.3"
         );
         assert_eq!(
+            next_local_world_generation_profile(WorldGenerationProfile::McloneOverworldV1),
+            WorldGenerationProfile::Overworld
+        );
+        assert_eq!(
             next_local_world_generation_profile(WorldGenerationProfile::Overworld),
             WorldGenerationProfile::FlatGrassV1
         );
@@ -1252,10 +1265,6 @@ mod tests {
         );
         assert_eq!(
             next_local_world_generation_profile(WorldGenerationProfile::SmallIslandV1),
-            WorldGenerationProfile::McloneOverworldV1
-        );
-        assert_eq!(
-            next_local_world_generation_profile(WorldGenerationProfile::McloneOverworldV1),
             WorldGenerationProfile::alpha_v1(false)
         );
         assert_eq!(
@@ -1268,11 +1277,11 @@ mod tests {
         );
         assert_eq!(
             next_local_world_generation_profile(WorldGenerationProfile::BetaV1),
-            WorldGenerationProfile::Overworld
+            WorldGenerationProfile::McloneOverworldV1
         );
         assert_eq!(
             next_local_world_generation_profile(WorldGenerationProfile::TopologyProbeV1),
-            WorldGenerationProfile::Overworld
+            WorldGenerationProfile::McloneOverworldV1
         );
         assert!(
             !LOCAL_WORLD_PROCEDURAL_GENERATION_PROFILES

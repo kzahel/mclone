@@ -80,11 +80,11 @@ pub use mclone_overworld::{
     mclone_overworld_biome_id, mclone_overworld_biome_id_for_sample,
     mclone_overworld_biome_id_with_topology, mclone_overworld_biome_recipe,
     mclone_overworld_debug_sample, mclone_overworld_debug_sample_with_streams,
-    mclone_overworld_landform_kind, mclone_overworld_macro_surface_top_material,
-    mclone_overworld_preview_visible_material, mclone_overworld_spawn_chunk,
-    mclone_overworld_spawn_chunk_with_topology, mclone_overworld_steppe_band,
-    mclone_overworld_steppe_suitability, mclone_overworld_surface_recipe, stream_placement,
-    tree_records_intersecting,
+    mclone_overworld_homestead_scout_origin_chunk_with_topology, mclone_overworld_landform_kind,
+    mclone_overworld_macro_surface_top_material, mclone_overworld_preview_visible_material,
+    mclone_overworld_spawn_chunk, mclone_overworld_spawn_chunk_with_topology,
+    mclone_overworld_steppe_band, mclone_overworld_steppe_suitability,
+    mclone_overworld_surface_recipe, stream_placement, tree_records_intersecting,
 };
 pub use planning::{ChunkGenerationPlan, ChunkStatusRequirement};
 pub use profile::{

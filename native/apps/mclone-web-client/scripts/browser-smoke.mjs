@@ -7422,12 +7422,12 @@ async function runCatalogUiProbe(page, canvas, homestead = false) {
         : "cycleWorldGenerationProfile")
       && afterFirstCreate.some((/** @type {any} */ world) => (
         world.id === firstWorldId
-          && world.generationProfile === (homestead ? "mclone-overworld-v1" : "flat-grass-v1")
+          && world.generationProfile === (homestead ? "mclone-overworld-v1" : "overworld")
           && world.starterContent === (homestead ? "intro-homestead-v1" : "wild")
       ))
       && afterSecondCreate.some((/** @type {any} */ world) => (
         world.id === secondWorldId
-          && world.generationProfile === (homestead ? "mclone-overworld-v1" : "small-island-v1")
+          && world.generationProfile === (homestead ? "mclone-overworld-v1" : "flat-grass-v1")
           && world.starterContent === "wild"
       ))
       && (!homestead || Number(firstRecords.savedData) > 0)

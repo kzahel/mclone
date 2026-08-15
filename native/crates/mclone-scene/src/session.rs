@@ -1952,7 +1952,13 @@ impl McloneSceneHost {
             .local_world_id()
             .cloned()
             .map(SessionStartRequest::open_local_world)
-            .unwrap_or_else(|| SessionStartRequest::new_seed_local_world(start.scene.seed));
+            .unwrap_or_else(|| {
+                SessionStartRequest::new_seed_local_world_with_generation_profile_and_starter_content(
+                    start.scene.seed,
+                    start.scene.world_generation_profile,
+                    start.scene.starter_content,
+                )
+            });
         Some(ExternalSceneSessionStart {
             target: ExternalSceneStartTarget::Lobby {
                 token: operation.token,
@@ -2680,7 +2686,13 @@ impl McloneSceneHost {
             .local_world_id()
             .cloned()
             .map(SessionStartRequest::open_local_world)
-            .unwrap_or_else(|| SessionStartRequest::new_seed_local_world(request.seed));
+            .unwrap_or_else(|| {
+                SessionStartRequest::new_seed_local_world_with_generation_profile_and_starter_content(
+                    request.seed,
+                    request.world_generation_profile,
+                    request.starter_content,
+                )
+            });
         let camera = SceneCameraConfig::from_scene(&scene).spawn_for_chunk(request.entry_center);
 
         let observer_only = matches!(

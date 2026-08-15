@@ -1386,7 +1386,10 @@ mod tests {
     #[test]
     fn production_mclone_source_is_reverse_order_equal() {
         let seed = 42;
-        let spawn = crate::levelgen::mclone_overworld_spawn_chunk(seed);
+        let spawn = crate::levelgen::mclone_overworld_homestead_scout_origin_chunk_with_topology(
+            seed,
+            McloneOverworldSamplingTopology::Unbounded,
+        );
         let request = HomesteadScoutRequest {
             seed,
             provisional_spawn: BlockPos::new(spawn.min_block_x() + 8, 0, spawn.min_block_z() + 8),

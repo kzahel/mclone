@@ -23,7 +23,17 @@ Flat Grass cylinder proof and
 [`196`](../tactical/196-periodic-mclone-terrain-fields.md) are complete. The
 entire accepted terrain, biome, surface, spawn, and vegetation pipeline now
 supports either the ordinary plane or the exact 6,144-block / 384-chunk
-X-periodic cylinder. The selected terrain sequence is now at rivers and
+X-periodic cylinder. Product world creation now defaults to this profile.
+Its deterministic spawn policy keeps the existing exact dry-surface gate and
+adds a 129-by-129-block sparse neighborhood survey, so the first locally safe
+chunk beside a dominant ocean is no longer accepted as the world entry region.
+Authoritative player/respawn admission also uses the selected profile's biome
+and center-first column policy rather than a vanilla-only biome lookup. This
+changes no generated blocks or field/decor fingerprints; it may intentionally
+move the unsaved Wild-start spawn of internal worlds. The accepted
+`intro-homestead-v1` scout origin remains separate and unchanged, so the
+realized seed-`0` composition and checksum do not drift with this Wild-start
+policy correction. The selected terrain sequence is now at rivers and
 wetlands: Tactical
 [`220`](../tactical/220-mclone-overworld-rivers-and-wetlands.md) has landed its
 bounded broad-river field, graded channels and banks, local water level, river

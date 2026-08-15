@@ -360,8 +360,14 @@ pub fn realize_intro_homestead_plan(
     generation_profile: WorldGenerationProfile,
     topology: HorizontalTopology,
 ) -> Result<IntroHomesteadPlanRecord, String> {
-    let spawn_chunk =
-        crate::initial_spawn_center_for_descriptor(seed, generation_profile, topology);
+    let spawn_chunk = if generation_profile == WorldGenerationProfile::McloneOverworldV1 {
+        mclone_worldgen::levelgen::mclone_overworld_homestead_scout_origin_chunk_with_topology(
+            seed,
+            McloneOverworldSamplingTopology::from_horizontal_topology(topology)?,
+        )
+    } else {
+        crate::initial_spawn_center_for_descriptor(seed, generation_profile, topology)
+    };
     let provisional_spawn = BlockPos::new(
         spawn_chunk.min_block_x() + 8,
         if generation_profile == WorldGenerationProfile::FlatGrassV1 {

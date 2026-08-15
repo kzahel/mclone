@@ -824,6 +824,56 @@ fn first_chunk_view_sends_safe_surface_spawn_position() {
 }
 
 #[test]
+fn seed_zero_mclone_wild_start_arrives_on_the_profile_selected_inland_surface() {
+    let seed = 0;
+    let profile = WorldGenerationProfile::McloneOverworldV1;
+    let definition = crate::DimensionDefinition::overworld(seed, profile);
+    let mut server = LocalRealmSession::local_integrated_with_world_store_and_dimension_definition(
+        definition,
+        Box::new(MemoryWorldStore::new()),
+    );
+    server.set_debug_passive_showcase_enabled(false);
+    server.initialize_world_metadata_blocking().unwrap();
+    server
+        .configure_local_player_identity_blocking(
+            ClientIdentity::new(PlayerProfileId::new([0x70; 16]), "Explorer").unwrap(),
+        )
+        .unwrap();
+
+    let center = crate::initial_spawn_center_for_profile(seed, profile);
+    server.set_lighting_enabled(false);
+    let updates = server
+        .try_handle_command(ClientCommand::SetChunkView(ChunkView {
+            center,
+            render_distance: 0,
+            chunk_tracking_radius: 0,
+        }))
+        .unwrap();
+    assert!(
+        updates
+            .iter()
+            .all(|update| !matches!(update, ServerUpdate::PlayerPosition(_)))
+    );
+    assert_eq!(
+        server
+            .chunk_tracking
+            .accepted_view(server.player_id())
+            .unwrap()
+            .center,
+        center
+    );
+
+    let spawn = wait_for_initial_spawn_update(&mut server);
+    let feet = BlockPos::containing(spawn.position);
+    assert_eq!(feet.chunk_pos(), center);
+    assert_eq!(
+        server.scheduler().block_at_world(feet.below()),
+        Some(GRASS_BLOCK)
+    );
+    assert!(server.player_pose_is_safe_spawn(spawn.position));
+}
+
+#[test]
 fn saved_player_pose_and_selected_slot_resume_for_stable_identity() {
     let seed = 12_345;
     let mut probe = LocalRealmSession::new(seed);

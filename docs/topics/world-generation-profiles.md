@@ -83,11 +83,14 @@ The profile already crosses world catalogs, realm/dimension metadata,
 integrated and dedicated startup, native and browser hosts, and persistence.
 It is fixed before chunk scheduling starts.
 
-Product world creation still cycles seven procedural selections—the four modern
-profiles, Alpha temperate, Alpha winter, and Beta—through shared catalog policy
-and generator-agnostic UI text. The hidden topology probe is available only
-through explicit developer/test configuration and is not part of that cycle.
-Scene replacement, warm-world startup, managed
+Product world creation defaults to Mclone Overworld and cycles seven procedural
+selections—the four modern profiles, Alpha temperate, Alpha winter, and
+Beta—through shared catalog policy and generator-agnostic UI text. Missing
+profile fields in legacy stored records still decode as the reference
+Overworld; changing the creation default does not reinterpret existing worlds.
+The hidden topology probe is available only through explicit developer/test
+configuration and is not part of that cycle. Scene replacement, warm-world
+startup, managed
 previews, and all host adapters copy the selected descriptor before using the
 shared profile-aware spawn policy. Native SQLite and browser IndexedDB reopen
 preserve it; the browser Worker applies stored metadata profiles before
@@ -185,6 +188,15 @@ world.
   Existing entity records, including empty records, remain authoritative;
   disposable internal worlds may be regenerated for a complete new
   population.
+- **Reviewed for default creation and inland spawn, 2026-08-15:** Mclone
+  Overworld is now the product new-world default while legacy missing-profile
+  records remain reference Overworld. Mclone spawn selection now requires a
+  dry grass candidate inside a land-dominant 129-by-129-block survey, and live
+  admission resolves biome top material through the selected profile. Terrain
+  blocks, field/decor fingerprints, profile identity, and existing player
+  records are unchanged; only new unsaved Wild-start spawn selection can move.
+  The accepted `intro-homestead-v1` scout origin and realized seed-`0` plan
+  checksum remain unchanged.
 - **Project release state:** `internal-unshipped`
 - **Known external world/save consumers:** none
 - **Default fixture meaning:** refactor and determinism regression guard, not a
@@ -438,6 +450,8 @@ remaining invisible as the content surface grows.
 - native and Web Worker equivalence;
 - SQLite and IndexedDB save/reopen equivalence;
 - safe spawn for every profile;
+- a land-dominant Mclone spawn neighborhood for the untouched seed and the
+  pinned review seeds;
 - inspected flat, island, and Mclone desktop captures;
 - profile identity visible in useful diagnostics;
 - no app-local or TypeScript terrain implementation.

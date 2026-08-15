@@ -1,4 +1,6 @@
 use crate::session::{GameSessionState, RemoteSessionEndpoint, SessionStartRequest, SessionStatus};
+#[cfg(test)]
+use crate::world_catalog::DEFAULT_LOCAL_WORLD_GENERATION_PROFILE;
 use mclone_server::{StarterContentDescriptor, WorldGenerationProfile};
 use mclone_ui::{GameScreen, GameUiAction, LoadingProgressOverlay, StatusOverlay};
 
@@ -199,7 +201,7 @@ mod tests {
 
     fn context() -> ClientSessionActionContext<'static> {
         ClientSessionActionContext {
-            new_world_generation_profile: WorldGenerationProfile::Overworld,
+            new_world_generation_profile: DEFAULT_LOCAL_WORLD_GENERATION_PROFILE,
             new_world_starter_content: StarterContentDescriptor::Wild,
             next_new_world_seed: Some(42),
             current_join_remote_addr: "127.0.0.1:25565",

@@ -86,8 +86,8 @@ use crate::player_lifecycle::player_body_touches_lava;
 use crate::players::{InitialSpawnRoute, ServerPlayerId, ServerPlayerList};
 use crate::remote_players::{RemotePlayerState, RemotePlayerTracking, RoutedRemotePlayerUpdate};
 use crate::spawn::{
-    SpawnColumnOrder, find_safe_surface_spawn_with_column_order,
-    initial_spawn_center_for_descriptor,
+    SpawnColumnOrder, find_safe_surface_spawn_for_loaded_descriptor,
+    find_safe_surface_spawn_with_column_order, initial_spawn_center_for_descriptor,
 };
 use crate::timing::{simulation_timing_elapsed_us, simulation_timing_start};
 use crate::{
@@ -3551,27 +3551,51 @@ impl RealmServer {
                     .map(|view| (*observer_id, view.center))
             })
             .collect::<Vec<_>>();
+        observers.into_iter().find_map(|(observer_id, center)| {
+            self.find_safe_surface_spawn_in_active_dimension(center, |chunk| {
+                self.chunk_tracking
+                    .source_tracks_chunk(DimensionInterestSource::Observer(observer_id), chunk)
+                    && self.scheduler.client_visible_snapshot(chunk).is_some()
+            })
+        })
+    }
+
+    fn find_safe_surface_spawn_in_active_dimension(
+        &self,
+        center: ChunkPos,
+        mut chunk_ready: impl FnMut(ChunkPos) -> bool,
+    ) -> Option<Vec3d> {
+        let definition = &self.active_dimension.definition;
+        if definition.generation_profile == WorldGenerationProfile::McloneOverworldV1 {
+            return find_safe_surface_spawn_for_loaded_descriptor(
+                definition.seed,
+                definition.generation_profile,
+                definition.topology,
+                center,
+                |pos| self.scheduler.block_at_world(pos),
+                chunk_ready,
+            );
+        }
+
         let column_order = if matches!(
-            self.scheduler.world_generation_profile(),
+            definition.generation_profile,
             WorldGenerationProfile::AuthoredOnly { .. }
         ) {
             SpawnColumnOrder::CenterFirst
         } else {
             SpawnColumnOrder::Scan
         };
-        observers.into_iter().find_map(|(observer_id, center)| {
-            find_safe_surface_spawn_with_column_order(
-                center,
-                |pos| self.scheduler.block_at_world(pos),
-                |x, z| self.biome_source.block_position_biome_definition(x, z),
-                |chunk| {
-                    self.chunk_tracking
-                        .source_tracks_chunk(DimensionInterestSource::Observer(observer_id), chunk)
-                        && self.scheduler.client_visible_snapshot(chunk).is_some()
-                },
-                column_order,
-            )
-        })
+        find_safe_surface_spawn_with_column_order(
+            center,
+            |pos| self.scheduler.block_at_world(pos),
+            |x, z| {
+                self.active_dimension
+                    .biome_source
+                    .block_position_biome_definition(x, z)
+            },
+            move |chunk| chunk_ready(chunk),
+            column_order,
+        )
     }
 
     fn handle_accept_teleport_for_target(
@@ -5742,14 +5766,6 @@ impl RealmServer {
         {
             return Ok(None);
         }
-        let column_order = if matches!(
-            self.scheduler.world_generation_profile(),
-            WorldGenerationProfile::AuthoredOnly { .. }
-        ) {
-            SpawnColumnOrder::CenterFirst
-        } else {
-            SpawnColumnOrder::Scan
-        };
         let exact_resume = resume
             .as_ref()
             .filter(|record| self.player_pose_has_clearance(record.position));
@@ -5773,13 +5789,11 @@ impl RealmServer {
         } else if let Some(position) = nearby_primary_spawn {
             position
         } else {
-            let Some(position) = find_safe_surface_spawn_with_column_order(
-                center,
-                |pos| self.scheduler.block_at_world(pos),
-                |x, z| self.biome_source.block_position_biome_definition(x, z),
-                |chunk| self.scheduler.client_visible_snapshot(chunk).is_some(),
-                column_order,
-            ) else {
+            let Some(position) = self
+                .find_safe_surface_spawn_in_active_dimension(center, |chunk| {
+                    self.scheduler.client_visible_snapshot(chunk).is_some()
+                })
+            else {
                 return Ok(None);
             };
             position
@@ -5853,14 +5867,6 @@ impl RealmServer {
                 respawn.destination
             )));
         }
-        let column_order = if matches!(
-            self.scheduler.world_generation_profile(),
-            WorldGenerationProfile::AuthoredOnly { .. }
-        ) {
-            SpawnColumnOrder::CenterFirst
-        } else {
-            SpawnColumnOrder::Scan
-        };
         let position = if let Some(position) = respawn
             .preferred_position
             .filter(|position| self.player_pose_is_safe_spawn(*position))
@@ -5872,13 +5878,11 @@ impl RealmServer {
         {
             position
         } else {
-            let Some(position) = find_safe_surface_spawn_with_column_order(
-                respawn.spawn_center,
-                |pos| self.scheduler.block_at_world(pos),
-                |x, z| self.biome_source.block_position_biome_definition(x, z),
-                |chunk| self.scheduler.client_visible_snapshot(chunk).is_some(),
-                column_order,
-            ) else {
+            let Some(position) = self
+                .find_safe_surface_spawn_in_active_dimension(respawn.spawn_center, |chunk| {
+                    self.scheduler.client_visible_snapshot(chunk).is_some()
+                })
+            else {
                 return Ok(None);
             };
             position

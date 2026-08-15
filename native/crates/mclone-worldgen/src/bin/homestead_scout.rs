@@ -9,7 +9,9 @@ use mclone_worldgen::homestead_site::{
     HomesteadScoutReceipt, HomesteadScoutRequest, HomesteadSurveySource,
     McloneOverworldHomesteadSurveySource, scout_homestead_site,
 };
-use mclone_worldgen::levelgen::{McloneOverworldSamplingTopology, mclone_overworld_spawn_chunk};
+use mclone_worldgen::levelgen::{
+    McloneOverworldSamplingTopology, mclone_overworld_homestead_scout_origin_chunk_with_topology,
+};
 use serde::Serialize;
 
 #[derive(Serialize)]
@@ -36,7 +38,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let spawn = if profile == "mclone" {
-        let chunk = mclone_overworld_spawn_chunk(seed);
+        let chunk = mclone_overworld_homestead_scout_origin_chunk_with_topology(
+            seed,
+            McloneOverworldSamplingTopology::Unbounded,
+        );
         BlockPos::new(chunk.min_block_x() + 8, 0, chunk.min_block_z() + 8)
     } else {
         BlockPos::new(8, 4, 8)

@@ -2,7 +2,10 @@ use std::path::{Path, PathBuf};
 
 use mclone_server::{StarterContentDescriptor, WorldGenerationProfile};
 
-use crate::world_catalog::{LocalWorldCreateOptions, LocalWorldId, LocalWorldSummary};
+use crate::world_catalog::{
+    DEFAULT_LOCAL_WORLD_GENERATION_PROFILE, LocalWorldCreateOptions, LocalWorldId,
+    LocalWorldSummary,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GameSessionCoordinator<P> {
@@ -208,7 +211,10 @@ impl SessionStartPhase {
 
 impl SessionStartRequest {
     pub fn new_seed_local_world(seed: i64) -> Self {
-        Self::new_seed_local_world_with_generation_profile(seed, WorldGenerationProfile::Overworld)
+        Self::new_seed_local_world_with_generation_profile(
+            seed,
+            DEFAULT_LOCAL_WORLD_GENERATION_PROFILE,
+        )
     }
 
     pub fn new_seed_local_world_with_generation_profile(
@@ -381,7 +387,7 @@ impl SessionStorageIntent {
     pub fn transient_local_world(seed: i64) -> Self {
         Self {
             seed: Some(seed),
-            world_generation_profile: WorldGenerationProfile::default(),
+            world_generation_profile: DEFAULT_LOCAL_WORLD_GENERATION_PROFILE,
             starter_content: StarterContentDescriptor::Wild,
             remote_addr: None,
             world_dir: None,
@@ -771,6 +777,13 @@ mod tests {
             local.active_descriptor(),
             Some(ActiveSessionDescriptor::new_seed_local_world(99))
         );
+        let SessionStartRequest::CreateLocalWorld { options } = &local else {
+            panic!("seed-local request should create a local world");
+        };
+        assert_eq!(
+            options.world_generation_profile,
+            WorldGenerationProfile::McloneOverworldV1
+        );
         assert_eq!(
             local.default_failure_message(),
             "World creation failed; see log"
@@ -895,6 +908,10 @@ mod tests {
     fn session_storage_intent_encodes_local_catalog_and_remote_policy() {
         let local = SessionStorageIntent::transient_local_world(123);
         assert_eq!(local.seed(), Some(123));
+        assert_eq!(
+            local.world_generation_profile(),
+            WorldGenerationProfile::McloneOverworldV1
+        );
         assert_eq!(local.remote_addr(), None);
         assert_eq!(local.world_dir(), None);
         assert!(!local.suppress_adaptive_chunk_publication_budget());

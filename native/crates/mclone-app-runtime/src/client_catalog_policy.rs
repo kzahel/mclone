@@ -2,10 +2,11 @@ use std::collections::{BTreeSet, HashMap};
 
 use crate::session::{ActiveSessionDescriptor, SessionStartRequest};
 use crate::world_catalog::{
-    LocalWorldCreateOptions, LocalWorldId, LocalWorldSummary, WorldCatalogCapabilities,
-    WorldCatalogError, WorldCatalogRequest, WorldCatalogRequestId, WorldCatalogResponse,
-    local_world_generation_profile_display_name, most_recent_compatible_local_world,
-    next_local_world_generation_profile, sort_local_world_summaries,
+    DEFAULT_LOCAL_WORLD_GENERATION_PROFILE, LocalWorldCreateOptions, LocalWorldId,
+    LocalWorldSummary, WorldCatalogCapabilities, WorldCatalogError, WorldCatalogRequest,
+    WorldCatalogRequestId, WorldCatalogResponse, local_world_generation_profile_display_name,
+    most_recent_compatible_local_world, next_local_world_generation_profile,
+    sort_local_world_summaries,
 };
 use mclone_server::{StarterContentDescriptor, WorldGenerationProfile};
 use mclone_ui::{
@@ -42,7 +43,7 @@ impl ClientCatalogController {
             active_world: None,
             pending: HashMap::new(),
             next_request_id: 1,
-            new_world_generation_profile: WorldGenerationProfile::Overworld,
+            new_world_generation_profile: DEFAULT_LOCAL_WORLD_GENERATION_PROFILE,
             new_world_starter_content: StarterContentDescriptor::Wild,
         }
     }
@@ -653,7 +654,7 @@ fn world_catalog_ui_state_for_capabilities(
             WorldCatalogUiText::empty()
         },
         create_generation_profile: WorldCatalogUiText::new(
-            local_world_generation_profile_display_name(WorldGenerationProfile::Overworld),
+            local_world_generation_profile_display_name(DEFAULT_LOCAL_WORLD_GENERATION_PROFILE),
         ),
         create_starter_content: WorldCatalogUiText::new(StarterContentDescriptor::Wild.label()),
         ..WorldCatalogUiState::empty()
@@ -799,9 +800,14 @@ mod tests {
         };
         assert_eq!(options.display_name, "New World");
         assert_eq!(options.seed, 1234);
+        assert_eq!(
+            options.world_generation_profile,
+            WorldGenerationProfile::McloneOverworldV1
+        );
         assert!(controller.ui_state().loading);
 
-        let created = summary("new-world", "New World", 1234);
+        let mut created = summary("new-world", "New World", 1234);
+        created.world_generation_profile = WorldGenerationProfile::McloneOverworldV1;
         let start = only_start(controller.apply_catalog_response(
             request.id,
             WorldCatalogResponse::WorldCreated {
@@ -831,22 +837,12 @@ mod tests {
         let mut controller = persistent_controller(Vec::new());
         assert_eq!(
             controller.ui_state().create_generation_profile.as_str(),
-            "Vanilla 1.17 Overworld"
+            "Mclone Overworld"
         );
         controller.apply_ui_action(GameUiAction::CycleWorldGenerationProfile, context(0));
         assert_eq!(
             controller.new_world_generation_profile(),
-            WorldGenerationProfile::FlatGrassV1
-        );
-        controller.apply_ui_action(GameUiAction::CycleWorldGenerationProfile, context(0));
-        assert_eq!(
-            controller.ui_state().create_generation_profile.as_str(),
-            "Small Island"
-        );
-        controller.apply_ui_action(GameUiAction::CycleWorldGenerationProfile, context(0));
-        assert_eq!(
-            controller.ui_state().create_generation_profile.as_str(),
-            "Mclone Overworld"
+            WorldGenerationProfile::Overworld
         );
 
         let request = only_request(
@@ -858,7 +854,7 @@ mod tests {
         assert_eq!(options.seed, -98_765);
         assert_eq!(
             options.world_generation_profile,
-            WorldGenerationProfile::McloneOverworldV1
+            WorldGenerationProfile::Overworld
         );
         assert_eq!(options.starter_content, StarterContentDescriptor::Wild);
     }
