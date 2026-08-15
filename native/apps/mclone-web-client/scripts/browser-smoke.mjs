@@ -7023,6 +7023,26 @@ async function runRenderDistanceReplayProbe(page, canvas, targetRenderDistance) 
   });
 
   const expectedLoadedChunkCount = (targetRenderDistance * 2 + 1) ** 2;
+  await dispatchKeyboardEvent(page, "keydown", { code: "KeyN", key: "n" });
+  await dispatchKeyboardEvent(page, "keyup", { code: "KeyN", key: "n" });
+  await page.waitForFunction(
+    () => globalThis.__mcloneWebApp?.state?.movementMode === "FLY",
+    undefined,
+    { timeout: 10_000 },
+  );
+  const flightStartY = Number(selected.cameraY);
+  await dispatchKeyboardEvent(page, "keydown", { code: "Space", key: " " });
+  try {
+    await page.waitForFunction(
+      (flightStartY) => Number(globalThis.__mcloneWebApp?.state?.cameraY) >= flightStartY + 64,
+      flightStartY,
+      { timeout: 45_000 },
+    );
+  } finally {
+    await dispatchKeyboardEvent(page, "keyup", { code: "Space", key: " " });
+  }
+  const flightReached = await captureRenderDistanceReplayState(page, "flight-height-reached");
+
   try {
     await page.waitForFunction(
       ({ targetRenderDistance, expectedLoadedChunkCount }) => {
@@ -7046,25 +7066,6 @@ async function runRenderDistanceReplayProbe(page, canvas, targetRenderDistance) 
   }
   const settled = await captureRenderDistanceReplayState(page, "settled");
 
-  await dispatchKeyboardEvent(page, "keydown", { code: "KeyN", key: "n" });
-  await dispatchKeyboardEvent(page, "keyup", { code: "KeyN", key: "n" });
-  await page.waitForFunction(
-    () => globalThis.__mcloneWebApp?.state?.movementMode === "FLY",
-    undefined,
-    { timeout: 10_000 },
-  );
-  const flightStartY = Number(settled.cameraY);
-  await dispatchKeyboardEvent(page, "keydown", { code: "Space", key: " " });
-  try {
-    await page.waitForFunction(
-      (flightStartY) => Number(globalThis.__mcloneWebApp?.state?.cameraY) >= flightStartY + 64,
-      flightStartY,
-      { timeout: 45_000 },
-    );
-  } finally {
-    await dispatchKeyboardEvent(page, "keyup", { code: "Space", key: " " });
-  }
-  await waitForWebAppStreamingSettled(page, 180_000);
   await page.waitForTimeout(1_500);
   const stable = await captureRenderDistanceReplayState(page, "flight-stability-window-end");
   const samples = await page.evaluate(() => {
@@ -7074,6 +7075,18 @@ async function runRenderDistanceReplayProbe(page, canvas, targetRenderDistance) 
     probe.record("end", true);
     return probe.samples;
   });
+  const exactCoverage = samples.find(
+    (sample) => sample.loadedChunkCount === expectedLoadedChunkCount,
+  ) ?? settled;
+  const serverSettled = samples.find(
+    (sample) => sample.loadedChunkCount === expectedLoadedChunkCount
+      && sample.commandQueueDepth === 0
+      && sample.updateQueueDepth === 0
+      && sample.pendingJobs === 0
+      && sample.pendingPublications === 0
+      && sample.worldgenMailboxPendingJobs === 0
+      && sample.lightStatusMailboxPendingStatuses === 0,
+  ) ?? settled;
 
   return {
     ok: before.renderDistance === 3
@@ -7085,12 +7098,15 @@ async function runRenderDistanceReplayProbe(page, canvas, targetRenderDistance) 
       && stable.loadedChunkSetHash === settled.loadedChunkSetHash
       && stable.unloadUpdateCount === settled.unloadUpdateCount
       && stable.streamingSettled === true
-      && stable.cameraY >= flightStartY + 64,
+      && flightReached.cameraY >= flightStartY + 64,
     targetRenderDistance,
     expectedLoadedChunkCount,
+    exactCoverageMillis: exactCoverage.timeMs - selected.timeMs,
+    serverSettleMillis: serverSettled.timeMs - selected.timeMs,
     expansionSettleMillis: settled.timeMs - selected.timeMs,
     before,
     selected,
+    flightReached,
     settled,
     stable,
     samples,
@@ -7137,6 +7153,10 @@ async function captureRenderDistanceReplayState(page, label) {
       cameraZ: Number(state.cameraZ),
       movementMode: String(state.movementMode ?? ""),
       lastUiAction: String(state.lastReport?.action ?? ""),
+      worldgenJobFrameMetrics: state.worldgenJobFrameMetrics ?? null,
+      lightStatusJobFrameMetrics: state.lightStatusJobFrameMetrics ?? null,
+      lightStatusMailboxMetrics: state.lightStatusMailboxMetrics ?? null,
+      renderCompilerMetrics: state.lastCompileReport?.renderCompilerMetrics ?? null,
     };
   }, label);
 }
