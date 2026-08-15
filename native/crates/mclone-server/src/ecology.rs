@@ -106,7 +106,7 @@ impl Default for WildlifeLifecycleTuning {
             rabbit_breeding_cooldown_ticks: 18_000,
             rabbit_reproductive_energy: 550,
             rabbit_birth_energy_cost: 240,
-            rabbit_starvation_ticks: 48_000,
+            rabbit_starvation_ticks: 96_000,
             deer_maturation_ticks: 120_000,
             deer_lifespan_ticks: 1_920_000,
             deer_lifespan_variance_ticks: 480_000,
