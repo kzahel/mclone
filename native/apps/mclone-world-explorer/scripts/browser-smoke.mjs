@@ -163,6 +163,31 @@ try {
   await page.evaluate(() => {
     globalThis.__MCLONE_WORLD_EXPLORER_SMOKE__.commands.failWorker();
   });
+  await page.evaluate(
+    ([worldX, worldZ]) => {
+      globalThis.__MCLONE_WORLD_EXPLORER_SMOKE__.commands.recenter(worldX, worldZ);
+    },
+    [touch.centerX + 8192, touch.centerZ - 8192],
+  );
+  await page.waitForFunction(
+    () => (
+      globalThis.__MCLONE_WORLD_EXPLORER_SMOKE__
+        ?.observer.snapshot().workerRestartCount === 2
+    ),
+  );
+  await waitReady(page);
+  const restartReady = await report(page);
+  assertFixedReady(restartReady, "forced Worker reconstruction");
+  assertVegetationDiagnostics(restartReady, "forced Worker reconstruction");
+  if (restartReady.vegetationTransportFailures !== 1
+      || restartReady.vegetationExecutorRestarts !== 1
+      || restartReady.vegetationExecutorGeneration !== 2
+      || restartReady.workerRestartCount !== 2) {
+    throw new Error(
+      `forced Worker reconstruction was not diagnosed:\n`
+        + `${JSON.stringify(restartReady, null, 2)}`,
+    );
+  }
   const heldSamples = [];
   await page.keyboard.down("ArrowRight");
   await page.waitForFunction(
@@ -191,20 +216,11 @@ try {
       globalThis.__MCLONE_WORLD_EXPLORER_SMOKE__?.observer.snapshot().heldMotion === false
     ),
   );
-  assertHeldSamples(heldSamples, touch);
+  assertHeldSamples(heldSamples, restartReady);
   await waitReady(page);
   const moved = await report(page);
   assertFixedReady(moved, "held keyboard movement");
   assertVegetationDiagnostics(moved, "held keyboard movement");
-  if (moved.vegetationTransportFailures !== 1
-      || moved.vegetationExecutorRestarts !== 1
-      || moved.vegetationExecutorGeneration !== 2
-      || moved.workerRestartCount !== 2) {
-    throw new Error(
-      `forced Worker reconstruction was not diagnosed:\n`
-        + `${JSON.stringify(moved, null, 2)}`,
-    );
-  }
   console.log(
     `World Explorer ${label} browser smoke: Worker restart and held movement ready`,
   );
@@ -400,7 +416,8 @@ function assertFixedReady(value, stage) {
       || value.vegetationCommittedLevels !== 3
       || value.pendingRefills !== 0
       || value.drawnLevels !== 10
-      || value.fixedResidentBytes !== 128_867_704
+      || value.fixedResidentBytes !== 128_941_304
+      || value.vertexCount <= 0
       || value.pendingVegetationTiles !== 0
       || value.residentBytes <= 0) {
     throw new Error(`${stage} is not fixed and ready:\n${JSON.stringify(value, null, 2)}`);

@@ -45,7 +45,7 @@ use super::{
 
 pub const TERRAIN_PREVIEW_MATERIAL_UV_COUNT: usize = 256;
 const TERRAIN_PREVIEW_MATERIAL_TABLE_BYTES: u64 =
-    (TERRAIN_PREVIEW_MATERIAL_UV_COUNT * 5 * 4 * size_of::<f32>()) as u64;
+    (TERRAIN_PREVIEW_MATERIAL_UV_COUNT * 4 * 4 * size_of::<f32>()) as u64;
 const TERRAIN_EXACT_COVERAGE_UNIFORM_BYTES: u64 = 32;
 const TERRAIN_HORIZON_TREE_CULL_MARGIN_BLOCKS: f32 = 16.0;
 const TERRAIN_HORIZON_CULL_MIN_Y: f32 = -64.0;
@@ -77,7 +77,6 @@ pub struct TerrainPreviewMaterialTable {
     side_uvs: [[f32; 4]; TERRAIN_PREVIEW_MATERIAL_UV_COUNT],
     tint_flags: [[f32; 4]; TERRAIN_PREVIEW_MATERIAL_UV_COUNT],
     grass_tints: [[f32; 4]; TERRAIN_PREVIEW_MATERIAL_UV_COUNT],
-    water_tints: [[f32; 4]; TERRAIN_PREVIEW_MATERIAL_UV_COUNT],
 }
 
 impl TerrainPreviewMaterialTable {
@@ -87,7 +86,6 @@ impl TerrainPreviewMaterialTable {
             side_uvs: [[0.0, 0.0, 1.0, 1.0]; TERRAIN_PREVIEW_MATERIAL_UV_COUNT],
             tint_flags: [[0.0; 4]; TERRAIN_PREVIEW_MATERIAL_UV_COUNT],
             grass_tints: [[1.0; 4]; TERRAIN_PREVIEW_MATERIAL_UV_COUNT],
-            water_tints: [[1.0; 4]; TERRAIN_PREVIEW_MATERIAL_UV_COUNT],
         };
         for raw_id in 0..TERRAIN_PREVIEW_MATERIAL_UV_COUNT {
             if let Some(material) = catalog.terrain_surface_material(BlockStateId(raw_id as u32)) {
@@ -100,7 +98,6 @@ impl TerrainPreviewMaterialTable {
             }
             let tint = catalog.terrain_grass_tint(raw_id as i32);
             table.grass_tints[raw_id] = [tint[0], tint[1], tint[2], 1.0];
-            table.water_tints[raw_id] = catalog.terrain_water_tint(raw_id as i32);
         }
         table
     }
@@ -112,7 +109,6 @@ impl TerrainPreviewMaterialTable {
             &self.side_uvs,
             &self.tint_flags,
             &self.grass_tints,
-            &self.water_tints,
         ] {
             for entry in table {
                 for value in entry {
@@ -4828,8 +4824,8 @@ mod tests {
         assert!(shader.contains("fn mclone_preview_column_profile("));
         assert!(shader.contains("material_table.side_uvs[material]"));
         assert!(shader.contains("material_table.grass_tints"));
-        assert!(shader.contains("material_table.water_tints"));
         assert!(shader.contains("near_surface_lightmap()"));
+        assert!(shader.contains("if display_material != 2u"));
         assert!(shader.contains("terrain_horizon_near_material_weight("));
     }
 

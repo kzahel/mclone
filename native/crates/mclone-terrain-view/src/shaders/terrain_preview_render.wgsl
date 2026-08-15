@@ -59,7 +59,6 @@ struct TerrainPreviewMaterialTable {
     side_uvs: array<vec4<f32>, 256>,
     tint_flags: array<vec4<f32>, 256>,
     grass_tints: array<vec4<f32>, 256>,
-    water_tints: array<vec4<f32>, 256>,
 };
 
 @group(1) @binding(0)
@@ -1019,17 +1018,6 @@ fn resolved_surface_material(input: VertexOutput) -> u32 {
 }
 
 fn near_surface_tint(input: VertexOutput, material: u32, side_surface: bool) -> vec3<f32> {
-    if material == 2u {
-        let biome = select(
-            input.biome,
-            mclone_grass_biome(input.biome),
-            preview_profile() == 0u,
-        );
-        let water_tint = material_table.water_tints[min(biome, 255u)];
-        // The procedural shell is opaque, so fold the exact fluid opacity
-        // into its tint instead of presenting the same RGB at full strength.
-        return water_tint.rgb * water_tint.a;
-    }
     let flags = material_table.tint_flags[material];
     let grass_tinted = select(flags.x, flags.y, side_surface) >= 0.5;
     if !grass_tinted {
@@ -1102,19 +1090,6 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let side_surface = input.near_shell != 0u && input.surface_kind != 0u;
     let display_material = resolved_surface_material(input);
     if input.textured != 0u && input.near_shell != 0u && display_material < 256u {
-        var near_color = near_surface_tint(input, display_material, side_surface)
-            * input.light
-            * near_surface_lightmap();
-        near_color = apply_material_texture(
-            near_color,
-            display_material,
-            side_surface,
-            input.world_uv,
-            material_dx,
-            material_dy,
-            material_blocks_per_pixel,
-            true,
-        );
         var far_color = color;
         if input.material < 256u {
             far_color = apply_material_texture(
@@ -1126,6 +1101,22 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
                 material_dy,
                 material_blocks_per_pixel,
                 false,
+            );
+        }
+        var near_color = far_color;
+        if display_material != 2u {
+            near_color = near_surface_tint(input, display_material, side_surface)
+                * input.light
+                * near_surface_lightmap();
+            near_color = apply_material_texture(
+                near_color,
+                display_material,
+                side_surface,
+                input.world_uv,
+                material_dx,
+                material_dy,
+                material_blocks_per_pixel,
+                true,
             );
         }
         color = mix(far_color, near_color, input.world_position.w);
