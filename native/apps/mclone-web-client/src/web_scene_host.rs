@@ -3456,6 +3456,16 @@ impl WebSceneHost {
                         .filter(|entity| entity.kind == mclone_protocol::EntityKind::MallardNest)
                         .count() as f64,
                 )?;
+                report_set_number(
+                    &object,
+                    "wildlifeRemainsCount",
+                    client
+                        .entity_snapshots()
+                        .filter(|entity| {
+                            entity.kind == mclone_protocol::EntityKind::WildlifeRemains
+                        })
+                        .count() as f64,
+                )?;
                 let mallards = client
                     .entity_snapshots()
                     .filter(|entity| entity.kind == mclone_protocol::EntityKind::Mallard)

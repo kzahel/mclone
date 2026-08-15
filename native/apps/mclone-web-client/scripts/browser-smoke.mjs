@@ -864,6 +864,7 @@ async function run() {
                       === state.showcaseDeerFieldGuideBits
                   : state.mallardCount >= state.showcaseMallardCount
                     && state.mallardNestCount <= state.showcaseMallardNestCount
+                    && state.wildlifeRemainsCount === 1
                     && (state.mallardFieldGuideBits & state.showcaseFieldGuideBits)
                       === state.showcaseFieldGuideBits)
                 && state.dayTime === (rabbitShowcase ? 12000 : 6000)
@@ -3035,7 +3036,7 @@ async function run() {
           pageErrors.length > 0
           || canvasPixels.distinctInteriorColorCount < 2
           || result?.showcaseId !== showcase
-          || result?.showcaseRevision !== (rabbitShowcase ? 4 : gardenShowcase ? 1 : wheatShowcase ? 3 : beeShowcase ? 2 : deerShowcase ? 1 : 2)
+          || result?.showcaseRevision !== (rabbitShowcase ? 4 : gardenShowcase ? 1 : wheatShowcase ? 3 : beeShowcase ? 2 : deerShowcase ? 1 : 3)
           || result?.activeWorldSeedText !== (rabbitShowcase ? "17507" : cropShowcase ? "17506" : beeShowcase ? "17505" : deerShowcase ? "17504" : "17503")
           || result?.generationProfile !== "authored-only"
           || result?.dayTime !== (rabbitShowcase ? 12000 : 6000)
@@ -3059,6 +3060,7 @@ async function run() {
             ? result?.deerCount < 3 || result?.deerBedCount < 1 || result?.deerFieldGuideBits < 3
             : result?.mallardCount < 4
               || result?.mallardNestCount !== 0
+              || result?.wildlifeRemainsCount !== 1
               || result?.mallardFieldGuideBits === 1)
           || (!cropShowcase && !rabbitShowcase
             && String(result?.showcaseEntryEye) !== `${result.cameraX},${result.cameraY},${result.cameraZ}`)

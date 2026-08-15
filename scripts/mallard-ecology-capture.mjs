@@ -20,7 +20,7 @@ const receipt = Object.fromEntries(
     .split(" ")
     .map((field) => field.split("=", 2)) ?? [],
 );
-if (receipt.id !== "mallard-ecology" || receipt.revision !== "2") {
+if (receipt.id !== "mallard-ecology" || receipt.revision !== "3") {
   throw new Error("showcase compiler did not emit the expected mallard-ecology receipt");
 }
 
@@ -49,8 +49,8 @@ const output = run([
   MCLONE_PLAYER_PROFILE_FILE: `${root}/player-profile.v1.json`,
 });
 
-if (!/4 entities, 4 actors, 4 drawn actors/.test(output)) {
-  throw new Error("mallard ecology capture did not draw all four persisted actors");
+if (!/5 entities, 5 actors, 5 drawn actors/.test(output)) {
+  throw new Error("mallard ecology capture did not draw all five persisted actors");
 }
 if (!/GUI commands/.test(output)) {
   throw new Error("mallard ecology capture did not include the HUD/field-guide draw list");

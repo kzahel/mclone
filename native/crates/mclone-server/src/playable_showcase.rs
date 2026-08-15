@@ -20,7 +20,7 @@ use sha2::{Digest, Sha256};
 
 use crate::persistence::{
     EntityChunkRecord, EntityPersistentId, EntitySavePayload, EntitySaveRecord, PlayerRecord,
-    PlayerRecordKey, RabbitRefugeSaveRecord,
+    PlayerRecordKey, RabbitRefugeSaveRecord, WildlifeRemainsCause, WildlifeRemainsSpecies,
 };
 use crate::{
     AUTHORED_WORLD_HEIGHT, AUTHORED_WORLD_MIN_Y, AuthoredWorldFixtureKind, ChunkStoreError,
@@ -204,6 +204,7 @@ enum LiveInstantiationSubject {
     Rabbit,
     RabbitBurrow,
     RabbitObservation,
+    WildlifeRemains,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -256,6 +257,12 @@ pub const LIVE_INSTANTIATION_EVIDENCE: &[LiveInstantiationEvidence] = &[
         ordinary_producer: "attended mallard nest hatching",
         contract: "mclone-server::entity::store::tests::covered_wetland_nest_pauses_resumes_hatches_once_and_roundtrips",
         subject: LiveInstantiationSubject::MallardDuckling,
+    },
+    LiveInstantiationEvidence {
+        id: "mclone-wildlife-natural-death-remains",
+        ordinary_producer: "loaded wildlife old-age or starvation death",
+        contract: "mclone-server::entity::store::tests::natural_mallard_death_creates_typed_durable_remains",
+        subject: LiveInstantiationSubject::WildlifeRemains,
     },
     LiveInstantiationEvidence {
         id: "mclone-mallard-nest-placement",
@@ -573,6 +580,9 @@ fn validate_recipe(
             ShowcaseEntityState::BeeHotel { .. } => LiveInstantiationSubject::BeeHotel,
             ShowcaseEntityState::Rabbit { .. } => LiveInstantiationSubject::Rabbit,
             ShowcaseEntityState::RabbitBurrow { .. } => LiveInstantiationSubject::RabbitBurrow,
+            ShowcaseEntityState::WildlifeRemains { .. } => {
+                LiveInstantiationSubject::WildlifeRemains
+            }
         };
         validate_evidence(&entity.live_instantiation, expected)?;
     }
@@ -724,6 +734,14 @@ fn validate_recipe(
                     entity.id
                 )));
             }
+        }
+        if let ShowcaseEntityState::WildlifeRemains { biomass, .. } = &entity.state
+            && !(1..=2_000).contains(biomass)
+        {
+            return Err(PlayableShowcaseError::invalid(format!(
+                "showcase wildlife remains `{}` has unbounded biomass {biomass}",
+                entity.id
+            )));
         }
     }
 
@@ -1125,6 +1143,19 @@ fn write_entities(
                 damage: *damage,
                 last_used_tick: *last_used_tick,
             },
+            ShowcaseEntityState::WildlifeRemains {
+                source_species,
+                biomass,
+                cause,
+                creation_tick,
+            } => EntitySavePayload::WildlifeRemains {
+                source_species: source_species.persistence(),
+                source: persistent_entity_id(showcase_id, &format!("{}:source", recipe.id)),
+                biomass: *biomass,
+                cause: cause.persistence(),
+                creation_tick: *creation_tick,
+                decay_remainder: 0,
+            },
         };
         let kind = match &recipe.state {
             ShowcaseEntityState::Mallard { .. } => "mclone:mallard",
@@ -1136,6 +1167,7 @@ fn write_entities(
             ShowcaseEntityState::BeeHotel { .. } => "mclone:bee_hotel",
             ShowcaseEntityState::Rabbit { .. } => "mclone:rabbit",
             ShowcaseEntityState::RabbitBurrow { .. } => "mclone:rabbit_burrow",
+            ShowcaseEntityState::WildlifeRemains { .. } => "mclone:wildlife_remains",
         };
         let position = Vec3d::new(recipe.position[0], recipe.position[1], recipe.position[2]);
         chunks
@@ -1510,6 +1542,48 @@ enum ShowcaseEntityState {
         #[serde(rename = "lastUsedTick")]
         last_used_tick: u64,
     },
+    WildlifeRemains {
+        #[serde(rename = "sourceSpecies")]
+        source_species: ShowcaseWildlifeRemainsSpecies,
+        biomass: u32,
+        cause: ShowcaseWildlifeRemainsCause,
+        #[serde(rename = "creationTick")]
+        creation_tick: u64,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+enum ShowcaseWildlifeRemainsSpecies {
+    Rabbit,
+    Deer,
+    Mallard,
+}
+
+impl ShowcaseWildlifeRemainsSpecies {
+    const fn persistence(self) -> WildlifeRemainsSpecies {
+        match self {
+            Self::Rabbit => WildlifeRemainsSpecies::Rabbit,
+            Self::Deer => WildlifeRemainsSpecies::Deer,
+            Self::Mallard => WildlifeRemainsSpecies::Mallard,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+enum ShowcaseWildlifeRemainsCause {
+    OldAge,
+    Starvation,
+}
+
+impl ShowcaseWildlifeRemainsCause {
+    const fn persistence(self) -> WildlifeRemainsCause {
+        match self {
+            Self::OldAge => WildlifeRemainsCause::OldAge,
+            Self::Starvation => WildlifeRemainsCause::Starvation,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
@@ -1657,7 +1731,8 @@ impl ShowcaseEntityState {
             | Self::Bee { .. }
             | Self::BeeNest { .. }
             | Self::BeeHotel { .. }
-            | Self::RabbitBurrow { .. } => return [None, None],
+            | Self::RabbitBurrow { .. }
+            | Self::WildlifeRemains { .. } => return [None, None],
             Self::Rabbit { parents, .. } => parents,
         };
         [parents[0].as_deref(), parents[1].as_deref()]
@@ -1781,7 +1856,8 @@ mod tests {
         let (second_manifest, second) =
             playable_showcase_memory_store(PlayableShowcaseId::MallardEcology, &identity).unwrap();
         assert_eq!(first_manifest, second_manifest);
-        assert_eq!(first_manifest.entity_count, 4);
+        assert_eq!(first_manifest.revision, 3);
+        assert_eq!(first_manifest.entity_count, 5);
         assert_eq!(first_manifest.mallard_count, 3);
         assert_eq!(first_manifest.mallard_nest_count, 1);
         assert_eq!(
@@ -1803,7 +1879,19 @@ mod tests {
         let first_entities = first.entity_chunk(ChunkPos::new(0, 0)).unwrap();
         let second_entities = second.entity_chunk(ChunkPos::new(0, 0)).unwrap();
         assert_eq!(first_entities, second_entities);
-        assert_eq!(first_entities.entities.len(), 4);
+        assert_eq!(first_entities.entities.len(), 5);
+        assert!(first_entities.entities.iter().any(|entity| {
+            entity.kind == "mclone:wildlife_remains"
+                && matches!(
+                    entity.payload,
+                    EntitySavePayload::WildlifeRemains {
+                        source_species: WildlifeRemainsSpecies::Mallard,
+                        biomass: 180,
+                        cause: WildlifeRemainsCause::OldAge,
+                        ..
+                    }
+                )
+        }));
         assert!(
             first
                 .player(&PlayerRecordKey::from_profile_id(identity.profile_id))

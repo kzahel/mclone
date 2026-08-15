@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "mallard-ecology",
   "title": "Mallard Ecology",
-  "revision": 2,
+  "revision": 3,
   "baseTerrain": "mallard-wetland-v1",
   "seed": 17503,
   "dayTime": 6000,
@@ -95,6 +95,20 @@
         "incubationProgress": 2320,
         "incubationRequired": 2400,
         "parents": ["parent-a", "parent-b"]
+      }
+    },
+    {
+      "id": "prior-mallard-remains",
+      "position": [4.5, 65.0, 13.5],
+      "yRotDegrees": -18.0,
+      "onGround": true,
+      "liveInstantiation": "mclone-wildlife-natural-death-remains",
+      "state": {
+        "kind": "wildlife-remains",
+        "sourceSpecies": "mallard",
+        "biomass": 180,
+        "cause": "old-age",
+        "creationTick": 0
       }
     }
   ],
