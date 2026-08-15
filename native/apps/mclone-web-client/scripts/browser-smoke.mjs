@@ -1368,7 +1368,7 @@ async function run() {
                 position[0] - startPosition[0],
                 position[2] - startPosition[2],
               );
-              return distance >= startDistance + 1.5 && travel >= 1.5;
+              return distance >= Number(startDistance) + 1.5 && travel >= 1.5;
             },
             {
               entityId: avoidanceSubject.entityId,
@@ -1399,7 +1399,7 @@ async function run() {
             selectedHotbarSlot: 0,
             detection: avoidanceDetection,
             final: avoidanceFinal,
-            distanceGain: avoidanceFinal.distance - avoidanceDetection.distance,
+            distanceGain: avoidanceFinal.distance - Number(avoidanceDetection.distance),
             subjectTravel: Math.hypot(
               avoidanceFinal.position[0] - avoidanceDetection.position[0],
               avoidanceFinal.position[2] - avoidanceDetection.position[2],
@@ -1480,12 +1480,14 @@ async function run() {
                 "use",
                 "place",
                 301,
-                () => page.waitForFunction(
-                  (closedState) => globalThis.__mcloneWebApp
-                    .blockStateAt?.(16, 65, 14)?.blockStateId !== closedState,
-                  initialGateState,
-                  { timeout: 10_000 },
-                ),
+                async () => {
+                  await page.waitForFunction(
+                    (closedState) => globalThis.__mcloneWebApp
+                      .blockStateAt?.(16, 65, 14)?.blockStateId !== closedState,
+                    initialGateState,
+                    { timeout: 10_000 },
+                  );
+                },
               )
             : await page.evaluate(
                 () => globalThis.__mcloneWebApp.interactBlock?.("place") ?? null,
@@ -1758,7 +1760,7 @@ async function run() {
           const collapseCommands = [];
           for (let hit = 0; hit < 3; hit += 1) {
             const framed = await page.evaluate(
-              (entityId) => globalThis.__mcloneWebApp.frameEntity(Number(entityId), true),
+              (entityId) => globalThis.__mcloneWebApp.frameEntity?.(Number(entityId), true) ?? null,
               homeBurrowId,
             );
             if (framed?.ok !== true) {
@@ -1775,10 +1777,11 @@ async function run() {
                   () => globalThis.__mcloneWebApp.interactBlock?.("break") ?? null,
                 );
             collapseCommands.push(command);
-            if (mobileShowcase ? command?.ok !== true : (
-              command?.commandSent !== true
-                || command?.targetKind !== "entity"
-                || String(command?.targetEntityId) !== String(homeBurrowId)
+            const commandReport = /** @type {any} */ (command);
+            if (mobileShowcase ? commandReport?.ok !== true : (
+              commandReport?.commandSent !== true
+                || commandReport?.targetKind !== "entity"
+                || String(commandReport?.targetEntityId) !== String(homeBurrowId)
             )) {
               throw new Error(`rabbit burrow attack ${hit + 1} missed the live mouth: ${JSON.stringify({ homeBurrowId, command })}`);
             }
@@ -1904,7 +1907,8 @@ async function run() {
             survivingBurrowIds,
             initialGateState,
             openGateState,
-            gateCommandSent: openGate?.commandSent === true || openGate?.ok === true,
+            gateCommandSent: /** @type {any} */ (openGate)?.commandSent === true
+              || openGate?.ok === true,
             retreatPosition,
             rabbitHeldItemProbe,
             rabbitAvoidanceProbe,
@@ -1939,7 +1943,9 @@ async function run() {
               behaviorProbe,
             }, null, 2)}`);
           }
+          /** @type {[number, number, number]} */
           const reviewEye = [14.5, 66.62, 18.5];
+          /** @type {[number, number, number]} */
           const reviewTarget = [15, 65.5, 9.5];
           await page.evaluate(() => globalThis.__mcloneWebApp?.pauseRendering?.());
           await page.waitForFunction(
