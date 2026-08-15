@@ -269,10 +269,19 @@ function validateObservedState(capture, state) {
   }
 }
 
+function settledPresentationState(state) {
+  const {
+    vegetationSubmittedJobs: _vegetationSubmittedJobs,
+    vegetationCompletedJobs: _vegetationCompletedJobs,
+    ...presentationState
+  } = state;
+  return presentationState;
+}
+
 function validateComparisonGroups(results) {
   const signatures = new Map();
   for (const capture of results) {
-    const signature = JSON.stringify(capture.observedState);
+    const signature = JSON.stringify(capture.settledPresentationState);
     const prior = signatures.get(capture.group);
     if (prior !== undefined && prior !== signature) {
       fail(`${capture.group} changed observed source/coverage/vegetation state`);
@@ -363,6 +372,7 @@ for (let index = 0; index < campaign.length; index += 1) {
   const output = run(clientPath, args, { capture: true, echo: true });
   const observedState = parseTerrainViewState(output, capture.name);
   validateObservedState(capture, observedState);
+  const settledState = settledPresentationState(observedState);
   results.push({
     ...capture,
     file: `${capture.name}.png`,
@@ -396,6 +406,7 @@ for (let index = 0; index < campaign.length; index += 1) {
     },
     command: [clientPath, ...args],
     observedState,
+    settledPresentationState: settledState,
     png: pngFacts(path, options.width, options.height),
   });
 }
@@ -425,7 +436,7 @@ const receipt = {
       "output extent",
     ],
     variedAxes: ["frozen time", "terrain presentation", "diagnostic channel"],
-    observedStateRule: "Every composed capture is target-ready with all 25 RD2 exact columns and drained, failure-free vegetation; observed state is identical within each comparison group. Exact Only reports the horizon disabled.",
+    observedStateRule: "Every composed capture is target-ready with all 25 RD2 exact columns and drained, failure-free vegetation. Settled presentation state is identical within each comparison group; cumulative submitted/completed job counts may differ between fresh processes but must be equal within every capture. Exact Only reports the horizon disabled.",
   },
   sceneCoverage: {
     coast: ["baseline-elevated-dawn", "baseline-elevated-noon", "baseline-elevated-dusk", "baseline-elevated-midnight"],
