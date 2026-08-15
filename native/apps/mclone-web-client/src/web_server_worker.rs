@@ -42,6 +42,7 @@ use crate::web_catalog_execution::web_world_writer_lease_name;
 use crate::web_integrated_server_startup::WebIntegratedServerStartupConfig;
 
 const WEB_WORKER_TICK_INTERVAL_MS: u32 = 50;
+const WEB_WORKER_BACKGROUND_POLL_INTERVAL_MS: u32 = 8;
 // Server-worker SharedArrayBuffer ring ABI. This is the Rust copy of the control-word layout
 // authored once on the JS side in www/mclone-runner-shared-abi.js (imported by both the
 // integrated-server worker and the worldgen/light job worker). The host test
@@ -757,6 +758,11 @@ impl WebIntegratedServerRunner {
             &message,
             "tickIntervalMs",
             f64::from(WEB_WORKER_TICK_INTERVAL_MS),
+        )?;
+        set_number(
+            &message,
+            "backgroundPollIntervalMs",
+            f64::from(WEB_WORKER_BACKGROUND_POLL_INTERVAL_MS),
         )?;
         let transfer = Array::new();
         transfer.push(&startup_frame.buffer());
@@ -2049,6 +2055,7 @@ pub struct WebIntegratedServerActor {
 enum WebIntegratedServerOperationKind {
     Command,
     Tick,
+    Poll,
     PersistenceCompletion,
     FlushPersistence,
     PromoteObserver,
@@ -2060,7 +2067,7 @@ impl WebIntegratedServerOperationKind {
     const fn response_kind(self) -> &'static str {
         match self {
             Self::Command => "command-result",
-            Self::Tick | Self::PersistenceCompletion => "updates",
+            Self::Tick | Self::Poll | Self::PersistenceCompletion => "updates",
             Self::FlushPersistence => "flush-complete",
             Self::PromoteObserver => "observer-promoted",
             Self::DemotePlayer => "player-demoted",
@@ -2069,7 +2076,7 @@ impl WebIntegratedServerOperationKind {
     }
 
     const fn posts_empty_response(self) -> bool {
-        !matches!(self, Self::Tick | Self::PersistenceCompletion)
+        !matches!(self, Self::Tick | Self::Poll | Self::PersistenceCompletion)
     }
 
     const fn closes_worker(self) -> bool {
@@ -2630,6 +2637,9 @@ impl WebIntegratedServerActor {
             }
             WebIntegratedServerOperationKind::Shutdown => self.server.shutdown(),
             WebIntegratedServerOperationKind::Tick => unreachable!("ticks have a dedicated entry"),
+            WebIntegratedServerOperationKind::Poll => {
+                unreachable!("polls have a dedicated entry")
+            }
             WebIntegratedServerOperationKind::PersistenceCompletion => {
                 unreachable!("persistence completions have a dedicated entry")
             }
@@ -2645,6 +2655,17 @@ impl WebIntegratedServerActor {
         self.begin_operation(WebIntegratedServerOperationKind::Tick, 0)
             .map_err(|error| JsValue::from_str(&error))?;
         let result = self.server.tick();
+        if result.is_err() {
+            self.operation = None;
+        }
+        result
+    }
+
+    #[wasm_bindgen(js_name = beginPoll)]
+    pub fn begin_poll(&mut self) -> Result<JsValue, JsValue> {
+        self.begin_operation(WebIntegratedServerOperationKind::Poll, 0)
+            .map_err(|error| JsValue::from_str(&error))?;
+        let result = self.server.poll();
         if result.is_err() {
             self.operation = None;
         }
@@ -2726,6 +2747,12 @@ impl WebIntegratedServerActor {
         .map_err(|error| JsValue::from_str(&error))?;
         set_bool(&report, "closeWorker", operation.kind.closes_worker())
             .map_err(|error| JsValue::from_str(&error))?;
+        set_bool(
+            &report,
+            "backgroundPollRequested",
+            integrated_server_background_poll_requested(&self.server.diagnostics),
+        )
+        .map_err(|error| JsValue::from_str(&error))?;
         Ok(report.into())
     }
 
@@ -2764,6 +2791,13 @@ impl WebIntegratedServerActor {
         self.operation = Some(WebIntegratedServerOperation { kind, request_id });
         Ok(())
     }
+}
+
+fn integrated_server_background_poll_requested(diagnostics: &ServerRunnerDiagnostics) -> bool {
+    diagnostics.pending_jobs > 0
+        || diagnostics.pending_publications > 0
+        || diagnostics.worldgen_mailbox_pending_jobs > 0
+        || diagnostics.light_status_mailbox_pending_statuses > 0
 }
 
 #[wasm_bindgen]

@@ -49,6 +49,7 @@ interface IntegratedServerWorkerMessage {
   requestBuffer?: SharedArrayBuffer;
   responseBuffer?: SharedArrayBuffer;
   runnerSharedBufferId?: number;
+  backgroundPollIntervalMs?: number;
 }
 
 // A pooled shared response slot (worker-local; not part of the cross-boundary control-word ABI).
@@ -77,6 +78,11 @@ interface ServicedServerResult {
   updates: unknown[];
 }
 
+interface FinishedActorOperation {
+  persistenceRequests: PersistenceRecordRequest[];
+  backgroundPollRequested: boolean;
+}
+
 // Adapter-only circuit breaker against a malformed continuation that never
 // quiesces. Rust still authors every request and decides whether another
 // continuation exists.
@@ -93,6 +99,9 @@ let indexedDbWorldId: string | null = null;
 let indexedDbWriterLease: HeldWorldWriterLease | null = null;
 let tickTimer: ReturnType<typeof setInterval> | 0 = 0;
 let tickInFlight = false;
+let backgroundPollTimer: ReturnType<typeof setTimeout> | 0 = 0;
+let backgroundPollActive = false;
+let backgroundPollIntervalMs = 0;
 let serverOperationInFlight = false;
 let persistenceFenceDepth = 0;
 let persistenceContinuationTail: Promise<void> = Promise.resolve();
@@ -178,6 +187,13 @@ async function startServer(message: IntegratedServerWorkerMessage): Promise<void
   if (!Number.isFinite(intervalMs) || intervalMs < 1) {
     throw new Error("integrated server start has an invalid Rust-authored tick interval");
   }
+  const pollIntervalMs = Number(message.backgroundPollIntervalMs);
+  if (!Number.isFinite(pollIntervalMs) || pollIntervalMs < 1) {
+    throw new Error(
+      "integrated server start has an invalid Rust-authored background poll interval",
+    );
+  }
+  backgroundPollIntervalMs = Math.trunc(pollIntervalMs);
   tickTimer = setInterval(() => {
     void tickServer();
   }, Math.trunc(intervalMs));
@@ -202,7 +218,10 @@ async function driveActorMessage(message: IntegratedServerWorkerMessage): Promis
     }
   }
   await acquireServerOperation();
-  let detachedPersistenceRequests: PersistenceRecordRequest[] = [];
+  let completion: FinishedActorOperation = {
+    persistenceRequests: [],
+    backgroundPollRequested: false,
+  };
   try {
     const activeServer = server;
     if (!activeServer) {
@@ -213,7 +232,7 @@ async function driveActorMessage(message: IntegratedServerWorkerMessage): Promis
     if (persistenceFence) {
       await drivePersistenceFenceOperation(activeServer, initial as Record<string, any>, message);
     } else {
-      detachedPersistenceRequests = finishActorOperation(
+      completion = finishActorOperation(
         activeServer,
         initial as Record<string, any>,
         message,
@@ -226,24 +245,71 @@ async function driveActorMessage(message: IntegratedServerWorkerMessage): Promis
     serverOperationInFlight = false;
     if (persistenceFence) persistenceFenceDepth -= 1;
   }
-  schedulePersistenceRequests(detachedPersistenceRequests);
+  schedulePersistenceRequests(completion.persistenceRequests);
+  if (completion.backgroundPollRequested) scheduleBackgroundPoll();
 }
 
 async function tickServer(): Promise<void> {
-  if (!server || tickInFlight || serverOperationInFlight || persistenceFenceDepth > 0) return;
-  const activeServer = server;
+  if (!server || tickInFlight || persistenceFenceDepth > 0) return;
   tickInFlight = true;
-  serverOperationInFlight = true;
+  let operationAcquired = false;
+  let completion: FinishedActorOperation = {
+    persistenceRequests: [],
+    backgroundPollRequested: false,
+  };
   try {
+    await acquireServerOperation();
+    operationAcquired = true;
+    const activeServer = server;
+    if (!activeServer || persistenceFenceDepth > 0) return;
     const initial = activeServer.beginTick();
-    const requests = finishActorOperation(activeServer, initial as Record<string, any>, null);
-    schedulePersistenceRequests(requests);
+    completion = finishActorOperation(activeServer, initial as Record<string, any>, null);
   } catch (error) {
     postActorFailure(0, error);
   } finally {
     tickInFlight = false;
-    serverOperationInFlight = false;
+    if (operationAcquired) serverOperationInFlight = false;
   }
+  schedulePersistenceRequests(completion.persistenceRequests);
+  if (completion.backgroundPollRequested) scheduleBackgroundPoll();
+}
+
+function scheduleBackgroundPoll(): void {
+  if (
+    !server
+    || backgroundPollTimer
+    || backgroundPollActive
+    || persistenceFenceDepth > 0
+  ) return;
+  backgroundPollTimer = setTimeout(() => {
+    backgroundPollTimer = 0;
+    void pollServerBackgroundWork();
+  }, backgroundPollIntervalMs);
+}
+
+async function pollServerBackgroundWork(): Promise<void> {
+  if (!server || backgroundPollActive || persistenceFenceDepth > 0) return;
+  backgroundPollActive = true;
+  let operationAcquired = false;
+  let completion: FinishedActorOperation = {
+    persistenceRequests: [],
+    backgroundPollRequested: false,
+  };
+  try {
+    await acquireServerOperation();
+    operationAcquired = true;
+    const activeServer = server;
+    if (!activeServer || persistenceFenceDepth > 0) return;
+    const initial = activeServer.beginPoll();
+    completion = finishActorOperation(activeServer, initial as Record<string, any>, null);
+  } catch (error) {
+    postActorFailure(0, error);
+  } finally {
+    if (operationAcquired) serverOperationInFlight = false;
+    backgroundPollActive = false;
+  }
+  schedulePersistenceRequests(completion.persistenceRequests);
+  if (completion.backgroundPollRequested) scheduleBackgroundPoll();
 }
 
 async function acquireServerOperation(): Promise<void> {
@@ -257,7 +323,7 @@ function finishActorOperation(
   activeServer: WebIntegratedServerActor,
   initialResult: Record<string, any>,
   requestMessage: IntegratedServerWorkerMessage | null,
-): PersistenceRecordRequest[] {
+): FinishedActorOperation {
   const updates = Array.isArray(initialResult?.updates) ? [...initialResult.updates] : [];
   const report = activeServer.finishOperation(initialResult, updates) as Record<string, any>;
   if (report.closeWorker === true) {
@@ -266,7 +332,12 @@ function finishActorOperation(
   if (report.postMessage === true) {
     postUpdates(report.message as RunnerOutboundMessage, requestMessage);
   }
-  return persistenceRecordRequestsFromValue(report.message?.persistenceRecordRequests);
+  return {
+    persistenceRequests: persistenceRecordRequestsFromValue(
+      report.message?.persistenceRecordRequests,
+    ),
+    backgroundPollRequested: report.backgroundPollRequested === true,
+  };
 }
 
 async function drivePersistenceFenceOperation(
@@ -281,6 +352,10 @@ async function drivePersistenceFenceOperation(
       clearInterval(tickTimer);
       tickTimer = 0;
     }
+    if (backgroundPollTimer) {
+      clearTimeout(backgroundPollTimer);
+      backgroundPollTimer = 0;
+    }
     server = null;
     // `shutdown-complete` is the browser host's durable retirement fence. Release
     // the world writer lease before publishing it so a same-page replacement can
@@ -290,6 +365,9 @@ async function drivePersistenceFenceOperation(
   }
   if (report.postMessage === true) {
     postUpdates(report.message as RunnerOutboundMessage, requestMessage);
+  }
+  if (report.backgroundPollRequested === true && report.closeWorker !== true) {
+    scheduleBackgroundPoll();
   }
   if (report.closeWorker === true) {
     workerSelf.close();
@@ -319,7 +397,9 @@ async function drivePersistenceRequests(initialRequests: PersistenceRecordReques
         throw new Error("integrated server stopped before persistence completion");
       }
       const initial = activeServer.beginPersistenceCompletion(completions) as Record<string, any>;
-      requests = finishActorOperation(activeServer, initial, null);
+      const completion = finishActorOperation(activeServer, initial, null);
+      requests = completion.persistenceRequests;
+      if (completion.backgroundPollRequested) scheduleBackgroundPoll();
     } catch (error) {
       postActorFailure(0, error);
       return;

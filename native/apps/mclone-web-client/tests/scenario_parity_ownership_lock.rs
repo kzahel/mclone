@@ -155,10 +155,15 @@ fn integrated_server_startup_domain_is_an_opaque_rust_frame() {
     assert!(INTEGRATED_SERVER_WORKER.contains("startup.indexedDbBootstrapRequests()"));
     assert!(INTEGRATED_SERVER_WORKER.contains("startup.createIndexedDb("));
     assert!(INTEGRATED_SERVER_WORKER.contains("activeServer.beginMessage("));
+    assert!(INTEGRATED_SERVER_WORKER.contains("activeServer.beginPoll()"));
     assert!(INTEGRATED_SERVER_WORKER.contains("activeServer.beginPersistenceCompletion("));
     assert!(!INTEGRATED_SERVER_WORKER.contains("activeServer.hasPendingJobs()"));
     assert!(!INTEGRATED_SERVER_WORKER.contains("activeServer.pollPendingJobs()"));
     assert!(INTEGRATED_SERVER_WORKER.contains("activeServer.finishOperation("));
+    assert!(INTEGRATED_SERVER_WORKER.contains("scheduleBackgroundPoll()"));
+    assert!(WEB_SERVER_WORKER.contains("backgroundPollIntervalMs"));
+    assert!(WEB_SERVER_WORKER.contains("backgroundPollRequested"));
+    assert!(WEB_SERVER_WORKER.contains("integrated_server_background_poll_requested"));
     assert!(WEB_SERVER_WORKER.contains("outstanding_command_request_ids"));
     assert!(WEB_SERVER_WORKER.contains(
         "diagnostics.command_queue_depth = self.outstanding_command_request_ids.borrow().len()"
