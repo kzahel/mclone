@@ -138,6 +138,8 @@ if (initialGrassDetail && !["off", "sparse", "lush", "ultra"].includes(initialGr
 }
 const movementPerf = process.argv.includes("--movement-perf")
   || process.env.MCLONE_NATIVE_WEB_MOVEMENT_PERF === "1";
+const viewReplayProbe = process.argv.includes("--view-replay-probe")
+  || process.env.MCLONE_NATIVE_WEB_VIEW_REPLAY_PROBE === "1";
 const blockEditProbe = process.argv.includes("--block-edit-probe")
   || process.env.MCLONE_NATIVE_WEB_BLOCK_EDIT_PROBE === "1";
 const deathUiProbe = process.argv.includes("--death-ui-probe")
@@ -243,6 +245,7 @@ const remoteWebSocket = process.argv.includes("--remote-websocket")
 const menuEntryProbe = process.argv.includes("--menu-entry-probe")
   || process.env.MCLONE_NATIVE_WEB_MENU_ENTRY_PROBE === "1";
 const appLoop = movementPerf
+  || viewReplayProbe
   || blockEditProbe
   || deathUiProbe
   || auxiliarySplitProbe
@@ -278,6 +281,8 @@ const serveOnly = process.argv.includes("--serve")
 const screenshotPath = process.env.MCLONE_NATIVE_WEB_SMOKE_SCREENSHOT
   ?? (movementPerf
     ? "/tmp/mclone-native-web-movement-perf.png"
+    : viewReplayProbe
+    ? "/tmp/mclone-native-web-view-replay.png"
     : blockEditProbe
     ? "/tmp/mclone-native-web-block-edit-probe.png"
     : deathUiProbe
@@ -314,6 +319,8 @@ const screenshotPath = process.env.MCLONE_NATIVE_WEB_SMOKE_SCREENSHOT
 const canvasScreenshotPath = process.env.MCLONE_NATIVE_WEB_CANVAS_SCREENSHOT
   ?? (movementPerf
     ? "/tmp/mclone-native-web-movement-perf-canvas.png"
+    : viewReplayProbe
+    ? "/tmp/mclone-native-web-view-replay-canvas.png"
     : blockEditProbe
     ? "/tmp/mclone-native-web-block-edit-probe-canvas.png"
     : deathUiProbe
@@ -363,6 +370,8 @@ const mobileJoystickScreenshotPath = process.env.MCLONE_NATIVE_WEB_MOBILE_JOYSTI
   ?? "/tmp/mclone-native-web-mobile-joystick.png";
 const movementPerfReportPath = process.env.MCLONE_NATIVE_WEB_MOVEMENT_PERF_REPORT
   ?? "/tmp/mclone-native-web-movement-perf.json";
+const viewReplayProbeReportPath = process.env.MCLONE_NATIVE_WEB_VIEW_REPLAY_PROBE_REPORT
+  ?? "/tmp/mclone-native-web-view-replay.json";
 const blockEditProbeReportPath = process.env.MCLONE_NATIVE_WEB_BLOCK_EDIT_PROBE_REPORT
   ?? "/tmp/mclone-native-web-block-edit-probe.json";
 const deathUiProbeReportPath = process.env.MCLONE_NATIVE_WEB_DEATH_UI_PROBE_REPORT
@@ -4040,6 +4049,35 @@ async function run() {
         console.log(JSON.stringify(report, null, 2));
         return;
       }
+      if (viewReplayProbe) {
+        const viewReplayProbeResult = await runViewReplayProbe(page, canvas);
+        const result = await page.evaluate(() => globalThis.__mcloneWebApp.state);
+        let pageScreenshotCaptured = false;
+        try {
+          await page.screenshot({ path: screenshotPath, fullPage: false, timeout: 5_000 });
+          pageScreenshotCaptured = true;
+        } catch (error) {
+          console.warn(`page screenshot skipped: ${error instanceof Error ? error.message : String(error)}`);
+        }
+        const canvasPng = await canvas.screenshot({ path: canvasScreenshotPath, timeout: 60_000 });
+        const canvasPixels = analyzePng(canvasPng);
+        const report = {
+          url: appUrl,
+          screenshotPath,
+          pageScreenshotCaptured,
+          canvasScreenshotPath,
+          viewReplayProbeReportPath,
+          appLoop,
+          viewReplayProbe,
+          canvasPixels,
+          viewReplayProbeResult,
+          result,
+        };
+        await writeFile(viewReplayProbeReportPath, `${JSON.stringify(report, null, 2)}\n`);
+        assertViewReplayProbeResult(report, pageErrors, canvasPixels);
+        console.log(JSON.stringify(report, null, 2));
+        return;
+      }
       if (mobileAppLoop) {
         await page.waitForFunction(
           () => {
@@ -6589,6 +6627,260 @@ async function runMovementPerfProbe(page, canvas) {
     movementCompileTimings: end.movementCompileTimings,
     compileTimings: end.compileTimings,
   };
+}
+
+/**
+ * Reproduce the stale-view failure shape with ordinary controls while recording
+ * requested and authority-accepted views at every observable transition.
+ *
+ * @param {Page} page
+ * @param {Locator} canvas
+ * @returns {Promise<any>}
+ */
+async function runViewReplayProbe(page, canvas) {
+  await canvas.evaluate((element) => element.focus());
+  await page.evaluate(() => globalThis.__mcloneWebApp?.frameInteractionSurface?.());
+  await waitForWebAppStreamingSettled(page, 120_000);
+  await page.waitForFunction(
+    () => {
+      const state = globalThis.__mcloneWebApp?.state;
+      return state?.onGround === true
+        && state.acceptedViewAvailable === true
+        && state.acceptedCenterX === state.centerX
+        && state.acceptedCenterZ === state.centerZ;
+    },
+    undefined,
+    { timeout: 30_000 },
+  );
+
+  await page.evaluate(() => {
+    const root = /** @type {any} */ (globalThis);
+    /** @type {any[]} */
+    const samples = [];
+    const probe = {
+      phase: "ground-forward",
+      samples,
+      lastSignature: "",
+      intervalId: /** @type {ReturnType<typeof setInterval> | 0} */ (0),
+      record(label = "transition", force = false) {
+        const state = root.__mcloneWebApp?.state;
+        if (!state) return;
+        const sample = {
+          label,
+          phase: probe.phase,
+          timeMs: performance.now(),
+          requestedCenterX: Number(state.centerX),
+          requestedCenterZ: Number(state.centerZ),
+          acceptedCenterX: state.acceptedViewAvailable === true
+            ? Number(state.acceptedCenterX)
+            : null,
+          acceptedCenterZ: state.acceptedViewAvailable === true
+            ? Number(state.acceptedCenterZ)
+            : null,
+          acceptedRenderDistance: state.acceptedViewAvailable === true
+            ? Number(state.acceptedRenderDistance)
+            : null,
+          acceptedTrackingRadius: state.acceptedViewAvailable === true
+            ? Number(state.acceptedTrackingRadius)
+            : null,
+          commandQueueDepth: Number(state.runnerCommandQueueDepth) || 0,
+          updateQueueDepth: Number(state.runnerUpdateQueueDepth) || 0,
+          pendingJobs: Number(state.runnerPendingJobs) || 0,
+          pendingPublications: Number(state.runnerPendingPublications) || 0,
+          pendingPersistenceLoads: Number(state.runnerPendingPersistenceLoads) || 0,
+          pendingPersistenceSaves: Number(state.runnerPendingPersistenceSaves) || 0,
+          loadedChunkCount: Number(state.loadedChunkCount) || 0,
+          loadedChunkSetHash: String(state.loadedChunkSetHash ?? ""),
+          snapshotUpdateCount: Number(state.snapshotUpdateCount) || 0,
+          unloadUpdateCount: Number(state.unloadUpdateCount) || 0,
+          residentSectionCount: Number(state.residentSectionCount) || 0,
+          streamingIdle: state.streamingIdle === true,
+          loadedCenterX: Number.isFinite(Number(state.loadedCenterX))
+            ? Number(state.loadedCenterX)
+            : null,
+          loadedCenterZ: Number.isFinite(Number(state.loadedCenterZ))
+            ? Number(state.loadedCenterZ)
+            : null,
+          cameraX: Number(state.cameraX),
+          cameraY: Number(state.cameraY),
+          cameraZ: Number(state.cameraZ),
+          cameraSpeedBlocksPerSecond: Number(state.cameraSpeedBlocksPerSecond),
+          movementMode: String(state.movementMode ?? ""),
+          onGround: state.onGround === true,
+        };
+        const signature = [
+          sample.phase,
+          sample.requestedCenterX,
+          sample.requestedCenterZ,
+          sample.acceptedCenterX,
+          sample.acceptedCenterZ,
+          sample.loadedChunkSetHash,
+        ].join(":");
+        if (force || signature !== probe.lastSignature) {
+          samples.push(sample);
+          probe.lastSignature = signature;
+        }
+      },
+    };
+    probe.intervalId = setInterval(() => probe.record(), 10);
+    root.__mcloneViewReplayProbe = probe;
+    probe.record("start", true);
+  });
+
+  const groundStart = await captureViewReplayProbeState(page, "ground-start");
+  await moveAcrossViewReplayChunks(page, "KeyD", "d", groundStart, 2, 60_000);
+  await waitForWebAppStreamingSettled(page, 120_000);
+  const groundEnd = await captureViewReplayProbeState(page, "ground-end");
+
+  await dispatchKeyboardEvent(page, "keydown", { code: "KeyN", key: "n" });
+  await dispatchKeyboardEvent(page, "keyup", { code: "KeyN", key: "n" });
+  await page.waitForFunction(
+    () => globalThis.__mcloneWebApp?.state?.movementMode === "FLY",
+    undefined,
+    { timeout: 10_000 },
+  );
+  await setViewReplayProbePhase(page, "normal-fly-forward");
+  const normalStart = await captureViewReplayProbeState(page, "normal-start");
+  await moveAcrossViewReplayChunks(page, "KeyW", "w", normalStart, 4, 60_000);
+  await waitForWebAppStreamingSettled(page, 120_000);
+  const normalForward = await captureViewReplayProbeState(page, "normal-forward-end");
+
+  await setViewReplayProbePhase(page, "normal-fly-reverse");
+  await moveAcrossViewReplayChunks(page, "KeyS", "s", normalForward, 4, 60_000);
+  await waitForWebAppStreamingSettled(page, 120_000);
+  const normalReverse = await captureViewReplayProbeState(page, "normal-reverse-end");
+
+  await page.evaluate(() => {
+    for (let i = 0; i < 4; i += 1) {
+      globalThis.__mcloneWebApp.adjustCameraSpeed?.(4);
+    }
+  });
+  await setViewReplayProbePhase(page, "accelerated-forward");
+  const acceleratedStart = await captureViewReplayProbeState(page, "accelerated-start");
+  await moveAcrossViewReplayChunks(page, "KeyW", "w", acceleratedStart, 8, 45_000);
+  const acceleratedForward = await captureViewReplayProbeState(page, "accelerated-forward-end");
+
+  // Reverse immediately, before asking the runner to settle. The original Web
+  // defect replayed stale accepted centers here and removed freshly visible
+  // chunks after the camera had already turned around.
+  await setViewReplayProbePhase(page, "accelerated-reverse");
+  await moveAcrossViewReplayChunks(page, "KeyS", "s", acceleratedForward, 8, 45_000);
+  await waitForWebAppStreamingSettled(page, 120_000);
+  const settled = await captureViewReplayProbeState(page, "settled");
+  await page.waitForTimeout(1_500);
+  const stable = await captureViewReplayProbeState(page, "stability-window-end");
+  const samples = await page.evaluate(() => {
+    const probe = /** @type {any} */ (globalThis).__mcloneViewReplayProbe;
+    if (!probe) return [];
+    clearInterval(probe.intervalId);
+    probe.record("end", true);
+    return probe.samples;
+  });
+  await page.evaluate(
+    () => globalThis.__mcloneWebApp?.frameInteractionSurface?.() ?? null,
+  );
+  await waitForWebAppStreamingSettled(page, 120_000);
+  const screenshotFraming = await captureViewReplayProbeState(page, "screenshot-framing");
+
+  return {
+    ok: true,
+    groundStart,
+    groundEnd,
+    normalStart,
+    normalForward,
+    normalReverse,
+    acceleratedStart,
+    acceleratedForward,
+    settled,
+    stable,
+    screenshotFraming,
+    samples,
+  };
+}
+
+/**
+ * @param {Page} page
+ * @param {string} phase
+ */
+async function setViewReplayProbePhase(page, phase) {
+  await page.evaluate((nextPhase) => {
+    const probe = /** @type {any} */ (globalThis).__mcloneViewReplayProbe;
+    if (!probe) return;
+    probe.phase = nextPhase;
+    probe.record("phase-start", true);
+  }, phase);
+}
+
+/**
+ * @param {Page} page
+ * @param {string} label
+ * @returns {Promise<any>}
+ */
+async function captureViewReplayProbeState(page, label) {
+  return page.evaluate((sampleLabel) => {
+    const root = /** @type {any} */ (globalThis);
+    const probe = root.__mcloneViewReplayProbe;
+    probe?.record(sampleLabel, true);
+    const state = root.__mcloneWebApp?.state ?? {};
+    return {
+      label: sampleLabel,
+      centerX: Number(state.centerX),
+      centerZ: Number(state.centerZ),
+      acceptedCenterX: state.acceptedViewAvailable === true
+        ? Number(state.acceptedCenterX)
+        : null,
+      acceptedCenterZ: state.acceptedViewAvailable === true
+        ? Number(state.acceptedCenterZ)
+        : null,
+      loadedCenterX: Number.isFinite(Number(state.loadedCenterX))
+        ? Number(state.loadedCenterX)
+        : null,
+      loadedCenterZ: Number.isFinite(Number(state.loadedCenterZ))
+        ? Number(state.loadedCenterZ)
+        : null,
+      commandQueueDepth: Number(state.runnerCommandQueueDepth) || 0,
+      loadedChunkCount: Number(state.loadedChunkCount) || 0,
+      loadedChunkSetHash: String(state.loadedChunkSetHash ?? ""),
+      snapshotUpdateCount: Number(state.snapshotUpdateCount) || 0,
+      unloadUpdateCount: Number(state.unloadUpdateCount) || 0,
+      residentSectionCount: Number(state.residentSectionCount) || 0,
+      streamingIdle: state.streamingIdle === true,
+      cameraX: Number(state.cameraX),
+      cameraY: Number(state.cameraY),
+      cameraZ: Number(state.cameraZ),
+      cameraSpeedBlocksPerSecond: Number(state.cameraSpeedBlocksPerSecond),
+      movementMode: String(state.movementMode ?? ""),
+      onGround: state.onGround === true,
+    };
+  }, label);
+}
+
+/**
+ * @param {Page} page
+ * @param {string} code
+ * @param {string} key
+ * @param {{ centerX: number, centerZ: number }} start
+ * @param {number} boundaries
+ * @param {number} timeout
+ */
+async function moveAcrossViewReplayChunks(page, code, key, start, boundaries, timeout) {
+  await dispatchKeyboardEvent(page, "keydown", { code, key });
+  try {
+    await page.waitForFunction(
+      ({ startX, startZ, boundaries }) => {
+        const state = globalThis.__mcloneWebApp?.state;
+        if (!state?.ok) return false;
+        return Math.max(
+          Math.abs(Number(state.centerX) - startX),
+          Math.abs(Number(state.centerZ) - startZ),
+        ) >= boundaries;
+      },
+      { startX: start.centerX, startZ: start.centerZ, boundaries },
+      { timeout },
+    );
+  } finally {
+    await dispatchKeyboardEvent(page, "keyup", { code, key });
+  }
 }
 
 /**
@@ -11098,6 +11390,90 @@ function assertMovementPerfResult(report, pageErrors, canvasPixels) {
   }
   if (canvasPixels.nonClearInteriorPixelCount < 128 || canvasPixels.distinctInteriorColorCount < 2) {
     throw new Error(`movement perf canvas screenshot did not contain generated chunk pixels:\n${JSON.stringify(canvasPixels, null, 2)}`);
+  }
+}
+
+/**
+ * @param {any} report
+ * @param {string[]} pageErrors
+ * @param {any} canvasPixels
+ */
+function assertViewReplayProbeResult(report, pageErrors, canvasPixels) {
+  if (pageErrors.length > 0) {
+    throw new Error(`browser view replay page errors:\n${pageErrors.join("\n")}`);
+  }
+  const probe = report.viewReplayProbeResult;
+  const result = report.result;
+  if (!probe?.ok || !result?.ok || !result.ready) {
+    throw new Error(`native web view replay probe did not complete:\n${JSON.stringify(report, null, 2)}`);
+  }
+  /** @type {(left: any, right: any) => number} */
+  const chunkDistance = (left, right) => Math.max(
+    Math.abs(Number(left.centerX) - Number(right.centerX)),
+    Math.abs(Number(left.centerZ) - Number(right.centerZ)),
+  );
+  if (
+    probe.groundStart.movementMode !== "WALK"
+    || probe.groundEnd.movementMode !== "WALK"
+    || chunkDistance(probe.groundStart, probe.groundEnd) < 2
+  ) {
+    throw new Error(`view replay probe did not cross multiple chunks on the ground:\n${JSON.stringify(probe, null, 2)}`);
+  }
+  if (
+    probe.normalStart.movementMode !== "FLY"
+    || chunkDistance(probe.normalStart, probe.normalForward) < 4
+    || chunkDistance(probe.normalForward, probe.normalReverse) < 4
+  ) {
+    throw new Error(`view replay probe did not cover ordinary fly and reversal paths:\n${JSON.stringify(probe, null, 2)}`);
+  }
+  if (
+    chunkDistance(probe.acceleratedStart, probe.acceleratedForward) < 8
+    || chunkDistance(probe.acceleratedForward, probe.settled) < 8
+    || Number(probe.acceleratedStart.cameraSpeedBlocksPerSecond)
+      <= Number(probe.normalStart.cameraSpeedBlocksPerSecond)
+  ) {
+    throw new Error(`view replay probe did not cover accelerated travel and immediate reversal:\n${JSON.stringify(probe, null, 2)}`);
+  }
+  const falseIdleSamples = probe.samples.filter((/** @type {any} */ sample) => sample.streamingIdle && (
+    sample.commandQueueDepth !== 0
+    || sample.acceptedCenterX !== sample.requestedCenterX
+    || sample.acceptedCenterZ !== sample.requestedCenterZ
+    || sample.loadedCenterX !== sample.acceptedCenterX
+    || sample.loadedCenterZ !== sample.acceptedCenterZ
+  ));
+  if (falseIdleSamples.length > 0) {
+    throw new Error(`view replay probe observed fabricated streaming idle:\n${JSON.stringify(falseIdleSamples, null, 2)}`);
+  }
+  if (
+    probe.settled.streamingIdle !== true
+    || probe.settled.commandQueueDepth !== 0
+    || probe.settled.acceptedCenterX !== probe.settled.centerX
+    || probe.settled.acceptedCenterZ !== probe.settled.centerZ
+    || probe.settled.loadedCenterX !== probe.settled.centerX
+    || probe.settled.loadedCenterZ !== probe.settled.centerZ
+  ) {
+    throw new Error(`view replay probe did not settle on its final authority view:\n${JSON.stringify(probe.settled, null, 2)}`);
+  }
+  if (
+    probe.stable.centerX !== probe.settled.centerX
+    || probe.stable.centerZ !== probe.settled.centerZ
+    || probe.stable.acceptedCenterX !== probe.settled.acceptedCenterX
+    || probe.stable.acceptedCenterZ !== probe.settled.acceptedCenterZ
+    || probe.stable.loadedChunkSetHash !== probe.settled.loadedChunkSetHash
+    || probe.stable.snapshotUpdateCount !== probe.settled.snapshotUpdateCount
+    || probe.stable.unloadUpdateCount !== probe.settled.unloadUpdateCount
+  ) {
+    throw new Error(`view replay probe replayed stale chunks after reporting idle:\n${JSON.stringify({ settled: probe.settled, stable: probe.stable }, null, 2)}`);
+  }
+  if (
+    probe.samples.length < 12
+    || probe.samples.some((/** @type {any} */ sample) => sample.loadedChunkCount <= 0)
+    || !probe.samples.some((/** @type {any} */ sample) => sample.loadedChunkSetHash.length > 0)
+  ) {
+    throw new Error(`view replay probe did not retain transition-level chunk evidence:\n${JSON.stringify(probe.samples, null, 2)}`);
+  }
+  if (canvasPixels.nonClearInteriorPixelCount < 128 || canvasPixels.distinctInteriorColorCount < 2) {
+    throw new Error(`view replay canvas screenshot did not contain rendered pixels:\n${JSON.stringify(canvasPixels, null, 2)}`);
   }
 }
 

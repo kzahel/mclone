@@ -12,11 +12,11 @@ use std::fmt;
 use mclone_core::BlockPos;
 #[cfg(not(target_arch = "wasm32"))]
 use mclone_core::HorizontalTopology;
+use mclone_protocol::{ChunkView, ClientCommand, ProtocolCodecError, ServerUpdate};
 #[cfg(not(target_arch = "wasm32"))]
 use mclone_protocol::{
     DimensionKey, decode_client_command, encode_client_command, encode_server_update,
 };
-use mclone_protocol::{ChunkView, ClientCommand, ProtocolCodecError, ServerUpdate};
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::ChunkPublicationBudgetConfig;

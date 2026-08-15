@@ -191,6 +191,7 @@
     "native:web:asset-pack-smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --asset-pack-ui-probe",
     "native:web:mobile-smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --mobile-app-loop",
     "native:web:movement-perf": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --movement-perf",
+    "native:web:view-replay": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --view-replay-probe",
     "native:web:block-edit-probe": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --block-edit-probe",
     "native:web:death-ui-smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --death-ui-probe",
     "native:web:auxiliary-split-smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --auxiliary-split-probe",

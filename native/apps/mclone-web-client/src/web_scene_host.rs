@@ -3132,14 +3132,15 @@ impl WebSceneHost {
             camera.eye.z as f32,
         );
         let accepted_view_matches = stats.host_mode.server_owned_lanes_are_remote()
-            || host
-                .runtime_poll_diagnostics()
-                .and_then(|diagnostics| diagnostics.accepted_local_chunk_view)
-                .is_some_and(|accepted| {
-                    accepted.center == stats.interest_center
-                        && accepted.render_distance == stats.render_distance
-                        && accepted.chunk_tracking_radius == stats.chunk_tracking_radius
-                });
+            || (camera.chunk_pos == stats.interest_center
+                && host
+                    .runtime_poll_diagnostics()
+                    .and_then(|diagnostics| diagnostics.accepted_local_chunk_view)
+                    .is_some_and(|accepted| {
+                        accepted.center == stats.interest_center
+                            && accepted.render_distance == stats.render_distance
+                            && accepted.chunk_tracking_radius == stats.chunk_tracking_radius
+                    }));
         accepted_view_matches
             && stats.server_command_queue_depth == 0
             && stats.server_update_queue_depth == 0
@@ -3468,6 +3469,11 @@ impl WebSceneHost {
             )?;
             report_set_number(&object, "sunAngle", f64::from(host.mono_sun_angle()))?;
             if let Some(client) = host.mono_client() {
+                report_set_string(
+                    &object,
+                    "loadedChunkSetHash",
+                    &loaded_chunk_set_hash(client),
+                )?;
                 let statistics = client.player_statistics();
                 report_set_number(&object, "entityCount", client.entity_count() as f64)?;
                 report_set_number(
@@ -5451,6 +5457,17 @@ fn find_interaction_surface(host: &McloneSceneHost) -> Option<BlockPos> {
         }
     }
     None
+}
+
+fn loaded_chunk_set_hash(client: &mclone_client::ClientRuntime) -> String {
+    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+    for pos in client.loaded_chunk_positions() {
+        for byte in pos.x.to_le_bytes().into_iter().chain(pos.z.to_le_bytes()) {
+            hash ^= u64::from(byte);
+            hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    }
+    format!("{hash:016x}")
 }
 
 fn aim_player_host_at_block(host: &mut McloneSceneHost, block: BlockPos) {
