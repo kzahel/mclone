@@ -37,6 +37,14 @@ of the loaded lifecycle and natural nest/hatch path. The gameplay model still
 contains no population estimator or carrying-capacity target; raw resource,
 condition, birth, and death histories are the calibration evidence.
 
+The first corrected multi-seed 30-day matrix proves that extraction across
+four ordinary radius-8 Overworld windows. Every exact invariant and
+full/accelerated canary passes. Wet windows consume different mixtures of
+shore seeds and aquatic invertebrates; the dry control retains zero aquatic
+capacity and zero mallards. Successful attended hatching keeps a bounded
+parent-owned memory of the still-valid shore site, enabling a later clutch
+without turning nests into permanent homes or loading remote terrain.
+
 ## Scope
 
 This topic owns the durable state and active-behavior model by which varied

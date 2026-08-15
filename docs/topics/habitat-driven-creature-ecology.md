@@ -262,6 +262,28 @@ reproduction gate, mortality input, despawn rule, or acceptance requirement.
 If it becomes falsely precise or needs a second aggregate simulation, retain
 the raw resource and population histories and omit the estimate.
 
+The corrected 30-day typed-resource calibration is the first multi-seed
+population evidence for this model. Its four radius-8 windows all pass exact
+identity, resource, biomass, boundary, overload, and full/accelerated
+invariants:
+
+| Window | Initial rabbit/deer/mallard | Final rabbit/deer/mallard | Mallard nests/births/deaths |
+|---|---:|---:|---:|
+| mixed river meadow, seed `12345` | 31 / 5 / 6 | 30 / 25 / 4 | 3 / 3 / 5 starvation |
+| mixed river steppe, seed `12345` | 16 / 4 / 4 | 11 / 24 / 2 | 1 / 1 / 3 starvation |
+| river/mountain, seed `-24680` | 20 / 13 / 12 | 17 / 58 / 6 | 2 / 2 / 8 starvation |
+| dry meadow/woodland control, seed `12345` | 30 / 11 / 0 | 10 / 52 / 0 | 0 / 0 / 0 |
+
+The dry control has exactly zero aquatic potential and mallard consumption.
+The wet windows consume shore seeds and aquatic invertebrates, but aquatic
+vegetation honestly remains zero in these samples. A successful attended
+hatch now preserves the pair's validated shore-site memory so it can be reused
+after cooldown; removal of a lost or destroyed nest still clears stale intent.
+The meadow produced three clutches after that correction while food pressure
+still caused five deaths, demonstrating opportunity without a guaranteed
+replacement rate. The exact diagnostic matrix checksum is
+`f951d5859d999cdc5e074872ff2bbd529178b8e34ca54987f6acddcdd61e3007`.
+
 ## Mechanics Ladder
 
 Creature breadth should grow by completing small loops rather than importing
