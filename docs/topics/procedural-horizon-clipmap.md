@@ -144,7 +144,13 @@ procedural geometry to occlude it. Desktop and phone browser semantic gates
 pass, and hosted interactive Human Review 1B accepted the corrected
 composition on 2026-07-27. Minor z-fighting limited to the outermost exact
 blocks remains a known near-coincident frontier-overlap issue for later
-collar/skirt refinement; it does not reopen the shared-depth correction. No
+collar/skirt refinement; it does not reopen the shared-depth correction.
+Planned Tactical
+[`304`](../tactical/304-lod-frontier-and-near-field-voxel-convergence.md)
+now owns the corrective direction: complete horizontal exact ownership, an
+explicit material-aware frontier connector, a spacing-one top-and-riser voxel
+shell, and near-field material/light convergence without expanding exact chunk
+residency or reviving the retired chunk-based system. No
 game-scene, Android, or XR adoption had started at that checkpoint.
 Post-review Explorer evidence then showed that Slice 3B's viewer-forward
 anchor was useful for foreground diagnosis but confusing as the product

@@ -14,6 +14,14 @@ shared workspace check, and matched release performance receipts on
 decoration-lake summaries, flat water geometry, stored lighting, and GPU
 timestamp instrumentation remain separate work.
 
+Planned Tactical
+[`304`](../tactical/304-lod-frontier-and-near-field-voxel-convergence.md)
+coordinates the next near-field appearance step with the exact-frontier
+correction. It will compare active-pack face sprites and biome tint, exact-style
+daylight and face shade, and a spacing-one top-and-riser voxel shell while
+leaving farther rings smooth and fixed-budget. Independent water geometry and
+decoration-lake summaries remain outside that tactical.
+
 ## Scope
 
 This topic owns how the procedural-horizon surface looks after worldgen has
