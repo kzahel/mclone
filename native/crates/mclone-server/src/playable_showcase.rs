@@ -943,6 +943,9 @@ fn write_entities(
         .collect::<BTreeMap<_, _>>();
     let mut chunks: BTreeMap<ChunkPos, Vec<EntitySaveRecord>> = BTreeMap::new();
     for recipe in recipes {
+        let persistent_id = *persistent_ids
+            .get(recipe.id.as_str())
+            .expect("validated showcase entity id");
         let parents = recipe
             .state
             .parents()
@@ -956,10 +959,23 @@ fn write_entities(
                 ..
             } => EntitySavePayload::Mallard {
                 egg_time: *egg_time,
+                sex: crate::entity::identity_mallard_sex(persistent_id),
+                life_stage: if *age_ticks < crate::entity::MALLARD_GROWTH_REQUIRED_TICKS {
+                    mclone_protocol::MallardLifeStage::Duckling
+                } else {
+                    mclone_protocol::MallardLifeStage::Adult
+                },
                 age_ticks: *age_ticks,
                 parents,
                 feather_time: *feather_time,
                 call_time: *call_time,
+                nest_target: None,
+                lifespan_ticks: 0,
+                energy: 800,
+                deficit_ticks: 0,
+                recent_intake: 0,
+                reproductive_condition: 640,
+                reproduction_cooldown: 0,
             },
             ShowcaseEntityState::MallardNest {
                 incubation_progress,

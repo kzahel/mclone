@@ -1,7 +1,7 @@
 use mclone_core::{BlockPos, Vec3d};
 use mclone_protocol::{
     BeeBehavior, DeerBehavior, DeerLifeStage, DeerSex, DeerSnapshotData, EntityKind,
-    EntityPersistentId, MallardLifeStage, RabbitBehavior, RabbitLifeStage,
+    EntityPersistentId, MallardLifeStage, MallardSex, RabbitBehavior, RabbitLifeStage,
 };
 use mclone_worldgen::prng::SimpleRandomSource;
 
@@ -39,10 +39,13 @@ pub(crate) struct DeerRuntimeSaveData {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct MallardRuntimeSaveData {
     pub(crate) egg_time: i32,
-    pub(crate) age_ticks: u32,
+    pub(crate) sex: MallardSex,
+    pub(crate) life_stage: MallardLifeStage,
     pub(crate) parents: [Option<EntityPersistentId>; 2],
     pub(crate) feather_time: i32,
     pub(crate) call_time: i32,
+    pub(crate) nest_target: Option<BlockPos>,
+    pub(crate) lifecycle: WildlifeLifeState,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -92,7 +95,11 @@ impl MobSpeciesState {
         match kind {
             EntityKind::Cow | EntityKind::Mannequin => Self::Cow,
             EntityKind::Chicken => Self::Chicken(ChickenRuntimeState::new(random)),
-            EntityKind::Mallard => Self::Mallard(MallardRuntimeState::new(random)),
+            EntityKind::Mallard => Self::Mallard(MallardRuntimeState::new(
+                persistent_id,
+                random,
+                wildlife_tuning,
+            )),
             EntityKind::Deer => Self::Deer(DeerRuntimeState::new(
                 persistent_id,
                 random,
@@ -148,12 +155,21 @@ impl MobSpeciesState {
                 egg_time.unwrap_or_else(|| next_egg_time(random)),
             )),
             EntityKind::Mallard => Self::Mallard(MallardRuntimeState::from_saved(
+                persistent_id,
                 mallard.unwrap_or(MallardRuntimeSaveData {
                     egg_time: egg_time.unwrap_or_else(|| next_mallard_egg_time(random)),
-                    age_ticks: MALLARD_GROWTH_REQUIRED_TICKS,
+                    sex: identity_mallard_sex(persistent_id),
+                    life_stage: MallardLifeStage::Adult,
                     parents: [None; 2],
                     feather_time: next_mallard_feather_time(random),
                     call_time: next_mallard_call_time(random),
+                    nest_target: None,
+                    lifecycle: WildlifeLifeState::founder(
+                        persistent_id,
+                        WildlifeLifecycleTuning::default().mallard_maturation_ticks,
+                        WildlifeLifecycleTuning::default().mallard_lifespan_ticks,
+                        WildlifeLifecycleTuning::default().mallard_lifespan_variance_ticks,
+                    ),
                 }),
             )),
             EntityKind::Deer => Self::Deer(DeerRuntimeState::from_saved(
@@ -936,38 +952,59 @@ fn next_egg_time(random: &mut SimpleRandomSource) -> i32 {
 #[derive(Debug, PartialEq)]
 pub(super) struct MallardRuntimeState {
     egg_time: i32,
-    age_ticks: u32,
+    sex: MallardSex,
+    life_stage: MallardLifeStage,
     parents: [Option<EntityPersistentId>; 2],
     feather_time: i32,
     call_time: i32,
+    nest_target: Option<BlockPos>,
+    lifecycle: WildlifeLifeState,
 }
 
 impl MallardRuntimeState {
-    fn new(random: &mut SimpleRandomSource) -> Self {
+    fn new(
+        identity: EntityPersistentId,
+        random: &mut SimpleRandomSource,
+        tuning: WildlifeLifecycleTuning,
+    ) -> Self {
         Self {
             egg_time: next_mallard_egg_time(random),
-            age_ticks: MALLARD_GROWTH_REQUIRED_TICKS,
+            sex: identity_mallard_sex(identity),
+            life_stage: MallardLifeStage::Adult,
             parents: [None; 2],
             feather_time: next_mallard_feather_time(random),
             call_time: next_mallard_call_time(random),
+            nest_target: None,
+            lifecycle: WildlifeLifeState::founder(
+                identity,
+                tuning.mallard_maturation_ticks,
+                tuning.mallard_lifespan_ticks,
+                tuning.mallard_lifespan_variance_ticks,
+            ),
         }
     }
 
-    fn from_saved(saved: MallardRuntimeSaveData) -> Self {
+    fn from_saved(identity: EntityPersistentId, mut saved: MallardRuntimeSaveData) -> Self {
+        let tuning = WildlifeLifecycleTuning::default();
+        saved.lifecycle.normalize_lifespan(
+            identity,
+            tuning.mallard_lifespan_ticks,
+            tuning.mallard_lifespan_variance_ticks,
+        );
         Self {
             egg_time: saved.egg_time,
-            age_ticks: saved.age_ticks,
+            sex: saved.sex,
+            life_stage: saved.life_stage,
             parents: saved.parents,
             feather_time: saved.feather_time,
             call_time: saved.call_time,
+            nest_target: saved.nest_target,
+            lifecycle: saved.lifecycle,
         }
     }
 
     fn ai_step(&mut self) {
-        self.age_ticks = self
-            .age_ticks
-            .saturating_add(1)
-            .min(MALLARD_GROWTH_REQUIRED_TICKS);
+        self.lifecycle.advance_tick();
         if self.egg_time > 0 {
             self.egg_time -= 1;
         }
@@ -986,19 +1023,70 @@ impl MallardRuntimeState {
     pub(super) const fn save_data(&self) -> MallardRuntimeSaveData {
         MallardRuntimeSaveData {
             egg_time: self.egg_time,
-            age_ticks: self.age_ticks,
+            sex: self.sex,
+            life_stage: self.life_stage,
             parents: self.parents,
             feather_time: self.feather_time,
             call_time: self.call_time,
+            nest_target: self.nest_target,
+            lifecycle: self.lifecycle,
         }
     }
 
     pub(super) const fn life_stage(&self) -> MallardLifeStage {
-        if self.age_ticks < MALLARD_GROWTH_REQUIRED_TICKS {
-            MallardLifeStage::Duckling
-        } else {
-            MallardLifeStage::Adult
+        self.life_stage
+    }
+
+    pub(super) const fn sex(&self) -> MallardSex {
+        self.sex
+    }
+
+    pub(super) const fn lifecycle(&self) -> WildlifeLifeState {
+        self.lifecycle
+    }
+
+    pub(super) fn lifecycle_mut(&mut self) -> &mut WildlifeLifeState {
+        &mut self.lifecycle
+    }
+
+    pub(super) fn reconcile_maturation(&mut self, maturation_ticks: u32) -> bool {
+        if self.life_stage == MallardLifeStage::Duckling
+            && self.lifecycle.age_ticks >= maturation_ticks
+        {
+            self.life_stage = MallardLifeStage::Adult;
+            return true;
         }
+        false
+    }
+
+    pub(super) fn can_nest(&self, threshold: u16) -> bool {
+        self.sex == MallardSex::Female
+            && self.life_stage() == MallardLifeStage::Adult
+            && self.lifecycle.reproduction_cooldown == 0
+            && self.lifecycle.energy >= threshold
+            && self.lifecycle.reproductive_condition >= threshold
+            && self.lifecycle.recent_intake > 0
+    }
+
+    pub(super) fn can_fertilize(&self, threshold: u16) -> bool {
+        self.sex == MallardSex::Male
+            && self.life_stage() == MallardLifeStage::Adult
+            && self.lifecycle.reproduction_cooldown == 0
+            && self.lifecycle.energy >= threshold
+            && self.lifecycle.reproductive_condition >= threshold
+            && self.lifecycle.recent_intake > 0
+    }
+
+    pub(super) fn spend_reproduction(&mut self, cost: u16, cooldown: u32) {
+        self.lifecycle.spend_reproduction(cost, cooldown);
+    }
+
+    pub(super) const fn nest_target(&self) -> Option<BlockPos> {
+        self.nest_target
+    }
+
+    pub(super) fn set_nest_target(&mut self, target: Option<BlockPos>) {
+        self.nest_target = target;
     }
 
     pub(super) fn take_due_feather(
@@ -1029,7 +1117,11 @@ impl MallardRuntimeState {
         habitat_suitable: bool,
         random: &mut SimpleRandomSource,
     ) -> u32 {
-        if self.egg_time > 0 || !habitat_suitable {
+        if self.sex != MallardSex::Female
+            || self.life_stage() != MallardLifeStage::Adult
+            || self.egg_time > 0
+            || !habitat_suitable
+        {
             return 0;
         }
         self.egg_time = next_mallard_egg_time(random);
@@ -1045,6 +1137,21 @@ impl MallardRuntimeState {
     pub(super) fn set_trace_times_for_test(&mut self, feather_time: i32, call_time: i32) {
         self.feather_time = feather_time;
         self.call_time = call_time;
+    }
+
+    #[cfg(test)]
+    pub(super) fn set_lifecycle_for_test(&mut self, lifecycle: WildlifeLifeState, sex: MallardSex) {
+        self.lifecycle = lifecycle;
+        self.sex = sex;
+        self.life_stage = MallardLifeStage::Adult;
+    }
+}
+
+pub(crate) const fn identity_mallard_sex(identity: EntityPersistentId) -> MallardSex {
+    if identity.least % 2 == 0 {
+        MallardSex::Female
+    } else {
+        MallardSex::Male
     }
 }
 

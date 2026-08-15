@@ -662,6 +662,52 @@ mod tests {
     }
 
     #[test]
+    fn mallards_draw_aquatic_food_only_at_reachable_water() {
+        let mut wetland = WildlifeResourceLedger::default();
+        let intake = wetland.consume_diet_at(
+            WildlifeForageConsumer::Mallard,
+            &MALLARD_DIET,
+            BlockPos::new(5, 64, 2),
+            0,
+            2,
+            1_000,
+            20,
+            &mixed_habitat,
+        );
+        assert_eq!(
+            intake.resource,
+            Some(WildlifeResourceKind::AquaticInvertebrates)
+        );
+        assert!(intake.units > 0);
+        assert_eq!(
+            wetland.snapshots()[0]
+                .stratum(WildlifeResourceKind::AquaticInvertebrates)
+                .mallard_consumed,
+            u64::from(intake.units)
+        );
+
+        let dry = |pos: BlockPos| {
+            Some(generated_block_state_id(if pos.y == 63 {
+                GRASS_BLOCK
+            } else {
+                AIR
+            }))
+        };
+        let mut dry_ledger = WildlifeResourceLedger::default();
+        let dry_intake = dry_ledger.consume_diet_at(
+            WildlifeForageConsumer::Mallard,
+            &MALLARD_DIET[..2],
+            BlockPos::new(5, 64, 2),
+            0,
+            2,
+            1_000,
+            20,
+            &dry,
+        );
+        assert_eq!(dry_intake, WildlifeDietIntake::default());
+    }
+
+    #[test]
     fn resampling_does_not_refill_consumed_resources() {
         let mut ledger = WildlifeResourceLedger::default();
         let feet = BlockPos::new(2, 64, 2);

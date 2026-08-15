@@ -26,7 +26,7 @@ use crate::{
     ObserverSimulationInterest, WorldGenerationProfile,
 };
 
-pub const WILDLIFE_SIMULATION_SCHEMA_VERSION: u32 = 3;
+pub const WILDLIFE_SIMULATION_SCHEMA_VERSION: u32 = 4;
 const SETUP_POLL_LIMIT: usize = 200_000;
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -59,6 +59,7 @@ impl WildlifeSimulationConfig {
 pub enum WildlifeSimulationSpecies {
     Rabbit,
     Deer,
+    Mallard,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -169,6 +170,7 @@ pub struct WildlifePopulationSnapshot {
     pub simulation_tick: u64,
     pub rabbits: usize,
     pub deer: usize,
+    pub mallards: usize,
     pub subjects: Vec<WildlifePopulationSubject>,
 }
 
@@ -187,6 +189,7 @@ pub enum WildlifeSimulationSuppressionReason {
     Crowding,
     NoMate,
     NoRefugeCapacity,
+    NoNestSite,
     HardOverload,
 }
 
@@ -200,6 +203,10 @@ pub enum WildlifeSimulationEventKind {
     },
     Birth {
         child: WildlifeSimulationIdentity,
+        parents: [WildlifeSimulationIdentity; 2],
+    },
+    NestEstablished {
+        nest: WildlifeSimulationIdentity,
         parents: [WildlifeSimulationIdentity; 2],
     },
     Death {
@@ -266,12 +273,20 @@ impl WildlifePopulationSnapshot {
             .iter()
             .filter(|subject| subject.species == WildlifeSimulationSpecies::Rabbit)
             .count();
-        let deer = subjects.len().saturating_sub(rabbits);
+        let deer = subjects
+            .iter()
+            .filter(|subject| subject.species == WildlifeSimulationSpecies::Deer)
+            .count();
+        let mallards = subjects
+            .iter()
+            .filter(|subject| subject.species == WildlifeSimulationSpecies::Mallard)
+            .count();
         Self {
             schema_version: WILDLIFE_SIMULATION_SCHEMA_VERSION,
             simulation_tick,
             rabbits,
             deer,
+            mallards,
             subjects,
         }
     }
@@ -505,15 +520,20 @@ fn validate_tuning(tuning: crate::WildlifeLifecycleTuning) -> ChunkStoreResult<(
         || tuning.maximum_energy == 0
         || tuning.rabbit_lifespan_ticks == 0
         || tuning.deer_lifespan_ticks == 0
+        || tuning.mallard_lifespan_ticks == 0
         || tuning.rabbit_starvation_ticks == 0
         || tuning.deer_starvation_ticks == 0
+        || tuning.mallard_starvation_ticks == 0
         || tuning.hard_population_guard == 0
         || tuning.rabbit_soft_cell_density == 0
         || tuning.deer_soft_cell_density == 0
+        || tuning.mallard_soft_cell_density == 0
         || tuning.rabbit_reproductive_energy > tuning.maximum_energy
         || tuning.deer_reproductive_energy > tuning.maximum_energy
+        || tuning.mallard_reproductive_energy > tuning.maximum_energy
         || tuning.rabbit_birth_energy_cost > tuning.maximum_energy
         || tuning.deer_birth_energy_cost > tuning.maximum_energy
+        || tuning.mallard_birth_energy_cost > tuning.maximum_energy
     {
         return Err(ChunkStoreError::InvalidData(format!(
             "invalid wildlife lifecycle tuning revision {}",
@@ -563,22 +583,35 @@ fn subject_from_diagnostic(state: WildlifeLifeDiagnostic) -> Option<WildlifePopu
     let species = match state.kind {
         EntityKind::Rabbit => WildlifeSimulationSpecies::Rabbit,
         EntityKind::Deer => WildlifeSimulationSpecies::Deer,
+        EntityKind::Mallard => WildlifeSimulationSpecies::Mallard,
         _ => return None,
     };
     let chunk = BlockPos::containing(state.position).chunk_pos();
-    let life_stage = match (state.rabbit_life_stage, state.deer_life_stage) {
-        (Some(RabbitLifeStage::Kit), _) | (_, Some(DeerLifeStage::Fawn)) => {
+    let life_stage = match (
+        state.rabbit_life_stage,
+        state.deer_life_stage,
+        state.mallard_life_stage,
+    ) {
+        (Some(RabbitLifeStage::Kit), _, _)
+        | (_, Some(DeerLifeStage::Fawn), _)
+        | (_, _, Some(mclone_protocol::MallardLifeStage::Duckling)) => {
             WildlifeSimulationLifeStage::Young
         }
-        (Some(RabbitLifeStage::Adult), _) | (_, Some(DeerLifeStage::Adult)) => {
+        (Some(RabbitLifeStage::Adult), _, _)
+        | (_, Some(DeerLifeStage::Adult), _)
+        | (_, _, Some(mclone_protocol::MallardLifeStage::Adult)) => {
             WildlifeSimulationLifeStage::Adult
         }
         _ => return None,
     };
-    let sex = match state.deer_sex {
-        Some(DeerSex::Female) => WildlifeSimulationSex::Female,
-        Some(DeerSex::Male) => WildlifeSimulationSex::Male,
-        None => WildlifeSimulationSex::Unknown,
+    let sex = match (state.deer_sex, state.mallard_sex) {
+        (Some(DeerSex::Female), _) | (_, Some(mclone_protocol::MallardSex::Female)) => {
+            WildlifeSimulationSex::Female
+        }
+        (Some(DeerSex::Male), _) | (_, Some(mclone_protocol::MallardSex::Male)) => {
+            WildlifeSimulationSex::Male
+        }
+        (None, None) => WildlifeSimulationSex::Unknown,
     };
     Some(WildlifePopulationSubject {
         identity_most: state.persistent_id.most,
@@ -646,6 +679,7 @@ fn simulation_event_from_ecology(
         species: match event.species {
             WildlifeSpecies::Rabbit => WildlifeSimulationSpecies::Rabbit,
             WildlifeSpecies::Deer => WildlifeSimulationSpecies::Deer,
+            WildlifeSpecies::Mallard => WildlifeSimulationSpecies::Mallard,
         },
         subject: event.subject.into(),
         event: match event.kind {
@@ -661,6 +695,12 @@ fn simulation_event_from_ecology(
             WildlifeEcologyEventKind::Birth { child, parents } => {
                 WildlifeSimulationEventKind::Birth {
                     child: child.into(),
+                    parents: parents.map(Into::into),
+                }
+            }
+            WildlifeEcologyEventKind::NestEstablished { nest, parents } => {
+                WildlifeSimulationEventKind::NestEstablished {
+                    nest: nest.into(),
                     parents: parents.map(Into::into),
                 }
             }
@@ -703,6 +743,9 @@ fn simulation_event_from_ecology(
                         WildlifeReproductionSuppression::NoRefugeCapacity => {
                             WildlifeSimulationSuppressionReason::NoRefugeCapacity
                         }
+                        WildlifeReproductionSuppression::NoNestSite => {
+                            WildlifeSimulationSuppressionReason::NoNestSite
+                        }
                         WildlifeReproductionSuppression::HardOverload => {
                             WildlifeSimulationSuppressionReason::HardOverload
                         }
@@ -722,6 +765,7 @@ fn simulation_remains_from_diagnostic(
         source_species: match remains.source_species {
             crate::WildlifeRemainsSpecies::Rabbit => WildlifeSimulationSpecies::Rabbit,
             crate::WildlifeRemainsSpecies::Deer => WildlifeSimulationSpecies::Deer,
+            crate::WildlifeRemainsSpecies::Mallard => WildlifeSimulationSpecies::Mallard,
         },
         source: remains.source.into(),
         biomass: remains.biomass,

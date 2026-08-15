@@ -83,8 +83,10 @@ const RABBIT_WARREN_LIFECYCLE_ENTITY_CHUNK_RECORD_VERSION: u32 = 10;
 const RABBIT_REFUGE_MEMORY_ENTITY_CHUNK_RECORD_VERSION: u32 = 11;
 const WILDLIFE_LIFECYCLE_ENTITY_CHUNK_RECORD_VERSION: u32 = 12;
 const WILDLIFE_REMAINS_ENTITY_CHUNK_RECORD_VERSION: u32 = 13;
+const MALLARD_LIFECYCLE_ENTITY_CHUNK_RECORD_VERSION: u32 = 14;
+const MALLARD_NEST_INTENT_ENTITY_CHUNK_RECORD_VERSION: u32 = 15;
 const DEER_ANTLER_SHED_LEGACY_REMAINING_TICKS: i32 = 36_000;
-pub const ENTITY_CHUNK_RECORD_VERSION: u32 = 13;
+pub const ENTITY_CHUNK_RECORD_VERSION: u32 = 15;
 const LEGACY_PLAYER_RECORD_VERSION: u32 = 1;
 const STATISTICS_PLAYER_RECORD_VERSION: u32 = 2;
 const PLAYER_LIFE_RECORD_VERSION: u32 = 3;
@@ -515,10 +517,19 @@ pub enum EntitySavePayload {
     },
     Mallard {
         egg_time: i32,
-        age_ticks: u32,
+        sex: mclone_protocol::MallardSex,
+        life_stage: mclone_protocol::MallardLifeStage,
         parents: [Option<EntityPersistentId>; 2],
         feather_time: i32,
         call_time: i32,
+        nest_target: Option<BlockPos>,
+        age_ticks: u32,
+        lifespan_ticks: u32,
+        energy: u16,
+        deficit_ticks: u32,
+        recent_intake: u16,
+        reproductive_condition: u16,
+        reproduction_cooldown: u32,
     },
     MallardNest {
         incubation_progress: u32,
@@ -606,6 +617,7 @@ pub enum EntitySavePayload {
 pub enum WildlifeRemainsSpecies {
     Rabbit,
     Deer,
+    Mallard,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -6467,19 +6479,52 @@ fn write_entity_save_payload(
         }
         EntitySavePayload::Mallard {
             egg_time,
-            age_ticks,
+            sex,
+            life_stage,
             parents,
             feather_time,
             call_time,
+            nest_target,
+            age_ticks,
+            lifespan_ticks,
+            energy,
+            deficit_ticks,
+            recent_intake,
+            reproductive_condition,
+            reproduction_cooldown,
         } => {
             write_u8(writer, 4)?;
             write_i32(writer, *egg_time)?;
-            write_u32(writer, *age_ticks)?;
+            write_u8(
+                writer,
+                match sex {
+                    mclone_protocol::MallardSex::Female => 0,
+                    mclone_protocol::MallardSex::Male => 1,
+                },
+            )?;
+            write_u8(
+                writer,
+                match life_stage {
+                    mclone_protocol::MallardLifeStage::Duckling => 0,
+                    mclone_protocol::MallardLifeStage::Adult => 1,
+                },
+            )?;
             for parent in parents {
                 write_optional_entity_persistent_id(writer, *parent)?;
             }
             write_i32(writer, *feather_time)?;
-            write_i32(writer, *call_time)
+            write_i32(writer, *call_time)?;
+            write_bool(writer, nest_target.is_some())?;
+            if let Some(target) = nest_target {
+                write_block_pos(writer, *target)?;
+            }
+            write_u32(writer, *age_ticks)?;
+            write_u32(writer, *lifespan_ticks)?;
+            write_u16(writer, *energy)?;
+            write_u32(writer, *deficit_ticks)?;
+            write_u16(writer, *recent_intake)?;
+            write_u16(writer, *reproductive_condition)?;
+            write_u32(writer, *reproduction_cooldown)
         }
         EntitySavePayload::MallardNest {
             incubation_progress,
@@ -6704,6 +6749,7 @@ fn write_entity_save_payload(
                 match source_species {
                     WildlifeRemainsSpecies::Rabbit => 0,
                     WildlifeRemainsSpecies::Deer => 1,
+                    WildlifeRemainsSpecies::Mallard => 2,
                 },
             )?;
             write_u64(writer, source.most)?;
@@ -6750,23 +6796,97 @@ fn read_entity_save_payload(
         4 => {
             let egg_time = read_i32(reader)?;
             Ok(if codec_version >= MALLARD_ENTITY_CHUNK_RECORD_VERSION {
-                EntitySavePayload::Mallard {
-                    egg_time,
-                    age_ticks: read_u32(reader)?,
-                    parents: [
+                if codec_version >= MALLARD_LIFECYCLE_ENTITY_CHUNK_RECORD_VERSION {
+                    let sex = match read_u8(reader)? {
+                        0 => mclone_protocol::MallardSex::Female,
+                        1 => mclone_protocol::MallardSex::Male,
+                        value => {
+                            return Err(ChunkStoreError::InvalidData(format!(
+                                "unknown mallard sex {value}"
+                            )));
+                        }
+                    };
+                    let life_stage = match read_u8(reader)? {
+                        0 => mclone_protocol::MallardLifeStage::Duckling,
+                        1 => mclone_protocol::MallardLifeStage::Adult,
+                        value => {
+                            return Err(ChunkStoreError::InvalidData(format!(
+                                "unknown mallard life stage {value}"
+                            )));
+                        }
+                    };
+                    let parents = [
                         read_optional_entity_persistent_id(reader)?,
                         read_optional_entity_persistent_id(reader)?,
-                    ],
-                    feather_time: read_i32(reader)?,
-                    call_time: read_i32(reader)?,
+                    ];
+                    let feather_time = read_i32(reader)?;
+                    let call_time = read_i32(reader)?;
+                    let nest_target = if codec_version
+                        >= MALLARD_NEST_INTENT_ENTITY_CHUNK_RECORD_VERSION
+                        && read_bool(reader)?
+                    {
+                        Some(read_block_pos(reader)?)
+                    } else {
+                        None
+                    };
+                    EntitySavePayload::Mallard {
+                        egg_time,
+                        sex,
+                        life_stage,
+                        parents,
+                        feather_time,
+                        call_time,
+                        nest_target,
+                        age_ticks: read_u32(reader)?,
+                        lifespan_ticks: read_u32(reader)?,
+                        energy: read_u16(reader)?,
+                        deficit_ticks: read_u32(reader)?,
+                        recent_intake: read_u16(reader)?,
+                        reproductive_condition: read_u16(reader)?,
+                        reproduction_cooldown: read_u32(reader)?,
+                    }
+                } else {
+                    let age_ticks = read_u32(reader)?;
+                    EntitySavePayload::Mallard {
+                        egg_time,
+                        sex: mclone_protocol::MallardSex::Female,
+                        life_stage: if age_ticks < crate::entity::MALLARD_GROWTH_REQUIRED_TICKS {
+                            mclone_protocol::MallardLifeStage::Duckling
+                        } else {
+                            mclone_protocol::MallardLifeStage::Adult
+                        },
+                        age_ticks,
+                        parents: [
+                            read_optional_entity_persistent_id(reader)?,
+                            read_optional_entity_persistent_id(reader)?,
+                        ],
+                        feather_time: read_i32(reader)?,
+                        call_time: read_i32(reader)?,
+                        nest_target: None,
+                        lifespan_ticks: 0,
+                        energy: 800,
+                        deficit_ticks: 0,
+                        recent_intake: 0,
+                        reproductive_condition: 640,
+                        reproduction_cooldown: 0,
+                    }
                 }
             } else {
                 EntitySavePayload::Mallard {
                     egg_time,
+                    sex: mclone_protocol::MallardSex::Female,
+                    life_stage: mclone_protocol::MallardLifeStage::Adult,
                     age_ticks: crate::entity::MALLARD_GROWTH_REQUIRED_TICKS,
                     parents: [None; 2],
                     feather_time: 2_400,
                     call_time: 200,
+                    nest_target: None,
+                    lifespan_ticks: 0,
+                    energy: 800,
+                    deficit_ticks: 0,
+                    recent_intake: 0,
+                    reproductive_condition: 640,
+                    reproduction_cooldown: 0,
                 }
             })
         }
@@ -7128,6 +7248,7 @@ fn read_entity_save_payload(
             let source_species = match read_u8(reader)? {
                 0 => WildlifeRemainsSpecies::Rabbit,
                 1 => WildlifeRemainsSpecies::Deer,
+                2 => WildlifeRemainsSpecies::Mallard,
                 value => {
                     return Err(ChunkStoreError::InvalidData(format!(
                         "unknown wildlife remains species {value}"
@@ -7873,10 +7994,19 @@ mod tests {
                     )),
                     payload: EntitySavePayload::Mallard {
                         egg_time: 4321,
+                        sex: mclone_protocol::MallardSex::Female,
+                        life_stage: mclone_protocol::MallardLifeStage::Adult,
                         age_ticks: crate::entity::MALLARD_GROWTH_REQUIRED_TICKS,
                         parents: [None; 2],
                         feather_time: 2_400,
                         call_time: 200,
+                        nest_target: Some(BlockPos::new(9, 64, 8)),
+                        lifespan_ticks: 720_000,
+                        energy: 800,
+                        deficit_ticks: 0,
+                        recent_intake: 0,
+                        reproductive_condition: 640,
+                        reproduction_cooldown: 0,
                     },
                 },
                 EntitySaveRecord {
@@ -7935,6 +8065,43 @@ mod tests {
         let decoded = read_entity_chunk_record(&mut bytes.as_slice()).unwrap();
 
         assert_eq!(decoded, record);
+    }
+
+    #[test]
+    fn version_thirteen_mallards_receive_safe_lifecycle_defaults() {
+        let parent = EntityPersistentId::new(0xCAFE, 0xBABE);
+        let mut legacy = Vec::new();
+        write_u8(&mut legacy, 4).unwrap();
+        write_i32(&mut legacy, 321).unwrap();
+        write_u32(&mut legacy, 1_234).unwrap();
+        write_optional_entity_persistent_id(&mut legacy, Some(parent)).unwrap();
+        write_optional_entity_persistent_id(&mut legacy, None).unwrap();
+        write_i32(&mut legacy, 456).unwrap();
+        write_i32(&mut legacy, 78).unwrap();
+
+        assert_eq!(
+            read_entity_save_payload(
+                &mut legacy.as_slice(),
+                WILDLIFE_REMAINS_ENTITY_CHUNK_RECORD_VERSION,
+            )
+            .unwrap(),
+            EntitySavePayload::Mallard {
+                egg_time: 321,
+                sex: mclone_protocol::MallardSex::Female,
+                life_stage: mclone_protocol::MallardLifeStage::Duckling,
+                age_ticks: 1_234,
+                parents: [Some(parent), None],
+                feather_time: 456,
+                call_time: 78,
+                nest_target: None,
+                lifespan_ticks: 0,
+                energy: 800,
+                deficit_ticks: 0,
+                recent_intake: 0,
+                reproductive_condition: 640,
+                reproduction_cooldown: 0,
+            }
+        );
     }
 
     #[test]

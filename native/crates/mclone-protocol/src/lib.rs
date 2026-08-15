@@ -22,7 +22,7 @@ pub use ecology::{
     DeerLifeStage, DeerObservationKind, DeerSex, DeerSnapshotData, DeerSoundCue, DeerSoundKind,
     DeerUpdateData, MALLARD_FIELD_GUIDE_OBSERVATION_COUNT, MallardCallCue,
     MallardFieldGuideProgress, MallardLifeStage, MallardNestSnapshotData, MallardNestUpdateData,
-    MallardObservationKind, MallardSnapshotData, MallardTrackCue, MallardUpdateData,
+    MallardObservationKind, MallardSex, MallardSnapshotData, MallardTrackCue, MallardUpdateData,
     RABBIT_FIELD_GUIDE_OBSERVATION_COUNT, RabbitBehavior, RabbitFieldGuideProgress,
     RabbitLifeStage, RabbitObservationKind, RabbitSoundCue, RabbitSoundKind,
 };

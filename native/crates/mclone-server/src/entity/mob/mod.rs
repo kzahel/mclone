@@ -39,7 +39,7 @@ use navigation::GroundPathNavigation;
 use species::MobSpeciesState;
 pub(crate) use species::{
     BeeRuntimeSaveData, DeerRuntimeSaveData, MALLARD_GROWTH_REQUIRED_TICKS, MallardRuntimeSaveData,
-    RabbitRuntimeSaveData,
+    RabbitRuntimeSaveData, identity_mallard_sex,
 };
 
 const PLAYER_EYE_HEIGHT: f64 = 1.62;
@@ -574,6 +574,49 @@ impl MobRuntimeState {
         self.species.mallard().map(|mallard| mallard.life_stage())
     }
 
+    pub(crate) fn mallard_sex(&self) -> Option<mclone_protocol::MallardSex> {
+        self.species.mallard().map(|mallard| mallard.sex())
+    }
+
+    pub(crate) fn mallard_can_nest(&self, threshold: u16) -> bool {
+        self.species
+            .mallard()
+            .is_some_and(|mallard| mallard.can_nest(threshold))
+    }
+
+    pub(crate) fn mallard_can_fertilize(&self, threshold: u16) -> bool {
+        self.species
+            .mallard()
+            .is_some_and(|mallard| mallard.can_fertilize(threshold))
+    }
+
+    pub(crate) fn spend_mallard_reproduction(&mut self, cost: u16, cooldown: u32) {
+        self.species
+            .mallard_mut()
+            .expect("mallard species")
+            .spend_reproduction(cost, cooldown);
+    }
+
+    pub(crate) fn mallard_nest_target(&self) -> Option<BlockPos> {
+        self.species
+            .mallard()
+            .and_then(|mallard| mallard.nest_target())
+    }
+
+    pub(crate) fn set_mallard_nest_target(&mut self, target: Option<BlockPos>) {
+        self.species
+            .mallard_mut()
+            .expect("mallard species")
+            .set_nest_target(target);
+    }
+
+    pub(crate) fn mallard_shore_intent(&self) -> Option<BlockPos> {
+        self.mallard_habitat_intent.and_then(|intent| {
+            (intent.kind == MallardHabitatKind::Shore)
+                .then_some(BlockPos::containing(intent.target))
+        })
+    }
+
     pub(crate) fn deer_save_data(&self) -> Option<DeerRuntimeSaveData> {
         self.species.deer().map(|deer| deer.save_data())
     }
@@ -616,6 +659,10 @@ impl MobRuntimeState {
         } else if let Some(deer) = self.species.deer_mut() {
             deer.lifecycle_mut()
                 .apply_energy_step(intake, cost, cadence_ticks, maximum_energy);
+        } else if let Some(mallard) = self.species.mallard_mut() {
+            mallard
+                .lifecycle_mut()
+                .apply_energy_step(intake, cost, cadence_ticks, maximum_energy);
         }
     }
 
@@ -637,6 +684,14 @@ impl MobRuntimeState {
             entity.width = EntityMetadata::DEER.dimensions.width;
             entity.height = EntityMetadata::DEER.dimensions.height;
             entity.deer = Some(deer.snapshot_data());
+        } else if let Some(mallard) = self.species.mallard_mut()
+            && mallard.reconcile_maturation(tuning.mallard_maturation_ticks)
+        {
+            entity.width = EntityMetadata::MALLARD.dimensions.width;
+            entity.height = EntityMetadata::MALLARD.dimensions.height;
+            if let Some(snapshot) = entity.mallard.as_mut() {
+                snapshot.life_stage = mclone_protocol::MallardLifeStage::Adult;
+            }
         }
     }
 
@@ -1907,6 +1962,18 @@ impl MobRuntimeState {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn set_mallard_lifecycle_for_test(
+        &mut self,
+        lifecycle: WildlifeLifeState,
+        sex: mclone_protocol::MallardSex,
+    ) {
+        self.species
+            .mallard_mut()
+            .expect("mallard lifecycle test requires mallard state")
+            .set_lifecycle_for_test(lifecycle, sex);
+    }
+
     fn tick_bee<F>(&mut self, entity: &mut ServerEntityState, block_state_at: &F)
     where
         F: Fn(BlockPos) -> Option<BlockStateId>,
@@ -2098,6 +2165,24 @@ impl MobRuntimeState {
         F: Fn(BlockPos) -> Option<BlockStateId>,
     {
         let water = mallard_water_occupancy(entity.position, block_state_at);
+        if let Some(target) = self.mallard_nest_target() {
+            let target = Vec3d::new(
+                f64::from(target.x) + 0.5,
+                f64::from(target.y),
+                f64::from(target.z) + 0.5,
+            );
+            let nest_intent = MallardHabitatIntent {
+                kind: MallardHabitatKind::Shore,
+                target,
+                ticks_remaining: u16::MAX,
+            };
+            if mallard_intent_is_valid(nest_intent, block_state_at) {
+                self.mallard_habitat_intent = Some(nest_intent);
+            } else {
+                self.set_mallard_nest_target(None);
+                self.mallard_habitat_intent = None;
+            }
+        }
         if self.mallard_habitat_intent.is_some_and(|intent| {
             intent.ticks_remaining == 0 || !mallard_intent_is_valid(intent, block_state_at)
         }) {

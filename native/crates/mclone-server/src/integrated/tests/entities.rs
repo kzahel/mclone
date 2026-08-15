@@ -1053,22 +1053,28 @@ fn generated_wetland_mallard_flock_and_due_egg_survive_reload() {
     server
         .entities
         .set_mallard_egg_time_for_test(spawned[0].id, 1);
-
     server
-        .try_simulation_tick_report_for_player(player)
-        .expect("tick due mallard in wetland habitat");
-    let resident = server.entities.states();
-    let egg = resident
-        .iter()
-        .find(|entity| {
+        .entities
+        .set_mallard_sex_for_test(spawned[0].id, mclone_protocol::MallardSex::Female);
+
+    let mut egg = None;
+    for _ in 0..400 {
+        server
+            .try_simulation_tick_report_for_player(player)
+            .expect("tick due mallard in wetland habitat");
+        egg = server.entities.states().into_iter().find(|entity| {
             entity.item_stack
                 == Some(ItemStackSnapshot {
                     kind: ItemKind::MallardEgg,
                     count: 1,
                 })
-        })
-        .copied()
-        .expect("due wetland mallard should lay a distinct persistent egg");
+        });
+        if egg.is_some() {
+            break;
+        }
+    }
+    let egg = egg.expect("due wetland female should lay a distinct persistent egg");
+    let resident = server.entities.states();
     let persistent_ids = resident
         .iter()
         .map(|entity| entity.persistent_id)

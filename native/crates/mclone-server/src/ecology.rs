@@ -11,12 +11,13 @@ use serde::{Deserialize, Serialize};
 
 pub(crate) const MAX_KNOWN_PLACES: usize = 3;
 
-pub const WILDLIFE_LIFECYCLE_RULE_REVISION: u32 = 1;
+pub const WILDLIFE_LIFECYCLE_RULE_REVISION: u32 = 2;
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub(crate) enum WildlifeSpecies {
     Rabbit,
     Deer,
+    Mallard,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -32,6 +33,7 @@ pub(crate) enum WildlifeReproductionSuppression {
     Crowding,
     NoMate,
     NoRefugeCapacity,
+    NoNestSite,
     HardOverload,
 }
 
@@ -44,6 +46,10 @@ pub(crate) enum WildlifeEcologyEventKind {
     },
     Birth {
         child: EntityPersistentId,
+        parents: [EntityPersistentId; 2],
+    },
+    NestEstablished {
+        nest: EntityPersistentId,
         parents: [EntityPersistentId; 2],
     },
     Death {
@@ -91,9 +97,17 @@ pub struct WildlifeLifecycleTuning {
     pub deer_reproductive_energy: u16,
     pub deer_birth_energy_cost: u16,
     pub deer_starvation_ticks: u32,
+    pub mallard_maturation_ticks: u32,
+    pub mallard_lifespan_ticks: u32,
+    pub mallard_lifespan_variance_ticks: u32,
+    pub mallard_breeding_cooldown_ticks: u32,
+    pub mallard_reproductive_energy: u16,
+    pub mallard_birth_energy_cost: u16,
+    pub mallard_starvation_ticks: u32,
     pub hard_population_guard: u32,
     pub rabbit_soft_cell_density: u16,
     pub deer_soft_cell_density: u16,
+    pub mallard_soft_cell_density: u16,
 }
 
 impl Default for WildlifeLifecycleTuning {
@@ -116,9 +130,17 @@ impl Default for WildlifeLifecycleTuning {
             deer_reproductive_energy: 650,
             deer_birth_energy_cost: 320,
             deer_starvation_ticks: 96_000,
+            mallard_maturation_ticks: 2_400,
+            mallard_lifespan_ticks: 720_000,
+            mallard_lifespan_variance_ticks: 240_000,
+            mallard_breeding_cooldown_ticks: 48_000,
+            mallard_reproductive_energy: 600,
+            mallard_birth_energy_cost: 240,
+            mallard_starvation_ticks: 96_000,
             hard_population_guard: 4_096,
             rabbit_soft_cell_density: 12,
             deer_soft_cell_density: 8,
+            mallard_soft_cell_density: 10,
         }
     }
 }

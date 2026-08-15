@@ -310,6 +310,12 @@ impl DeerFieldGuideProgress {
 pub const MALLARD_FIELD_GUIDE_OBSERVATION_COUNT: u32 = 6;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MallardSex {
+    Female,
+    Male,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MallardLifeStage {
     Duckling,
     Adult,

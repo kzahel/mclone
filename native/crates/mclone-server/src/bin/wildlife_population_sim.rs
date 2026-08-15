@@ -22,7 +22,7 @@ use mclone_worldgen::levelgen::MCLONE_WILDLIFE_POPULATION_REVISION;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-const REPORT_SCHEMA_VERSION: u32 = 3;
+const REPORT_SCHEMA_VERSION: u32 = 4;
 const MINECRAFT_DAY_TICKS: u64 = 24_000;
 
 type AnyResult<T> = Result<T, Box<dyn Error>>;
@@ -51,6 +51,10 @@ struct PopulationCounts {
     deer_adult_females: u32,
     deer_adult_males: u32,
     deer_young: u32,
+    mallards: u32,
+    mallard_adult_females: u32,
+    mallard_adult_males: u32,
+    mallard_young: u32,
     rabbit_known_refuge: u32,
     rabbit_sheltered: u32,
     deer_proximity_groups: u32,
@@ -75,10 +79,14 @@ struct IntegerDistribution {
 struct EventCounts {
     rabbit_births: u32,
     deer_births: u32,
+    mallard_births: u32,
+    mallard_nests_established: u32,
     rabbit_old_age_deaths: u32,
     rabbit_starvation_deaths: u32,
     deer_old_age_deaths: u32,
     deer_starvation_deaths: u32,
+    mallard_old_age_deaths: u32,
+    mallard_starvation_deaths: u32,
     young_deaths: u32,
     adult_deaths: u32,
     intake_events: u32,
@@ -90,12 +98,13 @@ struct EventCounts {
     suppressed_crowding: u32,
     suppressed_no_mate: u32,
     suppressed_no_refuge_capacity: u32,
+    suppressed_no_nest_site: u32,
     suppressed_hard_overload: u32,
 }
 
 impl EventCounts {
     fn births(&self) -> u64 {
-        u64::from(self.rabbit_births) + u64::from(self.deer_births)
+        u64::from(self.rabbit_births) + u64::from(self.deer_births) + u64::from(self.mallard_births)
     }
 
     fn deaths(&self) -> u64 {
@@ -103,6 +112,8 @@ impl EventCounts {
             + u64::from(self.rabbit_starvation_deaths)
             + u64::from(self.deer_old_age_deaths)
             + u64::from(self.deer_starvation_deaths)
+            + u64::from(self.mallard_old_age_deaths)
+            + u64::from(self.mallard_starvation_deaths)
     }
 
     fn suppressed(&self) -> u64 {
@@ -111,6 +122,7 @@ impl EventCounts {
             + u64::from(self.suppressed_crowding)
             + u64::from(self.suppressed_no_mate)
             + u64::from(self.suppressed_no_refuge_capacity)
+            + u64::from(self.suppressed_no_nest_site)
             + u64::from(self.suppressed_hard_overload)
     }
 }
@@ -233,6 +245,7 @@ struct DailySummary {
     population: PopulationCounts,
     rabbit_energy: IntegerDistribution,
     deer_energy: IntegerDistribution,
+    mallard_energy: IntegerDistribution,
     age_ticks: IntegerDistribution,
     deficit_ticks: IntegerDistribution,
     events: EventCounts,
@@ -452,10 +465,11 @@ fn run() -> AnyResult<()> {
             if tick.is_multiple_of(MINECRAFT_DAY_TICKS) {
                 let summary = summaries.last().expect("sample just emitted");
                 eprintln!(
-                    "day {:>3}: rabbits={} deer={} births={} deaths={} forage={}/{} invariants={}",
+                    "day {:>3}: rabbits={} deer={} mallards={} births={} deaths={} forage={}/{} invariants={}",
                     tick / MINECRAFT_DAY_TICKS,
                     summary.population.rabbits,
                     summary.population.deer,
+                    summary.population.mallards,
                     summary.events.births(),
                     summary.events.deaths(),
                     summary.forage.available,
@@ -607,16 +621,27 @@ fn equivalence_canary_tuning(mut tuning: WildlifeLifecycleTuning) -> WildlifeLif
     tuning.deer_reproductive_energy = 600;
     tuning.deer_birth_energy_cost = 100;
     tuning.deer_starvation_ticks = 240;
+    tuning.mallard_maturation_ticks = 40;
+    tuning.mallard_lifespan_ticks = 360;
+    tuning.mallard_lifespan_variance_ticks = 0;
+    tuning.mallard_breeding_cooldown_ticks = 100;
+    tuning.mallard_reproductive_energy = 600;
+    tuning.mallard_birth_energy_cost = 100;
+    tuning.mallard_starvation_ticks = 220;
     tuning
 }
 
 fn add_event_counts(target: &mut EventCounts, source: &EventCounts) {
     target.rabbit_births += source.rabbit_births;
     target.deer_births += source.deer_births;
+    target.mallard_births += source.mallard_births;
+    target.mallard_nests_established += source.mallard_nests_established;
     target.rabbit_old_age_deaths += source.rabbit_old_age_deaths;
     target.rabbit_starvation_deaths += source.rabbit_starvation_deaths;
     target.deer_old_age_deaths += source.deer_old_age_deaths;
     target.deer_starvation_deaths += source.deer_starvation_deaths;
+    target.mallard_old_age_deaths += source.mallard_old_age_deaths;
+    target.mallard_starvation_deaths += source.mallard_starvation_deaths;
     target.young_deaths += source.young_deaths;
     target.adult_deaths += source.adult_deaths;
     target.intake_events += source.intake_events;
@@ -628,6 +653,7 @@ fn add_event_counts(target: &mut EventCounts, source: &EventCounts) {
     target.suppressed_crowding += source.suppressed_crowding;
     target.suppressed_no_mate += source.suppressed_no_mate;
     target.suppressed_no_refuge_capacity += source.suppressed_no_refuge_capacity;
+    target.suppressed_no_nest_site += source.suppressed_no_nest_site;
     target.suppressed_hard_overload += source.suppressed_hard_overload;
 }
 
@@ -685,6 +711,13 @@ fn emit_sample(
                 .subjects
                 .iter()
                 .filter(|entry| entry.species == WildlifeSimulationSpecies::Deer)
+                .map(|entry| u32::from(entry.energy)),
+        ),
+        mallard_energy: distribution(
+            snapshot
+                .subjects
+                .iter()
+                .filter(|entry| entry.species == WildlifeSimulationSpecies::Mallard)
                 .map(|entry| u32::from(entry.energy)),
         ),
         age_ticks: distribution(snapshot.subjects.iter().map(|entry| entry.age_ticks)),
@@ -871,6 +904,19 @@ fn count_population(subjects: &[WildlifePopulationSubject]) -> PopulationCounts 
                     (WildlifeSimulationLifeStage::Adult, WildlifeSimulationSex::Unknown) => {}
                 }
             }
+            WildlifeSimulationSpecies::Mallard => {
+                counts.mallards += 1;
+                match (subject.life_stage, subject.sex) {
+                    (WildlifeSimulationLifeStage::Young, _) => counts.mallard_young += 1,
+                    (WildlifeSimulationLifeStage::Adult, WildlifeSimulationSex::Female) => {
+                        counts.mallard_adult_females += 1;
+                    }
+                    (WildlifeSimulationLifeStage::Adult, WildlifeSimulationSex::Male) => {
+                        counts.mallard_adult_males += 1;
+                    }
+                    (WildlifeSimulationLifeStage::Adult, WildlifeSimulationSex::Unknown) => {}
+                }
+            }
         }
     }
     counts.deer_proximity_groups = deer_proximity_groups(subjects);
@@ -941,7 +987,11 @@ fn count_events(events: &[WildlifeSimulationEvent]) -> EventCounts {
             WildlifeSimulationEventKind::Birth { .. } => match event.species {
                 WildlifeSimulationSpecies::Rabbit => counts.rabbit_births += 1,
                 WildlifeSimulationSpecies::Deer => counts.deer_births += 1,
+                WildlifeSimulationSpecies::Mallard => counts.mallard_births += 1,
             },
+            WildlifeSimulationEventKind::NestEstablished { .. } => {
+                counts.mallard_nests_established += 1;
+            }
             WildlifeSimulationEventKind::Death { cause, life_stage } => {
                 match (event.species, cause) {
                     (WildlifeSimulationSpecies::Rabbit, WildlifeSimulationDeathCause::OldAge) => {
@@ -957,6 +1007,13 @@ fn count_events(events: &[WildlifeSimulationEvent]) -> EventCounts {
                     (WildlifeSimulationSpecies::Deer, WildlifeSimulationDeathCause::Starvation) => {
                         counts.deer_starvation_deaths += 1
                     }
+                    (WildlifeSimulationSpecies::Mallard, WildlifeSimulationDeathCause::OldAge) => {
+                        counts.mallard_old_age_deaths += 1;
+                    }
+                    (
+                        WildlifeSimulationSpecies::Mallard,
+                        WildlifeSimulationDeathCause::Starvation,
+                    ) => counts.mallard_starvation_deaths += 1,
                 }
                 match life_stage {
                     WildlifeSimulationLifeStage::Young => counts.young_deaths += 1,
@@ -984,6 +1041,9 @@ fn count_events(events: &[WildlifeSimulationEvent]) -> EventCounts {
                 }
                 WildlifeSimulationSuppressionReason::NoRefugeCapacity => {
                     counts.suppressed_no_refuge_capacity += 1;
+                }
+                WildlifeSimulationSuppressionReason::NoNestSite => {
+                    counts.suppressed_no_nest_site += 1;
                 }
                 WildlifeSimulationSuppressionReason::HardOverload => {
                     counts.suppressed_hard_overload += 1;
@@ -1096,44 +1156,56 @@ fn percentile(values: &[u32], percentile: usize) -> u32 {
 fn write_csv_header(writer: &mut impl Write) -> AnyResult<()> {
     writeln!(
         writer,
-        "sample,day,tick,total,rabbits,rabbit_adults,rabbit_young,deer,deer_adult_females,deer_adult_males,deer_young,rabbit_births,deer_births,deaths,forage_available,forage_potential,rabbit_consumed,deer_consumed,rabbit_energy_p50,deer_energy_p50,remains_records,remains_biomass,suppressed,decision_admitted,path_admitted,path_deferred,identity_checksum,invariants_passed"
+        "sample,day,tick,total,rabbits,rabbit_adults,rabbit_young,deer,deer_adult_females,deer_adult_males,deer_young,mallards,mallard_adult_females,mallard_adult_males,mallard_young,rabbit_births,deer_births,mallard_births,mallard_nests_established,deaths,forage_available,forage_potential,low_herbaceous_available,woody_browse_available,seeds_soft_mast_available,aquatic_vegetation_available,aquatic_invertebrates_available,rabbit_consumed,deer_consumed,mallard_consumed,rabbit_energy_p50,deer_energy_p50,mallard_energy_p50,remains_records,remains_biomass,suppressed,decision_admitted,path_admitted,path_deferred,identity_checksum,invariants_passed"
     )?;
     Ok(())
 }
 
 fn write_csv_row(writer: &mut impl Write, row: &DailySummary) -> AnyResult<()> {
-    writeln!(
-        writer,
-        "{},{:.3},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
-        row.sample_index,
-        row.day_milli as f64 / 1_000.0,
-        row.simulation_tick,
-        row.population.total,
-        row.population.rabbits,
-        row.population.rabbit_adults,
-        row.population.rabbit_young,
-        row.population.deer,
-        row.population.deer_adult_females,
-        row.population.deer_adult_males,
-        row.population.deer_young,
-        row.events.rabbit_births,
-        row.events.deer_births,
-        row.events.deaths(),
-        row.forage.available,
-        row.forage.potential,
-        row.forage.interval_rabbit_consumed,
-        row.forage.interval_deer_consumed,
-        row.rabbit_energy.p50,
-        row.deer_energy.p50,
-        row.remains_records,
-        row.remains_biomass,
-        row.events.suppressed(),
-        row.work.decision_admitted,
-        row.work.path_admitted,
-        row.work.path_deferred,
-        row.identity_checksum,
-        row.invariants.passed(),
-    )?;
+    let columns = [
+        row.sample_index.to_string(),
+        format!("{:.3}", row.day_milli as f64 / 1_000.0),
+        row.simulation_tick.to_string(),
+        row.population.total.to_string(),
+        row.population.rabbits.to_string(),
+        row.population.rabbit_adults.to_string(),
+        row.population.rabbit_young.to_string(),
+        row.population.deer.to_string(),
+        row.population.deer_adult_females.to_string(),
+        row.population.deer_adult_males.to_string(),
+        row.population.deer_young.to_string(),
+        row.population.mallards.to_string(),
+        row.population.mallard_adult_females.to_string(),
+        row.population.mallard_adult_males.to_string(),
+        row.population.mallard_young.to_string(),
+        row.events.rabbit_births.to_string(),
+        row.events.deer_births.to_string(),
+        row.events.mallard_births.to_string(),
+        row.events.mallard_nests_established.to_string(),
+        row.events.deaths().to_string(),
+        row.forage.available.to_string(),
+        row.forage.potential.to_string(),
+        row.forage.strata[0].available.to_string(),
+        row.forage.strata[1].available.to_string(),
+        row.forage.strata[2].available.to_string(),
+        row.forage.strata[3].available.to_string(),
+        row.forage.strata[4].available.to_string(),
+        row.forage.interval_rabbit_consumed.to_string(),
+        row.forage.interval_deer_consumed.to_string(),
+        row.forage.interval_mallard_consumed.to_string(),
+        row.rabbit_energy.p50.to_string(),
+        row.deer_energy.p50.to_string(),
+        row.mallard_energy.p50.to_string(),
+        row.remains_records.to_string(),
+        row.remains_biomass.to_string(),
+        row.events.suppressed().to_string(),
+        row.work.decision_admitted.to_string(),
+        row.work.path_admitted.to_string(),
+        row.work.path_deferred.to_string(),
+        row.identity_checksum.clone(),
+        row.invariants.passed().to_string(),
+    ];
+    writeln!(writer, "{}", columns.join(","))?;
     Ok(())
 }
 
@@ -1152,6 +1224,9 @@ fn render_html(
             ("Deer", "#d9a25f", |row: &DailySummary| {
                 u64::from(row.population.deer)
             }),
+            ("Mallards", "#5f9fd9", |row: &DailySummary| {
+                u64::from(row.population.mallards)
+            }),
         ],
     );
     let birth_death_chart = chart(
@@ -1167,14 +1242,23 @@ fn render_html(
         ],
     );
     let forage_chart = chart(
-        "Forage",
+        "Typed resource availability",
         rows,
         &[
-            ("Available", "#63b9a7", |row: &DailySummary| {
-                row.forage.available
+            ("Low herb", "#6fbf65", |row: &DailySummary| {
+                row.forage.strata[0].available
             }),
-            ("Potential", "#b6d96a", |row: &DailySummary| {
-                row.forage.potential
+            ("Browse", "#9b7d53", |row: &DailySummary| {
+                row.forage.strata[1].available
+            }),
+            ("Seeds", "#d6bd61", |row: &DailySummary| {
+                row.forage.strata[2].available
+            }),
+            ("Aquatic plants", "#52b7a6", |row: &DailySummary| {
+                row.forage.strata[3].available
+            }),
+            ("Invertebrates", "#738ed0", |row: &DailySummary| {
+                row.forage.strata[4].available
             }),
         ],
     );
@@ -1187,6 +1271,9 @@ fn render_html(
             }),
             ("Deer", "#e1b579", |row: &DailySummary| {
                 u64::from(row.deer_energy.p50)
+            }),
+            ("Mallard", "#79afe0", |row: &DailySummary| {
+                u64::from(row.mallard_energy.p50)
             }),
         ],
     );
@@ -1202,10 +1289,11 @@ fn render_html(
     for row in rows.iter().rev().take(20).rev() {
         let _ = writeln!(
             table,
-            "<tr><td>{:.3}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}/{}</td><td>{}</td></tr>",
+            "<tr><td>{:.3}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}/{}</td><td>{}</td></tr>",
             row.day_milli as f64 / 1_000.0,
             row.population.rabbits,
             row.population.deer,
+            row.population.mallards,
             row.events.births(),
             row.events.deaths(),
             row.forage.available,
@@ -1219,7 +1307,7 @@ fn render_html(
     }
     let manifest_json = html_escape(&serde_json::to_string_pretty(manifest)?);
     Ok(format!(
-        "<!doctype html><html><head><meta charset=\"utf-8\"><title>Wildlife population report</title><style>{}</style></head><body><main><p class=\"eyebrow\">Mclone authoritative ecology</p><h1>{}</h1><p>Seed <code>{}</code>, center chunk <code>{},{}</code>, radius <code>{}</code>, {} Minecraft days. <a href=\"{}\">Open the matching Terrain Lab wildlife map</a>.</p><section class=\"cards\"><article><b>{}</b><span>final rabbits</span></article><article><b>{}</b><span>final deer</span></article><article><b>{}</b><span>peak living</span></article><article class=\"{}\"><b>{}</b><span>invariants</span></article></section><section class=\"grid\">{}{}{}{}{}</section><h2>Recent samples</h2><div class=\"table-wrap\"><table><thead><tr><th>Day</th><th>Rabbits</th><th>Deer</th><th>Births</th><th>Deaths</th><th>Forage</th><th>Checks</th></tr></thead><tbody>{}</tbody></table></div><h2>Performance (not deterministic)</h2><p>{} ticks in {} ms; mean {} µs/tick; max {} µs; {} entity-ticking chunks.</p><h2>Run manifest</h2><pre>{}</pre></main></body></html>",
+        "<!doctype html><html><head><meta charset=\"utf-8\"><title>Wildlife population report</title><style>{}</style></head><body><main><p class=\"eyebrow\">Mclone authoritative ecology</p><h1>{}</h1><p>Seed <code>{}</code>, center chunk <code>{},{}</code>, radius <code>{}</code>, {} Minecraft days. <a href=\"{}\">Open the matching Terrain Lab wildlife map</a>.</p><section class=\"cards\"><article><b>{}</b><span>final rabbits</span></article><article><b>{}</b><span>final deer</span></article><article><b>{}</b><span>final mallards</span></article><article><b>{}</b><span>peak living</span></article><article class=\"{}\"><b>{}</b><span>invariants</span></article></section><section class=\"grid\">{}{}{}{}{}</section><h2>Recent samples</h2><div class=\"table-wrap\"><table><thead><tr><th>Day</th><th>Rabbits</th><th>Deer</th><th>Mallards</th><th>Births</th><th>Deaths</th><th>Resources</th><th>Checks</th></tr></thead><tbody>{}</tbody></table></div><h2>Performance (not deterministic)</h2><p>{} ticks in {} ms; mean {} µs/tick; max {} µs; {} entity-ticking chunks.</p><h2>Run manifest</h2><pre>{}</pre></main></body></html>",
         CSS,
         html_escape(&manifest.label),
         manifest.config.seed,
@@ -1230,6 +1318,7 @@ fn render_html(
         html_escape(&manifest.terrain_lab_url),
         final_row.population.rabbits,
         final_row.population.deer,
+        final_row.population.mallards,
         performance.peak_living,
         if manifest.all_invariants_passed {
             "pass"
