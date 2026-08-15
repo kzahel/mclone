@@ -32,7 +32,7 @@ function parseArguments(argv) {
     output: "/tmp/mclone-terrain-seam-review",
     width: 1280,
     height: 720,
-    settleFrames: 90,
+    settleFrames: 180,
     skipBuild: false,
   };
   for (let index = 0; index < argv.length; index += 1) {
@@ -57,7 +57,7 @@ function parseArguments(argv) {
       process.stdout.write(
         "Usage: node scripts/capture-terrain-seam-review.mjs "
         + "[--output /tmp/mclone-terrain-seam-review] [--width 1280] "
-        + "[--height 720] [--settle-frames 90] [--skip-build]\n",
+        + "[--height 720] [--settle-frames 180] [--skip-build]\n",
       );
       process.exit(0);
     } else {
@@ -239,6 +239,13 @@ function validateObservedState(capture, state) {
   if (!state.enabled || !state.targetReady || !state.exactCenterReady) {
     fail(`${capture.name} did not reach exact/procedural target readiness`);
   }
+  const expectedExactColumns = 25;
+  if (state.exactColumnCount !== expectedExactColumns) {
+    fail(
+      `${capture.name} prepared ${state.exactColumnCount} exact columns; `
+      + `expected the complete RD2 footprint of ${expectedExactColumns}`,
+    );
+  }
   if (state.pendingVegetationTiles !== 0
       || state.vegetationSubmittedJobs !== state.vegetationCompletedJobs
       || state.vegetationTransportFailures !== 0
@@ -402,7 +409,7 @@ const receipt = {
       "output extent",
     ],
     variedAxes: ["frozen time", "terrain presentation", "diagnostic channel"],
-    observedStateRule: "Every composed capture is target-ready with drained, failure-free vegetation; observed state is identical within each comparison group. Exact Only reports the horizon disabled.",
+    observedStateRule: "Every composed capture is target-ready with all 25 RD2 exact columns and drained, failure-free vegetation; observed state is identical within each comparison group. Exact Only reports the horizon disabled.",
   },
   sceneCoverage: {
     coast: ["baseline-elevated-dawn", "baseline-elevated-noon", "baseline-elevated-dusk", "baseline-elevated-midnight"],
