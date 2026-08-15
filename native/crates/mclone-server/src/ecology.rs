@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 pub(crate) const MAX_KNOWN_PLACES: usize = 3;
 
-pub const WILDLIFE_LIFECYCLE_RULE_REVISION: u32 = 3;
+pub const WILDLIFE_LIFECYCLE_RULE_REVISION: u32 = 4;
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub(crate) enum WildlifeSpecies {
@@ -126,7 +126,7 @@ impl Default for WildlifeLifecycleTuning {
             deer_maturation_ticks: 120_000,
             deer_lifespan_ticks: 1_920_000,
             deer_lifespan_variance_ticks: 480_000,
-            deer_breeding_cooldown_ticks: 96_000,
+            deer_breeding_cooldown_ticks: 288_000,
             deer_reproductive_energy: 650,
             deer_birth_energy_cost: 320,
             deer_starvation_ticks: 96_000,
@@ -491,11 +491,12 @@ mod tests {
     #[test]
     fn production_lifecycle_tuning_avoids_one_day_breeding_pulses() {
         let tuning = WildlifeLifecycleTuning::default();
-        assert_eq!(tuning.revision, 3);
+        assert_eq!(tuning.revision, 4);
         assert_eq!(tuning.rabbit_maturation_ticks, 48_000);
         assert_eq!(tuning.rabbit_breeding_cooldown_ticks, 48_000);
         assert_eq!(tuning.rabbit_lifespan_ticks, 1_440_000);
         assert_eq!(tuning.rabbit_starvation_ticks, 144_000);
+        assert_eq!(tuning.deer_breeding_cooldown_ticks, 288_000);
         assert_eq!(tuning.mallard_maturation_ticks, 48_000);
         assert_eq!(tuning.mallard_breeding_cooldown_ticks, 96_000);
         assert_eq!(tuning.mallard_lifespan_ticks, 2_160_000);
