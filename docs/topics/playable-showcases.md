@@ -86,6 +86,7 @@ For `mallard-ecology`, the mapping is:
 | adult mallard | habitat-qualified natural wetland spawning |
 | duckling | attended nest hatching |
 | nest | using an egg on a valid covered wetland shore |
+| wildlife remains | loaded old-age or starvation death |
 | carried egg | adult wetland egg laying and pickup |
 | carried feather | periodic shedding and pickup |
 | field-note observations | proximity, call, trace, pickup, nest, and hatch observation paths |
@@ -256,6 +257,25 @@ shared swim-only visual waterline. Its stricter public gate reports three
 swimming mallards at both ends of the 80-tick window, and its inspected canvas
 digest is
 `d6967d161f532f532ec7c374432a25a6bb3eaca228a0ed4493fc563681e0201a`.
+
+Tactical
+[`301`](../tactical/301-typed-resource-strata-and-mallard-ecology.md) advances
+the local review recipe to revision 3 with one bounded typed mallard-remains
+record. The reusable saved-state schema accepts rabbit, deer, or mallard
+source species, old-age or starvation cause, and bounded biomass; evidence ID
+`mclone-wildlife-natural-death-remains` binds the staged fact to the ordinary
+loaded natural-death producer and its focused durability test. No death is
+scripted by the recipe.
+
+The inspected native flat capture visibly includes the remains on the left
+bank and has digest
+`e2a0183c7526d3f87ebb3766efed9cd0bb19411d9e65a0a09f25cdb2ae0429cb`.
+Local headed WebGPU retained the ordinary 80-tick displacement/hatch/field-note
+gate, reported exactly one live remains entity, kept all browser world stores
+empty, and produced inspected canvas digest
+`a30003f0e72882c7e31e2bca032a1f81eed6af0869a7e760b6272824f68afe43`.
+Revision 3 still requires the normal pushed-revision deployed gate before it
+supersedes the revision-2 public evidence above.
 
 Tactical
 [`284`](../tactical/284-deer-forest-edge-ecology-and-semantic-props.md) adds
