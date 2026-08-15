@@ -26,6 +26,16 @@ material transition. Independent water geometry and decoration-lake summaries
 remain separate work; subjective Human Review of the new terrain character is
 pending.
 
+Planned Tactical
+[`309`](../tactical/309-procedural-horizon-lighting-and-seam-convergence.md)
+owns the resulting appearance closeout as a phase-gated campaign. Its first
+priority is the captured night failure: exact terrain darkens while much of
+the smooth horizon, procedural water, and procedural vegetation remain near
+daylight color. It then separately converges the voxel/smooth and exact/voxel
+borders, with diagnostic albedo, environmental light, geometric shade, AO,
+water-depth, and texture inputs plus Human Review after every phase. Seasonal
+solar-path policy and independent water geometry remain outside that scope.
+
 ## Scope
 
 This topic owns how the procedural-horizon surface looks after worldgen has

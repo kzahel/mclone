@@ -159,6 +159,14 @@ remains the single visible water owner through exact-painted chunks so
 translucent exact water cannot form a differently shaded square. Native,
 desktop/mobile WebGPU, stereo, flat-Android build, and Android-XR build
 boundaries pass; subjective Human Review remains pending.
+Planned Tactical
+[`309`](../tactical/309-procedural-horizon-lighting-and-seam-convergence.md)
+now inherits that unresolved visual gate. It first makes time-of-day
+illumination common to procedural land, water, and vegetation, then treats the
+spacing-one-to-smooth and exact-to-spacing-one borders as separately
+diagnosed, separately reviewed convergence phases. Tactical 304's ownership,
+bounded frontier curtain, voxel-shell topology, and fixed clipmap allocation
+remain the foundation rather than being replaced to hide the seams.
 Post-review Explorer evidence then showed that Slice 3B's viewer-forward
 anchor was useful for foreground diagnosis but confusing as the product
 default: it moves exact residency when yaw changes and can place exact terrain
