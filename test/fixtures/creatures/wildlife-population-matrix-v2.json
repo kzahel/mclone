@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "description": "Real-seed radius-8 closed-domain rabbit/deer/mallard ecology across mixed river meadow, river-steppe, wet conifer edge, dry meadow, and mixed stress windows.",
+  "canaryTicks": 480,
+  "runs": [
+    {
+      "label": "mixed-river-meadow",
+      "seed": 12345,
+      "center": [30, 50],
+      "radius": 8,
+      "days": 120
+    },
+    {
+      "label": "mixed-river-steppe",
+      "seed": 12345,
+      "center": [18, -14],
+      "radius": 8,
+      "days": 120
+    },
+    {
+      "label": "wet-conifer-edge",
+      "seed": 12345,
+      "center": [50, -34],
+      "radius": 8,
+      "days": 120
+    },
+    {
+      "label": "dry-meadow-control",
+      "seed": 12345,
+      "center": [-14, 30],
+      "radius": 8,
+      "days": 120
+    },
+    {
+      "label": "mixed-river-steppe-stress",
+      "seed": 12345,
+      "center": [14, -10],
+      "radius": 8,
+      "days": 200
+    }
+  ]
+}

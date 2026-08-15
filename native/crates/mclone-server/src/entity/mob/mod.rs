@@ -171,6 +171,7 @@ impl RabbitEcologyAdmission {
 enum MallardHabitatKind {
     Water,
     Shore,
+    Nest,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -2172,7 +2173,7 @@ impl MobRuntimeState {
                 f64::from(target.z) + 0.5,
             );
             let nest_intent = MallardHabitatIntent {
-                kind: MallardHabitatKind::Shore,
+                kind: MallardHabitatKind::Nest,
                 target,
                 ticks_remaining: u16::MAX,
             };
@@ -2306,6 +2307,7 @@ impl MobRuntimeState {
             MallardHabitatKind::Shore => {
                 random_mallard_shore(position, &mut self.random, block_state_at)
             }
+            MallardHabitatKind::Nest => None,
         };
         let (kind, target) = if let Some(target) = preferred_target {
             (preferred_kind, target)
@@ -2911,6 +2913,7 @@ fn mallard_intent_is_valid(
     match intent.kind {
         MallardHabitatKind::Water => shallow_water_surface_at(target, block_state_at).is_some(),
         MallardHabitatKind::Shore => mallard_shore_surface_at(target, block_state_at).is_some(),
+        MallardHabitatKind::Nest => mallard_land_surface_at(target, block_state_at).is_some(),
     }
 }
 
@@ -2958,6 +2961,26 @@ fn mallard_shore_surface_at(
         block_state_at(water).is_some_and(|state| block_fluid_kind(state) == BlockFluidKind::Water)
     });
     (space_clear && stable_floor && near_water).then_some(Vec3d::new(
+        f64::from(feet.x) + 0.5,
+        f64::from(feet.y),
+        f64::from(feet.z) + 0.5,
+    ))
+}
+
+fn mallard_land_surface_at(
+    feet: BlockPos,
+    block_state_at: &dyn Fn(BlockPos) -> Option<BlockStateId>,
+) -> Option<Vec3d> {
+    let floor = feet.offset(0, -1, 0);
+    let space_clear = [feet, feet.offset(0, 1, 0)].into_iter().all(|pos| {
+        block_state_at(pos).is_some_and(|state| {
+            block_fluid_kind(state) != BlockFluidKind::Water
+                && mclone_blocks::block_collision_aabb(state, pos).is_none()
+        })
+    });
+    let stable_floor = block_state_at(floor)
+        .is_some_and(|state| mclone_blocks::block_collision_aabb(state, floor).is_some());
+    (space_clear && stable_floor).then_some(Vec3d::new(
         f64::from(feet.x) + 0.5,
         f64::from(feet.y),
         f64::from(feet.z) + 0.5,

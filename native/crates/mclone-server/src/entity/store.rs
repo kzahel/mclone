@@ -5228,9 +5228,9 @@ mod tests {
     fn mallard_nest_attempt_persists_and_drives_shore_travel() {
         let mut store = ServerEntityStore::default();
         let female =
-            store.insert_passive_mob_for_test(EntityKind::Mallard, Vec3d::new(2.5, 64.0, 4.5), 0.0);
+            store.insert_passive_mob_for_test(EntityKind::Mallard, Vec3d::new(0.5, 64.0, 4.5), 0.0);
         let male =
-            store.insert_passive_mob_for_test(EntityKind::Mallard, Vec3d::new(3.5, 64.0, 4.5), 0.0);
+            store.insert_passive_mob_for_test(EntityKind::Mallard, Vec3d::new(1.5, 64.0, 4.5), 0.0);
         for (id, sex) in [
             (female, mclone_protocol::MallardSex::Female),
             (male, mclone_protocol::MallardSex::Male),
@@ -5241,7 +5241,7 @@ mod tests {
                 .unwrap()
                 .set_mallard_lifecycle_for_test(ready_wildlife_lifecycle(120_000), sex);
         }
-        let target = BlockPos::new(6, 64, 4);
+        let target = BlockPos::new(4, 64, 4);
         store
             .mobs
             .get_mut(&female)
@@ -5432,9 +5432,9 @@ mod tests {
             DIRT
         } else if pos.y == 63 {
             GRASS_BLOCK
-        } else if pos.y == 64 && (7..=10).contains(&pos.x) {
+        } else if pos.y == 64 && (5..=10).contains(&pos.x) {
             WATER
-        } else if pos == BlockPos::new(6, 64, 6) {
+        } else if pos == BlockPos::new(4, 64, 6) {
             SUGAR_CANE
         } else {
             AIR

@@ -19,6 +19,7 @@ struct Args {
     search_radius_cells: i32,
     window_radius_chunks: u32,
     limit: usize,
+    require_mallards: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -33,6 +34,7 @@ struct SiteCandidate {
     deer_groups: u32,
     deer: u32,
     mallard_groups: u32,
+    mallards: u32,
     bees: u32,
     habitat_labels: Vec<String>,
     mean_desired_density: u32,
@@ -106,15 +108,20 @@ fn run() -> AnyResult<()> {
                 args.window_radius_chunks,
                 &plans,
             );
-            if candidate.rabbit_groups > 0 && candidate.deer_groups > 0 {
+            if candidate.rabbit_groups > 0
+                && candidate.deer_groups > 0
+                && (!args.require_mallards || candidate.mallard_groups > 0)
+            {
                 candidates.push(candidate);
             }
         }
     }
     candidates.sort_unstable_by_key(|candidate| {
         (
-            std::cmp::Reverse(candidate.rabbit_groups + candidate.deer_groups),
-            std::cmp::Reverse(candidate.rabbits + candidate.deer),
+            std::cmp::Reverse(
+                candidate.rabbit_groups + candidate.deer_groups + candidate.mallard_groups,
+            ),
+            std::cmp::Reverse(candidate.rabbits + candidate.deer + candidate.mallards),
             std::cmp::Reverse(candidate.habitat_labels.len()),
             candidate.center_chunk_x,
             candidate.center_chunk_z,
@@ -143,6 +150,7 @@ fn candidate_for_window(
     let mut deer_groups = 0;
     let mut deer = 0;
     let mut mallard_groups = 0;
+    let mut mallards = 0;
     let mut bees = 0;
     let mut density_sum = 0_u32;
     let mut habitat_labels = BTreeSet::new();
@@ -162,7 +170,10 @@ fn candidate_for_window(
                 deer_groups += 1;
                 deer += u32::from(encounter.group_size);
             }
-            McloneWildlifeSpecies::Mallard => mallard_groups += 1,
+            McloneWildlifeSpecies::Mallard => {
+                mallard_groups += 1;
+                mallards += u32::from(encounter.group_size);
+            }
             McloneWildlifeSpecies::Bee => bees += u32::from(encounter.group_size),
         }
         let habitat = format!("{:?}", plan.selected_habitat.biome);
@@ -202,6 +213,7 @@ fn candidate_for_window(
         deer_groups,
         deer,
         mallard_groups,
+        mallards,
         bees,
         habitat_labels: habitat_labels.into_iter().collect(),
         mean_desired_density,
@@ -222,7 +234,8 @@ fn parse_args() -> AnyResult<Args> {
     if command.iter().any(|arg| arg == "--help" || arg == "-h") {
         println!(
             "wildlife_population_sites --seed <i64> [--center-cell <x,z>] \
-             [--search-radius-cells <n>] [--window-radius-chunks <n>] [--limit <n>]"
+             [--search-radius-cells <n>] [--window-radius-chunks <n>] [--limit <n>] \
+             [--require-mallards]"
         );
         std::process::exit(0);
     }
@@ -233,11 +246,17 @@ fn parse_args() -> AnyResult<Args> {
         search_radius_cells: 12,
         window_radius_chunks: 4,
         limit: 12,
+        require_mallards: false,
     };
     let mut saw_seed = false;
     let mut index = 1;
     while index < command.len() {
         let flag = &command[index];
+        if flag == "--require-mallards" {
+            args.require_mallards = true;
+            index += 1;
+            continue;
+        }
         let value = command
             .get(index + 1)
             .ok_or_else(|| format!("missing value for {flag}"))?;
@@ -291,5 +310,25 @@ mod tests {
         let site = candidate_for_window(-98_765, 0, -128, 8, &plans);
         assert!(site.rabbits > 0);
         assert!(site.deer > 0);
+    }
+
+    #[test]
+    fn known_real_seed_search_finds_radius_eight_three_species_window() {
+        let planner =
+            McloneOverworldWildlifePlanner::new(12_345, McloneOverworldSamplingTopology::Unbounded);
+        let plans = (8..=16)
+            .flat_map(|z| {
+                let planner = &planner;
+                (3..=11).map(move |x| {
+                    planner
+                        .plan_cell(McloneWildlifePopulationCell { x, z })
+                        .unwrap()
+                })
+            })
+            .collect::<Vec<_>>();
+        let site = candidate_for_window(12_345, 30, 50, 8, &plans);
+        assert!(site.rabbits > 0);
+        assert!(site.deer > 0);
+        assert!(site.mallards > 0);
     }
 }

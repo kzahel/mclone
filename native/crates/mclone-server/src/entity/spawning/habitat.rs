@@ -342,8 +342,6 @@ pub(crate) fn sample_wetland_habitat(
     block_state_at: &mut impl FnMut(BlockPos) -> Option<BlockStateId>,
 ) -> Result<WetlandHabitatSample, WetlandHabitatFailure> {
     let grass = generated_block_state_id(GRASS_BLOCK);
-    let lily_pad = generated_block_state_id(LILY_PAD);
-    let sugar_cane = generated_block_state_id(SUGAR_CANE);
     let grass_floor =
         block_state_at(feet.below()).ok_or(WetlandHabitatFailure::MissingBlockData)? == grass;
     let mut sample = WetlandHabitatSample {
@@ -361,7 +359,7 @@ pub(crate) fn sample_wetland_habitat(
             for dy in -2..=2 {
                 let pos = feet.offset(dx, dy, dz);
                 let state = block_state_at(pos).ok_or(WetlandHabitatFailure::MissingBlockData)?;
-                if state == lily_pad || state == sugar_cane {
+                if is_wetland_cover(state) {
                     sample.cover_blocks = sample.cover_blocks.saturating_add(1);
                 }
                 if block_fluid_kind(state) != BlockFluidKind::Water {
@@ -391,6 +389,25 @@ pub(crate) fn sample_wetland_habitat(
         score(sample.water_columns, 10),
     );
     Ok(sample)
+}
+
+fn is_wetland_cover(state: BlockStateId) -> bool {
+    matches!(
+        state,
+        value if value == generated_block_state_id(LILY_PAD)
+            || value == generated_block_state_id(SUGAR_CANE)
+            || value == generated_block_state_id(GRASS)
+            || value == generated_block_state_id(FERN)
+            || value == generated_block_state_id(LARGE_FERN_LOWER)
+            || value == generated_block_state_id(LARGE_FERN_UPPER)
+            || value == generated_block_state_id(TALL_GRASS_LOWER)
+            || value == generated_block_state_id(TALL_GRASS_UPPER)
+            || value == generated_block_state_id(OAK_LEAVES)
+            || value == generated_block_state_id(BIRCH_LEAVES)
+            || value == generated_block_state_id(SPRUCE_LEAVES)
+            || value == generated_block_state_id(DARK_OAK_LEAVES)
+            || value == generated_block_state_id(ACACIA_LEAVES)
+    )
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -530,6 +547,30 @@ mod tests {
         assert!(sample.water_columns >= 2);
         assert!(sample.shallow_water_columns >= 2);
         assert!(sample.suitable());
+    }
+
+    #[test]
+    fn ordinary_bank_vegetation_counts_as_wetland_nest_cover() {
+        let sample = sample_wetland_habitat(BlockPos::new(0, 64, 0), &mut |pos| {
+            let raw = if pos.y <= 62 {
+                DIRT
+            } else if pos.y == 63 {
+                GRASS_BLOCK
+            } else if (2..=4).contains(&pos.x) && pos.y == 64 {
+                WATER
+            } else if pos == BlockPos::new(1, 64, 2) {
+                FERN
+            } else if pos == BlockPos::new(0, 65, 3) {
+                OAK_LEAVES
+            } else {
+                AIR
+            };
+            Some(generated_block_state_id(raw))
+        })
+        .unwrap();
+
+        assert!(sample.suitable());
+        assert_eq!(sample.cover_blocks, 2);
     }
 
     #[test]

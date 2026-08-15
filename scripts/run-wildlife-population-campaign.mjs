@@ -96,7 +96,7 @@ async function runOne(binary, root, matrix, entry) {
     const final = Object.fromEntries(header.map((name, index) => [name, values[index]]));
     process.stderr.write(
       `[wildlife:${entry.label}] pass in ${((performance.now() - started) / 1000).toFixed(1)}s; `
-        + `rabbits=${final.rabbits} deer=${final.deer}\n`,
+        + `rabbits=${final.rabbits} deer=${final.deer} mallards=${final.mallards}\n`,
     );
     return { label: entry.label, status: "passed", directory: entry.label, manifest, timing, final };
   } catch (error) {
@@ -128,11 +128,11 @@ function htmlEscape(value) {
 function campaignHtml(campaign) {
   const rows = campaign.results.map((result) => {
     if (result.status !== "passed") {
-      return `<tr class="fail"><td>${htmlEscape(result.label)}</td><td>FAIL</td><td colspan="6">${htmlEscape(result.error)}</td></tr>`;
+      return `<tr class="fail"><td>${htmlEscape(result.label)}</td><td>FAIL</td><td colspan="7">${htmlEscape(result.error)}</td></tr>`;
     }
-    return `<tr><td><a href="${encodeURIComponent(result.directory)}/report.html">${htmlEscape(result.label)}</a></td><td>pass</td><td>${result.manifest.durationDays}</td><td>${result.final.rabbits}</td><td>${result.final.deer}</td><td>${result.timing.peakLiving}</td><td>${result.timing.runMillis}</td><td><code>${result.manifest.dailySeriesChecksum.slice(0, 12)}</code></td></tr>`;
+    return `<tr><td><a href="${encodeURIComponent(result.directory)}/report.html">${htmlEscape(result.label)}</a></td><td>pass</td><td>${result.manifest.durationDays}</td><td>${result.final.rabbits}</td><td>${result.final.deer}</td><td>${result.final.mallards}</td><td>${result.timing.peakLiving}</td><td>${result.timing.runMillis}</td><td><code>${result.manifest.dailySeriesChecksum.slice(0, 12)}</code></td></tr>`;
   }).join("\n");
-  return `<!doctype html><meta charset="utf-8"><title>Mclone wildlife campaign</title><style>body{font:16px system-ui;background:#111712;color:#edf4e8;max-width:1200px;margin:40px auto;padding:0 20px}table{width:100%;border-collapse:collapse;background:#182219}th,td{padding:10px;border:1px solid #344638;text-align:right}th:first-child,td:first-child{text-align:left}a{color:#9fdab0}.fail{background:#482522}code{color:#d8e7a9}</style><h1>Wildlife population campaign</h1><p>Matrix checksum <code>${campaign.matrixChecksum}</code>. Overall: <b>${campaign.allPassed ? "PASS" : "FAIL"}</b>.</p><table><thead><tr><th>Window</th><th>Status</th><th>Days</th><th>Rabbits</th><th>Deer</th><th>Peak</th><th>Runtime ms</th><th>Receipt</th></tr></thead><tbody>${rows}</tbody></table>`;
+  return `<!doctype html><meta charset="utf-8"><title>Mclone wildlife campaign</title><style>body{font:16px system-ui;background:#111712;color:#edf4e8;max-width:1200px;margin:40px auto;padding:0 20px}table{width:100%;border-collapse:collapse;background:#182219}th,td{padding:10px;border:1px solid #344638;text-align:right}th:first-child,td:first-child{text-align:left}a{color:#9fdab0}.fail{background:#482522}code{color:#d8e7a9}</style><h1>Wildlife population campaign</h1><p>Matrix checksum <code>${campaign.matrixChecksum}</code>. Overall: <b>${campaign.allPassed ? "PASS" : "FAIL"}</b>.</p><table><thead><tr><th>Window</th><th>Status</th><th>Days</th><th>Rabbits</th><th>Deer</th><th>Mallards</th><th>Peak</th><th>Runtime ms</th><th>Receipt</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 async function main() {
