@@ -1116,6 +1116,8 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let river_anti_alias = max(fwidth(input.river.x), blocks_per_pixel * 0.35);
     let pool_anti_alias = max(fwidth(input.semantics.y), 0.01);
     let physical_channel_edge = max(fwidth(input.river.z), 0.001);
+    let diagnostic = params.multiview_options.y;
+    let albedo_diagnostic = diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_ALBEDO;
     var color = input.color;
     var albedo = input.color / max(input.light, 0.001);
     var diagnostic_river_alpha = 0.0;
@@ -1149,16 +1151,18 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
                 material_blocks_per_pixel,
                 false,
             );
-            far_albedo = apply_material_texture(
-                far_albedo,
-                input.material,
-                false,
-                input.world_uv,
-                material_dx,
-                material_dy,
-                material_blocks_per_pixel,
-                false,
-            );
+            if albedo_diagnostic {
+                far_albedo = apply_material_texture(
+                    far_albedo,
+                    input.material,
+                    false,
+                    input.world_uv,
+                    material_dx,
+                    material_dy,
+                    material_blocks_per_pixel,
+                    false,
+                );
+            }
         }
         var near_color = far_color;
         var near_albedo = far_albedo;
@@ -1176,19 +1180,23 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
                 material_blocks_per_pixel,
                 true,
             );
-            near_albedo = apply_material_texture(
-                near_surface_tint(input, display_material, side_surface),
-                display_material,
-                side_surface,
-                input.world_uv,
-                material_dx,
-                material_dy,
-                material_blocks_per_pixel,
-                true,
-            );
+            if albedo_diagnostic {
+                near_albedo = apply_material_texture(
+                    near_surface_tint(input, display_material, side_surface),
+                    display_material,
+                    side_surface,
+                    input.world_uv,
+                    material_dx,
+                    material_dy,
+                    material_blocks_per_pixel,
+                    true,
+                );
+            }
         }
         color = mix(far_color, near_color, input.world_position.w);
-        albedo = mix(far_albedo, near_albedo, input.world_position.w);
+        if albedo_diagnostic {
+            albedo = mix(far_albedo, near_albedo, input.world_position.w);
+        }
     } else if input.textured != 0u && input.material < 256u {
         color = apply_material_texture(
             color,
@@ -1200,16 +1208,18 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
             material_blocks_per_pixel,
             false,
         );
-        albedo = apply_material_texture(
-            albedo,
-            input.material,
-            false,
-            input.world_uv,
-            material_dx,
-            material_dy,
-            material_blocks_per_pixel,
-            false,
-        );
+        if albedo_diagnostic {
+            albedo = apply_material_texture(
+                albedo,
+                input.material,
+                false,
+                input.world_uv,
+                material_dx,
+                material_dy,
+                material_blocks_per_pixel,
+                false,
+            );
+        }
     }
     if input.textured != 0u
         && params.content_stage_flags.x >= 1u
@@ -1247,19 +1257,23 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
                 blocks_per_pixel,
                 input.near_shell != 0u,
             );
-            river_albedo = apply_material_texture(
-                water_surface_color(input.surface_y, 1.0),
-                2u,
-                false,
-                input.world_xz,
-                world_dx,
-                world_dy,
-                blocks_per_pixel,
-                input.near_shell != 0u,
-            );
+            if albedo_diagnostic {
+                river_albedo = apply_material_texture(
+                    water_surface_color(input.surface_y, 1.0),
+                    2u,
+                    false,
+                    input.world_xz,
+                    world_dx,
+                    world_dy,
+                    blocks_per_pixel,
+                    input.near_shell != 0u,
+                );
+            }
         }
         color = mix(color, river_color, river_alpha);
-        albedo = mix(albedo, river_albedo, river_alpha);
+        if albedo_diagnostic {
+            albedo = mix(albedo, river_albedo, river_alpha);
+        }
         let pool_alpha = smoothstep(
             0.55 - pool_anti_alias,
             0.55 + pool_anti_alias,
@@ -1272,22 +1286,25 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
             water_surface_color(input.river.w, input.light),
             water_alpha * 0.88,
         );
-        albedo = mix(
-            albedo,
-            water_surface_color(input.river.w, 1.0),
-            water_alpha * 0.88,
-        );
+        if albedo_diagnostic {
+            albedo = mix(
+                albedo,
+                water_surface_color(input.river.w, 1.0),
+                water_alpha * 0.88,
+            );
+        }
         if params.content_stage_flags.x >= 4u {
             let cover = clamp(input.semantics.w, 0.0, 1.0);
             color = mix(color, color * vec3<f32>(0.57, 0.82, 0.58), cover * 0.36);
-            albedo = mix(
-                albedo,
-                albedo * vec3<f32>(0.57, 0.82, 0.58),
-                cover * 0.36,
-            );
+            if albedo_diagnostic {
+                albedo = mix(
+                    albedo,
+                    albedo * vec3<f32>(0.57, 0.82, 0.58),
+                    cover * 0.36,
+                );
+            }
         }
     }
-    let diagnostic = params.multiview_options.y;
     if diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_OWNERSHIP_LEVEL {
         color = terrain_horizon_level_color(u32(params.origin_spacing_cells.z));
     } else if diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_TOPOLOGY {
