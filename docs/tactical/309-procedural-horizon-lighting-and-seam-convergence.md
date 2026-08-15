@@ -1,6 +1,7 @@
 # Tactical 309: Procedural Horizon Lighting and Seam Convergence
 
-Status: planned 2026-08-15; phased Human Review required
+Status: Phase 0 implemented 2026-08-15; awaiting Human Review 0. No
+appearance correction has begun.
 
 Topic: `procedural-horizon-clipmap`
 
@@ -246,8 +247,7 @@ existing switch-ready horizon.
 
 ## Phase 0: Reproducible Diagnostics and Review Contract
 
-Status: initial live-scene captures recorded; diagnostic channels and formal
-review packet pending.
+Status: implemented; Human Review 0 pending.
 
 - Turn the elevated and low cameras above into reproducible capture commands
   or a small shared capture scenario, not hand-positioned screenshots.
@@ -258,6 +258,78 @@ review packet pending.
 - Add the diagnostic channels listed above and record which shader term causes
   each visible border.
 - Ensure all images report a settled, identical source/camera/vegetation state.
+
+### Phase 0 execution record
+
+Commits `34fd2e1f`, `3830479b`, `04ecde69`, `e5bcc456`, and
+`94367622` implement the diagnostic and capture contract without changing
+natural appearance. The shared `mclone-terrain-view` presentation now has
+developer-only `ownership-level`, `topology`, `albedo`,
+`environmental-illumination`, `geometric-shade`, `local-occlusion`, `water`,
+and `texture` channels. One previously reserved uniform word carries the
+selector, so the uniform size, bind groups, textures, sample records, and
+fixed clipmap allocation are unchanged. The ordinary `natural` selector is
+the default. Extra albedo atlas samples execute only in the albedo diagnostic;
+the settled natural baseline remained byte-identical after that gate at SHA-256
+`4c6c7f010b0a66d2489555d8852dd7e9f96ed466b809d6784c43c94474460391`.
+
+The reproducible command is:
+
+```bash
+pnpm native:terrain-seam-review:capture -- \
+  --output /tmp/mclone-terrain-seam-review-hr0-review
+```
+
+The schema-one receipt is
+`/tmp/mclone-terrain-seam-review-hr0-review/receipt.json`. It records every
+command, seed, chunk interest, camera, tick, terrain presentation, diagnostic,
+render option, settle policy, PNG extent/size/hash, and observed terrain state.
+The 26 1280-by-720 captures comprise:
+
+- both accepted baseline cameras at ticks `0`, `6000`, `12000`, and `18000`;
+- both cameras in Exact Only at noon and midnight;
+- noon/midnight forest, exposed-stone, and snow views, with the elevated
+  baseline also serving as the focused coast view;
+- seed `12345` plus exposed-stone seed `-98765`; and
+- all eight procedural diagnostic channels in the accepted low view.
+
+The first strict campaign run exposed a false-ready forest capture with only
+18 exact columns. The landed runner therefore requires the complete RD2
+5-by-5 exact footprint and uses 180 paced post-settle frames. Every accepted
+composed image reports 25 exact columns, 160 ready clipmap slots, target-ready
+terrain, zero pending vegetation tiles, equal submitted/completed vegetation
+jobs, and zero vegetation transport/job failures. Every comparison group has
+an identical observed terrain-state object. Exact Only reports the terrain
+horizon disabled, preserving its allocation boundary.
+
+### Attributed problem inventory
+
+| Visible discontinuity | Diagnostic attribution | Phase owning correction |
+|---|---|---|
+| Exact terrain darkens at midnight while distant land stays green | The midnight environmental channel is dark in the exact foreground and the weighted near-material band, but identity-white over the smooth procedural surface. Environmental illumination is conditionally attached to near material blending instead of being a topology-independent term. | Phase 1 |
+| Procedural water remains bright cyan at midnight | The water channel confirms the sampled and analytic water owners, while the environmental channel shows that those visible water branches consume the identity multiplier. This is environmental response, not water ownership or depth classification. | Phase 1 |
+| Proxy trees retain daytime color | The topology channel identifies proxy vegetation in pink. Its environmental channel is identity-white, while exact trees remain naturally dark. Proxy family color currently has geometric height shade and fog but no scene lightmap term. | Phase 1 |
+| Voxel-to-smooth land forms a stable color/light ring | Topology cleanly locates green voxel tops/amber risers against blue smooth terrain. Geometric shade changes from fixed `1.0/0.6/0.8` faces to slope light, the texture channel changes exact-strength near material to footprint-reduced detail, and the albedo channel retains a biome/material color shift. These are separate contributors in addition to the night failure. | Phase 2 |
+| Water character changes across procedural levels | The water channel shows continuous sampled/analytic classification, but the texture channel changes footprint response and the natural frame changes shade/color at the same topology boundary. Classification is not the primary current defect; environmental, texture, and geometry responses are. | Phases 1 and 2 |
+| Exact-to-voxel frontier remains visible at noon | Ownership/level coloring confirms one exact owner and one spacing-one procedural owner rather than coincident solid surfaces. The procedural albedo, texture, and fixed face-shade terms differ from the exact foreground. Exact stored light and model AO remain additional semantic differences for controlled Phase 3 comparison. | Phase 3 |
+| AO may contribute at the exact frontier | The procedural local-occlusion channel is identity-white for terrain and proxies. It therefore cannot explain the global day/night or voxel/smooth failures, but its absence can contribute next to exact model AO. No AO approximation is justified before the unoccluded terms converge. | Phase 3, only if multi-scene evidence warrants it |
+
+The focused coast, forest, exposed-stone, and snow images were visually
+inspected. They retain the intended exact/voxel/smooth material and vegetation
+contrasts and reproduce the nighttime problem outside the original low view.
+The diagnostic maps intentionally leave exact pixels natural and suppress fog
+only on procedural diagnostic pixels so ownership and individual terms remain
+legible; natural comparison frames retain ordinary fog and target transfer.
+
+Automated evidence passes:
+
+- `cargo test --manifest-path native/Cargo.toml -p mclone-terrain-view --lib`
+  (`96` passed, `1` GPU-only test ignored);
+- the native screenshot CLI parsing tests for diagnostic and settle controls;
+- shared Naga validation for single-view and generated multiview terrain/tree
+  shaders; and
+- the 26-capture campaign's PNG, complete-coverage, exact-only, vegetation,
+  and within-group state gates.
 
 Gate — Human Review 0: accept the cameras, scenarios, and attributed problem
 inventory as the fixed comparison set. No appearance implementation begins

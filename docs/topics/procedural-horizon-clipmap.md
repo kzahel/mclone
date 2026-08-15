@@ -159,9 +159,17 @@ remains the single visible water owner through exact-painted chunks so
 translucent exact water cannot form a differently shaded square. Native,
 desktop/mobile WebGPU, stereo, flat-Android build, and Android-XR build
 boundaries pass; subjective Human Review remains pending.
-Planned Tactical
+Active Tactical
 [`309`](../tactical/309-procedural-horizon-lighting-and-seam-convergence.md)
-now inherits that unresolved visual gate. It first makes time-of-day
+now inherits that unresolved visual gate. Phase 0 is implemented and paused
+for Human Review 0 with a fixed 26-image, two-seed native packet and shared
+ownership/topology/albedo/environment/geometry/AO/water/texture diagnostics.
+The capture gate requires all 25 RD2 exact columns, all 160 clipmap slots,
+drained failure-free vegetation, and identical observed state within each
+comparison group; Exact Only reports no horizon allocation. The diagnostics
+attribute the global night failure to missing environmental illumination on
+smooth terrain, water, and proxy trees, not to overlap or AO. The tactical next
+makes time-of-day
 illumination common to procedural land, water, and vegetation, then treats the
 spacing-one-to-smooth and exact-to-spacing-one borders as separately
 diagnosed, separately reviewed convergence phases. Tactical 304's ownership,

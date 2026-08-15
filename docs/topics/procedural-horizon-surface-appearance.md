@@ -26,15 +26,27 @@ material transition. Independent water geometry and decoration-lake summaries
 remain separate work; subjective Human Review of the new terrain character is
 pending.
 
-Planned Tactical
+Active Tactical
 [`309`](../tactical/309-procedural-horizon-lighting-and-seam-convergence.md)
-owns the resulting appearance closeout as a phase-gated campaign. Its first
-priority is the captured night failure: exact terrain darkens while much of
-the smooth horizon, procedural water, and procedural vegetation remain near
-daylight color. It then separately converges the voxel/smooth and exact/voxel
-borders, with diagnostic albedo, environmental light, geometric shade, AO,
-water-depth, and texture inputs plus Human Review after every phase. Seasonal
-solar-path policy and independent water geometry remain outside that scope.
+owns the resulting appearance closeout as a phase-gated campaign. Phase 0 is
+implemented and awaiting Human Review 0; no appearance correction has begun.
+A 26-image, two-seed native packet now fixes the low/elevated cameras, four
+frozen times, Exact Only controls, coast/forest/exposed-stone/snow scenes, and
+eight surface-decomposition channels. Every accepted composed capture reports
+all 25 RD2 exact columns, all 160 clipmap slots ready, and drained,
+failure-free vegetation with identical observed state inside its comparison
+group. Exact Only reports the horizon disabled.
+
+The diagnostics confirm that the first priority is environmental rather than
+AO: smooth terrain, visible procedural water, and proxy trees use the identity
+environment multiplier at midnight, while only the weighted near-material
+band consumes the shared lightmap. The voxel/smooth ring additionally contains
+independent fixed-face-versus-slope shade, texture-footprint, and albedo
+changes. Procedural local occlusion is currently identity-white, so it may
+matter at the exact/model-AO frontier but cannot explain the global night
+failure. Human Review 0 must accept the fixed packet and attribution before
+Phase 1 changes lighting. Seasonal solar-path policy and independent water
+geometry remain outside this scope.
 
 ## Scope
 
