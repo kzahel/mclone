@@ -4061,6 +4061,7 @@ async function run() {
         }
         const canvasPng = await canvas.screenshot({ path: canvasScreenshotPath, timeout: 60_000 });
         const canvasPixels = analyzePng(canvasPng);
+        const runnerTransportParity = await runIntegratedServerTransportParityProbe(page);
         const report = {
           url: appUrl,
           screenshotPath,
@@ -4070,6 +4071,7 @@ async function run() {
           appLoop,
           viewReplayProbe,
           canvasPixels,
+          runnerTransportParity,
           viewReplayProbeResult,
           result,
         };
@@ -6781,6 +6783,25 @@ async function runViewReplayProbe(page, canvas) {
   );
   await waitForWebAppStreamingSettled(page, 120_000);
   const screenshotFraming = await captureViewReplayProbeState(page, "screenshot-framing");
+  const maxCommandQueueDepth = samples.reduce(
+    (/** @type {number} */ maximum, /** @type {any} */ sample) => (
+      Math.max(maximum, Number(sample.commandQueueDepth) || 0)
+    ),
+    0,
+  );
+  const maxAcceptedViewLagChunks = samples.reduce((
+    /** @type {number} */ maximum,
+    /** @type {any} */ sample,
+  ) => {
+    if (sample.acceptedCenterX === null || sample.acceptedCenterZ === null) return maximum;
+    return Math.max(
+      maximum,
+      Math.max(
+        Math.abs(Number(sample.requestedCenterX) - Number(sample.acceptedCenterX)),
+        Math.abs(Number(sample.requestedCenterZ) - Number(sample.acceptedCenterZ)),
+      ),
+    );
+  }, 0);
 
   return {
     ok: true,
@@ -6794,8 +6815,31 @@ async function runViewReplayProbe(page, canvas) {
     settled,
     stable,
     screenshotFraming,
+    maxCommandQueueDepth,
+    maxAcceptedViewLagChunks,
     samples,
   };
+}
+
+/**
+ * Exercise both production runner transports through fresh isolated actors.
+ * This runs after the movement capture so transport stress cannot distort the
+ * view-lag or frame-gap evidence from the live production runner.
+ *
+ * @param {Page} page
+ * @returns {Promise<any>}
+ */
+async function runIntegratedServerTransportParityProbe(page) {
+  return page.evaluate(async () => {
+    const moduleUrl = new URL("./pkg/mclone_web_client.js", location.href).href;
+    const wasm = /** @type {any} */ (await import(moduleUrl));
+    return wasm.mclone_web_shared_topology_stress_report(
+      new URL("./mclone-integrated-server-worker.js", location.href).href,
+      new URL("./mclone-server-job-worker.js", location.href).href,
+      moduleUrl,
+      new URL("./pkg/mclone_web_client_bg.wasm", location.href).href,
+    );
+  });
 }
 
 /**
@@ -11406,6 +11450,16 @@ function assertViewReplayProbeResult(report, pageErrors, canvasPixels) {
   const result = report.result;
   if (!probe?.ok || !result?.ok || !result.ready) {
     throw new Error(`native web view replay probe did not complete:\n${JSON.stringify(report, null, 2)}`);
+  }
+  const transportParity = report.runnerTransportParity;
+  if (
+    transportParity?.ok !== true
+    || transportParity.sharedRunner?.ok !== true
+    || transportParity.fallbackRunner?.ok !== true
+    || transportParity.sharedRunner?.runnerFrameMetrics?.transportKind !== "shared-memory"
+    || transportParity.fallbackRunner?.runnerFrameMetrics?.transportKind !== "message-transfer"
+  ) {
+    throw new Error(`integrated-server runner transport parity failed:\n${JSON.stringify(transportParity, null, 2)}`);
   }
   /** @type {(left: any, right: any) => number} */
   const chunkDistance = (left, right) => Math.max(

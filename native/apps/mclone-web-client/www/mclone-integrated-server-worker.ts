@@ -94,7 +94,7 @@ let indexedDbWriterLease: HeldWorldWriterLease | null = null;
 let tickTimer: ReturnType<typeof setInterval> | 0 = 0;
 let tickInFlight = false;
 let serverOperationInFlight = false;
-let persistenceFenceInFlight = false;
+let persistenceFenceDepth = 0;
 let persistenceContinuationTail: Promise<void> = Promise.resolve();
 let runnerTransportKind: "shared-memory" | "message-transfer" = "message-transfer";
 let nextRunnerSharedBufferId = 1;
@@ -194,10 +194,10 @@ async function driveActorMessage(message: IntegratedServerWorkerMessage): Promis
   }
   const persistenceFence = message.kind === "flush-persistence" || message.kind === "shutdown";
   if (persistenceFence) {
-    persistenceFenceInFlight = true;
+    persistenceFenceDepth += 1;
     await persistenceContinuationTail;
   } else {
-    while (persistenceFenceInFlight) {
+    while (persistenceFenceDepth > 0) {
       await waitForJobTurn();
     }
   }
@@ -224,13 +224,13 @@ async function driveActorMessage(message: IntegratedServerWorkerMessage): Promis
     postActorFailure(message.requestId, error);
   } finally {
     serverOperationInFlight = false;
-    if (persistenceFence) persistenceFenceInFlight = false;
+    if (persistenceFence) persistenceFenceDepth -= 1;
   }
   schedulePersistenceRequests(detachedPersistenceRequests);
 }
 
 async function tickServer(): Promise<void> {
-  if (!server || tickInFlight || serverOperationInFlight || persistenceFenceInFlight) return;
+  if (!server || tickInFlight || serverOperationInFlight || persistenceFenceDepth > 0) return;
   const activeServer = server;
   tickInFlight = true;
   serverOperationInFlight = true;

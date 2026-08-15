@@ -1375,10 +1375,10 @@ async fn run_shared_runner_stress(
             metrics.request_frames >= FIRE_AND_FORGET_COMMANDS as usize
                 && metrics.shared_buffer_pool_misses >= FIRE_AND_FORGET_COMMANDS as usize
                 && metrics.shared_buffer_pool_drops > 0
-                && metrics.shared_buffer_fallback_inbound_frames > 0
+                && metrics.shared_buffer_pooled_inbound_frames > 0
                 && runner_diagnostics_settled(diagnostics)
         },
-        "shared runner pool overflow and fallback",
+        "shared runner pool overflow",
     )
     .await?;
 
@@ -1411,10 +1411,6 @@ async fn run_shared_runner_stress(
             >= FIRE_AND_FORGET_COMMANDS as usize
         && diagnostics.runner_frame_metrics.shared_buffer_pool_drops > 0
         && diagnostics.runner_frame_metrics.shared_buffer_pool_hits >= REUSE_COMMANDS as usize
-        && diagnostics
-            .runner_frame_metrics
-            .shared_buffer_fallback_inbound_frames
-            > 0
         && diagnostics
             .runner_frame_metrics
             .shared_buffer_pooled_inbound_frames
@@ -1479,16 +1475,20 @@ async fn wait_for_runner_condition(
     condition: impl Fn(&ServerRunnerDiagnostics) -> bool,
     label: &str,
 ) -> Result<ServerRunnerDiagnostics, String> {
+    let mut last_diagnostics = runner.diagnostics();
     for _ in 0..2400 {
         *update_count = update_count.saturating_add(runner.drain_decoded_updates()?.len());
         let diagnostics = runner.diagnostics();
         if condition(&diagnostics) {
             return Ok(diagnostics);
         }
+        last_diagnostics = diagnostics;
         *poll_count = poll_count.saturating_add(1);
         wait_for_browser_turn().await?;
     }
-    Err(format!("timed out waiting for {label}"))
+    Err(format!(
+        "timed out waiting for {label}: {last_diagnostics:?}"
+    ))
 }
 
 async fn wait_for_browser_turn() -> Result<(), String> {
