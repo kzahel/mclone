@@ -87,6 +87,13 @@ Original plan:
 - Direct port of the celestial rig math.
 - Validate: captures across a full day cycle (noon, dusk, midnight, dawn).
 
+This phase remains the owner of the ordinary visible sun/moon/star baseline.
+Tactical
+[`307`](307-seasonal-solar-path-and-cyclical-latitude.md) depends on that
+visible sun and separately owns the original Mclone plane's cyclical-latitude
+and orbital path. Do not duplicate the baseline celestial renderer there or
+make retained vanilla-shaped profiles consume Mclone cosmology.
+
 "Reasonably pretty" target = end of Phase 3.
 
 ## Out of scope (follow-up)

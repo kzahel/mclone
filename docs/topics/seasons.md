@@ -4,12 +4,15 @@ Topic: `seasons`
 
 Status: **concept-stage design record created 2026-08-15. Tactical
 [`306`](../tactical/306-seasonal-appearance-preview.md) now owns the first
-visual-only exact-terrain proof: a continuous manual year phase, one bounded
+visual-only exact-terrain proof: a continuous manual local-season phase, one bounded
 local recent-snow ground/canopy pulse, and shared desktop/XR Debug controls,
-while explicitly deferring procedural-horizon LOD. No season clock, latitude
-model, authoritative weather event, seasonal surface system, migration
-producer, seasonal hydrology, wildlife tagging, or managed-habitat
-infrastructure is implemented.
+while explicitly deferring procedural-horizon LOD. Tactical
+[`307`](../tactical/307-seasonal-solar-path-and-cyclical-latitude.md) owns the
+separate visible-sun/day-length proof and actual cyclical-latitude policy for
+the default unbounded Mclone plane, with the optional cylinder remaining
+secondary. No season clock, latitude model, authoritative weather event,
+seasonal surface system, migration producer, seasonal hydrology, wildlife
+tagging, or managed-habitat infrastructure is implemented.
 The selected direction is that unloaded terrain and entities receive no ticks
 or elapsed-time catch-up. Climate and ambient seasonal opportunities may be
 derived when an active region asks for them, while durable animals freeze.
@@ -79,11 +82,12 @@ must choose those climate semantics explicitly.
 
 ### Unbounded plane
 
-One plausible plane policy uses a large, smooth cyclical effective latitude:
+The selected first plane policy uses a large, smooth cyclical effective
+latitude:
 
 ```text
-effective_z = z + broad topology-compatible climate warp(x, z)
-latitude = sin(TAU * effective_z / climate_wavelength)
+latitude_phase = (z - phase_origin_z) / climate_wavelength
+latitude = sin(TAU * latitude_phase)
 ```
 
 Travel along the latitude axis then passes through repeating equatorial,
@@ -93,14 +97,22 @@ family while terrain, continentality, moisture, and regional ecology continue
 to vary. Only the broad climate envelope repeats; landforms, rivers, habitats,
 and content must not repeat with it.
 
-The broad warp can keep transitions from appearing as perfectly straight
-stripes, but it must not erase the navigational rule that one direction mostly
-follows climate while the other crosses it. The wavelength needs human review
-against travel time, continent scale, and year length before selection.
+The first solar proof deliberately omits coordinate warp so the navigational
+rule and solar response remain legible. A later annual-climate/worldgen study
+may propose a broad shared warp, but it must not erase the rule that one
+direction mostly follows climate while the other crosses it. Wavelength and
+phase origin need human review against spawn climate, travel time, continent
+scale, migration geography, and year length before selection.
 
 This policy makes polar regions long belts rather than literal points. That is
 acceptable only if the product describes climate regions honestly instead of
 claiming spherical geography.
+
+The solar law treats latitude as a scalar climate coordinate. Equal latitude
+on opposite sides of a polar crest has equal sun path at the same global time;
+crossing the crest does not rotate the compass frame or add a twelve-hour
+longitude shift. Globe-like pole crossings and spatial time zones remain a
+separate cosmology decision.
 
 ### X-periodic cylinder
 
@@ -135,10 +147,11 @@ remain a separate later question.
 ### Seasonal forcing
 
 A simple signed forcing can establish opposite hemispheres without a global
-biome swap:
+biome swap. With orbital phase zero at the northward equinox:
 
 ```text
-seasonal_temperature_delta = latitude * cos(year_phase) * local_amplitude
+solar_declination = axial_tilt * sin(TAU * orbital_phase)
+seasonal_temperature_delta = latitude * sin(TAU * orbital_phase) * local_amplitude
 ```
 
 Mean temperature still depends on macro climate and altitude. Seasonal
@@ -146,6 +159,34 @@ amplitude may increase with absolute latitude, while tropical moisture may
 use a separate phase and response. Day length, precipitation tendency,
 snowmelt, and biological cues should consume a shared local seasonal sample
 rather than each inventing a calendar interpretation.
+
+### Annual climate and world generation
+
+Latitude and terrain generation should be independent layers with shared
+climate meaning, not unrelated systems. Worldgen should eventually consume an
+annual climate normal rather than the current orbital instant:
+
+```text
+annual climate normal =
+    existing regional temperature and moisture
+    + latitude mean-temperature bias
+    + altitude cooling
+    + continental and coastal moderation
+
+current climate =
+    annual climate normal
+    + orbital seasonal forcing
+    + active weather
+```
+
+Durable biome vocabulary, tree species, vegetation density, soils, perennial
+snow/ice, drainage form, and habitat character may use the annual normal.
+Reversible foliage, ordinary snow/frost, blooms, forage, temporary ice, and
+seasonal activity belong to active seasonal response. Latitude should first
+bias rather than replace existing regional noise, while continents, mountains,
+and valleys remain mostly independent until map review supports stronger
+coupling. Tactical 307 defines and calibrates the shared latitude policy but
+does not change generation.
 
 ## No Unloaded-World Simulation
 
@@ -449,9 +490,10 @@ logic.
 
 ## Recommended Evidence Ladder
 
-1. Define a pure calendar and local seasonal sample with explicit plane and
-   cylinder policies. Produce fixed-seed latitude, temperature, moisture,
-   daylight, and snow-target maps before affecting gameplay.
+1. Execute Tactical 307's pure orbital/solar sample and primary cyclical-plane
+   policy, retaining its secondary cylinder proof. Produce fixed-seed
+   latitude, temperature, moisture, daylight, and snow-target maps before
+   affecting gameplay or generation.
 2. Calibrate year length, climate wavelength/scale, continental size, and
    travel time together in Terrain Lab or another shared review surface.
 3. Add foliage/material response and a bounded derived snow/wetness surface.
@@ -476,8 +518,8 @@ gameplay milestone must prove bounded work with inactive regions held frozen.
 
 - What is a useful year length relative to sleep, ordinary travel, farming,
   breeding, and real play sessions?
-- Does the product plane use cyclical latitude, a weaker directional climate,
-  or no global latitude policy?
+- What wavelength and phase origin give the selected cyclical plane latitude
+  useful spawn, travel, continental, and migration scales?
 - Does the cylinder keep asymptotic polar tails, gain finite axial limits, or
   use another mapping?
 - How should day length affect actual skylight, spawning, crops, and player
@@ -502,6 +544,7 @@ gameplay milestone must prove bounded work with inactive regions held frozen.
 ## Related
 
 - [`../tactical/306-seasonal-appearance-preview.md`](../tactical/306-seasonal-appearance-preview.md)
+- [`../tactical/307-seasonal-solar-path-and-cyclical-latitude.md`](../tactical/307-seasonal-solar-path-and-cyclical-latitude.md)
 - [`habitat-driven-creature-ecology.md`](habitat-driven-creature-ecology.md)
 - [`wildlife-ecology-state-model.md`](wildlife-ecology-state-model.md)
 - [`persistent-actor-identity.md`](persistent-actor-identity.md)

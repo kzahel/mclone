@@ -8,12 +8,12 @@ Topic: `seasons`
 
 Prove the first useful part of seasons as a visual-only, exact-terrain slice.
 Use one shared local seasonal-appearance model to make the same fixed world
-move gradually through the year and to preview one bounded recent-snowfall
-pulse without adding an authoritative calendar, gameplay effects,
-unloaded-world simulation, block mutation, or seasonal persistence.
+move gradually through a local seasonal cycle and to preview one bounded
+recent-snowfall pulse without adding an authoritative calendar, gameplay
+effects, unloaded-world simulation, block mutation, or seasonal persistence.
 
-Add typed `Season Preview`, `Year Phase`, and `Recent Snow` controls to the
-existing shared Debug options screen so the user can inspect continuous
+Add typed `Season Preview`, `Local Season Phase`, and `Recent Snow` controls to
+the existing shared Debug options screen so the user can inspect continuous
 transitions interactively on desktop flat, desktop OpenXR, and Android XR.
 The controls must use the same shared UI actions and scene/render state in flat
 and VR; do not add a desktop keyboard-only shortcut or an XR-only menu branch.
@@ -65,7 +65,7 @@ animal decision in [`../topics/seasons.md`](../topics/seasons.md).
 
 At one fixed camera, fixed noon light, fixed authoritative weather, fixed world
 revision, and fixed exact-chunk set, the user can enable a preview and scrub a
-cyclic year phase continuously through:
+cyclic local-season phase continuously through:
 
 ```text
 Spring -> Summer -> Autumn -> Winter -> Spring
@@ -101,7 +101,7 @@ Use fixed-point shared values equivalent to:
 
 ```text
 SeasonPreview = Disabled | Manual {
-    year_phase: CyclicUnitU16,
+    local_season_phase: CyclicUnitU16,
     recent_snow: Option<LocalSnowPulse>,
 }
 
@@ -129,8 +129,8 @@ presentation state:
 The Debug screen exposes:
 
 - `Season Preview`, an enable checkbox;
-- `Year Phase`, a cyclic slider shown as a percentage plus the nearest named
-  landmark; and
+- `Local Season Phase`, a cyclic slider shown as a percentage plus the nearest
+  named landmark; and
 - `Recent Snow`, a zero-to-full slider for one bounded local pulse.
 
 The landmarks are Spring `0.00`, Summer `0.25`, Autumn `0.50`, and Winter
@@ -178,9 +178,17 @@ Do not add the plane's cyclical latitude, the cylinder's asymptotic polar
 coordinate, hemispheres, day-length forcing, a year length, or a persisted
 calendar.
 
+Tactical
+[`307`](307-seasonal-solar-path-and-cyclical-latitude.md) owns the actual
+Mclone latitude/orbital policy and solar path. If it lands before this tactical
+executes, consume its shared phase/latitude vocabulary rather than reimplement
+it here. This tactical's named seasons remain local material-review landmarks;
+they are not global calendar names, because opposite hemispheres interpret one
+orbital phase differently.
+
 The seasonal response must still vary spatially. A warm biome and a cold/high
 biome must not receive the same coverage at the Winter landmark merely because
-they share one year phase. Existing topology-aware biome identity and
+they share one local-season phase. Existing topology-aware biome identity and
 canonical position remain the basis for this proof. Any deterministic breakup
 used near a threshold must reproduce across chunk boundaries and the
 X-periodic cylinder seam.
@@ -193,8 +201,8 @@ with one compact per-frame phase/pulse input.
 
 ### Preview changes never rebuild terrain
 
-Changing the preview enable, year phase, or recent-snow intensity may update
-already-written per-frame/per-view uniform data. It must not:
+Changing the preview enable, local-season phase, or recent-snow intensity may
+update already-written per-frame/per-view uniform data. It must not:
 
 - mark a chunk or render section dirty;
 - enqueue a render-section compile;
@@ -224,7 +232,7 @@ sky-exposed exact faces. The pure model combines two targets:
 
 ```text
 snow coverage = clamp(
-    seasonal baseline(year phase, local climate, altitude, exposure)
+    seasonal baseline(local season phase, local climate, altitude, exposure)
     + recent snowfall(local pulse, retention, surface response),
     0, 1)
 ```
@@ -245,9 +253,9 @@ Distance to the pulse must use the world's topology-aware canonical
 displacement so coverage is continuous across the X-periodic cylinder seam.
 The pulse affects only exact surfaces drawn inside its footprint. It creates
 no per-chunk mask, resident event list, inactive-chunk query, or work outside
-ordinary rendering. Warm local climate and a warm year phase reduce retained
-snow even under a strong pulse; a late-Winter pulse in a cold or temperate
-region should be the clearest proof.
+ordinary rendering. Warm local climate and a warm local-season phase reduce
+retained snow even under a strong pulse; a late-Winter pulse in a cold or
+temperate region should be the clearest proof.
 
 Ground and canopy consume separate semantic response weights. Eligible
 natural ground may receive the strongest coverage. Exposed upward deciduous
@@ -393,7 +401,7 @@ Status: planned.
 Create a small dependency-leaf shared owner, preferably `mclone-season`, for
 the presentation-independent vocabulary and pure response math. It may own:
 
-- normalized fixed-point cyclic year phase and named quarter-year landmarks;
+- normalized fixed-point cyclic local-season phase and named review landmarks;
 - compact local climate/region inputs;
 - vegetation dormancy/color response;
 - a bounded topology-aware local snowfall pulse;
@@ -450,11 +458,12 @@ Status: planned.
   inspect a first late-Winter scene with and without recent snow before adding
   the full palette.
 
-After the view is settled, drag year phase through a full cycle, drag recent
-snow `0 -> 1 -> 0`, and disable the preview. Assert zero new section builds,
-section uploads, atlas uploads, block/light updates, persistence dirties, or
-server commands. One compact existing per-frame uniform write may carry phase,
-pulse center/radius, and intensity; do not add per-section season uploads.
+After the view is settled, drag local-season phase through a full cycle, drag
+recent snow `0 -> 1 -> 0`, and disable the preview. Assert zero new section
+builds, section uploads, atlas uploads, block/light updates, persistence
+dirties, or server commands. One compact existing per-frame uniform write may
+carry phase, pulse center/radius, and intensity; do not add per-section season
+uploads.
 
 Gate: exact near-field terrain, canopy, and grass show useful gradual seasonal
 and local recent-snow distinction in mono and stereo without any slider-driven
@@ -464,9 +473,9 @@ mesh or world churn.
 
 Status: planned.
 
-- Add a controller-friendly `Season Preview` checkbox plus `Year Phase` and
-  `Recent Snow` sliders to the shared Debug options screen. Disable the sliders
-  while the preview is off.
+- Add a controller-friendly `Season Preview` checkbox plus `Local Season Phase`
+  and `Recent Snow` sliders to the shared Debug options screen. Disable the
+  sliders while the preview is off.
 - Add typed enable, phase, and recent-snow actions, action-kind classification,
   capability projection, state, render-state projection, and setting effects
   through `ClientExperienceController`.
@@ -520,7 +529,7 @@ lighting mode, revision, and image paths.
 
 Then run:
 
-- a live desktop flat full-year scrub, recent-snow `0 -> 1 -> 0`, and
+- a live desktop flat full local-season scrub, recent-snow `0 -> 1 -> 0`, and
   preview-off restoration pass;
 - a desktop OpenXR menu pass on an available headset/runtime;
 - an Android XR build plus scripted menu/action validation;
@@ -537,7 +546,7 @@ proportional to loaded chunks or pulse radius. If representative Quest
 exact-only GPU p95 regresses by more than five percent or 0.25 ms, whichever
 is larger, stop and attribute the fragment/data cost before acceptance.
 
-Gate: Human Review accepts gradual full-year change, regional late-Winter
+Gate: Human Review accepts gradual full local-season change, regional late-Winter
 difference, and the temporary local ground/canopy snowfall response; desktop
 and XR interaction are comfortable; and the measured result stays inside the
 no-remesh/no-world-work contract.
@@ -573,7 +582,7 @@ no-remesh/no-world-work contract.
 ### Interaction and ownership gates
 
 - The shared Debug screen exposes exactly one `Season Preview` checkbox, one
-  cyclic `Year Phase` slider, and one `Recent Snow` slider.
+  cyclic `Local Season Phase` slider, and one `Recent Snow` slider.
 - Desktop flat, desktop OpenXR, and Android XR route those controls through one
   typed action/effect family.
 - The controls work live and return to preview-off output without restarting

@@ -53,9 +53,11 @@ series implements the same concern, normally reuse the document slug in its
   ecology direction, including plane/cylinder latitude, derived snow and
   water response, no unloaded-world simulation, encounter-shaped migration,
   and the unresolved anonymous-wildlife versus tagged/managed lifecycle;
-  Tactical 306 plans the first continuous exact-terrain visual preview, a
-  bounded local recent-snow ground/canopy pulse, and shared desktop/XR Debug
-  controls while procedural-horizon LOD remains deferred.
+  Tactical 306 plans the first continuous exact-terrain visual preview and
+  bounded local recent-snow ground/canopy pulse; Tactical 307 plans the
+  default plane's actual cyclical-latitude solar path and shared desktop/XR
+  orbital/latitude/time controls while terrain generation and
+  procedural-horizon LOD remain deferred.
 - [`playable-showcases.md`](playable-showcases.md): bounded data-driven tiny
   saves for matched screenshot and interactive review, with enforced
   live-instantiation evidence and strict anti-sprawl boundaries.
