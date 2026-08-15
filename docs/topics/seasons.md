@@ -4,10 +4,12 @@ Topic: `seasons`
 
 Status: **concept-stage design record created 2026-08-15. Tactical
 [`306`](../tactical/306-seasonal-appearance-preview.md) now owns the first
-visual-only exact-terrain proof and shared desktop/XR Debug control while
-explicitly deferring procedural-horizon LOD. No season clock, latitude model,
-seasonal surface system, migration producer, seasonal hydrology, wildlife
-tagging, or managed-habitat infrastructure is implemented.
+visual-only exact-terrain proof: a continuous manual year phase, one bounded
+local recent-snow ground/canopy pulse, and shared desktop/XR Debug controls,
+while explicitly deferring procedural-horizon LOD. No season clock, latitude
+model, authoritative weather event, seasonal surface system, migration
+producer, seasonal hydrology, wildlife tagging, or managed-habitat
+infrastructure is implemented.
 The selected direction is that unloaded terrain and entities receive no ticks
 or elapsed-time catch-up. Climate and ambient seasonal opportunities may be
 derived when an active region asks for them, while durable animals freeze.
@@ -201,6 +203,16 @@ change. The moving temperate/subpolar frontier carries most of the seasonal
 visual work. Foliage tint, dormant grass, blooms, falling leaves, ambience, and
 surface wetness can follow the same climate sample without sharing one
 all-purpose renderer.
+
+Tactical 306 deliberately proves a smaller representation before selecting
+that broader surface layer. Exact meshes carry only compact static material and
+exposure response; a continuous phase plus one bounded, topology-aware recent-
+snowfall pulse is evaluated during ordinary rendering. The pulse can raise
+texture-preserving coverage on eligible ground and exposed canopy locally,
+then return to zero without remeshing, per-chunk masks, persistence, or inactive
+work. A later active-world weather producer may drive its rise/hold/decay, but
+the first proof controls intensity manually and makes no precipitation or
+automatic-timing claim.
 
 Interactive snow remains a later, separate authoritative layer. Shovelable
 depth, collision, tracks, snowballs, buried plants, and meltwater may justify

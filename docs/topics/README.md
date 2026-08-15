@@ -53,8 +53,9 @@ series implements the same concern, normally reuse the document slug in its
   ecology direction, including plane/cylinder latitude, derived snow and
   water response, no unloaded-world simulation, encounter-shaped migration,
   and the unresolved anonymous-wildlife versus tagged/managed lifecycle;
-  Tactical 306 plans the first exact-terrain visual preview and shared
-  desktop/XR Debug control while procedural-horizon LOD remains deferred.
+  Tactical 306 plans the first continuous exact-terrain visual preview, a
+  bounded local recent-snow ground/canopy pulse, and shared desktop/XR Debug
+  controls while procedural-horizon LOD remains deferred.
 - [`playable-showcases.md`](playable-showcases.md): bounded data-driven tiny
   saves for matched screenshot and interactive review, with enforced
   live-instantiation evidence and strict anti-sprawl boundaries.

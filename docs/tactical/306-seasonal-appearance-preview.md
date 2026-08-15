@@ -8,15 +8,15 @@ Topic: `seasons`
 
 Prove the first useful part of seasons as a visual-only, exact-terrain slice.
 Use one shared local seasonal-appearance model to make the same fixed world
-read as spring, summer, autumn, or winter without adding an authoritative
-calendar, gameplay effects, unloaded-world simulation, block mutation, or
-seasonal persistence.
+move gradually through the year and to preview one bounded recent-snowfall
+pulse without adding an authoritative calendar, gameplay effects,
+unloaded-world simulation, block mutation, or seasonal persistence.
 
-Add a typed `Season Preview` control to the existing shared Debug options
-screen so the user can change the preview interactively on desktop flat,
-desktop OpenXR, and Android XR. The control must use the same shared UI action
-and scene/render state in flat and VR; do not add a desktop keyboard-only
-shortcut or an XR-only menu branch.
+Add typed `Season Preview`, `Year Phase`, and `Recent Snow` controls to the
+existing shared Debug options screen so the user can inspect continuous
+transitions interactively on desktop flat, desktop OpenXR, and Android XR.
+The controls must use the same shared UI actions and scene/render state in flat
+and VR; do not add a desktop keyboard-only shortcut or an XR-only menu branch.
 
 Explicitly defer the procedural-horizon LOD. Tacticals
 [`304`](304-lod-frontier-and-near-field-voxel-convergence.md) and
@@ -49,11 +49,12 @@ small proof:
 - the XR pause/options panel uses the same `mclone-ui` screen and supports
   pointer/controller interaction in both per-eye and multiview rendering.
 
-No seasonal clock, appearance sample, material response, UI value, render
-uniform, or screenshot fixture exists. Current biome tint is compiled into
-vertex color. The exact textured vertex does not carry a distinct seasonal
-material or upward/exposure flag, so the first slice must audit whether the
-existing facts can be packed without a costly general vertex expansion.
+No seasonal clock, appearance sample, local snowfall pulse, material response,
+UI value, render uniform, or screenshot fixture exists. Current biome tint is
+compiled into vertex color. The exact textured vertex does not carry a
+distinct seasonal material or upward/exposure flag, so the first slice must
+audit whether the existing facts can be packed without a costly general
+vertex expansion.
 
 The current lifecycle contract is also intentionally useful here: the preview
 is client-local presentation state. It does not ask the server to advance time,
@@ -62,23 +63,30 @@ animal decision in [`../topics/seasons.md`](../topics/seasons.md).
 
 ## Objective
 
-At one fixed camera, fixed noon light, fixed weather, fixed world revision, and
-fixed exact-chunk set, the user can choose:
+At one fixed camera, fixed noon light, fixed authoritative weather, fixed world
+revision, and fixed exact-chunk set, the user can enable a preview and scrub a
+cyclic year phase continuously through:
 
 ```text
-Baseline -> Spring -> Summer -> Autumn -> Winter -> Baseline
+Spring -> Summer -> Autumn -> Winter -> Spring
 ```
 
 The scene changes immediately and coherently:
 
+- transitions between the named quarter-year landmarks are gradual, including
+  the Winter-to-Spring wrap;
 - deciduous foliage and biome-tinted grass show recognizable seasonal color;
 - evergreen foliage responds less than deciduous foliage;
-- cold/high/exposed ground can receive a texture-preserving snow blend;
+- cold/high/exposed ground can receive a texture-preserving seasonal snow
+  blend;
 - warm regions resist snow and show a much smaller winter response;
 - dry regions remain visually distinct from productive green regions;
 - lush grass agrees with the underlying ground and does not remain bright
-  summer green through strong winter snow; and
-- returning to `Baseline` restores the current renderer output.
+  summer green through strong winter snow;
+- a bounded `Recent Snow` pulse can temporarily raise ground and exposed
+  canopy coverage around one anchored location, with smooth spatial falloff;
+  and
+- disabling `Season Preview` restores the current renderer output exactly.
 
 Changing preview state performs no authoritative mutation, persistence,
 lighting, chunk scheduling, mesh rebuild, or atlas replacement. The proof
@@ -87,48 +95,75 @@ calendar or gameplay system exists.
 
 ## Binding Decisions
 
-### Preview state is typed, local, and temporary
+### Preview state is typed, continuous, local, and temporary
 
-Use a closed shared value equivalent to:
+Use fixed-point shared values equivalent to:
 
 ```text
-SeasonPreview = Baseline | Spring | Summer | Autumn | Winter
+SeasonPreview = Disabled | Manual {
+    year_phase: CyclicUnitU16,
+    recent_snow: Option<LocalSnowPulse>,
+}
+
+LocalSnowPulse {
+    canonical_center_xz,
+    radius_blocks,
+    intensity: UnitU16,
+}
 ```
 
-`Baseline` is the default on process start, world entry, and new scene
-construction. The value is developer presentation state:
+`Disabled` is the default on process start, world entry, and new scene
+construction. A new enabled preview starts at the Summer landmark with no
+recent-snow pulse. Fixed point avoids float-equality state drift; the renderer
+may receive normalized finite floats derived from it. The value is developer
+presentation state:
 
 - it is not written to world records or client preferences;
 - it is not sent through gameplay protocol or server commands;
-- it does not alter day time, weather, biome, climate, blocks, light, crops,
-  resources, fluids, or entities;
+- it does not alter day time, authoritative weather, biome, climate, blocks,
+  light, crops, resources, fluids, or entities;
 - it is not described as the world's authoritative current season; and
-- a future real calendar may use the same pure appearance vocabulary without
-  inheriting the preview control's ownership.
+- a future real calendar and active-weather producer may use the same pure
+  appearance vocabulary without inheriting the Debug controls' ownership.
 
-The Debug screen labels the row `Season Preview`. Do not call the values
-`Current` or imply that a real season clock exists. The title-side Debug screen
-may show the value disabled, but an active world's pause/options path must make
-it interactive.
+The Debug screen exposes:
 
-### Use one shared Debug-menu action
+- `Season Preview`, an enable checkbox;
+- `Year Phase`, a cyclic slider shown as a percentage plus the nearest named
+  landmark; and
+- `Recent Snow`, a zero-to-full slider for one bounded local pulse.
 
-Add one typed UI action/effect path through the same owners as the existing
-Debug settings:
+The landmarks are Spring `0.00`, Summer `0.25`, Autumn `0.50`, and Winter
+`0.75`; `1.00` wraps exactly to Spring. They are automation presets and review
+labels, not discrete render modes. Color, dormancy, and seasonal snow targets
+must interpolate through them without a snap at a landmark or the year wrap.
+Pin `0.875` as the late-Winter review preset: the seasonal baseline is
+retreating, but a fresh local snowfall should still produce visible retained
+coverage. The slider remains continuous; this extra preset is not a fifth
+season.
+Do not call the phase `Current` or imply that a real season clock exists. The
+title-side Debug screen may show the values disabled, but an active world's
+pause/options path must make them interactive.
+
+### Use one shared Debug-menu action family
+
+Add typed UI actions/effects through the same owners as the existing Debug
+settings:
 
 ```text
-mclone-ui cycle row
-  -> typed GameUiAction
+mclone-ui checkbox/sliders
+  -> typed GameUiAction variants
   -> ClientExperienceController classification
-  -> one scene/render setting effect
+  -> one scene/render setting effect family
   -> shared mono/XR render state
 ```
 
 Desktop flat, desktop OpenXR, Android XR, synthetic stereo, offscreen capture,
-and other capable consumers must observe the same value. No app may translate
-menu text, intercept a platform-private action, or own a second season enum.
-Automation must be able to set and observe the typed value without pointer
-coordinates or text scraping.
+and other capable consumers must observe the same values. No app may translate
+menu text, intercept a platform-private action, or own a second phase/pulse
+type. Automation must be able to set and observe exact fixed-point phase,
+pulse intensity, center, and radius without pointer coordinates or text
+scraping.
 
 Do not add a new keyboard shortcut. The shared Debug menu is the interactive
 contract requested by the user and is already reachable from both desktop and
@@ -144,22 +179,22 @@ coordinate, hemispheres, day-length forcing, a year length, or a persisted
 calendar.
 
 The seasonal response must still vary spatially. A warm biome and a cold/high
-biome must not receive the same winter coverage merely because the Debug menu
-selected `Winter`. Existing topology-aware biome identity and canonical
-position remain the basis for this proof. Any deterministic breakup used near
-a threshold must reproduce across chunk boundaries and the X-periodic cylinder
-seam.
+biome must not receive the same coverage at the Winter landmark merely because
+they share one year phase. Existing topology-aware biome identity and
+canonical position remain the basis for this proof. Any deterministic breakup
+used near a threshold must reproduce across chunk boundaries and the
+X-periodic cylinder seam.
 
 Do not re-query the generator from the fragment shader or create a renderer
 copy of Mclone worldgen. Mesh compilation may derive a compact static response
 from the authoritative snapshot's biome, block/model, face, light/exposure,
 and world-position facts. The seasonal preview then combines that static fact
-with one small dynamic render value.
+with one compact per-frame phase/pulse input.
 
 ### Preview changes never rebuild terrain
 
-Changing `Season Preview` may update already-written per-frame/per-view
-uniform data. It must not:
+Changing the preview enable, year phase, or recent-snow intensity may update
+already-written per-frame/per-view uniform data. It must not:
 
 - mark a chunk or render section dirty;
 - enqueue a render-section compile;
@@ -182,10 +217,45 @@ vertex or more than ten percent to representative exact-terrain GPU mesh
 bytes, stop and compare a packed bitfield, spare-channel encoding, per-section
 data, and a bounded surface overlay before choosing a representation.
 
-### Snow is an appearance blend, not a block
+### Seasonal and recent snow compose as appearance
 
-Winter snow in this tactical is a derived material response over eligible
-upward, sky-exposed exact faces:
+Snow in this tactical is a derived material response over eligible upward,
+sky-exposed exact faces. The pure model combines two targets:
+
+```text
+snow coverage = clamp(
+    seasonal baseline(year phase, local climate, altitude, exposure)
+    + recent snowfall(local pulse, retention, surface response),
+    0, 1)
+```
+
+The recent-snow pulse represents material temporarily retained after a local
+snowfall event, not a second global winter control. On the first Debug change
+from zero to a positive intensity, anchor its center at the current canonical
+player/camera XZ. Further intensity changes retain that center, so walking
+away exposes the pulse boundary instead of dragging the weather with the
+player. Returning the slider to zero clears it; the next positive adjustment
+anchors a new pulse. Use one implementation-selected, hard-bounded radius with
+a smooth radial falloff and report the center/radius in diagnostics.
+In XR, use the shared player/observation root rather than either per-eye view
+as the anchor, so both eyes and both render paths receive identical world-space
+event geometry.
+
+Distance to the pulse must use the world's topology-aware canonical
+displacement so coverage is continuous across the X-periodic cylinder seam.
+The pulse affects only exact surfaces drawn inside its footprint. It creates
+no per-chunk mask, resident event list, inactive-chunk query, or work outside
+ordinary rendering. Warm local climate and a warm year phase reduce retained
+snow even under a strong pulse; a late-Winter pulse in a cold or temperate
+region should be the clearest proof.
+
+Ground and canopy consume separate semantic response weights. Eligible
+natural ground may receive the strongest coverage. Exposed upward deciduous
+and evergreen canopy faces may receive a lighter dusting, while side faces and
+sheltered foliage remain mostly unchanged. Canopy snow must not turn all leaf
+pixels uniformly white or erase the evergreen/deciduous distinction.
+
+For both seasonal and recent snow:
 
 - preserve underlying atlas detail instead of replacing the texel with flat
   white;
@@ -196,10 +266,16 @@ upward, sky-exposed exact faces:
   inventory claim; and
 - create no new geometry when the preview changes.
 
-The proof may use a narrow explicit natural-surface allowlist. General snow on
-player-built roofs and complete block/material semantics are later work. Do
-not use `snow` or `snow_layer` block identity unless the server actually owns
-such a block.
+The proof may use narrow explicit natural-ground and canopy allowlists.
+General snow on player-built roofs and complete block/material semantics are
+later work. Do not use `snow` or `snow_layer` block identity unless the server
+actually owns such a block.
+
+The `Recent Snow` slider manually samples deposition and recession in this
+visual proof. It does not run an automatic timer, precipitation particles, or
+a weather scheduler. A later active-world weather event may drive the same
+bounded intensity through a rise/hold/decay envelope without changing the
+material contract; it must still do no unloaded catch-up.
 
 ### Vegetation response stays semantic
 
@@ -208,13 +284,14 @@ deciduous foliage, evergreen foliage, lush-grass ground, snow-eligible natural
 surface, or seasonally inert. Do not infer these meanings from atlas UV
 coordinates or texture colors in the shader.
 
-The initial response should remain small:
+The initial response should remain small. The columns below are quarter-year
+review landmarks; the model interpolates continuously between them:
 
 | Surface family | Spring | Summer | Autumn | Winter |
 |---|---|---|---|---|
 | biome-tinted grass/fern | fresh green | present baseline family | muted/dry | dormant; suppressed under snow |
-| deciduous foliage | fresh green | present baseline family | strong warm hue | subdued/dormant |
-| evergreen foliage | small freshening | near baseline | small desaturation | dark/cold tint, no deciduous orange |
+| deciduous foliage | fresh green | present baseline family | strong warm hue | subdued/dormant; light exposed-canopy snow response |
+| evergreen foliage | small freshening | near baseline | small desaturation | dark/cold tint; distinct exposed-canopy snow response |
 | warm wet vegetation | modest phase change | lush | modest phase change | no automatic frost |
 | warm dry ground/grass | limited green response | dry response | dry/muted | no automatic snow |
 | cold/high exposed ground | thaw shoulder | mostly exposed where warm enough | frost shoulder | strongest snow blend |
@@ -269,9 +346,9 @@ both eyes consume the same season preview and canonical world response. A
 mono-only shader patch is not a partial success. Actors, UI, sky, fog, and
 procedural horizon remain unchanged.
 
-### Baseline is an exact no-op
+### Disabled preview is an exact no-op
 
-`Baseline` must retain the current visual and runtime result:
+`Season Preview: Off` must retain the current visual and runtime result:
 
 - the seasonal multiplier/blend is exactly neutral;
 - exact terrain and grass use the same textures, tint, light, fog, depth,
@@ -281,8 +358,8 @@ procedural horizon remain unchanged.
   existing deterministic offscreen lane permits it.
 
 If adding a static response attribute necessarily changes buffer layout, the
-payload may differ while Baseline pixels and draw ownership remain exact. That
-cost must still be measured and justified.
+payload may differ while preview-disabled pixels and draw ownership remain
+exact. That cost must still be measured and justified.
 
 ## Implementation Sequence
 
@@ -290,7 +367,7 @@ cost must still be measured and justified.
 
 Status: planned.
 
-- Capture one fixed temperate exact-only scene in the current Baseline state
+- Capture one fixed temperate exact-only scene with the preview disabled
   under frozen noon light and save it under `/tmp`.
 - Pin warm/wet, temperate/deciduous, dry/open, and cold/high exact capture
   locations from existing Mclone biome facts. Record seed, profile, topology,
@@ -305,9 +382,9 @@ Status: planned.
 - Select the smallest static seasonal response encoding and record why it is
   preferable to the alternatives.
 
-Gate: the execution record contains inspected Baseline pixels, pinned regional
-fixtures, the complete affected shader list, and a measured data-layout choice.
-No production seasonal effect lands before this gate.
+Gate: the execution record contains inspected preview-disabled pixels, pinned
+regional fixtures, the complete affected shader list, and a measured
+data-layout choice. No production seasonal effect lands before this gate.
 
 ### Slice 1: Pure seasonal appearance model
 
@@ -316,10 +393,12 @@ Status: planned.
 Create a small dependency-leaf shared owner, preferably `mclone-season`, for
 the presentation-independent vocabulary and pure response math. It may own:
 
-- normalized canonical phase for the four preview presets;
+- normalized fixed-point cyclic year phase and named quarter-year landmarks;
 - compact local climate/region inputs;
 - vegetation dormancy/color response;
-- derived snow-target response; and
+- a bounded topology-aware local snowfall pulse;
+- separate seasonal-baseline, recent-ground, and recent-canopy snow response;
+  and
 - finite/clamped validation.
 
 The crate must not depend on `wgpu`, `winit`, OpenXR, browser APIs, server
@@ -331,17 +410,23 @@ the math.
 
 Add table-driven tests for at least:
 
-- warm/wet lowland across all four phases;
-- warm/dry lowland across all four phases;
-- temperate lowland across all four phases;
-- cold/high exposed ground across all four phases;
+- warm/wet lowland at all four landmarks and intermediate phases;
+- warm/dry lowland at all four landmarks and intermediate phases;
+- temperate lowland at all four landmarks and intermediate phases;
+- cold/high exposed ground at all four landmarks and intermediate phases;
 - deciduous versus evergreen response;
-- snow threshold shoulders and monotonicity;
+- continuity on both sides of every landmark and the Winter-to-Spring wrap;
+- snow threshold shoulders and monotonicity as pulse intensity rises;
+- pulse center, radial falloff, outside-radius neutrality, and cylinder-seam
+  equivalence;
+- late-Winter recent snow on eligible ground and exposed canopy;
+- low retention under warm climate/year-phase inputs;
 - non-finite and out-of-range input normalization; and
-- exact neutral output for `Baseline`.
+- exact neutral output when the preview is disabled.
 
-Gate: the pure model proves regional differentiation and neutral Baseline
-without world loading, rendering, or a calendar.
+Gate: the pure model proves continuous regional differentiation, bounded local
+snowfall response, and neutral disabled state without world loading,
+rendering, a calendar, or a weather scheduler.
 
 ### Slice 2: Exact terrain and lush-grass rendering
 
@@ -354,51 +439,62 @@ Status: planned.
   together.
 - Apply semantic vegetation response after atlas sampling while preserving
   texture detail, lightmap, fog, alpha/cutout, depth, and target color transfer.
-- Apply snow only to eligible exposed upward faces and fade/suppress lush grass
-  consistently where coverage is strong.
+- Apply seasonal/recent snow only to eligible exposed upward ground and canopy
+  faces, retaining distinct response weights, and fade/suppress lush grass
+  consistently where ground coverage is strong.
 - Keep deterministic breakup canonical across section/chunk boundaries and
   exact at the X-periodic seam.
 - Add CPU/WGSL parity fixtures for packed response decoding and representative
   material outputs.
-- Capture and inspect the first non-Baseline native pixel immediately, then
-  inspect a first Winter scene before adding the full palette.
+- Capture and inspect the first active-preview native pixel immediately, then
+  inspect a first late-Winter scene with and without recent snow before adding
+  the full palette.
 
-Switch `Baseline -> Winter -> Autumn -> Baseline` after the view is settled and
-assert zero new section builds, section uploads, atlas uploads, block/light
-updates, persistence dirties, or server commands. One small existing per-frame
-uniform write may carry the value; do not add per-section season uploads.
+After the view is settled, drag year phase through a full cycle, drag recent
+snow `0 -> 1 -> 0`, and disable the preview. Assert zero new section builds,
+section uploads, atlas uploads, block/light updates, persistence dirties, or
+server commands. One compact existing per-frame uniform write may carry phase,
+pulse center/radius, and intensity; do not add per-section season uploads.
 
-Gate: exact near-field terrain and grass show useful seasonal distinction in
-mono and stereo without any preview-switch mesh or world churn.
+Gate: exact near-field terrain, canopy, and grass show useful gradual seasonal
+and local recent-snow distinction in mono and stereo without any slider-driven
+mesh or world churn.
 
 ### Slice 3: Shared interactive Debug control
 
 Status: planned.
 
-- Add a controller-friendly `Season Preview` cycle row to the shared Debug
-  options screen.
-- Add the typed action, action-kind classification, capability projection,
-  state, render-state projection, and setting effect through
-  `ClientExperienceController`.
+- Add a controller-friendly `Season Preview` checkbox plus `Year Phase` and
+  `Recent Snow` sliders to the shared Debug options screen. Disable the sliders
+  while the preview is off.
+- Add typed enable, phase, and recent-snow actions, action-kind classification,
+  capability projection, state, render-state projection, and setting effects
+  through `ClientExperienceController`.
 - Apply the effect in shared `mclone-scene` mono/XR session ownership rather
   than desktop or OpenXR apps.
-- Reset to `Baseline` for a new process/session and keep the value out of
-  preference and world persistence.
-- Expose active preview, exact-only/composed presentation, and `LOD deferred`
-  status in stable diagnostics.
+- On the first zero-to-positive recent-snow effect, anchor the bounded pulse at
+  the current canonical player/camera XZ. Clear it at zero and do not silently
+  recenter it while the slider remains positive.
+- Reset to preview off, Summer phase, and no recent snow for a new
+  process/session; keep all three out of preference and world persistence.
+- Expose enable, exact phase, nearest landmark, pulse intensity/center/radius,
+  exact-only/composed presentation, and `LOD deferred` in stable diagnostics.
 - Add focus, keyboard/controller navigation, pointer, capability, and effect
-  tests. Automation must select every value through the typed contract.
+  tests. Automation must set exact phase, intensity, and explicit fixture pulse
+  geometry through the typed contract.
 - Validate the actual menu interaction in desktop flat, desktop OpenXR, and
-  Android XR. The XR row must be readable and operable through the existing
-  world-panel pointer/controller path.
+  Android XR. The XR controls must be readable and operable through the
+  existing world-panel pointer/controller path.
 
-The row may be available on Web and flat Android if their existing shared UI
-and exact renderer consume the same action without a new platform mechanism.
-If a profile cannot present it, publish an explicit capability reason and
-retain Baseline; do not silently accept an action that has no pixels.
+The controls may be available on Web and flat Android if their existing shared
+UI and exact renderer consume the same actions without a new platform
+mechanism. If a profile cannot present them, publish an explicit capability
+reason and retain preview-off output; do not silently accept an action that has
+no pixels.
 
-Gate: one running desktop and one running XR session can cycle all states and
-return to Baseline without restart, world reload, or menu-state drift.
+Gate: one running desktop and one running XR session can scrub phase and recent
+snow, inspect the anchored pulse boundary, and return to exact preview-off
+output without restart, world reload, or menu-state drift.
 
 ### Slice 4: Visual matrix, performance, and Human Review
 
@@ -407,19 +503,25 @@ Status: planned.
 Add one focused capture runner, such as
 `pnpm native:seasons:appearance-capture`, that saves under `/tmp`:
 
-- Baseline, Spring, Summer, Autumn, and Winter from one exact temperate camera;
-- the same fixed Winter preview at warm/wet, warm/dry, temperate, and cold/high
-  locations; and
-- paired mono and synthetic-stereo Winter output.
+- preview off plus the four quarter-year landmarks and four intermediate
+  phases from one exact temperate camera;
+- the same fixed late-Winter phase at warm/wet, warm/dry, temperate, and
+  cold/high locations;
+- recent snow at zero, half, and full intensity from one late-Winter camera,
+  plus matched inside-footprint, falloff, and outside-footprint views that show
+  exposed ground and tree canopy; and
+- paired mono and synthetic-stereo late-Winter recent-snow output.
 
 Create a contact sheet only as a review convenience; retain the individual
 full-resolution captures and inspect them. Record exact profile, seed,
-topology, camera, season value, terrain presentation, day time, weather,
+topology, camera, exact phase, nearest landmark, pulse
+intensity/center/radius, terrain presentation, day time, authoritative weather,
 lighting mode, revision, and image paths.
 
 Then run:
 
-- a live desktop flat `Baseline -> four seasons -> Baseline` menu pass;
+- a live desktop flat full-year scrub, recent-snow `0 -> 1 -> 0`, and
+  preview-off restoration pass;
 - a desktop OpenXR menu pass on an available headset/runtime;
 - an Android XR build plus scripted menu/action validation;
 - physical Quest pixels for normal per-eye and full-frame multiview exact
@@ -428,60 +530,74 @@ Then run:
 - flat Android build/smoke for the affected shared crates; and
 - stationary before/after performance rows on desktop and Quest.
 
-Compare Baseline with each active preview for frame CPU/GPU, exact mesh bytes,
-render-section compile/upload counters, uniform writes, draw count, and memory.
-The steady active preview should add no recurring CPU work proportional to
-loaded chunks. If representative Quest exact-only GPU p95 regresses by more
-than five percent or 0.25 ms, whichever is larger, stop and attribute the
-fragment/data cost before acceptance.
+Compare preview-off output with active phase/pulse states for frame CPU/GPU,
+exact mesh bytes, render-section compile/upload counters, uniform writes, draw
+count, and memory. The steady active preview should add no recurring CPU work
+proportional to loaded chunks or pulse radius. If representative Quest
+exact-only GPU p95 regresses by more than five percent or 0.25 ms, whichever
+is larger, stop and attribute the fragment/data cost before acceptance.
 
-Gate: Human Review accepts both the temporal four-season difference and the
-regional Winter difference; desktop and XR interaction are comfortable; and
-the measured result stays inside the no-remesh/no-world-work contract.
+Gate: Human Review accepts gradual full-year change, regional late-Winter
+difference, and the temporary local ground/canopy snowfall response; desktop
+and XR interaction are comfortable; and the measured result stays inside the
+no-remesh/no-world-work contract.
 
 ## Acceptance
 
 ### Visual and semantic gates
 
-- One fixed temperate camera reads distinctly as Spring, Summer, Autumn, and
-  Winter without changing geometry, time of day, weather, or world state.
+- One fixed temperate camera reads distinctly at Spring, Summer, Autumn, and
+  Winter landmarks without changing geometry, time of day, authoritative
+  weather, or world state.
+- Intermediate phases change continuously, with no visual snap at a named
+  landmark or at the Winter-to-Spring wrap.
 - Warm/wet, warm/dry, temperate, and cold/high regions respond differently to
-  the same preview value.
+  the same phase and recent-snow intensity.
 - Deciduous and evergreen foliage do not receive one identical autumn color.
-- Winter snow preserves underlying texture, remains on eligible exposed upward
-  exact faces, and does not appear in caves or automatically cover warm
-  regions.
+- Seasonal and recent snow preserve underlying texture, remain on eligible
+  exposed upward exact faces, and do not appear in caves or automatically
+  cover warm regions.
+- Raising recent snow at late Winter gradually dusts eligible ground and
+  exposed canopy inside one anchored bounded footprint; falloff is smooth,
+  outside terrain keeps its seasonal baseline, and clearing the pulse removes
+  only its additional coverage.
+- Deciduous and evergreen canopy retain distinct appearance under recent snow,
+  with side and sheltered faces resisting the dusting.
 - Lush grass agrees with ground dormancy/snow instead of floating as a summer
   layer.
-- `Baseline` reproduces the accepted pre-tactical exact output.
-- The result makes no collision, depth, shoveling, accumulation, melting,
-  gameplay, or authoritative-season claim.
+- Preview off reproduces the accepted pre-tactical exact output.
+- The result makes no collision, material depth, shoveling, persisted
+  accumulation, melting, gameplay, authoritative-season, or authoritative-
+  weather claim.
 
 ### Interaction and ownership gates
 
-- The shared Debug screen exposes exactly one `Season Preview` row with the
-  five intended values.
-- Desktop flat, desktop OpenXR, and Android XR route that row through one typed
-  action/effect owner.
-- The control works live and returns to Baseline without restarting or
-  reloading the world.
+- The shared Debug screen exposes exactly one `Season Preview` checkbox, one
+  cyclic `Year Phase` slider, and one `Recent Snow` slider.
+- Desktop flat, desktop OpenXR, and Android XR route those controls through one
+  typed action/effect family.
+- The controls work live and return to preview-off output without restarting
+  or reloading the world.
+- A zero-to-positive snow adjustment anchors once at the current canonical
+  position; later scrubbing does not drag the pulse, zero clears it, and a new
+  positive adjustment may anchor again.
 - No desktop-only key, XR-only enum, string command, app-local renderer policy,
   or menu-text automation is added.
 - The preview is absent from world saves, preferences, protocol, and server
-  state and resets to Baseline as documented.
-- Diagnostics report the active value and identify procedural-horizon seasonal
-  response as deferred.
+  state and resets to off/Summer/no-pulse as documented.
+- Diagnostics report exact phase and pulse state and identify
+  procedural-horizon seasonal response as deferred.
 
 ### Work and performance gates
 
-- Switching preview produces zero block writes, light work, entity/ecology
-  work, persistence dirties, server commands, chunk snapshots, mesh compiles,
-  section uploads, and atlas uploads.
+- Enabling, disabling, or scrubbing phase/recent snow produces zero block
+  writes, light work, entity/ecology work, persistence dirties, server
+  commands, chunk snapshots, mesh compiles, section uploads, and atlas uploads.
 - Inactive chunks receive no query, update, mask, or catch-up work.
 - Any static vertex/payload growth remains within the preflight bound or has a
   separately approved measured representation decision.
 - Active-preview steady CPU cost is constant with respect to loaded chunk
-  count beyond work already performed for ordinary rendering.
+  count and pulse radius beyond work already performed for ordinary rendering.
 - Desktop and Quest GPU deltas are reported and remain within the Slice 4 gate.
 - Mono, placed, per-eye, and multiview exact paths share the same response and
   preserve correct per-view projection.
@@ -532,16 +648,18 @@ first drawable milestone and after every material expansion.
 
 Use the public Quest testbed/provider contract for physical device selection,
 authorization, leases, and sleep-after-use. Project scripts continue to own
-the APK, launch arguments, exact-only selection, season action, render-path
-selection, and acceptance assertions.
+the APK, launch arguments, exact-only selection, typed seasonal actions,
+render-path selection, and acceptance assertions.
 
 ## Non-Goals
 
 - authoritative or persisted season/calendar state;
 - selection of year length, latitude mapping, hemispheres, or axial daylight;
-- day-length, sky, sun, moon, fog, weather, or light-solver changes;
-- block snow, snow geometry, collision, tracks, shoveling, accumulation,
-  melting, or water production;
+- day-length, sky, sun, moon, fog, authoritative weather, precipitation
+  particles, weather scheduling, automatic pulse decay, or light-solver
+  changes;
+- block snow, snow geometry, collision, tracks, shoveling, persisted
+  accumulation, melting, or water production;
 - seasonal springs, streams, fluids, crops, resources, spawning, animals,
   migration, hibernation, aging, tagging, zoos, or husbandry;
 - falling leaves, leaf removal, bloom/flower placement, or vegetation geometry
@@ -566,7 +684,7 @@ Stop and request a narrower follow-up decision if the proof requires:
 - omitting per-eye or full-frame multiview from an XR-visible renderer;
 - copying generator climate logic into the renderer;
 - weakening existing texture, lightmap, fog, alpha, depth, color-transfer,
-  topology-seam, or Baseline pixel contracts; or
+  topology-seam, or preview-off pixel contracts; or
 - disguising a global color filter as regionally differentiated seasons.
 
 ## Code And Documentation Map
