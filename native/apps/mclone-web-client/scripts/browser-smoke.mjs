@@ -48,6 +48,18 @@ if (
     `--generation-profile requires overworld, flat-grass-v1, small-island-v1, mclone-overworld-v1, topology-probe-v1, or beta-v1; got ${generationProfile}`,
   );
 }
+const renderDistanceArgIndex = process.argv.indexOf("--render-distance");
+const renderDistance = renderDistanceArgIndex >= 0
+  ? Number(process.argv[renderDistanceArgIndex + 1])
+  : null;
+if (
+  renderDistance !== null
+  && (!Number.isInteger(renderDistance) || renderDistance < 1 || renderDistance > 16)
+) {
+  throw new Error(
+    `--render-distance requires an integer from 1 through 16; got ${process.argv[renderDistanceArgIndex + 1] ?? ""}`,
+  );
+}
 const seedArgIndex = process.argv.indexOf("--seed");
 const seed = seedArgIndex >= 0
   ? String(process.argv[seedArgIndex + 1] ?? "")
@@ -751,6 +763,9 @@ async function run() {
       if (mobileAppLoop) startupParameters.set("holdStartupProgress", "1");
       if (seed) startupParameters.set("seed", seed);
       if (generationProfile) startupParameters.set("generationProfile", generationProfile);
+      if (renderDistance !== null) {
+        startupParameters.set("renderDistance", String(renderDistance));
+      }
       if (starterContent) startupParameters.set("starterContent", starterContent);
       if (terrainPresentation) {
         startupParameters.set("terrainPresentation", terrainPresentation);
