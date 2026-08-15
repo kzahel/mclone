@@ -685,26 +685,41 @@ impl ServerEntityStore {
                 }
                 _ => continue,
             };
-            let consumed = if foraging && is_local_wildlife_forage_site(feet, block_state_at) {
-                resources.consume_at(
-                    consumer,
-                    feet,
-                    if entity.kind == EntityKind::Rabbit {
-                        6
-                    } else {
-                        10
-                    },
-                    simulation_tick,
-                    block_state_at,
-                )
+            let energy = if entity.kind == EntityKind::Rabbit {
+                self.mobs
+                    .get(&id)
+                    .and_then(MobRuntimeState::rabbit_save_data)
+                    .map_or(0, |rabbit| rabbit.lifecycle.energy)
             } else {
-                0
+                self.mobs
+                    .get(&id)
+                    .and_then(MobRuntimeState::deer_save_data)
+                    .map_or(0, |deer| deer.lifecycle.energy)
             };
-            let intake = consumed.saturating_mul(if entity.kind == EntityKind::Rabbit {
+            let energy_per_forage = if entity.kind == EntityKind::Rabbit {
                 20
             } else {
                 32
-            });
+            };
+            let requested = wildlife_forage_request(
+                energy,
+                cost,
+                tuning.maximum_energy,
+                energy_per_forage,
+                if entity.kind == EntityKind::Rabbit {
+                    6
+                } else {
+                    10
+                },
+            );
+            let consumed =
+                if foraging && requested > 0 && is_local_wildlife_forage_site(feet, block_state_at)
+                {
+                    resources.consume_at(consumer, feet, requested, simulation_tick, block_state_at)
+                } else {
+                    0
+                };
+            let intake = consumed.saturating_mul(energy_per_forage);
             let Some(mob) = self.mobs.get_mut(&id) else {
                 continue;
             };
@@ -4482,6 +4497,25 @@ where
     })
 }
 
+fn wildlife_forage_request(
+    energy: u16,
+    activity_cost: u16,
+    maximum_energy: u16,
+    energy_per_forage: u16,
+    maximum_bite: u16,
+) -> u16 {
+    if energy_per_forage == 0 || maximum_bite == 0 {
+        return 0;
+    }
+    let deficit = maximum_energy
+        .saturating_sub(energy)
+        .saturating_add(activity_cost);
+    deficit
+        .saturating_add(energy_per_forage - 1)
+        .div_euclid(energy_per_forage)
+        .min(maximum_bite)
+}
+
 type RabbitBreedingCandidate = (
     EntityId,
     EntityPersistentId,
@@ -4574,6 +4608,15 @@ mod tests {
             rabbit_breeding_pair(&[shelterless_close, shelterless]),
             Some((shelterless_close, shelterless, None))
         );
+    }
+
+    #[test]
+    fn forage_bites_follow_energy_deficit_without_exceeding_species_bounds() {
+        assert_eq!(wildlife_forage_request(1_000, 0, 1_000, 20, 6), 0);
+        assert_eq!(wildlife_forage_request(1_000, 1, 1_000, 20, 6), 1);
+        assert_eq!(wildlife_forage_request(900, 1, 1_000, 20, 6), 6);
+        assert_eq!(wildlife_forage_request(0, 1, 1_000, 20, 6), 6);
+        assert_eq!(wildlife_forage_request(0, 1, 1_000, 32, 10), 10);
     }
 
     fn adult_rabbit_with_refuge(
