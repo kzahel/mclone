@@ -275,6 +275,20 @@ const domainDebt = [
     destination: "worker-resident Rust integrated-server actor",
   },
   {
+    id: "integrated-worker-command-job-drain",
+    file: "mclone-integrated-server-worker.ts",
+    needle: "activeServer.hasPendingJobs()",
+    maximum: 0,
+    destination: "independent native-equivalent runner steps",
+  },
+  {
+    id: "integrated-worker-command-job-poll",
+    file: "mclone-integrated-server-worker.ts",
+    needle: "activeServer.pollPendingJobs()",
+    maximum: 0,
+    destination: "independent native-equivalent runner steps",
+  },
+  {
     id: "integrated-worker-command-dispatch",
     file: "mclone-integrated-server-worker.ts",
     needle: "handleCommandFrame",

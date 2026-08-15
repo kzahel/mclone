@@ -239,16 +239,8 @@ async function driveActorOperation(
   initialResult: Record<string, any>,
   requestMessage: IntegratedServerWorkerMessage | null,
 ): Promise<void> {
-  let serviced = await servicePersistenceResultForCurrentWorld(activeServer, initialResult);
+  const serviced = await servicePersistenceResultForCurrentWorld(activeServer, initialResult);
   const updates = [...serviced.updates];
-  while (activeServer.hasPendingJobs()) {
-    await waitForJobTurn();
-    serviced = await servicePersistenceResultForCurrentWorld(
-      activeServer,
-      activeServer.pollPendingJobs() as Record<string, any>,
-    );
-    updates.push(...serviced.updates);
-  }
   const report = activeServer.finishOperation(serviced.result, updates) as Record<string, any>;
   if (report.closeWorker === true) {
     if (tickTimer) {

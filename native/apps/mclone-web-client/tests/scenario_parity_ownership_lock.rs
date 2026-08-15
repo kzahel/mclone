@@ -146,7 +146,8 @@ fn integrated_server_startup_domain_is_an_opaque_rust_frame() {
     assert!(WEB_SERVER_WORKER.contains("pub struct WebIntegratedServerStartup"));
     assert!(WEB_SERVER_WORKER.contains("pub struct WebIntegratedServerActor"));
     assert!(WEB_SERVER_WORKER.contains("enum WebIntegratedServerOperationKind"));
-    assert!(WEB_SERVER_WORKER.contains("MAX_INTEGRATED_SERVER_PENDING_JOB_POLLS"));
+    assert!(!WEB_SERVER_WORKER.contains("MAX_INTEGRATED_SERVER_PENDING_JOB_POLLS"));
+    assert!(!WEB_SERVER_WORKER.contains("integrated_server_has_pending_jobs"));
     assert!(WEB_INTEGRATED_SERVER_STARTUP.contains("const STARTUP_MAGIC"));
     assert!(WEB_INTEGRATED_SERVER_STARTUP.contains("const STARTUP_VERSION"));
     assert!(INTEGRATED_SERVER_WORKER.contains("new module.WebIntegratedServerStartup("));
@@ -154,8 +155,20 @@ fn integrated_server_startup_domain_is_an_opaque_rust_frame() {
     assert!(INTEGRATED_SERVER_WORKER.contains("startup.indexedDbBootstrapRequests()"));
     assert!(INTEGRATED_SERVER_WORKER.contains("startup.createIndexedDb("));
     assert!(INTEGRATED_SERVER_WORKER.contains("activeServer.beginMessage("));
-    assert!(INTEGRATED_SERVER_WORKER.contains("activeServer.hasPendingJobs()"));
+    assert!(!INTEGRATED_SERVER_WORKER.contains("activeServer.hasPendingJobs()"));
+    assert!(!INTEGRATED_SERVER_WORKER.contains("activeServer.pollPendingJobs()"));
     assert!(INTEGRATED_SERVER_WORKER.contains("activeServer.finishOperation("));
+
+    let command_handler = WEB_SERVER_WORKER
+        .split("pub fn handle_command_frame(")
+        .nth(1)
+        .expect("Web integrated server command handler exists")
+        .split("#[wasm_bindgen(js_name = poll)]")
+        .next()
+        .expect("Web integrated server command handler has a bounded source region");
+    assert!(command_handler.contains(".try_handle_command(command)"));
+    assert!(!command_handler.contains(".try_poll()"));
+    assert!(!command_handler.contains("autosave_indexed_db_dirty_chunks"));
     for forbidden in [
         "generationProfile",
         "worldTopology",

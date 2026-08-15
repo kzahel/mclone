@@ -2046,10 +2046,7 @@ impl WebIntegratedServerOperationKind {
 struct WebIntegratedServerOperation {
     kind: WebIntegratedServerOperationKind,
     request_id: u32,
-    pending_job_polls: u32,
 }
-
-const MAX_INTEGRATED_SERVER_PENDING_JOB_POLLS: u32 = 60_000;
 
 const WEB_EXECUTOR_REQUEST_ID_BASE: u64 = 1_u64 << 63;
 
@@ -2624,29 +2621,6 @@ impl WebIntegratedServerActor {
         self.server.complete_indexed_db_record_requests(completions)
     }
 
-    #[wasm_bindgen(js_name = hasPendingJobs)]
-    pub fn has_pending_jobs(&self) -> bool {
-        self.operation.is_some_and(|operation| {
-            operation.kind == WebIntegratedServerOperationKind::Command
-                && integrated_server_has_pending_jobs(&self.server.diagnostics)
-        })
-    }
-
-    #[wasm_bindgen(js_name = pollPendingJobs)]
-    pub fn poll_pending_jobs(&mut self) -> Result<JsValue, JsValue> {
-        let operation = self
-            .operation
-            .as_mut()
-            .ok_or_else(|| JsValue::from_str("integrated-server actor has no active operation"))?;
-        operation.pending_job_polls = operation.pending_job_polls.saturating_add(1);
-        if operation.pending_job_polls > MAX_INTEGRATED_SERVER_PENDING_JOB_POLLS {
-            return Err(JsValue::from_str(
-                "timed out waiting for web integrated server jobs",
-            ));
-        }
-        self.server.poll()
-    }
-
     #[wasm_bindgen(js_name = finishOperation)]
     pub fn finish_operation(
         &mut self,
@@ -2724,22 +2698,9 @@ impl WebIntegratedServerActor {
         if !self.server.running {
             return Err("integrated-server actor is shut down".to_owned());
         }
-        self.operation = Some(WebIntegratedServerOperation {
-            kind,
-            request_id,
-            pending_job_polls: 0,
-        });
+        self.operation = Some(WebIntegratedServerOperation { kind, request_id });
         Ok(())
     }
-}
-
-fn integrated_server_has_pending_jobs(diagnostics: &ServerRunnerDiagnostics) -> bool {
-    diagnostics.pending_jobs > 0
-        || diagnostics.pending_publications > 0
-        || diagnostics.pending_persistence_loads > 0
-        || diagnostics.pending_persistence_saves > 0
-        || diagnostics.worldgen_mailbox_pending_jobs > 0
-        || diagnostics.light_status_mailbox_pending_statuses > 0
 }
 
 #[wasm_bindgen]
@@ -2968,13 +2929,9 @@ impl McloneWebIntegratedServerWorker {
         let result = decode_client_command(&frame.to_vec())
             .map_err(|error| error.to_string())
             .and_then(|command| {
-                let mut updates = self
-                    .server
+                self.server
                     .try_handle_command(command)
-                    .map_err(|error| error.to_string())?;
-                updates.extend(self.server.try_poll().map_err(|error| error.to_string())?);
-                self.autosave_indexed_db_dirty_chunks(&mut updates)?;
-                Ok(updates)
+                    .map_err(|error| error.to_string())
             });
         self.command_queue_depth = self.command_queue_depth.saturating_sub(1);
         match result {
