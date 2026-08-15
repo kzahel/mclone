@@ -82,6 +82,10 @@ async function runOne(binary, root, matrix, entry) {
   const started = performance.now();
   const log = createWriteStream(path.join(root, `${entry.label}.log`));
   try {
+    await new Promise((resolve, reject) => {
+      log.once("open", resolve);
+      log.once("error", reject);
+    });
     await runCommand(binary, command, { stdio: ["ignore", log, log] });
     const manifest = JSON.parse(await readFile(path.join(directory, "manifest.json"), "utf8"));
     const timing = JSON.parse(await readFile(path.join(directory, "performance.json"), "utf8"));
