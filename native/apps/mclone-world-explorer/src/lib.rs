@@ -13,6 +13,8 @@ pub use mclone_terrain_view::{
     TerrainRuntimeExactAnchor as WorldExplorerExactAnchor,
     TerrainRuntimeSession as WorldExplorerSession,
 };
+
+pub const WORLD_EXPLORER_TERRAIN_FRONTIER: &str = "single-owner-voxel-curtain";
 pub use mclone_terrain_view::{
     TerrainRuntimeExactRenderer as ExplorerExactTerrain,
     TerrainRuntimeExactStats as ExplorerExactStats,

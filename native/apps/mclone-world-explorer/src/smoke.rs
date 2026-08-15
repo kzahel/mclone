@@ -15,7 +15,7 @@ use crate::capture::{DepthStats, PixelStats};
 use crate::options::ExplorerOptions;
 use crate::terrain::ExplorerTerrain;
 use mclone_world_explorer::ExplorerExactStats;
-use mclone_world_explorer::WorldExplorerCompositionMode;
+use mclone_world_explorer::{WORLD_EXPLORER_TERRAIN_FRONTIER, WorldExplorerCompositionMode};
 
 const MOVEMENT_FRAMES: u32 = 8;
 const ZOOM_FRAMES: u32 = 4;
@@ -432,6 +432,9 @@ impl SmokeRecorder {
         let fields = capture
             .as_object_mut()
             .expect("a JSON object literal produces an object");
+        fields.insert("drawn_levels".to_owned(), json!(stats.drawn_levels));
+        fields.insert("drawn_tiles".to_owned(), json!(stats.drawn_tiles));
+        fields.insert("vertex_count".to_owned(), json!(stats.vertex_count));
         fields.insert(
             "tree_proxy_suppressed_instances".to_owned(),
             json!(stats.tree_proxy_suppressed_instances),
@@ -475,7 +478,10 @@ impl SmokeRecorder {
         );
         fields.insert("composition".to_owned(), json!(composition.label()));
         fields.insert("exact".to_owned(), exact_stats_json(exact));
-        fields.insert("frontier".to_owned(), json!("procedural-collar-1.5-blocks"));
+        fields.insert(
+            "frontier".to_owned(),
+            json!(WORLD_EXPLORER_TERRAIN_FRONTIER),
+        );
         self.captures.push(capture);
         Ok(())
     }
@@ -500,7 +506,7 @@ impl SmokeRecorder {
             "composition": terrain.composition_mode().label(),
             "exact_anchor": options.exact_anchor.label(),
             "exact": exact_stats_json(terrain.exact_stats()),
-            "frontier": "procedural-collar-1.5-blocks",
+            "frontier": WORLD_EXPLORER_TERRAIN_FRONTIER,
             "viewport": {
                 "width": options.width,
                 "height": options.height,
@@ -525,6 +531,9 @@ impl SmokeRecorder {
             "allocation_slots": final_stats.allocation_slots,
             "final_ready_slots": final_stats.ready_slots,
             "final_pending_work": final_stats.pending_refills,
+            "final_drawn_levels": final_stats.drawn_levels,
+            "final_drawn_tiles": final_stats.drawn_tiles,
+            "final_vertex_count": final_stats.vertex_count,
             "total_refills": final_stats.residency.total_refills,
             "total_rebases": final_stats.residency.total_rebases,
             "captures": self.captures,

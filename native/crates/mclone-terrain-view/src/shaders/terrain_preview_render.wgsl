@@ -59,6 +59,7 @@ struct TerrainPreviewMaterialTable {
     side_uvs: array<vec4<f32>, 256>,
     tint_flags: array<vec4<f32>, 256>,
     grass_tints: array<vec4<f32>, 256>,
+    water_tints: array<vec4<f32>, 256>,
 };
 
 @group(1) @binding(0)
@@ -1019,7 +1020,15 @@ fn resolved_surface_material(input: VertexOutput) -> u32 {
 
 fn near_surface_tint(input: VertexOutput, material: u32, side_surface: bool) -> vec3<f32> {
     if material == 2u {
-        return water_surface_color(input.surface_y, 1.0);
+        let biome = select(
+            input.biome,
+            mclone_grass_biome(input.biome),
+            preview_profile() == 0u,
+        );
+        let water_tint = material_table.water_tints[min(biome, 255u)];
+        // The procedural shell is opaque, so fold the exact fluid opacity
+        // into its tint instead of presenting the same RGB at full strength.
+        return water_tint.rgb * water_tint.a;
     }
     let flags = material_table.tint_flags[material];
     let grass_tinted = select(flags.x, flags.y, side_surface) >= 0.5;
@@ -1064,7 +1073,7 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
     }
     let exact_painted = exact_chunk_painted(input.world_xz);
     if exact_coverage.mode_count_generation.x == 1u
-        && input.surface_kind == 0u
+        && input.material != 2u
         && exact_chunk_painted(input.world_xz) {
         discard;
     }

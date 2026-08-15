@@ -19,7 +19,8 @@ use mclone_terrain_view::{
 use mclone_view_control::{WorldViewHeldDirection, WorldViewIntent, WorldViewState};
 use mclone_world_explorer::{
     ExplorerExactStats, ExplorerExactTerrain, NativeTerrainVegetationExecutor,
-    WorldExplorerCompositionMode, WorldExplorerConfig, WorldExplorerSession,
+    WORLD_EXPLORER_TERRAIN_FRONTIER, WorldExplorerCompositionMode, WorldExplorerConfig,
+    WorldExplorerSession,
 };
 
 use crate::options::{ExplorerAssetProfile, ExplorerOptions};
@@ -324,7 +325,7 @@ impl ExplorerTerrain {
              exact_vertices={} exact_indices={}/{} exact_bytes={} exact_trees={}:{}:{} \
              exact_tree_draw={}:{} exact_compile_ms={:.2} \
              exact_present_ms={:.2} exact_mesh_ms={:.2} exact_pack_ms={:.2} \
-             exact_anchor={}({}, {}) frontier=single-owner-voxel-curtain",
+             exact_anchor={}({}, {}) frontier={}",
             self.session.diagnostics(),
             self.composition.label(),
             exact.painted_chunks,
@@ -352,6 +353,7 @@ impl ExplorerTerrain {
             self.options.exact_anchor.label(),
             self.last_exact_anchor[0],
             self.last_exact_anchor[1],
+            WORLD_EXPLORER_TERRAIN_FRONTIER,
         )
     }
 }
