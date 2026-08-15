@@ -161,18 +161,23 @@ desktop/mobile WebGPU, stereo, flat-Android build, and Android-XR build
 boundaries pass; subjective Human Review remains pending.
 Active Tactical
 [`309`](../tactical/309-procedural-horizon-lighting-and-seam-convergence.md)
-now inherits that unresolved visual gate. Phase 0 is implemented and paused
-for Human Review 0 with a fixed 26-image, two-seed native packet and shared
-ownership/topology/albedo/environment/geometry/AO/water/texture diagnostics.
-The capture gate requires all 25 RD2 exact columns, all 160 clipmap slots,
-drained failure-free vegetation, and identical observed state within each
-comparison group; Exact Only reports no horizon allocation. The diagnostics
-attribute the global night failure to missing environmental illumination on
-smooth terrain, water, and proxy trees, not to overlap or AO. The tactical next
-makes time-of-day
-illumination common to procedural land, water, and vegetation, then treats the
-spacing-one-to-smooth and exact-to-spacing-one borders as separately
-diagnosed, separately reviewed convergence phases. Tactical 304's ownership,
+now inherits that unresolved visual gate. Human Review 0 accepted the fixed
+diagnostic packet, and Phase 1 is implemented and paused for Human Review 1.
+The exact renderer's full-sky/zero-block-light RGB now applies once to every
+procedural terrain level, sampled and analytic water, and proxy tree after
+albedo and geometric shade composition. A fixed 32-image, two-seed native
+packet covers every accepted scene at dawn, noon, dusk, and midnight plus
+Exact Only and eight diagnostic controls. Its gate requires all 25 RD2 exact
+columns, all 160 clipmap slots, drained failure-free vegetation, and identical
+settled presentation state within each comparison group; Exact Only reports no
+horizon allocation.
+
+Inspected midnight pixels no longer contain daytime-green smooth land,
+bright-cyan procedural water, or daylight proxy crowns. The environmental
+diagnostic is constant across procedural topology and surface class, while
+noon remains normally illuminated. The tactical next treats the
+spacing-one-to-smooth and exact-to-spacing-one borders as separately diagnosed,
+separately reviewed convergence phases. Tactical 304's ownership,
 bounded frontier curtain, voxel-shell topology, and fixed clipmap allocation
 remain the foundation rather than being replaced to hide the seams.
 Post-review Explorer evidence then showed that Slice 3B's viewer-forward

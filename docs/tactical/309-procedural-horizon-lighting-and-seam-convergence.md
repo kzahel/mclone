@@ -1,7 +1,7 @@
 # Tactical 309: Procedural Horizon Lighting and Seam Convergence
 
-Status: Phase 0 implemented 2026-08-15; awaiting Human Review 0. No
-appearance correction has begun.
+Status: Phase 0 accepted and Phase 1 implemented 2026-08-15; awaiting Human
+Review 1. Phase 2 has not begun.
 
 Topic: `procedural-horizon-clipmap`
 
@@ -247,7 +247,7 @@ existing switch-ready horizon.
 
 ## Phase 0: Reproducible Diagnostics and Review Contract
 
-Status: implemented; Human Review 0 pending.
+Status: implemented; Human Review 0 accepted 2026-08-15.
 
 - Turn the elevated and low cameras above into reproducible capture commands
   or a small shared capture scenario, not hand-positioned screenshots.
@@ -335,9 +335,11 @@ Gate — Human Review 0: accept the cameras, scenarios, and attributed problem
 inventory as the fixed comparison set. No appearance implementation begins
 before this gate.
 
+Accepted by the user on 2026-08-15.
+
 ## Phase 1: Shared Environmental Illumination
 
-Status: planned; highest priority.
+Status: implemented; Human Review 1 pending.
 
 - Establish one renderer-neutral full-sky/zero-block-light environmental term
   from the scene time-of-day input.
@@ -347,6 +349,81 @@ Status: planned; highest priority.
   where separation is necessary to remove double multiplication.
 - Add focused WGSL/source tests and mono/multiview shader validation.
 - Capture all Phase 0 scenes at the four frozen times.
+
+### Phase 1 execution record
+
+Commits `7608a317`, `028ccd94`, `787a7064`, and `c7edb61b` implement
+and verify this phase. The CPU already computed the exact renderer's
+full-sky/zero-block-light RGB through
+`mclone_render::light_texture::lightmap_color(0, 15, sky_darken)` and packed
+it in the shared terrain/tree uniform. The terrain shader now consumes that
+value exactly once, after material texture, sampled and analytic water, cover,
+and geometric shade are composed. Near-material weight and topology no longer
+control environmental light. The tree shader multiplies the same value into
+proxy family albedo and geometric height shade. The environmental diagnostic
+now reports that one uniform term over every procedural surface class.
+
+Face and slope shade are otherwise byte-for-byte unchanged: voxel tops and
+risers retain `1.0/0.6/0.8`, smooth terrain retains its slope term, and tree
+proxies retain their height shade. The change adds no uniform bytes, sample
+fields, textures, bind groups, fixed allocations, per-view products, or
+fragment branches. It adds one topology-independent RGB multiply to natural
+procedural terrain/water and one to proxy vegetation; the removed near-only
+multiply prevents double application.
+
+The accepted command was:
+
+```bash
+pnpm native:terrain-seam-review:capture -- \
+  --output /tmp/mclone-terrain-seam-review-hr1-final \
+  --review-phase 1 \
+  --settle-frames 300 \
+  --skip-build
+```
+
+The schema-one receipt is
+`/tmp/mclone-terrain-seam-review-hr1-final/receipt.json` and records revision
+`c7edb61bdd8c8e554ae67d117042f9d4dee22837`. Its 32 1280-by-720 images
+contain all four frozen times for the elevated/coast, low, forest,
+exposed-stone, and snow scenes; four noon/midnight Exact Only controls; and
+all eight surface diagnostics. It covers seeds `12345` and `-98765`.
+
+Every composed image reports 25 exact columns, 160 ready clipmap slots,
+target-ready terrain, zero pending vegetation, balanced submitted/completed
+vegetation work, and zero transport or job failures. Settled presentation
+facts are identical inside every comparison group. Fresh processes may use a
+different exact-coverage upload generation or complete a different balanced
+total of redundant vegetation jobs; both raw counters remain in the receipt
+but are correctly excluded from visible-state identity. Exact Only reports
+the horizon disabled.
+
+The complete natural time grid, Exact Only controls, and diagnostic grid were
+visually inspected, followed by the full-resolution forest, exposed-stone,
+snow, low, and elevated checkpoints. A direct Phase 0/Phase 1 midnight
+comparison shows the former daytime-green smooth land, bright-cyan water, and
+bright proxy crowns replaced by the same dark, blue-biased night-lightmap
+response seen at the exact foreground. Noon remains normally illuminated; it
+now consistently receives the exact lightmap's slight sub-white clear-day
+multiplier rather than identity white. The environmental diagnostic is one
+constant RGB field across voxel land, smooth land, both water paths, and proxy
+trees for the frame.
+
+The review intentionally does not accept the still-visible voxel/smooth
+material, texture, and geometric-shade ring or the exact/voxel frontier.
+Those remain attributed Phase 2 and Phase 3 work. Blue night water and snow
+are expected products of the shared exact lightmap tint, not retained daytime
+brightness.
+
+Automated evidence passes:
+
+- `cargo test --manifest-path native/Cargo.toml -p mclone-terrain-view --lib`
+  (`97` passed, `1` GPU-only test ignored), including shared Naga validation
+  for generated mono and multiview terrain/tree shaders;
+- source-contract tests that require one topology-independent environment
+  term in terrain, water, and proxy-tree composition;
+- `node --check scripts/capture-terrain-seam-review.mjs`; and
+- the 32-capture campaign's PNG, complete-coverage, exact-only, vegetation,
+  and within-group settled-presentation gates.
 
 Gate — Human Review 1: exact, voxel, smooth, water, and tree presentations
 belong to the same time of day. Midnight contains no daytime-green horizon or

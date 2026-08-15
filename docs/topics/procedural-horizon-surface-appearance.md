@@ -28,25 +28,26 @@ pending.
 
 Active Tactical
 [`309`](../tactical/309-procedural-horizon-lighting-and-seam-convergence.md)
-owns the resulting appearance closeout as a phase-gated campaign. Phase 0 is
-implemented and awaiting Human Review 0; no appearance correction has begun.
-A 26-image, two-seed native packet now fixes the low/elevated cameras, four
-frozen times, Exact Only controls, coast/forest/exposed-stone/snow scenes, and
-eight surface-decomposition channels. Every accepted composed capture reports
-all 25 RD2 exact columns, all 160 clipmap slots ready, and drained,
-failure-free vegetation with identical observed state inside its comparison
-group. Exact Only reports the horizon disabled.
+owns the resulting appearance closeout as a phase-gated campaign. Human Review
+0 accepted the fixed diagnostic packet on 2026-08-15. Phase 1 is implemented
+and awaiting Human Review 1 with a 32-image, two-seed native packet covering
+all four frozen times in the low/elevated, coast, forest, exposed-stone, and
+snow scenes plus Exact Only and surface-decomposition controls.
 
-The diagnostics confirm that the first priority is environmental rather than
-AO: smooth terrain, visible procedural water, and proxy trees use the identity
-environment multiplier at midnight, while only the weighted near-material
-band consumes the shared lightmap. The voxel/smooth ring additionally contains
-independent fixed-face-versus-slope shade, texture-footprint, and albedo
-changes. Procedural local occlusion is currently identity-white, so it may
-matter at the exact/model-AO frontier but cannot explain the global night
-failure. Human Review 0 must accept the fixed packet and attribution before
-Phase 1 changes lighting. Seasonal solar-path policy and independent water
-geometry remain outside this scope.
+Every procedural land level, sampled and analytic water, and proxy tree now
+consumes the exact renderer's full-sky/zero-block-light environmental RGB once
+after albedo and representation-specific geometric shade are composed. The
+change adds no uniform bytes, textures, bind groups, sample fields, fixed
+allocation, or fragment branches. The accepted midnight pixels no longer
+contain a daytime-green horizon, bright-cyan procedural water, or daylight
+proxy crowns, while noon remains normally illuminated.
+
+The voxel/smooth ring still contains independent fixed-face-versus-slope
+shade, texture-footprint, and albedo changes; it is Phase 2 rather than a
+failure of shared time-of-day light. Procedural local occlusion remains
+identity-white, so it may matter at the later exact/model-AO frontier but
+cannot explain the resolved global night failure. Seasonal solar-path policy
+and independent water geometry remain outside this scope.
 
 ## Scope
 
@@ -88,12 +89,14 @@ fixed 32-float TerrainPreviewSample
         v
 spacing-one voxel shell / stitched smooth farther rings
         |
-        +--> near: exact-style face shade + daylight + atlas texel
+        +--> near: exact-style face shade + atlas texel
         |
         +--> far: approximate slope light + reduced atlas detail
         |
+        +--> sampled/analytic water composition
+        |
         v
-analytic inland-water overlay --> fog/target transfer --> render target
+shared full-sky environment --> fog/target transfer --> render target
 ```
 
 The efficient default is therefore to improve classification and the compact
@@ -197,10 +200,13 @@ lighting seams from revealing clipmap tiles.
 
 Smooth levels retain one normalized directional term plus ambient bias,
 clamped to `0.34..1.05`. The spacing-one shell instead assumes exposed full
-sky/zero block light, uses the same sky-darken-dependent lightmap curve as exact
-chunks, and applies the ordinary top/east-west/north-south face shades of
-`1.0`, `0.6`, and `0.8`. The final target-color transfer and fog remain shared
-with the other WGPU paths.
+sky/zero block light and applies the ordinary top/east-west/north-south face
+shades of `1.0`, `0.6`, and `0.8`. After material, geometric shade, and water
+composition, every terrain topology and water path consumes the same
+sky-darken-dependent full-sky/zero-block-light RGB used by exact chunks.
+Procedural tree trunks and crowns consume the same term after their family
+albedo and geometric height shade. The final target-color transfer and fog
+remain shared with the other WGPU paths.
 
 The near shell still does not carry stored per-column light, shadow maps,
 weather attenuation, water specular, or reflections. Those effects require
@@ -365,8 +371,9 @@ remain under `/tmp` by policy.
    heightfield overlay produces sloped rivers or ponds at grazing angles.
 4. Decide whether decoration lakes receive deterministic multiscale summaries
    or deliberately remain exact-range-only.
-5. Add measured time-of-day/sky-light and water-response experiments through
-   shared per-view/multiview-aware lighting contracts.
+5. Converge voxel-to-smooth geometric shade, material footprint, biome tint,
+   water texture/depth response, and proxy presentation under Tactical 309's
+   Human Review 2 gate.
 6. Add renderer GPU timing before increasing atlas samples, biome blending, or
    water shading complexity.
 

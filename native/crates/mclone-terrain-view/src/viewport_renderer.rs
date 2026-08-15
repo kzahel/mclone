@@ -4864,9 +4864,7 @@ mod tests {
         }
         assert!(terrain.contains("color *= environmental_illumination;"));
         assert!(!terrain.contains("* near_surface_lightmap()"));
-        assert!(trees.contains(
-            "input.color.rgb * input.color.a * environmental_illumination"
-        ));
+        assert!(trees.contains("input.color.rgb * input.color.a * environmental_illumination"));
     }
 
     #[test]
