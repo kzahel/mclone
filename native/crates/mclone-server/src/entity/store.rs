@@ -3054,8 +3054,25 @@ impl ServerEntityStore {
             }
         }
         for (id, position, y_rot_degrees, parents) in hatched_nests {
+            let reusable_site = BlockPos::containing(position);
             if let Some(removed) = self.remove_entity(id) {
                 updated.push(removed);
+            }
+            // Removing a missing or destroyed nest must clear stale parent
+            // intent, but a successful hatch is positive evidence that this
+            // is still a usable attended shore site. Preserve that ordinary
+            // animal memory so the pair may return after its cooldown instead
+            // of having to rediscover the same bank from scratch.
+            for parent in parents.into_iter().flatten() {
+                let parent_id = self
+                    .entities
+                    .iter()
+                    .find_map(|(id, entity)| (entity.persistent_id == parent).then_some(*id));
+                if let Some(parent_id) = parent_id
+                    && let Some(parent) = self.mobs.get_mut(&parent_id)
+                {
+                    parent.set_mallard_nest_target(Some(reusable_site));
+                }
             }
             let child = self.insert_mallard_duckling(position, y_rot_degrees, parents);
             updated.push(child);
@@ -5225,6 +5242,62 @@ mod tests {
     }
 
     #[test]
+    fn successful_mallard_pair_reuses_its_hatched_shore_site() {
+        let mut store = ServerEntityStore::default();
+        let female =
+            store.insert_passive_mob_for_test(EntityKind::Mallard, Vec3d::new(4.5, 64.0, 4.5), 0.0);
+        let male =
+            store.insert_passive_mob_for_test(EntityKind::Mallard, Vec3d::new(3.5, 64.0, 4.5), 0.0);
+        for (id, sex) in [
+            (female, mclone_protocol::MallardSex::Female),
+            (male, mclone_protocol::MallardSex::Male),
+        ] {
+            store
+                .mobs
+                .get_mut(&id)
+                .unwrap()
+                .set_mallard_lifecycle_for_test(ready_wildlife_lifecycle(120_000), sex);
+        }
+        let ticking_chunks = local_ticking_chunks();
+        let mut resources = WildlifeResourceLedger::default();
+        store.tick_wildlife_lifecycle(20, &ticking_chunks, &mut resources, &covered_wetland_ground);
+        let nest = store
+            .states()
+            .into_iter()
+            .find(|entity| entity.kind == EntityKind::MallardNest && entity.alive)
+            .expect("conditioned pair establishes its first nest");
+        store
+            .mallard_nests
+            .get_mut(&nest.id)
+            .unwrap()
+            .incubation_progress = MALLARD_NEST_INCUBATION_REQUIRED_TICKS - 1;
+        store.tick_stationary(&ticking_chunks, &[], covered_wetland_ground);
+
+        let reusable_site = BlockPos::containing(nest.position);
+        for (id, sex) in [
+            (female, mclone_protocol::MallardSex::Female),
+            (male, mclone_protocol::MallardSex::Male),
+        ] {
+            assert_eq!(store.mobs[&id].mallard_nest_target(), Some(reusable_site));
+            store
+                .mobs
+                .get_mut(&id)
+                .unwrap()
+                .set_mallard_lifecycle_for_test(ready_wildlife_lifecycle(144_000), sex);
+        }
+        store.tick_wildlife_lifecycle(40, &ticking_chunks, &mut resources, &covered_wetland_ground);
+        assert_eq!(
+            store
+                .states()
+                .iter()
+                .filter(|entity| entity.kind == EntityKind::MallardNest && entity.alive)
+                .count(),
+            1,
+            "the pair should establish a later clutch at its still-valid known site",
+        );
+    }
+
+    #[test]
     fn mallard_nest_attempt_persists_and_drives_shore_travel() {
         let mut store = ServerEntityStore::default();
         let female =
@@ -6463,6 +6536,19 @@ mod tests {
             WildlifeEcologyEventKind::Birth { child, .. }
                 if child == duckling.persistent_id
         )));
+        let reusable_site = BlockPos::containing(nest_position);
+        assert_eq!(
+            loaded
+                .mobs
+                .values()
+                .filter(|mob| {
+                    mob.mallard_life_stage() == Some(MallardLifeStage::Adult)
+                        && mob.mallard_nest_target() == Some(reusable_site)
+                })
+                .count(),
+            2,
+            "a successful attended hatch should remain known as a reusable shore site",
+        );
 
         let second = loaded.tick_stationary(&ticking_chunks, &[], covered_wetland_ground);
         assert_eq!(
