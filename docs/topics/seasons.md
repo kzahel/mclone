@@ -2,9 +2,12 @@
 
 Topic: `seasons`
 
-Status: **concept-stage design record created 2026-08-15. No season clock,
-latitude model, seasonal surface system, migration producer, seasonal
-hydrology, wildlife tagging, or managed-habitat infrastructure is implemented.
+Status: **concept-stage design record created 2026-08-15. Tactical
+[`306`](../tactical/306-seasonal-appearance-preview.md) now owns the first
+visual-only exact-terrain proof and shared desktop/XR Debug control while
+explicitly deferring procedural-horizon LOD. No season clock, latitude model,
+seasonal surface system, migration producer, seasonal hydrology, wildlife
+tagging, or managed-habitat infrastructure is implemented.
 The selected direction is that unloaded terrain and entities receive no ticks
 or elapsed-time catch-up. Climate and ambient seasonal opportunities may be
 derived when an active region asks for them, while durable animals freeze.
@@ -486,6 +489,7 @@ gameplay milestone must prove bounded work with inactive regions held frozen.
 
 ## Related
 
+- [`../tactical/306-seasonal-appearance-preview.md`](../tactical/306-seasonal-appearance-preview.md)
 - [`habitat-driven-creature-ecology.md`](habitat-driven-creature-ecology.md)
 - [`wildlife-ecology-state-model.md`](wildlife-ecology-state-model.md)
 - [`persistent-actor-identity.md`](persistent-actor-identity.md)
