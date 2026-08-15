@@ -2287,6 +2287,14 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(error.contains("incompatible"), "{error}");
+
+        let unbounded_remains =
+            MALLARD_ECOLOGY_RECIPE.replacen("\"biomass\": 180", "\"biomass\": 0", 1);
+        let error =
+            parse_and_validate_recipe(PlayableShowcaseId::MallardEcology, &unbounded_remains)
+                .unwrap_err()
+                .to_string();
+        assert!(error.contains("unbounded biomass"), "{error}");
     }
 
     #[test]
