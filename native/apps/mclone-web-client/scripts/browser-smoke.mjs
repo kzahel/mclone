@@ -443,6 +443,7 @@ const buildOnly = process.argv.includes("--build-only")
   || process.env.MCLONE_NATIVE_WEB_BUILD_ONLY === "1";
 const AIR_BLOCK_STATE_ID = 0;
 const DIRT_BLOCK_STATE_ID = 5;
+const PERSISTENCE_EDIT_BLOCK_STATE_ID = 42;
 
 run().catch((error) => {
   console.error(error instanceof Error ? error.stack ?? error.message : String(error));
@@ -7162,15 +7163,24 @@ async function runIndexedDbReloadProbe(
     () => Number(globalThis.__mcloneWebApp?.state?.playerSuccessfulBlockPlacementStatistic) || 0,
   );
 
-  await page.keyboard.press("2");
+  // Aim at the nearby ground before placing. The startup view can legitimately
+  // frame an interactive fence gate; using it would toggle the gate before held
+  // block placement, which proves interaction but not persistence of an edit.
+  await page.mouse.down();
+  await page.mouse.move(640, 600);
+  await page.mouse.up();
+  // Slot 6 has no ordinary survival item and therefore exercises the stable
+  // debug-block placement path. Slot 2 now carries an oak fence and no longer
+  // represents the legacy dirt-only debug hotbar used by this older probe.
+  await page.keyboard.press("6");
   await page.waitForFunction(
-    () => globalThis.__mcloneWebApp?.state?.selectedHotbarSlot === 1,
+    () => globalThis.__mcloneWebApp?.state?.selectedHotbarSlot === 5,
     undefined,
     { timeout: 10_000 },
   );
   const placement = await submitBlockInteraction(page, "place", {
-    expectedSelectedHotbarSlot: 1,
-    expectedWorldBlockStateId: DIRT_BLOCK_STATE_ID,
+    expectedSelectedHotbarSlot: 5,
+    expectedWorldBlockStateId: PERSISTENCE_EDIT_BLOCK_STATE_ID,
     expectedCarriedItemSynced: true,
   });
   try {
@@ -7194,7 +7204,7 @@ async function runIndexedDbReloadProbe(
     beforeReloadCandidates.push(await blockStateAt(page, candidate));
   }
   const placedBlock = beforeReloadCandidates.find(
-    (candidate) => candidate?.blockStateId === DIRT_BLOCK_STATE_ID,
+    (candidate) => candidate?.blockStateId === PERSISTENCE_EDIT_BLOCK_STATE_ID,
   ) ?? beforeReloadCandidates[0];
   await waitForBrowserIndexedDbChunkRecords(page, worldId, 1);
   const beforeReloadDayTime = await page.evaluate(
@@ -7227,7 +7237,11 @@ async function runIndexedDbReloadProbe(
     afterPlacementStatistic,
     { timeout: 60_000 },
   );
-  const afterReload = await waitForBlockStateAt(page, placedBlock, DIRT_BLOCK_STATE_ID);
+  const afterReload = await waitForBlockStateAt(
+    page,
+    placedBlock,
+    PERSISTENCE_EDIT_BLOCK_STATE_ID,
+  );
   const afterReloadRecordCounts = await browserIndexedDbWorldRecordCounts(page, worldId);
   const afterReloadDayTime = await page.evaluate(
     () => Number(globalThis.__mcloneWebApp?.state?.dayTime) || 0,
@@ -7235,8 +7249,8 @@ async function runIndexedDbReloadProbe(
   return {
     ok: placement?.ok === true
       && recordExecutorProbe.ok === true
-      && placedBlock?.blockStateId === DIRT_BLOCK_STATE_ID
-      && afterReload?.blockStateId === DIRT_BLOCK_STATE_ID
+      && placedBlock?.blockStateId === PERSISTENCE_EDIT_BLOCK_STATE_ID
+      && afterReload?.blockStateId === PERSISTENCE_EDIT_BLOCK_STATE_ID
       && afterReloadRecordCounts.chunks > 0
       && afterReloadRecordCounts.worldMetadata === 1
       && writerLeaseConflict.conflictObserved === true
@@ -7446,14 +7460,34 @@ async function probeWorldWriterSessionAdmission(page, baseUrl, worldId) {
   try {
     const sameWorldUrl = `${baseUrl}/app.html?smokeObserver=1&worldStorage=indexeddb&worldId=${encodeURIComponent(worldId)}`;
     await contender.goto(sameWorldUrl, { waitUntil: "load" });
-    await contender.waitForFunction(
-      () => globalThis.__mcloneWebApp?.state?.failed === true,
-      undefined,
-      { timeout: 60_000 },
-    );
+    try {
+      await contender.waitForFunction(
+        () => {
+          const state = globalThis.__mcloneWebApp?.state;
+          return state?.sessionState === "failed"
+            && String(state?.lastReport?.lastRuntimeStartError ?? "")
+              .includes("already open");
+        },
+        undefined,
+        { timeout: 60_000 },
+      );
+    } catch (error) {
+      const state = await contender.evaluate(() => ({
+        ready: globalThis.__mcloneWebApp?.ready ?? false,
+        state: globalThis.__mcloneWebApp?.state ?? null,
+        workerStats: /** @type {any} */ (globalThis).__mcloneWorkerStats ?? null,
+      }));
+      throw new Error(
+        `same-world writer contender did not reject: ${String(error)}\n${JSON.stringify(state, null, 2)}`,
+      );
+    }
     const rejected = await contender.evaluate(() => ({
       ready: globalThis.__mcloneWebApp?.ready ?? false,
       failed: globalThis.__mcloneWebApp?.state?.failed ?? false,
+      sessionState: String(globalThis.__mcloneWebApp?.state?.sessionState ?? ""),
+      runtimeStartError: String(
+        globalThis.__mcloneWebApp?.state?.lastReport?.lastRuntimeStartError ?? "",
+      ),
       status: String(globalThis.__mcloneWebApp?.state?.status ?? ""),
     }));
 
@@ -7475,9 +7509,8 @@ async function probeWorldWriterSessionAdmission(page, baseUrl, worldId) {
     );
     return {
       ...directConflict,
-      sessionConflictObserved: rejected.failed === true
-        && rejected.ready === false
-        && rejected.status.includes("already open"),
+      sessionConflictObserved: rejected.sessionState === "failed"
+        && rejected.runtimeStartError.includes("already open"),
       rejected,
       differentWorldId,
       differentWorld,
@@ -11340,8 +11373,8 @@ function assertIndexedDbReloadProbeResult(report, pageErrors, canvasPixels) {
     probe.generationProfile
       ? probe.beforeReloadProfile?.ok !== true || probe.afterReloadProfile?.ok !== true
       : probe.placement?.ok !== true
-        || probe.placedBlock?.blockStateId !== DIRT_BLOCK_STATE_ID
-        || probe.afterReload?.blockStateId !== DIRT_BLOCK_STATE_ID
+        || probe.placedBlock?.blockStateId !== PERSISTENCE_EDIT_BLOCK_STATE_ID
+        || probe.afterReload?.blockStateId !== PERSISTENCE_EDIT_BLOCK_STATE_ID
   ) {
     throw new Error(`native web IndexedDB reload probe did not preserve its generated world content:\n${JSON.stringify(probe, null, 2)}`);
   }
