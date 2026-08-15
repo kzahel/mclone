@@ -1631,6 +1631,61 @@ mod tests {
     use super::*;
     use mclone_worldgen::terrain_preview::TerrainPreviewRequest;
 
+    const BROWSER_RESERVED_WGSL_DIRECTIVE_WORDS: [&str; 3] = ["diagnostic", "enable", "requires"];
+
+    fn lint_browser_reserved_wgsl_directive_words(source: &str) -> Result<(), String> {
+        // Terrain View does not use module directives. Forbid their sentinel
+        // words entirely because Chromium reserves them in identifier
+        // positions while the workspace's Naga 25 parser accepts them there.
+        let mut block_comment_depth = 0_u32;
+        for (line_index, line) in source.lines().enumerate() {
+            let bytes = line.as_bytes();
+            let mut index = 0;
+            while index < bytes.len() {
+                if block_comment_depth > 0 {
+                    if bytes[index..].starts_with(b"/*") {
+                        block_comment_depth += 1;
+                        index += 2;
+                    } else if bytes[index..].starts_with(b"*/") {
+                        block_comment_depth -= 1;
+                        index += 2;
+                    } else {
+                        index += 1;
+                    }
+                    continue;
+                }
+                if bytes[index..].starts_with(b"//") {
+                    break;
+                }
+                if bytes[index..].starts_with(b"/*") {
+                    block_comment_depth = 1;
+                    index += 2;
+                    continue;
+                }
+                if bytes[index].is_ascii_alphabetic() || bytes[index] == b'_' {
+                    let start = index;
+                    index += 1;
+                    while index < bytes.len()
+                        && (bytes[index].is_ascii_alphanumeric() || bytes[index] == b'_')
+                    {
+                        index += 1;
+                    }
+                    let word = &line[start..index];
+                    if BROWSER_RESERVED_WGSL_DIRECTIVE_WORDS.contains(&word) {
+                        return Err(format!(
+                            "line {}, column {} uses Chromium-reserved WGSL directive word `{word}`",
+                            line_index + 1,
+                            start + 1
+                        ));
+                    }
+                } else {
+                    index += 1;
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn validate_shader(source: &str, entry_point: &str) {
         validate_shader_with_capabilities(source, entry_point, naga::valid::Capabilities::all());
     }
@@ -1640,6 +1695,8 @@ mod tests {
         entry_point: &str,
         capabilities: naga::valid::Capabilities,
     ) {
+        lint_browser_reserved_wgsl_directive_words(source)
+            .expect("terrain preview WGSL passes the browser reserved-word lint");
         let module = naga::front::wgsl::parse_str(source).expect("terrain preview WGSL parses");
         assert!(
             module
@@ -1650,6 +1707,25 @@ mod tests {
         naga::valid::Validator::new(naga::valid::ValidationFlags::all(), capabilities)
             .validate(&module)
             .expect("terrain preview WGSL validates");
+    }
+
+    #[test]
+    fn browser_reserved_word_lint_catches_chrome_only_parser_gap() {
+        for reserved in BROWSER_RESERVED_WGSL_DIRECTIVE_WORDS {
+            let source = format!("fn example() {{\n    let {reserved} = 0u;\n}}\n");
+            let error = lint_browser_reserved_wgsl_directive_words(&source)
+                .expect_err("reserved directive word must fail the browser lint");
+            assert!(error.contains("line 2, column 9"));
+            assert!(error.contains(reserved));
+        }
+        assert!(
+            lint_browser_reserved_wgsl_directive_words(
+                "// let diagnostic = 0u;\n\
+                 /* let enable = 0u; /* let requires = 0u; */ */\n\
+                 fn example() { let horizon_diagnostic = 0u; }\n"
+            )
+            .is_ok()
+        );
     }
 
     #[test]

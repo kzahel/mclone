@@ -278,6 +278,11 @@ impl TerrainRuntimeCompositionLab {
             .map_err(|error| {
                 format!("failed to request Terrain Lab runtime WebGPU device: {error}")
             })?;
+        device.on_uncaptured_error(Box::new(|error| {
+            web_sys::console::error_1(&JsValue::from_str(&format!(
+                "uncaptured Terrain Lab runtime WebGPU device error: {error}"
+            )));
+        }));
         let capabilities = surface.get_capabilities(&adapter);
         let format = capabilities
             .formats
@@ -305,6 +310,7 @@ impl TerrainRuntimeCompositionLab {
 
         let vegetation_executor =
             BrowserTerrainVegetationExecutor::new(vegetation_worker_transport_factory)?;
+        device.push_error_scope(wgpu::ErrorFilter::Validation);
         let session = TerrainRuntimeSession::new(
             &device,
             &queue,
@@ -325,7 +331,13 @@ impl TerrainRuntimeCompositionLab {
                 material_table: &material_table,
             },
             Some(Box::new(vegetation_executor)),
-        )?;
+        );
+        if let Some(error) = device.pop_error_scope().await {
+            return Err(format!(
+                "failed to initialize Terrain Lab runtime GPU pipelines: {error}"
+            ));
+        }
+        let session = session?;
         let exact_executor = BrowserCanonicalExactExecutor::new_with_visual_assets(
             exact_worker_transport_factory,
             seed,
@@ -336,6 +348,7 @@ impl TerrainRuntimeCompositionLab {
             &visual_profile,
             &texture_presentation,
         )?;
+        device.push_error_scope(wgpu::ErrorFilter::Validation);
         let exact = TerrainRuntimeExactRenderer::new_with_executor(
             &device,
             &queue,
@@ -352,8 +365,13 @@ impl TerrainRuntimeCompositionLab {
             },
             false,
             RenderColorProfile::Vanilla.target_color_transform(format),
-        )
-        .map_err(|error| error.to_string())?;
+        );
+        if let Some(error) = device.pop_error_scope().await {
+            return Err(format!(
+                "failed to initialize Terrain Lab runtime exact GPU pipelines: {error}"
+            ));
+        }
+        let exact = exact.map_err(|error| error.to_string())?;
         Ok(Self {
             canvas,
             surface,

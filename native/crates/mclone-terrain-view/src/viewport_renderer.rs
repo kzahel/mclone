@@ -4842,6 +4842,7 @@ mod tests {
         let trees = super::super::TERRAIN_PREVIEW_TREE_WGSL;
         for shader in [terrain, trees] {
             assert!(shader.contains("params.multiview_options.y"));
+            assert!(shader.contains("let horizon_diagnostic ="));
             assert!(shader.contains("TERRAIN_HORIZON_DIAGNOSTIC_ALBEDO"));
             assert!(shader.contains("TERRAIN_HORIZON_DIAGNOSTIC_ENVIRONMENT"));
             assert!(shader.contains("TERRAIN_HORIZON_DIAGNOSTIC_GEOMETRY"));

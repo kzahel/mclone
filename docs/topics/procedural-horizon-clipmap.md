@@ -32,6 +32,21 @@ without a URL override, verifies the persisted `composed` choice, and captures
 again. The inspected 780-by-1688 toggle and reload images contain 46,737 and
 47,422 colors respectively instead of a black frame.
 
+A separate 2026-08-15 browser black-frame regression from the new surface
+diagnostics is also resolved. The terrain and proxy-tree WGSL used
+`diagnostic` as a local identifier; native Naga validation accepted it, but
+Chrome treats that WGSL diagnostic directive word as reserved and invalidated
+both render pipelines. The shared shaders now use `horizon_diagnostic`, and a
+browser reserved-word lint now rejects `diagnostic`, `enable`, or `requires`
+in every generated Terrain View shader variant before Naga validation.
+Terrain Lab also captures uncaught WebGPU device errors and scopes runtime
+pipeline creation so an invalid shader becomes an initialization failure
+instead of a ready black canvas. Inspected desktop and Pixel 7 Terrain Lab
+runtime captures reach 25/25 exact chunks and all 160 horizon slots with
+composed pixels. The full phone game Graphics toggle and persisted-reload
+smoke reaches 49 exact columns, all ten drawn levels, 23 drawn horizon tiles,
+and 37,750/38,735 distinct interior colors in its 780-by-1688 captures.
+
 This is the current system meant by unqualified **LOD** or **LOD system** in
 project discussion. **Terrain Horizon** is its player-facing settings name.
 World Explorer was its first proof host and remains a consumer, but the shared

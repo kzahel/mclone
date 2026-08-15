@@ -256,29 +256,29 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
         discard;
     }
     let exact_painted = exact_chunk_painted(input.world_xz);
-    let diagnostic = params.multiview_options.y;
+    let horizon_diagnostic = params.multiview_options.y;
     let environmental_illumination = full_sky_environmental_illumination();
     var color = input.color.rgb * input.color.a * environmental_illumination;
-    if diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_OWNERSHIP_LEVEL {
+    if horizon_diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_OWNERSHIP_LEVEL {
         color = terrain_horizon_level_color(u32(params.origin_spacing_cells.z));
-    } else if diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_TOPOLOGY {
+    } else if horizon_diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_TOPOLOGY {
         color = vec3<f32>(0.94, 0.10, 0.72);
-    } else if diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_ALBEDO {
+    } else if horizon_diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_ALBEDO {
         color = input.color.rgb;
-    } else if diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_ENVIRONMENT {
+    } else if horizon_diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_ENVIRONMENT {
         color = environmental_illumination;
-    } else if diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_GEOMETRY {
+    } else if horizon_diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_GEOMETRY {
         color = vec3<f32>(input.color.a);
-    } else if diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_OCCLUSION {
+    } else if horizon_diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_OCCLUSION {
         color = vec3<f32>(1.0);
-    } else if diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_WATER
-        || diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_TEXTURE {
+    } else if horizon_diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_WATER
+        || horizon_diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_TEXTURE {
         color = vec3<f32>(0.0);
     }
     if exact_coverage.mode_count_generation.x == 2u && exact_painted {
         color = mix(color, vec3<f32>(1.0, 0.08, 0.72), 0.86);
     }
-    if diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_NATURAL {
+    if horizon_diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_NATURAL {
         var fog_camera_position = params.fog_camera_position;
         if input.view_index != 0u {
             fog_camera_position = params.fog_camera_position_right;

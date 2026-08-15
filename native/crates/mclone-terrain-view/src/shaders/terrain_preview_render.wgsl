@@ -1116,8 +1116,8 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let river_anti_alias = max(fwidth(input.river.x), blocks_per_pixel * 0.35);
     let pool_anti_alias = max(fwidth(input.semantics.y), 0.01);
     let physical_channel_edge = max(fwidth(input.river.z), 0.001);
-    let diagnostic = params.multiview_options.y;
-    let albedo_diagnostic = diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_ALBEDO;
+    let horizon_diagnostic = params.multiview_options.y;
+    let albedo_diagnostic = horizon_diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_ALBEDO;
     let environmental_illumination = full_sky_environmental_illumination();
     var color = input.color;
     var albedo = input.color / max(input.light, 0.001);
@@ -1309,9 +1309,9 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
     // topology. Apply the exact renderer's full-sky/zero-block-light term once
     // after all albedo and geometric-shade composition.
     color *= environmental_illumination;
-    if diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_OWNERSHIP_LEVEL {
+    if horizon_diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_OWNERSHIP_LEVEL {
         color = terrain_horizon_level_color(u32(params.origin_spacing_cells.z));
-    } else if diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_TOPOLOGY {
+    } else if horizon_diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_TOPOLOGY {
         color = vec3<f32>(0.08, 0.42, 0.95);
         if input.near_shell != 0u {
             color = vec3<f32>(0.18, 0.86, 0.22);
@@ -1321,17 +1321,17 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
                 color = vec3<f32>(0.96, 0.06, 0.72);
             }
         }
-    } else if diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_ALBEDO {
+    } else if horizon_diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_ALBEDO {
         color = albedo;
-    } else if diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_ENVIRONMENT {
+    } else if horizon_diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_ENVIRONMENT {
         color = environmental_illumination;
-    } else if diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_GEOMETRY {
+    } else if horizon_diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_GEOMETRY {
         color = vec3<f32>(input.light);
-    } else if diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_OCCLUSION {
+    } else if horizon_diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_OCCLUSION {
         // Procedural terrain currently has no local AO term. White is the
         // identity multiplier and makes that absence explicit at the seam.
         color = vec3<f32>(1.0);
-    } else if diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_WATER {
+    } else if horizon_diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_WATER {
         color = vec3<f32>(0.035);
         if input.material == 2u {
             let bed_depth = clamp((63.0 - input.surface_y) / 32.0, 0.0, 1.0);
@@ -1351,7 +1351,7 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
             vec3<f32>(0.88, 0.10, 0.94),
             diagnostic_pool_alpha,
         );
-    } else if diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_TEXTURE {
+    } else if horizon_diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_TEXTURE {
         var texture_weight = 0.0;
         if input.textured != 0u {
             texture_weight = material_texture_weight(material_blocks_per_pixel, false);
@@ -1383,7 +1383,7 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
         );
         color = mix(color, coverage_color, 0.82);
     }
-    if diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_NATURAL {
+    if horizon_diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_NATURAL {
         var fog_camera_position = params.fog_camera_position;
         if input.view_index != 0u {
             fog_camera_position = params.fog_camera_position_right;

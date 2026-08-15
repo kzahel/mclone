@@ -425,6 +425,20 @@ Automated evidence passes:
 - the 32-capture campaign's PNG, complete-coverage, exact-only, vegetation,
   and within-group settled-presentation gates.
 
+Browser correction on 2026-08-15: the diagnostic shaders initially declared
+a local named `diagnostic`. Native Naga accepted it, but Chrome reserves that
+WGSL directive word and rejected both the terrain and proxy-tree modules,
+leaving Terrain Lab runtime composition and the live Web Composed setting
+black. The local is now `horizon_diagnostic`. A browser reserved-word lint
+over every generated Terrain View shader variant rejects all three directive
+words that Chromium reserves but Naga 25 accepts as identifiers. Terrain Lab
+also captures uncaught WebGPU errors and validation-scopes runtime pipeline
+construction so this failure class cannot report a ready black frame. Focused
+Rust coverage, inspected desktop and Pixel 7 Terrain Lab runtime captures,
+and the phone full-game Graphics toggle plus persisted reload smoke pass. The
+game captures draw all ten levels and contain 37,750 and 38,735 distinct
+interior colors.
+
 Gate — Human Review 1: exact, voxel, smooth, water, and tree presentations
 belong to the same time of day. Midnight contains no daytime-green horizon or
 bright-cyan procedural water, while noon is not globally over-darkened.
