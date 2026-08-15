@@ -139,10 +139,6 @@ impl PendingLightStatus {
         }
     }
 
-    pub(crate) fn raw_blocks(&self) -> &[RawBlockId] {
-        &self.raw_blocks
-    }
-
     pub(crate) fn neighbor_blocks(&self) -> &[(ChunkPos, Arc<[RawBlockId]>)] {
         &self.neighbor_blocks
     }
@@ -262,6 +258,7 @@ impl PendingLightStatusBatch {
         self.statuses.iter().map(|status| status.token)
     }
 
+    #[cfg(any(not(target_arch = "wasm32"), test))]
     pub(crate) fn into_statuses(self) -> Vec<PendingLightStatus> {
         self.statuses
     }

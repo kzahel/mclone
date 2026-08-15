@@ -22,6 +22,7 @@ use crate::WasmServerJobWorkerConfig;
 #[cfg(target_arch = "wasm32")]
 use crate::job_codec::{
     ServerJobActorKind, decode_light_status_response, encode_light_status_request,
+    encode_light_status_unload_request,
 };
 use crate::level_light_bridge::LevelLightComputationTiming;
 use crate::light_status::{
@@ -30,7 +31,9 @@ use crate::light_status::{
 };
 use crate::light_world::RetainedInitialLightState;
 use crate::persistence::ScheduledTickRecord;
-use crate::timing::{TimingSample, timing_elapsed_us, timing_start};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::timing::TimingSample;
+use crate::timing::{timing_elapsed_us, timing_start};
 #[cfg(target_arch = "wasm32")]
 use crate::wasm_job_worker::WasmJobWorker;
 use crate::{LightStatusMailboxKind, LightStatusMailboxMetrics, WorkerFrameMetrics};
@@ -81,6 +84,7 @@ impl CompletedLightStatus {
             .collect()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn cancelled(pending: PendingLightStatus) -> Self {
         Self {
             token: pending.token,
@@ -379,10 +383,12 @@ impl LightStatusMailboxBackend {
     }
 
     fn enqueue_unload(&mut self, positions: Vec<ChunkPos>) {
-        if self.worker.is_some() {
-            // The web worker rebuilds `RetainedInitialLightState` per job frame
-            // (`compute_light_status_job_frame`), so it retains nothing across
-            // batches and has nothing to evict.
+        if let Some(worker) = &mut self.worker {
+            let frame = encode_light_status_unload_request(&positions)
+                .expect("failed to encode wasm light-status unload request");
+            worker
+                .post_frame(frame)
+                .expect("wasm light-status worker stopped before receiving unload");
             return;
         }
         self.light_state.evict_chunks(&positions);
@@ -398,9 +404,9 @@ impl LightStatusMailboxBackend {
     fn acknowledge_terminal(&mut self, _token: LightRequestToken) {}
 
     fn wait_for_light_idle(&mut self, _timeout: Duration) -> bool {
-        // Inline compute + eviction are synchronous; the web worker retains no
-        // cross-batch state, so there is never a pending eviction to await.
-        true
+        self.worker
+            .as_ref()
+            .is_none_or(|worker| worker.pending_count() == 0)
     }
 
     fn drain_completed(&mut self) -> Vec<CompletedLightStatus> {
@@ -409,10 +415,10 @@ impl LightStatusMailboxBackend {
                 .drain_frames()
                 .expect("wasm light-status worker failed while draining jobs")
             {
-                self.completed.extend(
-                    decode_light_status_response(&frame)
-                        .expect("failed to decode wasm light-status job"),
-                );
+                let response = decode_light_status_response(&frame)
+                    .expect("failed to decode wasm light-status job");
+                self.mailbox_metrics.retained_light_chunk_count = response.retained_chunk_count;
+                self.completed.extend(response.completed);
             }
         }
         self.completed.drain(..).collect()

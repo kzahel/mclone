@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
 use mclone_core::{
     AxisTopology, BlockPos, ChunkPos, ChunkRevision, ChunkSnapshot, ChunkStatus,
@@ -21,7 +22,9 @@ use mclone_worldgen::levelgen::{
 
 use crate::level_light_bridge::LevelLightComputationTiming;
 use crate::light_mailbox::CompletedLightStatus;
-use crate::light_status::{LightRequestToken, PendingLightStatus, PendingLightStatusBatch};
+use crate::light_status::{
+    LightRequestToken, PendingLightDemand, PendingLightStatus, PendingLightStatusBatch,
+};
 use crate::light_world::RetainedInitialLightState;
 use crate::lighting_seed::provisional_light_neighbor_lift;
 #[cfg(test)]
@@ -44,8 +47,9 @@ const WORLDGEN_RESPONSE_MAGIC: u32 = 0x5747_4A53;
 /// tests). Desktop is untouched: it moves the dependency `Vec` over `mpsc`.
 const WORLDGEN_DELTA_REQUEST_MAGIC: u32 = 0x5747_4A44;
 const LIGHT_REQUEST_MAGIC: u32 = 0x4C54_4A52;
+const LIGHT_UNLOAD_REQUEST_MAGIC: u32 = 0x4C54_4A55;
 const LIGHT_RESPONSE_MAGIC: u32 = 0x4C54_4A53;
-const JOB_FRAME_VERSION: u32 = 8;
+const JOB_FRAME_VERSION: u32 = 9;
 const SERVER_JOB_ACTOR_INIT_MAGIC: u32 = 0x534A_4149;
 const SERVER_JOB_ACTOR_INIT_VERSION: u32 = 1;
 const SERVER_JOB_ACTOR_INIT_FRAME_BYTES: usize = 9;
@@ -681,47 +685,131 @@ pub(crate) fn encode_light_status_request(
     batch: PendingLightStatusBatch,
 ) -> Result<Vec<u8>, String> {
     let mut writer = FrameWriter::new(LIGHT_REQUEST_MAGIC);
-    let statuses = batch.into_statuses();
+    let (statuses, input_chunks) = batch.into_parts();
+    writer.write_len("light input chunks", input_chunks.len())?;
+    for (pos, blocks) in &input_chunks {
+        writer.write_chunk_pos(*pos);
+        writer.write_raw_block_ids("light input chunk blocks", blocks)?;
+    }
     writer.write_len("light statuses", statuses.len())?;
     for status in &statuses {
-        writer.write_pending_light_status(status)?;
+        writer.write_pending_light_status_metadata(status)?;
     }
     Ok(writer.into_bytes())
 }
 
-pub(crate) fn decode_light_status_response(
-    bytes: &[u8],
-) -> Result<Vec<CompletedLightStatus>, String> {
-    let mut reader = FrameReader::new(bytes, LIGHT_RESPONSE_MAGIC)?;
-    let completed = reader.read_vec(
-        "completed light statuses",
-        FrameReader::read_completed_light_status,
-    )?;
-    reader.finish()?;
-    Ok(completed)
-}
-
-pub fn compute_light_status_job_frame(bytes: &[u8]) -> Result<Vec<u8>, String> {
-    let mut reader = FrameReader::new(bytes, LIGHT_REQUEST_MAGIC)?;
-    let statuses = reader.read_vec("light statuses", FrameReader::read_pending_light_status)?;
-    reader.finish()?;
-
-    let mut light_state = RetainedInitialLightState::new();
-    let completed =
-        CompletedLightStatus::from_batch(&mut light_state, PendingLightStatusBatch::new(statuses));
-
-    let mut writer = FrameWriter::new(LIGHT_RESPONSE_MAGIC);
-    writer.write_len("completed light statuses", completed.len())?;
-    for status in &completed {
-        writer.write_completed_light_status(status)?;
+pub(crate) fn encode_light_status_unload_request(
+    positions: &[ChunkPos],
+) -> Result<Vec<u8>, String> {
+    let mut writer = FrameWriter::new(LIGHT_UNLOAD_REQUEST_MAGIC);
+    writer.write_len("light unload positions", positions.len())?;
+    for pos in positions {
+        writer.write_chunk_pos(*pos);
     }
     Ok(writer.into_bytes())
 }
 
 #[derive(Debug)]
+pub(crate) struct LightStatusJobFrame {
+    pub(crate) completed: Vec<CompletedLightStatus>,
+    pub(crate) retained_chunk_count: usize,
+}
+
+pub(crate) fn decode_light_status_response(bytes: &[u8]) -> Result<LightStatusJobFrame, String> {
+    let mut reader = FrameReader::new(bytes, LIGHT_RESPONSE_MAGIC)?;
+    let completed = reader.read_vec(
+        "completed light statuses",
+        FrameReader::read_completed_light_status,
+    )?;
+    let retained_chunk_count = reader.read_len("retained light chunks")?;
+    reader.finish()?;
+    Ok(LightStatusJobFrame {
+        completed,
+        retained_chunk_count,
+    })
+}
+
+pub fn compute_light_status_job_frame(bytes: &[u8]) -> Result<Vec<u8>, String> {
+    let batch = decode_light_status_request(bytes)?;
+    let mut light_state = RetainedInitialLightState::new();
+    compute_light_status_batch_frame(&mut light_state, batch)
+}
+
+fn decode_light_status_request(bytes: &[u8]) -> Result<PendingLightStatusBatch, String> {
+    let mut reader = FrameReader::new(bytes, LIGHT_REQUEST_MAGIC)?;
+    let input_chunks = reader.read_map("light input chunks", |reader| {
+        let pos = reader.read_chunk_pos()?;
+        let blocks: Arc<[RawBlockId]> = reader
+            .read_raw_block_ids("light input chunk blocks")?
+            .into();
+        Ok((pos, blocks))
+    })?;
+    let statuses = reader.read_vec("light statuses", |reader| {
+        reader.read_pending_light_status_metadata(&input_chunks)
+    })?;
+    reader.finish()?;
+    Ok(PendingLightStatusBatch::from_shared_parts(
+        statuses,
+        input_chunks,
+    ))
+}
+
+fn decode_light_status_unload_request(bytes: &[u8]) -> Result<Vec<ChunkPos>, String> {
+    let mut reader = FrameReader::new(bytes, LIGHT_UNLOAD_REQUEST_MAGIC)?;
+    let positions = reader.read_vec("light unload positions", FrameReader::read_chunk_pos)?;
+    reader.finish()?;
+    Ok(positions)
+}
+
+fn compute_light_status_batch_frame(
+    light_state: &mut RetainedInitialLightState,
+    batch: PendingLightStatusBatch,
+) -> Result<Vec<u8>, String> {
+    let completed = CompletedLightStatus::from_batch(light_state, batch);
+    encode_light_status_response(completed, light_state.retained_chunk_count())
+}
+
+fn encode_light_status_response(
+    completed: Vec<CompletedLightStatus>,
+    retained_chunk_count: usize,
+) -> Result<Vec<u8>, String> {
+    let mut writer = FrameWriter::new(LIGHT_RESPONSE_MAGIC);
+    writer.write_len("completed light statuses", completed.len())?;
+    for status in &completed {
+        writer.write_completed_light_status(status)?;
+    }
+    writer.write_len("retained light chunks", retained_chunk_count)?;
+    Ok(writer.into_bytes())
+}
+
+fn compute_light_status_actor_frame(
+    light_state: &mut RetainedInitialLightState,
+    bytes: &[u8],
+) -> Result<Vec<u8>, String> {
+    let magic = bytes
+        .get(0..4)
+        .ok_or_else(|| "light-status job frame ended before its magic".to_owned())?;
+    let magic = u32::from_le_bytes(magic.try_into().expect("checked light frame magic length"));
+    match magic {
+        LIGHT_REQUEST_MAGIC => {
+            let batch = decode_light_status_request(bytes)?;
+            compute_light_status_batch_frame(light_state, batch)
+        }
+        LIGHT_UNLOAD_REQUEST_MAGIC => {
+            let positions = decode_light_status_unload_request(bytes)?;
+            light_state.evict_chunks(&positions);
+            encode_light_status_response(Vec::new(), light_state.retained_chunk_count())
+        }
+        _ => Err(format!(
+            "unknown light-status actor frame magic {magic:#010x}"
+        )),
+    }
+}
+
+#[derive(Debug)]
 enum ServerJobActorState {
     Worldgen(WorldgenJobSession),
-    LightStatus,
+    LightStatus(RetainedInitialLightState),
 }
 
 /// One worker-resident server-job actor behind the domain-blind browser broker.
@@ -745,6 +833,7 @@ pub struct ServerJobActorDiagnostics {
     pub failed_frame_count: u64,
     pub resident_worldgen_mirror_chunk_count: usize,
     pub last_worldgen_delta_upsert_count: usize,
+    pub resident_light_chunk_count: usize,
 }
 
 impl ServerJobActor {
@@ -753,7 +842,9 @@ impl ServerJobActor {
             ServerJobActorKind::Worldgen => {
                 ServerJobActorState::Worldgen(WorldgenJobSession::new())
             }
-            ServerJobActorKind::LightStatus => ServerJobActorState::LightStatus,
+            ServerJobActorKind::LightStatus => {
+                ServerJobActorState::LightStatus(RetainedInitialLightState::new())
+            }
         };
         Self {
             kind,
@@ -770,7 +861,9 @@ impl ServerJobActor {
     pub fn compute_frame(&mut self, frame: &[u8]) -> Result<Vec<u8>, String> {
         let result = match self.state.as_mut() {
             Some(ServerJobActorState::Worldgen(session)) => session.compute_delta_job_frame(frame),
-            Some(ServerJobActorState::LightStatus) => compute_light_status_job_frame(frame),
+            Some(ServerJobActorState::LightStatus(light_state)) => {
+                compute_light_status_actor_frame(light_state, frame)
+            }
             None => Err("server-job actor is shut down".to_owned()),
         };
         match result {
@@ -786,14 +879,21 @@ impl ServerJobActor {
     }
 
     pub fn diagnostics(&self) -> ServerJobActorDiagnostics {
-        let (resident_worldgen_mirror_chunk_count, last_worldgen_delta_upsert_count) =
-            match self.state.as_ref() {
-                Some(ServerJobActorState::Worldgen(session)) => (
-                    session.mirror_chunk_count(),
-                    session.last_delta_upsert_count(),
-                ),
-                Some(ServerJobActorState::LightStatus) | None => (0, 0),
-            };
+        let (
+            resident_worldgen_mirror_chunk_count,
+            last_worldgen_delta_upsert_count,
+            resident_light_chunk_count,
+        ) = match self.state.as_ref() {
+            Some(ServerJobActorState::Worldgen(session)) => (
+                session.mirror_chunk_count(),
+                session.last_delta_upsert_count(),
+                0,
+            ),
+            Some(ServerJobActorState::LightStatus(light_state)) => {
+                (0, 0, light_state.retained_chunk_count())
+            }
+            None => (0, 0, 0),
+        };
         ServerJobActorDiagnostics {
             kind: self.kind,
             shutdown: self.state.is_none(),
@@ -801,6 +901,7 @@ impl ServerJobActor {
             failed_frame_count: self.failed_frame_count,
             resident_worldgen_mirror_chunk_count,
             last_worldgen_delta_upsert_count,
+            resident_light_chunk_count,
         }
     }
 
@@ -808,7 +909,7 @@ impl ServerJobActor {
     /// the TypeScript broker.
     pub fn diagnostics_frame(&self) -> Vec<u8> {
         let diagnostics = self.diagnostics();
-        let mut frame = Vec::with_capacity(42);
+        let mut frame = Vec::with_capacity(50);
         frame.extend_from_slice(&SERVER_JOB_ACTOR_DIAGNOSTICS_MAGIC.to_le_bytes());
         frame.extend_from_slice(&SERVER_JOB_ACTOR_DIAGNOSTICS_VERSION.to_le_bytes());
         frame.push(diagnostics.kind.tag());
@@ -822,6 +923,11 @@ impl ServerJobActor {
         );
         frame.extend_from_slice(
             &u64::try_from(diagnostics.last_worldgen_delta_upsert_count)
+                .unwrap_or(u64::MAX)
+                .to_le_bytes(),
+        );
+        frame.extend_from_slice(
+            &u64::try_from(diagnostics.resident_light_chunk_count)
                 .unwrap_or(u64::MAX)
                 .to_le_bytes(),
         );
@@ -1091,7 +1197,10 @@ impl FrameWriter {
         Ok(())
     }
 
-    fn write_pending_light_status(&mut self, status: &PendingLightStatus) -> Result<(), String> {
+    fn write_pending_light_status_metadata(
+        &mut self,
+        status: &PendingLightStatus,
+    ) -> Result<(), String> {
         self.write_u64(status.token.id);
         self.write_chunk_pos(status.pos);
         self.write_snapshot(&status.feature_snapshot)?;
@@ -1103,14 +1212,12 @@ impl FrameWriter {
             "light status scheduled fluid ticks",
             &status.scheduled_fluid_ticks,
         )?;
-        self.write_raw_block_ids("light status raw blocks", status.raw_blocks())?;
         self.write_len(
-            "light status neighbor blocks",
+            "light status neighbor positions",
             status.neighbor_blocks().len(),
         )?;
-        for (pos, blocks) in status.neighbor_blocks() {
+        for (pos, _) in status.neighbor_blocks() {
             self.write_chunk_pos(*pos);
-            self.write_raw_block_ids("light status neighbor block data", blocks)?;
         }
         Ok(())
     }
@@ -1545,29 +1652,53 @@ impl<'a> FrameReader<'a> {
         }
     }
 
-    fn read_pending_light_status(&mut self) -> Result<PendingLightStatus, String> {
+    fn read_pending_light_status_metadata(
+        &mut self,
+        input_chunks: &BTreeMap<ChunkPos, Arc<[RawBlockId]>>,
+    ) -> Result<PendingLightStatus, String> {
         let token_id = self.read_u64()?;
         let pos = self.read_chunk_pos()?;
         let feature_snapshot = self.read_snapshot()?;
         let scheduled_block_ticks = self.read_tick_records("light status scheduled block ticks")?;
         let scheduled_fluid_ticks = self.read_tick_records("light status scheduled fluid ticks")?;
-        let raw_blocks = self.read_raw_block_ids("light status raw blocks")?;
-        let neighbor_blocks = self.read_vec("light status neighbor blocks", |reader| {
-            let pos = reader.read_chunk_pos()?;
-            let blocks = reader.read_raw_block_ids("light status neighbor block data")?;
-            Ok((pos, blocks))
+        let neighbor_positions = self.read_vec(
+            "light status neighbor positions",
+            FrameReader::read_chunk_pos,
+        )?;
+        if feature_snapshot.pos != pos {
+            return Err(format!(
+                "light status snapshot position {:?} does not match request position {pos:?}",
+                feature_snapshot.pos
+            ));
+        }
+        let raw_blocks = input_chunks.get(&pos).cloned().ok_or_else(|| {
+            format!(
+                "light status target ({}, {}) is absent from its shared input table",
+                pos.x, pos.z
+            )
         })?;
-        Ok(PendingLightStatus::from_parts_with_token(
-            LightRequestToken::new(token_id, pos, feature_snapshot.revision),
-            feature_snapshot,
+        let mut neighbor_blocks = Vec::with_capacity(neighbor_positions.len());
+        for neighbor_pos in neighbor_positions {
+            let blocks = input_chunks.get(&neighbor_pos).cloned().ok_or_else(|| {
+                format!(
+                    "light status neighbor ({}, {}) is absent from its shared input table",
+                    neighbor_pos.x, neighbor_pos.z
+                )
+            })?;
+            neighbor_blocks.push((neighbor_pos, blocks));
+        }
+        let token = LightRequestToken::new(token_id, pos, feature_snapshot.revision);
+        Ok(PendingLightStatus::from_shared_demand(
+            PendingLightDemand::new(
+                token,
+                feature_snapshot,
+                scheduled_block_ticks,
+                scheduled_fluid_ticks,
+                None,
+            ),
             raw_blocks,
             neighbor_blocks,
         ))
-        .map(|mut status| {
-            status.scheduled_block_ticks = scheduled_block_ticks;
-            status.scheduled_fluid_ticks = scheduled_fluid_ticks;
-            status
-        })
     }
 
     fn read_completed_light_status(&mut self) -> Result<CompletedLightStatus, String> {
@@ -2570,7 +2701,7 @@ mod tests {
         assert_eq!(diagnostics.failed_frame_count, 0);
         assert!(diagnostics.resident_worldgen_mirror_chunk_count > 0);
         assert_eq!(diagnostics.last_worldgen_delta_upsert_count, 0);
-        assert_eq!(actor.diagnostics_frame().len(), 42);
+        assert_eq!(actor.diagnostics_frame().len(), 50);
 
         actor.shutdown();
         assert!(
@@ -2612,11 +2743,86 @@ mod tests {
         let response = actor.compute_frame(&request).unwrap();
         assert_eq!(response, expected_response);
         assert_eq!(actor.diagnostics().completed_frame_count, 1);
-        let completed = decode_light_status_response(&response).unwrap();
+        assert_eq!(actor.diagnostics().resident_light_chunk_count, 1);
+        let first = decode_light_status_response(&response).unwrap();
 
-        assert_eq!(completed.len(), 1);
-        assert_eq!(completed[0].pos, ChunkPos::new(0, 0));
-        assert_eq!(completed[0].feature_snapshot, snapshot);
-        assert!(completed[0].batch_compute_leader);
+        assert_eq!(first.retained_chunk_count, 1);
+        assert_eq!(first.completed.len(), 1);
+        assert_eq!(first.completed[0].pos, ChunkPos::new(0, 0));
+        assert_eq!(first.completed[0].feature_snapshot, snapshot);
+        assert!(first.completed[0].batch_compute_leader);
+
+        let second = decode_light_status_response(&actor.compute_frame(&request).unwrap()).unwrap();
+        assert_eq!(second.retained_chunk_count, 1);
+        assert_eq!(second.completed.len(), 1);
+        assert_eq!(
+            second.completed[0].light_sections,
+            first.completed[0].light_sections
+        );
+        assert_eq!(second.completed[0].timing.light_status_inserted_chunks, 0);
+        assert_eq!(second.completed[0].timing.light_status_unchanged_chunks, 1);
+
+        let unload = encode_light_status_unload_request(&[ChunkPos::new(0, 0)]).unwrap();
+        let unloaded =
+            decode_light_status_response(&actor.compute_frame(&unload).unwrap()).unwrap();
+        assert!(unloaded.completed.is_empty());
+        assert_eq!(unloaded.retained_chunk_count, 0);
+        assert_eq!(actor.diagnostics().resident_light_chunk_count, 0);
+    }
+
+    #[test]
+    fn light_status_batch_codec_serializes_shared_inputs_once() {
+        let center = ChunkPos::new(0, 0);
+        let east = ChunkPos::new(1, 0);
+        let snapshot = |pos| {
+            ChunkSnapshot::from_block_state_ids(
+                pos,
+                ChunkStatus::Features,
+                ChunkRevision(3),
+                0,
+                16,
+                &vec![AIR_BLOCK_STATE_ID; CHUNK_SECTION_VOLUME],
+            )
+        };
+        let center_blocks = vec![0; CHUNK_SECTION_VOLUME];
+        let east_blocks = vec![1; CHUNK_SECTION_VOLUME];
+        let center_status = PendingLightStatus::from_parts(
+            center,
+            snapshot(center),
+            center_blocks.clone(),
+            vec![(east, east_blocks.clone())],
+        );
+        let east_status = PendingLightStatus::from_parts(
+            east,
+            snapshot(east),
+            east_blocks.clone(),
+            vec![(center, center_blocks.clone())],
+        );
+        let separate_bytes =
+            encode_light_status_request(PendingLightStatusBatch::new(vec![center_status.clone()]))
+                .unwrap()
+                .len()
+                .saturating_add(
+                    encode_light_status_request(PendingLightStatusBatch::new(vec![
+                        east_status.clone(),
+                    ]))
+                    .unwrap()
+                    .len(),
+                );
+        let shared_request = encode_light_status_request(PendingLightStatusBatch::new(vec![
+            center_status,
+            east_status,
+        ]))
+        .unwrap();
+
+        assert!(
+            shared_request.len() + 2 * CHUNK_SECTION_VOLUME * std::mem::size_of::<RawBlockId>()
+                <= separate_bytes,
+            "shared request {} bytes did not eliminate two repeated raw inputs from {separate_bytes} bytes",
+            shared_request.len()
+        );
+        let decoded = decode_light_status_request(&shared_request).unwrap();
+        assert_eq!(decoded.target_count(), 2);
+        assert_eq!(decoded.unique_input_count(), 2);
     }
 }
