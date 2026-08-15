@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "description": "Thirty-day radius-8 diagnostic subset for typed rabbit/deer/mallard ecology before the accepted long matrix.",
+  "description": "Thirty-day radius-8 multi-seed diagnostic subset for typed rabbit/deer/mallard ecology before the accepted long matrix.",
   "canaryTicks": 480,
   "runs": [
     {
@@ -14,6 +14,13 @@
       "label": "mixed-river-steppe-30d",
       "seed": 12345,
       "center": [18, -14],
+      "radius": 8,
+      "days": 30
+    },
+    {
+      "label": "negative-seed-river-mountain-30d",
+      "seed": -24680,
+      "center": [-78, 38],
       "radius": 8,
       "days": 30
     },
