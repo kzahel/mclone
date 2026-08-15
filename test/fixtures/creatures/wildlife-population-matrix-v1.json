@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "description": "Real-seed closed-domain rabbit/deer baseline spanning mixed woodland, dry meadow, wet conifer, river meadow, and river-steppe windows.",
+  "canaryTicks": 480,
+  "runs": [
+    {
+      "label": "mixed-woodland",
+      "seed": -98765,
+      "center": [30, -122],
+      "radius": 4,
+      "days": 120
+    },
+    {
+      "label": "dry-meadow",
+      "seed": 12345,
+      "center": [-14, 30],
+      "radius": 4,
+      "days": 120
+    },
+    {
+      "label": "wet-conifer-alpine",
+      "seed": -24680,
+      "center": [-66, 74],
+      "radius": 4,
+      "days": 120
+    },
+    {
+      "label": "river-meadow",
+      "seed": 987654321,
+      "center": [70, 62],
+      "radius": 4,
+      "days": 120
+    },
+    {
+      "label": "river-steppe-stress",
+      "seed": -98765,
+      "center": [6, -94],
+      "radius": 4,
+      "days": 200
+    }
+  ]
+}
