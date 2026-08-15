@@ -53,6 +53,18 @@ plan, broad desired-density and species weights, first entity-chunk
 realization, and a Terrain Lab view over the exact production decisions. This
 retains durable individual animals while removing traversal order and repeated
 live habitat scans from Mclone's initial wildlife distribution.
+Tactical
+[`299`](../tactical/299-closed-domain-wildlife-population-simulation.md) has
+landed the first loaded rabbit/deer lifecycle, renewable forage ledger,
+natural birth/death/remains accounting, immutable-domain runner, and
+deterministic real-seed reports. Its radius-8 30-day calibration runs now show
+multi-generation growth and decline with exact conservation; the accepted
+120/200-day matrix and final visual evidence remain open.
+Tactical
+[`301`](../tactical/301-typed-resource-strata-and-mallard-ecology.md) plans the
+next bounded chapter: replace generic forage with shared typed habitat
+resources, migrate rabbit/deer diets, and make mallards the third complete
+loaded population without adding predators or an estimator-driven cap.
 
 ## Scope
 
@@ -205,19 +217,61 @@ population-summary simulation. Recolonization must become an explicit later
 ecology producer rather than reviving generic random passive spawning.
 
 Tactical
-[`299`](../tactical/299-closed-domain-wildlife-population-simulation.md) plans
-the first equilibrium evidence over materialized animals. It starts from this
-exact seed-authored geography, holds one central ticket and its entity-ticking
-chunks fixed, then runs authoritative rabbit/deer births, forage pressure,
-mortality, and remains for many loaded days. There is no immigration,
-emigration, post-initial spawn, or catch-up in that baseline; any boundary
-crossing is an invariant failure rather than an ecological event.
+[`299`](../tactical/299-closed-domain-wildlife-population-simulation.md) has
+landed the first population evidence over materialized animals. It starts from
+this exact seed-authored geography, holds one central ticket and its
+entity-ticking chunks fixed, then runs authoritative rabbit/deer births,
+forage pressure, mortality, and remains for many loaded days. There is no
+immigration, emigration, post-initial spawn, or catch-up in that baseline; any
+boundary crossing is an invariant failure rather than an ecological event.
+
+The first radius-4 matrix exposed an experimental rather than ecological
+problem: its deterministic windows often began with only one tiny founder
+group, so a closed no-immigration run could not provide a useful population
+band. Radius-8 site selection now finds multiple independent groups while
+retaining one immutable loaded domain. Two clean 30-day windows on seed 12345
+and seed -24680 began with 23 and 35 rabbits respectively, produced multiple
+generations and resource-driven decline, and preserved exact identity,
+resource, biomass, boundary, and full/accelerated equivalence invariants.
+Those are calibration evidence, not yet the accepted 120/200-day campaign.
 
 The continuing animal-record, knowledge, unavailable-world, social-memory,
 and bounded spatial-pattern contract lives in
 [`wildlife-ecology-state-model.md`](wildlife-ecology-state-model.md). This
 topic supplies its terrain and habitat inputs rather than owning another AI or
 persistence architecture.
+
+## Shared Renewable Resource Strata
+
+The landed Tactical 299 forage ledger deliberately begins as one invisible
+renewable scalar per 64-by-64-block cell. An animal still has to reach and
+perform a real local feeding action, but rabbits and deer currently draw from
+the same scalar assembled from grass, dirt, flowers, and leaves. This proves
+loaded recovery and competition, while making diet and terrain causality too
+coarse for the next species.
+
+The continuing direction is a small set of shared terrain-resource strata,
+not one private food pool per species. Near-term strata are low herbaceous
+growth, woody browse, seeds/soft mast, aquatic vegetation, and aquatic
+invertebrates. Rabbits mainly use low growth, deer use browse plus some low
+growth, and mallards use wetland food plus suitable shore seeds. Their partial
+overlap should create real competition without pretending that every animal
+can consume every productive block.
+
+These values remain renewable habitat accounting rather than remotely edible
+inventory. Ordinary blocks determine potential, loaded time determines
+recovery, and actual geometry, route availability, and a physically reached
+feeding action gate every intake. Crops stay visible mutable blocks. Missing
+or unsuitable terrain may yield zero for a resource; the ledger must not
+invent a minimum amount merely to preserve a desired population.
+
+Population support is consequently an outcome of individual food access,
+condition, safety, reproduction, maturation, mortality, and disturbance. A
+report may compare those outcomes with a rough resource-support envelope, but
+that estimate is diagnostic only. It is never a spawn target, quota,
+reproduction gate, mortality input, despawn rule, or acceptance requirement.
+If it becomes falsely precise or needs a second aggregate simulation, retain
+the raw resource and population histories and omit the estimate.
 
 ## Mechanics Ladder
 
@@ -545,27 +599,30 @@ notes, and zero browser-world records. The temporary play link is
 
 ## Known Gaps and Recommended Next Work
 
-- Decide which consumer actually needs the now-shared habitat-fitness record
-  outside server spawning before making it a public cross-crate API. Avoid a
-  generic ecology framework without a concrete query or simulation owner.
-- Evolve rabbits from one authoritative permanent-home relationship toward
-  individual refuge knowledge and replaceable warrens. An inaccessible
-  remembered warren should remain remembered; a rabbit needing shelter may
-  locate a reachable mouth with capacity or excavate one suitable cell nearby.
-  Density, suitability, cost/cooldown, reuse, abandonment, and collapse must
-  prevent uncontrolled burrow spam.
+- Finish Tactical 299's accepted radius-8 120/200-day predator-free matrix and
+  retained remains pixels. The existing 30-day curves are encouraging
+  calibration evidence, not a closed population claim.
+- Execute Tactical 301 through typed shared resource strata, explicit
+  rabbit/deer diets, and a complete mallard condition/nesting lifecycle. Keep
+  the individual simulation authoritative and any support estimate optional
+  and report-only.
+- Use the three-species histories to choose the next non-predator pressure
+  test. Fish could exercise bounded water volumes and aquatic resources;
+  beavers could connect woody/aquatic food to family construction and terrain
+  mutation; squirrels could exercise mast, caches, cavities, and canopy
+  connectivity. Do not implement all three merely to populate a food-web list.
+- Decide which concrete consumer actually needs the shared habitat-fitness or
+  resource records outside `mclone-server` before making either a public
+  cross-crate API. Avoid a generic ecology framework without a real query or
+  simulation owner.
 - Use deer as the contrasting proof for replaceable bedding memories, familiar
   range, and bounded herd knowledge. Persistent player disturbance should
   lower a bed site's preference and encourage another site rather than leave a
   deer permanently unable to rest.
-- Add fox predator pressure only after the shared unavailable-target and
-  interruptible-action semantics are explicit. A den should matter during the
-  appropriate life stages without making all fox behavior orbit a permanent
-  home pointer.
-- Build a first stewardship choice around mallards—food attraction, protected
-  nesting cover, or restrained hunting—using the now-shared inventory,
-  interaction, lineage, and persistence contracts.
-- Explore compact unloaded population summaries after individual durable
+- Add fox predator pressure only after prey surplus and bottom-up resource
+  behavior are measured. A den should matter during appropriate life stages
+  without making all fox behavior orbit a permanent home pointer.
+- Explore compact unloaded population summaries only after individual durable
   entities are correct; do not use them to weaken visible-entity continuity.
 - Feed animal paths, grazing sites, nests, and water access back into terrain
   and structure planning as evidence-bearing landscape history.
@@ -573,11 +630,6 @@ notes, and zero browser-world records. The temporary play link is
   mallard track visual through the bounded shared path in
   [`terrain-surface-traces.md`](terrain-surface-traces.md). Do not add deer
   hoofprints merely as ambient decoration.
-- Build the next chapter around either crop growth that lets bee pollination
-  affect yield, a reusable food/storage consequence for gardens and hunting,
-  predator pressure that connects prey and cover, or a cliff animal that
-  requires connected steep-surface navigation. Each should consume the
-  habitat vocabulary while adding a different player loop.
 
 ## Code and Documentation Map
 
@@ -589,6 +641,14 @@ notes, and zero browser-world records. The temporary play link is
   persistence selection
 - `native/crates/mclone-server/src/entity/store.rs`: durable versus volatile
   entity records
+- `native/crates/mclone-server/src/ecology.rs`: shared loaded lifecycle,
+  availability, and bounded ecology primitives
+- `native/crates/mclone-server/src/wildlife_resources.rs`: persisted renewable
+  resource-cell accounting
+- `native/crates/mclone-server/src/wildlife_simulation.rs`: immutable-domain
+  authoritative simulation facade and exact snapshots
+- `native/crates/mclone-server/src/bin/wildlife_population_sim.rs`: headless
+  deterministic run and receipt CLI
 - `native/crates/mclone-core/src/chunk.rs`: canonical chunk biome payload
 - [`../creatures.md`](../creatures.md): Java 1.17.1 spawning reference and
   parity ledger

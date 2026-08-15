@@ -1,6 +1,8 @@
 # Tactical 299: Closed-Domain Wildlife Population Simulation
 
-Status: planned 2026-08-15
+Status: in progress 2026-08-15; production foundation and 30-day radius-8
+calibration evidence landed, accepted 120/200-day campaign and final remains
+pixels pending
 
 Topic: `habitat-driven-creature-ecology`
 
@@ -45,10 +47,10 @@ ecology:
   80 ticks, and the 1,000-rabbit fixture proves work admission rather than
   births, deaths, food pressure, or equilibrium.
 
-A long run of the current rules would therefore be mostly flat: deer cannot
-reproduce, and rabbits reproduce only after repeated player interaction. No
-existing receipt demonstrates multi-day population growth, resource pressure,
-stable population bands, or a meaningful ceiling.
+Before this tactical's implementation, a long run of those rules was mostly
+flat: deer could not reproduce, and rabbits reproduced only after repeated
+player interaction. No prior receipt demonstrated multi-day population
+growth, resource pressure, stable population bands, or a meaningful ceiling.
 
 The current entity tick list also demotes an entity based on its resulting
 chunk position; it does not itself make the edge of the entity-ticking set a
@@ -56,6 +58,32 @@ physical wall. Loaded but non-ticking terrain can remain queryable. A mob that
 crosses the boundary can therefore become stranded and inactive rather than
 meaningfully emigrate. The closed-domain harness must expose and reject this
 case instead of counting it as ecology.
+
+### Implementation progress through 2026-08-15
+
+The authoritative foundation described below has landed. Rabbit and deer now
+share persistent age, condition, deficit, reproductive state, natural birth,
+old-age/starvation death, and remains accounting while retaining species-owned
+behavior. One renewable forage scalar is persisted per 64-by-64-block cell and
+can be consumed only after a real local feeding action. The fixed-domain
+runner emits deterministic JSONL/CSV/HTML evidence and proves exact identity,
+resource, biomass, boundary, and full/accelerated equivalence invariants.
+
+The first radius-4 matrix exposed founder undersampling rather than a stable
+ecological result. Radius-8 site selection now supplies multiple groups. Two
+clean 30-day runs provide the current calibration evidence:
+
+- seed 12345 at chunk `(50, -30)` began with 23 rabbits and 16 deer; rabbits
+  peaked at 52 and ended at 12, while deer ended at 68; and
+- seed -24680 at chunk `(38, -42)` began with 35 rabbits and 6 deer; rabbits
+  peaked at 111 and ended at 43, while deer ended at 10.
+
+Both runs produced multiple generations and resource-driven old-age/starvation
+decline with every hard invariant satisfied. The checked-in campaign matrix
+still needs radius-8 windows, accepted 120/200-day runs, final tuning review,
+and native/Web remains pixels. Tactical
+[`301`](301-typed-resource-strata-and-mallard-ecology.md) deliberately evolves
+the scalar ledger before declaring the broader predator-free baseline final.
 
 ## Binding Decisions
 

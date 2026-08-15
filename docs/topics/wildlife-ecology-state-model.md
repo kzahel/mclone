@@ -20,13 +20,22 @@ simulation. Social memory, multi-record crash-atomic persistence, and any
 coarse population layer remain deliberate later work.**
 
 Tactical
-[`299`](../tactical/299-closed-domain-wildlife-population-simulation.md) now
-plans the first multi-day population proof without weakening that model. It
-keeps one real-seed entity-ticking domain immutable, treats its exterior as
+[`299`](../tactical/299-closed-domain-wildlife-population-simulation.md) has
+landed the first multi-day population foundation without weakening that model.
+It keeps one real-seed entity-ticking domain immutable, treats its exterior as
 currently unavailable, permits no immigration or post-initial spawning, and
 requires exact `start + births - deaths = end` identity conservation. Its
 forage, energy, reproduction, mortality, and remains state advances only while
-loaded; it is not an unloaded population summary.
+loaded; it is not an unloaded population summary. Radius-8 30-day rabbit/deer
+runs now prove multiple generations and exact full/accelerated equivalence;
+the accepted 120/200-day campaign remains pending.
+
+Tactical
+[`301`](../tactical/301-typed-resource-strata-and-mallard-ecology.md) plans the
+next concrete extraction: a fixed set of shared terrain-resource strata,
+species-owned diet profiles, and mallard adoption of the loaded lifecycle and
+natural nest/hatch path. Any mathematical support estimate is confined to the
+report and cannot control gameplay.
 
 ## Scope
 
@@ -182,6 +191,51 @@ with the durable-animal model without pretending that a planner cell is a
 living population or using it to refill losses. A later population summary,
 if justified, needs its own identity, producer, cadence, and reconciliation
 contract.
+
+## Resource Competition and Diagnostic Expectations
+
+The common lifecycle can share resource accounting without sharing species
+policy. Terrain resources are persistent active-world facts indexed by bounded
+spatial cells; an animal's diet describes which facts it can consume, while
+its species behavior still owns sensing, destination choice, route, feeding
+action, safety, mating, and birth.
+
+Resource identity belongs to the habitat, not the consumer. Low herbaceous
+growth consumed by a rabbit is no longer independently available to a deer.
+Woody browse, shore seeds, aquatic vegetation, and aquatic invertebrates remain
+distinct, so coexistence does not imply total competition. A feeding event
+requires both ledger availability and complete local world evidence: the
+animal must reach compatible geometry inside its active navigation envelope.
+A cell record cannot authorize remote feeding or turn unloaded terrain into a
+known meal.
+
+This is a small fixed production vocabulary extracted from rabbit, deer, and
+mallard needs, not a generalized nutrient graph. New strata require a concrete
+consumer and ordinary terrain evidence. Species-specific crops, carrion,
+inventories, nests, and prey identities retain their own authoritative state
+instead of being flattened into generic resource units.
+
+Population support remains emergent. For species `s` and resource `r`, a
+report can describe the rough constraint that combined observed demand cannot
+remain above loaded recovery indefinitely:
+
+```text
+sum over species(observed population_s * maintenance demand_s,r)
+  approximately fits within observed loaded recovery_r
+```
+
+That expression is a calibration lens, not a simulation equation. Substitution
+between foods, access failure, safety, age structure, reproduction, mortality,
+and stochastic-looking individual histories make the feasible population a
+region rather than one carrying-capacity constant. Any estimated support range
+must serialize its assumptions, stay outside gameplay code, and be removable
+without changing a result. Raw intake, recovery, condition, birth, suppression,
+and death histories are the primary evidence.
+
+Never use a calculated capacity or desired species ratio to spawn, suppress a
+birth, kill, despawn, refill, steer migration, or declare an otherwise valid
+run successful. Technical overload guards remain host safety and are failures
+when reached by an ordinary ecology campaign.
 
 ## Cadence, Work Budgets, and Checkpoint Durability
 
@@ -398,11 +452,14 @@ food, prey, shelter, or disturbance to make the behavior legible.
 
 | Candidate | Model pressure | Terrain and interaction pressure |
 |---|---|---|
+| mallard lifecycle migration | sex/condition, mixed land-water diet, seasonal-like nest state without seasons | shallow feeding, covered shore nests, attendance and hatch survival |
+| fish | bounded water-volume availability, schooling, spawning grounds without terrestrial paths | depth, flow, cover, aquatic food and angling |
+| beaver | family memory, lodge/refuge use, persistent construction intent | woody food, banks, water connectivity and bounded dam terrain mutation |
+| squirrel | distributed caches, cavities and arboreal escape knowledge | mature trees, connected canopy, nuts and forgotten caches |
 | fox | prey memory, stalking, temporary den use, dispersal | rabbit pressure, cover, field edges |
 | wild pig | loose sounder knowledge, rooting, crop raids | rootable soil, woodland mast, marsh and garden pressure |
 | crow | shared observations, scavenging, mobbing, mixed flight/ground use | perches, carrion, fields and forest edges |
 | coyote | solitary/pair/group transitions and coordinated predation | scrub, grassland edges, rabbits and deer young |
-| squirrel | distributed caches, cavities and arboreal escape knowledge | mature trees, connected canopy, nuts and forgotten caches |
 | bear | seasonal priorities, conditional denning, cubs and omnivory | caves, logs, berries, streams and bee colonies |
 | owl | nocturnal hunting and replaceable roost fidelity | old forest, cavities and small prey |
 | mountain lion | very large familiar range, concealment and ambush | cliffs, rocky shelves, cover and deer corridors |
@@ -410,12 +467,16 @@ food, prey, shelter, or disturbance to make the behavior legible.
 | bobcat | solitary cover-dependent territory and prey caching | brush, rocks, wetlands and fallen timber |
 | horse | herd cohesion, grazing travel, water memory and panic cascades | broad grassland, trails and watering places |
 
-After deepening rabbit and deer semantics, the current candidate order is fox,
-wild pig, crow, coyote, squirrel, bear, owl, mountain lion, and eagle. Bobcat
-overlaps fox and mountain lion unless cover, wetland, snow, climbing, or cache
-mechanics distinguish it. Wild or feral horses are mechanically valuable but
-also invite taming, riding, breeding, and an implied human history, so their
-product role should be decided before promotion.
+The current bounded sequence first migrates mallards, then uses the resulting
+resource histories to choose among fish, beaver, or squirrel as the next
+non-predator pressure test. This is not a commitment to implement all three.
+After bottom-up support and prey surplus are legible, fox remains the first
+predator candidate, followed by whichever of wild pig, crow, coyote, bear,
+owl, mountain lion, or eagle adds the most useful missing relationship.
+Bobcat overlaps fox and mountain lion unless cover, wetland, snow, climbing,
+or cache mechanics distinguish it. Wild or feral horses are mechanically
+valuable but also invite taming, riding, breeding, and an implied human
+history, so their product role should be decided before promotion.
 
 Keep the food web from becoming predator-heavy. Rabbit, deer, pig, squirrel,
 crops, mast, berries, insects, and carrion should make predators and
@@ -423,14 +484,22 @@ scavengers consequential rather than decorative.
 
 ## Adoption Sequence and Guardrails
 
-1. Introduce the shared knowledge and unavailable-target vocabulary at the
-   narrowest rabbit-owned boundary without regressing accepted behavior.
-2. Use deer as the contrasting proof for replaceable bedding memories,
-   familiar range, disturbance-driven site changes, and bounded herd memory.
-3. Add fox pressure through prey observations, interruptible pursuit, and
-   life-stage-relevant den use rather than a universal permanent-home pointer.
-4. Extract a shared public ecology owner only from the concrete overlap. Do
-   not begin with a general actor platform or an unconstrained fact database.
+1. Retain the landed rabbit-owned knowledge/availability foundation and the
+   landed shared rabbit/deer lifecycle as server-internal concrete machinery.
+2. Replace their scalar forage with typed habitat resources and species-owned
+   diet profiles, preserving physically reached feeding and inactive-world
+   semantics.
+3. Migrate mallards as the contrasting amphibious lifecycle consumer, using
+   the existing durable nest and attended hatch rather than a universal home
+   or abstract population birth.
+4. Choose one of fish, beaver, or squirrel only after the three-species
+   resource evidence identifies the most valuable missing spatial pattern.
+5. Add fox pressure later through prey observations, interruptible pursuit,
+   and life-stage-relevant den use rather than a universal permanent-home
+   pointer.
+6. Extract a shared public ecology owner only from concrete cross-crate need.
+   Do not begin with a general actor platform or an unconstrained fact
+   database.
 
 Every transition from memory to world mutation must have one authoritative
 owner. Missing loaded state cannot prove destruction. Updates spanning an
