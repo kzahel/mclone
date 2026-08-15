@@ -152,6 +152,9 @@ const movementPerf = process.argv.includes("--movement-perf")
   || process.env.MCLONE_NATIVE_WEB_MOVEMENT_PERF === "1";
 const viewReplayProbe = process.argv.includes("--view-replay-probe")
   || process.env.MCLONE_NATIVE_WEB_VIEW_REPLAY_PROBE === "1";
+const renderDistanceReplayProbe = process.argv.includes("--render-distance-replay-probe")
+  || process.env.MCLONE_NATIVE_WEB_RENDER_DISTANCE_REPLAY_PROBE === "1";
+const renderDistanceReplayTarget = renderDistance ?? 10;
 const blockEditProbe = process.argv.includes("--block-edit-probe")
   || process.env.MCLONE_NATIVE_WEB_BLOCK_EDIT_PROBE === "1";
 const deathUiProbe = process.argv.includes("--death-ui-probe")
@@ -258,6 +261,7 @@ const menuEntryProbe = process.argv.includes("--menu-entry-probe")
   || process.env.MCLONE_NATIVE_WEB_MENU_ENTRY_PROBE === "1";
 const appLoop = movementPerf
   || viewReplayProbe
+  || renderDistanceReplayProbe
   || blockEditProbe
   || deathUiProbe
   || auxiliarySplitProbe
@@ -286,6 +290,7 @@ if (mobileShowcase && !showcase) {
 const mobileViewport = mobileAppLoop
   || mobileShowcase
   || movementPerf
+  || renderDistanceReplayProbe
   || lobbyScenarioMobileProbe
   || terrainHorizonProbe;
 const serveOnly = process.argv.includes("--serve")
@@ -295,6 +300,8 @@ const screenshotPath = process.env.MCLONE_NATIVE_WEB_SMOKE_SCREENSHOT
     ? "/tmp/mclone-native-web-movement-perf.png"
     : viewReplayProbe
     ? "/tmp/mclone-native-web-view-replay.png"
+    : renderDistanceReplayProbe
+    ? "/tmp/mclone-native-web-render-distance-replay.png"
     : blockEditProbe
     ? "/tmp/mclone-native-web-block-edit-probe.png"
     : deathUiProbe
@@ -333,6 +340,8 @@ const canvasScreenshotPath = process.env.MCLONE_NATIVE_WEB_CANVAS_SCREENSHOT
     ? "/tmp/mclone-native-web-movement-perf-canvas.png"
     : viewReplayProbe
     ? "/tmp/mclone-native-web-view-replay-canvas.png"
+    : renderDistanceReplayProbe
+    ? "/tmp/mclone-native-web-render-distance-replay-canvas.png"
     : blockEditProbe
     ? "/tmp/mclone-native-web-block-edit-probe-canvas.png"
     : deathUiProbe
@@ -384,6 +393,9 @@ const movementPerfReportPath = process.env.MCLONE_NATIVE_WEB_MOVEMENT_PERF_REPOR
   ?? "/tmp/mclone-native-web-movement-perf.json";
 const viewReplayProbeReportPath = process.env.MCLONE_NATIVE_WEB_VIEW_REPLAY_PROBE_REPORT
   ?? "/tmp/mclone-native-web-view-replay.json";
+const renderDistanceReplayProbeReportPath =
+  process.env.MCLONE_NATIVE_WEB_RENDER_DISTANCE_REPLAY_PROBE_REPORT
+    ?? "/tmp/mclone-native-web-render-distance-replay.json";
 const blockEditProbeReportPath = process.env.MCLONE_NATIVE_WEB_BLOCK_EDIT_PROBE_REPORT
   ?? "/tmp/mclone-native-web-block-edit-probe.json";
 const deathUiProbeReportPath = process.env.MCLONE_NATIVE_WEB_DEATH_UI_PROBE_REPORT
@@ -583,6 +595,7 @@ async function run() {
       || preparedFigureProbe
       || halfSpaceTerrainProbe
       || actorCompositionProbe
+      || renderDistanceReplayProbe
     ) {
       await page.addInitScript(() => {
         const root = /** @type {any} */ (globalThis);
@@ -714,7 +727,7 @@ async function run() {
         console.error(`browser console: ${message.text()}`);
       }
     });
-    if (mobileAppLoop || lobbyScenarioMobileProbe) {
+    if (mobileAppLoop || lobbyScenarioMobileProbe || renderDistanceReplayProbe) {
       const cdp = await page.context().newCDPSession(page);
       await cdp.send("Emulation.setCPUThrottlingRate", { rate: 2 });
     }
@@ -763,7 +776,7 @@ async function run() {
       if (mobileAppLoop) startupParameters.set("holdStartupProgress", "1");
       if (seed) startupParameters.set("seed", seed);
       if (generationProfile) startupParameters.set("generationProfile", generationProfile);
-      if (renderDistance !== null) {
+      if (renderDistance !== null && !renderDistanceReplayProbe) {
         startupParameters.set("renderDistance", String(renderDistance));
       }
       if (starterContent) startupParameters.set("starterContent", starterContent);
@@ -4102,6 +4115,63 @@ async function run() {
         console.log(JSON.stringify(report, null, 2));
         return;
       }
+      if (renderDistanceReplayProbe) {
+        const renderDistanceReplayProbeResult = await runRenderDistanceReplayProbe(
+          page,
+          canvas,
+          renderDistanceReplayTarget,
+        );
+        const result = await captureRenderDistanceReplayState(page, "final");
+        const pageScreenshotCaptured = await page.screenshot({
+          path: screenshotPath,
+          fullPage: false,
+          timeout: 60_000,
+        }).then(() => true, () => false);
+        const canvasPng = await canvas.screenshot({
+          path: canvasScreenshotPath,
+          timeout: 60_000,
+        });
+        const canvasPixels = analyzePng(canvasPng);
+        const shutdownResult = await page.evaluate(
+          () => globalThis.__mcloneWebApp.shutdownForSmoke?.() ?? null,
+        );
+        const workerStatsAfterShutdown = await page.evaluate(
+          () => /** @type {any} */ (globalThis).__mcloneWorkerStats ?? null,
+        );
+        const report = {
+          url: appUrl,
+          screenshotPath,
+          pageScreenshotCaptured,
+          canvasScreenshotPath,
+          renderDistanceReplayProbeReportPath,
+          renderDistanceReplayTarget,
+          mobileViewport,
+          canvasPixels,
+          renderDistanceReplayProbeResult,
+          shutdownResult,
+          workerStatsAfterShutdown,
+          result,
+          pageErrors,
+        };
+        await writeFile(
+          renderDistanceReplayProbeReportPath,
+          `${JSON.stringify(report, null, 2)}\n`,
+        );
+        if (
+          renderDistanceReplayProbeResult.ok !== true
+          || shutdownResult?.shutdownComplete !== true
+          || Number(workerStatsAfterShutdown?.active?.["mclone-integrated-server"]) !== 0
+          || Number(workerStatsAfterShutdown?.active?.["mclone-render-compiler-app"]) !== 0
+          || canvasPixels.nonClearInteriorPixelCount <= 128
+          || pageErrors.length > 0
+        ) {
+          throw new Error(
+            `browser render-distance replay failed:\n${JSON.stringify(report, null, 2)}`,
+          );
+        }
+        console.log(JSON.stringify(report, null, 2));
+        return;
+      }
       if (mobileAppLoop) {
         await page.waitForFunction(
           () => {
@@ -6844,6 +6914,234 @@ async function runViewReplayProbe(page, canvas) {
 }
 
 /**
+ * Reproduce the reported Web sequence: settle the default radius, raise it
+ * through the production Graphics slider, then fly vertically while the new
+ * view remains stationary. Exact loaded coverage is checked independently of
+ * the broader streaming-idle envelope so an accidentally partial view cannot
+ * report itself settled.
+ *
+ * @param {Page} page
+ * @param {Locator} canvas
+ * @param {number} targetRenderDistance
+ * @returns {Promise<any>}
+ */
+async function runRenderDistanceReplayProbe(page, canvas, targetRenderDistance) {
+  await canvas.evaluate((element) => element.focus());
+  await page.evaluate(() => globalThis.__mcloneWebApp?.frameInteractionSurface?.());
+  await waitForWebAppStreamingSettled(page, 120_000);
+  const before = await captureRenderDistanceReplayState(page, "default-settled");
+
+  await page.evaluate(() => globalThis.__mcloneWebApp?.openNativePauseUi?.());
+  await waitForNativeUiScreen(page, "pause");
+  await clickNativeMenuButton(canvas, "pause", 1);
+  await waitForNativeUiScreen(page, "options");
+  const geometry = await nativeUiGeometry(page);
+  await clickNativeUiPoint(page, graphicsOptionsButtonPoint(geometry));
+  await waitForNativeUiScreen(page, "optionsCategory");
+  await clickNativeUiPoint(
+    page,
+    graphicsRenderDistancePoint(geometry, targetRenderDistance),
+  );
+  try {
+    await page.waitForFunction(
+      (targetRenderDistance) => {
+        const state = globalThis.__mcloneWebApp?.state;
+        return Number(state?.radiusChunks) === targetRenderDistance
+          && state?.lastReport?.action === "setRenderDistance"
+          && Number(state?.lastReport?.renderDistance) === targetRenderDistance;
+      },
+      targetRenderDistance,
+      { timeout: 10_000 },
+    );
+  } catch (error) {
+    const state = await captureRenderDistanceReplayState(page, "setting-timeout");
+    throw new Error(
+      `render-distance slider did not select ${targetRenderDistance}: ${String(error)}\n`
+        + JSON.stringify({ geometry, state }, null, 2),
+    );
+  }
+  const selected = await captureRenderDistanceReplayState(page, "selected");
+  await page.evaluate(() => globalThis.__mcloneWebApp?.closeNativeUi?.());
+
+  await page.evaluate(() => {
+    const root = /** @type {any} */ (globalThis);
+    /** @type {any[]} */
+    const samples = [];
+    const probe = {
+      samples,
+      lastSignature: "",
+      intervalId: /** @type {ReturnType<typeof setInterval> | 0} */ (0),
+      record(label = "transition", force = false) {
+        const state = root.__mcloneWebApp?.state;
+        if (!state) return;
+        const sample = {
+          label,
+          timeMs: performance.now(),
+          renderDistance: Number(state.radiusChunks) || 0,
+          acceptedRenderDistance: state.acceptedViewAvailable === true
+            ? Number(state.acceptedRenderDistance)
+            : null,
+          loadedChunkCount: Number(state.loadedChunkCount) || 0,
+          loadedChunkSetHash: String(state.loadedChunkSetHash ?? ""),
+          snapshotUpdateCount: Number(state.snapshotUpdateCount) || 0,
+          unloadUpdateCount: Number(state.unloadUpdateCount) || 0,
+          commandQueueDepth: Number(state.runnerCommandQueueDepth) || 0,
+          updateQueueDepth: Number(state.runnerUpdateQueueDepth) || 0,
+          pendingJobs: Number(state.runnerPendingJobs) || 0,
+          pendingPublications: Number(state.runnerPendingPublications) || 0,
+          worldgenMailboxPendingJobs: Number(state.worldgenMailboxPendingJobs) || 0,
+          lightStatusMailboxPendingStatuses:
+            Number(state.lightStatusMailboxPendingStatuses) || 0,
+          pendingCompileJobCount: Number(state.pendingCompileJobCount) || 0,
+          renderDirtyChunkCount: Number(state.renderDirtyChunkCount) || 0,
+          renderInflightSectionCount: Number(state.renderInflightSectionCount) || 0,
+          residentSectionCount: Number(state.residentSectionCount) || 0,
+          streamingSettled: state.streamingSettled === true,
+        };
+        const signature = [
+          sample.renderDistance,
+          sample.acceptedRenderDistance,
+          sample.loadedChunkCount,
+          sample.loadedChunkSetHash,
+          sample.snapshotUpdateCount,
+          sample.pendingJobs,
+          sample.pendingPublications,
+          sample.worldgenMailboxPendingJobs,
+          sample.lightStatusMailboxPendingStatuses,
+          sample.pendingCompileJobCount,
+          sample.streamingSettled,
+        ].join(":");
+        if (force || signature !== probe.lastSignature) {
+          samples.push(sample);
+          probe.lastSignature = signature;
+        }
+      },
+    };
+    probe.intervalId = setInterval(() => probe.record(), 500);
+    root.__mcloneRenderDistanceReplayProbe = probe;
+    probe.record("start", true);
+  });
+
+  const expectedLoadedChunkCount = (targetRenderDistance * 2 + 1) ** 2;
+  try {
+    await page.waitForFunction(
+      ({ targetRenderDistance, expectedLoadedChunkCount }) => {
+        const state = globalThis.__mcloneWebApp?.state;
+        return state?.ok === true
+          && Number(state.radiusChunks) === targetRenderDistance
+          && state.acceptedViewAvailable === true
+          && Number(state.acceptedRenderDistance) === targetRenderDistance
+          && Number(state.loadedChunkCount) === expectedLoadedChunkCount
+          && state.streamingSettled === true;
+      },
+      { targetRenderDistance, expectedLoadedChunkCount },
+      { timeout: 180_000 },
+    );
+  } catch (error) {
+    const state = await captureRenderDistanceReplayState(page, "coverage-timeout");
+    throw new Error(
+      `render-distance ${targetRenderDistance} view did not reach exact coverage: ${String(error)}\n`
+        + JSON.stringify(state, null, 2),
+    );
+  }
+  const settled = await captureRenderDistanceReplayState(page, "settled");
+
+  await dispatchKeyboardEvent(page, "keydown", { code: "KeyN", key: "n" });
+  await dispatchKeyboardEvent(page, "keyup", { code: "KeyN", key: "n" });
+  await page.waitForFunction(
+    () => globalThis.__mcloneWebApp?.state?.movementMode === "FLY",
+    undefined,
+    { timeout: 10_000 },
+  );
+  const flightStartY = Number(settled.cameraY);
+  await dispatchKeyboardEvent(page, "keydown", { code: "Space", key: " " });
+  try {
+    await page.waitForFunction(
+      (flightStartY) => Number(globalThis.__mcloneWebApp?.state?.cameraY) >= flightStartY + 64,
+      flightStartY,
+      { timeout: 45_000 },
+    );
+  } finally {
+    await dispatchKeyboardEvent(page, "keyup", { code: "Space", key: " " });
+  }
+  await waitForWebAppStreamingSettled(page, 180_000);
+  await page.waitForTimeout(1_500);
+  const stable = await captureRenderDistanceReplayState(page, "flight-stability-window-end");
+  const samples = await page.evaluate(() => {
+    const probe = /** @type {any} */ (globalThis).__mcloneRenderDistanceReplayProbe;
+    if (!probe) return [];
+    clearInterval(probe.intervalId);
+    probe.record("end", true);
+    return probe.samples;
+  });
+
+  return {
+    ok: before.renderDistance === 3
+      && selected.renderDistance === targetRenderDistance
+      && settled.acceptedRenderDistance === targetRenderDistance
+      && settled.loadedChunkCount === expectedLoadedChunkCount
+      && settled.streamingSettled === true
+      && stable.loadedChunkCount === expectedLoadedChunkCount
+      && stable.loadedChunkSetHash === settled.loadedChunkSetHash
+      && stable.unloadUpdateCount === settled.unloadUpdateCount
+      && stable.streamingSettled === true
+      && stable.cameraY >= flightStartY + 64,
+    targetRenderDistance,
+    expectedLoadedChunkCount,
+    expansionSettleMillis: settled.timeMs - selected.timeMs,
+    before,
+    selected,
+    settled,
+    stable,
+    samples,
+  };
+}
+
+/** @param {Page} page @param {string} label */
+async function captureRenderDistanceReplayState(page, label) {
+  return page.evaluate((label) => {
+    const state = globalThis.__mcloneWebApp.state;
+    return {
+      label,
+      timeMs: performance.now(),
+      renderDistance: Number(state.radiusChunks) || 0,
+      acceptedRenderDistance: state.acceptedViewAvailable === true
+        ? Number(state.acceptedRenderDistance)
+        : null,
+      centerX: Number(state.centerX),
+      centerZ: Number(state.centerZ),
+      acceptedCenterX: state.acceptedViewAvailable === true
+        ? Number(state.acceptedCenterX)
+        : null,
+      acceptedCenterZ: state.acceptedViewAvailable === true
+        ? Number(state.acceptedCenterZ)
+        : null,
+      loadedChunkCount: Number(state.loadedChunkCount) || 0,
+      loadedChunkSetHash: String(state.loadedChunkSetHash ?? ""),
+      snapshotUpdateCount: Number(state.snapshotUpdateCount) || 0,
+      unloadUpdateCount: Number(state.unloadUpdateCount) || 0,
+      commandQueueDepth: Number(state.runnerCommandQueueDepth) || 0,
+      updateQueueDepth: Number(state.runnerUpdateQueueDepth) || 0,
+      pendingJobs: Number(state.runnerPendingJobs) || 0,
+      pendingPublications: Number(state.runnerPendingPublications) || 0,
+      worldgenMailboxPendingJobs: Number(state.worldgenMailboxPendingJobs) || 0,
+      lightStatusMailboxPendingStatuses:
+        Number(state.lightStatusMailboxPendingStatuses) || 0,
+      pendingCompileJobCount: Number(state.pendingCompileJobCount) || 0,
+      renderDirtyChunkCount: Number(state.renderDirtyChunkCount) || 0,
+      renderInflightSectionCount: Number(state.renderInflightSectionCount) || 0,
+      residentSectionCount: Number(state.residentSectionCount) || 0,
+      streamingSettled: state.streamingSettled === true,
+      cameraX: Number(state.cameraX),
+      cameraY: Number(state.cameraY),
+      cameraZ: Number(state.cameraZ),
+      movementMode: String(state.movementMode ?? ""),
+      lastUiAction: String(state.lastReport?.action ?? ""),
+    };
+  }, label);
+}
+
+/**
  * Exercise both production runner transports through fresh isolated actors.
  * This runs after the movement capture so transport stress cannot distort the
  * view-lag or frame-gap evidence from the live production runner.
@@ -8366,9 +8664,41 @@ function graphicsOptionsButtonPoint(geometry) {
   const panel = centeredPanel(
     geometry,
     Math.min(Math.max(geometry.width - 18.0, 242.0), 360.0),
-    Math.min(238.0, Math.max(geometry.height - 4.0, 1.0)),
+    Math.min(262.0, Math.max(geometry.height - 4.0, 1.0)),
   );
   return { x: panel.x + panel.width * 0.5, y: panel.y + 40.0 };
+}
+
+/**
+ * @param {{ width: number, height: number }} geometry
+ * @param {number} renderDistance
+ */
+function graphicsRenderDistancePoint(geometry, renderDistance) {
+  const panelRowCount = 13;
+  const flatRowCount = 11;
+  const rowIndex = 8;
+  const panelWidth = Math.min(Math.max(geometry.width - 18.0, 242.0), 420.0);
+  const columns = panelWidth < 340.0 ? 1 : 2;
+  const rowsPerColumn = Math.ceil(flatRowCount / columns);
+  const panelHeight = Math.min(
+    30.0 + Math.ceil(panelRowCount / columns) * 24.0 + 34.0,
+    Math.max(geometry.height - 4.0, 1.0),
+  );
+  const panel = centeredPanel(geometry, panelWidth, panelHeight);
+  const columnGap = 10.0;
+  const columnWidth = Math.max(
+    (panel.width - 36.0 - columnGap * (columns - 1.0)) / columns,
+    110.0,
+  );
+  const column = Math.floor(rowIndex / rowsPerColumn);
+  const row = rowIndex % rowsPerColumn;
+  const widgetX = panel.x + 18.0 + column * (columnWidth + columnGap);
+  const widgetY = panel.y + 30.0 + row * 24.0;
+  const value = (renderDistance - 1.0) / 15.0;
+  return {
+    x: widgetX + 8.0 + value * Math.max(columnWidth - 16.0, 0.0),
+    y: widgetY + 10.0,
+  };
 }
 
 /** @param {{ width: number, height: number }} geometry */

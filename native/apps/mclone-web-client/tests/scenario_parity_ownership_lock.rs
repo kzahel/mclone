@@ -170,9 +170,12 @@ fn integrated_server_startup_domain_is_an_opaque_rust_frame() {
     assert!(!WEB_SMOKE_OBSERVER.contains("runtime.state.loadedCenterX = Number(report.centerX)"));
     assert!(BROWSER_SMOKE.contains("--view-replay-probe"));
     assert!(BROWSER_SMOKE.contains("--render-distance"));
-    assert!(BROWSER_SMOKE.contains(
-        "startupParameters.set(\"renderDistance\", String(renderDistance))"
-    ));
+    assert!(BROWSER_SMOKE.contains("--render-distance-replay-probe"));
+    assert!(
+        BROWSER_SMOKE.contains("startupParameters.set(\"renderDistance\", String(renderDistance))")
+    );
+    assert!(BROWSER_SMOKE.contains("graphicsRenderDistancePoint"));
+    assert!(BROWSER_SMOKE.contains("expectedLoadedChunkCount"));
     assert!(BROWSER_SMOKE.contains("normal-fly-reverse"));
     assert!(BROWSER_SMOKE.contains("accelerated-reverse"));
 
