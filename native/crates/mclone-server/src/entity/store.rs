@@ -1215,7 +1215,7 @@ impl ServerEntityStore {
                     self.mobs
                         .get_mut(&parent_id)
                         .expect("existing mallard parent")
-                        .set_mallard_nest_target(Some(target));
+                        .set_mallard_active_nest_target(target);
                 }
                 attempting.extend([female_id, male_id]);
                 continue;
@@ -1224,7 +1224,7 @@ impl ServerEntityStore {
             let persisted = self
                 .mobs
                 .get(&female_id)
-                .and_then(MobRuntimeState::mallard_nest_target);
+                .and_then(MobRuntimeState::mallard_remembered_nest_site);
             let target = persisted
                 .filter(|target| {
                     is_valid_mallard_nest_site(mallard_target_position(*target), block_state_at)
@@ -1248,14 +1248,18 @@ impl ServerEntityStore {
                 self.mobs
                     .get_mut(&female_id)
                     .expect("selected female mallard")
-                    .set_mallard_nest_target(None);
+                    .set_mallard_remembered_nest_site(None);
+                self.mobs
+                    .get_mut(&female_id)
+                    .expect("selected female mallard")
+                    .clear_mallard_active_nest_target();
                 without_site.insert(female_id);
                 continue;
             };
             self.mobs
                 .get_mut(&female_id)
                 .expect("selected female mallard")
-                .set_mallard_nest_target(Some(target));
+                .set_mallard_active_nest_target(target);
             attempting.extend([female_id, male_id]);
             if squared_distance_xz(female_position, mallard_target_position(target))
                 > MALLARD_NEST_TARGET_REACHED_DISTANCE_SQR
@@ -1265,7 +1269,7 @@ impl ServerEntityStore {
             self.mobs
                 .get_mut(&male_id)
                 .expect("selected male mallard")
-                .set_mallard_nest_target(Some(target));
+                .set_mallard_active_nest_target(target);
             for parent_id in [female_id, male_id] {
                 self.mobs
                     .get_mut(&parent_id)
@@ -2349,6 +2353,20 @@ impl ServerEntityStore {
                 .then_some((entity.persistent_id, entity.position, mob.mallard_sex()?))
             })
             .collect::<Vec<_>>();
+        let active_mallard_nest_targets = self
+            .mallard_nests
+            .iter()
+            .filter_map(|(id, nest)| {
+                let target = BlockPos::containing(self.entities.get(id)?.position);
+                Some(
+                    nest.parents
+                        .into_iter()
+                        .flatten()
+                        .map(move |parent| (parent, target)),
+                )
+            })
+            .flatten()
+            .collect::<BTreeMap<_, _>>();
         let mallard_positions = self
             .entities
             .values()
@@ -2621,6 +2639,11 @@ impl ServerEntityStore {
                                 })
                         });
                         mob.set_rabbit_refuge(refuge, entity.tick_count);
+                    }
+                    if entity.kind == EntityKind::Mallard
+                        && let Some(target) = active_mallard_nest_targets.get(&entity.persistent_id)
+                    {
+                        mob.set_mallard_active_nest_target(*target);
                     }
                     let flockmates = if entity.kind == EntityKind::Mallard {
                         mallard_positions
@@ -3071,7 +3094,8 @@ impl ServerEntityStore {
                 if let Some(parent_id) = parent_id
                     && let Some(parent) = self.mobs.get_mut(&parent_id)
                 {
-                    parent.set_mallard_nest_target(Some(reusable_site));
+                    parent.set_mallard_remembered_nest_site(Some(reusable_site));
+                    parent.clear_mallard_active_nest_target();
                 }
             }
             let child = self.insert_mallard_duckling(position, y_rot_degrees, parents);
@@ -3437,7 +3461,8 @@ impl ServerEntityStore {
                 if let Some(parent_id) = parent_id
                     && let Some(parent) = self.mobs.get_mut(&parent_id)
                 {
-                    parent.set_mallard_nest_target(None);
+                    parent.set_mallard_remembered_nest_site(None);
+                    parent.clear_mallard_active_nest_target();
                 }
             }
         }
@@ -3531,7 +3556,7 @@ impl ServerEntityStore {
             parents,
             feather_time: 2_400,
             call_time: 200,
-            nest_target: None,
+            remembered_nest_site: None,
             lifecycle: WildlifeLifeState::offspring(
                 persistent_id,
                 self.wildlife_tuning.mallard_lifespan_ticks,
@@ -4022,7 +4047,7 @@ impl ServerEntityStore {
                     parents: *parents,
                     feather_time: *feather_time,
                     call_time: *call_time,
-                    nest_target: *nest_target,
+                    remembered_nest_site: *nest_target,
                     lifecycle: WildlifeLifeState {
                         age_ticks: *age_ticks,
                         lifespan_ticks: *lifespan_ticks,
@@ -4443,7 +4468,7 @@ impl ServerEntityStore {
                     parents: mallard.parents,
                     feather_time: mallard.feather_time,
                     call_time: mallard.call_time,
-                    nest_target: mallard.nest_target,
+                    nest_target: mallard.remembered_nest_site,
                     age_ticks: mallard.lifecycle.age_ticks,
                     lifespan_ticks: mallard.lifecycle.lifespan_ticks,
                     energy: mallard.lifecycle.energy,
@@ -5278,7 +5303,15 @@ mod tests {
             (female, mclone_protocol::MallardSex::Female),
             (male, mclone_protocol::MallardSex::Male),
         ] {
-            assert_eq!(store.mobs[&id].mallard_nest_target(), Some(reusable_site));
+            assert_eq!(
+                store.mobs[&id].mallard_remembered_nest_site(),
+                Some(reusable_site)
+            );
+            assert_eq!(
+                store.mobs[&id].mallard_active_nest_target_for_test(),
+                None,
+                "a completed clutch remains knowledge rather than movement intent",
+            );
             store
                 .mobs
                 .get_mut(&id)
@@ -5298,7 +5331,7 @@ mod tests {
     }
 
     #[test]
-    fn mallard_nest_attempt_persists_and_drives_shore_travel() {
+    fn remembered_mallard_nest_site_persists_then_drives_a_ready_attempt() {
         let mut store = ServerEntityStore::default();
         let female =
             store.insert_passive_mob_for_test(EntityKind::Mallard, Vec3d::new(0.5, 64.0, 4.5), 0.0);
@@ -5319,7 +5352,12 @@ mod tests {
             .mobs
             .get_mut(&female)
             .unwrap()
-            .set_mallard_nest_target(Some(target));
+            .set_mallard_remembered_nest_site(Some(target));
+        assert_eq!(
+            store.mobs[&female].mallard_active_nest_target_for_test(),
+            None,
+            "site knowledge alone must not pin a mallard",
+        );
         let record = store.entity_chunk_record(ChunkPos::new(0, 0), 15);
         assert!(record.entities.iter().any(|entity| matches!(
             entity.payload,
@@ -5328,6 +5366,30 @@ mod tests {
                 ..
             } if saved == target
         )));
+        let female_persistent_id = store.state(female).unwrap().persistent_id;
+        let mut hydrated = ServerEntityStore::default();
+        hydrated.hydrate_entity_chunk_record(&record).unwrap();
+        let hydrated_female = hydrated
+            .states()
+            .iter()
+            .find(|entity| entity.persistent_id == female_persistent_id)
+            .unwrap()
+            .id;
+        assert_eq!(
+            hydrated.mobs[&hydrated_female].mallard_remembered_nest_site(),
+            Some(target)
+        );
+        assert_eq!(
+            hydrated.mobs[&hydrated_female].mallard_active_nest_target_for_test(),
+            None,
+            "hydrating remembered knowledge must not restore an active command",
+        );
+        hydrated.tick_stationary(&local_ticking_chunks(), &[], covered_wetland_ground);
+        assert_eq!(
+            hydrated.mobs[&hydrated_female].mallard_active_nest_target_for_test(),
+            None,
+            "ordinary movement must not promote memory without a nesting attempt",
+        );
 
         let mut resources = WildlifeResourceLedger::default();
         let ticking_chunks = local_ticking_chunks();
@@ -5360,7 +5422,7 @@ mod tests {
                 panic!(
                     "persisted nest intent should finish: female={:?} target={:?} intent={:?} lifecycle={:?}",
                     store.state(female),
-                    store.mobs[&female].mallard_nest_target(),
+                    store.mobs[&female].mallard_remembered_nest_site(),
                     store.mobs[&female].mallard_habitat_intent_for_test(),
                     store.mobs[&female].mallard_save_data(),
                 )
@@ -6543,11 +6605,23 @@ mod tests {
                 .values()
                 .filter(|mob| {
                     mob.mallard_life_stage() == Some(MallardLifeStage::Adult)
-                        && mob.mallard_nest_target() == Some(reusable_site)
+                        && mob.mallard_remembered_nest_site() == Some(reusable_site)
                 })
                 .count(),
             2,
             "a successful attended hatch should remain known as a reusable shore site",
+        );
+        assert!(
+            loaded
+                .mobs
+                .values()
+                .filter(|mob| {
+                    mob.mallard_life_stage() == Some(MallardLifeStage::Adult)
+                        && mob.mallard_active_nest_target_for_test().is_some()
+                })
+                .count()
+                == 0,
+            "successful hatching must release both parents from nest attendance"
         );
 
         let second = loaded.tick_stationary(&ticking_chunks, &[], covered_wetland_ground);

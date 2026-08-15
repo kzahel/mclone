@@ -44,7 +44,7 @@ pub(crate) struct MallardRuntimeSaveData {
     pub(crate) parents: [Option<EntityPersistentId>; 2],
     pub(crate) feather_time: i32,
     pub(crate) call_time: i32,
-    pub(crate) nest_target: Option<BlockPos>,
+    pub(crate) remembered_nest_site: Option<BlockPos>,
     pub(crate) lifecycle: WildlifeLifeState,
 }
 
@@ -163,7 +163,7 @@ impl MobSpeciesState {
                     parents: [None; 2],
                     feather_time: next_mallard_feather_time(random),
                     call_time: next_mallard_call_time(random),
-                    nest_target: None,
+                    remembered_nest_site: None,
                     lifecycle: WildlifeLifeState::founder(
                         persistent_id,
                         WildlifeLifecycleTuning::default().mallard_maturation_ticks,
@@ -957,7 +957,7 @@ pub(super) struct MallardRuntimeState {
     parents: [Option<EntityPersistentId>; 2],
     feather_time: i32,
     call_time: i32,
-    nest_target: Option<BlockPos>,
+    remembered_nest_site: Option<BlockPos>,
     lifecycle: WildlifeLifeState,
 }
 
@@ -974,7 +974,7 @@ impl MallardRuntimeState {
             parents: [None; 2],
             feather_time: next_mallard_feather_time(random),
             call_time: next_mallard_call_time(random),
-            nest_target: None,
+            remembered_nest_site: None,
             lifecycle: WildlifeLifeState::founder(
                 identity,
                 tuning.mallard_maturation_ticks,
@@ -998,7 +998,7 @@ impl MallardRuntimeState {
             parents: saved.parents,
             feather_time: saved.feather_time,
             call_time: saved.call_time,
-            nest_target: saved.nest_target,
+            remembered_nest_site: saved.remembered_nest_site,
             lifecycle: saved.lifecycle,
         }
     }
@@ -1028,7 +1028,7 @@ impl MallardRuntimeState {
             parents: self.parents,
             feather_time: self.feather_time,
             call_time: self.call_time,
-            nest_target: self.nest_target,
+            remembered_nest_site: self.remembered_nest_site,
             lifecycle: self.lifecycle,
         }
     }
@@ -1081,12 +1081,12 @@ impl MallardRuntimeState {
         self.lifecycle.spend_reproduction(cost, cooldown);
     }
 
-    pub(super) const fn nest_target(&self) -> Option<BlockPos> {
-        self.nest_target
+    pub(super) const fn remembered_nest_site(&self) -> Option<BlockPos> {
+        self.remembered_nest_site
     }
 
-    pub(super) fn set_nest_target(&mut self, target: Option<BlockPos>) {
-        self.nest_target = target;
+    pub(super) fn set_remembered_nest_site(&mut self, site: Option<BlockPos>) {
+        self.remembered_nest_site = site;
     }
 
     pub(super) fn take_due_feather(

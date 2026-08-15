@@ -598,17 +598,39 @@ impl MobRuntimeState {
             .spend_reproduction(cost, cooldown);
     }
 
-    pub(crate) fn mallard_nest_target(&self) -> Option<BlockPos> {
+    pub(crate) fn mallard_remembered_nest_site(&self) -> Option<BlockPos> {
         self.species
             .mallard()
-            .and_then(|mallard| mallard.nest_target())
+            .and_then(|mallard| mallard.remembered_nest_site())
     }
 
-    pub(crate) fn set_mallard_nest_target(&mut self, target: Option<BlockPos>) {
+    pub(crate) fn set_mallard_remembered_nest_site(&mut self, site: Option<BlockPos>) {
         self.species
             .mallard_mut()
             .expect("mallard species")
-            .set_nest_target(target);
+            .set_remembered_nest_site(site);
+    }
+
+    pub(crate) fn set_mallard_active_nest_target(&mut self, target: BlockPos) {
+        self.set_mallard_remembered_nest_site(Some(target));
+        self.mallard_habitat_intent = Some(MallardHabitatIntent {
+            kind: MallardHabitatKind::Nest,
+            target: Vec3d::new(
+                f64::from(target.x) + 0.5,
+                f64::from(target.y),
+                f64::from(target.z) + 0.5,
+            ),
+            ticks_remaining: u16::MAX,
+        });
+    }
+
+    pub(crate) fn clear_mallard_active_nest_target(&mut self) {
+        if self
+            .mallard_habitat_intent
+            .is_some_and(|intent| intent.kind == MallardHabitatKind::Nest)
+        {
+            self.mallard_habitat_intent = None;
+        }
     }
 
     pub(crate) fn mallard_shore_intent(&self) -> Option<BlockPos> {
@@ -2166,27 +2188,15 @@ impl MobRuntimeState {
         F: Fn(BlockPos) -> Option<BlockStateId>,
     {
         let water = mallard_water_occupancy(entity.position, block_state_at);
-        if let Some(target) = self.mallard_nest_target() {
-            let target = Vec3d::new(
-                f64::from(target.x) + 0.5,
-                f64::from(target.y),
-                f64::from(target.z) + 0.5,
-            );
-            let nest_intent = MallardHabitatIntent {
-                kind: MallardHabitatKind::Nest,
-                target,
-                ticks_remaining: u16::MAX,
-            };
-            if mallard_intent_is_valid(nest_intent, block_state_at) {
-                self.mallard_habitat_intent = Some(nest_intent);
-            } else {
-                self.set_mallard_nest_target(None);
-                self.mallard_habitat_intent = None;
-            }
-        }
         if self.mallard_habitat_intent.is_some_and(|intent| {
             intent.ticks_remaining == 0 || !mallard_intent_is_valid(intent, block_state_at)
         }) {
+            if self
+                .mallard_habitat_intent
+                .is_some_and(|intent| intent.kind == MallardHabitatKind::Nest)
+            {
+                self.set_mallard_remembered_nest_site(None);
+            }
             self.mallard_habitat_intent = None;
         }
         if let Some(intent) = self.mallard_habitat_intent.as_mut() {
@@ -2430,6 +2440,13 @@ impl MobRuntimeState {
     pub(crate) fn mallard_habitat_intent_for_test(&self) -> Option<(Vec3d, u16)> {
         self.mallard_habitat_intent
             .map(|intent| (intent.target, intent.ticks_remaining))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn mallard_active_nest_target_for_test(&self) -> Option<BlockPos> {
+        self.mallard_habitat_intent.and_then(|intent| {
+            (intent.kind == MallardHabitatKind::Nest).then_some(BlockPos::containing(intent.target))
+        })
     }
 
     #[cfg(test)]
