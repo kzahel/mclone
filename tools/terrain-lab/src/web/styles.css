@@ -670,52 +670,102 @@ h1 {
   gap: 7px;
 }
 
+.wildlifePopulationMap {
+  min-width: 0;
+  background: #071012;
+}
+
 .wildlifeLegend {
-  position: absolute;
-  z-index: 4;
-  bottom: 48px;
-  left: 16px;
   display: grid;
-  grid-template-columns: repeat(2, max-content);
-  gap: 7px 16px;
-  padding: 10px 12px;
-  border: 1px solid rgba(235, 245, 238, 0.14);
-  border-radius: 3px;
-  background: rgba(5, 14, 15, 0.82);
+  grid-template-columns: minmax(260px, 1.35fr) minmax(170px, 0.7fr) minmax(230px, 1fr);
+  gap: 18px;
+  padding: 12px 16px 13px;
+  border-top: 1px solid rgba(235, 245, 238, 0.14);
+  background: rgba(8, 20, 21, 0.98);
   backdrop-filter: blur(10px);
   color: #c3cfca;
   font-family: "DM Mono", monospace;
   font-size: 8px;
   letter-spacing: 0.06em;
-  pointer-events: none;
   text-transform: uppercase;
 }
 
-.wildlifeLegend > span {
-  display: flex;
-  align-items: center;
+.wildlifeLegendSection {
+  min-width: 0;
+  display: grid;
+  align-content: start;
   gap: 7px;
 }
 
-.wildlifeLegend i {
+.wildlifeLegendSection > strong {
+  color: #e0e9e4;
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+}
+
+.wildlifeLegendSection > div {
+  display: grid;
+  gap: 6px 12px;
+}
+
+.habitatLegend > div {
+  grid-template-columns: repeat(4, minmax(52px, 1fr));
+}
+
+.encounterLegend > div {
+  grid-template-columns: repeat(2, max-content);
+}
+
+.habitatLegend span,
+.encounterLegend span {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.habitatLegend i,
+.encounterLegend i {
   width: 8px;
   height: 8px;
+  flex: 0 0 auto;
   display: inline-block;
   border-radius: 50%;
   box-shadow: 0 0 0 1px rgba(4, 11, 12, 0.8);
 }
 
-.wildlifeLegend i.empty {
+.habitatLegend i {
+  border-radius: 1px;
+}
+
+.encounterLegend i.empty {
   background: transparent;
   border: 1px solid rgba(235, 245, 238, 0.55);
   box-shadow: none;
 }
 
-.wildlifeLegend i.unsuitable {
+.encounterLegend i.unsuitable {
   width: 7px;
   height: 7px;
   background: rgba(151, 165, 161, 0.22);
   box-shadow: none;
+}
+
+.densityLegend > div {
+  grid-template-columns: max-content minmax(56px, 1fr) max-content;
+  align-items: center;
+  gap: 7px;
+}
+
+.densityLegend i {
+  height: 10px;
+  border: 1px solid rgba(235, 245, 238, 0.16);
+  border-radius: 2px;
+  background:
+    linear-gradient(90deg, rgba(214, 235, 146, 0), rgba(214, 235, 146, 0.15)),
+    rgb(58, 76, 64);
 }
 
 .wildlifeInspector {
@@ -1481,11 +1531,20 @@ button:hover {
   }
 
   .wildlifeLegend {
-    bottom: 40px;
-    left: 10px;
-    gap: 5px 10px;
-    padding: 8px 9px;
-    font-size: 7px;
+    grid-template-columns: 1fr;
+    gap: 12px;
+    padding: 12px;
+    font-size: 8px;
+  }
+
+  .habitatLegend > div {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 7px 8px;
+  }
+
+  .encounterLegend > div {
+    grid-template-columns: repeat(3, max-content);
+    gap: 7px 12px;
   }
 
   .wildlifeInspector {

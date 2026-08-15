@@ -35,8 +35,10 @@ The profiles cannot be mixed in one workspace. Within the selected profile:
   planner used by first entity-chunk realization. It shows quiet biome and
   landform substrate, desired density and occupancy rolls, all species
   weights, encounter anchors/group sizes, owner chunks, and aggregate visible
-  counts. The browser draws receipts only; it does not simulate or spawn
-  animals.
+  counts. A fixed key below the map names every habitat color, separates the
+  low-to-high desired-density tint, and identifies species, empty rolls, and
+  unsuitable cells without obscuring the map. The browser draws receipts only;
+  it does not simulate or spawn animals.
 - `Planner atlas` is a research-only, freely pannable comparison of the
   coordinate-pure fallback, hierarchical shared facts, and feature-owned
   bounded graphs. Rust owns canonical region queries, plane/cylinder/torus

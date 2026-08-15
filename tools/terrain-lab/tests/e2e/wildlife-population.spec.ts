@@ -21,6 +21,12 @@ test("wildlife population is deterministic, inspectable, and responsive", async 
   await expect(shell).toHaveAttribute("data-wildlife-ready", "true");
   await expect(stage).toHaveAttribute("data-render-ready", "true");
   await expect(page.getByTestId("lab-status")).toContainText("ready");
+  const legend = page.getByTestId("wildlife-map-legend");
+  await expect(legend).toBeVisible();
+  await expect(legend).toContainText("Cell habitat");
+  await expect(legend).toContainText("Alpine");
+  await expect(legend).toContainText("Desired density tint");
+  await expect(legend).toContainText("Encounter result");
   expect(Number(await shell.getAttribute("data-wildlife-cells"))).toBeGreaterThan(100);
   expect(Number(await shell.getAttribute("data-wildlife-occupied"))).toBeGreaterThan(10);
   expect(Number(await shell.getAttribute("data-wildlife-animals"))).toBeGreaterThan(25);

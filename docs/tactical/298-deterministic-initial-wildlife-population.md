@@ -238,6 +238,12 @@ smoke likewise waits for a status pill intentionally hidden by the existing
 phone header. These adjacent harness issues do not exercise or block the
 wildlife pane and remain separate Terrain Lab maintenance.
 
+A 2026-08-15 review follow-up replaced the small encounter-only map overlay
+with a persistent key below the canvas. It now names all eight habitat colors,
+shows desired density as a separate none-to-higher tint, and retains encounter,
+empty-roll, and unsuitable markers without covering population cells. The
+focused desktop/phone Playwright gate and inspected captures passed again.
+
 ## Non-Goals
 
 - season simulation, catch-up ecology, offscreen predation, or population

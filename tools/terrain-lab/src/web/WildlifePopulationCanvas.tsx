@@ -41,6 +41,16 @@ interface WildlifePopulationCanvasProps {
 }
 
 const SPECIES: WildlifeSpecies[] = ["rabbit", "deer", "mallard", "bee"];
+const HABITATS = [
+  ["ocean", "Ocean"],
+  ["river", "River"],
+  ["shore", "Shore"],
+  ["snowyAlpine", "Alpine"],
+  ["coolWetConifer", "Conifer"],
+  ["warmDrySteppe", "Steppe"],
+  ["temperateWoodland", "Woodland"],
+  ["temperateMeadow", "Meadow"],
+] as const;
 
 export function WildlifePopulationCanvas({
   state,
@@ -228,44 +238,46 @@ export function WildlifePopulationCanvas({
   }, [canvasSize, onError, selected, state, summary]);
 
   return (
-    <div
-      ref={stageRef}
-      className="terrainStage wildlifePopulationStage"
-      data-testid="wildlife-population-stage"
-      data-render-ready={summary ? "true" : "false"}
-      data-checksum={summary?.checksum ?? ""}
-      data-occupied-cells={summary?.occupiedCells ?? 0}
-      data-animal-count={summary?.animalCount ?? 0}
-      tabIndex={0}
-      aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight"
-      onPointerDown={navigation.onPointerDown}
-      onPointerMove={navigation.onPointerMove}
-      onPointerUp={navigation.onPointerUp}
-      onPointerCancel={navigation.onPointerCancel}
-      onContextMenu={(event) => event.preventDefault()}
-      onKeyDown={navigation.onKeyDown}
-    >
-      <canvas
-        ref={canvasRef}
-        className="terrainCanvas"
-        width={canvasSize.width}
-        height={canvasSize.height}
-        aria-label="Deterministic initial wildlife population map"
-      />
-      <div className="canvasTopline" aria-hidden="true">
-        <span className="canvasBadge primary">
-          {summary ? `${summary.occupiedCells} encounters` : "planning wildlife"}
-        </span>
-        <span className="canvasBadge">production · revision {summary?.revision ?? "—"}</span>
-        <span className="canvasBadge">
-          {summary ? `${summary.animalCount} animals · ${buildMs.toFixed(1)} ms` : "64 m cells"}
-        </span>
+    <div className="wildlifePopulationMap">
+      <div
+        ref={stageRef}
+        className="terrainStage wildlifePopulationStage"
+        data-testid="wildlife-population-stage"
+        data-render-ready={summary ? "true" : "false"}
+        data-checksum={summary?.checksum ?? ""}
+        data-occupied-cells={summary?.occupiedCells ?? 0}
+        data-animal-count={summary?.animalCount ?? 0}
+        tabIndex={0}
+        aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight"
+        onPointerDown={navigation.onPointerDown}
+        onPointerMove={navigation.onPointerMove}
+        onPointerUp={navigation.onPointerUp}
+        onPointerCancel={navigation.onPointerCancel}
+        onContextMenu={(event) => event.preventDefault()}
+        onKeyDown={navigation.onKeyDown}
+      >
+        <canvas
+          ref={canvasRef}
+          className="terrainCanvas"
+          width={canvasSize.width}
+          height={canvasSize.height}
+          aria-label="Deterministic initial wildlife population map"
+        />
+        <div className="canvasTopline" aria-hidden="true">
+          <span className="canvasBadge primary">
+            {summary ? `${summary.occupiedCells} encounters` : "planning wildlife"}
+          </span>
+          <span className="canvasBadge">production · revision {summary?.revision ?? "—"}</span>
+          <span className="canvasBadge">
+            {summary ? `${summary.animalCount} animals · ${buildMs.toFixed(1)} ms` : "64 m cells"}
+          </span>
+        </div>
+        {selected ? <WildlifeInspector receipt={selected} /> : null}
+        <div className="canvasHint">
+          Drag to pan · wheel or pinch to zoom · tap a population cell to inspect
+        </div>
       </div>
       <WildlifeLegend summary={summary} />
-      {selected ? <WildlifeInspector receipt={selected} /> : null}
-      <div className="canvasHint">
-        Drag to pan · wheel or pinch to zoom · tap a population cell to inspect
-      </div>
     </div>
   );
 }
@@ -276,15 +288,47 @@ function WildlifeLegend({
   summary: WildlifePopulationSummary | undefined;
 }): React.JSX.Element {
   return (
-    <div className="wildlifeLegend" aria-label="Wildlife encounter legend">
-      {SPECIES.map((species, index) => (
-        <span key={species}>
-          <i style={{ background: speciesColor(species) }} aria-hidden="true" />
-          {species} {summary ? summary.speciesCounts[index] : "—"}
-        </span>
-      ))}
-      <span><i className="empty" aria-hidden="true" /> empty roll</span>
-      <span><i className="unsuitable" aria-hidden="true" /> unsuitable</span>
+    <div
+      className="wildlifeLegend"
+      data-testid="wildlife-map-legend"
+      aria-label="Wildlife map legend"
+    >
+      <section className="wildlifeLegendSection habitatLegend">
+        <strong>Cell habitat</strong>
+        <div>
+          {HABITATS.map(([biome, label]) => (
+            <span key={biome}>
+              <i
+                className="habitatSwatch"
+                style={{ background: biomeColor(biome, 650) }}
+                aria-hidden="true"
+              />
+              {label}
+            </span>
+          ))}
+        </div>
+      </section>
+      <section className="wildlifeLegendSection densityLegend">
+        <strong>Desired density tint</strong>
+        <div>
+          <span>none</span>
+          <i aria-hidden="true" />
+          <span>higher</span>
+        </div>
+      </section>
+      <section className="wildlifeLegendSection encounterLegend">
+        <strong>Encounter result</strong>
+        <div>
+          {SPECIES.map((species, index) => (
+            <span key={species}>
+              <i style={{ background: speciesColor(species) }} aria-hidden="true" />
+              {species} {summary ? summary.speciesCounts[index] : "—"}
+            </span>
+          ))}
+          <span><i className="empty" aria-hidden="true" /> empty roll</span>
+          <span><i className="unsuitable" aria-hidden="true" /> unsuitable</span>
+        </div>
+      </section>
     </div>
   );
 }
