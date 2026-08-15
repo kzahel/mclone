@@ -25,7 +25,9 @@ use crate::persistence::{
     WildlifeRemainsCause, WildlifeRemainsSpecies,
 };
 use crate::players::ServerPlayerId;
-use crate::wildlife_resources::{WildlifeForageConsumer, WildlifeResourceLedger};
+use crate::wildlife_resources::{
+    DEER_DIET, RABBIT_DIET, WildlifeDietEntry, WildlifeForageConsumer, WildlifeResourceLedger,
+};
 
 use super::ServerEntityState;
 use super::item::{ITEM_ENTITY_LIFETIME_TICKS, ItemEntityRuntimeState};
@@ -644,7 +646,14 @@ impl ServerEntityStore {
                 ))
                 .copied()
                 .unwrap_or(1);
-            let (consumer, foraging, cost, soft_density, species) = match entity.kind {
+            let (consumer, diet, foraging, cost, soft_density, species): (
+                WildlifeForageConsumer,
+                &[WildlifeDietEntry],
+                bool,
+                u16,
+                u16,
+                WildlifeSpecies,
+            ) = match entity.kind {
                 EntityKind::Rabbit => {
                     let behavior = self
                         .mobs
@@ -653,6 +662,7 @@ impl ServerEntityStore {
                         .unwrap_or(RabbitBehavior::Idle);
                     (
                         WildlifeForageConsumer::Rabbit,
+                        &RABBIT_DIET,
                         behavior == RabbitBehavior::Forage,
                         match behavior {
                             RabbitBehavior::Flee => 4,
@@ -672,6 +682,7 @@ impl ServerEntityStore {
                         .unwrap_or(mclone_protocol::DeerBehavior::Idle);
                     (
                         WildlifeForageConsumer::Deer,
+                        &DEER_DIET,
                         behavior == mclone_protocol::DeerBehavior::Graze,
                         match behavior {
                             mclone_protocol::DeerBehavior::Flee => 5,
@@ -696,35 +707,25 @@ impl ServerEntityStore {
                     .and_then(MobRuntimeState::deer_save_data)
                     .map_or(0, |deer| deer.lifecycle.energy)
             };
-            let energy_per_forage = if entity.kind == EntityKind::Rabbit {
-                20
+            let intake = if foraging {
+                resources.consume_diet_at(
+                    consumer,
+                    diet,
+                    feet,
+                    energy,
+                    cost,
+                    tuning.maximum_energy,
+                    simulation_tick,
+                    block_state_at,
+                )
             } else {
-                32
+                crate::wildlife_resources::WildlifeDietIntake::default()
             };
-            let requested = wildlife_forage_request(
-                energy,
-                cost,
-                tuning.maximum_energy,
-                energy_per_forage,
-                if entity.kind == EntityKind::Rabbit {
-                    6
-                } else {
-                    10
-                },
-            );
-            let consumed =
-                if foraging && requested > 0 && is_local_wildlife_forage_site(feet, block_state_at)
-                {
-                    resources.consume_at(consumer, feet, requested, simulation_tick, block_state_at)
-                } else {
-                    0
-                };
-            let intake = consumed.saturating_mul(energy_per_forage);
             let Some(mob) = self.mobs.get_mut(&id) else {
                 continue;
             };
             mob.apply_wildlife_energy_step(
-                intake,
+                intake.energy,
                 cost,
                 tuning.cadence_ticks,
                 tuning.maximum_energy,
@@ -753,12 +754,16 @@ impl ServerEntityStore {
                 natural_deaths.push((id, entity, species, cause));
                 continue;
             }
-            if intake > 0 {
+            if intake.energy > 0 {
                 self.pending_wildlife_events.push(WildlifeEcologyEvent {
                     tick: simulation_tick,
                     species,
                     subject: entity.persistent_id,
-                    kind: WildlifeEcologyEventKind::Intake { amount: intake },
+                    kind: WildlifeEcologyEventKind::Intake {
+                        resource: intake.resource.expect("positive intake has a resource"),
+                        units: intake.units,
+                        energy: intake.energy,
+                    },
                 });
             }
             if entity.kind == EntityKind::Rabbit {
@@ -4478,44 +4483,6 @@ fn rabbit_release_position(mouth: ServerEntityState, rabbit: EntityPersistentId)
     ))
 }
 
-fn is_local_wildlife_forage_site<F>(feet: BlockPos, block_state_at: &F) -> bool
-where
-    F: Fn(BlockPos) -> Option<BlockStateId>,
-{
-    use mclone_worldgen::block::{
-        DANDELION, DIRT, GRASS_BLOCK, OAK_LEAVES, POPPY, generated_block_state_id,
-    };
-
-    let floor = block_state_at(BlockPos::new(feet.x, feet.y - 1, feet.z));
-    let at_feet = block_state_at(feet);
-    floor.is_some_and(|state| {
-        state == generated_block_state_id(GRASS_BLOCK) || state == generated_block_state_id(DIRT)
-    }) || at_feet.is_some_and(|state| {
-        state == generated_block_state_id(DANDELION)
-            || state == generated_block_state_id(POPPY)
-            || state == generated_block_state_id(OAK_LEAVES)
-    })
-}
-
-fn wildlife_forage_request(
-    energy: u16,
-    activity_cost: u16,
-    maximum_energy: u16,
-    energy_per_forage: u16,
-    maximum_bite: u16,
-) -> u16 {
-    if energy_per_forage == 0 || maximum_bite == 0 {
-        return 0;
-    }
-    let deficit = maximum_energy
-        .saturating_sub(energy)
-        .saturating_add(activity_cost);
-    deficit
-        .saturating_add(energy_per_forage - 1)
-        .div_euclid(energy_per_forage)
-        .min(maximum_bite)
-}
-
 type RabbitBreedingCandidate = (
     EntityId,
     EntityPersistentId,
@@ -4608,15 +4575,6 @@ mod tests {
             rabbit_breeding_pair(&[shelterless_close, shelterless]),
             Some((shelterless_close, shelterless, None))
         );
-    }
-
-    #[test]
-    fn forage_bites_follow_energy_deficit_without_exceeding_species_bounds() {
-        assert_eq!(wildlife_forage_request(1_000, 0, 1_000, 20, 6), 0);
-        assert_eq!(wildlife_forage_request(1_000, 1, 1_000, 20, 6), 1);
-        assert_eq!(wildlife_forage_request(900, 1, 1_000, 20, 6), 6);
-        assert_eq!(wildlife_forage_request(0, 1, 1_000, 20, 6), 6);
-        assert_eq!(wildlife_forage_request(0, 1, 1_000, 32, 10), 10);
     }
 
     fn adult_rabbit_with_refuge(

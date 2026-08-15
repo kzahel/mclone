@@ -199,8 +199,9 @@ pub use types::{
     UNLOADED_CHUNK_LEVEL, WorldBlockPos, WorldgenMailboxKind,
 };
 pub use wildlife_resources::{
-    WILDLIFE_RESOURCE_CELL_WIDTH_BLOCKS, WILDLIFE_RESOURCE_RULE_REVISION, WildlifeForageCellPos,
-    WildlifeForageCellSnapshot,
+    WILDLIFE_RESOURCE_CELL_WIDTH_BLOCKS, WILDLIFE_RESOURCE_KIND_COUNT,
+    WILDLIFE_RESOURCE_RULE_REVISION, WildlifeForageCellPos, WildlifeForageCellSnapshot,
+    WildlifeResourceKind, WildlifeResourceStratumSnapshot,
 };
 pub use wildlife_simulation::{
     WILDLIFE_SIMULATION_SCHEMA_VERSION, WildlifePopulationSnapshot, WildlifePopulationSubject,

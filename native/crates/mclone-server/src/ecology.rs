@@ -38,7 +38,9 @@ pub(crate) enum WildlifeReproductionSuppression {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum WildlifeEcologyEventKind {
     Intake {
-        amount: u16,
+        resource: crate::WildlifeResourceKind,
+        units: u16,
+        energy: u16,
     },
     Birth {
         child: EntityPersistentId,

@@ -26,7 +26,7 @@ use crate::{
     ObserverSimulationInterest, WorldGenerationProfile,
 };
 
-pub const WILDLIFE_SIMULATION_SCHEMA_VERSION: u32 = 2;
+pub const WILDLIFE_SIMULATION_SCHEMA_VERSION: u32 = 3;
 const SETUP_POLL_LIMIT: usize = 200_000;
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -194,7 +194,9 @@ pub enum WildlifeSimulationSuppressionReason {
 #[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
 pub enum WildlifeSimulationEventKind {
     Intake {
-        amount: u16,
+        resource: crate::WildlifeResourceKind,
+        units: u16,
+        energy: u16,
     },
     Birth {
         child: WildlifeSimulationIdentity,
@@ -647,9 +649,15 @@ fn simulation_event_from_ecology(
         },
         subject: event.subject.into(),
         event: match event.kind {
-            WildlifeEcologyEventKind::Intake { amount } => {
-                WildlifeSimulationEventKind::Intake { amount }
-            }
+            WildlifeEcologyEventKind::Intake {
+                resource,
+                units,
+                energy,
+            } => WildlifeSimulationEventKind::Intake {
+                resource,
+                units,
+                energy,
+            },
             WildlifeEcologyEventKind::Birth { child, parents } => {
                 WildlifeSimulationEventKind::Birth {
                     child: child.into(),

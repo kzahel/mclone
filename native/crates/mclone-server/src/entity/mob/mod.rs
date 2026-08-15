@@ -11,9 +11,9 @@ use mclone_core::{Aabb, AnimationClipId, AnimationState, BlockPos, BlockStateId,
 use mclone_protocol::{EntityId, EntityKind, EntityPersistentId};
 use mclone_worldgen::block::{
     ACACIA_LEAVES, ACACIA_LOG, BIRCH_LEAVES, BIRCH_LOG, CARROTS_AGE_7, DANDELION, DARK_OAK_LEAVES,
-    DARK_OAK_LOG, DIRT, FERN, GRASS, GRASS_BLOCK, LARGE_FERN_LOWER, LARGE_FERN_UPPER, OAK_LEAVES,
-    OAK_LOG, POPPY, SPRUCE_LEAVES, SPRUCE_LOG, TALL_GRASS_LOWER, TALL_GRASS_UPPER,
-    generated_block_state_id,
+    DARK_OAK_LOG, DIRT, FERN, GRASS, GRASS_BLOCK, JUNGLE_LEAVES, LARGE_FERN_LOWER,
+    LARGE_FERN_UPPER, OAK_LEAVES, OAK_LOG, POPPY, SPRUCE_LEAVES, SPRUCE_LOG, TALL_GRASS_LOWER,
+    TALL_GRASS_UPPER, generated_block_state_id,
 };
 use mclone_worldgen::prng::SimpleRandomSource;
 
@@ -3396,6 +3396,12 @@ where
                         || value == generated_block_state_id(TALL_GRASS_UPPER)
                         || value == generated_block_state_id(DANDELION)
                         || value == generated_block_state_id(POPPY)
+                        || value == generated_block_state_id(OAK_LEAVES)
+                        || value == generated_block_state_id(BIRCH_LEAVES)
+                        || value == generated_block_state_id(SPRUCE_LEAVES)
+                        || value == generated_block_state_id(DARK_OAK_LEAVES)
+                        || value == generated_block_state_id(ACACIA_LEAVES)
+                        || value == generated_block_state_id(JUNGLE_LEAVES)
                 ) {
                     return true;
                 }

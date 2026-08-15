@@ -9,9 +9,10 @@ use std::process::Command;
 use std::time::Instant;
 
 use mclone_server::{
-    WILDLIFE_LIFECYCLE_RULE_REVISION, WILDLIFE_RESOURCE_RULE_REVISION,
-    WILDLIFE_SIMULATION_SCHEMA_VERSION, WildlifeForageCellSnapshot, WildlifeLifecycleTuning,
-    WildlifePopulationSnapshot, WildlifePopulationSubject, WildlifeSimulationConfig,
+    WILDLIFE_LIFECYCLE_RULE_REVISION, WILDLIFE_RESOURCE_KIND_COUNT,
+    WILDLIFE_RESOURCE_RULE_REVISION, WILDLIFE_SIMULATION_SCHEMA_VERSION,
+    WildlifeForageCellSnapshot, WildlifeLifecycleTuning, WildlifePopulationSnapshot,
+    WildlifePopulationSubject, WildlifeResourceKind, WildlifeSimulationConfig,
     WildlifeSimulationDeathCause, WildlifeSimulationEvent, WildlifeSimulationEventKind,
     WildlifeSimulationLifeStage, WildlifeSimulationRemainsSnapshot, WildlifeSimulationSession,
     WildlifeSimulationSex, WildlifeSimulationSpecies, WildlifeSimulationSuppressionReason,
@@ -21,7 +22,7 @@ use mclone_worldgen::levelgen::MCLONE_WILDLIFE_POPULATION_REVISION;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-const REPORT_SCHEMA_VERSION: u32 = 2;
+const REPORT_SCHEMA_VERSION: u32 = 3;
 const MINECRAFT_DAY_TICKS: u64 = 24_000;
 
 type AnyResult<T> = Result<T, Box<dyn Error>>;
@@ -118,14 +119,51 @@ impl EventCounts {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ForageCounts {
     cells: u32,
+    strata: [ResourceCounts; WILDLIFE_RESOURCE_KIND_COUNT],
     potential: u64,
     available: u64,
     cumulative_recovered: u64,
     cumulative_rabbit_consumed: u64,
     cumulative_deer_consumed: u64,
+    cumulative_mallard_consumed: u64,
     interval_recovered: u64,
     interval_rabbit_consumed: u64,
     interval_deer_consumed: u64,
+    interval_mallard_consumed: u64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ResourceCounts {
+    resource: WildlifeResourceKind,
+    potential: u64,
+    available: u64,
+    cumulative_recovered: u64,
+    cumulative_rabbit_consumed: u64,
+    cumulative_deer_consumed: u64,
+    cumulative_mallard_consumed: u64,
+    interval_recovered: u64,
+    interval_rabbit_consumed: u64,
+    interval_deer_consumed: u64,
+    interval_mallard_consumed: u64,
+}
+
+impl Default for ResourceCounts {
+    fn default() -> Self {
+        Self {
+            resource: WildlifeResourceKind::LowHerbaceous,
+            potential: 0,
+            available: 0,
+            cumulative_recovered: 0,
+            cumulative_rabbit_consumed: 0,
+            cumulative_deer_consumed: 0,
+            cumulative_mallard_consumed: 0,
+            interval_recovered: 0,
+            interval_rabbit_consumed: 0,
+            interval_deer_consumed: 0,
+            interval_mallard_consumed: 0,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -627,7 +665,8 @@ fn emit_sample(
             .saturating_sub(event_counts.remains_decayed_biomass);
     let forage_bounds = forage_cells
         .iter()
-        .all(|cell| cell.potential > 0 && cell.available <= cell.potential);
+        .flat_map(|cell| cell.strata)
+        .all(|stratum| stratum.available <= stratum.potential);
     let below_hard_overload_guard = population.total < simulation.tuning().hard_population_guard;
     let summary = DailySummary {
         sample_index,
@@ -895,9 +934,9 @@ fn count_events(events: &[WildlifeSimulationEvent]) -> EventCounts {
     let mut counts = EventCounts::default();
     for event in events {
         match event.event {
-            WildlifeSimulationEventKind::Intake { amount } => {
+            WildlifeSimulationEventKind::Intake { energy, .. } => {
                 counts.intake_events += 1;
-                counts.intake_amount += u64::from(amount);
+                counts.intake_amount += u64::from(energy);
             }
             WildlifeSimulationEventKind::Birth { .. } => match event.species {
                 WildlifeSimulationSpecies::Rabbit => counts.rabbit_births += 1,
@@ -956,13 +995,66 @@ fn count_events(events: &[WildlifeSimulationEvent]) -> EventCounts {
 }
 
 fn count_forage(cells: &[WildlifeForageCellSnapshot], previous: &ForageCounts) -> ForageCounts {
+    let strata = std::array::from_fn(|index| {
+        let resource = WildlifeResourceKind::ALL[index];
+        let prior = previous.strata[index];
+        let mut counts = ResourceCounts {
+            resource,
+            potential: cells
+                .iter()
+                .map(|cell| u64::from(cell.strata[index].potential))
+                .sum(),
+            available: cells
+                .iter()
+                .map(|cell| u64::from(cell.strata[index].available))
+                .sum(),
+            cumulative_recovered: cells.iter().map(|cell| cell.strata[index].recovered).sum(),
+            cumulative_rabbit_consumed: cells
+                .iter()
+                .map(|cell| cell.strata[index].rabbit_consumed)
+                .sum(),
+            cumulative_deer_consumed: cells
+                .iter()
+                .map(|cell| cell.strata[index].deer_consumed)
+                .sum(),
+            cumulative_mallard_consumed: cells
+                .iter()
+                .map(|cell| cell.strata[index].mallard_consumed)
+                .sum(),
+            ..ResourceCounts::default()
+        };
+        counts.interval_recovered = counts
+            .cumulative_recovered
+            .saturating_sub(prior.cumulative_recovered);
+        counts.interval_rabbit_consumed = counts
+            .cumulative_rabbit_consumed
+            .saturating_sub(prior.cumulative_rabbit_consumed);
+        counts.interval_deer_consumed = counts
+            .cumulative_deer_consumed
+            .saturating_sub(prior.cumulative_deer_consumed);
+        counts.interval_mallard_consumed = counts
+            .cumulative_mallard_consumed
+            .saturating_sub(prior.cumulative_mallard_consumed);
+        counts
+    });
     let mut counts = ForageCounts {
         cells: cells.len() as u32,
-        potential: cells.iter().map(|cell| u64::from(cell.potential)).sum(),
-        available: cells.iter().map(|cell| u64::from(cell.available)).sum(),
-        cumulative_recovered: cells.iter().map(|cell| cell.recovered).sum(),
-        cumulative_rabbit_consumed: cells.iter().map(|cell| cell.rabbit_consumed).sum(),
-        cumulative_deer_consumed: cells.iter().map(|cell| cell.deer_consumed).sum(),
+        strata,
+        potential: strata.iter().map(|entry| entry.potential).sum(),
+        available: strata.iter().map(|entry| entry.available).sum(),
+        cumulative_recovered: strata.iter().map(|entry| entry.cumulative_recovered).sum(),
+        cumulative_rabbit_consumed: strata
+            .iter()
+            .map(|entry| entry.cumulative_rabbit_consumed)
+            .sum(),
+        cumulative_deer_consumed: strata
+            .iter()
+            .map(|entry| entry.cumulative_deer_consumed)
+            .sum(),
+        cumulative_mallard_consumed: strata
+            .iter()
+            .map(|entry| entry.cumulative_mallard_consumed)
+            .sum(),
         ..ForageCounts::default()
     };
     counts.interval_recovered = counts
@@ -974,6 +1066,9 @@ fn count_forage(cells: &[WildlifeForageCellSnapshot], previous: &ForageCounts) -
     counts.interval_deer_consumed = counts
         .cumulative_deer_consumed
         .saturating_sub(previous.cumulative_deer_consumed);
+    counts.interval_mallard_consumed = counts
+        .cumulative_mallard_consumed
+        .saturating_sub(previous.cumulative_mallard_consumed);
     counts
 }
 
