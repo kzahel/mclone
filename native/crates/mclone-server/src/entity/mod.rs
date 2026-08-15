@@ -20,7 +20,7 @@ pub(crate) use state::ServerEntityState;
 #[cfg(feature = "physics-engine")]
 pub(crate) use store::DebugPhysicsCubeEntitySpawn;
 pub(crate) use store::{
-    BeePollinationEvent, ItemPickupTarget, ServerEntityStore, WildlifeLifeDiagnostic,
-    WildlifeRemainsDiagnostic,
+    BeePollinationEvent, ItemPickupTarget, RabbitEcologyTickDiagnostics, ServerEntityStore,
+    WildlifeLifeDiagnostic, WildlifeRemainsDiagnostic,
 };
 pub(crate) use tracking::{EntityTracking, RoutedEntityUpdate};

@@ -203,11 +203,12 @@ pub use wildlife_resources::{
     WildlifeForageCellSnapshot,
 };
 pub use wildlife_simulation::{
-    WildlifePopulationSnapshot, WildlifePopulationSubject, WildlifeSimulationConfig,
-    WildlifeSimulationDeathCause, WildlifeSimulationEvent, WildlifeSimulationEventKind,
-    WildlifeSimulationIdentity, WildlifeSimulationLifeStage, WildlifeSimulationRemainsSnapshot,
-    WildlifeSimulationSession, WildlifeSimulationSex, WildlifeSimulationSpecies,
-    WildlifeSimulationSuppressionReason,
+    WILDLIFE_SIMULATION_SCHEMA_VERSION, WildlifePopulationSnapshot, WildlifePopulationSubject,
+    WildlifeSimulationConfig, WildlifeSimulationDeathCause, WildlifeSimulationDeerBehavior,
+    WildlifeSimulationEvent, WildlifeSimulationEventKind, WildlifeSimulationIdentity,
+    WildlifeSimulationLifeStage, WildlifeSimulationRabbitBehavior,
+    WildlifeSimulationRemainsSnapshot, WildlifeSimulationSession, WildlifeSimulationSex,
+    WildlifeSimulationSpecies, WildlifeSimulationSuppressionReason, WildlifeSimulationWorkSnapshot,
 };
 pub use world_behavior_profile::WorldBehaviorProfile;
 pub use world_generation_profile::{

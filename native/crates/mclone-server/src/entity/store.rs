@@ -213,6 +213,10 @@ pub(crate) struct WildlifeLifeDiagnostic {
     pub(crate) rabbit_life_stage: Option<RabbitLifeStage>,
     pub(crate) deer_life_stage: Option<mclone_protocol::DeerLifeStage>,
     pub(crate) deer_sex: Option<mclone_protocol::DeerSex>,
+    pub(crate) rabbit_behavior: Option<RabbitBehavior>,
+    pub(crate) deer_behavior: Option<mclone_protocol::DeerBehavior>,
+    pub(crate) rabbit_has_refuge: bool,
+    pub(crate) rabbit_sheltered: bool,
     pub(crate) parents: [Option<EntityPersistentId>; 2],
     pub(crate) lifecycle: WildlifeLifeState,
 }
@@ -518,6 +522,10 @@ impl ServerEntityStore {
                             rabbit_life_stage: Some(rabbit.life_stage),
                             deer_life_stage: None,
                             deer_sex: None,
+                            rabbit_behavior: Some(rabbit.behavior),
+                            deer_behavior: None,
+                            rabbit_has_refuge: rabbit.known_refuges.iter().any(Option::is_some),
+                            rabbit_sheltered: rabbit.sheltered_in.is_some(),
                             parents: rabbit.parents,
                             lifecycle: rabbit.lifecycle,
                         })
@@ -531,6 +539,10 @@ impl ServerEntityStore {
                             rabbit_life_stage: None,
                             deer_life_stage: Some(deer.life_stage),
                             deer_sex: Some(deer.sex),
+                            rabbit_behavior: None,
+                            deer_behavior: Some(deer.behavior),
+                            rabbit_has_refuge: false,
+                            rabbit_sheltered: false,
                             parents: [None; 2],
                             lifecycle: deer.lifecycle,
                         })
@@ -697,6 +709,9 @@ impl ServerEntityStore {
                 tuning.cadence_ticks,
                 tuning.maximum_energy,
             );
+            if let Some(entity) = self.entities.get_mut(&id) {
+                mob.reconcile_wildlife_maturation(entity, tuning);
+            }
             let lifecycle = if entity.kind == EntityKind::Rabbit {
                 mob.rabbit_save_data().expect("rabbit state").lifecycle
             } else {
@@ -1945,7 +1960,6 @@ impl ServerEntityStore {
         }
     }
 
-    #[cfg(test)]
     pub(crate) const fn rabbit_ecology_diagnostics(&self) -> RabbitEcologyTickDiagnostics {
         self.last_rabbit_ecology
     }
@@ -3098,6 +3112,7 @@ impl ServerEntityStore {
                 metadata,
                 state.on_ground,
                 state.y_rot_degrees,
+                self.wildlife_tuning,
             ),
         );
         let state = if kind == EntityKind::Mallard {

@@ -11,8 +11,8 @@ use std::time::Duration;
 
 use mclone_core::{BlockPos, ChunkPos};
 use mclone_protocol::{
-    ChunkView, DeerLifeStage, DeerSex, DimensionKey, EntityKind, EntityPersistentId,
-    RabbitLifeStage,
+    ChunkView, DeerBehavior, DeerLifeStage, DeerSex, DimensionKey, EntityKind, EntityPersistentId,
+    RabbitBehavior, RabbitLifeStage,
 };
 use serde::{Deserialize, Serialize};
 
@@ -26,10 +26,10 @@ use crate::{
     ObserverSimulationInterest, WorldGenerationProfile,
 };
 
-pub const WILDLIFE_SIMULATION_SCHEMA_VERSION: u32 = 1;
+pub const WILDLIFE_SIMULATION_SCHEMA_VERSION: u32 = 2;
 const SETUP_POLL_LIMIT: usize = 200_000;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WildlifeSimulationConfig {
     pub seed: i64,
@@ -54,7 +54,7 @@ impl WildlifeSimulationConfig {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum WildlifeSimulationSpecies {
     Rabbit,
@@ -98,7 +98,38 @@ pub enum WildlifeSimulationSex {
     Unknown,
 }
 
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum WildlifeSimulationRabbitBehavior {
+    Idle,
+    Hop,
+    Dig,
+    Emerge,
+    Forage,
+    Raid,
+    Flee,
+    EnterBurrow,
+    Underground,
+    Courtship,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum WildlifeSimulationDeerBehavior {
+    Idle,
+    Walk,
+    Graze,
+    Drink,
+    Alert,
+    Flee,
+    LieDown,
+    Bedded,
+    StandUp,
+    Hit,
+    Fall,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WildlifePopulationSubject {
     pub identity_most: u64,
@@ -106,6 +137,9 @@ pub struct WildlifePopulationSubject {
     pub species: WildlifeSimulationSpecies,
     pub chunk_x: i32,
     pub chunk_z: i32,
+    pub position_x_milli: i64,
+    pub position_y_milli: i64,
+    pub position_z_milli: i64,
     pub life_stage: WildlifeSimulationLifeStage,
     pub sex: WildlifeSimulationSex,
     pub age_ticks: u32,
@@ -116,6 +150,10 @@ pub struct WildlifePopulationSubject {
     pub reproductive_condition: u16,
     pub reproduction_cooldown: u32,
     pub parents: [Option<WildlifeSimulationIdentity>; 2],
+    pub rabbit_behavior: Option<WildlifeSimulationRabbitBehavior>,
+    pub deer_behavior: Option<WildlifeSimulationDeerBehavior>,
+    pub rabbit_has_refuge: bool,
+    pub rabbit_sheltered: bool,
 }
 
 impl WildlifePopulationSubject {
@@ -164,6 +202,7 @@ pub enum WildlifeSimulationEventKind {
     },
     Death {
         cause: WildlifeSimulationDeathCause,
+        life_stage: WildlifeSimulationLifeStage,
     },
     RemainsCreated {
         biomass: u32,
@@ -198,13 +237,29 @@ pub struct WildlifeSimulationEvent {
     pub event: WildlifeSimulationEventKind,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WildlifeSimulationWorkSnapshot {
+    pub active_rabbits: u32,
+    pub due_rabbits: u32,
+    pub decision_admitted: u32,
+    pub habitat_admitted: u32,
+    pub path_admitted: u32,
+    pub decision_deferred: u32,
+    pub habitat_deferred: u32,
+    pub path_deferred: u32,
+    pub oldest_debt_ticks: u64,
+    pub habitat_candidates: u32,
+    pub neighbor_candidates: u32,
+}
+
 impl WildlifePopulationSnapshot {
     fn from_diagnostics(simulation_tick: u64, states: Vec<WildlifeLifeDiagnostic>) -> Self {
         let mut subjects = states
             .into_iter()
             .filter_map(subject_from_diagnostic)
             .collect::<Vec<_>>();
-        subjects.sort_unstable();
+        subjects.sort_unstable_by_key(|subject| subject.identity());
         let rabbits = subjects
             .iter()
             .filter(|subject| subject.species == WildlifeSimulationSpecies::Rabbit)
@@ -240,7 +295,15 @@ pub struct WildlifeSimulationSession {
 
 impl WildlifeSimulationSession {
     pub fn open(config: WildlifeSimulationConfig) -> ChunkStoreResult<Self> {
+        Self::open_with_tuning(config, crate::WildlifeLifecycleTuning::default())
+    }
+
+    pub fn open_with_tuning(
+        config: WildlifeSimulationConfig,
+        tuning: crate::WildlifeLifecycleTuning,
+    ) -> ChunkStoreResult<Self> {
         let config = config.validate()?;
+        validate_tuning(tuning)?;
         let definition =
             DimensionDefinition::overworld(config.seed, WorldGenerationProfile::McloneOverworldV1);
         let mut session =
@@ -250,6 +313,7 @@ impl WildlifeSimulationSession {
             );
         session.set_lighting_enabled(false);
         session.set_debug_passive_showcase_enabled(false);
+        session.set_wildlife_lifecycle_tuning(tuning);
         session.begin_observing(
             DimensionKey::overworld(),
             ChunkView {
@@ -303,6 +367,10 @@ impl WildlifeSimulationSession {
         &self.previous
     }
 
+    pub fn current_snapshot(&self) -> &WildlifePopulationSnapshot {
+        &self.previous
+    }
+
     pub fn initial_identities(&self) -> Vec<WildlifeSimulationIdentity> {
         self.initial_identities
             .iter()
@@ -313,12 +381,28 @@ impl WildlifeSimulationSession {
 
     pub fn advance_tick(&mut self) -> ChunkStoreResult<WildlifePopulationSnapshot> {
         self.session.try_simulation_tick_report()?;
+        self.finish_tick()
+    }
+
+    pub fn advance_ecology_tick(&mut self) -> ChunkStoreResult<WildlifePopulationSnapshot> {
+        let chunks = self.immutable_ticking_chunks();
+        self.session.try_closed_wildlife_ecology_tick(&chunks)?;
+        self.finish_tick()
+    }
+
+    fn finish_tick(&mut self) -> ChunkStoreResult<WildlifePopulationSnapshot> {
+        let previous_subjects = self
+            .previous
+            .subjects
+            .iter()
+            .map(|subject| (subject.identity(), subject.life_stage))
+            .collect::<BTreeMap<_, _>>();
         let events = self
             .session
             .drain_wildlife_ecology_events()
             .into_iter()
-            .map(simulation_event_from_ecology)
-            .collect::<Vec<_>>();
+            .map(|event| simulation_event_from_ecology(event, &previous_subjects))
+            .collect::<ChunkStoreResult<Vec<_>>>()?;
         let current_chunks = self
             .session
             .scheduler()
@@ -394,6 +478,47 @@ impl WildlifeSimulationSession {
     pub fn tuning(&self) -> crate::WildlifeLifecycleTuning {
         self.session.wildlife_lifecycle_tuning()
     }
+
+    pub fn work_snapshot(&self) -> WildlifeSimulationWorkSnapshot {
+        let diagnostics = self.session.rabbit_ecology_diagnostics();
+        WildlifeSimulationWorkSnapshot {
+            active_rabbits: diagnostics.active,
+            due_rabbits: diagnostics.due,
+            decision_admitted: diagnostics.work.admitted[0],
+            habitat_admitted: diagnostics.work.admitted[1],
+            path_admitted: diagnostics.work.admitted[2],
+            decision_deferred: diagnostics.work.deferred[0],
+            habitat_deferred: diagnostics.work.deferred[1],
+            path_deferred: diagnostics.work.deferred[2],
+            oldest_debt_ticks: diagnostics.work.oldest_debt_ticks,
+            habitat_candidates: diagnostics.habitat_candidates,
+            neighbor_candidates: diagnostics.neighbor_candidates,
+        }
+    }
+}
+
+fn validate_tuning(tuning: crate::WildlifeLifecycleTuning) -> ChunkStoreResult<()> {
+    if tuning.revision != crate::WILDLIFE_LIFECYCLE_RULE_REVISION
+        || tuning.cadence_ticks == 0
+        || tuning.maximum_energy == 0
+        || tuning.rabbit_lifespan_ticks == 0
+        || tuning.deer_lifespan_ticks == 0
+        || tuning.rabbit_starvation_ticks == 0
+        || tuning.deer_starvation_ticks == 0
+        || tuning.hard_population_guard == 0
+        || tuning.rabbit_soft_cell_density == 0
+        || tuning.deer_soft_cell_density == 0
+        || tuning.rabbit_reproductive_energy > tuning.maximum_energy
+        || tuning.deer_reproductive_energy > tuning.maximum_energy
+        || tuning.rabbit_birth_energy_cost > tuning.maximum_energy
+        || tuning.deer_birth_energy_cost > tuning.maximum_energy
+    {
+        return Err(ChunkStoreError::InvalidData(format!(
+            "invalid wildlife lifecycle tuning revision {}",
+            tuning.revision
+        )));
+    }
+    Ok(())
 }
 
 fn wait_for_initial_domain(session: &mut LocalRealmSession) -> ChunkStoreResult<()> {
@@ -459,6 +584,9 @@ fn subject_from_diagnostic(state: WildlifeLifeDiagnostic) -> Option<WildlifePopu
         species,
         chunk_x: chunk.x,
         chunk_z: chunk.z,
+        position_x_milli: (state.position.x * 1_000.0).round() as i64,
+        position_y_milli: (state.position.y * 1_000.0).round() as i64,
+        position_z_milli: (state.position.z * 1_000.0).round() as i64,
         life_stage,
         sex,
         age_ticks: state.lifecycle.age_ticks,
@@ -469,11 +597,49 @@ fn subject_from_diagnostic(state: WildlifeLifeDiagnostic) -> Option<WildlifePopu
         reproductive_condition: state.lifecycle.reproductive_condition,
         reproduction_cooldown: state.lifecycle.reproduction_cooldown,
         parents: state.parents.map(|parent| parent.map(Into::into)),
+        rabbit_behavior: state.rabbit_behavior.map(simulation_rabbit_behavior),
+        deer_behavior: state.deer_behavior.map(simulation_deer_behavior),
+        rabbit_has_refuge: state.rabbit_has_refuge,
+        rabbit_sheltered: state.rabbit_sheltered,
     })
 }
 
-fn simulation_event_from_ecology(event: WildlifeEcologyEvent) -> WildlifeSimulationEvent {
-    WildlifeSimulationEvent {
+const fn simulation_rabbit_behavior(behavior: RabbitBehavior) -> WildlifeSimulationRabbitBehavior {
+    match behavior {
+        RabbitBehavior::Idle => WildlifeSimulationRabbitBehavior::Idle,
+        RabbitBehavior::Hop => WildlifeSimulationRabbitBehavior::Hop,
+        RabbitBehavior::Dig => WildlifeSimulationRabbitBehavior::Dig,
+        RabbitBehavior::Emerge => WildlifeSimulationRabbitBehavior::Emerge,
+        RabbitBehavior::Forage => WildlifeSimulationRabbitBehavior::Forage,
+        RabbitBehavior::Raid => WildlifeSimulationRabbitBehavior::Raid,
+        RabbitBehavior::Flee => WildlifeSimulationRabbitBehavior::Flee,
+        RabbitBehavior::EnterBurrow => WildlifeSimulationRabbitBehavior::EnterBurrow,
+        RabbitBehavior::Underground => WildlifeSimulationRabbitBehavior::Underground,
+        RabbitBehavior::Courtship => WildlifeSimulationRabbitBehavior::Courtship,
+    }
+}
+
+const fn simulation_deer_behavior(behavior: DeerBehavior) -> WildlifeSimulationDeerBehavior {
+    match behavior {
+        DeerBehavior::Idle => WildlifeSimulationDeerBehavior::Idle,
+        DeerBehavior::Walk => WildlifeSimulationDeerBehavior::Walk,
+        DeerBehavior::Graze => WildlifeSimulationDeerBehavior::Graze,
+        DeerBehavior::Drink => WildlifeSimulationDeerBehavior::Drink,
+        DeerBehavior::Alert => WildlifeSimulationDeerBehavior::Alert,
+        DeerBehavior::Flee => WildlifeSimulationDeerBehavior::Flee,
+        DeerBehavior::LieDown => WildlifeSimulationDeerBehavior::LieDown,
+        DeerBehavior::Bedded => WildlifeSimulationDeerBehavior::Bedded,
+        DeerBehavior::StandUp => WildlifeSimulationDeerBehavior::StandUp,
+        DeerBehavior::Hit => WildlifeSimulationDeerBehavior::Hit,
+        DeerBehavior::Fall => WildlifeSimulationDeerBehavior::Fall,
+    }
+}
+
+fn simulation_event_from_ecology(
+    event: WildlifeEcologyEvent,
+    previous_subjects: &BTreeMap<EntityPersistentId, WildlifeSimulationLifeStage>,
+) -> ChunkStoreResult<WildlifeSimulationEvent> {
+    Ok(WildlifeSimulationEvent {
         tick: event.tick,
         species: match event.species {
             WildlifeSpecies::Rabbit => WildlifeSimulationSpecies::Rabbit,
@@ -495,6 +661,15 @@ fn simulation_event_from_ecology(event: WildlifeEcologyEvent) -> WildlifeSimulat
                     WildlifeDeathCause::OldAge => WildlifeSimulationDeathCause::OldAge,
                     WildlifeDeathCause::Starvation => WildlifeSimulationDeathCause::Starvation,
                 },
+                life_stage: previous_subjects
+                    .get(&event.subject)
+                    .copied()
+                    .ok_or_else(|| {
+                        ChunkStoreError::InvalidData(format!(
+                            "wildlife death for unknown identity {:?}",
+                            event.subject
+                        ))
+                    })?,
             },
             WildlifeEcologyEventKind::RemainsCreated { biomass } => {
                 WildlifeSimulationEventKind::RemainsCreated { biomass }
@@ -527,7 +702,7 @@ fn simulation_event_from_ecology(event: WildlifeEcologyEvent) -> WildlifeSimulat
                 }
             }
         },
-    }
+    })
 }
 
 fn simulation_remains_from_diagnostic(
@@ -596,5 +771,28 @@ mod tests {
         }
         assert_eq!(simulation.immutable_ticking_chunks(), domain);
         assert_eq!(simulation.previous.subjects, initial.subjects);
+    }
+
+    #[test]
+    fn accelerated_ecology_matches_full_ticks_on_real_seed_canary() {
+        let config = WildlifeSimulationConfig {
+            seed: -98_765,
+            center_chunk_x: 0,
+            center_chunk_z: -128,
+            ticking_radius_chunks: 4,
+        };
+        let mut full = WildlifeSimulationSession::open(config).unwrap();
+        let mut accelerated = WildlifeSimulationSession::open(config).unwrap();
+        assert!(!full.initial_snapshot().subjects.is_empty());
+        assert_eq!(full.initial_snapshot(), accelerated.initial_snapshot());
+        for _ in 0..240 {
+            assert_eq!(
+                full.advance_tick().unwrap(),
+                accelerated.advance_ecology_tick().unwrap()
+            );
+            assert_eq!(full.drain_events(), accelerated.drain_events());
+            assert_eq!(full.forage_cells(), accelerated.forage_cells());
+            assert_eq!(full.remains(), accelerated.remains());
+        }
     }
 }

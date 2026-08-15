@@ -19,7 +19,7 @@ use mclone_worldgen::prng::SimpleRandomSource;
 
 #[cfg(test)]
 use crate::ecology::WildlifeLifeState;
-use crate::ecology::{Availability, KnownPlace};
+use crate::ecology::{Availability, KnownPlace, WildlifeLifecycleTuning};
 
 use super::metadata::EntityMetadata;
 use super::spawning::habitat::sample_wetland_habitat;
@@ -286,6 +286,7 @@ impl MobRuntimeState {
             metadata,
             on_ground,
             y_rot_degrees,
+            WildlifeLifecycleTuning::default(),
         )
     }
 
@@ -295,6 +296,7 @@ impl MobRuntimeState {
         metadata: EntityMetadata,
         on_ground: bool,
         y_rot_degrees: f32,
+        wildlife_tuning: WildlifeLifecycleTuning,
     ) -> Self {
         debug_assert!(
             metadata.is_passive_mob(),
@@ -306,7 +308,8 @@ impl MobRuntimeState {
         }
 
         let mut random = SimpleRandomSource::new(mob_random_seed(id, metadata.kind));
-        let species = MobSpeciesState::from_spawn(metadata.kind, persistent_id, &mut random);
+        let species =
+            MobSpeciesState::from_spawn(metadata.kind, persistent_id, &mut random, wildlife_tuning);
 
         let mut goal_selector = GoalSelector::default();
         match metadata.kind {
@@ -605,6 +608,27 @@ impl MobRuntimeState {
         } else if let Some(deer) = self.species.deer_mut() {
             deer.lifecycle_mut()
                 .apply_energy_step(intake, cost, cadence_ticks, maximum_energy);
+        }
+    }
+
+    pub(crate) fn reconcile_wildlife_maturation(
+        &mut self,
+        entity: &mut ServerEntityState,
+        tuning: WildlifeLifecycleTuning,
+    ) {
+        if let Some(rabbit) = self.species.rabbit_mut() {
+            if rabbit.reconcile_maturation(tuning.rabbit_maturation_ticks)
+                && !entity.hidden_from_clients
+            {
+                entity.width = EntityMetadata::RABBIT.dimensions.width;
+                entity.height = EntityMetadata::RABBIT.dimensions.height;
+            }
+        } else if let Some(deer) = self.species.deer_mut()
+            && deer.reconcile_maturation(tuning.deer_maturation_ticks)
+        {
+            entity.width = EntityMetadata::DEER.dimensions.width;
+            entity.height = EntityMetadata::DEER.dimensions.height;
+            entity.deer = Some(deer.snapshot_data());
         }
     }
 

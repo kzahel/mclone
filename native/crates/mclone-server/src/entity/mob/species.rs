@@ -87,12 +87,17 @@ impl MobSpeciesState {
         kind: EntityKind,
         persistent_id: EntityPersistentId,
         random: &mut SimpleRandomSource,
+        wildlife_tuning: WildlifeLifecycleTuning,
     ) -> Self {
         match kind {
             EntityKind::Cow | EntityKind::Mannequin => Self::Cow,
             EntityKind::Chicken => Self::Chicken(ChickenRuntimeState::new(random)),
             EntityKind::Mallard => Self::Mallard(MallardRuntimeState::new(random)),
-            EntityKind::Deer => Self::Deer(DeerRuntimeState::new(persistent_id, random)),
+            EntityKind::Deer => Self::Deer(DeerRuntimeState::new(
+                persistent_id,
+                random,
+                wildlife_tuning,
+            )),
             EntityKind::Bee => {
                 debug_assert!(false, "bee spawn requires a durable colony home");
                 Self::Bee(BeeRuntimeState::from_saved(BeeRuntimeSaveData {
@@ -103,7 +108,10 @@ impl MobSpeciesState {
                     carrying_pollen: false,
                 }))
             }
-            EntityKind::Rabbit => Self::Rabbit(RabbitRuntimeState::new_founder(persistent_id)),
+            EntityKind::Rabbit => Self::Rabbit(RabbitRuntimeState::new_founder(
+                persistent_id,
+                wildlife_tuning,
+            )),
             EntityKind::DebugCube
             | EntityKind::Item
             | EntityKind::MallardNest
@@ -150,7 +158,10 @@ impl MobSpeciesState {
             )),
             EntityKind::Deer => Self::Deer(DeerRuntimeState::from_saved(
                 persistent_id,
-                deer.unwrap_or_else(|| DeerRuntimeState::new(persistent_id, random).save_data()),
+                deer.unwrap_or_else(|| {
+                    DeerRuntimeState::new(persistent_id, random, WildlifeLifecycleTuning::default())
+                        .save_data()
+                }),
             )),
             EntityKind::Bee => Self::Bee(BeeRuntimeState::from_saved(bee.unwrap_or(
                 BeeRuntimeSaveData {
@@ -163,7 +174,12 @@ impl MobSpeciesState {
             ))),
             EntityKind::Rabbit => Self::Rabbit(RabbitRuntimeState::from_saved(
                 persistent_id,
-                rabbit.unwrap_or_else(|| RabbitRuntimeState::founder_save_data(persistent_id)),
+                rabbit.unwrap_or_else(|| {
+                    RabbitRuntimeState::founder_save_data(
+                        persistent_id,
+                        WildlifeLifecycleTuning::default(),
+                    )
+                }),
             )),
             EntityKind::DebugCube
             | EntityKind::Item
@@ -294,8 +310,10 @@ pub(super) struct RabbitRuntimeState {
 }
 
 impl RabbitRuntimeState {
-    fn founder_save_data(identity: EntityPersistentId) -> RabbitRuntimeSaveData {
-        let tuning = WildlifeLifecycleTuning::default();
+    fn founder_save_data(
+        identity: EntityPersistentId,
+        tuning: WildlifeLifecycleTuning,
+    ) -> RabbitRuntimeSaveData {
         RabbitRuntimeSaveData {
             known_refuges: [None; MAX_KNOWN_PLACES],
             sheltered_in: None,
@@ -319,9 +337,9 @@ impl RabbitRuntimeState {
         }
     }
 
-    fn new_founder(identity: EntityPersistentId) -> Self {
+    fn new_founder(identity: EntityPersistentId, tuning: WildlifeLifecycleTuning) -> Self {
         Self {
-            saved: Self::founder_save_data(identity),
+            saved: Self::founder_save_data(identity, tuning),
         }
     }
 
@@ -467,11 +485,16 @@ impl RabbitRuntimeState {
         self.saved.lifecycle.advance_tick();
         self.saved.raid_cooldown = self.saved.raid_cooldown.saturating_sub(1);
         self.saved.dig_cooldown = self.saved.dig_cooldown.saturating_sub(1);
-        if self.saved.life_stage == RabbitLifeStage::Kit {
-            if self.saved.lifecycle.age_ticks >= RABBIT_GROWTH_REQUIRED_TICKS {
-                self.saved.life_stage = RabbitLifeStage::Adult;
-            }
+    }
+
+    pub(super) fn reconcile_maturation(&mut self, maturation_ticks: u32) -> bool {
+        if self.saved.life_stage == RabbitLifeStage::Kit
+            && self.saved.lifecycle.age_ticks >= maturation_ticks
+        {
+            self.saved.life_stage = RabbitLifeStage::Adult;
+            return true;
         }
+        false
     }
 
     pub(super) fn feed(&mut self, love_ticks: u32) -> bool {
@@ -599,8 +622,11 @@ pub(super) struct DeerRuntimeState {
 }
 
 impl DeerRuntimeState {
-    fn new(identity: EntityPersistentId, random: &mut SimpleRandomSource) -> Self {
-        let tuning = WildlifeLifecycleTuning::default();
+    fn new(
+        identity: EntityPersistentId,
+        random: &mut SimpleRandomSource,
+        tuning: WildlifeLifecycleTuning,
+    ) -> Self {
         let life_stage = if random.next_int_bound(5) == 0 {
             DeerLifeStage::Fawn
         } else {
@@ -733,14 +759,18 @@ impl DeerRuntimeState {
     pub(super) fn advance_behavior_tick(&mut self) {
         self.saved.behavior_ticks = self.saved.behavior_ticks.saturating_add(1);
         self.saved.lifecycle.advance_tick();
-        let tuning = WildlifeLifecycleTuning::default();
+    }
+
+    pub(super) fn reconcile_maturation(&mut self, maturation_ticks: u32) -> bool {
         if self.saved.life_stage == DeerLifeStage::Fawn
-            && self.saved.lifecycle.age_ticks >= tuning.deer_maturation_ticks
+            && self.saved.lifecycle.age_ticks >= maturation_ticks
         {
             self.saved.life_stage = DeerLifeStage::Adult;
             self.saved.max_health = 20;
             self.saved.health = self.saved.health.max(12).min(self.saved.max_health);
+            return true;
         }
+        false
     }
 
     pub(super) fn set_behavior(&mut self, behavior: DeerBehavior) -> bool {

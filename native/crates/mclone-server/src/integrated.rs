@@ -499,6 +499,120 @@ impl RealmServer {
         self.active_dimension.wildlife_resources.snapshots()
     }
 
+    /// Advances the ordinary entity/ecology owner over a caller-frozen loaded
+    /// domain without spending time on unrelated scheduler, network, fluid,
+    /// lighting, or presentation phases. The population runner proves this
+    /// path against full authoritative ticks before every accelerated run.
+    pub(crate) fn try_closed_wildlife_ecology_tick(
+        &mut self,
+        entity_ticking_chunks: &[ChunkPos],
+    ) -> ChunkStoreResult<()> {
+        let simulation_tick = self.simulation_tick.saturating_add(1);
+        self.simulation_tick = simulation_tick;
+        if self.daylight_cycle_running() {
+            self.day_time = self.day_time.wrapping_add(1);
+        }
+        if self.world_metadata.is_some() {
+            self.world_metadata_dirty = true;
+        }
+
+        let entity_chunks_before_tick = self.entities.persistent_entity_chunk_positions();
+        let day_time = self.day_time;
+        let runtime = &mut self.active_dimension;
+        let scheduler = &runtime.scheduler;
+        let mut entity_updates =
+            runtime
+                .entities
+                .tick_stationary_at_time(entity_ticking_chunks, &[], day_time, |pos| {
+                    scheduler
+                        .block_at_world(pos)
+                        .map(|block| BlockStateId(u32::from(block)))
+                });
+        let entity_ticking_set = entity_ticking_chunks
+            .iter()
+            .copied()
+            .collect::<BTreeSet<_>>();
+        entity_updates.extend(runtime.entities.tick_wildlife_lifecycle(
+            simulation_tick,
+            entity_ticking_chunks,
+            &mut runtime.wildlife_resources,
+            &|pos| {
+                entity_ticking_set
+                    .contains(&pos.chunk_pos())
+                    .then(|| {
+                        scheduler
+                            .block_at_world(pos)
+                            .map(|block| BlockStateId(u32::from(block)))
+                    })
+                    .flatten()
+            },
+        ));
+
+        let rabbit_digs = runtime.entities.drain_rabbit_digs();
+        let rabbit_raids = runtime.entities.drain_rabbit_raids();
+        for event in rabbit_digs {
+            let completed = self
+                .scheduler
+                .block_at_world(event.target)
+                .is_some_and(|block| matches!(block, mclone_worldgen::block::DIRT | GRASS_BLOCK))
+                && self.set_block_from_simulation(event.target, AIR);
+            if completed {
+                entity_updates.extend(
+                    self.active_dimension
+                        .entities
+                        .complete_rabbit_dig(event.rabbit, event.target),
+                );
+            } else if let Some(updated) = self
+                .active_dimension
+                .entities
+                .cancel_rabbit_dig(event.rabbit)
+            {
+                entity_updates.push(updated);
+            }
+        }
+        for event in rabbit_raids {
+            let Some(next) = self
+                .scheduler
+                .block_at_world(event.target)
+                .and_then(rabbit_raid_next_state)
+            else {
+                continue;
+            };
+            if self.set_block_from_simulation(event.target, next)
+                && let Some(updated) = self
+                    .active_dimension
+                    .entities
+                    .complete_rabbit_raid(event.rabbit)
+            {
+                entity_updates.push(updated);
+            }
+        }
+
+        let bee_pollinations = self.active_dimension.entities.drain_bee_pollinations();
+        let _ = self.apply_bee_pollinations(&bee_pollinations);
+        let _ = self.scheduler.drain_pending_block_delta_events();
+        let _ = self.active_dimension.entities.drain_mallard_calls();
+        let _ = self.active_dimension.entities.drain_mallard_tracks();
+        let _ = self
+            .active_dimension
+            .entities
+            .drain_hatched_mallard_positions();
+        let _ = self.active_dimension.entities.drain_deer_sounds();
+        let _ = self.active_dimension.entities.drain_bee_sounds();
+        let _ = self.active_dimension.entities.drain_rabbit_sounds();
+
+        let entity_chunks_after_tick = self.entities.persistent_entity_chunk_positions();
+        self.mark_entity_chunk_index_changes(entity_chunks_before_tick, entity_chunks_after_tick);
+        self.mark_entity_updates_dirty(&entity_updates);
+        Ok(())
+    }
+
+    pub(crate) const fn rabbit_ecology_diagnostics(
+        &self,
+    ) -> crate::entity::RabbitEcologyTickDiagnostics {
+        self.active_dimension.entities.rabbit_ecology_diagnostics()
+    }
+
     pub fn new(seed: i64) -> Self {
         Self::with_chunk_store(seed, Box::<NullChunkSnapshotStore>::default())
     }
@@ -7038,6 +7152,28 @@ impl LocalRealmSession {
             DEFAULT_PHYSICS_STEPS_PER_GAMEPLAY_TICK,
             DEFAULT_PHYSICS_STEP_DT_SECONDS,
         )
+    }
+
+    pub(crate) fn try_closed_wildlife_ecology_tick(
+        &mut self,
+        entity_ticking_chunks: &[ChunkPos],
+    ) -> ChunkStoreResult<()> {
+        match self.role {
+            LocalRealmSessionRole::Player(player_id) => {
+                let dimension = self
+                    .server
+                    .players
+                    .get(player_id)
+                    .map(|player| player.dimension.clone())
+                    .ok_or_else(|| unknown_player_error(player_id))?;
+                self.server.activate_dimension(&dimension)?;
+            }
+            LocalRealmSessionRole::Observer(observer_id) => {
+                self.activate_observer_dimension(observer_id)?;
+            }
+        }
+        self.server
+            .try_closed_wildlife_ecology_tick(entity_ticking_chunks)
     }
 
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
