@@ -815,6 +815,22 @@ parents. Tall buildings may be better represented by explicit sparse
 structure silhouettes than by raising a terrain heightfield. Those are future
 research questions and must not block natural-terrain proof.
 
+Tactical
+[`305`](../tactical/305-fine-homestead-lod-overlay.md) now records the first
+explicitly accepted, bounded exception to the implemented natural-only state:
+a block-resolution presentation patch derived from the persisted starter
+homestead plan, plus stable full-detail landmark records, admitted only through
+spacing-`1`, spacing-`2`, and spacing-`4` levels. It keeps the rings unchanged
+and resolves the patch while intersecting tiles refill. It is planned, not yet
+implemented.
+
+That tactical intentionally does not begin the generic edit system described
+above. It accepts the initial plan as its distant baseline, lets exact-painted
+chunks show authoritative edits, and allows the baseline to return after an
+edited chunk leaves exact range. Per-edit invalidation, dirty summary
+propagation, persistence, world-scale indexing, and remote publication remain
+future generic-overlay concerns rather than homestead-specific machinery.
+
 ## XR And Frame Predictability
 
 The procedural horizon is view-independent world geometry and is generated

@@ -13,11 +13,15 @@ session and physical Quest run were not completed and remain explicit R4
 acceptance gaps. Independently approved Tactical
 [`291`](../tactical/291-functional-kitchen-garden-foundation.md) has replaced
 the decorative garden parcel with the source-first working fence/gate,
-irrigation, wheat, and carrot place. Further speculative terrain, LOD,
-maximal-settlement, and worlds-within-worlds expansion stays paused until the
-R4 decision.**
+irrigation, wheat, and carrot place. Open-ended expansion of terrain, the
+maximal settlement, and worlds within worlds stays paused until the R4
+decision. Tactical
+[`305`](../tactical/305-fine-homestead-lod-overlay.md) is an explicitly
+authorized bounded exception: it plans a real nearby presentation overlay in
+the fine procedural-horizon levels without taking on generic edit
+invalidation. Implementation has not started.**
 
-Last reconciled: **2026-08-10**.
+Last reconciled: **2026-08-15**.
 
 ## Scope
 
@@ -156,7 +160,9 @@ The direction is accepted before all of its consumers are ready:
   port.
 - The retired synthetic Far LOD omitted exact features, structures, and
   player/block edits. The settlement, its pond/grade changes, and its authored
-  trees therefore have no honest distant representation yet.
+  trees still have no honest distant representation in the implemented
+  runtime. Tactical 305 now plans a bounded fine-level representation; it does
+  not claim generic distant edit fidelity.
 
 None of these gaps should shrink the maximal vision. They control staging and
 acceptance claims.
@@ -659,13 +665,21 @@ structures, and edits. Therefore:
 - documentation and captures must not imply that the settlement already has
   distant continuity.
 
-A later **settlement LOD proxy** may derive a coarse graded surface/water patch
-and landmark silhouettes for the barn, chapel, and focal oak from the same site
-plan. That proxy remains presentation-only and must use the spatial identity,
-coverage ledger, and exact/procedural handoff of a future multiscale terrain
-architecture. It must not preserve the current `ChunkPos + level` coordinator.
-It is explicitly deferred; do not add a farmstead-specific second authority
-world or ad hoc app-rendered model.
+Tactical
+[`305`](../tactical/305-fine-homestead-lod-overlay.md) now plans the first
+**settlement LOD proxy** through the current procedural-horizon clipmap. It
+derives a block-resolution graded surface, water, material, and vegetation
+patch plus stable full-detail landmark records from the same persisted site
+plan. The patch is consumed only while spacing-`1`, spacing-`2`, and
+spacing-`4` tiles refill; it does not preserve the retired `ChunkPos + level`
+coordinator or add an ad hoc app-rendered rectangle.
+
+The proxy remains presentation-only and baseline-only. Exact-painted chunks
+show authoritative player edits, while the original plan proxy may return
+after those chunks leave exact range. Generic edit listeners, invalidation,
+summary roll-up, persistence, remote publication, and kilometre-scale
+silhouettes remain deferred. Do not add a farmstead-specific second authority
+world to hide that boundary.
 
 See [`far-lod.md`](far-lod.md) and
 [`gpu-procedural-terrain.md`](gpu-procedural-terrain.md).
@@ -741,7 +755,7 @@ approved; do not reserve a block of numbers in advance.
 | `FS-09` | cross-profile and topology adaptation | `deferred` | same engine contract accepted; first composition must land before breadth | Flat Grass, Small Island, Mclone, and explicit Overworld-overlay cases prove fit/fallback/rejection; admitted topology cases pass |
 | `FS-10` | maximal parcels, church, outbuildings, richer animals, and visual mill | `deferred` | named destination and optional parcels are preserved | additions pass composition, persistence, and performance reviews without replacing the first hierarchy |
 | `FS-11` | functional farm simulation and machinery | `working kitchen garden proven` | Tacticals 288–291 implement authoritative till, irrigation, shared wheat/carrot growth, world-drop harvest, renewal, connected enclosure/gate mechanics, and the promoted ordinary homestead garden | rabbits may now consume real garden facts; potatoes, food/crafting, villagers, and machinery remain later |
-| `FS-12` | settlement distant-presentation proxy | `deferred` | the removed chunk Far LOD omitted structures and edits | a future multiscale terrain architecture exists, then a shared presentation-only proxy passes its spatial handoff and coverage gates |
+| `FS-12` | settlement distant-presentation proxy | `planned` | Tactical 305 specifies one plan-derived block-resolution fine-level patch, full-detail landmark records, exact-coverage handoff, and explicit baseline-only edit fidelity | implement and visually accept the bounded overlay without growing a homestead-specific invalidation system |
 
 The `ready` rows are not an instruction to start all of them. They identify
 work that can be scheduled without inventing a missing predecessor. The topic's
@@ -792,17 +806,16 @@ and reopens the first world with both the plan and edit intact. Flat Android
 creates a second world and reaches gameplay; desktop offscreen, synthetic
 stereo, strict first-party provenance, and Android XR build gates pass.
 Tactical 291 was an explicitly approved independent gameplay/content
-prerequisite and did not resume the paused terrain or maximal-composition
-campaign. The next farmstead-specific move remains the human R4 decision,
-including whether the unperformed clean
+prerequisite. The human R4 decision still owns whether the unperformed clean
 20-minute desktop play session and physical Quest run must be completed before
-calling this the first shareable alpha. Do not begin another farmstead tactical
-until that decision names the next bounded product slice.
+calling this the first shareable alpha. Separately authorized Tactical 305 now
+owns the next bounded distant-presentation slice; it does not resume maximal
+composition or replace the R4 decision.
 
-Do not resume open-ended terrain representation, worlds-within-worlds, or
-procedural-horizon expansion during this tactical unless the playable intro
-exposes a specific correctness or presentation blocker. Do not make the
-maximal settlement the structure-foundation canary.
+Do not broaden Tactical 305 into open-ended terrain representation,
+worlds-within-worlds, generic distant edits, or kilometre-scale
+procedural-horizon expansion. Do not make the maximal settlement the overlay
+performance canary.
 
 ## Staged Direction
 
@@ -862,8 +875,9 @@ plan. It does not need recursive jigsaw assembly.
 
 - Add richer habitat/role behavior only through shared entity systems.
 - Add horses and original ducks when their complete contracts are ready.
-- Evaluate a settlement LOD proxy only after a shared multiscale terrain
-  producer and renderer exist.
+- Execute Tactical 305's bounded nearby settlement proxy through the shared
+  procedural-horizon producer and renderer before considering generic edits or
+  coarser silhouettes.
 - Consider upgrade provenance only when a real shipped-world migration requires
   it.
 
