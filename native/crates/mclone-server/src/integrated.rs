@@ -453,6 +453,31 @@ struct NaturalSpawningTickResult {
 }
 
 impl RealmServer {
+    pub(crate) fn wildlife_population_subjects(&self) -> Vec<ServerEntityState> {
+        self.active_dimension
+            .entities
+            .states()
+            .into_iter()
+            .filter(|entity| {
+                entity.alive && matches!(entity.kind, EntityKind::Rabbit | EntityKind::Deer)
+            })
+            .collect()
+    }
+
+    pub(crate) fn pending_initial_wildlife_entity_ticking_chunk_count(&self) -> usize {
+        let entity_ticking = self
+            .active_dimension
+            .scheduler
+            .entity_ticking_chunks()
+            .into_iter()
+            .collect::<BTreeSet<_>>();
+        self.active_dimension
+            .pending_initial_wildlife_chunks
+            .iter()
+            .filter(|chunk| entity_ticking.contains(chunk))
+            .count()
+    }
+
     pub fn new(seed: i64) -> Self {
         Self::with_chunk_store(seed, Box::<NullChunkSnapshotStore>::default())
     }

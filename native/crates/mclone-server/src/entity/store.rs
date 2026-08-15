@@ -1447,6 +1447,12 @@ impl ServerEntityStore {
             .iter()
             .copied()
             .collect::<BTreeSet<_>>();
+        let available_block_state_at = |pos: BlockPos| {
+            entity_ticking_chunks
+                .contains(&pos.chunk_pos())
+                .then(|| block_state_at(pos))
+                .flatten()
+        };
         let debug_physics_cube_id = self.debug_physics_cube_id();
         self.tick_list.reconcile(
             self.entities
@@ -1778,7 +1784,7 @@ impl ServerEntityStore {
                         day_time,
                         &rabbit_candidates,
                         rabbit_admission,
-                        &block_state_at,
+                        &available_block_state_at,
                     );
                     let current_rabbit_shelter = mob.rabbit_refuge_claim();
                     if previous_rabbit_shelter != current_rabbit_shelter {
@@ -1798,7 +1804,7 @@ impl ServerEntityStore {
                             .map(|_| (ItemKind::Egg, entity.position, entity.y_rot_degrees)),
                     );
                     let mallard_habitat = entity.kind == EntityKind::Mallard
-                        && is_mallard_egg_habitat(entity.position, &block_state_at);
+                        && is_mallard_egg_habitat(entity.position, &available_block_state_at);
                     let mallard_egg_count = mob.take_mallard_due_egg(mallard_habitat);
                     egg_spawns
                         .extend((0..mallard_egg_count).map(|_| {
@@ -1941,7 +1947,7 @@ impl ServerEntityStore {
                 }
                 if let Some(nest) = self.mallard_nests.get_mut(&id) {
                     let habitat_valid =
-                        is_valid_mallard_nest_site(entity.position, &block_state_at);
+                        is_valid_mallard_nest_site(entity.position, &available_block_state_at);
                     let mut attendees =
                         adult_mallards
                             .iter()
@@ -1984,7 +1990,7 @@ impl ServerEntityStore {
                 if let Some(item) = self.items.get_mut(&id) {
                     is_item = true;
                     let previous_position = entity.position;
-                    item.tick_entity(entity, &block_state_at);
+                    item.tick_entity(entity, &available_block_state_at);
                     item_block_changed = BlockPos::containing(previous_position)
                         != BlockPos::containing(entity.position);
                     if item.age() >= ITEM_ENTITY_LIFETIME_TICKS {
@@ -2009,7 +2015,7 @@ impl ServerEntityStore {
             }
         }
         let (rabbit_separation_updates, rabbit_neighbor_candidates) =
-            self.separate_visible_rabbits_with_diagnostics(&ticking_ids, &block_state_at);
+            self.separate_visible_rabbits_with_diagnostics(&ticking_ids, &available_block_state_at);
         updated.extend(rabbit_separation_updates);
         updated.extend(self.decay_rabbit_burrow_disturbance());
         for id in removed_ids {
@@ -4638,6 +4644,29 @@ mod tests {
             mob.rabbit_escape_attempts_for_test()
                 .is_some_and(|attempts| attempts > 0)
         }));
+    }
+
+    #[test]
+    fn ticking_domain_boundary_is_unavailable_to_rabbit_paths() {
+        let mut store = ServerEntityStore::default();
+        let rabbit =
+            store.insert_passive_mob_for_test(EntityKind::Rabbit, Vec3d::new(14.5, 64.0, 8.5), 0.0);
+        let player = MobPlayerTarget::from_position(Vec3d::new(12.5, 64.0, 8.5));
+        let ticking = [ChunkPos::new(0, 0)];
+
+        for tick in 0..240 {
+            store.tick_stationary_at_time(&ticking, &[player], 12_000 + tick, flat_ground);
+            assert_eq!(
+                store.state(rabbit).unwrap().chunk_pos(),
+                ChunkPos::new(0, 0),
+                "an unavailable non-ticking chunk must never become a path or movement target"
+            );
+        }
+
+        assert_eq!(
+            store.mobs[&rabbit].rabbit_behavior(),
+            Some(RabbitBehavior::Flee)
+        );
     }
 
     #[test]

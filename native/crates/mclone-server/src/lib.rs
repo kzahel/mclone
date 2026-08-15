@@ -53,6 +53,7 @@ mod timing;
 mod types;
 #[cfg(target_arch = "wasm32")]
 mod wasm_job_worker;
+mod wildlife_simulation;
 mod world_behavior_profile;
 mod world_generation_profile;
 mod worldgen_mailbox;
@@ -194,6 +195,10 @@ pub use types::{
     ChunkTicketKey, ChunkTicketType, FORCED_TICKET_LEVEL, FluidKind, FullChunkStatus,
     LightStatusMailboxKind, MAX_CHUNK_DISTANCE, PLAYER_TICKET_LEVEL, ServerMode,
     UNLOADED_CHUNK_LEVEL, WorldBlockPos, WorldgenMailboxKind,
+};
+pub use wildlife_simulation::{
+    WildlifePopulationSnapshot, WildlifePopulationSubject, WildlifeSimulationConfig,
+    WildlifeSimulationSession, WildlifeSimulationSpecies,
 };
 pub use world_behavior_profile::WorldBehaviorProfile;
 pub use world_generation_profile::{
