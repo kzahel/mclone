@@ -1,8 +1,8 @@
 # Tactical 299: Closed-Domain Wildlife Population Simulation
 
-Status: in progress 2026-08-15; production foundation and 30-day radius-8
-calibration evidence landed, accepted 120/200-day campaign and final remains
-pixels pending
+Status: in progress 2026-08-15; production foundation and corrected 30-day
+radius-8 calibration evidence landed, accepted revision-5 120/200-day campaign
+and final remains pixels pending
 
 Topic: `habitat-driven-creature-ecology`
 

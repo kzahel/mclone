@@ -41,9 +41,30 @@ The first corrected multi-seed 30-day matrix proves that extraction across
 four ordinary radius-8 Overworld windows. Every exact invariant and
 full/accelerated canary passes. Wet windows consume different mixtures of
 shore seeds and aquatic invertebrates; the dry control retains zero aquatic
-capacity and zero mallards. Successful attended hatching keeps a bounded
-parent-owned memory of the still-valid shore site, enabling a later clutch
-without turning nests into permanent homes or loading remote terrain.
+capacity and zero mallards.
+
+Tactical
+[`308`](../tactical/308-wildlife-population-stability-correction.md) corrects
+the first population failures without adding a population floor. A persisted
+mallard nest site is now bounded knowledge, not an active movement command.
+Only a compatible live nest or a current condition-driven reproduction attempt
+creates runtime attendance; successful hatching releases both parents to
+ordinary shore/water feeding while preserving the still-valid remembered site
+for a possible later clutch.
+
+Lifecycle revision 5 incorporates the corrected population timings and failed-
+nest cleanup. Rabbits
+mature and may breed again on two-day cadences, live 60-80 loaded days, and
+tolerate six days of sustained deficit; mallards mature after two days, use a
+four-day cooldown, live 90-110 days, and share the same deficit tolerance.
+Mallard water maintenance no longer costs twice shore maintenance. A rejected
+long diagnostic also showed four-day deer breeding driving 4 deer to a peak of
+70 and squeezing rabbits through shared forage, so deer now use a twelve-day
+breeding cooldown. Food, resource recovery, movement, and mortality remain
+individual and terrain-driven. A failed parented mallard nest is removed only
+after authoritative parent mortality, preventing it from permanently blocking
+later clutches without treating unloaded parents as dead. The exact revision-5
+120/200-day acceptance campaign remains open; Tactical 308 owns its evidence.
 
 ## Scope
 

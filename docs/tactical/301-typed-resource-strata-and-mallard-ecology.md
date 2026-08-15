@@ -1,6 +1,8 @@
 # Tactical 301: Typed Resource Strata and Mallard Ecology
 
-Status: planned 2026-08-15
+Status: implementation landed 2026-08-15; typed resources, three-species
+lifecycle, natural mallard nesting, and corrected 30-day evidence complete;
+accepted long campaign and final native/Web remains review pending
 
 Topic: `habitat-driven-creature-ecology`
 

@@ -1,6 +1,7 @@
 # Tactical 308: Wildlife Population Stability Correction
 
-Status: in progress 2026-08-15
+Status: implementation landed 2026-08-15; accepted revision-5 120/200-day
+campaign remains open after the user requested wrap-up
 
 Topic: `wildlife-ecology-state-model`
 
@@ -97,6 +98,79 @@ only because it reaches the 4,096 hard overload guard fails.
 5. Run focused server/persistence tests, the four-window diagnostic, and the
    long real-Overworld matrix; update this tactical and the living topic with
    exact evidence.
+
+## Execution Record
+
+The nest correction landed in `ecf7707b`. Persisted mallard site memory and
+runtime nest attendance are now separate: hydration reconstructs attendance
+only from a live compatible nest, successful hatching clears active intent,
+and later reuse must pass the ordinary condition, mate, route, and nest path.
+Focused hydration, hatch-release, and reuse tests pass.
+
+Lifecycle revision 3 landed in `895744e4`. It changes no resource potential,
+recovery, population target, or spawn path. Rabbit maturation and cooldown are
+two loaded days, rabbit lifespan is 60-80 days, mallard maturation is two days,
+mallard cooldown is four days, mallard lifespan is 90-110 days, both species
+tolerate six days of sustained deficit, and a mallard pays one maintenance
+unit per lifecycle cadence on shore or water. The same-seed revision-3
+30-day diagnostic produced:
+
+| radius-8 Overworld window | initial R/D/M | peak R/D/M | final R/D/M |
+|---|---:|---:|---:|
+| dry meadow/woodland | 30/11/0 | 94/43/0 | 88/43/0 |
+| river meadow | 31/5/6 | 106/29/9 | 99/29/8 |
+| river steppe | 16/4/4 | 50/31/5 | 38/31/5 |
+| negative river/mountain | 20/13/12 | 68/47/14 | 63/47/6 |
+
+Every exact invariant passed, and the preceding production defaults had ended
+the same rabbit windows at 10, 42, 7, and 20 after much larger synchronized
+birth/death pulses. However, the first longer revision-3 steppe diagnostic
+showed another causal problem: by day 84 deer had grown from 4 to a peak of 70
+while rabbits fell from a peak of 50 to 10 despite continued births. The deer
+four-day breeding cadence was monopolizing their shared low-herbaceous forage.
+
+Lifecycle revision 4 therefore changes only the deer breeding cooldown from
+four to twelve loaded days. It landed in `f90493fe`; deer maturation, energy,
+food, lifespan, mortality, and movement remain unchanged. Repeating the exact
+30-day matrix at checksum
+`f951d5859d999cdc5e074872ff2bbd529178b8e34ca54987f6acddcdd61e3007`
+produced:
+
+| radius-8 Overworld window | initial R/D/M | peak R/D/M | final R/D/M |
+|---|---:|---:|---:|
+| dry meadow/woodland | 30/11/0 | 108/26/0 | 107/26/0 |
+| river meadow | 31/5/6 | 118/10/9 | 110/8/6 |
+| river steppe | 16/4/4 | 51/10/6 | 36/10/6 |
+| negative river/mountain | 20/13/12 | 73/26/14 | 66/26/6 |
+
+Revision 4 retains ordinary scarcity, starvation, nest failure, and habitat
+differences while removing the deer pulse that delayed rabbit collapse. All
+identity, biomass, resource, boundary, no-refill, and overload invariants pass.
+
+Its first 120-day steppe run exposed one more concrete mallard defect. The
+flock established later nests and retained healthy mixed-sex adults, but a
+failed parented nest remained alive after a parent died. Every later ready pair
+was redirected to that sterile nest, so two early ducklings were the only
+recruitment and the flock reached zero on day 108. The run ended on day 120 at
+8 rabbits, 31 deer, and 0 mallards and was rejected.
+
+Revision 5 landed in `bf537ade`. Authoritative natural death now removes any
+nest that records the dead mallard as a parent, replicates that removal, and
+clears surviving parent intent. It does not infer death from an unloaded or
+unavailable parent. A focused regression proves that the failed nest is
+released and a later conditioned pair creates an ordinary replacement nest;
+all 15 mallard-focused server tests pass. The revision-5 steppe 30-day receipt
+remains exactly 36 rabbits, 10 deer, and 6 mallards. The broader 30-day rerun
+and long campaign were stopped when the user requested wrap-up, so the final
+120/200-day acceptance remains deliberately open.
+
+The exact rerun command is:
+
+```text
+pnpm native:wildlife:campaign --matrix \
+  test/fixtures/creatures/wildlife-population-matrix-v2.json \
+  --output <empty-temporary-directory> --jobs 5
+```
 
 ## Acceptance
 
