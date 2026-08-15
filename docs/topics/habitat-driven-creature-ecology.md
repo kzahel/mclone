@@ -53,18 +53,14 @@ plan, broad desired-density and species weights, first entity-chunk
 realization, and a Terrain Lab view over the exact production decisions. This
 retains durable individual animals while removing traversal order and repeated
 live habitat scans from Mclone's initial wildlife distribution.
-Tactical
-[`299`](../tactical/299-closed-domain-wildlife-population-simulation.md) has
-landed the first loaded rabbit/deer lifecycle, renewable forage ledger,
-natural birth/death/remains accounting, immutable-domain runner, and
-deterministic real-seed reports. Its radius-8 30-day calibration runs now show
-multi-generation growth and decline with exact conservation; the accepted
-120/200-day matrix and final visual evidence remain open.
-Tactical
-[`301`](../tactical/301-typed-resource-strata-and-mallard-ecology.md) plans the
-next bounded chapter: replace generic forage with shared typed habitat
-resources, migrate rabbit/deer diets, and make mallards the third complete
-loaded population without adding predators or an estimator-driven cap.
+Tacticals
+[`299`](../tactical/299-closed-domain-wildlife-population-simulation.md) and
+[`301`](../tactical/301-typed-resource-strata-and-mallard-ecology.md) now land
+the first three-species loaded population: five shared renewable resource
+strata, distinct rabbit/deer/mallard diets, natural birth/death/remains,
+natural attended mallard nests, one immutable-domain runner, and deterministic
+real-seed reports. The individual simulation remains authoritative; there is
+no estimator-driven cap, refill, immigration, or unloaded catch-up.
 
 ## Scope
 
@@ -243,20 +239,13 @@ persistence architecture.
 
 ## Shared Renewable Resource Strata
 
-The landed Tactical 299 forage ledger deliberately begins as one invisible
-renewable scalar per 64-by-64-block cell. An animal still has to reach and
-perform a real local feeding action, but rabbits and deer currently draw from
-the same scalar assembled from grass, dirt, flowers, and leaves. This proves
-loaded recovery and competition, while making diet and terrain causality too
-coarse for the next species.
-
-The continuing direction is a small set of shared terrain-resource strata,
-not one private food pool per species. Near-term strata are low herbaceous
-growth, woody browse, seeds/soft mast, aquatic vegetation, and aquatic
-invertebrates. Rabbits mainly use low growth, deer use browse plus some low
-growth, and mallards use wetland food plus suitable shore seeds. Their partial
-overlap should create real competition without pretending that every animal
-can consume every productive block.
+Tactical 301 replaces the Tactical 299 scalar with five fixed resources per
+64-by-64-block cell: low herbaceous growth, woody browse, seeds/soft mast,
+aquatic vegetation, and aquatic invertebrates. Rabbits use low growth, deer
+prefer browse and substitute low growth, and mallards prefer aquatic
+invertebrates, then aquatic vegetation, then suitable shore seeds. The
+resources belong to the terrain cell rather than to a species, so overlap is
+real without pretending every animal can consume every productive block.
 
 These values remain renewable habitat accounting rather than remotely edible
 inventory. Ordinary blocks determine potential, loaded time determines
@@ -599,13 +588,13 @@ notes, and zero browser-world records. The temporary play link is
 
 ## Known Gaps and Recommended Next Work
 
-- Finish Tactical 299's accepted radius-8 120/200-day predator-free matrix and
-  retained remains pixels. The existing 30-day curves are encouraging
-  calibration evidence, not a closed population claim.
-- Execute Tactical 301 through typed shared resource strata, explicit
-  rabbit/deer diets, and a complete mallard condition/nesting lifecycle. Keep
-  the individual simulation authoritative and any support estimate optional
-  and report-only.
+- Keep the checked-in radius-8 30/120/200-day campaign windows as regression
+  and tuning evidence, not as a promise that one final count is an ecological
+  equilibrium or desired species ratio.
+- Keep the individual simulation authoritative. Add a report-only support
+  estimate only if it clarifies the raw histories without becoming a second
+  model; Tactical 301 deliberately omits one because the typed resource,
+  condition, suppression, birth, and mortality curves are more legible.
 - Use the three-species histories to choose the next non-predator pressure
   test. Fish could exercise bounded water volumes and aquatic resources;
   beavers could connect woody/aquatic food to family construction and terrain

@@ -189,6 +189,13 @@ world.
   Existing entity records, including empty records, remain authoritative;
   disposable internal worlds may be regenerated for a complete new
   population.
+- **Reviewed for Tactical 301:** 2026-08-15; generated blocks, terrain
+  fingerprints, and initial wildlife geography are unchanged. The internal
+  wildlife resource saved-data codec intentionally advances from its scalar
+  proof to revision 2 fixed typed strata and rejects obsolete scalar records;
+  disposable development worlds regenerate them from current terrain. Entity
+  saved data advances to revision 15 for mallard lifecycle and nest intent,
+  with focused legacy mallard hydration and round-trip coverage.
 - **Reviewed for default creation and inland spawn, 2026-08-15:** Mclone
   Overworld is now the product new-world default; obsolete catalog records
   without a profile are rejected rather than migrated. Mclone spawn selection

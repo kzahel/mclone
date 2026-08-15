@@ -26,16 +26,16 @@ It keeps one real-seed entity-ticking domain immutable, treats its exterior as
 currently unavailable, permits no immigration or post-initial spawning, and
 requires exact `start + births - deaths = end` identity conservation. Its
 forage, energy, reproduction, mortality, and remains state advances only while
-loaded; it is not an unloaded population summary. Radius-8 30-day rabbit/deer
-runs now prove multiple generations and exact full/accelerated equivalence;
-the accepted 120/200-day campaign remains pending.
+loaded; it is not an unloaded population summary. Radius-8 runs prove
+multiple generations and exact full/accelerated equivalence.
 
 Tactical
-[`301`](../tactical/301-typed-resource-strata-and-mallard-ecology.md) plans the
-next concrete extraction: a fixed set of shared terrain-resource strata,
-species-owned diet profiles, and mallard adoption of the loaded lifecycle and
-natural nest/hatch path. Any mathematical support estimate is confined to the
-report and cannot control gameplay.
+[`301`](../tactical/301-typed-resource-strata-and-mallard-ecology.md) has now
+landed the next concrete extraction: five fixed shared terrain-resource
+strata, species-owned rabbit/deer/mallard diet profiles, and mallard adoption
+of the loaded lifecycle and natural nest/hatch path. The gameplay model still
+contains no population estimator or carrying-capacity target; raw resource,
+condition, birth, and death histories are the calibration evidence.
 
 ## Scope
 
@@ -452,7 +452,6 @@ food, prey, shelter, or disturbance to make the behavior legible.
 
 | Candidate | Model pressure | Terrain and interaction pressure |
 |---|---|---|
-| mallard lifecycle migration | sex/condition, mixed land-water diet, seasonal-like nest state without seasons | shallow feeding, covered shore nests, attendance and hatch survival |
 | fish | bounded water-volume availability, schooling, spawning grounds without terrestrial paths | depth, flow, cover, aquatic food and angling |
 | beaver | family memory, lodge/refuge use, persistent construction intent | woody food, banks, water connectivity and bounded dam terrain mutation |
 | squirrel | distributed caches, cavities and arboreal escape knowledge | mature trees, connected canopy, nuts and forgotten caches |
@@ -467,7 +466,7 @@ food, prey, shelter, or disturbance to make the behavior legible.
 | bobcat | solitary cover-dependent territory and prey caching | brush, rocks, wetlands and fallen timber |
 | horse | herd cohesion, grazing travel, water memory and panic cascades | broad grassland, trails and watering places |
 
-The current bounded sequence first migrates mallards, then uses the resulting
+The current bounded sequence has migrated mallards and now uses the resulting
 resource histories to choose among fish, beaver, or squirrel as the next
 non-predator pressure test. This is not a commitment to implement all three.
 After bottom-up support and prey surplus are legible, fox remains the first
@@ -484,14 +483,13 @@ scavengers consequential rather than decorative.
 
 ## Adoption Sequence and Guardrails
 
-1. Retain the landed rabbit-owned knowledge/availability foundation and the
-   landed shared rabbit/deer lifecycle as server-internal concrete machinery.
-2. Replace their scalar forage with typed habitat resources and species-owned
-   diet profiles, preserving physically reached feeding and inactive-world
-   semantics.
-3. Migrate mallards as the contrasting amphibious lifecycle consumer, using
-   the existing durable nest and attended hatch rather than a universal home
-   or abstract population birth.
+1. Retain the landed rabbit-owned knowledge/availability foundation and shared
+   loaded lifecycle as server-internal concrete machinery.
+2. Retain the landed typed habitat resources and species-owned diet profiles,
+   preserving physically reached feeding and inactive-world semantics.
+3. Retain mallards as the landed contrasting amphibious lifecycle consumer,
+   using the durable semantic nest and attended hatch rather than a universal
+   home or abstract population birth.
 4. Choose one of fish, beaver, or squirrel only after the three-species
    resource evidence identifies the most valuable missing spatial pattern.
 5. Add fox pressure later through prey observations, interruptible pursuit,
