@@ -128,6 +128,34 @@ fn main() -> Result<()> {
                 report.drawn_actor_count,
                 report.underwater
             );
+            let terrain_view = report.terrain_view.map_or_else(
+                || serde_json::json!({ "enabled": false }),
+                |terrain| {
+                    serde_json::json!({
+                        "enabled": true,
+                        "sourceGeneration": terrain.source_generation,
+                        "coverageGeneration": terrain.coverage_generation,
+                        "exactColumnCount": terrain.exact_column_count,
+                        "exactCenterReady": terrain.exact_center_ready,
+                        "lastFrameRevision": terrain.last_frame_revision,
+                        "readySlots": terrain.ready_slots,
+                        "drawnLevels": terrain.drawn_levels,
+                        "drawnTiles": terrain.drawn_tiles,
+                        "drawnTreeTiles": terrain.drawn_tree_tiles,
+                        "drawnTreeInstances": terrain.drawn_tree_instances,
+                        "targetReady": terrain.target_ready,
+                        "treeInstanceCount": terrain.tree_instance_count,
+                        "pendingVegetationTiles": terrain.pending_vegetation_tiles,
+                        "vegetationEnabled": terrain.vegetation_enabled,
+                        "vegetationResidentTiles": terrain.vegetation_resident_tiles,
+                        "vegetationSubmittedJobs": terrain.vegetation_submitted_jobs,
+                        "vegetationCompletedJobs": terrain.vegetation_completed_jobs,
+                        "vegetationTransportFailures": terrain.vegetation_transport_failures,
+                        "vegetationJobFailures": terrain.vegetation_job_failures,
+                    })
+                },
+            );
+            println!("MCLONE_TERRAIN_SEAM_STATE {terrain_view}");
             Ok(())
         }
         Cli::WorldgenShowcase { options } => {

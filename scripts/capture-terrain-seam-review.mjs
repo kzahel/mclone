@@ -37,7 +37,9 @@ function parseArguments(argv) {
   };
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
-    if (argument === "--output") {
+    if (argument === "--") {
+      continue;
+    } else if (argument === "--output") {
       options.output = argv[++index] ?? fail("--output requires a directory");
     } else if (argument === "--width") {
       options.width = parsePositiveInteger("--width", argv[++index], 8192);
@@ -81,6 +83,10 @@ function run(command, args, options = {}) {
       process.stderr.write(result.stderr ?? "");
     }
     fail(`${command} exited with status ${result.status}`);
+  }
+  if (options.echo) {
+    process.stdout.write(result.stdout ?? "");
+    process.stderr.write(result.stderr ?? "");
   }
   return options.capture ? (result.stdout ?? "").trim() : "";
 }
@@ -186,7 +192,9 @@ function buildCampaign() {
       }));
     }
   }
-  for (const view of ["coast", "forest", "stone", "snow"]) {
+  // The accepted elevated baseline is itself the focused coast view. Avoid
+  // writing duplicate PNGs while retaining that role in the receipt.
+  for (const view of ["forest", "stone", "snow"]) {
     for (const [timeLabel, time] of [["noon", 6000], ["midnight", 18000]]) {
       captures.push(captureDefinition({
         name: `focus-${view}-${timeLabel}`,
@@ -206,6 +214,49 @@ function buildCampaign() {
     }));
   }
   return captures;
+}
+
+function parseTerrainViewState(output, captureName) {
+  const prefix = "MCLONE_TERRAIN_SEAM_STATE ";
+  const line = output.split(/\r?\n/u).find((candidate) => candidate.startsWith(prefix));
+  if (!line) {
+    fail(`${captureName} did not report terrain seam readiness state`);
+  }
+  try {
+    return JSON.parse(line.slice(prefix.length));
+  } catch (error) {
+    fail(`${captureName} reported invalid terrain seam state: ${error.message}`);
+  }
+}
+
+function validateObservedState(capture, state) {
+  if (capture.presentation === "exact-only") {
+    if (state.enabled !== false) {
+      fail(`${capture.name} allocated a terrain horizon in Exact Only mode`);
+    }
+    return;
+  }
+  if (!state.enabled || !state.targetReady || !state.exactCenterReady) {
+    fail(`${capture.name} did not reach exact/procedural target readiness`);
+  }
+  if (state.pendingVegetationTiles !== 0
+      || state.vegetationSubmittedJobs !== state.vegetationCompletedJobs
+      || state.vegetationTransportFailures !== 0
+      || state.vegetationJobFailures !== 0) {
+    fail(`${capture.name} did not reach a drained, failure-free vegetation state`);
+  }
+}
+
+function validateComparisonGroups(results) {
+  const signatures = new Map();
+  for (const capture of results) {
+    const signature = JSON.stringify(capture.observedState);
+    const prior = signatures.get(capture.group);
+    if (prior !== undefined && prior !== signature) {
+      fail(`${capture.group} changed observed source/coverage/vegetation state`);
+    }
+    signatures.set(capture.group, signature);
+  }
 }
 
 function pngFacts(path, expectedWidth, expectedHeight) {
@@ -287,7 +338,9 @@ for (let index = 0; index < campaign.length; index += 1) {
     + `(seed ${view.seed}, ${capture.presentation}, tick ${capture.time}, `
     + `${capture.diagnostic})\n`,
   );
-  run(clientPath, args);
+  const output = run(clientPath, args, { capture: true, echo: true });
+  const observedState = parseTerrainViewState(output, capture.name);
+  validateObservedState(capture, observedState);
   results.push({
     ...capture,
     file: `${capture.name}.png`,
@@ -320,9 +373,12 @@ for (let index = 0; index < campaign.length; index += 1) {
       pacedFrameMilliseconds: 16,
     },
     command: [clientPath, ...args],
+    observedState,
     png: pngFacts(path, options.width, options.height),
   });
 }
+
+validateComparisonGroups(results);
 
 const receipt = {
   schema: "mclone-terrain-seam-review-v1",
@@ -346,6 +402,13 @@ const receipt = {
       "output extent",
     ],
     variedAxes: ["frozen time", "terrain presentation", "diagnostic channel"],
+    observedStateRule: "Every composed capture is target-ready with drained, failure-free vegetation; observed state is identical within each comparison group. Exact Only reports the horizon disabled.",
+  },
+  sceneCoverage: {
+    coast: ["baseline-elevated-dawn", "baseline-elevated-noon", "baseline-elevated-dusk", "baseline-elevated-midnight"],
+    forest: ["focus-forest-noon", "focus-forest-midnight"],
+    exposedStone: ["focus-stone-noon", "focus-stone-midnight"],
+    snow: ["focus-snow-noon", "focus-snow-midnight"],
   },
   diagnosticLegend: {
     "ownership-level": "Exact pixels remain natural; procedural levels use a spacing palette from red (spacing one) through successively cooler rings.",

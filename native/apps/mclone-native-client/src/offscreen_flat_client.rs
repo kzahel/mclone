@@ -42,6 +42,7 @@ pub(crate) struct OffscreenFlatClientScreenshotReport {
     pub(crate) underwater: bool,
     pub(crate) embedded_preview: Option<EmbeddedWorldPreviewSnapshot>,
     pub(crate) warm_world_standby: Option<WarmWorldStandbySnapshot>,
+    pub(crate) terrain_view: Option<mclone_scene::SceneTerrainViewDiagnostics>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -1948,6 +1949,7 @@ pub(crate) fn run_offscreen_flat_client_screenshot(
     let underwater = host.driver.host().mono_underwater();
     let embedded_preview = host.driver.host().embedded_world_preview_snapshot();
     let warm_world_standby = host.driver.host().warm_world_standby_snapshot();
+    let terrain_view = host.driver.host().terrain_view_diagnostics();
 
     Ok(OffscreenFlatClientScreenshotReport {
         path: options.path.clone(),
@@ -1962,6 +1964,7 @@ pub(crate) fn run_offscreen_flat_client_screenshot(
         underwater,
         embedded_preview,
         warm_world_standby,
+        terrain_view,
     })
 }
 
