@@ -1,6 +1,6 @@
 # Tactical 303: Web Integrated Runner Semantic Parity
 
-Status: planned 2026-08-15
+Status: completed 2026-08-15
 
 Topic: `web-worker-runtime-ownership`
 
@@ -417,3 +417,123 @@ Stop and request a new decision if the correction requires:
   continuations; or
 - weakening any accepted movement, IndexedDB reload, lifecycle, ownership, or
   rendered-output gate.
+
+## Execution Record
+
+Completed on 2026-08-15 without changing the Worker count, private-Wasm-heap
+topology, external SAB ABI, persistence schema, simulation cadence, chunk
+radius, unload hysteresis, gameplay results, or renderer retention policy.
+No Web-only view coalescing was added.
+
+### Landed contract
+
+- `handle_command_frame` now performs one `try_handle_command` transition and
+  returns its immediately available ordered updates. It no longer polls the
+  scheduler or triggers autosave.
+- The Worker actor no longer exposes command-scoped pending-job predicates,
+  pending-job polls, yields, or drain limits. Periodic ticks and Worker job
+  completions advance background work independently.
+- Ordinary command and tick operations finish before IndexedDB begins.
+  Browser record results enter Rust as separate typed persistence-completion
+  operations. Explicit flush and shutdown still wait for durable completion.
+- Main-side Web Rust retains every posted command request ID until its response
+  arrives, so command depth includes messages waiting in the Worker event
+  loop.
+- Shared server and app-runtime diagnostics expose the accepted local
+  `ChunkView`. Local streaming readiness requires the camera chunk, requested
+  view, accepted view, server queues/jobs, scene stream work, and render work
+  all to agree or be empty.
+- The browser observer derives its loaded center only from accepted authority
+  diagnostics and reports a stable hash of the loaded chunk identities.
+- A source gate rejects reintroduction of command-scoped job drains or browser
+  yields inside an ordinary actor operation.
+
+The browser's existing tick-driven autosave cadence remains intentionally
+unchanged. The retired command-triggered autosave was Web-only and was part of
+the incorrect command transaction. Persistence schema, record validation,
+request IDs, world-keyed writer leases, failure kinds, and shutdown durability
+remain owned by the existing Tactical 199 boundary.
+
+### Commits
+
+- `ce47bb1c` — make Web server commands nonblocking;
+- `f2b703a4` — detach Web persistence continuations;
+- `f5ab3990` — make Web streaming readiness authoritative;
+- `2f94707e` — gate Web readiness across deterministic view replay;
+- `7bffe3b8` — lock nonblocking chunk-view admission in shared tests;
+- `2d82f49a` — prove shared-memory and message-transfer runner parity;
+- `f59e2a5e` — repair the exact persistence acceptance fixture; and
+- `703fca5f` — restore the complete Web smoke typecheck gate.
+
+All implementation commits use `Topic: web-worker-runtime-ownership`.
+
+### Movement and transport evidence
+
+`pnpm native:web:view-replay` ran the production integrated-server Worker and
+passed all four required movement shapes:
+
+- ground movement crossed two chunk boundaries;
+- ordinary flight crossed four boundaries forward and four in reverse;
+- accelerated flight crossed eight boundaries; and
+- the accelerated path immediately reversed across eight boundaries before
+  waiting for quiescence.
+
+The 77 sampled transitions observed maximum outstanding command depth `2`,
+maximum accepted-view lag `1` chunk, and zero false-idle samples. The final
+requested, accepted, and loaded centers were all `(-2, 0)`. The scene retained
+49 loaded chunks and 159 resident sections. Loaded-set hash
+`44240cd7288b30cb`, 279 snapshot updates, and 216 unload updates remained exact
+for the complete 1.5-second post-idle stability window. The final measured
+maximum frame gap was `9.255 ms`.
+
+The same lane ran fresh isolated transport actors after movement. The external
+SAB runner processed six commands, reached maximum four pending frames,
+exercised pool miss/drop/reuse, and settled. The separate message-transfer
+runner processed its command and settled. Both reported `ok` with their exact
+transport kinds and transitioned to final non-running diagnostics after
+shutdown requests.
+
+The final 1280 by 720 canvas contained 905,016 non-clear interior pixels and
+1,384 distinct interior colors. The inspected capture showed coherent grass,
+stone, and vegetation terrain without a missing-chunk hole. Evidence:
+
+- [page capture](/tmp/mclone-native-web-view-replay.png)
+- [canvas capture](/tmp/mclone-native-web-view-replay-canvas.png)
+- [movement report](/tmp/mclone-native-web-view-replay.json)
+
+### Persistence and lifecycle evidence
+
+`pnpm native:web:indexeddb-smoke` passed the detached continuation and durable
+fence boundary. Exact placed state `42` survived close and reopen, the
+successful-placement statistic advanced from `0` to `1`, day time advanced
+from `87` to `105`, and the reopened world contained 121 chunk records plus
+one metadata record. The generic record executor passed.
+
+The live world retained its Web Lock: direct and complete session contenders
+both observed same-world rejection. A different IndexedDB world started and
+reported clean shutdown. The Chromium quota injection returned the typed
+`quota` failure without poisoning the live world. Evidence is recorded in the
+[IndexedDB reload report](/tmp/mclone-native-web-indexeddb-reload-probe.json).
+
+### Validation closeout
+
+The complete affected matrix passed through `703fca5f`:
+
+```bash
+cargo test --manifest-path native/Cargo.toml -p mclone-server
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime
+pnpm native:web:typecheck
+pnpm native:web:worker-ownership
+pnpm native:web:scene-host-adoption
+pnpm native:scheduler:smoke
+pnpm native:movement:smoke
+pnpm native:web:movement-perf
+pnpm native:web:indexeddb-smoke
+pnpm native:web:lobby-runtime-smoke
+pnpm native:web:view-replay
+```
+
+One first full `mclone-server` run observed the existing homestead resident
+test fail while the other 732 tests passed. The exact test then passed alone,
+and the complete 733-test suite passed on immediate rerun without a source
+change. It is retained here as flaky baseline evidence rather than hidden.

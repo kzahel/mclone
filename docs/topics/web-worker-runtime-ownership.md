@@ -2,7 +2,8 @@
 
 Topic: web-worker-runtime-ownership
 
-Status: bounded campaign complete 2026-07-19. Tactical
+Status: bounded campaign complete 2026-07-19; integrated-runner semantic
+parity restored 2026-08-15. Tactical
 [`197`](../tactical/197-domain-blind-web-worker-broker.md) completed the
 high-value isolated-actor campaign without justifying shared Wasm memory.
 Human review then authorized Tactical
@@ -23,7 +24,10 @@ Tactical
 [`303`](../tactical/303-web-integrated-runner-semantic-parity.md) to restore
 native-equivalent command admission, detach browser persistence waits, and make
 queue/readiness diagnostics authoritative without changing the isolated-Wasm
-or domain-blind TypeScript architecture.
+or domain-blind TypeScript architecture. That tactical is complete: command
+admission is short and nonblocking, browser persistence runs as detached typed
+continuations, flush and shutdown remain durable fences, and requested versus
+accepted view agreement is now a readiness requirement.
 
 On 2026-07-25 human review selected one focused continuation: migrate Terrain
 Lab's exact-terrain Worker to the same isolated Rust-actor, opaque browser
@@ -290,11 +294,15 @@ unchanged.
 
 The live authority/session cut is now complete as well. A resident
 `WebIntegratedServerActor` owns operation admission, message-to-session
-dispatch, command-only pending-job policy and poll limit, completion/failure
-envelopes, and graceful domain shutdown. TypeScript retains the browser event
-exclusion guard, IndexedDB batching, zero-delay yields, SAB views/publication,
-message posting, timer cadence, and final Worker close. This is deliberately a
-bounded actor rather than a Rust reimplementation of browser mechanics.
+dispatch, typed persistence completions, completion/failure envelopes, and
+graceful domain shutdown. Ordinary commands and ticks finish after one bounded
+Rust transition; they do not drain scheduler jobs or wait on browser promises.
+TypeScript retains a synchronous browser event exclusion guard, IndexedDB
+batching outside actor admission, zero-delay yields, SAB views/publication,
+message posting, timer cadence, and final Worker close. Explicit flush and
+shutdown operations alone may hold a durable persistence fence. This is
+deliberately a bounded actor rather than a Rust reimplementation of browser
+mechanics.
 
 The integrated-server Worker is now 919 lines and total authored TypeScript is
 5,789 lines. The cut added no copy, worker, heap, schema, cadence, or SAB-ABI
@@ -703,6 +711,52 @@ coordination policy with private Wasm heaps, owned completion values, and
 small platform executors. It introduced no shared Rust heap, mailbox inside
 Wasm linear memory, new Worker, or additional SAB copy site.
 
+## Integrated Runner Semantic Parity Closeout
+
+Tactical
+[`303`](../tactical/303-web-integrated-runner-semantic-parity.md) removed the
+Web-only command transaction over all future background work. Native and Web
+now share this runner meaning: `try_handle_command` applies one authoritative
+transition, immediate ordered updates are published, and the next command may
+enter while worldgen, lighting, or publication remains pending. Periodic tick
+and job-completion steps advance that background work independently.
+
+Browser persistence follows the same lifetime boundary. Ordinary command and
+tick operations expose opaque record requests and finish; TypeScript executes
+IndexedDB after actor admission is released; typed completions return through
+new bounded actor operations. Only explicit flush and shutdown wait for the
+continuation tail. The pre-existing browser tick-driven autosave cadence is
+unchanged, while the Web-only command-triggered autosave was removed.
+
+Main-side Rust counts command request IDs from post through response, including
+messages waiting in the Worker event loop. Shared runner and runtime
+diagnostics expose the authority's accepted local `ChunkView`. Local
+`streamingIdle` now requires the camera chunk, requested interest, accepted
+view, server work, scene stream work, and render work all to agree or be empty.
+The smoke observer reports the accepted center rather than inventing one from
+the camera, and a stable loaded-chunk-set hash makes post-idle replay directly
+testable.
+
+The deterministic ground, ordinary-flight, accelerated-flight, and immediate-
+reversal lane crossed two, four, and eight chunk boundaries respectively. Its
+77 transition samples observed maximum command depth `2`, maximum accepted-
+view lag `1` chunk, and no false idle. The final requested, accepted, and
+loaded centers all matched `(-2, 0)` with 49 loaded chunks. Hash
+`44240cd7288b30cb`, 279 snapshots, and 216 unloads remained exact through a
+1.5-second stability window. The final frame-gap maximum was `9.255 ms`.
+Shared-memory stress processed six commands with maximum four pending frames;
+the separate message-transfer actor also completed, and both transitioned to
+final non-running diagnostics after shutdown requests. No Web-only view
+coalescing was needed or added.
+
+IndexedDB acceptance preserved exact block state `42`, the successful
+placement statistic, and advancing world time across close and reopen. It
+reopened 121 chunk records, rejected a same-world writer, admitted and cleanly
+shut down a different world, and retained typed quota failure. The complete
+Rust, ownership, typecheck, native movement, Web movement, IndexedDB, and lobby
+matrix passed. The inspected final browser capture is
+[mclone-native-web-view-replay.png](/tmp/mclone-native-web-view-replay.png).
+
 ## Subsequent Scene Boundary Cleanup
 
 Tactical 202 completed a fresh production inventory after the managed lobby
@@ -792,6 +846,9 @@ ownership checks and unchanged behavior/performance evidence are load-bearing.
   generic persistence executor and browser world-lease campaign.
 - [`../tactical/202-web-scene-async-boundary-cleanup.md`](../tactical/202-web-scene-async-boundary-cleanup.md):
   completed session/lobby/readiness adapter cleanup.
+- [`../tactical/303-web-integrated-runner-semantic-parity.md`](../tactical/303-web-integrated-runner-semantic-parity.md):
+  native-equivalent Web command admission, detached persistence, and
+  authoritative readiness.
 
 Primary implementation surfaces:
 
@@ -818,11 +875,11 @@ Primary implementation surfaces:
 
 ## Recommended Next Work
 
-Execute the explicitly authorized, bounded semantic correction in Tactical
-[`303`](../tactical/303-web-integrated-runner-semantic-parity.md). Keep the
-ownership and scene-host checks as regression gates. Integrated-server
-persistence remains structurally complete under Tactical 199; the new work
-changes operation lifetime and parity, not its schema. Do not continue from
-this correction into managed provisioning, shared Wasm memory, Web-only view
-coalescing, or broader browser-native long-tail movement without a separate
-human decision and focused tactical supported by measured evidence.
+Keep the Tactical 303 movement replay, ownership inventory, scene-host gate,
+and IndexedDB reload lane as regression checks. No integrated-runner follow-up
+is currently justified: command admission remained current without
+coalescing, and the persistence schema and browser tick-driven save cadence did
+not change. Do not continue into managed provisioning, shared Wasm memory,
+Web-only view coalescing, or broader browser-native long-tail movement without
+a separate human decision and focused tactical supported by measured
+evidence.
