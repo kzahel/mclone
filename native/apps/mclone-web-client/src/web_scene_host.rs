@@ -3131,7 +3131,17 @@ impl WebSceneHost {
             camera.eye.y as f32,
             camera.eye.z as f32,
         );
-        stats.server_command_queue_depth == 0
+        let accepted_view_matches = stats.host_mode.server_owned_lanes_are_remote()
+            || host
+                .runtime_poll_diagnostics()
+                .and_then(|diagnostics| diagnostics.accepted_local_chunk_view)
+                .is_some_and(|accepted| {
+                    accepted.center == stats.interest_center
+                        && accepted.render_distance == stats.render_distance
+                        && accepted.chunk_tracking_radius == stats.chunk_tracking_radius
+                });
+        accepted_view_matches
+            && stats.server_command_queue_depth == 0
             && stats.server_update_queue_depth == 0
             && stats.pending_jobs == 0
             && stats.pending_publications == 0
@@ -3356,6 +3366,26 @@ impl WebSceneHost {
                 "radiusChunks",
                 f64::from(host.current_render_distance()),
             )?;
+            if let Some(accepted) = host
+                .runtime_poll_diagnostics()
+                .and_then(|diagnostics| diagnostics.accepted_local_chunk_view)
+            {
+                report_set_bool(&object, "acceptedViewAvailable", true)?;
+                report_set_number(&object, "acceptedCenterX", f64::from(accepted.center.x))?;
+                report_set_number(&object, "acceptedCenterZ", f64::from(accepted.center.z))?;
+                report_set_number(
+                    &object,
+                    "acceptedRenderDistance",
+                    f64::from(accepted.render_distance),
+                )?;
+                report_set_number(
+                    &object,
+                    "acceptedTrackingRadius",
+                    f64::from(accepted.chunk_tracking_radius),
+                )?;
+            } else {
+                report_set_bool(&object, "acceptedViewAvailable", false)?;
+            }
             if let Some(terrain) = host.terrain_view_diagnostics() {
                 report_set_bool(&object, "terrainViewActive", true)?;
                 report_set_number(

@@ -281,8 +281,16 @@ export function installWebSmokeObserver(
         runtime.state.startupAdmissionCameraY = Number(report.cameraY);
       }
       if (report.streamingIdle === true) {
-        runtime.state.loadedCenterX = Number(report.centerX);
-        runtime.state.loadedCenterZ = Number(report.centerZ);
+        const acceptedCenterX = Number(report.acceptedCenterX);
+        const acceptedCenterZ = Number(report.acceptedCenterZ);
+        runtime.state.loadedCenterX = report.acceptedViewAvailable === true
+          && Number.isFinite(acceptedCenterX)
+          ? acceptedCenterX
+          : null;
+        runtime.state.loadedCenterZ = report.acceptedViewAvailable === true
+          && Number.isFinite(acceptedCenterZ)
+          ? acceptedCenterZ
+          : null;
       }
       if (typeof report.streamingIdle !== "undefined") {
         runtime.state.streamingSettled = Boolean(report.streamingIdle);

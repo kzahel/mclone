@@ -36,8 +36,17 @@ fn local_chunk_view_routes_status_events_into_loading_progress() {
 fn view_readiness_snapshot_tracks_current_accepted_view() {
     let mut server = LocalRealmSession::new(0);
     assert_eq!(server.view_readiness_snapshot(), None);
+    assert_eq!(server.accepted_local_chunk_view(), None);
 
     load_chunk_view(&mut server, ChunkPos::new(0, 0));
+    assert_eq!(
+        server.accepted_local_chunk_view(),
+        Some(&ChunkView {
+            center: ChunkPos::new(0, 0),
+            render_distance: 0,
+            chunk_tracking_radius: 0,
+        })
+    );
     let first = server
         .view_readiness_snapshot()
         .expect("loaded local view should expose readiness snapshot");
@@ -50,6 +59,14 @@ fn view_readiness_snapshot_tracks_current_accepted_view() {
     assert!(first.stats.playable_chunk_ready);
 
     load_chunk_view(&mut server, ChunkPos::new(2, 0));
+    assert_eq!(
+        server.accepted_local_chunk_view(),
+        Some(&ChunkView {
+            center: ChunkPos::new(2, 0),
+            render_distance: 0,
+            chunk_tracking_radius: 0,
+        })
+    );
     let moved = server
         .view_readiness_snapshot()
         .expect("moved local view should expose readiness snapshot");

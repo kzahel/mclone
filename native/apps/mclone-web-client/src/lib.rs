@@ -735,6 +735,7 @@ impl WebLoopbackHost {
             self.server.scheduler().pending_persistence_load_count();
         diagnostics.pending_persistence_saves =
             self.server.scheduler().pending_persistence_save_count();
+        diagnostics.accepted_local_chunk_view = self.server.accepted_local_chunk_view().cloned();
         diagnostics
     }
 

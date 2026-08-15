@@ -159,6 +159,14 @@ fn integrated_server_startup_domain_is_an_opaque_rust_frame() {
     assert!(!INTEGRATED_SERVER_WORKER.contains("activeServer.hasPendingJobs()"));
     assert!(!INTEGRATED_SERVER_WORKER.contains("activeServer.pollPendingJobs()"));
     assert!(INTEGRATED_SERVER_WORKER.contains("activeServer.finishOperation("));
+    assert!(WEB_SERVER_WORKER.contains("outstanding_command_request_ids"));
+    assert!(WEB_SERVER_WORKER.contains(
+        "diagnostics.command_queue_depth = self.outstanding_command_request_ids.borrow().len()"
+    ));
+    assert!(WEB_SCENE_HOST.contains("diagnostics.accepted_local_chunk_view"));
+    assert!(WEB_SCENE_HOST.contains("accepted.center == stats.interest_center"));
+    assert!(WEB_SMOKE_OBSERVER.contains("Number(report.acceptedCenterX)"));
+    assert!(!WEB_SMOKE_OBSERVER.contains("runtime.state.loadedCenterX = Number(report.centerX)"));
 
     let command_handler = WEB_SERVER_WORKER
         .split("pub fn handle_command_frame(")

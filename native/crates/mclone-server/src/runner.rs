@@ -14,9 +14,9 @@ use mclone_core::BlockPos;
 use mclone_core::HorizontalTopology;
 #[cfg(not(target_arch = "wasm32"))]
 use mclone_protocol::{
-    ChunkView, DimensionKey, decode_client_command, encode_client_command, encode_server_update,
+    DimensionKey, decode_client_command, encode_client_command, encode_server_update,
 };
-use mclone_protocol::{ClientCommand, ProtocolCodecError, ServerUpdate};
+use mclone_protocol::{ChunkView, ClientCommand, ProtocolCodecError, ServerUpdate};
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::ChunkPublicationBudgetConfig;
@@ -364,6 +364,7 @@ pub struct ServerRunnerDiagnostics {
     pub light_status_mailbox_metrics: LightStatusMailboxMetrics,
     pub scheduler_metrics: ChunkSchedulerMetrics,
     pub chunk_tracking: PlayerChunkTrackingDiagnostics,
+    pub accepted_local_chunk_view: Option<ChunkView>,
     pub loading_progress: Option<ChunkLoadingProgressStats>,
     pub loading_progress_snapshot: Option<ChunkLoadingProgressSnapshot>,
     pub view_readiness_snapshot: Option<ChunkLoadingProgressSnapshot>,
@@ -407,6 +408,7 @@ impl ServerRunnerDiagnostics {
             light_status_mailbox_metrics: LightStatusMailboxMetrics::default(),
             scheduler_metrics: ChunkSchedulerMetrics::default(),
             chunk_tracking: PlayerChunkTrackingDiagnostics::default(),
+            accepted_local_chunk_view: None,
             loading_progress: None,
             loading_progress_snapshot: None,
             view_readiness_snapshot: None,
@@ -1754,6 +1756,7 @@ mod native {
         let pending_persistence_loads = server.scheduler().pending_persistence_load_count();
         let pending_persistence_saves = server.scheduler().pending_persistence_save_count();
         let persistence_queue_metrics = server.scheduler().persistence_queue_metrics();
+        let accepted_local_chunk_view = server.accepted_local_chunk_view().cloned();
         let detail_snapshot = diagnostics_detail_sampler
             .should_refresh(now, force_detail)
             .then(|| DiagnosticsDetailSnapshot::from_server(server));
@@ -1773,6 +1776,7 @@ mod native {
         diagnostics.pending_persistence_loads = pending_persistence_loads;
         diagnostics.pending_persistence_saves = pending_persistence_saves;
         diagnostics.persistence_queue_metrics = persistence_queue_metrics;
+        diagnostics.accepted_local_chunk_view = accepted_local_chunk_view;
         if let Some(detail_snapshot) = detail_snapshot {
             diagnostics.worldgen_mailbox_kind = detail_snapshot.worldgen_mailbox_kind;
             diagnostics.light_status_mailbox_kind = detail_snapshot.light_status_mailbox_kind;

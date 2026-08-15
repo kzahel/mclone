@@ -1014,6 +1014,7 @@ pub struct RuntimeExchangeApplyReport {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RuntimePollDiagnostics {
     pub server_runner_kind: Option<ServerRunnerKind>,
+    pub accepted_local_chunk_view: Option<ChunkView>,
     pub server_command_queue_depth: usize,
     pub server_update_queue_depth: usize,
     pub server_update_queue_bytes: usize,
@@ -2941,6 +2942,8 @@ impl SingleViewRuntime {
     ) {
         let tick = &runner_diagnostics.last_tick;
         diagnostics.server_runner_kind = Some(runner_diagnostics.kind);
+        diagnostics.accepted_local_chunk_view =
+            runner_diagnostics.accepted_local_chunk_view.clone();
         diagnostics.server_command_queue_depth = runner_diagnostics.command_queue_depth;
         diagnostics.server_update_queue_depth = runner_diagnostics.update_queue_depth;
         diagnostics.server_update_queue_bytes = runner_diagnostics.update_queue_bytes;

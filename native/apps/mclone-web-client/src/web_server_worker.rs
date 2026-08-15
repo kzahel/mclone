@@ -383,6 +383,7 @@ pub struct WebIntegratedServerRunner {
     next_request_id: u32,
     pending: Rc<RefCell<BTreeMap<u32, PendingRequest>>>,
     request_start_ms_by_id: Rc<RefCell<BTreeMap<u32, f64>>>,
+    outstanding_command_request_ids: Rc<RefCell<BTreeSet<u32>>>,
     runner_frame_metrics: Rc<RefCell<WorkerFrameMetrics>>,
     shared_pool: Rc<RefCell<Vec<RunnerSharedSlot>>>,
     shared_inflight: Rc<RefCell<BTreeMap<u32, RunnerSharedSlot>>>,
@@ -475,6 +476,7 @@ impl WebIntegratedServerRunner {
         let pending = Rc::new(RefCell::new(BTreeMap::new()));
         let request_start_ms_by_id: Rc<RefCell<BTreeMap<u32, f64>>> =
             Rc::new(RefCell::new(BTreeMap::new()));
+        let outstanding_command_request_ids = Rc::new(RefCell::new(BTreeSet::new()));
         let runner_frame_metrics = Rc::new(RefCell::new(match transport_kind {
             WorkerFrameTransportKind::SharedMemory => WorkerFrameMetrics::shared_memory(),
             _ => WorkerFrameMetrics::message_transfer(),
@@ -493,6 +495,7 @@ impl WebIntegratedServerRunner {
             let worker = worker.clone();
             let pending = Rc::clone(&pending);
             let request_start_ms_by_id = Rc::clone(&request_start_ms_by_id);
+            let outstanding_command_request_ids = Rc::clone(&outstanding_command_request_ids);
             let runner_frame_metrics = Rc::clone(&runner_frame_metrics);
             let shared_pool = Rc::clone(&shared_pool);
             let shared_inflight = Rc::clone(&shared_inflight);
@@ -505,6 +508,7 @@ impl WebIntegratedServerRunner {
                     &worker,
                     &pending,
                     &request_start_ms_by_id,
+                    &outstanding_command_request_ids,
                     &runner_frame_metrics,
                     &shared_pool,
                     &shared_inflight,
@@ -520,6 +524,7 @@ impl WebIntegratedServerRunner {
             let worker = worker.clone();
             let pending = Rc::clone(&pending);
             let diagnostics = Rc::clone(&diagnostics);
+            let outstanding_command_request_ids = Rc::clone(&outstanding_command_request_ids);
             let shutdown_outcome = Rc::clone(&shutdown_outcome);
             Closure::wrap(Box::new(move |event: ErrorEvent| {
                 let message = if event.message().is_empty() {
@@ -528,6 +533,7 @@ impl WebIntegratedServerRunner {
                     event.message()
                 };
                 diagnostics.borrow_mut().last_error = Some(message.clone());
+                outstanding_command_request_ids.borrow_mut().clear();
                 reject_all_pending(&pending, &message);
                 worker.terminate();
                 *shutdown_outcome.borrow_mut() = Some(Err(message));
@@ -541,6 +547,7 @@ impl WebIntegratedServerRunner {
             next_request_id: 1,
             pending,
             request_start_ms_by_id,
+            outstanding_command_request_ids,
             runner_frame_metrics,
             shared_pool,
             shared_inflight,
@@ -568,6 +575,7 @@ impl WebIntegratedServerRunner {
 
     pub fn diagnostics(&self) -> ServerRunnerDiagnostics {
         let mut diagnostics = self.diagnostics.borrow().clone();
+        diagnostics.command_queue_depth = self.outstanding_command_request_ids.borrow().len();
         let frames = self.update_frames.borrow();
         diagnostics.update_queue_depth = frames.len();
         diagnostics.update_queue_bytes = queued_frame_bytes(&frames);
@@ -780,7 +788,7 @@ impl WebIntegratedServerRunner {
             self.pending.borrow_mut().remove(&request_id);
             return Err(format!("failed to post to server worker: {error:?}"));
         }
-        self.record_runner_request(request_id, frame.len());
+        self.record_command_request(request_id, frame.len());
         let response = JsFuture::from(promise).await.map_err(|error| {
             format!("server worker request failed: {}", js_error_string(&error))
         })?;
@@ -796,7 +804,7 @@ impl WebIntegratedServerRunner {
             self.release_shared_inflight(request_id);
             return Err(format!("failed to post to server worker: {error:?}"));
         }
-        self.record_runner_request(request_id, frame.len());
+        self.record_command_request(request_id, frame.len());
         let response = JsFuture::from(promise).await.map_err(|error| {
             format!("server worker request failed: {}", js_error_string(&error))
         })?;
@@ -828,7 +836,7 @@ impl WebIntegratedServerRunner {
         self.worker
             .post_message_with_transfer(&message, &transfer)
             .map_err(|error| format!("failed to post command to server worker: {error:?}"))?;
-        self.record_runner_request(request_id, frame.len());
+        self.record_command_request(request_id, frame.len());
         Ok(())
     }
 
@@ -841,7 +849,7 @@ impl WebIntegratedServerRunner {
                 "failed to post command to server worker: {error:?}"
             ));
         }
-        self.record_runner_request(request_id, frame.len());
+        self.record_command_request(request_id, frame.len());
         Ok(())
     }
 
@@ -1027,6 +1035,13 @@ impl WebIntegratedServerRunner {
         let mut metrics = self.runner_frame_metrics.borrow_mut();
         metrics.record_request(bytes);
         metrics.observe_pending_frames(pending_frames);
+    }
+
+    fn record_command_request(&self, request_id: u32, bytes: usize) {
+        self.outstanding_command_request_ids
+            .borrow_mut()
+            .insert(request_id);
+        self.record_runner_request(request_id, bytes);
     }
 
     async fn post_request(
@@ -1543,6 +1558,7 @@ fn handle_runner_message(
     worker: &Worker,
     pending: &Rc<RefCell<BTreeMap<u32, PendingRequest>>>,
     request_start_ms_by_id: &Rc<RefCell<BTreeMap<u32, f64>>>,
+    outstanding_command_request_ids: &Rc<RefCell<BTreeSet<u32>>>,
     runner_frame_metrics: &Rc<RefCell<WorkerFrameMetrics>>,
     shared_pool: &Rc<RefCell<Vec<RunnerSharedSlot>>>,
     shared_inflight: &Rc<RefCell<BTreeMap<u32, RunnerSharedSlot>>>,
@@ -1553,6 +1569,11 @@ fn handle_runner_message(
     let request_id = number_prop(&data, "requestId")
         .map(|value| value as u32)
         .unwrap_or(0);
+    if request_id != 0 {
+        outstanding_command_request_ids
+            .borrow_mut()
+            .remove(&request_id);
+    }
     if let Some(diagnostic_value) = reflect_get(&data, "diagnostics") {
         let fallback = diagnostics.borrow().clone();
         if let Some(parsed) = parse_diagnostics(&diagnostic_value, &fallback) {
@@ -1798,6 +1819,19 @@ fn parse_diagnostics(
         .and_then(|value| loading_progress_snapshot_from_js(&value));
     diagnostics.view_readiness_snapshot = reflect_get(value, "viewReadinessSnapshot")
         .and_then(|value| loading_progress_snapshot_from_js(&value));
+    diagnostics.accepted_local_chunk_view =
+        if bool_prop(value, "acceptedLocalViewAvailable").unwrap_or(false) {
+            Some(ChunkView {
+                center: ChunkPos::new(
+                    number_prop(value, "acceptedLocalCenterX")? as i32,
+                    number_prop(value, "acceptedLocalCenterZ")? as i32,
+                ),
+                render_distance: number_prop(value, "acceptedLocalRenderDistance")? as u32,
+                chunk_tracking_radius: number_prop(value, "acceptedLocalTrackingRadius")? as u32,
+            })
+        } else {
+            None
+        };
     Some(diagnostics)
 }
 
@@ -3172,6 +3206,8 @@ impl McloneWebIntegratedServerWorker {
             self.server.scheduler().light_status_mailbox_frame_metrics();
         self.diagnostics.scheduler_metrics = self.server.scheduler().metrics();
         self.diagnostics.chunk_tracking = self.server.chunk_tracking_diagnostics();
+        self.diagnostics.accepted_local_chunk_view =
+            self.server.accepted_local_chunk_view().cloned();
         self.diagnostics.loading_progress = self.server.loading_progress_stats();
         self.diagnostics.loading_progress_snapshot = self.server.loading_progress_snapshot();
         self.diagnostics.view_readiness_snapshot = self.server.view_readiness_snapshot();
@@ -3618,6 +3654,23 @@ fn diagnostics_to_js(diagnostics: &ServerRunnerDiagnostics) -> Result<JsValue, S
         "lightStatusMailboxPendingStatuses",
         diagnostics.light_status_mailbox_pending_statuses as f64,
     )?;
+    if let Some(view) = diagnostics.accepted_local_chunk_view.as_ref() {
+        set_bool(&object, "acceptedLocalViewAvailable", true)?;
+        set_number(&object, "acceptedLocalCenterX", f64::from(view.center.x))?;
+        set_number(&object, "acceptedLocalCenterZ", f64::from(view.center.z))?;
+        set_number(
+            &object,
+            "acceptedLocalRenderDistance",
+            f64::from(view.render_distance),
+        )?;
+        set_number(
+            &object,
+            "acceptedLocalTrackingRadius",
+            f64::from(view.chunk_tracking_radius),
+        )?;
+    } else {
+        set_bool(&object, "acceptedLocalViewAvailable", false)?;
+    }
     Reflect::set(
         &object,
         &JsValue::from_str("runnerFrameMetrics"),

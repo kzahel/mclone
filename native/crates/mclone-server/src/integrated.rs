@@ -6849,6 +6849,18 @@ impl LocalRealmSession {
         }
     }
 
+    pub fn accepted_local_chunk_view(&self) -> Option<&ChunkView> {
+        match self.role {
+            LocalRealmSessionRole::Player(player_id) => {
+                self.server.chunk_tracking.accepted_view(player_id)
+            }
+            LocalRealmSessionRole::Observer(observer_id) => self
+                .server
+                .chunk_tracking
+                .accepted_observer_view(observer_id),
+        }
+    }
+
     pub const fn player_id(&self) -> ServerPlayerId {
         match self.player_id_opt() {
             Some(player_id) => player_id,
