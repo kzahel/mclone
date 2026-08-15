@@ -204,6 +204,15 @@ area nor advances populations while unloaded, and it does not claim a
 population-summary simulation. Recolonization must become an explicit later
 ecology producer rather than reviving generic random passive spawning.
 
+Tactical
+[`299`](../tactical/299-closed-domain-wildlife-population-simulation.md) plans
+the first equilibrium evidence over materialized animals. It starts from this
+exact seed-authored geography, holds one central ticket and its entity-ticking
+chunks fixed, then runs authoritative rabbit/deer births, forage pressure,
+mortality, and remains for many loaded days. There is no immigration,
+emigration, post-initial spawn, or catch-up in that baseline; any boundary
+crossing is an invariant failure rather than an ecological event.
+
 The continuing animal-record, knowledge, unavailable-world, social-memory,
 and bounded spatial-pattern contract lives in
 [`wildlife-ecology-state-model.md`](wildlife-ecology-state-model.md). This

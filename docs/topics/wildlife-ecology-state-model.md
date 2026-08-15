@@ -19,6 +19,15 @@ it does not tick unloaded animals or introduce a coarse offscreen population
 simulation. Social memory, multi-record crash-atomic persistence, and any
 coarse population layer remain deliberate later work.**
 
+Tactical
+[`299`](../tactical/299-closed-domain-wildlife-population-simulation.md) now
+plans the first multi-day population proof without weakening that model. It
+keeps one real-seed entity-ticking domain immutable, treats its exterior as
+currently unavailable, permits no immigration or post-initial spawning, and
+requires exact `start + births - deaths = end` identity conservation. Its
+forage, energy, reproduction, mortality, and remains state advances only while
+loaded; it is not an unloaded population summary.
+
 ## Scope
 
 This topic owns the durable state and active-behavior model by which varied
