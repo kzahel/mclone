@@ -33,6 +33,7 @@ function parseArguments(argv) {
     width: 1280,
     height: 720,
     settleFrames: 180,
+    reviewPhase: 0,
     skipBuild: false,
   };
   for (let index = 0; index < argv.length; index += 1) {
@@ -51,13 +52,20 @@ function parseArguments(argv) {
         argv[++index],
         600,
       );
+    } else if (argument === "--review-phase") {
+      const reviewPhase = Number.parseInt(argv[++index] ?? "", 10);
+      if (reviewPhase !== 0 && reviewPhase !== 1) {
+        fail("--review-phase must be 0 or 1");
+      }
+      options.reviewPhase = reviewPhase;
     } else if (argument === "--skip-build") {
       options.skipBuild = true;
     } else if (argument === "--help") {
       process.stdout.write(
         "Usage: node scripts/capture-terrain-seam-review.mjs "
         + "[--output /tmp/mclone-terrain-seam-review] [--width 1280] "
-        + "[--height 720] [--settle-frames 180] [--skip-build]\n",
+        + "[--height 720] [--settle-frames 180] "
+        + "[--review-phase 0|1] [--skip-build]\n",
       );
       process.exit(0);
     } else {
@@ -169,7 +177,13 @@ function captureDefinition({
   return { name, group, view, time, presentation, diagnostic };
 }
 
-function buildCampaign() {
+function focusTimesForReviewPhase(reviewPhase) {
+  return reviewPhase >= 1
+    ? times
+    : [["noon", 6000], ["midnight", 18000]];
+}
+
+function buildCampaign(reviewPhase) {
   const captures = [];
   for (const view of ["elevated", "low"]) {
     for (const [timeLabel, time] of times) {
@@ -194,8 +208,9 @@ function buildCampaign() {
   }
   // The accepted elevated baseline is itself the focused coast view. Avoid
   // writing duplicate PNGs while retaining that role in the receipt.
+  const focusTimes = focusTimesForReviewPhase(reviewPhase);
   for (const view of ["forest", "stone", "snow"]) {
-    for (const [timeLabel, time] of [["noon", 6000], ["midnight", 18000]]) {
+    for (const [timeLabel, time] of focusTimes) {
       captures.push(captureDefinition({
         name: `focus-${view}-${timeLabel}`,
         group: `focus-${view}`,
@@ -307,7 +322,7 @@ if (!existsSync(clientPath)) {
 }
 
 const revision = run("git", ["rev-parse", "HEAD"], { capture: true });
-const campaign = buildCampaign();
+const campaign = buildCampaign(options.reviewPhase);
 const results = [];
 
 for (let index = 0; index < campaign.length; index += 1) {
@@ -390,6 +405,7 @@ validateComparisonGroups(results);
 const receipt = {
   schema: "mclone-terrain-seam-review-v1",
   tactical: 309,
+  tacticalPhase: options.reviewPhase,
   revision,
   generatedAt: new Date().toISOString(),
   outputDirectory: options.output,
@@ -413,9 +429,12 @@ const receipt = {
   },
   sceneCoverage: {
     coast: ["baseline-elevated-dawn", "baseline-elevated-noon", "baseline-elevated-dusk", "baseline-elevated-midnight"],
-    forest: ["focus-forest-noon", "focus-forest-midnight"],
-    exposedStone: ["focus-stone-noon", "focus-stone-midnight"],
-    snow: ["focus-snow-noon", "focus-snow-midnight"],
+    forest: focusTimesForReviewPhase(options.reviewPhase)
+      .map(([timeLabel]) => `focus-forest-${timeLabel}`),
+    exposedStone: focusTimesForReviewPhase(options.reviewPhase)
+      .map(([timeLabel]) => `focus-stone-${timeLabel}`),
+    snow: focusTimesForReviewPhase(options.reviewPhase)
+      .map(([timeLabel]) => `focus-snow-${timeLabel}`),
   },
   diagnosticLegend: {
     "ownership-level": "Exact pixels remain natural; procedural levels use a spacing palette from red (spacing one) through successively cooler rings.",
