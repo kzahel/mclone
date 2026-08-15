@@ -1,6 +1,40 @@
 use super::*;
 
 #[test]
+fn newer_chunk_view_is_accepted_without_draining_older_jobs() {
+    let mut server = LocalRealmSession::new(0);
+    server.set_lighting_enabled(true);
+    let first = ChunkView {
+        center: ChunkPos::new(0, 0),
+        render_distance: 3,
+        chunk_tracking_radius: 4,
+    };
+    server
+        .try_handle_command(ClientCommand::SetChunkView(first.clone()))
+        .expect("admit first view");
+    let first_pending_jobs = server.pending_job_count();
+    assert!(
+        first_pending_jobs > 0,
+        "first view should leave jobs pending"
+    );
+    assert_eq!(server.accepted_local_chunk_view(), Some(&first));
+
+    let second = ChunkView {
+        center: ChunkPos::new(8, 0),
+        ..first
+    };
+    server
+        .try_handle_command(ClientCommand::SetChunkView(second.clone()))
+        .expect("admit newer view while older work is pending");
+
+    assert_eq!(server.accepted_local_chunk_view(), Some(&second));
+    assert!(
+        server.pending_job_count() > 0,
+        "newer view admission must not manufacture global job quiescence"
+    );
+}
+
+#[test]
 fn local_chunk_view_routes_status_events_into_loading_progress() {
     let mut server = LocalRealmSession::new(0);
     assert_eq!(server.loading_progress_stats(), None);
