@@ -568,7 +568,9 @@ fn validate_recipe(
             )));
         }
         let expected = match &entity.state {
-            ShowcaseEntityState::Mallard { age_ticks, .. } if *age_ticks < 2_400 => {
+            ShowcaseEntityState::Mallard { age_ticks, .. }
+                if *age_ticks < crate::entity::MALLARD_GROWTH_REQUIRED_TICKS =>
+            {
                 LiveInstantiationSubject::MallardDuckling
             }
             ShowcaseEntityState::Mallard { .. } => LiveInstantiationSubject::AdultMallard,
@@ -715,8 +717,10 @@ fn validate_recipe(
             }
             if *max_health == 0
                 || *health > *max_health
-                || (*life_stage == ShowcaseRabbitLifeStage::Kit && *age_ticks >= 2_400)
-                || (*life_stage == ShowcaseRabbitLifeStage::Adult && *age_ticks < 2_400)
+                || (*life_stage == ShowcaseRabbitLifeStage::Kit
+                    && *age_ticks >= crate::entity::RABBIT_GROWTH_REQUIRED_TICKS)
+                || (*life_stage == ShowcaseRabbitLifeStage::Adult
+                    && *age_ticks < crate::entity::RABBIT_GROWTH_REQUIRED_TICKS)
             {
                 return Err(PlayableShowcaseError::invalid(format!(
                     "showcase rabbit `{}` has impossible biological state",

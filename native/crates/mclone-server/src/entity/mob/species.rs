@@ -20,8 +20,8 @@ const MALLARD_CALL_TIME_MIN: i32 = 160;
 const MALLARD_CALL_TIME_RANGE: i32 = 320;
 const DEER_ANTLER_SHED_TIME_MIN: i32 = 36_000;
 const DEER_ANTLER_SHED_TIME_RANGE: i32 = 36_000;
-pub(crate) const MALLARD_GROWTH_REQUIRED_TICKS: u32 = 2_400;
-pub(crate) const RABBIT_GROWTH_REQUIRED_TICKS: u32 = 24_000;
+pub(crate) const MALLARD_GROWTH_REQUIRED_TICKS: u32 = 48_000;
+pub(crate) const RABBIT_GROWTH_REQUIRED_TICKS: u32 = 48_000;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct DeerRuntimeSaveData {

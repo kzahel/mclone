@@ -13,13 +13,14 @@ function parseArgs(argv) {
     output: null,
     jobs: 2,
     skipBuild: false,
+    tuning: null,
   };
   for (let index = 0; index < argv.length; index += 1) {
     const flag = argv[index];
     if (flag === "--help" || flag === "-h") {
       process.stdout.write(
         "run-wildlife-population-campaign.mjs --output <empty-dir> "
-          + "[--matrix <json>] [--jobs <n>] [--skip-build]\n",
+          + "[--matrix <json>] [--tuning <json>] [--jobs <n>] [--skip-build]\n",
       );
       process.exit(0);
     }
@@ -30,6 +31,7 @@ function parseArgs(argv) {
     const value = argv[index + 1];
     if (!value) throw new Error(`missing value for ${flag}`);
     if (flag === "--matrix") result.matrix = value;
+    else if (flag === "--tuning") result.tuning = value;
     else if (flag === "--output") result.output = value;
     else if (flag === "--jobs") result.jobs = Number.parseInt(value, 10);
     else throw new Error(`unknown argument ${flag}`);
@@ -67,7 +69,7 @@ async function ensureEmptyDirectory(directory) {
   }
 }
 
-async function runOne(binary, root, matrix, entry) {
+async function runOne(binary, root, matrix, entry, tuning) {
   const directory = path.join(root, entry.label);
   const command = [
     "--seed", String(entry.seed),
@@ -78,6 +80,7 @@ async function runOne(binary, root, matrix, entry) {
     "--output", directory,
     "--label", entry.label,
   ];
+  if (tuning) command.push("--tuning", tuning);
   process.stderr.write(`[wildlife:${entry.label}] starting ${entry.days} days\n`);
   const started = performance.now();
   const log = createWriteStream(path.join(root, `${entry.label}.log`));
@@ -151,13 +154,19 @@ async function main() {
     ]);
   }
   const binary = path.resolve("native/target/release/wildlife_population_sim");
+  const tuningPath = args.tuning ? path.resolve(args.tuning) : null;
+  const tuningBytes = tuningPath ? await readFile(tuningPath) : null;
   const results = await runPool(matrix.runs, args.jobs, (entry) => (
-    runOne(binary, root, matrix, entry)
+    runOne(binary, root, matrix, entry, tuningPath)
   ));
   const campaign = {
     schemaVersion: 1,
     matrixPath: args.matrix,
     matrixChecksum: createHash("sha256").update(matrixBytes).digest("hex"),
+    tuningPath: args.tuning,
+    tuningChecksum: tuningBytes
+      ? createHash("sha256").update(tuningBytes).digest("hex")
+      : null,
     jobs: args.jobs,
     allPassed: results.every((result) => result.status === "passed"),
     results,

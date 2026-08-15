@@ -727,20 +727,14 @@ impl ServerEntityStore {
                         WildlifeSpecies::Deer,
                     )
                 }
-                EntityKind::Mallard => {
-                    let in_water = self
-                        .mobs
-                        .get(&id)
-                        .is_some_and(MobRuntimeState::mallard_in_water);
-                    (
-                        WildlifeForageConsumer::Mallard,
-                        &MALLARD_DIET,
-                        true,
-                        if in_water { 2 } else { 1 },
-                        tuning.mallard_soft_cell_density,
-                        WildlifeSpecies::Mallard,
-                    )
-                }
+                EntityKind::Mallard => (
+                    WildlifeForageConsumer::Mallard,
+                    &MALLARD_DIET,
+                    true,
+                    1,
+                    tuning.mallard_soft_cell_density,
+                    WildlifeSpecies::Mallard,
+                ),
                 _ => continue,
             };
             let energy = match entity.kind {
@@ -5087,6 +5081,36 @@ mod tests {
     }
 
     #[test]
+    fn resting_shore_mallard_uses_one_low_maintenance_unit() {
+        let mut store = ServerEntityStore::default();
+        let mallard =
+            store.insert_passive_mob_for_test(EntityKind::Mallard, Vec3d::new(4.5, 64.0, 4.5), 0.0);
+        let mut lifecycle = ready_wildlife_lifecycle(24_000);
+        lifecycle.energy = 500;
+        lifecycle.reproductive_condition = 0;
+        store
+            .mobs
+            .get_mut(&mallard)
+            .unwrap()
+            .set_mallard_lifecycle_for_test(lifecycle, mclone_protocol::MallardSex::Female);
+
+        store.tick_wildlife_lifecycle(
+            20,
+            &[ChunkPos::new(0, 0)],
+            &mut WildlifeResourceLedger::default(),
+            &flat_ground,
+        );
+
+        let after = store
+            .wildlife_life_diagnostics()
+            .into_iter()
+            .find(|animal| animal.persistent_id == store.state(mallard).unwrap().persistent_id)
+            .unwrap();
+        assert_eq!(after.lifecycle.energy, 499);
+        assert_eq!(after.lifecycle.deficit_ticks, 0);
+    }
+
+    #[test]
     fn wild_rabbits_breed_without_a_burrow_when_condition_allows() {
         let mut store = ServerEntityStore::default();
         let left =
@@ -5098,7 +5122,12 @@ mod tests {
                 .mobs
                 .get_mut(&id)
                 .unwrap()
-                .set_wildlife_lifecycle_for_test(ready_wildlife_lifecycle(24_000), None);
+                .set_wildlife_lifecycle_for_test(
+                    ready_wildlife_lifecycle(
+                        WildlifeLifecycleTuning::default().rabbit_maturation_ticks,
+                    ),
+                    None,
+                );
         }
         let mut resources = WildlifeResourceLedger::default();
         store.tick_wildlife_lifecycle(20, &[ChunkPos::new(0, 0)], &mut resources, &flat_meadow);

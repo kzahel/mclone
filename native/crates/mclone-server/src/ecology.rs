@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 pub(crate) const MAX_KNOWN_PLACES: usize = 3;
 
-pub const WILDLIFE_LIFECYCLE_RULE_REVISION: u32 = 2;
+pub const WILDLIFE_LIFECYCLE_RULE_REVISION: u32 = 3;
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub(crate) enum WildlifeSpecies {
@@ -116,13 +116,13 @@ impl Default for WildlifeLifecycleTuning {
             revision: WILDLIFE_LIFECYCLE_RULE_REVISION,
             cadence_ticks: 20,
             maximum_energy: 1_000,
-            rabbit_maturation_ticks: 24_000,
-            rabbit_lifespan_ticks: 480_000,
-            rabbit_lifespan_variance_ticks: 120_000,
-            rabbit_breeding_cooldown_ticks: 18_000,
-            rabbit_reproductive_energy: 550,
-            rabbit_birth_energy_cost: 240,
-            rabbit_starvation_ticks: 96_000,
+            rabbit_maturation_ticks: 48_000,
+            rabbit_lifespan_ticks: 1_440_000,
+            rabbit_lifespan_variance_ticks: 480_000,
+            rabbit_breeding_cooldown_ticks: 48_000,
+            rabbit_reproductive_energy: 600,
+            rabbit_birth_energy_cost: 280,
+            rabbit_starvation_ticks: 144_000,
             deer_maturation_ticks: 120_000,
             deer_lifespan_ticks: 1_920_000,
             deer_lifespan_variance_ticks: 480_000,
@@ -130,13 +130,13 @@ impl Default for WildlifeLifecycleTuning {
             deer_reproductive_energy: 650,
             deer_birth_energy_cost: 320,
             deer_starvation_ticks: 96_000,
-            mallard_maturation_ticks: 2_400,
-            mallard_lifespan_ticks: 720_000,
-            mallard_lifespan_variance_ticks: 240_000,
-            mallard_breeding_cooldown_ticks: 48_000,
+            mallard_maturation_ticks: 48_000,
+            mallard_lifespan_ticks: 2_160_000,
+            mallard_lifespan_variance_ticks: 480_000,
+            mallard_breeding_cooldown_ticks: 96_000,
             mallard_reproductive_energy: 600,
             mallard_birth_energy_cost: 240,
-            mallard_starvation_ticks: 96_000,
+            mallard_starvation_ticks: 144_000,
             hard_population_guard: 4_096,
             rabbit_soft_cell_density: 12,
             deer_soft_cell_density: 8,
@@ -486,6 +486,20 @@ mod tests {
                 assert_eq!(left == right, left_index == right_index);
             }
         }
+    }
+
+    #[test]
+    fn production_lifecycle_tuning_avoids_one_day_breeding_pulses() {
+        let tuning = WildlifeLifecycleTuning::default();
+        assert_eq!(tuning.revision, 3);
+        assert_eq!(tuning.rabbit_maturation_ticks, 48_000);
+        assert_eq!(tuning.rabbit_breeding_cooldown_ticks, 48_000);
+        assert_eq!(tuning.rabbit_lifespan_ticks, 1_440_000);
+        assert_eq!(tuning.rabbit_starvation_ticks, 144_000);
+        assert_eq!(tuning.mallard_maturation_ticks, 48_000);
+        assert_eq!(tuning.mallard_breeding_cooldown_ticks, 96_000);
+        assert_eq!(tuning.mallard_lifespan_ticks, 2_160_000);
+        assert_eq!(tuning.mallard_starvation_ticks, 144_000);
     }
 
     #[test]

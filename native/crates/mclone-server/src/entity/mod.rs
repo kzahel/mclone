@@ -15,7 +15,10 @@ mod tick_list;
 mod tracking;
 mod visibility;
 
-pub(crate) use mob::{MALLARD_GROWTH_REQUIRED_TICKS, MobPlayerTarget, identity_mallard_sex};
+pub(crate) use mob::{
+    MALLARD_GROWTH_REQUIRED_TICKS, MobPlayerTarget, RABBIT_GROWTH_REQUIRED_TICKS,
+    identity_mallard_sex,
+};
 pub(crate) use state::ServerEntityState;
 #[cfg(feature = "physics-engine")]
 pub(crate) use store::DebugPhysicsCubeEntitySpawn;

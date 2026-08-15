@@ -39,7 +39,7 @@ use navigation::GroundPathNavigation;
 use species::MobSpeciesState;
 pub(crate) use species::{
     BeeRuntimeSaveData, DeerRuntimeSaveData, MALLARD_GROWTH_REQUIRED_TICKS, MallardRuntimeSaveData,
-    RabbitRuntimeSaveData, identity_mallard_sex,
+    RABBIT_GROWTH_REQUIRED_TICKS, RabbitRuntimeSaveData, identity_mallard_sex,
 };
 
 const PLAYER_EYE_HEIGHT: f64 = 1.62;

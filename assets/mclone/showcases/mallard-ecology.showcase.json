@@ -47,7 +47,7 @@
       "liveInstantiation": "mclone-mallard-natural-spawn",
       "state": {
         "kind": "mallard",
-        "ageTicks": 2400,
+        "ageTicks": 48000,
         "parents": [null, null],
         "eggTime": 300,
         "featherTime": 200,
@@ -62,7 +62,7 @@
       "liveInstantiation": "mclone-mallard-natural-spawn",
       "state": {
         "kind": "mallard",
-        "ageTicks": 2400,
+        "ageTicks": 48000,
         "parents": [null, null],
         "eggTime": 360,
         "featherTime": 240,
