@@ -531,9 +531,104 @@ pnpm native:web:movement-perf
 pnpm native:web:indexeddb-smoke
 pnpm native:web:lobby-runtime-smoke
 pnpm native:web:view-replay
+node native/apps/mclone-web-client/scripts/browser-smoke.mjs \
+  --render-distance-replay-probe
 ```
 
 One first full `mclone-server` run observed the existing homestead resident
 test fail while the other 732 tests passed. The exact test then passed alone,
 and the complete 733-test suite passed on immediate rerun without a source
 change. It is retained here as flaky baseline evidence rather than hidden.
+
+## Post-Closeout Dynamic-Radius Correction
+
+Interactive phone review on 2026-08-15 exposed a second defect after the
+original movement closeout: increasing a new transient Web world from render
+distance 3 to 10 and immediately flying upward left large exact-terrain holes
+for roughly 40 seconds. The 441-chunk view eventually converged, so this was
+not lost interest or an authoritative unload. It was starvation and excessive
+transport work in the new background-progress path.
+
+The first closeout correctly removed command-scoped quiescence but left
+background scheduler progress dependent on 20 Hz simulation ticks. The
+browser also discarded a timer callback whenever another actor operation was
+active. Separately, the Web Light actor rebuilt `RetainedInitialLightState`
+for every frame and ignored unloads, unlike the native retained worker. At
+render distance 10 that combination produced 341 Light frames, about 1.056 GB
+of Light request payload, 201.9 seconds of cumulative Light request latency,
+and maximum eight pending Light frames.
+
+The correction landed in four implementation commits:
+
+- `8afe3144` adds the production options-menu radius replay, including
+  immediate altitude flight, exact 441-chunk coverage, stability, phase
+  timing, transport metrics, pixels, and shutdown;
+- `65cada99` keeps Light state resident in the Web Rust actor, applies unload
+  control there, reports retained chunks, and shares raw chunk input once per
+  encoded batch;
+- `3e3c484d` adds a Rust-authored bounded background poll operation and lets
+  the domain-blind Worker coalesce its 8 ms timer requests through ordinary
+  actor admission; and
+- `a0aca622` records exact coverage, server-drain, and render-settlement
+  phases independently.
+
+The final 390 by 844, device-pixel-ratio 2 replay used 2x CPU throttling. All
+441 exact chunks arrived in `5.013s`, server work drained in `7.513s`, and the
+complete rendered view settled in `20.677s`. Hash `a20061ff48d75dcd` and zero
+unloads remained unchanged through the 1.5-second stability window. Worldgen
+completed in 17 frames with maximum one pending frame. Light completed in 78
+frames with 621,848,665 request bytes, 5.520 seconds of cumulative request
+latency, and maximum two pending frames. The final Worker shutdown was clean
+and both Worker kinds returned to zero active instances.
+
+The inspected final capture contains one coherent filled terrain view:
+
+- [page capture](/tmp/mclone-native-web-render-distance-replay.png)
+- [canvas capture](/tmp/mclone-native-web-render-distance-replay-canvas.png)
+- [phase report](/tmp/mclone-native-web-render-distance-replay.json)
+
+### Correction validation
+
+The original high-speed view replay still passed after the correction. Its
+requested and accepted centers remained within one chunk, command depth peaked
+at two, the final 49-chunk hash was stable, neither transport reported false
+idle, and both shut down. The IndexedDB reload lane preserved the placed block
+and statistic across restart. Native and Web movement, lobby runtime, scheduler
+movement, ownership, and scene-host source gates also passed, and all browser
+captures used real WebGPU pixels and were inspected.
+
+The first final server-suite run made the formerly recorded homestead
+persistence flake deterministic. Isolation against the pre-series revision
+showed that the test helper returned while entity-record loads were still
+pending; code layout merely changed which side won the race. Commit
+`bade0788` makes the helper wait for persistence hydration. The focused test
+then passed, followed by all 737 server tests and all app-runtime suites.
+
+Final commands:
+
+```bash
+cargo test --manifest-path native/Cargo.toml -p mclone-server
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime
+cargo check --manifest-path native/Cargo.toml -p mclone-web-client \
+  --target wasm32-unknown-unknown
+cargo test --manifest-path native/Cargo.toml -p mclone-web-client \
+  --test scenario_parity_ownership_lock
+pnpm native:web:typecheck
+pnpm native:web:worker-ownership
+pnpm native:web:scene-host-adoption
+pnpm native:scheduler:smoke
+pnpm native:movement:smoke
+pnpm native:web:movement-perf
+pnpm native:web:indexeddb-smoke
+pnpm native:web:lobby-runtime-smoke
+pnpm native:web:view-replay
+```
+
+The remaining `7.513s` to `20.677s` tail is measured render compilation, not
+server chunk loading: the existing single budget-one Web render compiler
+completed 461 targeted jobs. Immediate altitude flight can therefore reveal a
+brief progressive mesh-fill transition even though authoritative coverage is
+already advancing. This correction does not raise the app-local render budget
+or add a second render Worker; either change needs a separate frame-time and
+representative-device tactical rather than being hidden inside server-runner
+semantics.

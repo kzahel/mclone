@@ -3,7 +3,7 @@
 Topic: web-worker-runtime-ownership
 
 Status: bounded campaign complete 2026-07-19; integrated-runner semantic
-parity restored 2026-08-15. Tactical
+parity and independent background progress restored 2026-08-15. Tactical
 [`197`](../tactical/197-domain-blind-web-worker-broker.md) completed the
 high-value isolated-actor campaign without justifying shared Wasm memory.
 Human review then authorized Tactical
@@ -27,7 +27,12 @@ queue/readiness diagnostics authoritative without changing the isolated-Wasm
 or domain-blind TypeScript architecture. That tactical is complete: command
 admission is short and nonblocking, browser persistence runs as detached typed
 continuations, flush and shutdown remain durable fences, and requested versus
-accepted view agreement is now a readiness requirement.
+accepted view agreement is now a readiness requirement. Post-closeout
+render-distance replay additionally found that background progress was still
+coupled to 20 Hz simulation ticks and that the Web Light actor did not retain
+native-equivalent state. A bounded Rust-authored poll operation now advances
+pending work independently, while the Light actor retains state and observes
+unloads across frames.
 
 On 2026-07-25 human review selected one focused continuation: migrate Terrain
 Lab's exact-terrain Worker to the same isolated Rust-actor, opaque browser
@@ -757,6 +762,17 @@ Rust, ownership, typecheck, native movement, Web movement, IndexedDB, and lobby
 matrix passed. The inspected final browser capture is
 [mclone-native-web-view-replay.png](/tmp/mclone-native-web-view-replay.png).
 
+The post-closeout radius-3-to-10 phone replay is now a second load-bearing
+gate. The pre-correction view needed roughly 40 seconds to converge under 2x
+CPU throttling. The corrected run reached all 441 exact chunks in `5.013s`,
+drained server work in `7.513s`, and fully rendered in `20.677s`, with no
+unloads during its stability window. Web Light work fell from 341 frames,
+about 1.056 GB of requests, and maximum eight pending frames to 78 frames,
+621.8 MB, and maximum two pending frames. The remaining visual tail is the
+existing single budget-one render compiler draining 461 jobs, not stalled
+authority work. See Tactical 303's post-closeout record for exact metrics and
+captures.
+
 ## Subsequent Scene Boundary Cleanup
 
 Tactical 202 completed a fresh production inventory after the managed lobby
@@ -875,11 +891,13 @@ Primary implementation surfaces:
 
 ## Recommended Next Work
 
-Keep the Tactical 303 movement replay, ownership inventory, scene-host gate,
-and IndexedDB reload lane as regression checks. No integrated-runner follow-up
-is currently justified: command admission remained current without
-coalescing, and the persistence schema and browser tick-driven save cadence did
-not change. Do not continue into managed provisioning, shared Wasm memory,
-Web-only view coalescing, or broader browser-native long-tail movement without
-a separate human decision and focused tactical supported by measured
-evidence.
+Keep both Tactical 303 movement replays, the ownership inventory, scene-host
+gate, and IndexedDB reload lane as regression checks. Do not couple scheduler
+progress back to simulation ticks or rebuild retained actor state per frame.
+The next justified investigation, if representative physical-phone review
+still finds the 13-second post-server visual tail unacceptable, is a focused
+render-compiler throughput/presentation tactical with frame-time and memory
+acceptance. Do not raise a fixed Web render budget or add a Worker without
+that evidence. Managed provisioning, shared Wasm memory, Web-only view
+coalescing, and broader browser-native long-tail movement still require a
+separate human decision.

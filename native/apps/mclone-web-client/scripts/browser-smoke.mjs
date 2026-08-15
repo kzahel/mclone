@@ -7068,13 +7068,13 @@ async function runRenderDistanceReplayProbe(page, canvas, targetRenderDistance) 
 
   await page.waitForTimeout(1_500);
   const stable = await captureRenderDistanceReplayState(page, "flight-stability-window-end");
-  const samples = await page.evaluate(() => {
+  const samples = /** @type {Array<Record<string, any>>} */ (await page.evaluate(() => {
     const probe = /** @type {any} */ (globalThis).__mcloneRenderDistanceReplayProbe;
     if (!probe) return [];
     clearInterval(probe.intervalId);
     probe.record("end", true);
     return probe.samples;
-  });
+  }));
   const exactCoverage = samples.find(
     (sample) => sample.loadedChunkCount === expectedLoadedChunkCount,
   ) ?? settled;

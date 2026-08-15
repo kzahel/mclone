@@ -64,6 +64,14 @@ ownership cannot become a second low-memory-killer path.
 All limits are shared engine policy. They are not graphics settings and are not
 selected by XR, desktop, Android, or browser adapters.
 
+The browser backend now preserves the same retained-worker lifecycle as the
+native backend. `RetainedInitialLightState` lives in the Web Rust Light actor
+across opaque job frames, unload control evicts its chunks, and response
+diagnostics report retained chunk count. The batch codec also emits each
+shared raw input chunk once and references it from every target status in that
+batch. TypeScript remains a domain-blind transport and does not own lighting
+state or eviction policy.
+
 ## Final Acceptance Evidence
 
 The final physical APK was built from `10ee9156`, SHA-256
@@ -592,8 +600,10 @@ and capacity. Platform adapters do not choose chunk admission.
 
 - Native desktop, Android, XR, dedicated server, and headless use the native
   worker implementation behind that contract.
-- Browser authority uses the same scheduler admission/token/capacity behavior
-  whether Light is temporarily inline or runs through a Web Worker.
+- Browser authority uses the same scheduler admission/token/capacity and
+  retained Light-state lifecycle whether Light is inline or runs through a
+  Web Worker. The Worker actor applies opaque job and unload frames; browser
+  glue does not reconstruct or evict Light state.
 - Remote clients observe server-owned readiness and cannot change admission
   limits.
 - Multiview, per-eye, and flat rendering consume the same client-ready

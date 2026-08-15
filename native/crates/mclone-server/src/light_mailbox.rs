@@ -25,8 +25,10 @@ use crate::job_codec::{
     encode_light_status_unload_request,
 };
 use crate::level_light_bridge::LevelLightComputationTiming;
+#[cfg(any(not(target_arch = "wasm32"), test))]
+use crate::light_status::PendingLightStatus;
 use crate::light_status::{
-    LightRequestToken, PendingLightStatus, PendingLightStatusBatch, snapshot_heap_bytes_estimate,
+    LightRequestToken, PendingLightStatusBatch, snapshot_heap_bytes_estimate,
     ticks_heap_bytes_estimate,
 };
 use crate::light_world::RetainedInitialLightState;
