@@ -20,6 +20,7 @@ struct Args {
     window_radius_chunks: u32,
     limit: usize,
     require_mallards: bool,
+    exclude_mallards: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -111,6 +112,7 @@ fn run() -> AnyResult<()> {
             if candidate.rabbit_groups > 0
                 && candidate.deer_groups > 0
                 && (!args.require_mallards || candidate.mallard_groups > 0)
+                && (!args.exclude_mallards || candidate.mallard_groups == 0)
             {
                 candidates.push(candidate);
             }
@@ -235,7 +237,7 @@ fn parse_args() -> AnyResult<Args> {
         println!(
             "wildlife_population_sites --seed <i64> [--center-cell <x,z>] \
              [--search-radius-cells <n>] [--window-radius-chunks <n>] [--limit <n>] \
-             [--require-mallards]"
+             [--require-mallards | --exclude-mallards]"
         );
         std::process::exit(0);
     }
@@ -247,6 +249,7 @@ fn parse_args() -> AnyResult<Args> {
         window_radius_chunks: 4,
         limit: 12,
         require_mallards: false,
+        exclude_mallards: false,
     };
     let mut saw_seed = false;
     let mut index = 1;
@@ -254,6 +257,11 @@ fn parse_args() -> AnyResult<Args> {
         let flag = &command[index];
         if flag == "--require-mallards" {
             args.require_mallards = true;
+            index += 1;
+            continue;
+        }
+        if flag == "--exclude-mallards" {
+            args.exclude_mallards = true;
             index += 1;
             continue;
         }
@@ -281,6 +289,7 @@ fn parse_args() -> AnyResult<Args> {
         || !(0..=128).contains(&args.search_radius_cells)
         || args.window_radius_chunks > 16
         || args.limit > 1_000
+        || (args.require_mallards && args.exclude_mallards)
     {
         return Err("invalid or unbounded site selection arguments".into());
     }
@@ -336,20 +345,23 @@ mod tests {
     fn known_real_seed_search_finds_radius_eight_dry_control_window() {
         let planner =
             McloneOverworldWildlifePlanner::new(12_345, McloneOverworldSamplingTopology::Unbounded);
-        let plans = (-34..=-26)
+        let plans = (-25..=-17)
             .flat_map(|z| {
                 let planner = &planner;
-                (-33..=-25).map(move |x| {
+                (-34..=-26).map(move |x| {
                     planner
                         .plan_cell(McloneWildlifePopulationCell { x, z })
                         .unwrap()
                 })
             })
             .collect::<Vec<_>>();
-        let site = candidate_for_window(12_345, -114, -122, 8, &plans);
+        let site = candidate_for_window(12_345, -118, -82, 8, &plans);
         assert!(site.rabbits > 0);
         assert!(site.deer > 0);
         assert_eq!(site.mallards, 0);
-        assert_eq!(site.habitat_labels, ["TemperateMeadow"]);
+        assert_eq!(
+            site.habitat_labels,
+            ["TemperateMeadow", "TemperateWoodland"]
+        );
     }
 }

@@ -18,9 +18,9 @@
       "days": 30
     },
     {
-      "label": "dry-meadow-control-30d",
+      "label": "dry-meadow-woodland-control-30d",
       "seed": 12345,
-      "center": [-114, -122],
+      "center": [-118, -82],
       "radius": 8,
       "days": 30
     }
