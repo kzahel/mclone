@@ -271,6 +271,7 @@ function validateObservedState(capture, state) {
 
 function settledPresentationState(state) {
   const {
+    coverageGeneration: _coverageGeneration,
     vegetationSubmittedJobs: _vegetationSubmittedJobs,
     vegetationCompletedJobs: _vegetationCompletedJobs,
     ...presentationState
@@ -436,7 +437,7 @@ const receipt = {
       "output extent",
     ],
     variedAxes: ["frozen time", "terrain presentation", "diagnostic channel"],
-    observedStateRule: "Every composed capture is target-ready with all 25 RD2 exact columns and drained, failure-free vegetation. Settled presentation state is identical within each comparison group; cumulative submitted/completed job counts may differ between fresh processes but must be equal within every capture. Exact Only reports the horizon disabled.",
+    observedStateRule: "Every composed capture is target-ready with all 25 RD2 exact columns and drained, failure-free vegetation. Settled presentation state is identical within each comparison group; transient coverage-generation and cumulative submitted/completed job counters may differ between fresh processes, while submitted/completed must be equal within every capture. Exact Only reports the horizon disabled.",
   },
   sceneCoverage: {
     coast: ["baseline-elevated-dawn", "baseline-elevated-noon", "baseline-elevated-dusk", "baseline-elevated-midnight"],
