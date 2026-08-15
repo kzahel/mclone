@@ -13,6 +13,18 @@ stopped before managed provisioning or integrated-server persistence. Its
 remote actor, ordinary catalog continuation, and closeout validation are
 complete.
 
+On 2026-08-15, interactive browser movement evidence found a semantic defect
+in the local integrated-server actor retained by Tactical 197: each command
+holds actor admission until all resulting worldgen, lighting, publication, and
+persistence work is quiescent. Queued `SetChunkView` commands therefore replay
+historical interest centers, producing real unload/snapshot churn and visible
+terrain holes that native does not reproduce. Human review authorized focused
+Tactical
+[`303`](../tactical/303-web-integrated-runner-semantic-parity.md) to restore
+native-equivalent command admission, detach browser persistence waits, and make
+queue/readiness diagnostics authoritative without changing the isolated-Wasm
+or domain-blind TypeScript architecture.
+
 On 2026-07-25 human review selected one focused continuation: migrate Terrain
 Lab's exact-terrain Worker to the same isolated Rust-actor, opaque browser
 transport, Rust-owned coordinator, and external `SharedArrayBuffer` mailbox
@@ -806,9 +818,11 @@ Primary implementation surfaces:
 
 ## Recommended Next Work
 
-No automatic continuation is recommended. Keep the ownership and scene-host
-checks as regression gates. Integrated-server persistence is complete under
-Tactical 199; do not continue into managed provisioning, shared Wasm memory,
-or browser-native long-tail movement without a new human decision and a
-focused tactical supported by specific ownership or measured performance
-evidence.
+Execute the explicitly authorized, bounded semantic correction in Tactical
+[`303`](../tactical/303-web-integrated-runner-semantic-parity.md). Keep the
+ownership and scene-host checks as regression gates. Integrated-server
+persistence remains structurally complete under Tactical 199; the new work
+changes operation lifetime and parity, not its schema. Do not continue from
+this correction into managed provisioning, shared Wasm memory, Web-only view
+coalescing, or broader browser-native long-tail movement without a separate
+human decision and focused tactical supported by measured evidence.
