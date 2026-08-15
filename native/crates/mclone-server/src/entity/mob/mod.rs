@@ -510,6 +510,14 @@ impl MobRuntimeState {
         self.bee_completed_deposit = None;
     }
 
+    pub(crate) fn reject_unavailable_movement(&mut self, entity: ServerEntityState) {
+        self.sync_from_entity(entity);
+        self.navigation.stop();
+        self.rabbit_completed_dig = None;
+        self.rabbit_completed_raid = None;
+        self.clear_rabbit_shelter_reservation();
+    }
+
     pub(crate) const fn no_action_time(&self) -> u32 {
         self.no_action_time
     }

@@ -21,7 +21,7 @@ use mclone_worldgen::levelgen::MCLONE_WILDLIFE_POPULATION_REVISION;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-const REPORT_SCHEMA_VERSION: u32 = 1;
+const REPORT_SCHEMA_VERSION: u32 = 2;
 const MINECRAFT_DAY_TICKS: u64 = 24_000;
 
 type AnyResult<T> = Result<T, Box<dyn Error>>;
@@ -214,7 +214,7 @@ struct DailyReceipt {
     subjects: Vec<WildlifePopulationSubject>,
     forage_cells: Vec<WildlifeForageCellSnapshot>,
     remains: Vec<WildlifeSimulationRemainsSnapshot>,
-    events: Vec<WildlifeSimulationEvent>,
+    identity_events: Vec<WildlifeSimulationEvent>,
 }
 
 #[derive(Debug, Serialize)]
@@ -667,13 +667,23 @@ fn emit_sample(
             duplicate_identities: 0,
         },
     };
+    let identity_events = events
+        .into_iter()
+        .filter(|event| {
+            matches!(
+                event.event,
+                WildlifeSimulationEventKind::Birth { .. }
+                    | WildlifeSimulationEventKind::Death { .. }
+            )
+        })
+        .collect();
     let receipt = DailyReceipt {
         report_schema_version: REPORT_SCHEMA_VERSION,
         summary: summary.clone(),
         subjects: snapshot.subjects.clone(),
         forage_cells,
         remains,
-        events,
+        identity_events,
     };
     let mut line = serde_json::to_vec(&receipt)?;
     line.push(b'\n');

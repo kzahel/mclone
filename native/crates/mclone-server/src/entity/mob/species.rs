@@ -632,7 +632,7 @@ impl DeerRuntimeState {
         } else {
             DeerLifeStage::Adult
         };
-        let sex = if random.next_boolean() {
+        let sex = if identity.least.is_multiple_of(2) {
             DeerSex::Female
         } else {
             DeerSex::Male

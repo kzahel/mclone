@@ -104,14 +104,14 @@ impl Default for WildlifeLifecycleTuning {
             rabbit_lifespan_ticks: 480_000,
             rabbit_lifespan_variance_ticks: 120_000,
             rabbit_breeding_cooldown_ticks: 18_000,
-            rabbit_reproductive_energy: 720,
+            rabbit_reproductive_energy: 550,
             rabbit_birth_energy_cost: 240,
             rabbit_starvation_ticks: 48_000,
             deer_maturation_ticks: 120_000,
             deer_lifespan_ticks: 1_920_000,
             deer_lifespan_variance_ticks: 480_000,
             deer_breeding_cooldown_ticks: 96_000,
-            deer_reproductive_energy: 800,
+            deer_reproductive_energy: 650,
             deer_birth_energy_cost: 320,
             deer_starvation_ticks: 96_000,
             hard_population_guard: 4_096,
@@ -197,12 +197,10 @@ impl WildlifeLifeState {
         if intake > cost {
             self.reproductive_condition = self
                 .reproductive_condition
-                .saturating_add((intake - cost) / 2)
+                .saturating_add(((intake - cost) / 4).max(1))
                 .min(maximum_energy);
-        } else {
-            self.reproductive_condition = self
-                .reproductive_condition
-                .saturating_sub((cost - intake).max(1));
+        } else if self.energy < maximum_energy / 3 {
+            self.reproductive_condition = self.reproductive_condition.saturating_sub(1);
         }
     }
 

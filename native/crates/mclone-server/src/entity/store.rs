@@ -655,10 +655,10 @@ impl ServerEntityStore {
                         WildlifeForageConsumer::Rabbit,
                         behavior == RabbitBehavior::Forage,
                         match behavior {
-                            RabbitBehavior::Flee => 16,
-                            RabbitBehavior::Hop => 9,
-                            RabbitBehavior::Underground => 2,
-                            _ => 5,
+                            RabbitBehavior::Flee => 4,
+                            RabbitBehavior::Hop => 2,
+                            RabbitBehavior::Underground => 0,
+                            _ => 1,
                         },
                         tuning.rabbit_soft_cell_density,
                         WildlifeSpecies::Rabbit,
@@ -674,10 +674,10 @@ impl ServerEntityStore {
                         WildlifeForageConsumer::Deer,
                         behavior == mclone_protocol::DeerBehavior::Graze,
                         match behavior {
-                            mclone_protocol::DeerBehavior::Flee => 22,
-                            mclone_protocol::DeerBehavior::Walk => 12,
-                            mclone_protocol::DeerBehavior::Bedded => 4,
-                            _ => 8,
+                            mclone_protocol::DeerBehavior::Flee => 5,
+                            mclone_protocol::DeerBehavior::Walk => 2,
+                            mclone_protocol::DeerBehavior::Bedded => 0,
+                            _ => 1,
                         },
                         tuning.deer_soft_cell_density,
                         WildlifeSpecies::Deer,
@@ -685,14 +685,14 @@ impl ServerEntityStore {
                 }
                 _ => continue,
             };
-            let intake = if foraging && is_local_wildlife_forage_site(feet, block_state_at) {
+            let consumed = if foraging && is_local_wildlife_forage_site(feet, block_state_at) {
                 resources.consume_at(
                     consumer,
                     feet,
                     if entity.kind == EntityKind::Rabbit {
-                        24
+                        6
                     } else {
-                        42
+                        10
                     },
                     simulation_tick,
                     block_state_at,
@@ -700,6 +700,11 @@ impl ServerEntityStore {
             } else {
                 0
             };
+            let intake = consumed.saturating_mul(if entity.kind == EntityKind::Rabbit {
+                20
+            } else {
+                32
+            });
             let Some(mob) = self.mobs.get_mut(&id) else {
                 continue;
             };
@@ -2368,6 +2373,10 @@ impl ServerEntityStore {
                         rabbit_admission,
                         &available_block_state_at,
                     );
+                    if !entity_ticking_chunks.contains(&entity.chunk_pos()) {
+                        entity.position = previous_position;
+                        mob.reject_unavailable_movement(*entity);
+                    }
                     let current_rabbit_shelter = mob.rabbit_refuge_claim();
                     if previous_rabbit_shelter != current_rabbit_shelter {
                         if let Some(previous) = previous_rabbit_shelter
@@ -5681,6 +5690,24 @@ mod tests {
             store.mobs[&rabbit].rabbit_behavior(),
             Some(RabbitBehavior::Flee)
         );
+    }
+
+    #[test]
+    fn ticking_domain_boundary_rejects_deer_escape_steps() {
+        let mut store = ServerEntityStore::default();
+        let deer =
+            store.insert_passive_mob_for_test(EntityKind::Deer, Vec3d::new(15.7, 64.0, 8.5), 0.0);
+        let player = MobPlayerTarget::from_position(Vec3d::new(12.5, 64.0, 8.5));
+        let ticking = [ChunkPos::new(0, 0)];
+
+        for tick in 0..240 {
+            store.tick_stationary_at_time(&ticking, &[player], 12_000 + tick, flat_ground);
+            assert_eq!(
+                store.state(deer).unwrap().chunk_pos(),
+                ChunkPos::new(0, 0),
+                "unavailable chunks must reject physical escape steps as well as paths"
+            );
+        }
     }
 
     #[test]
