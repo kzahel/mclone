@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 pub(crate) const MAX_KNOWN_PLACES: usize = 3;
 
-pub const WILDLIFE_LIFECYCLE_RULE_REVISION: u32 = 4;
+pub const WILDLIFE_LIFECYCLE_RULE_REVISION: u32 = 5;
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub(crate) enum WildlifeSpecies {
@@ -491,7 +491,7 @@ mod tests {
     #[test]
     fn production_lifecycle_tuning_avoids_one_day_breeding_pulses() {
         let tuning = WildlifeLifecycleTuning::default();
-        assert_eq!(tuning.revision, 4);
+        assert_eq!(tuning.revision, 5);
         assert_eq!(tuning.rabbit_maturation_ticks, 48_000);
         assert_eq!(tuning.rabbit_breeding_cooldown_ticks, 48_000);
         assert_eq!(tuning.rabbit_lifespan_ticks, 1_440_000);

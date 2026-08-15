@@ -884,6 +884,9 @@ impl ServerEntityStore {
         }
 
         for (id, entity, species, cause) in natural_deaths {
+            if species == WildlifeSpecies::Mallard {
+                updated.extend(self.remove_mallard_nests_for_parent(entity.persistent_id));
+            }
             if let Some(removed) = self.remove_entity(id) {
                 updated.push(removed);
             }
@@ -1083,6 +1086,21 @@ impl ServerEntityStore {
             }
         }
         updated
+    }
+
+    fn remove_mallard_nests_for_parent(
+        &mut self,
+        parent: EntityPersistentId,
+    ) -> Vec<ServerEntityState> {
+        let nests = self
+            .mallard_nests
+            .iter()
+            .filter_map(|(id, nest)| nest.parents.contains(&Some(parent)).then_some(*id))
+            .collect::<Vec<_>>();
+        nests
+            .into_iter()
+            .filter_map(|id| self.remove_entity(id))
+            .collect()
     }
 
     fn try_deer_birth(
@@ -5356,6 +5374,83 @@ mod tests {
                 .count(),
             1,
             "the pair should establish a later clutch at its still-valid known site",
+        );
+    }
+
+    #[test]
+    fn natural_parent_death_releases_failed_mallard_nest_for_a_later_pair() {
+        let mut store = ServerEntityStore::default();
+        let female =
+            store.insert_passive_mob_for_test(EntityKind::Mallard, Vec3d::new(4.5, 64.0, 4.5), 0.0);
+        let male =
+            store.insert_passive_mob_for_test(EntityKind::Mallard, Vec3d::new(3.5, 64.0, 4.5), 0.0);
+        for (id, sex) in [
+            (female, mclone_protocol::MallardSex::Female),
+            (male, mclone_protocol::MallardSex::Male),
+        ] {
+            store
+                .mobs
+                .get_mut(&id)
+                .unwrap()
+                .set_mallard_lifecycle_for_test(ready_wildlife_lifecycle(120_000), sex);
+        }
+        let ticking_chunks = local_ticking_chunks();
+        let mut resources = WildlifeResourceLedger::default();
+        store.tick_wildlife_lifecycle(20, &ticking_chunks, &mut resources, &covered_wetland_ground);
+        assert_eq!(
+            store
+                .states()
+                .iter()
+                .filter(|entity| entity.kind == EntityKind::MallardNest && entity.alive)
+                .count(),
+            1,
+        );
+
+        let mut terminal = ready_wildlife_lifecycle(1_000_000);
+        terminal.lifespan_ticks = 1_000_000;
+        store
+            .mobs
+            .get_mut(&female)
+            .unwrap()
+            .set_mallard_lifecycle_for_test(terminal, mclone_protocol::MallardSex::Female);
+        store.tick_wildlife_lifecycle(40, &ticking_chunks, &mut resources, &covered_wetland_ground);
+        assert!(store.state(female).is_none());
+        assert_eq!(
+            store
+                .states()
+                .iter()
+                .filter(|entity| entity.kind == EntityKind::MallardNest && entity.alive)
+                .count(),
+            0,
+            "a nest whose known parent died must not block all later clutches",
+        );
+        assert_eq!(store.mobs[&male].mallard_remembered_nest_site(), None);
+        assert_eq!(
+            store.mobs[&male].mallard_active_nest_target_for_test(),
+            None,
+        );
+
+        let replacement =
+            store.insert_passive_mob_for_test(EntityKind::Mallard, Vec3d::new(4.5, 64.0, 4.5), 0.0);
+        for (id, sex) in [
+            (replacement, mclone_protocol::MallardSex::Female),
+            (male, mclone_protocol::MallardSex::Male),
+        ] {
+            store
+                .mobs
+                .get_mut(&id)
+                .unwrap()
+                .set_mallard_lifecycle_for_test(ready_wildlife_lifecycle(144_000), sex);
+        }
+        store.tick_wildlife_lifecycle(60, &ticking_chunks, &mut resources, &covered_wetland_ground);
+        assert_eq!(
+            store
+                .states()
+                .iter()
+                .filter(|entity| entity.kind == EntityKind::MallardNest && entity.alive)
+                .count(),
+            1,
+            "a later conditioned pair should establish an ordinary replacement nest",
         );
     }
 
