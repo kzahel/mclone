@@ -2,8 +2,8 @@
 
 Topic: `procedural-horizon-surface-appearance`
 
-Status: the current material, texture, color, hydrology, and approximate-light
-pipeline is documented. Tactical
+Status: the material, texture, color, hydrology, and approximate-light pipeline
+is documented. Tactical
 [`276`](../tactical/276-procedural-horizon-surface-appearance.md) now makes the
 original Mclone profile use its sampled biome recipe for grass tint, paints
 interpolated wetland-pool water as well as river corridors, and derives all far
@@ -14,13 +14,17 @@ shared workspace check, and matched release performance receipts on
 decoration-lake summaries, flat water geometry, stored lighting, and GPU
 timestamp instrumentation remain separate work.
 
-Planned Tactical
+Tactical
 [`304`](../tactical/304-lod-frontier-and-near-field-voxel-convergence.md)
-coordinates the next near-field appearance step with the exact-frontier
-correction. It will compare active-pack face sprites and biome tint, exact-style
-daylight and face shade, and a spacing-one top-and-riser voxel shell while
-leaving farther rings smooth and fixed-budget. Independent water geometry and
-decoration-lake summaries remain outside that tactical.
+implements the near-field convergence step with the exact-frontier correction.
+The spacing-one level now presents flat tops and cardinal risers with
+worldgen-owned side strata, direction-specific active-pack faces, pack-native
+grass tint, exact face shade, and shared sky-darken/lightmap inputs. Farther
+rings remain smooth. Opaque procedural water remains the single visible water
+owner through exact-painted chunks and uses one treatment across the near/far
+material transition. Independent water geometry and decoration-lake summaries
+remain separate work; subjective Human Review of the new terrain character is
+pending.
 
 ## Scope
 
@@ -55,19 +59,19 @@ visible block material + biome/hydrology semantics
         v
 fixed 32-float TerrainPreviewSample
         |
-        +--> block-state id --> normal block-atlas sprite UV
+        +--> block-state id --> active-pack top/side faces + tint flags
+        |
+        +--> surface recipe --> worldgen-owned side/subsurface/body strata
         |
         v
-stitched clipmap height + interpolated semantic fields
+spacing-one voxel shell / stitched smooth farther rings
+        |
+        +--> near: exact-style face shade + daylight + atlas texel
+        |
+        +--> far: approximate slope light + reduced atlas detail
         |
         v
-biome/material base color * approximate directional light
-        |
-        v
-mip-filtered atlas detail + analytic inland-water overlay
-        |
-        v
-target color transfer --> caller-owned render target
+analytic inland-water overlay --> fog/target transfer --> render target
 ```
 
 The efficient default is therefore to improve classification and the compact
@@ -99,18 +103,37 @@ avoids inventing nonsensical fractional block ids, but it also means a coarse
 triangle has one atlas sprite. Continuous fields such as river distance,
 wetland-pool influence, light, and world position interpolate normally.
 
+### Near voxel shell and side strata
+
+Only the spacing-one level changes topology. Each one-block cell has a rounded
+integer-height flat top plus reserved north, south, east, and west risers;
+unexposed risers become degenerate triangles. The coarser levels remain the
+stitched smooth heightfield.
+
+Worldgen resolves each visible material and surface recipe to a compact
+`top/upper-side/subsurface-depth/body` profile shared with generated WGSL.
+Grass uses grass top, grass-block side, three dirt blocks, then stone. Sand,
+gravel, clay, snow, water, and exposed-stone recipes select their own bounded
+profiles. This is approximate untouched-natural-terrain semantics, not a
+renderer-authored raw-id strata table or a cache of canonical columns.
+
 ### Texture selection and filtering
 
-The scene maps each raw material id through the same asset catalog used by
-ordinary block meshes (`gui_icon_uv`) and passes one material-atlas binding to
-`mclone-terrain-view`. The renderer builds the atlas mip chain once. Its sampler
-uses nearest magnification and linear minification/mipmap filtering.
+The scene maps each raw material id through the same baked asset catalog used
+by ordinary block meshes. A compact uniform table distinguishes upward and
+cardinal sprite rectangles plus grass-tint flags; it replaces the earlier
+single `gui_icon_uv` representative. The renderer builds the atlas mip chain
+once. Its sampler uses nearest magnification and linear minification/mipmap
+filtering.
 
 The fragment shader repeats the selected block sprite in world space with
-`fract(world_xz)` and samples it with explicit gradients. Texture contribution
-falls from `0.82` near one block per pixel toward `0.42` at eight or more blocks
-per pixel. This preserves dirt/stone/snow texture character nearby without
-turning the distant horizon into high-frequency aliasing.
+`fract(world_xz)` and samples it with explicit gradients. Solid faces in the
+spacing-one shell use exact-strength atlas texels. Their material character
+transitions over the outer 32 cells toward the smooth far presentation, whose
+texture contribution falls from `0.82` near one block per pixel toward `0.42`
+at eight or more blocks per pixel. Water uses the same far-style treatment on
+both sides of that transition so open ocean does not reveal the finest ring as
+a square.
 
 This path is fixed-resident and shared by native, browser, flat Android, and the
 normal per-eye XR renderer. It does not allocate or upload a per-view painted
@@ -137,9 +160,10 @@ This replaces the prior generic dry/wet/cold gradient, which discarded the
 already-computed biome recipe and made large grass regions less recognizable.
 The vanilla LOD profile continues to use its direct sampled biome id.
 
-The grass tint is currently the renderer's reference-shaped palette, not a
-texture-pack `grass.png` colormap and not vanilla's 5x5 neighborhood blend.
-That distinction is intentional and remains visible in the gap list.
+The near-shell grass tint samples the active pack's `grass.png` colormap
+through the exact mesh catalog for the selected biome id. It is still one
+representative biome sample rather than vanilla's 5x5 neighborhood blend; the
+far smooth path retains its cheaper reference-shaped palette.
 
 ### Lighting
 
@@ -149,16 +173,17 @@ used for position. Coarse outer-footprint normals blend a wider derivative;
 the normal halo supplies real samples beyond tile boundaries. These rules stop
 lighting seams from revealing clipmap tiles.
 
-Lighting is one normalized directional term plus ambient bias, clamped to
-`0.34..1.05`. It modulates the material/biome base color before atlas detail is
-applied. The final target-color transfer is shared with the other WGPU render
-paths.
+Smooth levels retain one normalized directional term plus ambient bias,
+clamped to `0.34..1.05`. The spacing-one shell instead assumes exposed full
+sky/zero block light, uses the same sky-darken-dependent lightmap curve as exact
+chunks, and applies the ordinary top/east-west/north-south face shades of
+`1.0`, `0.6`, and `0.8`. The final target-color transfer and fog remain shared
+with the other WGPU paths.
 
-This is deliberately approximate natural-horizon lighting. The LOD does not
-currently carry block light, sky light, time-of-day light, shadow maps,
-weather attenuation, water specular, or reflections. Those effects should be
-added only through shared mono/per-eye/multiview-aware render contracts and
-measured separately.
+The near shell still does not carry stored per-column light, shadow maps,
+weather attenuation, water specular, or reflections. Those effects require
+compact world semantics and shared mono/per-eye/multiview-aware render
+contracts rather than renderer-local guesses.
 
 ### Water and small inland features
 
@@ -188,6 +213,16 @@ The analytic mask currently colors the terrain heightfield; it does not create
 a separate flat surface at sea/pool level. A later geometry slice should compare
 an independent water sheet against the current inexpensive color overlay.
 
+In exact/procedural composition, the opaque procedural water surface remains
+visible through exact-painted chunks while solid procedural faces are removed.
+This is deliberate single-visible-owner arbitration: translucent exact water
+otherwise produces a stable dark square because the compact exact snapshot
+does not carry the water-column compositing depth needed by the opaque horizon.
+The accepted close and elevated captures show the composed water matching the
+horizon-only presentation without horizontal z-fighting. A future translucent
+water contract must replace this rule explicitly rather than draw both water
+surfaces.
+
 ## Decisions and Invariants
 
 1. Worldgen owns material, biome, and water semantics; the renderer owns their
@@ -203,11 +238,29 @@ an independent water sheet against the current inexpensive color overlay.
    explicitly replaces that contract.
 7. A surface change needs both shader validation and inspected pixels. Color
    screenshots alone are not performance evidence.
-8. Full-frame XR multiview remains unavailable for the procedural horizon;
-   normal per-eye XR uses this shared shader. Appearance work does not silently
-   introduce a per-eye-only alternate implementation.
+8. Mono, normal per-eye XR, and full-frame multiview are generated from the
+   same appearance source. Appearance work does not introduce a per-eye-only
+   alternate implementation.
 
 ## Performance Contract and Evidence
+
+### Tactical 304 near-shell cost
+
+The spacing-one shell generates topology from `vertex_index`; it adds no
+resident vertex buffer and does not change the fixed 160 terrain / 70 staging
+slot allocation. The active-pack face/tint uniform is 16 KiB, 12 KiB larger
+than the former one-face UV table. Final native acceptance reports
+`128,941,304` fixed resident bytes and zero pending work.
+
+Sixteen finest tiles now reserve 30 vertex invocations per cell while the
+other 144 tiles retain six. The worst-case terrain total is therefore
+`5,505,024` versus `3,932,160`, a bounded 40% increase. Accepted native
+movement captures report `4,709,496..5,294,208` submitted terrain-plus-tree
+vertices after tile culling. This slice does not claim a GPU-time result;
+portable timestamp evidence remains future work. Exact command lines and
+inspected pixel paths are recorded in Tactical 304.
+
+### Tactical 276 baseline
 
 All measurements below are release builds on Linux x86_64, 20 logical CPUs,
 commit `65d8f61267cae5492f5c303c875c034d1e4edde4`, with the already-dirty working

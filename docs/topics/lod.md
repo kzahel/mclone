@@ -62,7 +62,8 @@ Current detailed status, limitations, evidence, and next work live in
 [`procedural-horizon-clipmap.md`](procedural-horizon-clipmap.md). In particular,
 that topic records the supported local `mclone-overworld-v1` source, the live
 `Terrain Horizon: Exact Only / Composed` control, platform coverage, and the
-full-frame XR multiview exception.
+spacing-one voxel shell. Full-frame XR multiview shares the same terrain
+contract but remains an opt-in diagnostic path rather than the default.
 
 ## Historical Routes
 

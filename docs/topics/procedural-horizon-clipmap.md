@@ -2,19 +2,21 @@
 
 Topic: `procedural-horizon-clipmap`
 
-Status: the standalone cross-platform proof, transition hardening, and shared
-vegetation service are complete. Terrain Lab runtime-composition adoption,
-PH-4 live-game scene adoption, and their hosted human reviews are also
-complete. As of 2026-08-11, the shared in-game Graphics screen exposes
+Status: the standalone cross-platform proof, transition hardening, shared
+vegetation service, and spacing-one voxel-frontier convergence are complete.
+Terrain Lab runtime-composition adoption, PH-4 live-game scene adoption, and
+their hosted human reviews are also complete. As of 2026-08-11, the shared
+in-game Graphics screen exposes
 `Terrain Horizon: Exact Only / Composed` as a live session control. The same
 UI action, settings reducer, and scene effect serve desktop, browser, flat
-Android, and ordinary per-eye XR. It is available only for a local
+Android, and ordinary per-eye XR. Full-frame multiview terrain and vegetation
+also share the composed contract; multiview remains an opt-in diagnostic path
+rather than the default because its accepted Quest comparison regressed on
+GPU. The control is available only for a local
 `mclone-overworld-v1` source; remote and incompatible-profile sessions show
 the row as unavailable and project inherited state back to exact-only.
-Full-frame XR multiview is the explicit current exception: its platform
-capability disables the row and forces exact-only before rendering. Native,
-browser-Wasm, flat-Android APK, and Android-XR APK builds pass; physical
-Android/XR pixel and performance acceptance remain later work.
+Native, browser-Wasm, flat-Android APK, and Android-XR APK builds pass;
+physical flat-Android pixel acceptance remains later work.
 
 The 2026-08-13 phone-browser black-frame regression is resolved. XR
 multiview support had added `@builtin(view_index)` entry points to the same
@@ -106,9 +108,9 @@ now reached Human Review 1 with a shared exact-painted snapshot, bounded GPU
 mask, caller-owned color/depth target, extracted canonical compiler/codec,
 and native `Horizon`, `Exact`, `Composed`, and `Coverage` modes. The 5-by-5
 exact footprint stays coherent through delayed movement, negative
-coordinates, and teleport. Its explicit 1.5-block procedural collar removes
-the earlier full-height footprint wall. Human review accepted that terrain
-behavior overall but found a blocking natural-tree ownership defect: an exact
+coordinates, and teleport. Its then-current 1.5-block procedural collar
+removed the earlier full-height footprint wall. Human review accepted that
+terrain behavior overall but found a blocking natural-tree ownership defect: an exact
 tree can be depth-occluded by the retained collar while fragment masking
 leaves the outside part of the same stable record's LOD proxy visible.
 Tactical 262 Slice 3A now separates natural-tree admission from terrain and
@@ -143,15 +145,20 @@ silhouette and hill captures preserve nearer exact geometry and allow nearer
 procedural geometry to occlude it. Desktop and phone browser semantic gates
 pass, and hosted interactive Human Review 1B accepted the corrected
 composition on 2026-07-27. Minor z-fighting limited to the outermost exact
-blocks remains a known near-coincident frontier-overlap issue for later
-collar/skirt refinement; it does not reopen the shared-depth correction.
-Planned Tactical
+blocks remained a known near-coincident frontier-overlap issue at that
+checkpoint; it did not reopen the shared-depth correction. Tactical
 [`304`](../tactical/304-lod-frontier-and-near-field-voxel-convergence.md)
-now owns the corrective direction: complete horizontal exact ownership, an
-explicit material-aware frontier connector, a spacing-one top-and-riser voxel
-shell, and near-field material/light convergence without expanding exact chunk
-residency or reviving the retired chunk-based system. No
-game-scene, Android, or XR adoption had started at that checkpoint.
+now implements the correction. Solid procedural tops and ordinary risers are
+discarded over the complete exact-painted footprint; a bounded
+procedural-side curtain covers height disagreement without a horizontal
+collar. The spacing-one level is a flat-top/cardinal-riser voxel shell, while
+coarser levels remain smooth. Active-pack face materials, worldgen-owned side
+strata, grass tint, exact face shade, and shared sky-darken/lightmap inputs
+converge the near shell on exact terrain. Opaque procedural water deliberately
+remains the single visible water owner through exact-painted chunks so
+translucent exact water cannot form a differently shaded square. Native,
+desktop/mobile WebGPU, stereo, flat-Android build, and Android-XR build
+boundaries pass; subjective Human Review remains pending.
 Post-review Explorer evidence then showed that Slice 3B's viewer-forward
 anchor was useful for foreground diagnosis but confusing as the product
 default: it moves exact residency when yaw changes and can place exact terrain
@@ -766,8 +773,13 @@ The intended opaque composition is:
 4. actors and vegetation; and
 5. translucent terrain and water.
 
-Exact terrain needs a narrow frontier skirt or collar so disagreement between
-the exact boundary and the procedural sample beneath it cannot expose a crack.
+Solid exact terrain uses full-footprint procedural discard. A bounded curtain
+on the procedural side covers boundary-height disagreement; ordinary
+procedural risers inside exact-owned land are discarded. Water is the explicit
+surface-class exception: the opaque procedural water surface remains visible
+through painted chunks and depth-occludes translucent exact water, avoiding a
+second color/lighting owner until the exact snapshot carries the water-column
+facts needed for a different compositing contract.
 
 ### Vegetation
 
