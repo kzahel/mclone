@@ -4,13 +4,13 @@ use anyhow::{Context, Result, bail};
 use mclone_app_runtime::frame_render::{TerrainBackdropRenderContext, TerrainBackdropRenderer};
 use mclone_app_runtime::host_mode::SingleViewHostMode;
 use mclone_app_runtime::render_asset_data::TexturedMeshAssets;
-use mclone_core::{BlockStateId, ChunkPos, HorizontalTopology};
+use mclone_core::{ChunkPos, HorizontalTopology};
 use mclone_render::color_profile::RenderColorProfile;
 use mclone_terrain_view::{
-    ExactPaintedCoverageSnapshot, TERRAIN_PREVIEW_MATERIAL_UV_COUNT, TerrainClipmapConfig,
-    TerrainCompositionSourceIdentity, TerrainExactCoverageMode, TerrainHorizonFrameStats,
-    TerrainHorizonPresentation, TerrainHorizonRenderTarget, TerrainPreparedExactFrame,
-    TerrainPreviewCamera, TerrainPreviewMaterialAtlas, TerrainPreviewView,
+    ExactPaintedCoverageSnapshot, TerrainClipmapConfig, TerrainCompositionSourceIdentity,
+    TerrainExactCoverageMode, TerrainHorizonFrameStats, TerrainHorizonPresentation,
+    TerrainHorizonRenderTarget, TerrainPreparedExactFrame, TerrainPreviewCamera,
+    TerrainPreviewMaterialAtlas, TerrainPreviewMaterialTable, TerrainPreviewView,
     TerrainVegetationExecutor, TerrainViewEngine, TerrainViewEngineConfig,
     TerrainViewSourceIdentity,
 };
@@ -97,12 +97,7 @@ impl SceneTerrainViewState {
         )
         .map_err(anyhow::Error::msg)?;
         let exact = TerrainPreparedExactFrame::new(source, coverage).map_err(anyhow::Error::msg)?;
-        let mut material_uvs = [[0.0_f32, 0.0, 1.0, 1.0]; TERRAIN_PREVIEW_MATERIAL_UV_COUNT];
-        for (raw_id, target) in material_uvs.iter_mut().enumerate() {
-            if let Some(sprite) = mesh_assets.catalog.gui_icon_uv(BlockStateId(raw_id as u32)) {
-                *target = [sprite.u0, sprite.v0, sprite.u1, sprite.v1];
-            }
-        }
+        let material_table = TerrainPreviewMaterialTable::from_catalog(&mesh_assets.catalog);
         let atlas = mesh_assets.atlas.as_upload();
         let vegetation_enabled = vegetation_executor.is_some();
         let mut engine = TerrainViewEngine::new(
@@ -122,7 +117,7 @@ impl SceneTerrainViewState {
                 width: atlas.width,
                 height: atlas.height,
                 rgba: atlas.rgba,
-                material_uvs: &material_uvs,
+                material_table: &material_table,
             },
             vegetation_executor,
         )
@@ -218,6 +213,7 @@ impl SceneTerrainViewState {
         depth_view: &wgpu::TextureView,
         size: [u32; 2],
         render_views: [mclone_render::chunk::ChunkRenderView; 2],
+        sky_darken: f32,
         fog: mclone_render::fog::RenderFog,
     ) -> Result<()> {
         self.engine.resize(device, size[0], size[1]);
@@ -231,6 +227,7 @@ impl SceneTerrainViewState {
         )
         .and_then(|presentation| presentation.with_multiview_render_views(render_views))
         .map_err(anyhow::Error::msg)?
+        .with_sky_darken(sky_darken)
         .with_fog(fog);
         let stats = self
             .engine
@@ -402,6 +399,7 @@ impl TerrainBackdropRenderer for SceneTerrainViewState {
         )
         .and_then(|presentation| presentation.with_render_view(context.render_view))
         .map_err(anyhow::Error::msg)?
+        .with_sky_darken(context.sky_darken)
         .with_fog(context.fog);
         let stats = self
             .engine

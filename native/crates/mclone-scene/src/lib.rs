@@ -2819,6 +2819,7 @@ impl McloneSceneHost {
                     depth_view: &target.depth.view,
                     size: target.size,
                     render_view,
+                    sky_darken: render_options.sky_darken,
                     fog: render_options.fog,
                     view_slot,
                 })?;
@@ -3134,6 +3135,7 @@ impl McloneSceneHost {
                     &target.depth.view,
                     target.size,
                     terrain_views,
+                    terrain_options[0].sky_darken,
                     terrain_options[0].fog,
                 )
                 .context("render XR procedural horizon multiview")?;

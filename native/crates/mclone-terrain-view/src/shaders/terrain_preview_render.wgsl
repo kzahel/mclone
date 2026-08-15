@@ -33,6 +33,7 @@ struct TerrainPreviewSample {
 // __MCLONE_TARGET_COLOR_TRANSFER_WGSL__
 const terrain_target_color_transform: f32 = __MCLONE_TARGET_COLOR_TRANSFORM__;
 // MCLONE_FOG_FUNCTION
+// __MCLONE_SURFACE_COLUMN_PROFILE_WGSL__
 
 const TERRAIN_HORIZON_NORMAL_EDGE_WEST: u32 = 0x08000000u;
 const TERRAIN_HORIZON_NORMAL_EDGE_EAST: u32 = 0x10000000u;
@@ -53,8 +54,11 @@ var<storage, read> reference_samples: array<TerrainPreviewSample>;
 @group(0) @binding(3)
 var<storage, read> normal_heights: array<f32>;
 
-struct TerrainPreviewMaterialUvs {
-    values: array<vec4<f32>, 256>,
+struct TerrainPreviewMaterialTable {
+    top_uvs: array<vec4<f32>, 256>,
+    side_uvs: array<vec4<f32>, 256>,
+    tint_flags: array<vec4<f32>, 256>,
+    grass_tints: array<vec4<f32>, 256>,
 };
 
 @group(1) @binding(0)
@@ -64,7 +68,7 @@ var material_atlas: texture_2d<f32>;
 var material_sampler: sampler;
 
 @group(1) @binding(2)
-var<uniform> material_uvs: TerrainPreviewMaterialUvs;
+var<uniform> material_table: TerrainPreviewMaterialTable;
 
 struct TerrainExactCoverageParams {
     origin_size: vec4<i32>,
@@ -86,12 +90,15 @@ struct VertexOutput {
     @location(4) @interpolate(flat) textured: u32,
     @location(5) river: vec4<f32>,
     @location(6) semantics: vec4<f32>,
-    @location(7) world_position: vec3<f32>,
+    @location(7) world_position: vec4<f32>,
     @location(8) @interpolate(flat) biome: u32,
     @location(9) surface_y: f32,
     @location(10) @interpolate(flat) view_index: u32,
     @location(11) world_uv: vec2<f32>,
     @location(12) @interpolate(flat) surface_kind: u32,
+    @location(13) @interpolate(flat) near_shell: u32,
+    @location(14) @interpolate(flat) surface_recipe: u32,
+    @location(15) @interpolate(flat) column_top_y: f32,
 };
 
 fn exact_chunk_masked(chunk: vec2<i32>) -> bool {
@@ -271,6 +278,28 @@ fn terrain_horizon_coarse_footprint_weight(
         distance = min(distance, cells - sample_z);
     }
     return clamp((2.0 - f32(distance)) * 0.5, 0.0, 1.0);
+}
+
+fn terrain_horizon_near_material_weight(
+    cell_x: u32,
+    cell_z: u32,
+    cells: u32,
+) -> f32 {
+    let flags = params.content_stage_flags.w;
+    var distance = 32u;
+    if (flags & TERRAIN_HORIZON_NORMAL_EDGE_WEST) != 0u {
+        distance = min(distance, cell_x);
+    }
+    if (flags & TERRAIN_HORIZON_NORMAL_EDGE_EAST) != 0u {
+        distance = min(distance, cells - 1u - cell_x);
+    }
+    if (flags & TERRAIN_HORIZON_NORMAL_EDGE_NORTH) != 0u {
+        distance = min(distance, cell_z);
+    }
+    if (flags & TERRAIN_HORIZON_NORMAL_EDGE_SOUTH) != 0u {
+        distance = min(distance, cells - 1u - cell_z);
+    }
+    return clamp((f32(distance) + 0.5) / 32.0, 0.0, 1.0);
 }
 
 fn rgb8(color: u32) -> vec3<f32> {
@@ -809,7 +838,7 @@ fn terrain_vertex(
             );
             var bottom_y = top_y;
             var upper_y = top_y;
-            if !current_exact && neighbor_exact {
+            if !current_exact && neighbor_exact && terrain_material(sample) != 2u {
                 // The exact coverage contract currently supplies readiness but
                 // not a complete surface profile. Keep a bounded curtain on
                 // the procedural side of the ownership plane as the explicit
@@ -912,30 +941,44 @@ fn terrain_vertex(
         sample.semantics.x,
         select(0.0, sample.forest_summary.x, params.content_stage_flags.x >= 4u),
     );
-    out.world_position = vec3<f32>(
+    out.world_position = vec4<f32>(
         vertex_world_x,
         vertex_world_y,
         vertex_world_z,
+        select(
+            0.0,
+            terrain_horizon_near_material_weight(cell_x, cell_z, cells),
+            voxel_shell,
+        ),
     );
     out.biome = u32(round(sample.semantics.y));
     out.surface_y = sample.terrain.x;
     out.view_index = view_index;
     out.world_uv = world_uv;
     out.surface_kind = surface_kind;
+    out.near_shell = select(0u, 1u, voxel_shell);
+    out.surface_recipe = u32(round(sample.semantics.w));
+    out.column_top_y = select(stitched_height + 1.0, round(stitched_height) + 1.0, voxel_shell);
     return out;
 }
 
 fn apply_material_texture(
     base_color: vec3<f32>,
     material: u32,
-    world_xz: vec2<f32>,
+    side_surface: bool,
+    world_uv: vec2<f32>,
     world_dx: vec2<f32>,
     world_dy: vec2<f32>,
     blocks_per_pixel: f32,
+    exact_weight: bool,
 ) -> vec3<f32> {
-    let sprite = material_uvs.values[material];
+    let sprite = select(
+        material_table.top_uvs[material],
+        material_table.side_uvs[material],
+        side_surface,
+    );
     let sprite_size = sprite.zw - sprite.xy;
-    let local_uv = fract(world_xz);
+    let local_uv = fract(world_uv);
     let atlas_uv = sprite.xy + local_uv * sprite_size;
     let atlas_dx = world_dx * sprite_size;
     let atlas_dy = world_dy * sprite_size;
@@ -946,13 +989,57 @@ fn apply_material_texture(
         atlas_dx,
         atlas_dy,
     );
-    let texture_weight = mix(
+    var texture_weight = mix(
         0.82,
         0.42,
         clamp((blocks_per_pixel - 1.0) / 7.0, 0.0, 1.0),
     );
-    let texture_detail = clamp(texel.rgb * 1.25, vec3<f32>(0.0), vec3<f32>(1.5));
+    var texture_detail = clamp(texel.rgb * 1.25, vec3<f32>(0.0), vec3<f32>(1.5));
+    if exact_weight {
+        texture_weight = 1.0;
+        texture_detail = texel.rgb;
+    }
     return base_color * mix(vec3<f32>(1.0), texture_detail, texture_weight);
+}
+
+fn resolved_surface_material(input: VertexOutput) -> u32 {
+    if input.near_shell == 0u || input.surface_kind == 0u {
+        return input.material;
+    }
+    let profile = mclone_preview_column_profile(input.material, input.surface_recipe);
+    let depth = u32(max(floor(input.column_top_y - input.world_position.y + 0.0001), 0.0));
+    if depth == 0u {
+        return profile.x;
+    }
+    if depth < profile.z {
+        return profile.y;
+    }
+    return profile.w;
+}
+
+fn near_surface_tint(input: VertexOutput, material: u32, side_surface: bool) -> vec3<f32> {
+    if material == 2u {
+        return water_surface_color(input.surface_y, 1.0);
+    }
+    let flags = material_table.tint_flags[material];
+    let grass_tinted = select(flags.x, flags.y, side_surface) >= 0.5;
+    if !grass_tinted {
+        return vec3<f32>(1.0);
+    }
+    let biome = select(
+        input.biome,
+        mclone_grass_biome(input.biome),
+        preview_profile() == 0u,
+    );
+    return material_table.grass_tints[min(biome, 255u)].rgb;
+}
+
+fn near_surface_lightmap() -> vec3<f32> {
+    return vec3<f32>(
+        params.fog_render_options.x,
+        params.fog_render_options.y,
+        params.fog_render_options.w,
+    );
 }
 
 @vertex
@@ -984,13 +1071,16 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let world_dx = dpdx(input.world_xz);
     let world_dy = dpdy(input.world_xz);
     let blocks_per_pixel = max(length(world_dx), length(world_dy));
+    let material_dx = dpdx(input.world_uv);
+    let material_dy = dpdy(input.world_uv);
+    let material_blocks_per_pixel = max(length(material_dx), length(material_dy));
     let river_anti_alias = max(fwidth(input.river.x), blocks_per_pixel * 0.35);
     let pool_anti_alias = max(fwidth(input.semantics.y), 0.01);
     let physical_channel_edge = max(fwidth(input.river.z), 0.001);
     var color = input.color;
     let face_normal = normalize(cross(
-        dpdx(input.world_position),
-        dpdy(input.world_position),
+        dpdx(input.world_position.xyz),
+        dpdy(input.world_position.xyz),
     ));
     let steep_mountain_face = abs(face_normal.y) < 0.80
         && vanilla_mountain_exposure_biome(input.biome);
@@ -1000,19 +1090,52 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
         && steep_mountain_face && grass_family {
         color = vec3<f32>(0.48, 0.49, 0.47) * input.light;
     }
-    if input.textured != 0u && input.material < 256u {
+    let side_surface = input.near_shell != 0u && input.surface_kind != 0u;
+    let display_material = resolved_surface_material(input);
+    if input.textured != 0u && input.near_shell != 0u && display_material < 256u {
+        var near_color = near_surface_tint(input, display_material, side_surface)
+            * input.light
+            * near_surface_lightmap();
+        near_color = apply_material_texture(
+            near_color,
+            display_material,
+            side_surface,
+            input.world_uv,
+            material_dx,
+            material_dy,
+            material_blocks_per_pixel,
+            true,
+        );
+        var far_color = color;
+        if input.material < 256u {
+            far_color = apply_material_texture(
+                far_color,
+                input.material,
+                false,
+                input.world_uv,
+                material_dx,
+                material_dy,
+                material_blocks_per_pixel,
+                false,
+            );
+        }
+        color = mix(far_color, near_color, input.world_position.w);
+    } else if input.textured != 0u && input.material < 256u {
         color = apply_material_texture(
             color,
             input.material,
+            false,
             input.world_uv,
-            dpdx(input.world_uv),
-            dpdy(input.world_uv),
-            blocks_per_pixel,
+            material_dx,
+            material_dy,
+            material_blocks_per_pixel,
+            false,
         );
     }
     if input.textured != 0u
         && params.content_stage_flags.x >= 1u
         && input.material != 2u
+        && input.surface_kind == 0u
         && preview_profile() == 0u {
         let visible_half_width = max(input.river.y, blocks_per_pixel * 0.70);
         let river_distance_alpha = 1.0 - smoothstep(
@@ -1036,10 +1159,12 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
             river_color = apply_material_texture(
                 water_surface_color(input.surface_y, input.light),
                 2u,
+                false,
                 input.world_xz,
                 world_dx,
                 world_dy,
                 blocks_per_pixel,
+                input.near_shell != 0u,
             );
         }
         color = mix(color, river_color, river_alpha);
@@ -1074,7 +1199,7 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
         fog_camera_position = params.fog_camera_position_right;
     }
     let fog_factor = mclone_fog_factor(
-        input.world_position,
+        input.world_position.xyz,
         fog_camera_position,
         params.fog_render_options,
         params.fog_color,

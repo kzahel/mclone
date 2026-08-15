@@ -110,8 +110,8 @@ pub const TERRAIN_HORIZON_MAX_PROVEN_RENDER_CELL_STRIDE: u32 = 1;
 pub use viewport_renderer::{
     TERRAIN_PREVIEW_MATERIAL_UV_COUNT, TerrainHorizonFrameStats, TerrainHorizonRenderTarget,
     TerrainHorizonRenderer, TerrainHorizonVegetationServiceStats, TerrainPreviewMaterialAtlas,
-    TerrainViewportCompletedComparison, TerrainViewportExternalCpuRequest,
-    TerrainViewportFrameStats, TerrainViewportRenderer,
+    TerrainPreviewMaterialTable, TerrainViewportCompletedComparison,
+    TerrainViewportExternalCpuRequest, TerrainViewportFrameStats, TerrainViewportRenderer,
 };
 
 pub const TERRAIN_PREVIEW_GPU_EVALUATOR_REVISION: &str = "mclone-overworld-v1-gpu-preview-a10";
@@ -206,6 +206,10 @@ fn vertex_multiview_main(
 }"#,
     );
     let source = inject_multiview_vertex_entry(TERRAIN_PREVIEW_RENDER_WGSL, multiview_entry);
+    let source = source.replace(
+        "// __MCLONE_SURFACE_COLUMN_PROFILE_WGSL__",
+        mclone_worldgen::levelgen::mclone_overworld_preview_column_profile_wgsl(),
+    );
     let source = mclone_render::fog::inject_fog_wgsl(&source);
     mclone_render_color::inject_target_color_transform_wgsl(&source, transform)
         .expect("terrain preview render WGSL has one color transfer and transform marker")
@@ -389,6 +393,7 @@ pub struct TerrainHorizonPresentation {
     pub view: TerrainPreviewView,
     pub camera: TerrainPreviewCamera,
     pub target_y: f32,
+    pub sky_darken: f32,
     pub fog: mclone_render::fog::RenderFog,
     render_view_override: Option<mclone_render::chunk::ChunkRenderView>,
     multiview_render_view_override: Option<[mclone_render::chunk::ChunkRenderView; 2]>,
@@ -411,6 +416,7 @@ impl TerrainHorizonPresentation {
             view,
             camera,
             target_y: terrain_horizon_orbit_target_y(),
+            sky_darken: 1.0,
             fog: mclone_render::fog::RenderFog::none(),
             render_view_override: None,
             multiview_render_view_override: None,
@@ -462,6 +468,11 @@ impl TerrainHorizonPresentation {
 
     pub fn with_fog(mut self, fog: mclone_render::fog::RenderFog) -> Self {
         self.fog = fog;
+        self
+    }
+
+    pub fn with_sky_darken(mut self, sky_darken: f32) -> Self {
+        self.sky_darken = sky_darken.clamp(0.0, 1.0);
         self
     }
 
@@ -1871,6 +1882,21 @@ mod tests {
             terrain_horizon_orbit_target_y(),
             MCLONE_OVERWORLD_SEA_LEVEL as f32
         );
+    }
+
+    #[test]
+    fn horizon_daylight_input_is_bounded_for_the_shared_lightmap() {
+        let presentation = TerrainHorizonPresentation::new(
+            0.0,
+            0.0,
+            64.0,
+            64.0,
+            TerrainPreviewView::ThreeDimensional,
+            TerrainPreviewCamera::default(),
+        )
+        .unwrap();
+        assert_eq!(presentation.with_sky_darken(-1.0).sky_darken, 0.0);
+        assert_eq!(presentation.with_sky_darken(2.0).sky_darken, 1.0);
     }
 
     #[test]

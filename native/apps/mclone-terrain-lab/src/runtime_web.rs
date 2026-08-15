@@ -1,14 +1,12 @@
 use std::time::Duration;
 
-use mclone_core::BlockStateId;
 use mclone_render::chunk::ChunkTextureAtlas;
 use mclone_render_color::RenderColorProfile;
 use mclone_terrain_view::{
-    BrowserCanonicalExactExecutor, BrowserTerrainVegetationExecutor,
-    TERRAIN_PREVIEW_MATERIAL_UV_COUNT, TerrainClipmapConfig, TerrainExactCoverageMode,
-    TerrainHorizonRenderTarget, TerrainPreviewMaterialAtlas, TerrainRuntimeConfig,
-    TerrainRuntimeExactAnchor, TerrainRuntimeExactRenderer, TerrainRuntimeExactStats,
-    TerrainRuntimeSession,
+    BrowserCanonicalExactExecutor, BrowserTerrainVegetationExecutor, TerrainClipmapConfig,
+    TerrainExactCoverageMode, TerrainHorizonRenderTarget, TerrainPreviewMaterialAtlas,
+    TerrainPreviewMaterialTable, TerrainRuntimeConfig, TerrainRuntimeExactAnchor,
+    TerrainRuntimeExactRenderer, TerrainRuntimeExactStats, TerrainRuntimeSession,
 };
 use mclone_view_control::{WorldViewMode, WorldViewProjection, WorldViewState};
 use serde::Serialize;
@@ -246,12 +244,7 @@ impl TerrainRuntimeCompositionLab {
             &texture_presentation,
         )?;
         let assets = visual_assets.terrain;
-        let mut material_uvs = [[0.0_f32, 0.0, 1.0, 1.0]; TERRAIN_PREVIEW_MATERIAL_UV_COUNT];
-        for (raw_id, target) in material_uvs.iter_mut().enumerate() {
-            if let Some(sprite) = assets.catalog.gui_icon_uv(BlockStateId(raw_id as u32)) {
-                *target = [sprite.u0, sprite.v0, sprite.u1, sprite.v1];
-            }
-        }
+        let material_table = TerrainPreviewMaterialTable::from_catalog(&assets.catalog);
 
         let width = canvas.width().max(1);
         let height = canvas.height().max(1);
@@ -329,7 +322,7 @@ impl TerrainRuntimeCompositionLab {
                 width: assets.atlas.width,
                 height: assets.atlas.height,
                 rgba: assets.atlas.rgba(),
-                material_uvs: &material_uvs,
+                material_table: &material_table,
             },
             Some(Box::new(vegetation_executor)),
         )?;

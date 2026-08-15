@@ -3,6 +3,8 @@ use std::mem::size_of;
 use std::num::{NonZeroU32, NonZeroU64};
 use std::sync::mpsc;
 
+use mclone_core::BlockStateId;
+use mclone_mesh::{TexturedBlockTint, TexturedMeshCatalog};
 use mclone_render_color::{RenderTargetColorTransform, color_transform_wgpu};
 use mclone_worldgen::levelgen::{
     McloneOverworldSamplingTopology, McloneOverworldVegetationPlanCache, McloneTreeFamily,
@@ -42,6 +44,8 @@ use super::{
 };
 
 pub const TERRAIN_PREVIEW_MATERIAL_UV_COUNT: usize = 256;
+const TERRAIN_PREVIEW_MATERIAL_TABLE_BYTES: u64 =
+    (TERRAIN_PREVIEW_MATERIAL_UV_COUNT * 4 * 4 * size_of::<f32>()) as u64;
 const TERRAIN_EXACT_COVERAGE_UNIFORM_BYTES: u64 = 32;
 const TERRAIN_HORIZON_TREE_CULL_MARGIN_BLOCKS: f32 = 16.0;
 const TERRAIN_HORIZON_CULL_MIN_Y: f32 = -64.0;
@@ -62,7 +66,63 @@ pub struct TerrainPreviewMaterialAtlas<'a> {
     pub width: u32,
     pub height: u32,
     pub rgba: &'a [u8],
-    pub material_uvs: &'a [[f32; 4]; TERRAIN_PREVIEW_MATERIAL_UV_COUNT],
+    pub material_table: &'a TerrainPreviewMaterialTable,
+}
+
+/// Active-pack material facts consumed by procedural terrain. The table is
+/// copied into fixed GPU uniform storage when a renderer is created.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TerrainPreviewMaterialTable {
+    top_uvs: [[f32; 4]; TERRAIN_PREVIEW_MATERIAL_UV_COUNT],
+    side_uvs: [[f32; 4]; TERRAIN_PREVIEW_MATERIAL_UV_COUNT],
+    tint_flags: [[f32; 4]; TERRAIN_PREVIEW_MATERIAL_UV_COUNT],
+    grass_tints: [[f32; 4]; TERRAIN_PREVIEW_MATERIAL_UV_COUNT],
+}
+
+impl TerrainPreviewMaterialTable {
+    pub fn from_catalog(catalog: &TexturedMeshCatalog) -> Self {
+        let mut table = Self {
+            top_uvs: [[0.0, 0.0, 1.0, 1.0]; TERRAIN_PREVIEW_MATERIAL_UV_COUNT],
+            side_uvs: [[0.0, 0.0, 1.0, 1.0]; TERRAIN_PREVIEW_MATERIAL_UV_COUNT],
+            tint_flags: [[0.0; 4]; TERRAIN_PREVIEW_MATERIAL_UV_COUNT],
+            grass_tints: [[1.0; 4]; TERRAIN_PREVIEW_MATERIAL_UV_COUNT],
+        };
+        for raw_id in 0..TERRAIN_PREVIEW_MATERIAL_UV_COUNT {
+            if let Some(material) = catalog.terrain_surface_material(BlockStateId(raw_id as u32)) {
+                table.top_uvs[raw_id] = sprite_rect(material.top);
+                table.side_uvs[raw_id] = sprite_rect(material.side);
+                table.tint_flags[raw_id][0] =
+                    f32::from(material.top_tint == TexturedBlockTint::Grass);
+                table.tint_flags[raw_id][1] =
+                    f32::from(material.side_tint == TexturedBlockTint::Grass);
+            }
+            let tint = catalog.terrain_grass_tint(raw_id as i32);
+            table.grass_tints[raw_id] = [tint[0], tint[1], tint[2], 1.0];
+        }
+        table
+    }
+
+    fn uniform_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(TERRAIN_PREVIEW_MATERIAL_TABLE_BYTES as usize);
+        for table in [
+            &self.top_uvs,
+            &self.side_uvs,
+            &self.tint_flags,
+            &self.grass_tints,
+        ] {
+            for entry in table {
+                for value in entry {
+                    bytes.extend_from_slice(&value.to_le_bytes());
+                }
+            }
+        }
+        debug_assert_eq!(bytes.len(), TERRAIN_PREVIEW_MATERIAL_TABLE_BYTES as usize);
+        bytes
+    }
+}
+
+fn sprite_rect(sprite: mclone_mesh::AtlasSpriteUv) -> [f32; 4] {
+    [sprite.u0, sprite.v0, sprite.u1, sprite.v1]
 }
 
 pub const TERRAIN_VIEWPORT_MAX_RESIDENT_TILES: usize = 192;
@@ -325,7 +385,7 @@ struct TerrainPreviewMaterialResources {
     _texture: wgpu::Texture,
     _view: wgpu::TextureView,
     _sampler: wgpu::Sampler,
-    _uv_buffer: wgpu::Buffer,
+    _table_buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
 }
 
@@ -488,20 +548,14 @@ impl TerrainPreviewMaterialResources {
             lod_max_clamp: mip_levels.len().saturating_sub(1) as f32,
             ..Default::default()
         });
-        let mut uv_bytes =
-            Vec::with_capacity(TERRAIN_PREVIEW_MATERIAL_UV_COUNT * 4 * size_of::<f32>());
-        for rect in atlas.material_uvs {
-            for value in rect {
-                uv_bytes.extend_from_slice(&value.to_le_bytes());
-            }
-        }
-        let uv_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("mclone_terrain_preview_material_uvs"),
-            size: uv_bytes.len() as u64,
+        let table_bytes = atlas.material_table.uniform_bytes();
+        let table_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("mclone_terrain_preview_material_table"),
+            size: table_bytes.len() as u64,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        queue.write_buffer(&uv_buffer, 0, &uv_bytes);
+        queue.write_buffer(&table_buffer, 0, &table_bytes);
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("mclone_terrain_preview_material_bind_group"),
             layout,
@@ -516,7 +570,7 @@ impl TerrainPreviewMaterialResources {
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
-                    resource: uv_buffer.as_entire_binding(),
+                    resource: table_buffer.as_entire_binding(),
                 },
             ],
         });
@@ -524,7 +578,7 @@ impl TerrainPreviewMaterialResources {
             _texture: texture,
             _view: view,
             _sampler: sampler,
-            _uv_buffer: uv_buffer,
+            _table_buffer: table_buffer,
             bind_group,
         })
     }
@@ -1124,7 +1178,7 @@ impl TerrainViewportRenderer {
                 uniform_layout_entry_with_size(
                     2,
                     wgpu::ShaderStages::FRAGMENT,
-                    (TERRAIN_PREVIEW_MATERIAL_UV_COUNT * 4 * size_of::<f32>()) as u64,
+                    TERRAIN_PREVIEW_MATERIAL_TABLE_BYTES,
                 ),
             ],
         });
@@ -3299,6 +3353,7 @@ impl TerrainHorizonRenderer {
                     0,
                     if multiview { 0b11 } else { 0b01 },
                     render_view_overrides,
+                    presentation.sky_darken,
                     presentation.fog,
                 ),
             );
@@ -3441,6 +3496,7 @@ impl TerrainHorizonRenderer {
                         ),
                         view_mask,
                         render_view_overrides,
+                        presentation.sky_darken,
                         presentation.fog,
                     ),
                 );
@@ -3490,6 +3546,7 @@ impl TerrainHorizonRenderer {
                         0,
                         view_mask,
                         render_view_overrides,
+                        presentation.sky_darken,
                         presentation.fog,
                     ),
                 );
@@ -4027,6 +4084,7 @@ fn terrain_horizon_uniform_bytes(
     normal_edge_flags: u32,
     view_mask: u32,
     render_view_overrides: [Option<mclone_render::chunk::ChunkRenderView>; 2],
+    sky_darken: f32,
     fog: mclone_render::fog::RenderFog,
 ) -> Vec<u8> {
     debug_assert_eq!(
@@ -4061,15 +4119,16 @@ fn terrain_horizon_uniform_bytes(
     const FOG_CAMERA_OFFSET: usize = 14 * 16;
     let camera = render_view_overrides[0].map_or(glam::Vec3::ZERO, |view| view.camera_position);
     let fog_distances = fog.shader_distances();
+    let lightmap = mclone_render::light_texture::lightmap_color(0, 15, sky_darken);
     let values = [
         camera.x,
         camera.y,
         camera.z,
         fog.ground_base_y,
-        0.0,
-        0.0,
+        lightmap[0],
+        lightmap[1],
         fog.shader_options(),
-        0.0,
+        lightmap[2],
         fog.color[0],
         fog.color[1],
         fog.color[2],
@@ -4747,6 +4806,26 @@ mod tests {
         assert!(shader.contains("let vertices_per_cell = select(6u, 30u, voxel_shell);"));
         assert!(shader.contains("bottom_y = top_y - 32.0;"));
         assert!(shader.contains("surface_kind = 2u;"));
+    }
+
+    #[test]
+    fn horizon_near_materials_use_active_pack_faces_and_worldgen_strata() {
+        let table =
+            TerrainPreviewMaterialTable::from_catalog(&mclone_mesh::TexturedMeshCatalog::default());
+        assert_eq!(
+            table.uniform_bytes().len(),
+            TERRAIN_PREVIEW_MATERIAL_TABLE_BYTES as usize
+        );
+
+        let shader = super::super::terrain_preview_render_wgsl(
+            mclone_render_color::RenderTargetColorTransform::Identity,
+        );
+        assert!(!shader.contains("__MCLONE_SURFACE_COLUMN_PROFILE_WGSL__"));
+        assert!(shader.contains("fn mclone_preview_column_profile("));
+        assert!(shader.contains("material_table.side_uvs[material]"));
+        assert!(shader.contains("material_table.grass_tints"));
+        assert!(shader.contains("near_surface_lightmap()"));
+        assert!(shader.contains("terrain_horizon_near_material_weight("));
     }
 
     #[test]

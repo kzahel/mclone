@@ -257,6 +257,7 @@ pub struct TerrainBackdropRenderContext<'a> {
     pub depth_view: &'a wgpu::TextureView,
     pub size: [u32; 2],
     pub render_view: ChunkRenderView,
+    pub sky_darken: f32,
     pub fog: RenderFog,
     pub view_slot: PerViewSlot,
 }
@@ -2743,6 +2744,7 @@ where
                 depth_view: &depth.view,
                 size: frame.target.size,
                 render_view,
+                sky_darken: render_options.sky_darken,
                 fog,
                 view_slot,
             })?;

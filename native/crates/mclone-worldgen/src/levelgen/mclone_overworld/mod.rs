@@ -69,9 +69,10 @@ pub use streams::{
 pub use surface::{
     MCLONE_OVERWORLD_ALPINE_EXPOSED_STONE_MIN_SLOPE, MCLONE_OVERWORLD_ERODED_SLOPE_MIN_STRENGTH,
     MCLONE_OVERWORLD_ERODED_SLOPE_MIN_Y, MCLONE_OVERWORLD_EXPOSED_STONE_MIN_STRENGTH,
-    MCLONE_OVERWORLD_EXPOSED_STONE_MIN_Y, McloneOverworldSurfaceRecipe,
-    mclone_overworld_macro_surface_top_material, mclone_overworld_preview_visible_material,
-    mclone_overworld_surface_recipe,
+    MCLONE_OVERWORLD_EXPOSED_STONE_MIN_Y, McloneOverworldPreviewColumnProfile,
+    McloneOverworldSurfaceRecipe, mclone_overworld_macro_surface_top_material,
+    mclone_overworld_preview_column_profile, mclone_overworld_preview_column_profile_wgsl,
+    mclone_overworld_preview_visible_material, mclone_overworld_surface_recipe,
 };
 pub(crate) use terrain::apply_stream_plans;
 pub use terrain::{

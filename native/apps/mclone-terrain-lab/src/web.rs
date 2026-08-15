@@ -1,12 +1,10 @@
-use mclone_core::BlockStateId;
 use mclone_terrain_view::{
-    TERRAIN_PREVIEW_GPU_EVALUATOR_REVISION, TERRAIN_PREVIEW_MATERIAL_UV_COUNT,
-    TerrainPreviewCamera, TerrainPreviewLayer, TerrainPreviewMaterialAtlas,
-    TerrainPreviewProjectionKind, TerrainPreviewSource, TerrainPreviewView,
-    TerrainViewportCompletedComparison, TerrainViewportDetail, TerrainViewportExternalCpuRequest,
-    TerrainViewportFrameStats, TerrainViewportRenderer, TerrainViewportRequest,
-    TerrainViewportTileId, plan_terrain_viewport, terrain_preview_focus_y,
-    terrain_preview_projection,
+    TERRAIN_PREVIEW_GPU_EVALUATOR_REVISION, TerrainPreviewCamera, TerrainPreviewLayer,
+    TerrainPreviewMaterialAtlas, TerrainPreviewMaterialTable, TerrainPreviewProjectionKind,
+    TerrainPreviewSource, TerrainPreviewView, TerrainViewportCompletedComparison,
+    TerrainViewportDetail, TerrainViewportExternalCpuRequest, TerrainViewportFrameStats,
+    TerrainViewportRenderer, TerrainViewportRequest, TerrainViewportTileId, plan_terrain_viewport,
+    terrain_preview_focus_y, terrain_preview_projection,
 };
 use mclone_worldgen::{
     levelgen::{
@@ -857,12 +855,7 @@ impl TerrainLab {
             &texture_presentation,
         )?
         .terrain;
-        let mut material_uvs = [[0.0_f32, 0.0, 1.0, 1.0]; TERRAIN_PREVIEW_MATERIAL_UV_COUNT];
-        for (raw_id, target) in material_uvs.iter_mut().enumerate() {
-            if let Some(sprite) = assets.catalog.gui_icon_uv(BlockStateId(raw_id as u32)) {
-                *target = [sprite.u0, sprite.v0, sprite.u1, sprite.v1];
-            }
-        }
+        let material_table = TerrainPreviewMaterialTable::from_catalog(&assets.catalog);
         let width = canvas.width().max(1);
         let height = canvas.height().max(1);
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
@@ -926,7 +919,7 @@ impl TerrainLab {
                 width: assets.atlas.width,
                 height: assets.atlas.height,
                 rgba: assets.atlas.rgba(),
-                material_uvs: &material_uvs,
+                material_table: &material_table,
             },
         )?;
         if let Some(error) = device.pop_error_scope().await {

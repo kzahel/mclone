@@ -35,6 +35,131 @@ pub enum McloneOverworldSurfaceRecipe {
     ExposedStone,
 }
 
+/// Bounded material semantics for a visible procedural surface column.
+///
+/// `subsurface_depth` is measured down from the top of the visible surface.
+/// Depth zero uses `upper_side_material`; positive depths below the top use
+/// `subsurface_material` until this exclusive limit, then `body_material`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct McloneOverworldPreviewColumnProfile {
+    pub upper_side_material: RawBlockId,
+    pub subsurface_material: RawBlockId,
+    pub subsurface_depth: u32,
+    pub body_material: RawBlockId,
+}
+
+/// Resolve the compact side-strata contract from the same surface recipe that
+/// writes canonical columns. The recipe is the packed preview code retained in
+/// `TerrainPreviewSample::surface_recipe`.
+pub const fn mclone_overworld_preview_column_profile(
+    visible_material: RawBlockId,
+    surface_recipe_code: u32,
+) -> McloneOverworldPreviewColumnProfile {
+    if visible_material == WATER
+        || (visible_material >= crate::block::WATER_LEVEL_1
+            && visible_material <= crate::block::WATER_LEVEL_8)
+    {
+        return McloneOverworldPreviewColumnProfile {
+            upper_side_material: WATER,
+            subsurface_material: WATER,
+            subsurface_depth: 32,
+            body_material: WATER,
+        };
+    }
+    match surface_recipe_code {
+        0 | 2 => material_column_profile(GRAVEL),
+        3 => McloneOverworldPreviewColumnProfile {
+            upper_side_material: CLAY,
+            subsurface_material: CLAY,
+            subsurface_depth: 2,
+            body_material: STONE,
+        },
+        5 | 7 | 11 => grass_soil_column_profile(),
+        8 => material_column_profile(STONE),
+        _ => material_column_profile(visible_material),
+    }
+}
+
+const fn grass_soil_column_profile() -> McloneOverworldPreviewColumnProfile {
+    McloneOverworldPreviewColumnProfile {
+        upper_side_material: GRASS_BLOCK,
+        subsurface_material: DIRT,
+        subsurface_depth: 3,
+        body_material: STONE,
+    }
+}
+
+const fn material_column_profile(material: RawBlockId) -> McloneOverworldPreviewColumnProfile {
+    match material {
+        GRASS_BLOCK | SNOW => grass_soil_column_profile(),
+        COARSE_DIRT => McloneOverworldPreviewColumnProfile {
+            upper_side_material: COARSE_DIRT,
+            subsurface_material: DIRT,
+            subsurface_depth: 3,
+            body_material: STONE,
+        },
+        SAND => McloneOverworldPreviewColumnProfile {
+            upper_side_material: SAND,
+            subsurface_material: SAND,
+            subsurface_depth: 4,
+            body_material: STONE,
+        },
+        GRAVEL => McloneOverworldPreviewColumnProfile {
+            upper_side_material: GRAVEL,
+            subsurface_material: GRAVEL,
+            subsurface_depth: 2,
+            body_material: STONE,
+        },
+        STONE => McloneOverworldPreviewColumnProfile {
+            upper_side_material: STONE,
+            subsurface_material: STONE,
+            subsurface_depth: 0,
+            body_material: STONE,
+        },
+        _ => McloneOverworldPreviewColumnProfile {
+            upper_side_material: material,
+            subsurface_material: material,
+            subsurface_depth: 3,
+            body_material: STONE,
+        },
+    }
+}
+
+/// WGSL mirror of [`mclone_overworld_preview_column_profile`]. Keeping the
+/// generated rendering helper in the worldgen owner prevents the horizon
+/// shader from inventing an independent surface-writing policy.
+pub const fn mclone_overworld_preview_column_profile_wgsl() -> &'static str {
+    r#"
+fn mclone_material_column_profile(material: u32) -> vec4<u32> {
+    switch material {
+        case 4u, 8u: { return vec4<u32>(4u, 5u, 3u, 1u); }
+        case 13u: { return vec4<u32>(13u, 5u, 3u, 1u); }
+        case 6u: { return vec4<u32>(6u, 6u, 4u, 1u); }
+        case 7u: { return vec4<u32>(7u, 7u, 2u, 1u); }
+        case 1u: { return vec4<u32>(1u, 1u, 0u, 1u); }
+        default: { return vec4<u32>(material, material, 3u, 1u); }
+    }
+}
+
+fn mclone_preview_column_profile(
+    visible_material: u32,
+    surface_recipe_code: u32,
+) -> vec4<u32> {
+    if visible_material == 2u
+        || (visible_material >= 72u && visible_material <= 79u) {
+        return vec4<u32>(2u, 2u, 32u, 2u);
+    }
+    switch surface_recipe_code {
+        case 0u, 2u: { return mclone_material_column_profile(7u); }
+        case 3u: { return vec4<u32>(88u, 88u, 2u, 1u); }
+        case 5u, 7u, 11u: { return vec4<u32>(4u, 5u, 3u, 1u); }
+        case 8u: { return mclone_material_column_profile(1u); }
+        default: { return mclone_material_column_profile(visible_material); }
+    }
+}
+"#
+}
+
 impl McloneOverworldSurfaceRecipe {
     pub const fn label(self) -> &'static str {
         match self {
@@ -621,6 +746,38 @@ mod tests {
             },
             slope,
         }
+    }
+
+    #[test]
+    fn preview_column_profiles_preserve_surface_strata() {
+        assert_eq!(
+            mclone_overworld_preview_column_profile(GRASS_BLOCK, 5),
+            McloneOverworldPreviewColumnProfile {
+                upper_side_material: GRASS_BLOCK,
+                subsurface_material: DIRT,
+                subsurface_depth: 3,
+                body_material: STONE,
+            }
+        );
+        assert_eq!(
+            mclone_overworld_preview_column_profile(SAND, 1),
+            McloneOverworldPreviewColumnProfile {
+                upper_side_material: SAND,
+                subsurface_material: SAND,
+                subsurface_depth: 4,
+                body_material: STONE,
+            }
+        );
+        assert_eq!(
+            mclone_overworld_preview_column_profile(WATER, 2),
+            McloneOverworldPreviewColumnProfile {
+                upper_side_material: WATER,
+                subsurface_material: WATER,
+                subsurface_depth: 32,
+                body_material: WATER,
+            }
+        );
+        assert!(mclone_overworld_preview_column_profile_wgsl().contains("case 5u, 7u, 11u"));
     }
 
     fn with_coast(

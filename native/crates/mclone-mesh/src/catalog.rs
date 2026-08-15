@@ -42,6 +42,16 @@ pub struct TexturedBlockFace {
     pub shade: bool,
 }
 
+/// Direction-aware terrain material selected from a baked block model for a
+/// derived surface representation such as the procedural horizon.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TexturedTerrainSurfaceMaterial {
+    pub top: AtlasSpriteUv,
+    pub top_tint: TexturedBlockTint,
+    pub side: AtlasSpriteUv,
+    pub side_tint: TexturedBlockTint,
+}
+
 /// Client-local decorative leaf geometry policy.
 ///
 /// This is deliberately catalog state rather than renderer state: changing it
@@ -512,6 +522,53 @@ impl TexturedMeshCatalog {
             .find(|face| face.direction == ModelFaceDirection::Up)
             .or_else(|| model.faces.first())
             .map(|face| face.sprite)
+    }
+
+    /// Resolve one upward and one cardinal presentation from the same baked
+    /// active-pack model used by exact chunk meshing.
+    pub fn terrain_surface_material(
+        &self,
+        state_id: BlockStateId,
+    ) -> Option<TexturedTerrainSurfaceMaterial> {
+        let model = self.blocks.get(&state_id)?;
+        if let Some(fluid) = model.fluid {
+            return Some(TexturedTerrainSurfaceMaterial {
+                top: fluid.still,
+                top_tint: TexturedBlockTint::None,
+                side: fluid.flow,
+                side_tint: TexturedBlockTint::None,
+            });
+        }
+        let top = model
+            .faces
+            .iter()
+            .find(|face| face.direction == ModelFaceDirection::Up)
+            .or_else(|| model.faces.first())?;
+        let side = model
+            .faces
+            .iter()
+            .find(|face| {
+                matches!(
+                    face.direction,
+                    ModelFaceDirection::North
+                        | ModelFaceDirection::South
+                        | ModelFaceDirection::West
+                        | ModelFaceDirection::East
+                )
+            })
+            .unwrap_or(top);
+        Some(TexturedTerrainSurfaceMaterial {
+            top: top.sprite,
+            top_tint: top.tint,
+            side: side.sprite,
+            side_tint: side.tint,
+        })
+    }
+
+    /// Sample the active-pack grass colormap through the exact terrain tint
+    /// path for a representative unblended biome.
+    pub fn terrain_grass_tint(&self, biome_id: i32) -> [f32; 3] {
+        crate::tint::block_tint(self, TexturedBlockTint::Grass, 0, 64, 0, |_, _, _| biome_id)
     }
 
     pub fn occludes(&self, state_id: BlockStateId) -> bool {

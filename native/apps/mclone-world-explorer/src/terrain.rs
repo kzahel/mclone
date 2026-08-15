@@ -7,15 +7,14 @@ use mclone_assets::{
     DIAGNOSTIC_MISSING_PACK_ID, PROVISIONAL_FIRST_PARTY_PACK_ID, PackedAssetSource,
     TexturePresentation,
 };
-use mclone_core::BlockStateId;
 use mclone_mesh::{
     TexturedTerrainAssets, load_first_party_textured_terrain_assets_with_presentation,
 };
 use mclone_render::chunk::ChunkTextureAtlas;
 use mclone_render_color::RenderColorProfile;
 use mclone_terrain_view::{
-    TERRAIN_PREVIEW_MATERIAL_UV_COUNT, TerrainClipmapConfig, TerrainExactCoverageMode,
-    TerrainHorizonFrameStats, TerrainHorizonRenderTarget, TerrainPreviewMaterialAtlas,
+    TerrainClipmapConfig, TerrainExactCoverageMode, TerrainHorizonFrameStats,
+    TerrainHorizonRenderTarget, TerrainPreviewMaterialAtlas, TerrainPreviewMaterialTable,
 };
 use mclone_view_control::{WorldViewHeldDirection, WorldViewIntent, WorldViewState};
 use mclone_world_explorer::{
@@ -44,12 +43,7 @@ impl ExplorerTerrain {
         started: Instant,
     ) -> Result<Self> {
         let assets = load_assets(&options.asset_root, options.asset_profile)?;
-        let mut material_uvs = [[0.0_f32, 0.0, 1.0, 1.0]; TERRAIN_PREVIEW_MATERIAL_UV_COUNT];
-        for (raw_id, target) in material_uvs.iter_mut().enumerate() {
-            if let Some(sprite) = assets.catalog.gui_icon_uv(BlockStateId(raw_id as u32)) {
-                *target = [sprite.u0, sprite.v0, sprite.u1, sprite.v1];
-            }
-        }
+        let material_table = TerrainPreviewMaterialTable::from_catalog(&assets.catalog);
         let target_color_transform =
             RenderColorProfile::Vanilla.target_color_transform(color_format);
         let session = WorldExplorerSession::new(
@@ -69,7 +63,7 @@ impl ExplorerTerrain {
                 width: assets.atlas.width,
                 height: assets.atlas.height,
                 rgba: assets.atlas.rgba(),
-                material_uvs: &material_uvs,
+                material_table: &material_table,
             },
             Some(Box::new(NativeTerrainVegetationExecutor::new())),
         )

@@ -24,9 +24,10 @@ pub use builder::{
     merge_textured_render_section_meshes,
 };
 pub use catalog::{
-    AtlasSpriteUv, LeafDetail, TexturedBlockFace, TexturedBlockModel, TexturedColorMap,
-    TexturedColorMaps, TexturedFluidKind, TexturedFluidModel, TexturedLeafCardModel,
-    TexturedMeshCatalog, TexturedMeshError, TexturedTerrainRenderLayer,
+    AtlasSpriteUv, LeafDetail, TexturedBlockFace, TexturedBlockModel, TexturedBlockTint,
+    TexturedColorMap, TexturedColorMaps, TexturedFluidKind, TexturedFluidModel,
+    TexturedLeafCardModel, TexturedMeshCatalog, TexturedMeshError, TexturedTerrainRenderLayer,
+    TexturedTerrainSurfaceMaterial,
 };
 pub use data::{
     ChunkVertex, GrassPatch, RenderSectionKey, SectionMeshStats, TexturedChunkVertex,
