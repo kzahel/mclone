@@ -4831,7 +4831,7 @@ mod tests {
         assert!(shader.contains("fn mclone_preview_column_profile("));
         assert!(shader.contains("material_table.side_uvs[material]"));
         assert!(shader.contains("material_table.grass_tints"));
-        assert!(shader.contains("near_surface_lightmap()"));
+        assert!(shader.contains("full_sky_environmental_illumination()"));
         assert!(shader.contains("if display_material != 2u"));
         assert!(shader.contains("terrain_horizon_near_material_weight("));
     }
@@ -4849,7 +4849,24 @@ mod tests {
         }
         assert!(terrain.contains("diagnostic_river_alpha"));
         assert!(terrain.contains("material_texture_weight("));
-        assert!(trees.contains("Proxy vegetation currently omits environmental illumination"));
+    }
+
+    #[test]
+    fn horizon_environment_is_topology_independent_for_terrain_water_and_trees() {
+        let terrain = super::super::TERRAIN_PREVIEW_RENDER_WGSL;
+        let trees = super::super::TERRAIN_PREVIEW_TREE_WGSL;
+        for shader in [terrain, trees] {
+            assert!(shader.contains("fn full_sky_environmental_illumination()"));
+            assert!(shader.contains(
+                "let environmental_illumination = full_sky_environmental_illumination();"
+            ));
+            assert!(shader.contains("color = environmental_illumination;"));
+        }
+        assert!(terrain.contains("color *= environmental_illumination;"));
+        assert!(!terrain.contains("* near_surface_lightmap()"));
+        assert!(trees.contains(
+            "input.color.rgb * input.color.a * environmental_illumination"
+        ));
     }
 
     #[test]

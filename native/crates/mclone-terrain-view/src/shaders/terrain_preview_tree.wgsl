@@ -127,6 +127,14 @@ fn terrain_horizon_level_color(sample_spacing: u32) -> vec3<f32> {
     return colors[level];
 }
 
+fn full_sky_environmental_illumination() -> vec3<f32> {
+    return vec3<f32>(
+        params.fog_render_options.x,
+        params.fog_render_options.y,
+        params.fog_render_options.w,
+    );
+}
+
 fn tree_vertex(
     input: TreeInstance,
     vertex_index: u32,
@@ -249,7 +257,8 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
     }
     let exact_painted = exact_chunk_painted(input.world_xz);
     let diagnostic = params.multiview_options.y;
-    var color = input.color.rgb * input.color.a;
+    let environmental_illumination = full_sky_environmental_illumination();
+    var color = input.color.rgb * input.color.a * environmental_illumination;
     if diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_OWNERSHIP_LEVEL {
         color = terrain_horizon_level_color(u32(params.origin_spacing_cells.z));
     } else if diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_TOPOLOGY {
@@ -257,8 +266,7 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
     } else if diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_ALBEDO {
         color = input.color.rgb;
     } else if diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_ENVIRONMENT {
-        // Proxy vegetation currently omits environmental illumination.
-        color = vec3<f32>(1.0);
+        color = environmental_illumination;
     } else if diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_GEOMETRY {
         color = vec3<f32>(input.color.a);
     } else if diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_OCCLUSION {

@@ -1073,7 +1073,7 @@ fn near_surface_tint(input: VertexOutput, material: u32, side_surface: bool) -> 
     return material_table.grass_tints[min(biome, 255u)].rgb;
 }
 
-fn near_surface_lightmap() -> vec3<f32> {
+fn full_sky_environmental_illumination() -> vec3<f32> {
     return vec3<f32>(
         params.fog_render_options.x,
         params.fog_render_options.y,
@@ -1118,6 +1118,7 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let physical_channel_edge = max(fwidth(input.river.z), 0.001);
     let diagnostic = params.multiview_options.y;
     let albedo_diagnostic = diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_ALBEDO;
+    let environmental_illumination = full_sky_environmental_illumination();
     var color = input.color;
     var albedo = input.color / max(input.light, 0.001);
     var diagnostic_river_alpha = 0.0;
@@ -1168,8 +1169,7 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
         var near_albedo = far_albedo;
         if display_material != 2u {
             near_color = near_surface_tint(input, display_material, side_surface)
-                * input.light
-                * near_surface_lightmap();
+                * input.light;
             near_color = apply_material_texture(
                 near_color,
                 display_material,
@@ -1305,6 +1305,10 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
             }
         }
     }
+    // Environment is independent of material, water ownership, and clipmap
+    // topology. Apply the exact renderer's full-sky/zero-block-light term once
+    // after all albedo and geometric-shade composition.
+    color *= environmental_illumination;
     if diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_OWNERSHIP_LEVEL {
         color = terrain_horizon_level_color(u32(params.origin_spacing_cells.z));
     } else if diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_TOPOLOGY {
@@ -1320,15 +1324,7 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
     } else if diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_ALBEDO {
         color = albedo;
     } else if diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_ENVIRONMENT {
-        var environment = vec3<f32>(1.0);
-        if input.near_shell != 0u && display_material != 2u {
-            environment = mix(
-                environment,
-                near_surface_lightmap(),
-                input.world_position.w,
-            );
-        }
-        color = environment;
+        color = environmental_illumination;
     } else if diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_GEOMETRY {
         color = vec3<f32>(input.light);
     } else if diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_OCCLUSION {
