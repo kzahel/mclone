@@ -39,6 +39,15 @@ const TERRAIN_HORIZON_NORMAL_EDGE_WEST: u32 = 0x08000000u;
 const TERRAIN_HORIZON_NORMAL_EDGE_EAST: u32 = 0x10000000u;
 const TERRAIN_HORIZON_NORMAL_EDGE_NORTH: u32 = 0x20000000u;
 const TERRAIN_HORIZON_NORMAL_EDGE_SOUTH: u32 = 0x40000000u;
+const TERRAIN_HORIZON_DIAGNOSTIC_NATURAL: u32 = 0u;
+const TERRAIN_HORIZON_DIAGNOSTIC_OWNERSHIP_LEVEL: u32 = 1u;
+const TERRAIN_HORIZON_DIAGNOSTIC_TOPOLOGY: u32 = 2u;
+const TERRAIN_HORIZON_DIAGNOSTIC_ALBEDO: u32 = 3u;
+const TERRAIN_HORIZON_DIAGNOSTIC_ENVIRONMENT: u32 = 4u;
+const TERRAIN_HORIZON_DIAGNOSTIC_GEOMETRY: u32 = 5u;
+const TERRAIN_HORIZON_DIAGNOSTIC_OCCLUSION: u32 = 6u;
+const TERRAIN_HORIZON_DIAGNOSTIC_WATER: u32 = 7u;
+const TERRAIN_HORIZON_DIAGNOSTIC_TEXTURE: u32 = 8u;
 override terrain_sample_halo_radius: u32 = 0u;
 override terrain_render_cell_stride: u32 = 1u;
 
@@ -989,17 +998,50 @@ fn apply_material_texture(
         atlas_dx,
         atlas_dy,
     );
-    var texture_weight = mix(
+    let texture_weight = select(
+        mix(
+            0.82,
+            0.42,
+            clamp((blocks_per_pixel - 1.0) / 7.0, 0.0, 1.0),
+        ),
+        1.0,
+        exact_weight,
+    );
+    let texture_detail = select(
+        clamp(texel.rgb * 1.25, vec3<f32>(0.0), vec3<f32>(1.5)),
+        texel.rgb,
+        exact_weight,
+    );
+    return base_color * mix(vec3<f32>(1.0), texture_detail, texture_weight);
+}
+
+fn material_texture_weight(blocks_per_pixel: f32, exact_weight: bool) -> f32 {
+    return select(
+        mix(
         0.82,
         0.42,
         clamp((blocks_per_pixel - 1.0) / 7.0, 0.0, 1.0),
+        ),
+        1.0,
+        exact_weight,
     );
-    var texture_detail = clamp(texel.rgb * 1.25, vec3<f32>(0.0), vec3<f32>(1.5));
-    if exact_weight {
-        texture_weight = 1.0;
-        texture_detail = texel.rgb;
-    }
-    return base_color * mix(vec3<f32>(1.0), texture_detail, texture_weight);
+}
+
+fn terrain_horizon_level_color(sample_spacing: u32) -> vec3<f32> {
+    let colors = array<vec3<f32>, 10>(
+        vec3<f32>(0.95, 0.18, 0.12),
+        vec3<f32>(1.00, 0.55, 0.08),
+        vec3<f32>(0.92, 0.88, 0.12),
+        vec3<f32>(0.30, 0.82, 0.18),
+        vec3<f32>(0.08, 0.78, 0.72),
+        vec3<f32>(0.08, 0.48, 0.96),
+        vec3<f32>(0.30, 0.20, 0.92),
+        vec3<f32>(0.68, 0.16, 0.90),
+        vec3<f32>(0.95, 0.18, 0.62),
+        vec3<f32>(0.75, 0.75, 0.75),
+    );
+    let level = min(u32(round(log2(max(f32(sample_spacing), 1.0)))), 9u);
+    return colors[level];
 }
 
 fn resolved_surface_material(input: VertexOutput) -> u32 {
@@ -1075,6 +1117,9 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let pool_anti_alias = max(fwidth(input.semantics.y), 0.01);
     let physical_channel_edge = max(fwidth(input.river.z), 0.001);
     var color = input.color;
+    var albedo = input.color / max(input.light, 0.001);
+    var diagnostic_river_alpha = 0.0;
+    var diagnostic_pool_alpha = 0.0;
     let face_normal = normalize(cross(
         dpdx(input.world_position.xyz),
         dpdy(input.world_position.xyz),
@@ -1086,11 +1131,13 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
     if preview_profile() == 1u && surface_quality() >= 1u
         && steep_mountain_face && grass_family {
         color = vec3<f32>(0.48, 0.49, 0.47) * input.light;
+        albedo = vec3<f32>(0.48, 0.49, 0.47);
     }
     let side_surface = input.near_shell != 0u && input.surface_kind != 0u;
     let display_material = resolved_surface_material(input);
     if input.textured != 0u && input.near_shell != 0u && display_material < 256u {
         var far_color = color;
+        var far_albedo = albedo;
         if input.material < 256u {
             far_color = apply_material_texture(
                 far_color,
@@ -1102,8 +1149,19 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
                 material_blocks_per_pixel,
                 false,
             );
+            far_albedo = apply_material_texture(
+                far_albedo,
+                input.material,
+                false,
+                input.world_uv,
+                material_dx,
+                material_dy,
+                material_blocks_per_pixel,
+                false,
+            );
         }
         var near_color = far_color;
+        var near_albedo = far_albedo;
         if display_material != 2u {
             near_color = near_surface_tint(input, display_material, side_surface)
                 * input.light
@@ -1118,11 +1176,32 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
                 material_blocks_per_pixel,
                 true,
             );
+            near_albedo = apply_material_texture(
+                near_surface_tint(input, display_material, side_surface),
+                display_material,
+                side_surface,
+                input.world_uv,
+                material_dx,
+                material_dy,
+                material_blocks_per_pixel,
+                true,
+            );
         }
         color = mix(far_color, near_color, input.world_position.w);
+        albedo = mix(far_albedo, near_albedo, input.world_position.w);
     } else if input.textured != 0u && input.material < 256u {
         color = apply_material_texture(
             color,
+            input.material,
+            false,
+            input.world_uv,
+            material_dx,
+            material_dy,
+            material_blocks_per_pixel,
+            false,
+        );
+        albedo = apply_material_texture(
+            albedo,
             input.material,
             false,
             input.world_uv,
@@ -1154,7 +1233,9 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
             input.river.w > 0.0,
         );
         let river_alpha = river_distance_alpha * continental_channel_alpha;
+        diagnostic_river_alpha = river_alpha;
         var river_color = color;
+        var river_albedo = albedo;
         if input.material != 2u {
             river_color = apply_material_texture(
                 water_surface_color(input.surface_y, input.light),
@@ -1166,23 +1247,118 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
                 blocks_per_pixel,
                 input.near_shell != 0u,
             );
+            river_albedo = apply_material_texture(
+                water_surface_color(input.surface_y, 1.0),
+                2u,
+                false,
+                input.world_xz,
+                world_dx,
+                world_dy,
+                blocks_per_pixel,
+                input.near_shell != 0u,
+            );
         }
         color = mix(color, river_color, river_alpha);
+        albedo = mix(albedo, river_albedo, river_alpha);
         let pool_alpha = smoothstep(
             0.55 - pool_anti_alias,
             0.55 + pool_anti_alias,
             input.semantics.y,
         );
+        diagnostic_pool_alpha = pool_alpha;
         let water_alpha = max(river_alpha, pool_alpha);
         color = mix(
             color,
             water_surface_color(input.river.w, input.light),
             water_alpha * 0.88,
         );
+        albedo = mix(
+            albedo,
+            water_surface_color(input.river.w, 1.0),
+            water_alpha * 0.88,
+        );
         if params.content_stage_flags.x >= 4u {
             let cover = clamp(input.semantics.w, 0.0, 1.0);
             color = mix(color, color * vec3<f32>(0.57, 0.82, 0.58), cover * 0.36);
+            albedo = mix(
+                albedo,
+                albedo * vec3<f32>(0.57, 0.82, 0.58),
+                cover * 0.36,
+            );
         }
+    }
+    let diagnostic = params.multiview_options.y;
+    if diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_OWNERSHIP_LEVEL {
+        color = terrain_horizon_level_color(u32(params.origin_spacing_cells.z));
+    } else if diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_TOPOLOGY {
+        color = vec3<f32>(0.08, 0.42, 0.95);
+        if input.near_shell != 0u {
+            color = vec3<f32>(0.18, 0.86, 0.22);
+            if input.surface_kind == 1u {
+                color = vec3<f32>(1.0, 0.55, 0.06);
+            } else if input.surface_kind == 2u {
+                color = vec3<f32>(0.96, 0.06, 0.72);
+            }
+        }
+    } else if diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_ALBEDO {
+        color = albedo;
+    } else if diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_ENVIRONMENT {
+        var environment = vec3<f32>(1.0);
+        if input.near_shell != 0u && display_material != 2u {
+            environment = mix(
+                environment,
+                near_surface_lightmap(),
+                input.world_position.w,
+            );
+        }
+        color = environment;
+    } else if diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_GEOMETRY {
+        color = vec3<f32>(input.light);
+    } else if diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_OCCLUSION {
+        // Procedural terrain currently has no local AO term. White is the
+        // identity multiplier and makes that absence explicit at the seam.
+        color = vec3<f32>(1.0);
+    } else if diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_WATER {
+        color = vec3<f32>(0.035);
+        if input.material == 2u {
+            let bed_depth = clamp((63.0 - input.surface_y) / 32.0, 0.0, 1.0);
+            color = mix(
+                vec3<f32>(0.06, 0.46, 0.92),
+                vec3<f32>(0.08, 0.12, 0.48),
+                bed_depth,
+            );
+        }
+        color = mix(
+            color,
+            vec3<f32>(0.04, 0.94, 0.82),
+            diagnostic_river_alpha,
+        );
+        color = mix(
+            color,
+            vec3<f32>(0.88, 0.10, 0.94),
+            diagnostic_pool_alpha,
+        );
+    } else if diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_TEXTURE {
+        var texture_weight = 0.0;
+        if input.textured != 0u {
+            texture_weight = material_texture_weight(material_blocks_per_pixel, false);
+            if input.near_shell != 0u && display_material != 2u {
+                texture_weight = mix(texture_weight, 1.0, input.world_position.w);
+            }
+            if diagnostic_river_alpha > 0.0 {
+                let river_texture_weight = material_texture_weight(
+                    blocks_per_pixel,
+                    input.near_shell != 0u,
+                );
+                texture_weight = mix(
+                    texture_weight,
+                    river_texture_weight,
+                    diagnostic_river_alpha,
+                );
+            }
+        }
+        let footprint = clamp(log2(max(material_blocks_per_pixel, 1.0)) / 6.0, 0.0, 1.0);
+        color = vec3<f32>(texture_weight, footprint, input.world_position.w);
     }
     if exact_coverage.mode_count_generation.x == 2u && exact_painted {
         let checker = (i32(floor(input.world_xz.x / 2.0))
@@ -1194,18 +1370,20 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
         );
         color = mix(color, coverage_color, 0.82);
     }
-    var fog_camera_position = params.fog_camera_position;
-    if input.view_index != 0u {
-        fog_camera_position = params.fog_camera_position_right;
+    if diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_NATURAL {
+        var fog_camera_position = params.fog_camera_position;
+        if input.view_index != 0u {
+            fog_camera_position = params.fog_camera_position_right;
+        }
+        let fog_factor = mclone_fog_factor(
+            input.world_position.xyz,
+            fog_camera_position,
+            params.fog_render_options,
+            params.fog_color,
+            params.fog_distances,
+        );
+        color = mix(color, params.fog_color.rgb, fog_factor);
     }
-    let fog_factor = mclone_fog_factor(
-        input.world_position.xyz,
-        fog_camera_position,
-        params.fog_render_options,
-        params.fog_color,
-        params.fog_distances,
-    );
-    color = mix(color, params.fog_color.rgb, fog_factor);
     return mclone_apply_target_color_transform_rgba(
         vec4<f32>(color, 1.0),
         terrain_target_color_transform,

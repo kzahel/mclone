@@ -384,6 +384,60 @@ impl Default for TerrainPreviewCamera {
     }
 }
 
+/// Developer-only decomposition of the procedural horizon surface response.
+///
+/// These views retain the committed clipmap geometry, coverage, camera, and
+/// vegetation presentation while replacing final material color with one
+/// isolated appearance term. `Natural` is the ordinary product path.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[repr(u32)]
+pub enum TerrainHorizonDiagnostic {
+    #[default]
+    Natural = 0,
+    OwnershipLevel = 1,
+    Topology = 2,
+    Albedo = 3,
+    EnvironmentalIllumination = 4,
+    GeometricShade = 5,
+    LocalOcclusion = 6,
+    Water = 7,
+    Texture = 8,
+}
+
+impl TerrainHorizonDiagnostic {
+    pub const ALL: [Self; 9] = [
+        Self::Natural,
+        Self::OwnershipLevel,
+        Self::Topology,
+        Self::Albedo,
+        Self::EnvironmentalIllumination,
+        Self::GeometricShade,
+        Self::LocalOcclusion,
+        Self::Water,
+        Self::Texture,
+    ];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Natural => "natural",
+            Self::OwnershipLevel => "ownership-level",
+            Self::Topology => "topology",
+            Self::Albedo => "albedo",
+            Self::EnvironmentalIllumination => "environmental-illumination",
+            Self::GeometricShade => "geometric-shade",
+            Self::LocalOcclusion => "local-occlusion",
+            Self::Water => "water",
+            Self::Texture => "texture",
+        }
+    }
+
+    pub fn parse_label(value: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|diagnostic| diagnostic.label() == value)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TerrainHorizonPresentation {
     pub center_x: f64,
@@ -395,6 +449,7 @@ pub struct TerrainHorizonPresentation {
     pub target_y: f32,
     pub sky_darken: f32,
     pub fog: mclone_render::fog::RenderFog,
+    pub diagnostic: TerrainHorizonDiagnostic,
     render_view_override: Option<mclone_render::chunk::ChunkRenderView>,
     multiview_render_view_override: Option<[mclone_render::chunk::ChunkRenderView; 2]>,
 }
@@ -418,6 +473,7 @@ impl TerrainHorizonPresentation {
             target_y: terrain_horizon_orbit_target_y(),
             sky_darken: 1.0,
             fog: mclone_render::fog::RenderFog::none(),
+            diagnostic: TerrainHorizonDiagnostic::Natural,
             render_view_override: None,
             multiview_render_view_override: None,
         };
@@ -473,6 +529,11 @@ impl TerrainHorizonPresentation {
 
     pub fn with_sky_darken(mut self, sky_darken: f32) -> Self {
         self.sky_darken = sky_darken.clamp(0.0, 1.0);
+        self
+    }
+
+    pub fn with_diagnostic(mut self, diagnostic: TerrainHorizonDiagnostic) -> Self {
+        self.diagnostic = diagnostic;
         self
     }
 
@@ -1897,6 +1958,33 @@ mod tests {
         .unwrap();
         assert_eq!(presentation.with_sky_darken(-1.0).sky_darken, 0.0);
         assert_eq!(presentation.with_sky_darken(2.0).sky_darken, 1.0);
+    }
+
+    #[test]
+    fn horizon_diagnostic_labels_round_trip_and_default_to_natural() {
+        for diagnostic in TerrainHorizonDiagnostic::ALL {
+            assert_eq!(
+                TerrainHorizonDiagnostic::parse_label(diagnostic.label()),
+                Some(diagnostic)
+            );
+        }
+        assert_eq!(TerrainHorizonDiagnostic::parse_label("ambient-ish"), None);
+        let presentation = TerrainHorizonPresentation::new(
+            0.0,
+            0.0,
+            64.0,
+            64.0,
+            TerrainPreviewView::ThreeDimensional,
+            TerrainPreviewCamera::default(),
+        )
+        .unwrap();
+        assert_eq!(presentation.diagnostic, TerrainHorizonDiagnostic::Natural);
+        assert_eq!(
+            presentation
+                .with_diagnostic(TerrainHorizonDiagnostic::Water)
+                .diagnostic,
+            TerrainHorizonDiagnostic::Water
+        );
     }
 
     #[test]

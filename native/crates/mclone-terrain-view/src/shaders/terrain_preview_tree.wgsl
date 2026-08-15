@@ -23,6 +23,16 @@ struct TerrainPreviewParams {
 const terrain_target_color_transform: f32 = __MCLONE_TARGET_COLOR_TRANSFORM__;
 // MCLONE_FOG_FUNCTION
 
+const TERRAIN_HORIZON_DIAGNOSTIC_NATURAL: u32 = 0u;
+const TERRAIN_HORIZON_DIAGNOSTIC_OWNERSHIP_LEVEL: u32 = 1u;
+const TERRAIN_HORIZON_DIAGNOSTIC_TOPOLOGY: u32 = 2u;
+const TERRAIN_HORIZON_DIAGNOSTIC_ALBEDO: u32 = 3u;
+const TERRAIN_HORIZON_DIAGNOSTIC_ENVIRONMENT: u32 = 4u;
+const TERRAIN_HORIZON_DIAGNOSTIC_GEOMETRY: u32 = 5u;
+const TERRAIN_HORIZON_DIAGNOSTIC_OCCLUSION: u32 = 6u;
+const TERRAIN_HORIZON_DIAGNOSTIC_WATER: u32 = 7u;
+const TERRAIN_HORIZON_DIAGNOSTIC_TEXTURE: u32 = 8u;
+
 @group(0) @binding(0)
 var<uniform> params: TerrainPreviewParams;
 
@@ -45,7 +55,8 @@ struct TreeInstance {
 
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
-    @location(0) color: vec3<f32>,
+    // RGB is unlit family albedo; A is the proxy's geometric height shade.
+    @location(0) color: vec4<f32>,
     @location(1) world_xz: vec2<f32>,
     @location(2) world_position: vec3<f32>,
     @location(3) @interpolate(flat) view_index: u32,
@@ -97,6 +108,23 @@ fn family_color(family: u32, trunk: bool) -> vec3<f32> {
         return vec3<f32>(0.37, 0.50, 0.16);
     }
     return vec3<f32>(0.16, 0.45, 0.20);
+}
+
+fn terrain_horizon_level_color(sample_spacing: u32) -> vec3<f32> {
+    let colors = array<vec3<f32>, 10>(
+        vec3<f32>(0.95, 0.18, 0.12),
+        vec3<f32>(1.00, 0.55, 0.08),
+        vec3<f32>(0.92, 0.88, 0.12),
+        vec3<f32>(0.30, 0.82, 0.18),
+        vec3<f32>(0.08, 0.78, 0.72),
+        vec3<f32>(0.08, 0.48, 0.96),
+        vec3<f32>(0.30, 0.20, 0.92),
+        vec3<f32>(0.68, 0.16, 0.90),
+        vec3<f32>(0.95, 0.18, 0.62),
+        vec3<f32>(0.75, 0.75, 0.75),
+    );
+    let level = min(u32(round(log2(max(f32(sample_spacing), 1.0)))), 9u);
+    return colors[level];
 }
 
 fn tree_vertex(
@@ -192,7 +220,7 @@ fn tree_vertex(
     var out: VertexOutput;
     out.position = clip_position;
     let height_shade = clamp(0.78 + corner.y * 0.08, 0.62, 0.92);
-    out.color = family_color(family, trunk) * height_shade;
+    out.color = vec4<f32>(family_color(family, trunk), height_shade);
     out.world_xz = world.xz;
     out.world_position = world;
     out.view_index = view_index;
@@ -220,22 +248,42 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
         discard;
     }
     let exact_painted = exact_chunk_painted(input.world_xz);
-    var color = input.color;
+    let diagnostic = params.multiview_options.y;
+    var color = input.color.rgb * input.color.a;
+    if diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_OWNERSHIP_LEVEL {
+        color = terrain_horizon_level_color(u32(params.origin_spacing_cells.z));
+    } else if diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_TOPOLOGY {
+        color = vec3<f32>(0.94, 0.10, 0.72);
+    } else if diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_ALBEDO {
+        color = input.color.rgb;
+    } else if diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_ENVIRONMENT {
+        // Proxy vegetation currently omits environmental illumination.
+        color = vec3<f32>(1.0);
+    } else if diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_GEOMETRY {
+        color = vec3<f32>(input.color.a);
+    } else if diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_OCCLUSION {
+        color = vec3<f32>(1.0);
+    } else if diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_WATER
+        || diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_TEXTURE {
+        color = vec3<f32>(0.0);
+    }
     if exact_coverage.mode_count_generation.x == 2u && exact_painted {
         color = mix(color, vec3<f32>(1.0, 0.08, 0.72), 0.86);
     }
-    var fog_camera_position = params.fog_camera_position;
-    if input.view_index != 0u {
-        fog_camera_position = params.fog_camera_position_right;
+    if diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_NATURAL {
+        var fog_camera_position = params.fog_camera_position;
+        if input.view_index != 0u {
+            fog_camera_position = params.fog_camera_position_right;
+        }
+        let fog_factor = mclone_fog_factor(
+            input.world_position,
+            fog_camera_position,
+            params.fog_render_options,
+            params.fog_color,
+            params.fog_distances,
+        );
+        color = mix(color, params.fog_color.rgb, fog_factor);
     }
-    let fog_factor = mclone_fog_factor(
-        input.world_position,
-        fog_camera_position,
-        params.fog_render_options,
-        params.fog_color,
-        params.fog_distances,
-    );
-    color = mix(color, params.fog_color.rgb, fog_factor);
     return mclone_apply_target_color_transform_rgba(
         vec4<f32>(color, 1.0),
         terrain_target_color_transform,

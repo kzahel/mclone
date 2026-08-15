@@ -86,6 +86,8 @@ pub(crate) fn run_remote_player_visual_smoke(
         controller_focus: false,
         scripted_interaction: false,
         remote_settle_ms: REMOTE_SETTLE_MS,
+        settle_frames: 0,
+        terrain_horizon_diagnostic: Default::default(),
         eye: None,
         target: None,
     });

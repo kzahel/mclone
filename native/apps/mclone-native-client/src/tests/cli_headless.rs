@@ -576,6 +576,10 @@ fn cli_parses_full_frame_screenshot_options() {
         "true".to_owned(),
         "--screenshot-remote-settle-ms".to_owned(),
         "750".to_owned(),
+        "--screenshot-settle-frames".to_owned(),
+        "90".to_owned(),
+        "--screenshot-terrain-horizon-diagnostic".to_owned(),
+        "environmental-illumination".to_owned(),
         "--screenshot-eye".to_owned(),
         "1.5,62.25,-3".to_owned(),
         "--screenshot-target".to_owned(),
@@ -620,11 +624,29 @@ fn cli_parses_full_frame_screenshot_options() {
                 controller_focus: true,
                 scripted_interaction: true,
                 remote_settle_ms: 750,
+                settle_frames: 90,
+                terrain_horizon_diagnostic:
+                    mclone_scene::TerrainHorizonDiagnostic::EnvironmentalIllumination,
                 eye: Some([1.5, 62.25, -3.0]),
                 target: Some([8.0, 64.0, 8.0]),
             },
         }
     );
+}
+
+#[test]
+fn cli_rejects_unknown_terrain_horizon_diagnostic() {
+    let error = Cli::parse([
+        "--screenshot".to_owned(),
+        "/tmp/mclone-frame.png".to_owned(),
+        "--screenshot-terrain-horizon-diagnostic".to_owned(),
+        "ambient-ish".to_owned(),
+    ])
+    .unwrap_err()
+    .to_string();
+
+    assert!(error.contains("environmental-illumination"));
+    assert!(error.contains("ambient-ish"));
 }
 
 #[test]

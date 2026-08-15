@@ -3355,6 +3355,7 @@ impl TerrainHorizonRenderer {
                     render_view_overrides,
                     presentation.sky_darken,
                     presentation.fog,
+                    presentation.diagnostic,
                 ),
             );
             {
@@ -3498,6 +3499,7 @@ impl TerrainHorizonRenderer {
                         render_view_overrides,
                         presentation.sky_darken,
                         presentation.fog,
+                        presentation.diagnostic,
                     ),
                 );
             }
@@ -3548,6 +3550,7 @@ impl TerrainHorizonRenderer {
                         render_view_overrides,
                         presentation.sky_darken,
                         presentation.fog,
+                        presentation.diagnostic,
                     ),
                 );
             }
@@ -4086,6 +4089,7 @@ fn terrain_horizon_uniform_bytes(
     render_view_overrides: [Option<mclone_render::chunk::ChunkRenderView>; 2],
     sky_darken: f32,
     fog: mclone_render::fog::RenderFog,
+    diagnostic: super::TerrainHorizonDiagnostic,
 ) -> Vec<u8> {
     debug_assert_eq!(
         normal_edge_flags
@@ -4171,6 +4175,9 @@ fn terrain_horizon_uniform_bytes(
     const MULTIVIEW_OPTIONS_OFFSET: usize = 23 * 16;
     bytes[MULTIVIEW_OPTIONS_OFFSET..MULTIVIEW_OPTIONS_OFFSET + size_of::<u32>()]
         .copy_from_slice(&view_mask.to_le_bytes());
+    bytes[MULTIVIEW_OPTIONS_OFFSET + size_of::<u32>()
+        ..MULTIVIEW_OPTIONS_OFFSET + 2 * size_of::<u32>()]
+        .copy_from_slice(&(diagnostic as u32).to_le_bytes());
     bytes
 }
 
@@ -4827,6 +4834,22 @@ mod tests {
         assert!(shader.contains("near_surface_lightmap()"));
         assert!(shader.contains("if display_material != 2u"));
         assert!(shader.contains("terrain_horizon_near_material_weight("));
+    }
+
+    #[test]
+    fn horizon_diagnostics_isolate_surface_terms_in_terrain_and_trees() {
+        let terrain = super::super::TERRAIN_PREVIEW_RENDER_WGSL;
+        let trees = super::super::TERRAIN_PREVIEW_TREE_WGSL;
+        for shader in [terrain, trees] {
+            assert!(shader.contains("params.multiview_options.y"));
+            assert!(shader.contains("TERRAIN_HORIZON_DIAGNOSTIC_ALBEDO"));
+            assert!(shader.contains("TERRAIN_HORIZON_DIAGNOSTIC_ENVIRONMENT"));
+            assert!(shader.contains("TERRAIN_HORIZON_DIAGNOSTIC_GEOMETRY"));
+            assert!(shader.contains("TERRAIN_HORIZON_DIAGNOSTIC_OCCLUSION"));
+        }
+        assert!(terrain.contains("diagnostic_river_alpha"));
+        assert!(terrain.contains("material_texture_weight("));
+        assert!(trees.contains("Proxy vegetation currently omits environmental illumination"));
     }
 
     #[test]

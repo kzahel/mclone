@@ -8,10 +8,10 @@ use mclone_core::{ChunkPos, HorizontalTopology};
 use mclone_render::color_profile::RenderColorProfile;
 use mclone_terrain_view::{
     ExactPaintedCoverageSnapshot, TerrainClipmapConfig, TerrainCompositionSourceIdentity,
-    TerrainExactCoverageMode, TerrainHorizonFrameStats, TerrainHorizonPresentation,
-    TerrainHorizonRenderTarget, TerrainPreparedExactFrame, TerrainPreviewCamera,
-    TerrainPreviewMaterialAtlas, TerrainPreviewMaterialTable, TerrainPreviewView,
-    TerrainVegetationExecutor, TerrainViewEngine, TerrainViewEngineConfig,
+    TerrainExactCoverageMode, TerrainHorizonDiagnostic, TerrainHorizonFrameStats,
+    TerrainHorizonPresentation, TerrainHorizonRenderTarget, TerrainPreparedExactFrame,
+    TerrainPreviewCamera, TerrainPreviewMaterialAtlas, TerrainPreviewMaterialTable,
+    TerrainPreviewView, TerrainVegetationExecutor, TerrainViewEngine, TerrainViewEngineConfig,
     TerrainViewSourceIdentity,
 };
 use mclone_worldgen::terrain_preview::{TerrainPreviewContentStage, TerrainPreviewProfile};
@@ -73,6 +73,7 @@ pub(crate) struct SceneTerrainViewState {
     ready_columns: BTreeSet<ChunkPos>,
     coverage_generation: u64,
     anchor: [f64; 2],
+    diagnostic: TerrainHorizonDiagnostic,
     diagnostics: SceneTerrainViewDiagnostics,
 }
 
@@ -132,6 +133,7 @@ impl SceneTerrainViewState {
             ready_columns: BTreeSet::new(),
             coverage_generation,
             anchor: [0.0, 0.0],
+            diagnostic: TerrainHorizonDiagnostic::Natural,
             diagnostics: SceneTerrainViewDiagnostics {
                 source_generation: source.generation(),
                 coverage_generation,
@@ -199,6 +201,10 @@ impl SceneTerrainViewState {
         self.diagnostics
     }
 
+    pub(crate) fn set_diagnostic(&mut self, diagnostic: TerrainHorizonDiagnostic) {
+        self.diagnostic = diagnostic;
+    }
+
     pub(crate) fn shutdown(&mut self) {
         self.engine.shutdown();
     }
@@ -228,7 +234,8 @@ impl SceneTerrainViewState {
         .and_then(|presentation| presentation.with_multiview_render_views(render_views))
         .map_err(anyhow::Error::msg)?
         .with_sky_darken(sky_darken)
-        .with_fog(fog);
+        .with_fog(fog)
+        .with_diagnostic(self.diagnostic);
         let stats = self
             .engine
             .encode_multiview_to_target(
@@ -360,6 +367,10 @@ impl McloneSceneHost {
         self.terrain_view
             .as_mut()
             .expect("composed terrain view was initialized")
+            .set_diagnostic(self.terrain_horizon_diagnostic);
+        self.terrain_view
+            .as_mut()
+            .expect("composed terrain view was initialized")
             .prepare(world, seed, topology, focus, ready_columns)?;
         Ok(true)
     }
@@ -368,6 +379,13 @@ impl McloneSceneHost {
         self.terrain_view
             .as_ref()
             .map(SceneTerrainViewState::diagnostics)
+    }
+
+    pub fn set_terrain_horizon_diagnostic(&mut self, diagnostic: TerrainHorizonDiagnostic) {
+        self.terrain_horizon_diagnostic = diagnostic;
+        if let Some(terrain_view) = self.terrain_view.as_mut() {
+            terrain_view.set_diagnostic(diagnostic);
+        }
     }
 
     pub(crate) fn reset_terrain_view(&mut self) {
@@ -400,7 +418,8 @@ impl TerrainBackdropRenderer for SceneTerrainViewState {
         .and_then(|presentation| presentation.with_render_view(context.render_view))
         .map_err(anyhow::Error::msg)?
         .with_sky_darken(context.sky_darken)
-        .with_fog(context.fog);
+        .with_fog(context.fog)
+        .with_diagnostic(self.diagnostic);
         let stats = self
             .engine
             .encode_to_target(

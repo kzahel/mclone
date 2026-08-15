@@ -16,7 +16,7 @@ use mclone_input::KeyboardKey;
 use mclone_render::chunk::TexturedSectionRenderOptions;
 use mclone_render::placement::{EmbeddedChunkRegion, WorldPlacement};
 use mclone_render_session::EngineCameraViewMode;
-use mclone_scene::WorldgenLensLayer;
+use mclone_scene::{TerrainHorizonDiagnostic, WorldgenLensLayer};
 use mclone_server::SimulationCadenceConfig;
 use mclone_ui::{
     GameDeathCause, GameHelpParent, GameOptionsCategory, GameOptionsParent, GameScreen,
@@ -37,6 +37,7 @@ use crate::{
 };
 
 const MAX_SCREENSHOT_REMOTE_SETTLE_MS: u64 = 10_000;
+const MAX_SCREENSHOT_SETTLE_FRAMES: u32 = 600;
 const MAX_WARM_WORLD_COST_SAMPLE_MS: u64 = 60_000;
 const MAX_LIVE_DIORAMA_SOAK_SECONDS: u64 = 3_600;
 const MAX_STARTUP_WAIT_FRAMES: u32 = 4096;
@@ -119,7 +120,9 @@ pub(crate) const DESKTOP_LOCAL_ARG_FLAGS: &[&str] = &[
     "--screenshot-player-box",
     "--screenshot-remote-settle-ms",
     "--screenshot-settle-ms",
+    "--screenshot-settle-frames",
     "--screenshot-scripted-interaction",
+    "--screenshot-terrain-horizon-diagnostic",
     "--screenshot-ui",
     "--settle-distances",
     "--simulation-cadence",
@@ -316,6 +319,8 @@ pub(crate) struct HeadlessScreenshotOptions {
     pub(crate) controller_focus: bool,
     pub(crate) scripted_interaction: bool,
     pub(crate) remote_settle_ms: u64,
+    pub(crate) settle_frames: u32,
+    pub(crate) terrain_horizon_diagnostic: TerrainHorizonDiagnostic,
     pub(crate) eye: Option<[f32; 3]>,
     pub(crate) target: Option<[f32; 3]>,
 }
@@ -928,6 +933,8 @@ impl Cli {
         let mut screenshot_controller_focus = false;
         let mut screenshot_scripted_interaction = false;
         let mut screenshot_remote_settle_ms = 0;
+        let mut screenshot_settle_frames = 0;
+        let mut screenshot_terrain_horizon_diagnostic = TerrainHorizonDiagnostic::Natural;
         let mut screenshot_camera_view = EngineCameraViewMode::FirstPerson;
         let mut actor_walk_review_video = None;
         let mut actor_walk_review_options_explicit = false;
@@ -1479,6 +1486,14 @@ impl Cli {
                 "--screenshot-remote-settle-ms" | "--screenshot-settle-ms" => {
                     screenshot_remote_settle_ms =
                         parse_screenshot_remote_settle_ms_arg(&arg, args.next())?;
+                }
+                "--screenshot-settle-frames" => {
+                    screenshot_settle_frames =
+                        parse_screenshot_settle_frames_arg(&arg, args.next())?;
+                }
+                "--screenshot-terrain-horizon-diagnostic" => {
+                    screenshot_terrain_horizon_diagnostic =
+                        parse_terrain_horizon_diagnostic_arg(&arg, args.next())?;
                 }
                 "--screenshot-camera-view" => {
                     screenshot_camera_view = parse_camera_view_arg(&arg, args.next())?;
@@ -2115,6 +2130,8 @@ impl Cli {
                     controller_focus: screenshot_controller_focus,
                     scripted_interaction: screenshot_scripted_interaction,
                     remote_settle_ms: screenshot_remote_settle_ms,
+                    settle_frames: screenshot_settle_frames,
+                    terrain_horizon_diagnostic: screenshot_terrain_horizon_diagnostic,
                     eye: startup_camera.eye,
                     target: startup_camera.target,
                 },
@@ -2788,6 +2805,31 @@ fn parse_screenshot_remote_settle_ms_arg(flag: &str, value: Option<String>) -> R
     Ok(parsed)
 }
 
+fn parse_screenshot_settle_frames_arg(flag: &str, value: Option<String>) -> Result<u32> {
+    let parsed = parse_u32_arg(flag, value)?;
+    if parsed > MAX_SCREENSHOT_SETTLE_FRAMES {
+        bail!("{flag} must be at most {MAX_SCREENSHOT_SETTLE_FRAMES}");
+    }
+    Ok(parsed)
+}
+
+fn parse_terrain_horizon_diagnostic_arg(
+    flag: &str,
+    value: Option<String>,
+) -> Result<TerrainHorizonDiagnostic> {
+    let value = value.with_context(|| format!("{flag} requires a value"))?;
+    TerrainHorizonDiagnostic::parse_label(&value).with_context(|| {
+        format!(
+            "{flag} must be one of {}, got `{value}`",
+            TerrainHorizonDiagnostic::ALL
+                .into_iter()
+                .map(TerrainHorizonDiagnostic::label)
+                .collect::<Vec<_>>()
+                .join("|")
+        )
+    })
+}
+
 fn parse_warm_world_cost_sample_ms(flag: &str, value: Option<String>) -> Result<u64> {
     let parsed = parse_u64_arg(flag, value)?;
     if parsed > MAX_WARM_WORLD_COST_SAMPLE_MS {
@@ -2933,7 +2975,7 @@ fn print_help() {
            mclone-native-client --headless-clear /tmp/mclone-native-clear.png [--width 96] [--height 64]\n\
            mclone-native-client --actor-review-sheet /tmp/mclone-actor-review.png [--width 1152] [--height 512] [--fullbright true|false]\n\
            mclone-native-client --actor-walk-review /tmp/mclone-actor-walk-review.png [--actor-walk-review-video /tmp/mclone-actor-walk-review.mp4] [--width 360] [--height 360] [--walk-review-frames 24] [--walk-review-fps 12] [--walk-review-cycles 2] [--fullbright true|false]\n\
-          mclone-native-client --screenshot /tmp/mclone-frame.png [--asset-pack saved|original] [--width 1280] [--height 720] [--startup-wait none|progress|playable|view-settled|frames:N] [--warm-world-standby-seed -98765] [--screenshot-ui none|title|world-list|world-create|world-delete-confirm|new-world|join-remote|pause|death|help|controls|block-palette|options-title|options-pause|options-local-play|storage-profile-title|storage-factory-confirm|server-settings-pause|asset-packs-pause] [--screenshot-hud true|false] [--screenshot-frame-pipeline-overlay true|false] [--screenshot-debug-pane true|false] [--screenshot-worldgen-lens off|biome|landform|surface|hydrology] [--screenshot-player-box true|false] [--screenshot-blink-debug true|false] [--screenshot-controller-focus true|false] [--screenshot-scripted-interaction true|false] [--screenshot-settle-ms 0] [--screenshot-eye x,y,z] [--screenshot-target x,y,z] [--screenshot-camera-view first-person|third-person] [--first-person-player true|false] [--seed 12345] [--generation-profile mclone-overworld-v1] [--starter-content wild|intro-homestead-v1] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--movement-speed-multiplier 1.0] [--simulation-cadence 20/20/60] [--debug-passive-showcase true|false] [--section-occlusion true|false] [--lighting true|false] [--fullbright true|false]\n\
+          mclone-native-client --screenshot /tmp/mclone-frame.png [--asset-pack saved|original] [--width 1280] [--height 720] [--startup-wait none|progress|playable|view-settled|frames:N] [--warm-world-standby-seed -98765] [--screenshot-ui none|title|world-list|world-create|world-delete-confirm|new-world|join-remote|pause|death|help|controls|block-palette|options-title|options-pause|options-local-play|storage-profile-title|storage-factory-confirm|server-settings-pause|asset-packs-pause] [--screenshot-hud true|false] [--screenshot-frame-pipeline-overlay true|false] [--screenshot-debug-pane true|false] [--screenshot-worldgen-lens off|biome|landform|surface|hydrology] [--screenshot-player-box true|false] [--screenshot-blink-debug true|false] [--screenshot-controller-focus true|false] [--screenshot-scripted-interaction true|false] [--screenshot-settle-ms 0] [--screenshot-settle-frames 0] [--screenshot-terrain-horizon-diagnostic natural|ownership-level|topology|albedo|environmental-illumination|geometric-shade|local-occlusion|water|texture] [--screenshot-eye x,y,z] [--screenshot-target x,y,z] [--screenshot-camera-view first-person|third-person] [--first-person-player true|false] [--seed 12345] [--generation-profile mclone-overworld-v1] [--starter-content wild|intro-homestead-v1] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--movement-speed-multiplier 1.0] [--simulation-cadence 20/20/60] [--debug-passive-showcase true|false] [--section-occlusion true|false] [--lighting true|false] [--fullbright true|false]\n\
            mclone-native-client --worldgen-showcase-card /tmp/mclone-worldgen-showcase [--width 640] [--height 400] [--generation-profile small-island-v1] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 16] [--day-time 6000] [--lighting true|false] [--fullbright true|false]\n\
            mclone-native-client --warm-world-swap-smoke /tmp/mclone-warm-world-swap --warm-world-standby-seed 67890 [--warm-world-standby-cadence 5/5/5] [--warm-world-cost-sample-ms 3000] [--width 1280] [--height 720] [scene/render options as --screenshot]\n\
            mclone-native-client --live-diorama-smoke /tmp/mclone-live-diorama --world-dir ./table-a --live-diorama-world-dir ./island-b [--live-diorama-scale 0.125] [--live-diorama-soak-seconds 600] [--width 960] [--height 640]\n\

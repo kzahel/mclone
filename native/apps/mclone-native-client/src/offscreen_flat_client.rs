@@ -1550,6 +1550,7 @@ pub(crate) fn run_offscreen_flat_client_screenshot(
     } else {
         startup_wait.offscreen_capture_frame_count()
     };
+    frame_count = frame_count.saturating_add(options.settle_frames as usize);
     if asset_replacement_smoke.is_some() {
         frame_count = frame_count.max(180);
     }
@@ -1564,7 +1565,7 @@ pub(crate) fn run_offscreen_flat_client_screenshot(
             width: options.width,
             height: options.height,
             frame_count,
-            pace_frame_duration: None,
+            pace_frame_duration: (options.settle_frames > 0).then_some(Duration::from_millis(16)),
         },
         move |device, queue, format, size| {
             let mut host = OffscreenFlatClientHost::new(
@@ -2063,6 +2064,9 @@ fn configure_screenshot_scene(
         host.force_day_time(day_time);
     }
     host.settle_remote_session(options.remote_settle_ms)?;
+    host.driver
+        .host_mut()
+        .set_terrain_horizon_diagnostic(options.terrain_horizon_diagnostic);
     if options.controller_focus {
         let (handled, action) = host
             .driver
