@@ -49,6 +49,10 @@ series implements the same concern, normally reuse the document slug in its
   accepted terrain-and-creature co-design loop, immediate durability for
   materialized animals, explicit lazy population layers, mechanics-led
   Creature Lab promotion, and Tactical 277's first generated-habitat slice.
+- [`seasons.md`](seasons.md): concept-stage regional seasons and seasonal
+  ecology direction, including plane/cylinder latitude, derived snow and
+  water response, no unloaded-world simulation, encounter-shaped migration,
+  and the unresolved anonymous-wildlife versus tagged/managed lifecycle.
 - [`playable-showcases.md`](playable-showcases.md): bounded data-driven tiny
   saves for matched screenshot and interactive review, with enforced
   live-instantiation evidence and strict anti-sprawl boundaries.

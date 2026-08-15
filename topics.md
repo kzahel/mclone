@@ -250,6 +250,9 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
 - `habitat-driven-creature-ecology` — terrain and creature co-design,
   generated-world habitat queries, durable visible animals, explicit ambient
   summaries, and mechanics-led Creature Lab promotion
+- `seasons` — regional seasonal climate, plane/cylinder latitude, derived
+  snow and water response, active-boundary migration encounters, frozen
+  unloaded state, and tagged wildlife/managed-habitat decisions
 - `playable-showcases` — bounded data-driven tiny-save recipes, live-game
   instantiation evidence, matched capture/browser review, and temporary hosted
   play links
