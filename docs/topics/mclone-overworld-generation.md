@@ -166,20 +166,21 @@ duplicating that planning contract.
 It does not own generic profile persistence, worker transport, scheduling,
 lighting, or publication. Those contracts and their compatibility safety
 ledger remain in
-[`world-generation-profiles.md`](world-generation-profiles.md). It also does
-not change the reference target recorded in
-[`../reference-minecraft.md`](../reference-minecraft.md).
+[`world-generation-profiles.md`](world-generation-profiles.md). Minecraft
+reference tooling and legacy notes remain in
+[`../reference-minecraft.md`](../reference-minecraft.md), but do not constrain
+this product direction.
 
 ## Product Roles
 
-- `overworld` remains reference-locked to Minecraft Java 1.17.1 output. It is
-  the behavior baseline and a source of proven algorithms, not the creative
-  profile to mutate.
+- `overworld` is a legacy Java-1.17-shaped development/reference profile. It
+  is not reference-locked, the product default, or the behavior baseline for
+  new work.
 - `small-island-v1` remains an internal, bounded proving ground for reusable
   noise, surfaces, placed features, dependency planning, and visual review.
-- `mclone-overworld-v1` is the live internal continuous, explorable, original
-  terrain profile. Its current output may still change in place under the
-  compatibility safety ledger.
+- `mclone-overworld-v1` is the normal product new-world default and the live
+  continuous, explorable, original terrain profile. Its current output may
+  still change in place under the compatibility safety ledger.
 
 Small Island must not gradually become the full Overworld. It should pressure
 the new profile toward useful shared mechanisms while keeping its own bounded
@@ -187,9 +188,9 @@ landform rules. The new profile must not fork scheduler or platform policy.
 
 ## Intended Experience
 
-The first original Overworld should be recognizably Minecraft-like in its
-block scale, legibility, and progression from terrain to surface to features,
-while owning its exact seeds, fields, rules, and content combinations.
+The original Overworld should be a legible block-scale survival landscape with
+clear progression from terrain to surface to features, while owning its exact
+seeds, fields, rules, content combinations, and visual identity.
 
 The long-term terrain vocabulary includes:
 
@@ -222,12 +223,11 @@ Mountains and periodic fields are now complete; the first bounded
 river/wetland family is at human review, while caves remain deferred to their
 own slice.
 
-## Reference Vocabulary And Deliberate Divergence
+## Comparative Vocabulary And Original Direction
 
-Minecraft Java 1.17.1 remains the executable reference for pipeline order,
-surface and feature vocabulary, deterministic chunk ownership, and the
-legibility expected at block scale. Its exact terrain composition is not the
-creative target for this profile.
+Minecraft Java 1.17.1 remains an executable comparison source for pipeline
+order, surface/feature vocabulary, and chunk ownership. It does not define
+Mclone's pipeline, content set, or block-scale legibility requirements.
 
 The useful 1.17.1 lessons are separation rather than wholesale algorithm
 reuse:
@@ -251,10 +251,9 @@ Mclone deliberately improves the ownership of landforms and water:
 | Waterfalls | usually incidental fluid placement and flow | classify a continuous reach with an upstream supply and downstream destination |
 
 This direction does not port `Aquifer`, `Cavifier`, `NoodleCavifier`, ore-vein
-paths, the Minecraft 1.18 density-function stack, or other systems excluded by
-the Java 1.17.1 target. A later profile-owned 3D density tactical remains
-available if reviewed cliffs, overhangs, or geology demonstrate a concrete
-need.
+paths, or the Minecraft 1.18 density-function stack. A later profile-owned 3D
+density tactical remains available if Mclone's reviewed cliffs, overhangs, or
+geology demonstrate a concrete need.
 
 ## Landform Composition Direction
 
@@ -795,9 +794,10 @@ profile's rule ownership.
 | Existing carver tunnel/ravine geometry | candidate later; mclone owns domains and distribution |
 | Structure start/reference/piece lifecycle | reuse the model later; mclone owns candidates and content |
 
-The strongest constraint wins when a shared primitive also affects the
-reference-locked `overworld`. Any extraction from that path requires exact
-oracle/output locks. New mclone rule data never enters vanilla fixtures.
+When a shared primitive also affects legacy `overworld`, cover the affected
+behavior with ordinary regression tests and use exact oracle/output checks
+only if the scoped work continues to claim a Minecraft fact. New Mclone rule
+data remains profile-owned rather than entering legacy fixtures accidentally.
 
 The first post-terrain checkpoint extracted only the columnar biome payload
 traversal, whose concrete consumers are Small Island and Mclone Overworld. It

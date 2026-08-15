@@ -62,7 +62,7 @@ series implements the same concern, normally reuse the document slug in its
 - [`modern-minecraft-reference.md`](modern-minecraft-reference.md): pinned
   current-stable Java 26.2 comparative source lane, official unobfuscated jar
   bootstrap, focused worldgen selection, provenance and refresh policy, and
-  durable post-1.18 findings without changing the 1.17.1 parity target.
+  durable post-1.18 findings for original Mclone design research.
 - [`alpha-era-reference.md`](alpha-era-reference.md): preserved early-worldgen
   study ladder, reproducible Alpha v1.1.2_01 decompilation and terrain oracle,
   detailed generator anatomy, and the Alpha v1.2.6 biome-era comparison that
@@ -115,9 +115,8 @@ series implements the same concern, normally reuse the document slug in its
   ownership, and a later bounded connection to worlds inside blocks.
 - [`world-generation-profiles.md`](world-generation-profiles.md): accepted
   generator-profile direction and authoritative compatibility safety ledger;
-  current reference-locked Overworld versus internal-mutable flat-grass,
-  seeded-island, and authored-only proofs, plus the separate original-mclone
-  profile identity.
+  product-default Mclone Overworld plus internal-mutable legacy, historical,
+  flat-grass, seeded-island, topology-probe, and authored-only profiles.
   Tactical
   [`187`](../tactical/187-generator-profile-flat-grass-and-seeded-island.md)
   owns the bounded refactor and first two generators.

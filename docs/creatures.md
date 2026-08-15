@@ -1,17 +1,24 @@
 # Creatures
 
-Research and implementation notes for Minecraft Java 1.17.1-style overworld creature spawning in `mclone`.
+Original Mclone creature status plus retained Minecraft Java 1.17.1 spawning
+research.
 
-This document is a reference for creature work. It is not a tactical slice by itself. The parity-critical parts should be direct Rust ports of the 1.17.1 spawn tables, spawn placement checks, mob caps, despawn rules, and entity tick semantics. Runtime ownership, worker boundaries, transport, and persistence adapters should fit the native authoritative host architecture.
+This document is not a tactical slice by itself. Mclone's habitat-driven
+ecology and original creature lifecycles are the product direction. The Java
+sections remain comparative notes and describe retained legacy code; they do
+not require direct ports or make vanilla spawning the acceptance target.
 
 ## Goals
 
-- Match vanilla 1.17.1 basics for overworld-adjacent creatures: cows, sheep, pigs, chickens, horses, donkeys, wolves, foxes, rabbits, goats, llamas, common water creatures, ambient bats, and common hostile overworld mobs such as spiders, zombies, skeletons, creepers, slimes, endermen, and witches.
+- Build an original roster and habitat-driven population model for Mclone
+  Overworld, promoting creatures through mechanics-led content work.
 - Keep entity spawning and ticking authoritative-host owned, not renderer owned.
 - Preserve the distinction between seed-time chunk-generation creatures and live natural spawns.
 - Keep browser main-thread work limited to presentation, interpolation, and GPU upload.
-- Preserve one logical entity lifecycle for browser singleplayer, remote clients, Node hosts, storage, and oracle tests.
-- Keep the first slice smaller than full Minecraft entity behavior: no dungeon spawners, monster rooms, raids, patrols, phantoms, villages, villagers, cats, wandering traders, structure-specific mobs, breeding, taming, combat AI, loot, equipment, or full pathfinding unless explicitly pulled into scope.
+- Preserve one logical entity lifecycle for browser singleplayer, remote
+  clients, dedicated hosts, storage, and focused tests.
+- Add behavior from Mclone's own gameplay priorities rather than using
+  Minecraft's roster as a completion checklist.
 
 ## Current Status
 
@@ -131,12 +138,11 @@ farm-animal fallback branches have been deleted from the live planner. The
 Java 1.17.1 `overworld` profile still owns the reference-shaped live
 cow/chicken subset described below; Mclone does not call it.
 
-Still not landed: complete Java group attempt geometry, shared-spawn exclusion,
-all vanilla passive entity kinds, hostile/ambient/aquatic categories, despawn,
-synchronized gamerules and dedicated flags, full vanilla
-`LivingEntity.travel(...)`/`Entity.move(...)`, broad vanilla breeding and
-drop parity, predator/prey population response, or a coarse population
-simulation. Original Mclone rabbit breeding, deer hunting, mallard life,
+Legacy Java coverage remains incomplete: complete group attempt geometry,
+shared-spawn exclusion, all passive kinds, hostile/ambient/aquatic categories,
+despawn, synchronized gamerules, and full vanilla movement were never ported.
+Those are not product gaps unless an original Mclone mechanic needs them.
+Original Mclone rabbit breeding, deer hunting, mallard life,
 bee pollination, and garden farming exist as separate gameplay chapters. The
 original Mclone
 terrain/creature co-design direction lives in
@@ -166,7 +172,9 @@ terrain/creature co-design direction lives in
 | Dedicated server spawn flags | `reference/minecraft-1.17.1/src/net/minecraft/server/dedicated/DedicatedServerProperties.java` |
 | `doMobSpawning` gamerule | `reference/minecraft-1.17.1/src/net/minecraft/world/level/GameRules.java` |
 
-Read these files before writing the port. Spawn algorithms, category caps, placement predicates, despawn rules, and entity tick semantics are simulation parity logic. The host scheduler and worker layout may diverge, but they must preserve the same observable world state.
+Read these files when a scoped task needs a Minecraft comparison or modifies
+the retained Java-shaped spawn path. Original Mclone creature work should use
+the habitat/ecology topic and shared authoritative runtime contracts instead.
 
 ## Terms
 
@@ -193,8 +201,8 @@ Mclone Overworld now makes the same lifecycle distinction with a different
 generation policy: its initial wildlife planner is deterministic by seed and
 population-cell coordinate, while its materialized animals are ordinary
 durable entities. It currently has no periodic generic passive replenishment.
-The sections below remain the Java 1.17.1 reference model and the contract for
-the reference-locked `overworld` profile.
+The sections below remain the Java 1.17.1 reference model and describe the
+legacy `overworld` implementation; they are not a product contract.
 
 ### Generation-Time Original Mobs
 
@@ -279,7 +287,10 @@ Common monsters come from `monsters(...)`:
 | enderman | 10 | 1-4 |
 | witch | 5 | 1-1 |
 
-`VanillaBiomes` layers in biome-specific creatures, for example wolves, rabbits, foxes, llamas, goats, horses, and donkeys in the relevant biome builders. A first implementation should port the spawn settings needed by the biome set we already render, then broaden through oracle-backed slices.
+`VanillaBiomes` layers in biome-specific creatures, for example wolves,
+rabbits, foxes, llamas, goats, horses, and donkeys in the relevant biome
+builders. This is reference inventory only. Mclone should add creatures through
+its habitat, mechanics, and ecology direction rather than porting this roster.
 
 ## Spawn Placement Rules
 
@@ -349,7 +360,10 @@ tickNonPassenger()
   passenger ticks
 ```
 
-For mobs, server AI work happens inside `Mob.serverAiStep()`: sensing, target selector, goal selector, navigation, custom AI, movement/look/jump controls, and debug packet hooks. We should not start with this entire AI surface; the first creature slice can keep server-owned entity records and simple movement/state ticking before porting full goals.
+For Java mobs, server AI work happens inside `Mob.serverAiStep()`: sensing,
+target selector, goal selector, navigation, custom AI, movement/look/jump
+controls, and debug packet hooks. Mclone need not reproduce this entire surface;
+add engine-owned behavior layers as original creatures require them.
 
 ## Player Distance And Spawn Eligibility
 
@@ -399,7 +413,9 @@ Important non-configurable vanilla constants in 1.17.1:
 - `CREATURE` natural-spawn interval: 400 ticks
 - category caps and spawn attempt geometry
 
-Minecraft Java 1.17.1 does not have the later separate `simulation-distance` server property. For our 1.17.1 target, keep simulation/chunk activity tied to the 1.17.1 ticket model unless we deliberately document an engine-profile divergence.
+Minecraft Java 1.17.1 does not have the later separate `simulation-distance`
+server property. That is comparative context only; Mclone simulation and chunk
+activity should follow its own documented runtime requirements.
 
 ## Seed Dependence
 
@@ -410,7 +426,10 @@ Seed-dependent:
 - generation-time original creature group placement/type loops through `WorldgenRandom.setDecorationSeed(...)`
 - slime chunk selection and some structure-specific hostile behavior, when those systems are in scope
 
-Do not treat full entity NBT as seed-stable by default. Entity UUIDs and some finalized type-specific fields can come from entity-local or level random state. Oracle fixtures should normalize away UUIDs until the exact vanilla source of a field is ported and intentionally asserted.
+Do not treat full entity records as seed-stable by default. Entity identities
+and finalized type-specific fields can come from entity-local or runtime random
+state. Focused Java oracle fixtures should normalize away UUIDs unless a scoped
+comparison intentionally asserts them.
 
 Not purely seed-dependent:
 
@@ -444,7 +463,7 @@ Keep the same division used by lighting and liquids:
 
 | Layer | Creature responsibility |
 |---|---|
-| Simulation core | direct ports of entity type metadata, mob categories, biome spawn settings, spawn placements, natural spawn algorithm, despawn rules, and minimal entity state transitions |
+| Simulation core | original entity metadata, habitat/population policy, spawn placement, lifecycle, despawn rules, and state transitions; retained Java-shaped types are implementation history |
 | Authoritative host | owns game time, player/session positions, chunk ticket/activity state, entity storage, natural-spawn scheduling, entity ticks, mutation batching, persistence dirtying |
 | Chunk workers | generate chunks and return blocks plus generation-time original entity records when `ChunkStatus.SPAWN` lands |
 | Storage adapters | persist chunk/section entity records and world-level entity indexes behind engine-native records |
@@ -528,9 +547,12 @@ These should use small synthetic worlds and compare exact local outcomes:
 - tracked vs entity-ticking visibility transitions
 - despawn checks for persistent passive animals vs despawning monsters
 
-### Java Oracles
+### Optional Legacy Java Oracles
 
-Generation fixtures should use the 1.17.1 server or Java harness to capture entity records for selected chunks after `ChunkStatus.SPAWN` / full chunk generation.
+When a scoped task makes a Java spawning claim, generation fixtures should use
+the 1.17.1 server or Java harness to capture entity records for selected chunks
+after `ChunkStatus.SPAWN` / full chunk generation. New Mclone creature behavior
+instead needs authoritative state and gameplay-outcome tests.
 
 Dynamic fixtures should be scripted server scenarios:
 
@@ -540,7 +562,8 @@ Dynamic fixtures should be scripted server scenarios:
 - exact tick count
 - dump entity list, categories, positions, and pending persistence state
 
-Do not validate live spawning from screenshots alone. Screenshots are only for visible follow-through after data parity is covered.
+Do not validate live spawning from screenshots alone. Screenshots are only for
+visible follow-through after authoritative state and behavior tests pass.
 
 ### Browser Validation
 
@@ -552,4 +575,5 @@ When a creature slice produces pixels, run the smallest browser probe that reach
 - How much of vanilla `EntityType` to port before the first visual creature, versus a minimal metadata table that is intentionally shaped for future expansion.
 - How broadly to expand generation-original-mobs fixtures beyond the current exact sheep type/position/rotation/color comparison.
 - Whether host chunk activity should keep exposing vanilla names (`BORDER`, `TICKING`, `ENTITY_TICKING`) at every API boundary or wrap them at higher runtime layers.
-- Whether first browser rendering should use placeholder billboards, extracted vanilla models, or a deliberately small custom model path while entity behavior is still being ported.
+- Which first-party model path should cover new creatures while behavior is
+  still being implemented; extracted vanilla models are comparison-only.

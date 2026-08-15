@@ -36,10 +36,10 @@ renames merely because the topic exists.
 
 ## Product Identity The Name Must Carry
 
-Minecraft parity is a development technique and correctness oracle, not the
-public identity. The intended release is an original survival-building
-sandbox with first-party terrain, creatures, structures, visual assets, and
-audio.
+Minecraft comparison and retained oracle tooling are historical development
+techniques, not the product direction or public identity. The intended release
+is an original survival-building sandbox with first-party terrain, creatures,
+structures, visual assets, and audio.
 
 The title should arise from the combination of qualities that makes this game
 specific rather than from the generic voxel genre.

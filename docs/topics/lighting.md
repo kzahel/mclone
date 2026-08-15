@@ -2,14 +2,15 @@
 
 Status: active living index.
 
-This document is the current map for Java 1.17.1-style lighting work in the
-Rust engine.
+This document is the current map for authoritative Mclone lighting work in the
+Rust engine. The existing solver is Java-1.17-shaped, but Minecraft parity is
+not the subsystem target.
 The broad architecture reference remains [`../lighting.md`](../lighting.md);
 the first concrete Rust slice is
 [`../tactical/026-lighting-pipeline.md`](../tactical/026-lighting-pipeline.md).
 Presentation-side point lights and dynamic shadows are a separate concern in
-[`dynamic-point-lights.md`](dynamic-point-lights.md); they must not distort this
-stored-light parity contract.
+[`dynamic-point-lights.md`](dynamic-point-lights.md); they must not distort the
+authoritative stored-light contract.
 The sustained-travel admission, cancellation, Light-ticket, and memory-bound
 campaign is now a focused sibling topic in
 [`chunk-lighting-admission-and-backpressure.md`](chunk-lighting-admission-and-backpressure.md);
@@ -18,6 +19,11 @@ Tactical
 implemented P0 lifecycle and physical Quest acceptance.
 This topic records where the subsystem stands now, how the next slices should
 compose, and which Java/Rust boundaries to preserve.
+
+Older sections use “parity” in their landed tactical names and execution
+receipts. Treat those as historical evidence labels. Current priorities are
+Mclone lighting correctness, visual quality, gameplay support, and measured
+performance; unimplemented Java details are not automatically product gaps.
 
 Update this file whenever a lighting tactical lands, a validation result changes
 the next recommendation, or the implementation shape needs correction.
@@ -138,8 +144,8 @@ Known gaps:
   `ThreadedLevelLightEngine` port: the worker has no general live light-update
   task queue, and the retained Rust state is not yet Java's shared
   `ChunkAccess`/`ChunkHolder` graph. The 20-minute RD7 8x Quest lane is
-  memory-clean, so solver parity and measured sky-graph throughput again take
-  priority over generic queue-capacity work.
+  memory-clean, so measured sky-graph throughput and product-visible solver
+  correctness take priority over generic queue-capacity work.
 - Desktop startup still waits for the initial light-ready view before opening
   the window in the current native path. This avoids a sky-only first frame but
   leaves launch latency high when lighting is enabled.
@@ -150,8 +156,8 @@ Known gaps:
   it still uses reduced generated-block metadata beyond the current leaf
   opacity special case rather than full vanilla `BlockState.getLightBlock(...)`
   tables.
-- Scheduler `LIGHT` strict block-light parity for seed `12345`, chunk `(0,0)`
-  is guarded at one known edge nibble delta: section `1`, byte `1784`,
+- A strict Java comparison for seed `12345`, chunk `(0,0)` is guarded at one
+  known edge nibble delta: section `1`, byte `1784`,
   expected `0x10`, native `0x00`. Current evidence points to missing/inexact
   neighbor decoration parity, likely glow-lichen source placement around the
   southern edge, rather than block-light solver math or render gamma.
@@ -189,8 +195,8 @@ current server-only boundary profile still shows about `7.7ms` light compute per
 status, with `run_updates` around `6.1ms` and sky updates around `5.8ms` per
 status (`73-74%` of light compute). Batch `5` versus `9` does not materially
 change that per-status shape. The next throughput slice should therefore target
-sky graph/storage hot paths with parity proofs, not scheduler publication knobs
-or parallel lighting by default.
+sky graph/storage hot paths with focused behavioral proofs, not scheduler
+publication knobs or parallel lighting by default.
 
 ## Latest Visual Probe
 
@@ -248,9 +254,9 @@ It was inspected and rendered nonblank terrain with `166` cached sections and
 all-sections-active setup.
 
 Interpretation: the large startup regression is now mostly removed. The next
-lighting parity work should move manual sky-source seeding into a Java-shaped
-`SkyLightSectionStorage` source-section queue and port the remaining
-skip-through-empty-section sky propagation behavior.
+solver work may use the proven source-section queue and
+skip-through-empty-section behavior where it improves Mclone correctness and
+performance; exact Java reproduction is not itself the goal.
 
 On 2026-06-19, after moving sky source-section ownership into
 `SkyLightSectionStorage`, the radius-5 performance result stayed stable while
@@ -276,8 +282,8 @@ It was inspected and rendered nonblank terrain with `166` cached sections and
 `26` drawn sections.
 
 Interpretation: this was primarily a Java-shaped ownership improvement. The
-next sky parity gap is `SkyLightEngine.checkNeighborsAfterUpdate(...)`
-skip-through behavior across missing vertical light-storage sections.
+remaining `SkyLightEngine.checkNeighborsAfterUpdate(...)` skip-through
+difference is comparative evidence, not automatically the next product task.
 
 On 2026-06-19, after matching Java leaf opacity and teaching the mesh packed
 sky-light sampler to read across omitted all-air sky sections, the dark foliage
@@ -578,9 +584,11 @@ Current native entry points:
 
 ## Module Shape Policy
 
-Lighting should follow the reference Java separation closely. Do not grow
-`mclone_light/src/lib.rs` or `mclone-server/src/lighting_seed.rs` into large
-catch-all modules.
+Lighting should preserve clear engine-owned solver, storage, scheduling, and
+presentation boundaries. Do not grow `mclone_light/src/lib.rs` or
+`mclone-server/src/lighting_seed.rs` into large catch-all modules. The table
+below records where retained Java-shaped components currently map; it is not a
+requirement that new components mirror Java classes.
 
 Preferred native shape as the real solver lands:
 
@@ -604,8 +612,9 @@ Preferred native shape as the real solver lands:
 
 Rules:
 
-- Port parity-critical data and solver code directly, with the same field and
-  method names where practical.
+- Preserve tested solver behavior while it serves Mclone, but do not require
+  future data or solver work to mirror Java fields, method names, or control
+  flow.
 - Keep runtime scheduling in `mclone-server`; keep propagation/data ownership in
   `mclone_light`.
 - Keep `mclone-mesh` and `mclone-render` consumers of stored light, not owners of
@@ -627,8 +636,8 @@ Landed:
 - Split `mclone_light` into small Java-shaped modules.
 - Move existing `DataLayer`, `LightLayer`, and packed helpers behind those
   modules without changing behavior.
-- Port `DataLayerStorageMap`.
-- Port the non-scheduling parts of `LayerLightSectionStorage`.
+- Added `DataLayerStorageMap` from the Java-shaped implementation.
+- Added the non-scheduling parts of `LayerLightSectionStorage`.
 - Add focused tests for queued sections, visible/updating map separation,
   copy-on-write data layers, changed sections, and padded light-section ranges.
 
@@ -650,7 +659,7 @@ Landed:
   source removal repair from an alternate source, and cross-section
   propagation.
 
-Remaining parity gaps in this slice: the block engine does not yet use real
+Recorded Java differences in this slice: the block engine does not yet use real
 block states, `BlockState.getLightBlock(...)`, emission tables, or
 `Shapes.faceShapeOccludes(...)`-style face occlusion.
 
@@ -668,7 +677,7 @@ Landed:
   still match exactly through the graph path.
 - Generated-block emission now includes lava, magma block, and glow lichen.
 
-Remaining parity gaps: full vanilla block-state opacity/emission tables and
+Recorded Java differences: full vanilla block-state opacity/emission tables and
 face shape occlusion are still pending.
 
 ### P3: Sky Light Storage And Engine
@@ -685,7 +694,7 @@ Landed:
   cross-chunk cases, still match exactly through the graph path.
 - Removed the old provisional sky flood-fill from `lighting_seed.rs`.
 
-Remaining parity gaps: full Java `LevelLightEngine` scheduling, live section
+Recorded Java differences: full Java `LevelLightEngine` scheduling, live section
 status changes, face shape occlusion, and full block-state opacity tables are
 still pending.
 
@@ -704,7 +713,7 @@ Landed:
   `getRawBrightness`.
 - Kept layer-specific bridges as test-only coverage.
 
-Remaining parity gaps from that slice: `queueSectionData`, `retainData`, full
+Recorded Java differences from that slice: `queueSectionData`, `retainData`, full
 padded section lifecycle, and live block-change updates were still pending.
 The real `ChunkStatus::Light` scheduler boundary landed in P5.
 
@@ -749,7 +758,7 @@ Landed:
   a temporary `LevelLightEngine`.
 - The scheduler's stored-snapshot branch now publishes hydrated light payloads.
 
-Remaining parity gaps: the server still does not retain a long-lived world light
+Recorded Java differences: the server still does not retain a long-lived world light
 engine, and loaded neighbor light data stitching is not modeled yet.
 
 ### P6.5: Light Status Worker And Diagnostic Bypass
@@ -773,7 +782,7 @@ Landed:
 - Native startup/headless screenshots place the spectator above the loaded
   surface column so captures do not start inside or below terrain.
 
-Remaining parity gaps: this is still a first mailbox boundary, not full Java
+Recorded Java differences: this is still a first mailbox boundary, not full Java
 `ThreadedLevelLightEngine` parity. Startup still blocks on the initial
 light-ready view.
 
@@ -824,7 +833,7 @@ Measured radius-5 result on 2026-06-18:
 - light-status batch compute: `9,323.850 ms` across `169` statuses in `1` batch
 - `LevelLightEngine.run_all_updates`: `9,281.490 ms`
 
-Remaining parity gaps: the worker still rebuilds a temporary raw light world per
+Recorded Java differences: the worker still rebuilds a temporary raw light world per
 feature-job batch. It is not yet Java's long-lived threaded world light state,
 does not own light tickets, and does not support live `checkBlock` updates.
 
@@ -855,7 +864,7 @@ Measured result on 2026-06-19:
 - radius-3 two-step movement shows retained-state reuse: step `0` light compute
   `4,652.194 ms`, step `1` incremental light compute `423.869 ms`
 
-Remaining parity gaps: no Java-shaped task prioritization, cancellation, light
+Recorded Java differences: no Java-shaped task prioritization, cancellation, light
 ticket release, retained-state unload policy, loaded-neighbor stitching, or live
 `checkBlock` queue yet.
 
@@ -924,8 +933,8 @@ Status: completed first pass in
 The retained setup still manually scans top non-empty section rows and calls
 `check_sky_source`. Java owns this inside `SkyLightSectionStorage` through
 source-section add/remove queues, and `SkyLightEngine.checkNeighborsAfterUpdate`
-has special skip-through-empty-section behavior. Porting those pieces should
-improve parity and make future live section/block updates less ad hoc.
+has special skip-through-empty-section behavior. Reusing those pieces can make
+future live section/block updates less ad hoc when Mclone needs that behavior.
 
 Landed:
 
@@ -937,16 +946,17 @@ Landed:
 - Radius-5 sky processed nodes stayed at `794,466`, and manual sky source scan
   timing went to `0.000 ms`.
 
-Remaining parity gap: native still uses the current reduced source-row edge
+Recorded Java difference: native still uses the current reduced source-row edge
 behavior rather than Java's full source-section fill/horizontal-boundary path
 for `LIGHT_ONLY` source sections.
 
 ### P6.12: Sky Neighbor Skip-Through Propagation
 
-Status: pending solver parity.
+Status: optional comparative solver follow-up, not a product blocker.
 
-Port the remaining Java `SkyLightEngine.checkNeighborsAfterUpdate(...)`
-behavior for vertical gaps in light-storage sections.
+If Mclone needs it, adapt the Java
+`SkyLightEngine.checkNeighborsAfterUpdate(...)` behavior for vertical gaps in
+light-storage sections.
 
 Initial scope:
 
@@ -973,16 +983,16 @@ Scope:
 - Changed light sections dirty render sections and neighbor sections as needed.
 - Section block deltas and light deltas are batched when practical.
 
-### P8: Rendering Parity
+### P8: Rendering Quality
 
 Status: active, first terrain-MVP block render facts pass complete.
 
-Improve visual parity after stored light is correct.
+Improve Mclone visual quality after stored light is correct.
 
 Scope:
 
-- Read Java `BlockModelRenderer`, `ModelBlockRenderer`, and `LightTexture`
-  before porting.
+- Consult Java `BlockModelRenderer`, `ModelBlockRenderer`, and `LightTexture`
+  only when a scoped task compares or changes retained behavior.
 - First Java `LightTexture` lightmap behavior is in `mclone-render`; next,
   decide whether exact dynamic 16x16 GPU texture allocation is needed or whether
   the procedural shader curve remains sufficient.
@@ -990,10 +1000,11 @@ Scope:
   `mclone-mesh`, including `calculateShape(...)`, the non-cubic `SizeInfo`
   weighting branch for partial boxes, and current terrain-MVP
   `BlockStateBase.Cache`-style render facts.
-- Replace the hand-maintained current-block render-facts bridge with full
-  generated vanilla block-state facts when the native registry grows beyond the
-  terrain-MVP surface.
-- Port liquid light sampling from `LiquidBlockRenderer`.
+- Replace the hand-maintained current-block render-facts bridge with generated
+  Mclone block-state facts when the native registry grows beyond the current
+  terrain surface.
+- Implement liquid light sampling according to Mclone's current stored-light
+  and liquid-rendering contracts.
 - Keep lightmap, model-face AO, and mesh data plumbing split into separate
   modules instead of growing `mclone-mesh/src/builder.rs` into a renderer
   catch-all.
@@ -1026,8 +1037,9 @@ Primary native lighting docs:
 - [`../tactical/054-native-block-render-facts-parity.md`](../tactical/054-native-block-render-facts-parity.md)
 
 Reference-only prior art from the retired browser engine now lives only in Git
-history. New implementation work belongs in the shared Rust crates and should
-read the Java source plus committed oracle fixtures before porting parity logic.
+history. New implementation work belongs in the shared Rust crates. Read Java
+source and committed oracle fixtures only when a scoped task explicitly needs
+a Minecraft comparison or modifies retained reference-shaped logic.
 
 ## Validation Lanes
 

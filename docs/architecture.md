@@ -29,34 +29,21 @@ This document exists to answer a different question than [`strategy.md`](./strat
 
 The central decision is simple:
 
-**Keep Minecraft parity in the simulation where it matters; diverge deliberately in runtime architecture where native, web, Android, OpenXR, storage, workers, and multiplayer needs require it.**
+**Build one original Mclone simulation and product experience over shared,
+host-neutral engine contracts.** Minecraft may inform explicitly scoped
+research, but it is not the architecture's correctness target.
 
-## Architectural divergence standard
+## Comparative-reference standard
 
-Even when this document recommends an engine-native runtime architecture, architectural choices should still be weighed against the reference Minecraft source.
+Architecture should start from Mclone's product and cross-platform
+requirements. The Minecraft source may be inspected when it supplies useful
+comparative evidence or explains retained legacy code, but matching its shape
+or preserving a path back to parity is not a default constraint.
 
-That means:
-
-- start by understanding how vanilla 1.17.1 splits the responsibility in question
-- prefer the reference shape when it is still a good fit
-- diverge only for a clear reason, not convenience or guesswork
-- make the divergence intentional, narrow, and documented
-
-Before committing to an architectural divergence, answer these questions:
-
-1. What does the reference source do here?
-2. Why is that shape a poor fit for native/web/Android/OpenXR/worker constraints?
-3. What exact layer or boundary is diverging?
-4. Does the divergence make future parity work easier, neutral, or harder?
-5. What constraint keeps the divergence from leaking into parity-critical simulation logic?
-
-Good divergences are ones where we can say all of the following clearly:
-
-- the vanilla shape is understood
-- the platform reason for divergence is concrete
-- the scope of divergence is bounded
-- the parity cost is known and acceptable
-- there is a mitigation if parity work later needs tighter alignment
+When a decision uses Minecraft as evidence, record what was learned, which
+Mclone requirement it serves, and where the design intentionally differs. A
+comparison should clarify the original design rather than silently turn into a
+porting mandate.
 
 ## Goals
 
@@ -65,8 +52,9 @@ Good divergences are ones where we can say all of the following clearly:
 - Support browser and native multiplayer clients against an authoritative server.
 - Preserve dedicated-server play as a supported host mode for every client lane.
 - Support a headless dedicated server.
-- Preserve a path to vanilla 1.17.1 overworld parity.
-- Preserve a path to non-vanilla gameplay later, including alternate physics systems such as PhysX-backed simulation.
+- Advance original Mclone world generation and gameplay without a parity
+  compatibility constraint.
+- Preserve room for alternate physics systems such as PhysX-backed simulation.
 
 ## Non-goals
 
@@ -128,18 +116,20 @@ dedicated play through shared runtime contracts. Browser-hosted rooms are an
 additional accepted session/transport topology behind the same command/update
 model.
 
-### 5. Parity and custom gameplay are policies, not architectural forks
+### 5. Legacy reference surfaces do not define product architecture
 
-We should be able to support both:
-
-- a `vanilla17` profile that keeps translated worldgen and gameplay rules as strict as practical
-- custom profiles that diverge in physics, collision, entity behavior, or other systems
-
-The architecture should not assume only one of those exists.
+The retained Java-shaped `overworld` generator and focused oracle fixtures may
+continue to exercise shared engine contracts, but they do not define gameplay,
+physics, collision, entities, rendering, or future profile abstractions. New
+architecture should serve Mclone Overworld and original gameplay first without
+creating a parallel `vanilla17` product mode.
 
 ### 6. High-rate player movement is command-driven runtime gameplay
 
-Player movement is a deliberate runtime/gameplay divergence from vanilla 1.17.1, not a reason to fork the world or entity architecture. The lower shared movement ideas in `Entity.move(...)` and `LivingEntity.travel(...)` are still the reference to study before implementation, but the vanilla 20 TPS player packet loop is not the target protocol shape.
+Player movement is original runtime/gameplay design, not a divergence that
+needs to be justified against vanilla 1.17.1. Minecraft movement can be a
+comparative input for a focused question, but its 20 TPS player packet loop is
+not the target protocol shape.
 
 The durable constraints are:
 
@@ -171,9 +161,9 @@ The client runtime architecture must not bake in vanilla's 20 TPS rate or a brow
 - transport send/poll/push cadence
 - render frame and presentation interpolation cadence
 
-These rates are engine profile data, not hard-coded architecture. A
-Minecraft-like profile can default to a 20 Hz host/gameplay lane with higher
-rate physics substeps, while a high-fidelity profile may choose a 60 Hz host and
+These rates are engine profile data, not hard-coded architecture. Mclone's
+current cadence profile can use a 20 Hz host/gameplay lane with higher-rate
+physics substeps, while a high-fidelity profile may choose a 60 Hz host and
 60 Hz gameplay lane, and a lower-CPU profile may intentionally reduce host,
 gameplay, AI, or publication rates.
 
@@ -188,17 +178,17 @@ for host/gameplay/physics/AI/network cadence.
 
 ## Layer model
 
-| Layer | Responsibility | Parity expectation |
+| Layer | Responsibility | Product expectation |
 |---|---|---|
-| Simulation core | worldgen, block/state rules, chunk contents, gameplay systems, authoritative world state | strict where we target vanilla parity |
-| Server runtime | task scheduling, chunk lifecycle, ticking, authority, persistence orchestration, multiplayer session state | engine-native divergence |
-| Client runtime | protocol application, client-world replica, input/session ownership, prediction/interpolation services, presentation-state publication | engine-native divergence shaped by vanilla `ClientLevel` ownership |
-| Meshing/build pipeline | convert chunk/block state into renderer-ready geometry | renderer-native divergence, while consuming parity-correct chunk contents |
-| Renderer | WebGPU resources, uploads, passes, shaders, frame submission | engine-native divergence |
-| UI | shared Rust/WebGPU GUI model and draw list for menus, HUD, loading, options, and debug surfaces | engine-native divergence with vanilla-inspired behavior where useful |
-| App/platform adapters | desktop `winit`, Android activity/JNI, browser canvas/workers, OpenXR runtime/session/swapchain, packaging, validation scripts | platform divergence |
-| Persistence adapters | IndexedDB, filesystem, future alternate backends | engine-native divergence |
-| Transport adapters | local worker transport, WebSocket, future transports | engine-native divergence |
+| Simulation core | worldgen, block/state rules, chunk contents, gameplay systems, authoritative world state | original Mclone rules and content |
+| Server runtime | task scheduling, chunk lifecycle, ticking, authority, persistence orchestration, multiplayer session state | engine-native lifecycle and authority |
+| Client runtime | protocol application, client-world replica, input/session ownership, prediction/interpolation services, presentation-state publication | shared Mclone client behavior |
+| Meshing/build pipeline | convert chunk/block state into renderer-ready geometry | renderer-native implementation consuming authoritative chunks |
+| Renderer | WebGPU resources, uploads, passes, shaders, frame submission | original cross-platform presentation |
+| UI | shared Rust/WebGPU GUI model and draw list for menus, HUD, loading, options, and debug surfaces | original shared product behavior |
+| App/platform adapters | desktop `winit`, Android activity/JNI, browser canvas/workers, OpenXR runtime/session/swapchain, packaging, validation scripts | platform-specific glue only |
+| Persistence adapters | IndexedDB, filesystem, future alternate backends | engine-native storage implementations |
+| Transport adapters | local worker transport, WebSocket, future transports | carrier-specific implementations |
 
 ## Current Platform Architecture Status
 
@@ -232,7 +222,7 @@ sentinel smokes catching adapter regressions?"
 
 ### Shared simulation core
 
-This layer should contain the deterministic content and rules that need to behave like Minecraft when parity matters:
+This layer contains deterministic Mclone content and authoritative rules:
 
 - PRNG and noise
 - biome source
@@ -393,7 +383,8 @@ At minimum, the engine should converge on explicit shapes for:
 - world metadata and save metadata
 
 The durable shape of those data records lives in [`runtime-data-model.md`](./runtime-data-model.md). The message model that carries them lives in [`protocol.md`](./protocol.md).
-Lighting has additional parity-sensitive solver rules and browser/worker ownership constraints; keep the detailed design in [`lighting.md`](./lighting.md).
+Lighting has additional solver-correctness and browser/worker ownership
+constraints; keep the detailed design in [`lighting.md`](./lighting.md).
 
 These should be serializable without depending on live class instances.
 
@@ -454,39 +445,23 @@ version negotiation beyond strict equality. See [`protocol.md`](./protocol.md).
 This avoids building two engines — a shortcut local one and a real remote one.
 Only the transport changes.
 
-## Translation policy inside this architecture
+## Reference use inside this architecture
 
-The direct-translation rule from [`AGENTS.md`](../AGENTS.md) remains correct for the simulation/content side:
+Design simulation, content, and runtime systems from Mclone's requirements.
+Minecraft source is optional comparative evidence for explicitly scoped
+questions, not a baseline that every design must translate or justify itself
+against. Retained translated code may be maintained when needed, but new
+original work should not inherit Java names, control flow, or semantics by
+default.
 
-- worldgen
-- block/state systems
-- content logic where vanilla parity is the goal
-
-But the runtime shell should intentionally diverge where Minecraft's JVM architecture is not the right fit for native, browser, Android, or OpenXR hosts:
-
-- worker boundaries
-- scheduling
-- persistence
-- network transport
-- render-thread ownership
-- meshing pipeline organization
-
-In short:
-
-- translate gameplay logic
-- design engine architecture
-
-When making runtime-architecture decisions, use the reference Minecraft source as the baseline design input, not just as an implementation quarry. The question is not "can we do this differently?", but "what does vanilla do, why are we diverging, and what does that cost us for future parity work?"
-
-## Extensibility for non-vanilla gameplay
+## Extensibility for original gameplay
 
 This architecture is compatible with later divergence, including alternate physics systems such as PhysX, as long as those systems live in the authoritative simulation/runtime side and not in the renderer.
 
-The clean way to think about this is in profiles or modes:
-
-- `vanilla17`: translated worldgen and gameplay rules
-- `custom`: translated worldgen with modified gameplay
-- future additional profiles as needed
+World-generation profiles remain useful stored content identities. They do not
+imply parallel Minecraft-compatible gameplay modes: Mclone Overworld is the
+product default, while legacy and historical generators are optional internal
+surfaces behind the same original runtime.
 
 Examples of systems that may vary by profile:
 
@@ -516,13 +491,15 @@ Current gaps:
 - desktop XR and Android XR share the new XR host/graphics/scene crates; the
   shared scene now owns terrain/actor rendering, startup pose, locomotion, and
   the generic local/remote host runtime shape
-- lighting has a strong first pass, but parity correctness and render integration are still a user-visible feature gap
+- lighting has a strong first pass, but product correctness and render integration are still a user-visible feature gap
 - shared menu/HUD/options/loading UI is not yet complete enough to be the obvious feature path for every platform
 - the platform parity tracker now records the contract matrix, but its sentinel
   gates should become more executable and script-adjacent
-- richer gameplay still needs parity movement, entities, interactions, and server correctness work without moving ownership back into renderer/app shells
+- richer gameplay still needs original movement, entities, interactions, and server correctness work without moving ownership back into renderer/app shells
 
-That is why boundary consolidation, lighting/UI feature parity, and richer authoritative gameplay are now the architectural priorities, not more platform bring-up.
+That is why boundary consolidation, lighting/UI completeness, and richer
+authoritative gameplay are now the architectural priorities, not more platform
+bring-up.
 
 ## Immediate implications
 

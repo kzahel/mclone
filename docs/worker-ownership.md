@@ -2,7 +2,13 @@
 
 Baseline worker architecture for keeping the browser UI/GPU thread and authoritative host tick responsive while chunk generation, decoration, lighting, persistence, render-world ingest, and meshing are active.
 
-This is the target ownership model, not a tactical implementation slice. Worker pooling for terrain generation and decoration is deliberately deferred. The immediate goal is a clean baseline with one owner per mutable cache and bounded cross-worker queues. Runtime priorities and latency budgets are owned by [`authoritative-host-scheduling.md`](authoritative-host-scheduling.md); vanilla generation order is owned by [`worldgen-deterministic-order.md`](worldgen-deterministic-order.md).
+This is the target ownership model, not a tactical implementation slice.
+Worker pooling for terrain generation and decoration is deliberately deferred.
+The immediate goal is a clean baseline with one owner per mutable cache and
+bounded cross-worker queues. Runtime priorities and latency budgets are owned
+by [`authoritative-host-scheduling.md`](authoritative-host-scheduling.md);
+generator-declared prerequisites and retained Java-order research live in
+[`worldgen-deterministic-order.md`](worldgen-deterministic-order.md).
 
 ## Core Rule
 
@@ -271,9 +277,12 @@ Worldgen and decoration are good future pool candidates, but not part of this ba
 Reasons to defer:
 
 - decoration has cross-chunk write/read behavior
-- vanilla status order and publication gates are parity-critical; see [`worldgen-deterministic-order.md`](worldgen-deterministic-order.md)
+- generator-declared prerequisites and publication gates are correctness
+  critical; [`worldgen-deterministic-order.md`](worldgen-deterministic-order.md)
+  records the legacy Java model and retained lessons
 - structures span many chunks through starts/references; see [`structures.md`](structures.md)
-- feature application must preserve vanilla ordering and deterministic seeds
+- feature application must preserve each profile's declared deterministic
+  ordering and seed domains
 - chunk workers must return data or write plans, not mutate host chunks directly
 
 When pooling is introduced, keep this shape:

@@ -1,8 +1,12 @@
-# Worldgen Deterministic Order
+# Minecraft 1.17.1 Worldgen Order Reference
 
-Canonical ordering contract for vanilla Java 1.17.1 world generation, initial lighting, chunk publication, and client render readiness in `mclone`.
+Reference record for vanilla Java 1.17.1 world generation, initial lighting,
+chunk publication, and client render readiness, plus the engine mechanisms
+that Mclone has retained from that work.
 
-This document owns the parity-critical order model. Other docs may summarize it, but should link here instead of restating the algorithm.
+This document owns the detailed Java order model. It is not a parity target for
+Mclone Overworld; original generators own their plans and deterministic-write
+contracts through the shared scheduler interfaces.
 
 Related docs:
 
@@ -18,7 +22,9 @@ Related docs:
 
 ## Scope
 
-The target is vanilla Java `1.17.1` overworld behavior. Runtime machinery may use browser/Node workers instead of JVM executors, but a `vanilla17` profile must preserve the observable order of chunk-stage side effects.
+The specimen is vanilla Java `1.17.1` Overworld behavior. The legacy
+Java-shaped `overworld` profile uses much of this model, but is internal-mutable
+and no longer carries an exact parity promise.
 
 This is not a status dashboard and not a worker topology doc. It answers:
 
@@ -108,7 +114,10 @@ Concrete examples:
 - `NOISE` has range `8`, but only the center advances from `BIOMES` to `NOISE`; neighbors in the range are there for already-recorded structure metadata that can affect density through `Beardifier`.
 - `FEATURES` has range `8`, but `getDependencyStatus(FEATURES, r)` means the center and Chebyshev radius `1` are `LIQUID_CARVERS`, while radii `2..8` are only `STRUCTURE_STARTS`. Those outer chunks are metadata inputs, not carved terrain inputs.
 
-For `mclone`, this is a parity requirement. Do not replace vanilla's mixed-status dependency futures with a flattened "hidden authority terrain window." The runtime needs host-owned chunk records that can represent partial `ProtoChunk`-like states and metadata-only statuses separately from materialized block sections. Browser or Node scheduling can differ in mechanics, but status requests, dependency statuses, and the data each status is allowed to require must follow the vanilla mechanism.
+For `mclone`, the useful retained lesson is to avoid flattening dependencies
+into a hidden authority terrain window. Host-owned chunk records and typed
+prerequisites should represent the states an original generator actually
+needs. They need not reproduce every vanilla partial-status rule.
 
 ## Carvers
 
@@ -116,7 +125,12 @@ Classic carvers are target-local status tasks. `CARVERS` and `LIQUID_CARVERS` ha
 
 The wide cave/ravine footprint is internal to the target chunk's own carver pass. `ChunkGenerator.applyCarvers(...)` receives the target `ChunkAccess`, creates the target chunk's carving mask, scans possible carver start chunks in a fixed `[-8,+8]` square, walks the biome carver list in order, seeds each candidate, and only then carves into the target chunk ([`ChunkGenerator.java:135`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/chunk/ChunkGenerator.java), [`ChunkGenerator.java:142`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/chunk/ChunkGenerator.java), [`ChunkGenerator.java:144`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/chunk/ChunkGenerator.java), [`ChunkGenerator.java:153`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/chunk/ChunkGenerator.java), [`ChunkGenerator.java:156`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/chunk/ChunkGenerator.java)).
 
-Carver overlap is mostly subtractive air-over-air, but not formally commutative. The target `ProtoChunk` stores a carving mask for the step, and `WorldCarver` uses that mask as first-claim state before `carveBlock(...)` runs ([`ProtoChunk.java:455`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/chunk/ProtoChunk.java), [`WorldCarver.java:164`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/levelgen/carver/WorldCarver.java)). Preserve vanilla start scan order, list order, seed derivation, and mask behavior for parity.
+Carver overlap is mostly subtractive air-over-air, but not formally
+commutative. The target `ProtoChunk` stores a carving mask for the step, and
+`WorldCarver` uses that mask as first-claim state before `carveBlock(...)` runs
+([`ProtoChunk.java:455`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/chunk/ProtoChunk.java),
+[`WorldCarver.java:164`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/levelgen/carver/WorldCarver.java)). Preserve those details only for a
+scoped legacy comparison; original carvers need their own deterministic order.
 
 ## Structures
 
@@ -144,9 +158,22 @@ A target chunk C can therefore receive ordinary decoration writes from the nine 
 
 Decoration is deterministic because the chunk scheduler gives `FEATURES` tasks a single queue order, not because overlapping feature writes are order-independent. `ChunkMap.scheduleChunkGeneration(...)` submits the status task through `worldgenMailbox` and `ChunkTaskPriorityQueueSorter` after dependencies complete ([`ChunkMap.java:516`](../reference/minecraft-1.17.1/src/net/minecraft/server/level/ChunkMap.java), [`ChunkMap.java:517`](../reference/minecraft-1.17.1/src/net/minecraft/server/level/ChunkMap.java)). `ChunkTaskPriorityQueue` pops the first queued chunk at the first non-empty priority level ([`ChunkTaskPriorityQueue.java:49`](../reference/minecraft-1.17.1/src/net/minecraft/server/level/ChunkTaskPriorityQueue.java), [`ChunkTaskPriorityQueue.java:82`](../reference/minecraft-1.17.1/src/net/minecraft/server/level/ChunkTaskPriorityQueue.java), [`ChunkTaskPriorityQueue.java:88`](../reference/minecraft-1.17.1/src/net/minecraft/server/level/ChunkTaskPriorityQueue.java), [`ChunkTaskPriorityQueue.java:90`](../reference/minecraft-1.17.1/src/net/minecraft/server/level/ChunkTaskPriorityQueue.java)). The sorter then asks the target mailbox to run that task and polls the next task after the returned futures complete ([`ChunkTaskPriorityQueueSorter.java:116`](../reference/minecraft-1.17.1/src/net/minecraft/server/level/ChunkTaskPriorityQueueSorter.java), [`ChunkTaskPriorityQueueSorter.java:122`](../reference/minecraft-1.17.1/src/net/minecraft/server/level/ChunkTaskPriorityQueueSorter.java), [`ChunkTaskPriorityQueueSorter.java:125`](../reference/minecraft-1.17.1/src/net/minecraft/server/level/ChunkTaskPriorityQueueSorter.java)). `ProcessorMailbox.tell(...)` queues tasks for execution by the mailbox dispatcher ([`ProcessorMailbox.java:107`](../reference/minecraft-1.17.1/src/net/minecraft/util/thread/ProcessorMailbox.java)).
 
-This is not just an `mclone` porting concern. Vanilla Minecraft itself is order-dependent on the same seed: two worlds generated with the same seed and same version can differ slightly depending on the player's travel route, because chunk generation order determines which of two conflicting feature writes wins. This is publicly documented on the [Minecraft Wiki "World generation" page](https://minecraft.wiki/w/World_generation), tracked on the Mojang bug tracker as [MC-55596](https://bugs.mojang.com/browse/MC-55596), and catalogued for specific anomalous seeds on the [Minecraft Wiki "Anomalous world seeds" page](https://minecraft.wiki/w/Anomalous_world_seeds). The parity requirement for `mclone` is therefore not "match the seed" but "match the order in which vanilla schedules and commits cross-chunk `FEATURES` writes."
+Vanilla Minecraft itself is order-dependent on the same seed: two worlds
+generated with the same seed and same version can differ slightly depending on
+the player's travel route, because chunk generation order determines which of
+two conflicting feature writes wins. This is publicly documented on the
+[Minecraft Wiki "World generation" page](https://minecraft.wiki/w/World_generation),
+tracked on the Mojang bug tracker as
+[MC-55596](https://bugs.mojang.com/browse/MC-55596), and catalogued for specific
+anomalous seeds on the
+[Minecraft Wiki "Anomalous world seeds" page](https://minecraft.wiki/w/Anomalous_world_seeds).
+Mclone's product requirement is stronger route-independent determinism where
+its original generators claim it, not reproduction of this vanilla write race.
 
-For `mclone`, adjacent `FEATURES` tasks must not commit directly into shared chunks in arbitrary parallel order. If generation workers are used, they should return write plans or isolated results; the authoritative host must apply side effects in one deterministic vanilla-shaped order.
+For `mclone`, adjacent `FEATURES` tasks must not commit directly into shared
+chunks in arbitrary parallel order. Generation workers should return write
+plans or isolated results, and the authoritative host must apply side effects
+in the deterministic order declared by the active Mclone generator.
 
 Trace coverage note: the rule above is source-backed, and tactical [`48`](tactical/48-vanilla-scheduler-trace-oracle.md) now provides the first executable vanilla scheduler trace for a bounded spawn-bootstrap scenario. Tactical [`46`](tactical/46-full-decorated-spawn-chunk-parity.md) consumed that trace before claiming exact decorated block parity for the spawn fixture.
 
@@ -164,13 +191,32 @@ That order matches the current generated-host `sortChunkCoordinates(...)` order 
 
 ## Lighting Gate
 
-`LIGHT` has parent `FEATURES` and dependency range `1` ([`ChunkStatus.java:135`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/chunk/ChunkStatus.java), [`ChunkStatus.java:137`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/chunk/ChunkStatus.java), [`ChunkStatus.java:138`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/chunk/ChunkStatus.java)). Through `getDependencyStatus(...)` and `STATUS_BY_RANGE[1]`, lighting a target chunk waits for the target chunk plus its 8 neighbors to have completed `FEATURES` ([`ChunkMap.java:555`](../reference/minecraft-1.17.1/src/net/minecraft/server/level/ChunkMap.java), [`ChunkMap.java:557`](../reference/minecraft-1.17.1/src/net/minecraft/server/level/ChunkMap.java), [`ChunkStatus.java:164`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/chunk/ChunkStatus.java)).
+`LIGHT` has parent `FEATURES` and dependency range `1`
+([`ChunkStatus.java:135`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/chunk/ChunkStatus.java),
+[`ChunkStatus.java:137`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/chunk/ChunkStatus.java),
+[`ChunkStatus.java:138`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/chunk/ChunkStatus.java)).
+Through `getDependencyStatus(...)` and `STATUS_BY_RANGE[1]`, lighting a target
+chunk waits for the target chunk plus its 8 neighbors to have completed
+`FEATURES`
+([`ChunkMap.java:555`](../reference/minecraft-1.17.1/src/net/minecraft/server/level/ChunkMap.java),
+[`ChunkMap.java:557`](../reference/minecraft-1.17.1/src/net/minecraft/server/level/ChunkMap.java),
+[`ChunkStatus.java:164`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/chunk/ChunkStatus.java)).
 
 This matches the ordinary decoration stability rule. Initial light must not be treated as final if it was computed from only terrain, only local decoration, or a stale neighbor snapshot.
 
-Vanilla also schedules `LIGHT` through the same chunk-holder future machinery as the other statuses. When `ChunkMap.schedule(...)` sees `ChunkStatus.LIGHT`, it adds a `TicketType.LIGHT` ticket for the target chunk before requesting the status future, and the threaded light engine releases that ticket only after the post-update completion path marks the chunk light-correct ([`ChunkMap.java:455`](../reference/minecraft-1.17.1/src/net/minecraft/server/level/ChunkMap.java), [`ChunkMap.java:456`](../reference/minecraft-1.17.1/src/net/minecraft/server/level/ChunkMap.java), [`ThreadedLevelLightEngine.java:156`](../reference/minecraft-1.17.1/src/net/minecraft/server/level/ThreadedLevelLightEngine.java), [`ThreadedLevelLightEngine.java:159`](../reference/minecraft-1.17.1/src/net/minecraft/server/level/ThreadedLevelLightEngine.java)). `ThreadedLevelLightEngine` queues chunk-priority `PRE_UPDATE` tasks, runs propagation, then runs `POST_UPDATE` tasks; browser/Node workers can budget this differently, but should preserve the order ([`ThreadedLevelLightEngine.java:173`](../reference/minecraft-1.17.1/src/net/minecraft/server/level/ThreadedLevelLightEngine.java), [`ThreadedLevelLightEngine.java:180`](../reference/minecraft-1.17.1/src/net/minecraft/server/level/ThreadedLevelLightEngine.java), [`ThreadedLevelLightEngine.java:186`](../reference/minecraft-1.17.1/src/net/minecraft/server/level/ThreadedLevelLightEngine.java), [`ThreadedLevelLightEngine.java:190`](../reference/minecraft-1.17.1/src/net/minecraft/server/level/ThreadedLevelLightEngine.java)).
+Vanilla also schedules `LIGHT` through chunk-holder futures. A scoped legacy
+comparison would preserve its `PRE_UPDATE`, propagation, and `POST_UPDATE`
+ordering; Mclone's retained solver uses a similar split because it is useful,
+not because JVM scheduling is the product target. See the linked Java source
+around `ChunkMap.schedule(...)` and `ThreadedLevelLightEngine` for the exact
+reference details.
 
-For `mclone`, this means `LIGHT` should become status-scheduled work that starts as soon as the target's `3x3 FEATURES` dependency is ready. A whole-view "decorate everything, then compute light for everything" phase is a runtime shortcut, not the vanilla scheduling model. The light solver's physical propagation footprint and worker design are owned by [`lighting.md`](lighting.md) and [`lighting-worker-architecture.md`](lighting-worker-architecture.md).
+For `mclone`, `LIGHT` should remain status-scheduled work that starts as soon as
+the target's declared feature dependencies are ready. A whole-view “decorate
+everything, then compute light for everything” phase harms pipeline latency
+regardless of how Java schedules it. The light solver's physical propagation
+footprint and worker design are owned by [`lighting.md`](lighting.md) and
+[`lighting-worker-architecture.md`](lighting-worker-architecture.md).
 
 ## Full / Send Gate
 
@@ -221,7 +267,12 @@ After a warm steady-state move by one chunk along one axis, each square adds one
 25 new STRUCTURE_STARTS metadata records
 ```
 
-Those are the target counts if all 5x5 snapshots are normal vanilla publications and each chunk/status is generated once. If we want a move to materialize only the 5 newly visible terrain chunks, that is a different policy: only those 5 can be treated as normal publishable chunks, while the rest of the visual/cache halo must be represented as non-ticking cache data with explicitly weaker vanilla guarantees. Do not silently weaken the 3x3 `FULL` send gate to obtain the smaller number.
+Those are the counts for the retained 5x5 publication model when each
+chunk/status is generated once. Materializing only the five newly visible
+terrain chunks is a different product policy: the rest of the visual/cache halo
+must be represented explicitly as non-authoritative or non-ticking data. Do not
+silently weaken the declared `FULL` publication gate to obtain the smaller
+number.
 
 ## Player View Distance And Tickets
 
@@ -283,7 +334,12 @@ derived readiness:
   publishable(C) = FULL complete for C and its 8 neighbors
 ```
 
-Implementation rules:
+Legacy Java-shaped profile rules:
+
+The list below records the retained profile's model. Original Mclone generators
+reuse the shared typed-prerequisite, isolation, lighting, and publication
+machinery only as their own plans declare it; they do not inherit Java ranges
+or status graphs automatically.
 
 1. Schedule statuses through parent/range dependencies, not through a flattened radius shortcut.
 2. Keep partial `ProtoChunk`-like state first-class; metadata-only chunks must not be forced to `LIQUID_CARVERS` or `FULL` just because they are in a dependency square.
@@ -294,4 +350,5 @@ Implementation rules:
 7. Represent structures as starts, references, optional noise influence, and clipped per-chunk placement during `FEATURES`.
 8. Compute final initial light only after the 3x3 `FEATURES` gate.
 9. Publish normal chunk snapshots only after the 3x3 `FULL` gate.
-10. Let host scheduling and worker topology diverge from vanilla only when these ordering facts remain observable.
+10. A scoped Java comparison should keep these ordering facts observable even
+    when host scheduling and worker topology differ.

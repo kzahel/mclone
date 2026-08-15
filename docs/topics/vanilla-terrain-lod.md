@@ -22,7 +22,10 @@ generating complete chunks and discarding almost all of their block data. It
 does not replace canonical vanilla generation or Mclone's independent
 procedural CPU/GPU preview graph.
 
-## Product Decision
+This is an optional Terrain Lab comparison surface, not the product-default
+world, an active seed-parity campaign, or a constraint on Mclone LOD design.
+
+## Terrain Lab Decision
 
 Terrain Lab has one global terrain profile:
 

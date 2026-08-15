@@ -3,8 +3,8 @@
 Topic: vanilla-weather
 
 Status: reference notes for Minecraft Java 1.17.1 vanilla weather. This records
-the behavior shape to preserve before deciding whether mclone should add
-non-vanilla atmosphere systems later.
+one comparative behavior shape; it is not the implementation plan or
+correctness target for Mclone's original atmosphere systems.
 
 ## Scope
 
@@ -12,8 +12,7 @@ This topic covers vanilla Overworld weather state, local precipitation, thunder
 and lightning, weather randomness, and the notable absence of richer weather
 simulation such as wind, tornadoes, and wildfire events.
 
-The project target is Minecraft Java 1.17.1 vanilla overworld unless explicitly
-changed elsewhere.
+Minecraft Java 1.17.1 is the specimen documented here, not the project target.
 
 ## Vanilla Weather Model
 
@@ -131,15 +130,15 @@ extensions, not parity requirements.
 
 ## Mclone Direction
 
-For vanilla parity, implement the simple global weather cycle first, with
-position-local precipitation queries matching Java 1.17.1 semantics. Keep the
-weather API shaped so future non-vanilla atmosphere systems can layer on top
-without corrupting the vanilla contract:
+Design Mclone weather from the original product experience. The simple global
+cycle and position-local precipitation described above remain useful
+comparative mechanisms, but Mclone need not implement them first or preserve a
+vanilla contract:
 
 - global weather state and timers belong in shared simulation/server state;
 - local precipitation belongs behind biome/temperature/sky-access queries;
 - visual rain, snow, thunder darkening, sounds, particles, block ticks,
   lightning, and fire effects should consume those shared queries;
 - wind, tornadoes, wildfire events, seasons, and heavy ambient particle systems
-  should be explicit optional extensions, not hidden inside the vanilla weather
-  implementation.
+  should be explicit Mclone systems with their own contracts, not hidden inside
+  retained Java-comparison logic.

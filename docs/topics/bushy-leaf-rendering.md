@@ -249,7 +249,7 @@ Useful mclone-specific conservation:
 
 The inspected pack recommends Cull Leaves and includes options that force leaf
 culling and hide inner leaves. Mclone should not import that mod's policy
-implicitly or change vanilla-target base-leaf semantics as a side effect.
+implicitly or change its authoritative base-leaf semantics as a side effect.
 Skipping only optional bush cards for provably enclosed leaves is a narrower
 optimization.
 

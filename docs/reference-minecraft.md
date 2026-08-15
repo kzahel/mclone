@@ -1,9 +1,10 @@
 # Minecraft Reference Bootstrap
 
-The repo uses a local, gitignored Minecraft Java 1.17.1 reference tree for
-vanilla behavior, assets, oracle fixtures, and visual correctness checks.
-Separately pinned Alpha, Beta, and current-stable trees are historical or
-comparative research inputs; none changes the 1.17.1 parity target.
+The repo retains a local, gitignored Minecraft Java 1.17.1 reference tree for
+bounded behavioral research, legacy maintenance, assets, oracle fixtures, and
+visual comparison. Separately pinned Alpha, Beta, and current-stable trees are
+also historical or comparative research inputs. None is Mclone's product
+target.
 
 Root path:
 
@@ -17,15 +18,21 @@ The most important subtree is:
 reference/minecraft-1.17.1/src/
 ```
 
-Read the Java source before porting parity-sensitive vanilla behavior. Use it for simulation, content, renderer-facing state, model baking, texture atlas behavior, mipmaps/filtering, render layers, lighting, fog, sky, particles, and client-visible state.
+When an explicitly scoped task asks what Minecraft does, read the Java source
+before making claims or changing retained reference-shaped behavior. New
+Mclone simulation, content, rendering, and world generation do not default to
+this source and should follow Mclone's original product direction.
 
-## Target
+## Current Role
 
-The native worldgen target is **seed parity** with Minecraft Java 1.17.1 overworld output.
+Minecraft Java 1.17.1 seed parity is no longer a native worldgen or product
+target. The Java-shaped `overworld` profile and its fixtures remain available
+as legacy development/reference material, while `mclone-overworld-v1` is the
+normal new-world default and active worldgen direction.
 
 1.17.1 is intentionally pre-Caves-and-Cliffs terrain. It avoids the 1.18+ density-function and spline terrain system while still giving enough modern client/rendering source to reference.
 
-The MVP worldgen pipeline is:
+The retained 1.17-shaped pipeline is:
 
 1. PRNG and octaved noise
 2. `OverworldBiomeSource` / `BiomeManager`
@@ -35,11 +42,20 @@ The MVP worldgen pipeline is:
 6. surface rules
 7. features and structures
 
-See [`strategy.md`](strategy.md), [`worldgen-deterministic-order.md`](worldgen-deterministic-order.md), [`worldgen-status.md`](worldgen-status.md), [`carver-status.md`](carver-status.md), and [`structures.md`](structures.md) for current implementation status and parity policy.
+See [`strategy.md`](strategy.md),
+[`worldgen-deterministic-order.md`](worldgen-deterministic-order.md),
+[`worldgen-status.md`](worldgen-status.md),
+[`carver-status.md`](carver-status.md), and [`structures.md`](structures.md) for
+current implementation status and the boundary between legacy reference notes
+and original work.
 
 ## Disabled Caves & Cliffs Part 1 Systems
 
-The decomp under `reference/minecraft-1.17.1/` contains Caves & Cliffs Part 1 systems that are present in the source but disabled by default in 1.17.1 overworld generation. Do not port them for the MVP target. Revisit only if the project target changes to 1.18+ or explicitly enables Caves & Cliffs Part 1 behavior.
+The decomp under `reference/minecraft-1.17.1/` contains Caves & Cliffs Part 1
+systems that are present in the source but disabled by default in 1.17.1
+overworld generation. This is a fact about the retained reference, not a scope
+rule for original Mclone terrain. Do not port these systems merely because
+they exist in the decomp.
 
 `NoiseGeneratorSettings.overworld(...)` passes `false` for all five Caves & Cliffs Part 1 booleans in `reference/minecraft-1.17.1/src/net/minecraft/world/level/levelgen/NoiseGeneratorSettings.java`.
 
@@ -98,7 +114,10 @@ Client rendering and assets:
 - `net/minecraft/client/renderer/block/model/` - block model baking and baked quad UV behavior
 - `net/minecraft/client/renderer/RenderType.java` and `RenderStateShard.java` - vanilla render-layer state, transparency, culling, and texture-state choices
 
-1.17.1 also includes Caves & Cliffs Part 1 internals such as `Aquifer`, `Cavifier`, `NoodleCavifier`, and `OreVeinifier`. They are useful context when comparing versions, but they are disabled in the vanilla 1.17.1 overworld target and are not part of the MVP terrain port.
+1.17.1 also includes Caves & Cliffs Part 1 internals such as `Aquifer`,
+`Cavifier`, `NoodleCavifier`, and `OreVeinifier`. They are useful context when
+comparing versions, but are disabled in ordinary 1.17.1 Overworld generation
+and do not define Mclone's original terrain roadmap.
 
 ## Build Or Refresh The Reference Tree
 
@@ -204,7 +223,8 @@ also records the decisions required before any Rust implementation:
 
 ## Modern Stable Side Reference
 
-The current comparative specimen is pinned separately from the parity target:
+The current comparative specimen is pinned separately from the retained
+1.17.1 reference:
 
 ```bash
 # Build a focused current-stable worldgen tree under

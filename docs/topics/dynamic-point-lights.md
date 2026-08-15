@@ -17,8 +17,8 @@ cast shadows in it, and a wall should reliably block its direct contribution.
 
 This is deliberately separate from [`lighting.md`](lighting.md), which owns
 the Java-shaped stored sky/block light field, chunk-light status, persistence,
-mesh sampling, and the `LightTexture` color curve. Dynamic point lights are a
-rendering extension and intentional vanilla-parity divergence. They do not
+mesh sampling, and the `LightTexture` color curve. Dynamic point lights are an
+original Mclone rendering extension. They do not
 replace the authoritative stored-light facts or change gameplay rules such as
 mob spawning, crop growth, melting, or other light-level queries.
 

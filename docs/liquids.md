@@ -1,12 +1,17 @@
 # Liquids
 
-Research and implementation notes for Minecraft Java 1.17.1-style liquid simulation in `mclone`.
+Mclone liquid-simulation architecture with retained Minecraft Java 1.17.1
+comparison notes.
 
-This document is a reference for future liquid work. It is not a tactical slice by itself. The parity-critical parts should be direct Rust ports of the 1.17.1 fluid/block/tick logic, while scheduling, worker boundaries, transport, and persistence adapters should fit the existing authoritative host architecture.
+This document is not a tactical slice by itself. The current liquid path grew
+from Java-reference work, but future behavior should serve Mclone's original
+terrain and gameplay. Exact Minecraft flow is not the default acceptance
+target.
 
 ## Goals
 
-- Match vanilla 1.17.1 water behavior for generated overworld chunks, live block edits, and saved/reloaded worlds.
+- Provide deterministic, playable water behavior for Mclone Overworld,
+  including generated water, live block edits, and saved/reloaded worlds.
 - Keep liquid simulation authoritative-host owned, not renderer owned.
 - Preserve water `level` block-state facts exactly enough for meshing, storage, and oracle tests.
 - Execute generation-created scheduled liquid ticks instead of only recording them.
@@ -37,7 +42,9 @@ This document is a reference for future liquid work. It is not a tactical slice 
 | Lake feature block tick seeding | `reference/minecraft-1.17.1/src/net/minecraft/world/level/levelgen/feature/LakeFeature.java` |
 | Underwater carver tick seeding | `reference/minecraft-1.17.1/src/net/minecraft/world/level/levelgen/carver/UnderwaterCaveWorldCarver.java` |
 
-Read these files before writing the port. The flow rules, state conversion, and tick semantics are simulation parity logic. The host scheduler and worker layout may diverge, but they must preserve the same observable world state.
+Read these files when a scoped task compares Minecraft flow or modifies the
+retained Java-shaped implementation. Original Mclone liquid work should start
+from its gameplay, terrain, performance, and persistence requirements.
 
 ## Terms
 
@@ -69,7 +76,11 @@ When the tick fires, `FlowingFluid.tick(...)` recomputes the fluid state at that
 
 Liquid simulation has the same loaded-neighborhood issue as lighting, but not the same fixed radius. Water can eventually travel across arbitrary chunks, yet each scheduled tick only reads a small local footprint: direct neighbors, above/below, and the water slope search (`4` blocks for vanilla water). A water source in an unloaded neighboring chunk must not flow until that chunk is loaded and ticking.
 
-For `mclone`, do not answer fluid reads outside the loaded simulation neighborhood with fake air and then let the tick proceed. The host should defer due boundary liquid ticks until the local read footprint is loaded/decorated/published, keeping the tick pending just like other non-eligible scheduled ticks. This is a host scheduling divergence from vanilla's shared server chunk source, not a change to `FlowingFluid` rules.
+For `mclone`, do not answer fluid reads outside the loaded simulation
+neighborhood with fake air and then let the tick proceed. The host should defer
+due boundary liquid ticks until the local read footprint is ready, keeping the
+tick pending like other non-eligible scheduled work. This is the Mclone host
+contract regardless of the retained `FlowingFluid` implementation's origin.
 
 ### Oceans And Rivers
 
@@ -206,14 +217,17 @@ Keep the same division used by lighting:
 
 | Layer | Liquid responsibility |
 |---|---|
-| Simulation core | direct ports of fluid state, `FlowingFluid`, `WaterFluid`, `LiquidBlock`, tick-list semantics, block updates |
+| Simulation core | Mclone fluid state, flow/source behavior, liquid blocks, tick-list semantics, and block updates; retained Java-shaped code is an implementation detail |
 | Authoritative host | owns game time, due liquid tick queue, ticking-chunk eligibility, mutation batching, persistence dirtying |
 | Chunk workers | generate chunks and return block states plus generation-created scheduled tick records |
 | Storage adapters | persist block states and pending scheduled ticks behind engine-native records |
 | Protocol | publish chunk snapshots and later chunk deltas with tick/revision context |
 | Renderer/meshing | consume authoritative block states; never decide liquid simulation |
 
-The host may budget liquid work, but budgeting must preserve vanilla ordering within the work that is due. If we need to defer due work under load, document that as host scheduling backpressure, not as a changed fluid algorithm.
+The host may budget liquid work, but budgeting must preserve Mclone's declared
+ordering within the work that is due. If due work is deferred under load,
+document that as host scheduling backpressure rather than silently changing
+the fluid contract.
 
 ### Architectural Divergence
 
@@ -277,7 +291,8 @@ dump pending LiquidTicks
 compare TS result after same N ticks
 ```
 
-Do not rely on screenshots to validate liquid logic. Screenshots are only for visible follow-through after data parity is covered.
+Do not rely on screenshots to validate liquid logic. Screenshots are only for
+visible follow-through after authoritative state and behavior tests pass.
 
 ### Browser Visual Checks
 
@@ -294,7 +309,13 @@ Save screenshots to `/tmp` per project policy and inspect them before moving on.
 1. `Liquid0`: oracle foundation for dynamic liquid scenarios. **Done** for the first water-slope official-server fixture.
 2. `Liquid1`: direct water simulation foundation in TS, using Liquid0 fixtures. **Done** for the test-local water-slope path.
 3. `Liquid2`: authoritative host integration and dirty-chunk publication. **Done** for host queue hydration/execution, pending-tick persistence, and coarse dirty chunk snapshots.
-4. `Liquid3`: broaden verification and parity surface: browser visual probe for the hill/spring case, cross-chunk and source-regeneration oracle fixtures, then granular block-delta protocol or lava/waterlogged follow-through depending on the failure found first.
+4. `Liquid3`: broaden Mclone behavior verification: browser visual probe for
+   the hill/spring case, cross-chunk and source-regeneration tests, then
+   granular block-delta protocol or lava/waterlogged follow-through depending
+   on the failure found first. Java oracle fixtures are optional comparison
+   evidence, not the goal.
 5. Later: interaction with block entities, entity physics, boats, particles/sounds, and visual polish.
 
-Do not include disabled Caves & Cliffs Part 1 aquifer work in this liquid track. The 1.17.1 vanilla overworld target has aquifers disabled, per `AGENTS.md`.
+Do not add Minecraft's disabled Caves & Cliffs Part 1 aquifer implementation
+merely because it is present in the reference tree. Any Mclone groundwater or
+aquifer system should be designed as original terrain/gameplay work.

@@ -1,12 +1,14 @@
-# Translation and Release Strategy
+# Original Product and Reference Strategy
 
-Mclone uses Minecraft Java 1.17.1 as a behavioral and visual reference while
-building a shared Rust engine and original product content. The live engine
-under [`../native/`](../native/) serves all five client targets; reference use
-does not define a separate implementation track or a preferred platform.
+Mclone is building an original voxel sandbox on a shared Rust engine. Minecraft
+Java 1.17.1 remains an optional behavioral and visual comparison source, but
+Minecraft parity is no longer a project target or the default implementation
+method. The live engine under [`../native/`](../native/) serves all five client
+targets.
 
-This document owns the boundary between reference-backed parity development
-and eventual public distribution. Runtime and host ownership live in
+This document owns the boundary between original product development,
+reference research, and eventual public distribution. Runtime and host
+ownership live in
 [`architecture.md`](architecture.md), durable crate and app ownership live in
 [`native-engine-architecture.md`](native-engine-architecture.md), and reference
 bootstrap details live in
@@ -14,22 +16,23 @@ bootstrap details live in
 
 ## Current Reference Use
 
-The local, gitignored Minecraft 1.17.1 decomp and extracted assets support:
+The local, gitignored Minecraft 1.17.1 decomp and extracted assets may support:
 
-- behavioral research before parity-sensitive implementation;
-- oracle fixtures and deterministic output comparisons;
+- bounded behavioral or architectural comparison;
+- maintenance of retained legacy behavior and focused oracle fixtures;
 - development-only visual comparison and asset-pipeline bring-up;
-- the reference-locked `overworld` generation profile.
+- historical research into Minecraft's implementation.
 
-Parity-sensitive implementations preserve Java primitive semantics explicitly,
-including integer wrapping, floating-point behavior, truncation versus floor,
-and random draw order. The Minecraft reference tree remains a development
-input, not live engine code or distributable product content.
+The Minecraft reference tree remains an optional development input, not live
+engine code, distributable product content, or the source of truth for new
+Mclone behavior. Original Mclone features should be designed from product
+requirements and shared engine contracts rather than translated from Java.
 
-The `overworld` profile targets Minecraft Java 1.17.1 seed parity as an oracle
-and regression surface. The original `mclone-overworld-v1` profile owns the
-product's creative terrain, biome, surface, decoration, cave, geology,
-landmark, and structure direction. See
+`mclone-overworld-v1` is the product new-world default and owns the creative
+terrain, biome, surface, decoration, cave, geology, landmark, ecology, and
+structure direction. The stored `overworld` profile remains a selectable
+Java-1.17-shaped legacy development surface; its current fixtures guard
+against accidental drift but do not make parity an active goal. See
 [`topics/mclone-overworld-generation.md`](topics/mclone-overworld-generation.md)
 and [`worldgen-status.md`](worldgen-status.md).
 
@@ -53,9 +56,8 @@ That is a current release state, not a personal/home-use product goal.
 First-party asset-pack provenance and the remaining reference-free startup
 boundary are tracked in
 [`topics/asset-pack-profiles.md`](topics/asset-pack-profiles.md). Original world
-generation status is tracked separately so completion of the reference-locked
-`overworld` profile is never mistaken for completion of Mclone's product
-generator.
+generation status is tracked separately from the legacy `overworld` profile so
+reference maintenance is never mistaken for product progress.
 
 ## Independent Implementation Process
 
@@ -74,10 +76,12 @@ AI assistance does not remove the need for this separation. Project policy
 treats code produced with source access as reference-derived until it has been
 reviewed or replaced for distribution.
 
-## Oracle Testing
+## Optional Oracle Testing
 
-Ground truth for parity tests is observed Minecraft behavior, not an earlier
-Mclone translation.
+When a bounded legacy/reference task explicitly calls for a Minecraft oracle,
+ground truth is observed Minecraft behavior, not an earlier Mclone
+translation. Oracle testing is not a general acceptance requirement for new
+Mclone features.
 
 - The Java oracle harness and pinned server/client artifacts generate focused
   behavioral measurements.
@@ -95,8 +99,8 @@ Bootstrap and fixture-generation commands live in
 
 | Component | Development policy | Release direction |
 |---|---|---|
-| Minecraft 1.17.1 `overworld` profile | Reference-locked parity and oracle surface | Retain only if implementation and distribution review permit it; never substitute it for original Mclone world generation |
-| `mclone-overworld-v1` | Original terrain and content over shared engine mechanisms | Complete as the product world-generation profile |
+| Minecraft 1.17-shaped `overworld` profile | Legacy development/reference surface; internal and mutable | Maintain, change, or retire only for an explicit need; never substitute it for original Mclone world generation |
+| `mclone-overworld-v1` | Original terrain and content over shared engine mechanisms; product default | Continue as the product world-generation profile |
 | Textures, models, sounds, and structure data | Local Minecraft content may be used for development comparison | Ship only first-party or otherwise redistributable content |
 | Renderer, physics, UI, networking, persistence, and platform adapters | Original shared Rust implementation informed by behavioral references | Ship after ordinary provenance and release review |
 | Oracle fixtures and tooling | Retained development infrastructure | Include only factual, review-approved artifacts needed by the released project |

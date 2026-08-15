@@ -56,8 +56,9 @@ It does **not** own:
 ## Strategic Thesis
 
 Mclone should be sold as an **original, cross-platform voxel survival sandbox
-that is native to both ordinary screens and spatial play**. Minecraft parity is
-an internal development and correctness technique, not the public identity.
+that is native to both ordinary screens and spatial play**. Retained Minecraft
+reference tooling is optional internal infrastructure, not product direction
+or public identity.
 
 The strongest product advantages are the combination rather than any one
 feature:
@@ -551,10 +552,10 @@ continue toward release:
 
 ### Brand and expectation risk
 
-Seed/behavior parity creates unusually high expectations if exposed as the
-product identity. Keep Minecraft reference materials private, ship original
-content, establish a visually distinct world, and describe the actual current
-game rather than everything the reference target eventually implies.
+Minecraft-parity language would create inaccurate expectations if exposed as
+the product identity. Keep Minecraft reference materials private, ship
+original content, establish a visually distinct world, and describe the actual
+current game rather than implying a parity roadmap that no longer exists.
 
 ### Store and pricing risk
 

@@ -1,6 +1,7 @@
-# Entities
+# Entity Runtime
 
-Durable architecture notes for Minecraft Java 1.17.1-style entity runtime ownership in `mclone`.
+Durable architecture notes for original Mclone entity runtime ownership, with
+retained Minecraft Java 1.17.1 research below.
 
 This document is about entity lifecycle, storage, ticking, host ownership, persistence, and protocol shape. Creature spawning remains covered by [`creatures.md`](./creatures.md). The original fixture/oracle and entity-runtime foundation slices are now represented by native server/client/render code plus retained oracle fixtures under `test/fixtures/creatures/`; new creature/entity implementation slices should use numeric native tacticals under [`tactical/`](tactical/README.md).
 
@@ -19,7 +20,11 @@ This document is about entity lifecycle, storage, ticking, host ownership, persi
 
 `Entities0` itself stayed pre-creature. `Creatures1` feeds the runtime with generation-time passive entities through the host-owned worldgen entity sink. `Creatures2` wires that runtime into `GeneratedWorldHost` and publishes generated entities as protocol `entity_snapshot` records consumed by local and remote clients as data. `Creatures5` starts ticking generated cows in `ENTITY_TICKING` chunks and publishes movement through `entity_update`. `Creatures7` adds the first authoritative living-entity push pass for generated mobs and the local player.
 
-Still deferred: full per-session tracking/revision policy, despawn, durable entity persistence adapters beyond the current in-memory runtime path, hard entity collision shapes for vehicles/special entities, full `deltaMovement` / `Entity.move(...)` parity, and most mob behavior beyond the first passive wander foundation.
+Still deferred: full per-session tracking/revision policy, lifecycle/removal
+policy, durable entity persistence adapters beyond current paths, hard entity
+collision shapes for vehicles/special entities, richer movement, and behavior
+beyond the first original creature foundations. Missing Java parity is not the
+completion criterion.
 
 ## Scope
 
@@ -27,7 +32,8 @@ The first entity runtime foundation should make entities real authoritative host
 
 In scope:
 
-- vanilla-shaped entity identity, position, section ownership, removal, and persistence state
+- engine-owned entity identity, position, section ownership, removal, and
+  persistence state
 - tracked vs ticking lifecycle
 - chunk status transitions through `BORDER`, `TICKING`, and `ENTITY_TICKING`
 - host-owned mutation order for add, remove, move, load, save, and unload
@@ -40,11 +46,13 @@ Explicit non-goals for the first runtime foundation:
 - no generation-time original mob spawning
 - no AI, goals, sensing, navigation, pathfinding, combat, breeding, taming, or despawn rules
 - no renderer models, animations, particles, sounds, or entity selection UI
-- no full `Mob`, `LivingEntity`, `Player`, inventory, equipment, passenger, leash, or brain port
+- no requirement to port full Java `Mob`, `LivingEntity`, `Player`, inventory,
+  equipment, passenger, leash, or brain systems
 
 ## Reference Source Map
 
-Read these before implementing entity runtime code:
+Read these only for explicitly scoped Minecraft comparison or retained
+reference-code maintenance:
 
 | Concern | Vanilla source |
 |---|---|
@@ -247,7 +255,7 @@ For `mclone`, this means collision/spawn/despawn systems should query authoritat
 
 ## Mclone Runtime Adaptation
 
-The vanilla shape:
+The useful reference shape:
 
 1. server tick thread owns authoritative entity mutation
 2. chunk status futures call back into the entity manager
@@ -260,7 +268,7 @@ The browser/Node adaptation should keep the ownership while changing the carrier
 | Vanilla concept | `mclone` adaptation |
 |---|---|
 | Server tick thread | host authority lane in browser worker or Node event loop |
-| `PersistentEntitySectionManager` | shared simulation/runtime entity manager with vanilla-shaped callbacks |
+| `PersistentEntitySectionManager` | shared simulation/runtime entity manager with engine-owned callbacks |
 | `EntityStorage` using `world/entities/*.mca` | logical entity storage adapter; browser/file physical layout may differ |
 | `ChunkHolder.FullChunkStatus` futures | host chunk job/status records publishing full-status changes |
 | `ChunkMap.addEntity/removeEntity` | protocol tracking publication and session filtering |
@@ -274,7 +282,7 @@ The allowed divergence is runtime orchestration:
 - chunk jobs may produce generated entity records off-thread
 - protocol/wire codecs may use structured clone, JSON control envelopes, and binary payloads
 
-The not-allowed divergence for vanilla-profile behavior:
+Mclone invariants regardless of the retained reference implementation:
 
 - renderer-owned entity truth
 - putting entities into block chunk snapshots or mesh payloads
@@ -282,7 +290,7 @@ The not-allowed divergence for vanilla-profile behavior:
 - treating killed generation-time animals as seed-respawnable decorations
 - ignoring section ownership during movement
 - dropping duplicate-UUID and removal-persistence semantics
-- changing spawn/despawn/category behavior later to fit a client cache
+- changing population/lifecycle behavior merely to fit a client cache
 
 ## Protocol Implications
 
@@ -331,7 +339,7 @@ Polling transports can carry these as ordinary `WorldHostMessage` updates. If en
 
 ## Persistence Direction
 
-The logical storage model should mirror vanilla even if the physical adapter differs:
+The logical storage model should remain engine-owned and adapter-neutral:
 
 ```ts
 interface EntityChunkRecord {

@@ -6,7 +6,7 @@ Status: **Tacticals 187, 188, 191, 193, 194, and 257 are complete.
 `flat-grass-v1`, `small-island-v1`, `topology-probe-v1`, `alpha-v1`,
 `beta-v1`, and the
 first `mclone-overworld-v1` terrain language are live, persisted shared-Rust
-generators beside the unchanged Overworld; authored-only misses still produce
+generators beside the legacy Java-shaped Overworld; authored-only misses still produce
 void. Small Island now
 exercises the reusable value-noise primitive, typed scheduler/worker request
 contract, dependency cache, mutable feature region, and a real cross-chunk
@@ -33,11 +33,11 @@ order lives in
 
 ## Product Direction
 
-Continue building broad agreement with Minecraft Java 1.17.1 biomes, terrain,
-and ordinary decoration as a reference baseline. At an explicit fork, retain
-that oracle-tested behavior as a frozen reference profile and develop a
-versioned mclone profile with original biome combinations, decoration,
-structures, landmarks, and eventually terrain changes.
+Continue building Mclone Overworld as the original product world: its own
+terrain, biome combinations, decoration, ecology, structures, landmarks, and
+gameplay. It is already the product default; there is no future parity fork to
+wait for. Minecraft Java 1.17.1 and the stored `overworld` profile are optional
+comparative/legacy surfaces, not a reference lock on product work.
 
 The first alternate generators are intentionally smaller:
 
@@ -59,7 +59,8 @@ The first alternate generators are intentionally smaller:
 
 The stored server-owned `WorldGenerationProfile` has eight values:
 
-- `Overworld`: current procedural vanilla-1.17-shaped generation;
+- `Overworld`: legacy procedural Java-1.17-shaped generation, retained as an
+  internal development/reference selection rather than the product default;
 - `FlatGrassV1`: exact bedrock/dirt/dirt/grass layers with plains biomes and no
   decoration, ticks, or generator neighbors;
 - `SmallIslandV1`: a bounded original seeded radial/noise field with a safe
@@ -99,7 +100,7 @@ validating or scheduling the world.
 
 Scheduler and worker requests carry an immutable profile-plus-seed descriptor
 through native messages, WASM codecs, responses, and diagnostics. The closed
-shared-Rust executor selects the unchanged Overworld cache, flat grass, the
+shared-Rust executor selects the legacy Overworld cache, flat grass, the
 Small Island, Mclone Overworld, Alpha, or Beta cache, and resident state resets
 when either descriptor fact changes.
 
@@ -205,6 +206,12 @@ world.
   unchanged; internal worlds remain disposable. The accepted
   `intro-homestead-v1` scout origin and realized seed-`0` plan checksum remain
   unchanged.
+- **Reviewed for original-product direction, 2026-08-15:** Minecraft Java
+  1.17.1 parity is no longer a project target. Mclone Overworld remains the
+  product default, and legacy `overworld` joins the other internal-unshipped
+  profiles as mutable rather than reference-locked. Existing oracle and
+  regression fixtures remain useful evidence only when a task explicitly
+  places that legacy surface in scope.
 - **Project release state:** `internal-unshipped`
 - **Known external world/save consumers:** none
 - **Default fixture meaning:** refactor and determinism regression guard, not a
@@ -214,9 +221,6 @@ world.
 
 Dispositions mean:
 
-- `reference-locked`: output is constrained by an external correctness target;
-  intentional change is limited to parity corrections, proven
-  behavior-preserving refactors, or an explicit target change;
 - `internal-mutable`: intentional output and identity changes are allowed in
   place because no shipped consumer depends on them;
 - `planned-unallocated`: the identity is not live and may be redesigned before
@@ -224,7 +228,7 @@ Dispositions mean:
 
 | Surface | Disposition | Safe intentional changes | Why | Required update when changed |
 |---|---|---|---|---|
-| `overworld` | `reference-locked` | Parity fixes, output-identical refactors, or an explicit change away from the Java 1.17.1 target | Its constraint is the Minecraft reference/oracle target, not shipped save compatibility | Re-run oracle, random-order, scheduler, worker, and pixel gates; update fixtures only when correcting the reference expectation |
+| `overworld` | `internal-mutable` | Maintenance, output changes, identity changes, or retirement may proceed for an explicit project need | It is a legacy Java-shaped development/reference profile with no shipped consumers and no active parity target | Update affected fixtures/tests/docs and discard or explicitly migrate affected internal worlds; run oracle checks only when the scoped change still claims a Minecraft fact |
 | `flat-grass-v1` | `internal-mutable` | Layers, biome, seed use, label, tag, planning shape, and implementation may change in place | It is an internal proof generator with no shipped worlds or external consumers | Update focused fixtures/tests/docs and discard or migrate affected internal worlds |
 | `small-island-v1` | `internal-mutable` | Noise, terrain shape, materials, biomes, spawn, decoration, dependencies, label, tag, and implementation may change in place | It is an internal proving ground; current fingerprints protect accidental drift but do not prohibit intentional improvement | Update fingerprints, seam/order tests, captures, docs, and discard or migrate affected internal worlds |
 | `authored-only` missing-void behavior | `internal-mutable` | Missing-chunk semantics and identity may change after auditing authored scenarios | No shipped consumer exists, although lobby/preview fixtures rely on the current void contract | Update persistence, embedded-world, catalog, and no-worldgen scenario coverage together |
@@ -262,16 +266,17 @@ fingerprint.
 
 ## Binding Decisions
 
-1. Preserve the existing stored `overworld` identity and serialized
-   discriminant while it names the Java 1.17.1 reference path. This is a
-   reference-baseline decision, not evidence of shipped save consumers.
+1. The existing stored `overworld` identity and serialized discriminant name a
+   legacy Java-shaped path. They are not a parity promise or evidence of
+   shipped save consumers and may be changed or retired under the safety
+   ledger when an explicit need justifies it.
 2. `flat-grass-v1` and `small-island-v1` are current internal identities, not
    release freezes. They may change in place under the safety ledger while no
    preservation consumer exists.
-3. The original overworld uses internal `mclone-overworld-v1` so it remains
-   distinct from reference `overworld`; its exact compatibility promise begins
-   only when the safety ledger records a concrete preservation consumer and
-   freeze.
+3. The product default uses `mclone-overworld-v1` so Mclone's original world
+   remains distinct from legacy `overworld`; its exact compatibility promise
+   begins only when the safety ledger records a concrete preservation consumer
+   and freeze.
 4. Persistence hits win for every profile. Profiles govern only what a true
    missing chunk produces.
 5. Generator dependency footprints are separate from lighting and publication
@@ -451,7 +456,8 @@ remaining invisible as the content surface grows.
 ## Acceptance Themes
 
 - exact current world/profile decode;
-- unchanged overworld oracle fixtures and random order;
+- affected legacy-overworld regression fixtures, with oracle comparison only
+  when the scoped work makes a Minecraft-behavior claim;
 - deterministic output independent of request order/batching;
 - worker rejection of undeclared or duplicate typed inputs;
 - explicit profile/seed reset of worker-resident state;

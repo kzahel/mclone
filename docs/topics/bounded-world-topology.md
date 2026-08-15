@@ -377,10 +377,11 @@ DimensionDefinition
 ```
 
 The topology determines canonical identity, bounds, adjacency, and observation.
-The generation profile determines terrain content. Vanilla Overworld remains
-on the unbounded Euclidean topology and retains its reference-locked output.
-Alternate internal profiles may opt into finite or periodic topology without
-changing the meaning of the Overworld profile.
+The generation profile determines terrain content. The legacy Java-shaped
+Overworld remains on the unbounded Euclidean topology. It is not
+reference-locked; any future topology or output change still needs an explicit
+profile decision and the normal internal-world fixture updates. Other internal
+profiles may opt into finite or periodic topology independently.
 
 Generation must respect the selected topology:
 

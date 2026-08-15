@@ -411,7 +411,8 @@ a grass/table world A and a grass/stone-island world B. A new server-owned
 through the normal chunk-status/light/publication path instead of silently
 running overworld generation. This is not presented as a partial vanilla
 Superflat port. A general flat generator remains separate and should start from
-Java 1.17.1 `FlatLevelSource` if product world creation later needs it.
+Mclone's world-creation requirements; Java 1.17.1 `FlatLevelSource` is only an
+optional comparison specimen.
 
 Placed terrain gets separate mono/per-eye/multiview shader/pipeline variants so
 the direct one-world shader and draw path remain unchanged. The first manual
@@ -619,12 +620,11 @@ Confirmed against the renderer (see Seams for file:line):
     itself correctly at any position/scale with zero work.
 - **Net-new, and orthogonal to nesting:**
   - *Cross-world light and shadow* ("your shadow falls across the little
-    world"). The engine has **no dynamic shadow system at all** — lighting is
-    Minecraft baked lightmaps, faithful to 1.17.1. So world A's torch will not
-    spill into world B and no shadow crosses the boundary. This is not a
-    boundary to bridge; it is a dynamic shadow-mapping subsystem to *invent*,
-    and a deliberate vanilla-parity divergence. Good news: it is independent of
-    nesting — build dynamic shadows once for either world and, because geometry
+    world"). The engine has **no dynamic shadow system at all**; its retained
+    stored-light/lightmap path does not spill one world's torch into another or
+    cast cross-world shadows. This is not a boundary to bridge; it is an
+    original dynamic shadow-mapping subsystem to build. It is independent of
+    nesting—build dynamic shadows once for either world and, because geometry
     already shares coordinates and depth, they cross the boundary naturally.
     Track shadow work as its own concern, not a sub-task of this one.
 

@@ -126,9 +126,9 @@ lossless compression.
 
 The current compatibility safety ledger in
 [`world-generation-profiles.md`](world-generation-profiles.md#compatibility-safety-ledger)
-still governs profile changes. Most live profiles are internal and mutable;
-the Java 1.17.1 Overworld is reference-locked for parity, not yet frozen by a
-shipped-save promise. Before public release, the product needs an explicit
+still governs profile changes. All live profiles, including the legacy Java
+1.17-shaped `overworld`, are internal and mutable. Before public release, the
+product needs an explicit
 generator freeze/migration contract if `Regenerate` is expected to preserve
 seamless reopened worlds across upgrades.
 

@@ -94,7 +94,7 @@ It deliberately does not replace:
 - [`../structures.md`](../structures.md), which owns generic structure
   starts, references, pieces, placement, and persistence architecture;
 - renderer and distant-terrain topics, which own presentation mechanisms; or
-- the reference-locked Java 1.17.1 Overworld.
+- the legacy Java-1.17-shaped `overworld` profile.
 
 This is an original-profile planning document. Minecraft and studied
 community generators supply evidence and useful vocabulary, not rule tables

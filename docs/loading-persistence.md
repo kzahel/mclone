@@ -4,10 +4,21 @@ Durable guidance for world creation, chunk loading, generation, saving, eviction
 
 This document has two jobs:
 
-1. Describe Minecraft Java 1.17.1's loading and persistence model closely enough to guide parity work.
-2. Describe where `mclone` intentionally or accidentally diverges today, with immediate fixes separated from acceptable deferrals.
+1. Record Minecraft Java 1.17.1's loading and persistence model as comparative
+   architecture research.
+2. Describe Mclone's own loading/persistence requirements and current gaps,
+   without treating differences from Java as parity defects.
 
-[`architecture.md`](./architecture.md) owns runtime boundaries. [`runtime-data-model.md`](./runtime-data-model.md) owns logical chunk and block-state facts. [`protocol.md`](./protocol.md) owns host/client messages. [`persistence-architecture.md`](./persistence-architecture.md) owns the broader shared persistence target for chunks, entity chunks, player data, saved data, and platform backends. [`authoritative-host-scheduling.md`](./authoritative-host-scheduling.md) owns scheduler rules that keep player/session authority responsive while chunk jobs run. [`worldgen-deterministic-order.md`](./worldgen-deterministic-order.md) owns vanilla status order, finality, lighting gates, and chunk publication gates. [`structures.md`](./structures.md) owns the structure-specific start/reference/placement model inside the status pipeline.
+[`architecture.md`](./architecture.md) owns runtime boundaries.
+[`runtime-data-model.md`](./runtime-data-model.md) owns logical chunk and
+block-state facts. [`protocol.md`](./protocol.md) owns host/client messages.
+[`persistence-architecture.md`](./persistence-architecture.md) owns the broader
+shared persistence target. [`authoritative-host-scheduling.md`](./authoritative-host-scheduling.md)
+owns responsive scheduler rules.
+[`worldgen-deterministic-order.md`](./worldgen-deterministic-order.md) records
+the legacy Java status order and retained scheduling mechanisms.
+[`structures.md`](./structures.md) owns original structure foundations plus the
+Java architecture reference.
 
 ## Core Rule
 
@@ -87,7 +98,10 @@ EMPTY
 
 Each status declares a parent, dependency range, generation task, loading task, chunk type, and heightmaps available after that status. If a stored chunk already satisfies a requested status, the loading task advances or passes it through. If it does not, the generation task resumes from the stored status rather than starting from nothing.
 
-This matters for future parity because persisted partial chunks are real vanilla state. For MVP we mostly deal in fully publishable chunks, but the architecture should not make status-based loading impossible later.
+Persisted partial chunks are a useful Java reference fact. Mclone mostly deals
+in fully publishable chunks today, but the architecture should not make
+status-based resume impossible if original generators or long-running jobs
+later need it.
 
 Structure-specific status semantics are not optional details: `STRUCTURE_STARTS` records starts, `STRUCTURE_REFERENCES` records touched-start references, noise-affecting structures can alter `NOISE`, and final structure slices are placed during `FEATURES`. The canonical status-order and finality model is [`worldgen-deterministic-order.md`](./worldgen-deterministic-order.md); structure implementation details live in [`structures.md`](./structures.md).
 
@@ -383,7 +397,7 @@ Fresh Playwright contexts reduce leakage, but the explicit query is the determin
 | Generated clean persistence | Dirty/save policy; not every publish writes | Published generated-clean chunks now queue lazy discardable cache writes through the shared actor; stale queued cache writes skip if a dirty save supersedes them | Still lacks a native durable backend | Tactical 134 |
 | Dirty tracking | `isUnsaved` gates save | Host block mutations mark durable dirty chunks; future gameplay domains still need to join that policy | Entity/block-entity/player state could bypass dirty saving until implemented | Extend with each gameplay domain |
 | Light persistence | Saved and hydrated only through `isLightOn`/light-correct trust path | Sent to clients but omitted from storage; recomputed on reload | Cannot benefit from trusted saved light yet | Keep until trusted-light hydration exists |
-| Tick persistence | Proto/full tick lists preserved; unpacked into server tick lists when accessible | Block/liquid tick snapshots restored into chunks; liquid host hydrates published chunk ticks | Reasonable partial match for liquid work | Continue parity work |
+| Tick persistence | Proto/full tick lists preserved; unpacked into server tick lists when accessible | Block/liquid tick snapshots restored into chunks; liquid host hydrates published chunk ticks | Useful reference comparison | Continue Mclone persistence work as gameplay requires |
 | Heightmaps | Stored and primed if missing | Not stored in snapshots | Current systems recompute or avoid persisted heightmaps | Defer until needed |
 | Structures | Stored starts/references | Not persisted | Structures are post-MVP | Defer |
 | Entities/block entities | Persisted and loaded | Entity chunk records persist Cow, Chicken, and Item state through `WorldStore` backends that opt in; block entities are not modeled yet | Generated-original entity placement and tombstone suppression still need follow-up slices | Tactical 134 |
@@ -393,13 +407,14 @@ Fresh Playwright contexts reduce leakage, but the explicit query is the determin
 | Progress UI | Status listener reports status changes | UI reports saved-chunk lookup, missing generation, decoration, lighting, and publish phases | Coarse lighting progress only | Keep improving with future status work |
 | Test storage isolation | N/A | Worker probes can request `clearWorldStorage=1`; dev profile still persists unless requested | Manual dev refreshes can still intentionally reuse local saves | Keep explicit reset path |
 
-## Recommended Target Shape
+## Mclone Gaps And Optional Java Comparisons
 
 ### Separate Durable State From Derived Cache
 
 Use two concepts explicitly:
 
-- **Durable save state**: user/world mutations and vanilla state that must survive reload.
+- **Durable save state**: user/world mutations and authoritative gameplay state
+  that must survive reload.
 - **Derived generated cache**: deterministic generated chunks or light data that may be discarded when algorithms or versions change.
 
 Generated chunks can be cached for faster refresh, but the code and metadata should make that policy obvious. A generated-clean cache miss should be acceptable. A mutated chunk save miss is data loss.
@@ -480,7 +495,9 @@ These were small enough and high enough leverage to do before deeper persistence
 
 ## Deferred Work
 
-These are real vanilla deltas, but they do not need to block current renderer/worldgen progress:
+The first-party persistence gaps below should be prioritized by Mclone product
+needs. Java differences are comparative context and do not block original
+renderer/worldgen progress by themselves:
 
 - Full `ChunkStatus` persistence and partial-status resume.
 - Vanilla Anvil/region physical layout.
@@ -489,7 +506,8 @@ These are real vanilla deltas, but they do not need to block current renderer/wo
 - Structure starts/references in chunk saves.
 - Heightmap persistence.
 - Postprocessing and carving mask persistence.
-- General ticket graph parity beyond rectangular chunk-view interest.
+- Richer ticket/interest graphs beyond rectangular chunk-view interest, when
+  Mclone gameplay needs them.
 - Trusted persisted-light hydration, if we choose not to do it immediately.
 
 ## Working Rule For Future Slices
@@ -497,7 +515,7 @@ These are real vanilla deltas, but they do not need to block current renderer/wo
 Before changing loading, persistence, or chunk publication, explicitly answer:
 
 1. Is this state authoritative durable data or a discardable generated cache?
-2. Does vanilla store it, derive it, or recompute it?
+2. Does Mclone need to store it durably, cache it, derive it, or recompute it?
 3. If stored, what version/trust marker invalidates stale data?
 4. What marks the chunk dirty?
 5. When is the dirty state flushed?

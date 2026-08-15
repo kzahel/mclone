@@ -7,8 +7,9 @@ system is owned by `mclone-ui`; GPU execution, glyph atlases, batching, item
 icon rendering, and panel texture caching are owned by `mclone-render`.
 Platform apps own only window/session/input glue.
 
-The target is a vanilla-shaped Minecraft GUI model with a retained, cached GPU
-implementation. Menus, HUD, hotbar, in-game block picker, tooltips, and XR
+The target is an original shared Mclone GUI model with a retained, cached GPU
+implementation. Earlier vanilla-shaped research remains comparative input, not
+a parity requirement. Menus, HUD, hotbar, in-game block picker, tooltips, and XR
 world-space panels must all use the same shared UI contracts. Validation should
 exercise the relevant flat, XR, Android, and web boundaries without treating
 one client target as the baseline.
@@ -77,7 +78,7 @@ dirty-tracked paint lists a better fit.
 
 ## Goals
 
-- Preserve vanilla-shaped screen and widget behavior where practical.
+- Define coherent Mclone screen and widget behavior across every client.
 - Keep UI policy shared across desktop, XR, Android, and web.
 - Repaint only changed surfaces/layers.
 - Make text, icons, slots, and panel backgrounds batchable GPU data.
@@ -337,8 +338,8 @@ when only XR pose changed.
 
 ## Text and Fonts
 
-The text system should borrow Minecraft's `Font`, `FontSet`, `FontTexture`, and
-`BakedGlyph` split:
+The text system uses a UI/render glyph-atlas split; Minecraft's `Font`,
+`FontSet`, `FontTexture`, and `BakedGlyph` are comparative precedents:
 
 - `mclone-ui` owns text runs, style, wrapping, and measurement requests.
 - `mclone-render` owns glyph lookup, glyph atlas pages, and text mesh output.
@@ -355,7 +356,7 @@ and glyph-cache boundary.
 
 ## Screens and Widgets
 
-Screens follow the vanilla lifecycle:
+Screens follow this retained shared lifecycle:
 
 - construct screen state
 - initialize at viewport size and scale
@@ -365,7 +366,7 @@ Screens follow the vanilla lifecycle:
 - emit paint ops when dirty
 - close or resize through explicit lifecycle methods
 
-Widgets should preserve vanilla-style explicit state:
+Widgets expose explicit shared state:
 
 - bounds
 - message/label
@@ -493,9 +494,9 @@ Input is translated into shared UI events before it reaches screens:
 screen-level shortcuts such as Escape/back. Platform crates own only conversion
 from OS/browser/XR events into these shared events.
 
-Focus navigation should be compatible with vanilla `Screen` and
-`GuiEventListener` behavior: keyboard Tab and controller navigation can move
-between focusable widgets without depending on mouse coordinates.
+Focus navigation should support keyboard Tab and controller navigation between
+focusable widgets without depending on mouse coordinates. Exact vanilla
+`Screen` and `GuiEventListener` behavior is not required.
 
 ## Accessibility And Narration
 
@@ -612,6 +613,7 @@ renderer and cache policy:
 - explicit item-icon render boundary
 - platform-independent input/focus model
 
-This divergence should make future vanilla parity easier, not harder. The
-behavioral model remains close to vanilla, while the GPU and cache model is
-adapted to wgpu, headless validation, web/WASM, and XR performance needs.
+The retained-screen, GPU, and cache model is Mclone's own architecture for
+wgpu, headless validation, web/WASM, and XR performance. Similarities to
+vanilla's behavioral model are comparative context, not a future parity
+obligation.

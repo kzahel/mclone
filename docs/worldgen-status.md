@@ -1,15 +1,15 @@
 # Worldgen Status
 
-Living status page for Rust world generation. Live procedural profiles are
-the Minecraft Java 1.17.1-shaped Overworld, historical `alpha-v1` and
-`beta-v1` profiles, the deliberately minimal `flat-grass-v1` proof generator,
-the seeded `small-island-v1` proof generator, and the continuous
-`mclone-overworld-v1` terrain caller.
+Living status page for Rust world generation. `mclone-overworld-v1` is the
+normal new-world default and active original product generator. Other live
+procedural profiles are the legacy Minecraft Java 1.17.1-shaped `overworld`,
+historical `alpha-v1` and `beta-v1`, the deliberately minimal
+`flat-grass-v1` proof generator, and the seeded `small-island-v1` proof
+generator.
 
-The current `overworld` profile's durable target is seed parity against vanilla
-1.17.1 overworld output. The accepted follow-up direction is to preserve that
-profile while adding versioned flat-grass, seeded-island, and later original
-mclone generation profiles. See
+Minecraft seed parity is no longer a project target. The stored `overworld`
+profile remains a legacy development/reference surface, while current and
+future worldgen work advances original Mclone terrain and content. See
 [`topics/world-generation-profiles.md`](topics/world-generation-profiles.md)
 and
 [`tactical/187-generator-profile-flat-grass-and-seeded-island.md`](tactical/187-generator-profile-flat-grass-and-seeded-island.md).
@@ -79,10 +79,9 @@ cards pass.
 
 Compatibility safety is recorded in the
 [`world-generation-profiles` ledger](topics/world-generation-profiles.md#compatibility-safety-ledger).
-The project is currently internal and unshipped: Flat Grass, Small Island,
-Mclone Overworld, and authored-only fixtures are mutable proving surfaces,
-while `overworld` remains locked because Java 1.17.1 parity is its external
-correctness target.
+The project is currently internal and unshipped. Every current profile,
+including legacy `overworld`, is mutable under the ledger; none is
+reference-locked or release-frozen.
 
 The implementation lives primarily in `native/crates/mclone-worldgen`, with
 scheduler/publication integration in `native/crates/mclone-server` and shared
@@ -217,14 +216,13 @@ Do not move these fixtures without updating native consumers in `mclone-worldgen
 
 ## Deferred Or Incomplete
 
-Still not full vanilla parity:
+Product gaps and legacy-reference notes are distinguished explicitly:
 
-- full decorated chunk parity remains an active gauntlet rather than a finished guarantee
-- broad biome/decorator confidence still needs more targeted fixtures
-- no true native structure-start/reference/piece runtime exists yet; the
-  former buried-treasure implementation and the former desert-well,
-  monster-room, and fossil feature work belonged to the retired TypeScript
-  engine
+- **Legacy reference:** full decorated-chunk parity was never completed, and
+  broad Java biome/decorator confidence remains intentionally incomplete.
+- **Original product:** a minimal native structure start/reference/piece
+  foundation is live, but Mclone still needs broader first-party structure
+  registries, content, placement, and gameplay integration.
 - the first original island generator remains intentionally bounded; the
   continuous mclone overworld now exists but has only a deliberately narrow
   terrain/material/biome/vegetation palette. Its first broad river and sparse
@@ -237,9 +235,13 @@ Still not full vanilla parity:
   rivers, and wetland pools are periodic for the exact 384-chunk X cylinder.
   All later content must join that sampler contract explicitly; canonical
   chunk wrapping alone remains intentionally insufficient
-- full entity/natural-spawn parity is incomplete
-- block-state breadth is intentionally narrower than exhaustive vanilla state coverage
-- Caves & Cliffs Part 1 systems disabled in 1.17.1 vanilla overworld remain out of scope unless the target changes
+- **Legacy reference:** full Java entity/natural-spawn parity is incomplete and
+  is not the direction for Mclone's original ecology.
+- **Original product:** block-state breadth is still narrower than the content
+  Mclone ultimately needs; exhaustive vanilla state coverage is not the goal.
+- **Reference boundary:** Caves & Cliffs Part 1 systems in the decomp do not
+  enter the original Mclone roadmap merely because they existed or were
+  disabled in Java 1.17.1.
 
 ## Validation
 
@@ -259,11 +261,15 @@ cargo test --manifest-path native/Cargo.toml -p mclone-worldgen -p mclone-server
 
 ## Tactical Trail
 
-Current native tacticals live under [`docs/tactical/`](tactical/README.md). Start with:
+Native tacticals live under [`docs/tactical/`](tactical/README.md). Early
+parity tacticals are historical execution records; current work should start
+from the original Mclone topics and their latest linked tacticals:
 
-- [`003-native-ts-parity-roadmap.md`](tactical/003-native-ts-parity-roadmap.md) for the broad native parity horizon.
+- [`003-native-ts-parity-roadmap.md`](tactical/003-native-ts-parity-roadmap.md)
+  for historical native/parity context, not the current roadmap.
 - [`015-decoration-framework-foundation.md`](tactical/015-decoration-framework-foundation.md) through the later worldgen tacticals for feature/decorator progress.
-- [`017-full-decorated-chunk-parity-gauntlet.md`](tactical/017-full-decorated-chunk-parity-gauntlet.md) for the current full decorated chunk parity target.
+- [`017-full-decorated-chunk-parity-gauntlet.md`](tactical/017-full-decorated-chunk-parity-gauntlet.md)
+  for the historical decorated-chunk parity campaign.
 - [`187-generator-profile-flat-grass-and-seeded-island.md`](tactical/187-generator-profile-flat-grass-and-seeded-island.md) for the accepted multi-generator refactor and first original terrain proof.
 - [`188-mclone-overworld-v1-terrain-foundation.md`](tactical/188-mclone-overworld-v1-terrain-foundation.md) for the first original continuous-terrain profile and its explicit reuse/refactor reviews.
 - [`192-mclone-overworld-mountains-and-valleys.md`](tactical/192-mclone-overworld-mountains-and-valleys.md) for the accepted original relief family.

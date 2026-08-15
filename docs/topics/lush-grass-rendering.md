@@ -499,7 +499,7 @@ The blade vertices carry that result and the packed surface light. A stable
 per-blade hue perturbation breaks uniformity. The shaders then apply lightmap,
 height gradient, wind shimmer, brightness, snow mixing, and fog.
 
-Relevant Minecraft 1.17.1 reference files for mclone's own parity target are:
+Relevant Minecraft 1.17.1 files for optional tint-behavior comparison are:
 
 - [`BiomeColors.java`](../../reference/minecraft-1.17.1/src/net/minecraft/client/renderer/BiomeColors.java)
 - [`BlockColors.java`](../../reference/minecraft-1.17.1/src/net/minecraft/client/color/block/BlockColors.java)
@@ -743,7 +743,8 @@ headset measurement; it must not be inferred from desktop or AVD results.
 
 ## Invariants
 
-- Preserve the underlying vanilla-target terrain and biome-color behavior.
+- Preserve authoritative Mclone terrain and intentional biome-color behavior;
+  do not treat incidental Java-shaped colors as a parity lock.
 - Grass is presentation-only and deterministic for a given world position and
   quality profile; it must not shimmer or relocate across frames.
 - Use shared section compilation and render-session lifetime. Do not create a

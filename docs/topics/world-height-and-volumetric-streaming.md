@@ -5,9 +5,9 @@ Topic: `world-height-and-volumetric-streaming`
 Status: **research and near-term contract accepted 2026-07-18;
 implementation has not started. Live generated dimensions still use
 `min_y = 0`, `height = 256`. The immediate direction is to make a finite
-vertical range an authoritative per-dimension fact without changing the
-reference-locked Minecraft 1.17.1 Overworld. Partial vertical residency and
-cubic worlds remain later experimental work.**
+vertical range an authoritative per-dimension fact for Mclone's original
+worlds. The legacy Java-shaped profile is not a reference lock on that work.
+Partial vertical residency and cubic worlds remain later experimental work.**
 
 This topic owns current truth, decisions, practical limits, and next work for
 dimension height and three-dimensional world residency. It does not own
@@ -82,7 +82,7 @@ particular datapack performs acceptably across all 254 sections.
 
 ## Minecraft Java State
 
-### 1.17.1, Mclone's Reference Target
+### 1.17.1 Reference Specimen
 
 Minecraft Java 1.17.1 has a 256-block default Overworld, `min_y = 0` and
 `height = 256`. Its chunk column is internally sectioned rather than one dense
@@ -91,10 +91,10 @@ mesh. The local decompiled reference anchors are
 and
 [`NoiseGeneratorSettings.java`](../../reference/minecraft-1.17.1/src/net/minecraft/world/level/levelgen/NoiseGeneratorSettings.java).
 
-This remains Mclone's seed-parity target. The `overworld` generation profile
-must continue to mean the 1.17.1 range and output. A modern-height mode must be
-a different compatible profile/dimension configuration rather than a silent
-change to reference Overworld generation.
+This is no longer Mclone's seed-parity target. The legacy `overworld`
+generation profile currently uses the 1.17.1 range, but it is internal-mutable
+under the compatibility ledger. Mclone Overworld may adopt a different range
+through an explicit dimension/profile change without preserving Java output.
 
 ### 1.18 And Current Vanilla
 
@@ -382,16 +382,16 @@ DimensionDefinition
   generation profile: content algorithm and compatibility
 ```
 
-The `overworld` profile supports exactly `0, 256` while 1.17.1 parity is the
-correctness bar. Internal mutable profiles may gain broader range support in
-place after the
+The legacy `overworld` profile currently supports exactly `0, 256`. Internal
+mutable profiles, including Mclone Overworld, may gain broader range support
+in place after the
 [`world-generation-profiles` compatibility ledger](world-generation-profiles.md#compatibility-safety-ledger)
 is updated. Authored-only dimensions are the lowest-risk first proof because
 they do not require a complete procedural generator to fill the new range.
 
 Candidate creation choices, after implementation and measurement, are:
 
-- **1.17 Reference:** `0, 256`, locked for the reference Overworld;
+- **1.17 Reference:** `0, 256`, retained as a legacy comparison preset;
 - **Modern:** `-64, 384`, opt-in for a compatible non-reference profile;
 - **Tall Experimental:** initially 512 or 768 blocks, benchmark-gated; and
 - **Custom:** an advanced later option constrained by the selected profile and
@@ -537,8 +537,8 @@ normal native validation policy.
 
 ## Open Questions
 
-- Which first non-reference profile should support `-64, 384`: authored-only,
-  `mclone-overworld-v1`, or a dedicated experimental profile?
+- Should Mclone Overworld, authored-only, or a dedicated experimental profile
+  be the first to support `-64, 384`?
 - Should the first tall preset be 512 or 768 blocks after dense-stage cleanup?
 - Which mechanics need a separate `logical_height` concept rather than only a
   physical build range?
@@ -557,12 +557,12 @@ normal native validation policy.
   finite/periodic identity; it deliberately keeps vertical range as an
   independent finite dimension fact.
 - [`world-generation-profiles.md`](world-generation-profiles.md) owns profile
-  compatibility and the reference-locked versus internal-mutable ledger.
+  compatibility and the current all-internal-mutable ledger.
 - [`jjthunder-to-the-max-reference.md`](jjthunder-to-the-max-reference.md)
   owns the reproducible 2,096-block community-worldgen specimen and its terrain
   analysis.
-- [`lighting.md`](lighting.md) owns solver/storage parity and the missing
-  vertical-gap skylight behavior.
+- [`lighting.md`](lighting.md) owns solver/storage correctness and the optional
+  vertical-gap skylight comparison.
 - [`far-lod.md`](far-lod.md) records retirement of the old non-authoritative
   distant surface representation; it does not own authoritative cubic
   residency.

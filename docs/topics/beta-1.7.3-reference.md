@@ -438,5 +438,5 @@ The subsequent implementation decision selected:
 3. the ten effective generated biomes, not unreachable Ice Desert;
 4. deterministic mclone safe spawn rather than the historical sand-search
    walk; and
-5. a sibling direct port until both Alpha and Beta parity suites prove any
-   smaller shared legacy extraction safe.
+5. a sibling implementation while the historical profile was built, with
+   Alpha/Beta comparison suites guarding any shared legacy extraction.

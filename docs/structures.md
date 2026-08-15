@@ -18,12 +18,15 @@ random-spread candidates, a capped multi-chunk route, monotonic typed pieces,
 aggregate boxes, continuous column queries, positive/negative plan caching,
 and production diagnostics without changing generated blocks. It does not by
 itself claim the live status pipeline, templates, jigsaw, or structure-family
-parity. The later Tactical 274 canary supplies the first narrow persisted
-status consumer; both remain well short of vanilla family parity.
+breadth. The later Tactical 274 canary supplies the first narrow persisted
+status consumer; neither is intended to reproduce vanilla structure families.
 
-Durable architecture notes for Minecraft Java 1.17.1 overworld structures in `mclone`.
+Durable original Mclone structure-foundation notes plus a retained Minecraft
+Java 1.17.1 architecture reference.
 
-This document is about vanilla `StructureFeature` generation, not every worldgen feature that looks structure-like. It should be read with:
+The reference portion of this document describes vanilla `StructureFeature`
+generation, not every worldgen feature that looks structure-like. Read it
+with:
 
 - [`worldgen-status.md`](worldgen-status.md) for current implementation state and priorities
 - [`loading-persistence.md`](loading-persistence.md) for the vanilla `ChunkStatus` pipeline
@@ -31,7 +34,9 @@ This document is about vanilla `StructureFeature` generation, not every worldgen
 - [`authoritative-host-scheduling.md`](authoritative-host-scheduling.md) for runtime scheduler responsiveness around chunk jobs
 - [`tactical/README.md`](tactical/README.md) for tactical sequencing
 
-The target is vanilla Java `1.17.1` overworld parity. Nether and End structures are out of scope unless the target changes.
+Mclone's target is original structures built on the shared start, reference,
+piece, clipping, and persistence foundation. The Java sections below are
+comparative design material, not a vanilla-family implementation queue.
 
 ## Reference Source Map
 
@@ -52,7 +57,9 @@ Primary vanilla files:
 | Template-backed structures | [`TemplateStructurePiece.java`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/levelgen/structure/TemplateStructurePiece.java), [`StructureTemplate.java`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/levelgen/structure/templatesystem/StructureTemplate.java), [`StructurePlaceSettings.java`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/levelgen/structure/templatesystem/StructurePlaceSettings.java) |
 | Noise-affecting terrain blend | [`Beardifier.java`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/levelgen/Beardifier.java), [`NoiseBasedChunkGenerator.java`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/levelgen/NoiseBasedChunkGenerator.java) |
 
-Read these files before porting a structure family. Do not infer structure behavior from carvers or ordinary features.
+Read these files before an explicitly scoped Java structure comparison or
+legacy port. Do not infer Java structure behavior from carvers or ordinary
+features.
 
 ## Vanilla Pipeline
 
@@ -82,7 +89,12 @@ each touched chunk later places its own clipped slice
 
 ### 3. Noise-Affecting Structures
 
-Some structures influence terrain shape before blocks are placed. Vanilla lists `PILLAGER_OUTPOST`, `VILLAGE`, `NETHER_FOSSIL`, and `STRONGHOLD` in `StructureFeature.NOISE_AFFECTING_FEATURES` ([`StructureFeature.java:110`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/levelgen/feature/StructureFeature.java)). For the overworld target, the relevant members are pillager outposts, villages, and strongholds.
+Some structures influence terrain shape before blocks are placed. Vanilla lists
+`PILLAGER_OUTPOST`, `VILLAGE`, `NETHER_FOSSIL`, and `STRONGHOLD` in
+`StructureFeature.NOISE_AFFECTING_FEATURES`
+([`StructureFeature.java:110`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/levelgen/feature/StructureFeature.java)).
+For the Java Overworld specimen, the relevant members are pillager outposts,
+villages, and strongholds.
 
 `NoiseBasedChunkGenerator.doFill(...)` constructs a `Beardifier` from the chunk's `StructureFeatureManager` and chunk ([`NoiseBasedChunkGenerator.java:351`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/levelgen/NoiseBasedChunkGenerator.java)). `Beardifier` gathers close structure pieces and jigsaw junctions from referenced noise-affecting starts ([`Beardifier.java:38`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/levelgen/Beardifier.java)). The density path then adds `beardifyOrBury(...)` to noise samples ([`NoiseBasedChunkGenerator.java:245`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/levelgen/NoiseBasedChunkGenerator.java)).
 
@@ -96,9 +108,10 @@ Inside `Biome.generate(...)`, for each `GenerationStep.Decoration`, vanilla plac
 
 This means structures are not arbitrary late writes from faraway chunks. A start may be far enough away to need a reference, but each chunk applies the intersecting structure pieces during its own `FEATURES` pass. Ordinary configured features in the same generation step then run after those structure pieces and can observe the structure blocks.
 
-## Overworld Structure Set
+## Java 1.17.1 Overworld Structure Set
 
-Vanilla 1.17.1 registers more structure types than the overworld target needs. The overworld-relevant `StructureFeature` families are:
+Vanilla 1.17.1 registers more structure types than this reference inventory
+lists. Its Overworld-relevant `StructureFeature` families are:
 
 | Family | Notes | Sources |
 |---|---|---|
@@ -106,7 +119,7 @@ Vanilla 1.17.1 registers more structure types than the overworld target needs. T
 | Stronghold | special global/ring placement; noise-affecting | [`StructureFeature.java:83`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/levelgen/feature/StructureFeature.java), [`ChunkGenerator.java:80`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/chunk/ChunkGenerator.java) |
 | Village | jigsaw; plains/desert/savanna/snowy/taiga pools; noise-affecting | [`StructureFeature.java:101`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/levelgen/feature/StructureFeature.java), [`StructureFeatures.java:80`](../reference/minecraft-1.17.1/src/net/minecraft/data/worldgen/StructureFeatures.java), [`VillageFeature.java:6`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/levelgen/feature/VillageFeature.java) |
 | Pillager outpost | jigsaw; avoids nearby village candidates; noise-affecting | [`StructureFeature.java:56`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/levelgen/feature/StructureFeature.java), [`PillagerOutpostFeature.java`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/levelgen/feature/PillagerOutpostFeature.java) |
-| Desert pyramid | single custom piece; good early target | [`StructureFeature.java:68`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/levelgen/feature/StructureFeature.java), [`DesertPyramidFeature.java:29`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/levelgen/feature/DesertPyramidFeature.java) |
+| Desert pyramid | single custom piece; compact reference example | [`StructureFeature.java:68`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/levelgen/feature/StructureFeature.java), [`DesertPyramidFeature.java:29`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/levelgen/feature/DesertPyramidFeature.java) |
 | Jungle temple | custom piece | [`StructureFeature.java:65`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/levelgen/feature/StructureFeature.java), [`JunglePyramidFeature.java`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/levelgen/feature/JunglePyramidFeature.java) |
 | Swamp hut | custom piece plus spawning implications | [`StructureFeature.java:80`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/levelgen/feature/StructureFeature.java), [`SwamplandHutFeature.java`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/levelgen/feature/SwamplandHutFeature.java) |
 | Igloo | template-backed | [`StructureFeature.java:71`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/levelgen/feature/StructureFeature.java), [`IglooFeature.java`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/levelgen/feature/IglooFeature.java) |
@@ -151,9 +164,10 @@ Structures explain why the status pipeline cannot be collapsed to "terrain then 
 - A chunk's structure slice is placed by that chunk's own `FEATURES` task using references; a far start chunk does not later mutate the target through its own `FEATURES` task.
 - The broader `FEATURES` stability rule from [`worldgen-deterministic-order.md`](worldgen-deterministic-order.md) still applies: initial lighting for a target chunk waits for the target plus its 8 neighbors to complete `FEATURES`, and client publication waits for the 3x3 `FULL` gate.
 
-For a `vanilla17` profile, structure work must be status-aware even if the runtime scheduler uses engine-native workers and futures.
+The retained Java-shaped path demonstrates why structure work is status-aware
+even when the runtime scheduler uses engine-native workers and futures.
 
-## Recommended Implementation Order
+## Original Implementation Order And Optional Reference Follow-up
 
 Do not start with villages. They combine jigsaw pools, templates, processors, terrain blending, and settlement-specific interactions.
 
@@ -181,32 +195,35 @@ Do not start with villages. They combine jigsaw pools, templates, processors, te
    - Preserve its cross-chunk determinism, save/reopen, and no-far-write gates
      while integrating the first accepted farmstead plan.
 
-4. **First original and vanilla proof structures**
+4. **First original proof structures**
    - Start with a small original mclone ruin, shrine, campsite, or tower. This
      proves profile-neutral candidate selection, references, and clipped block
      placement without importing vanilla content complexity.
-   - If vanilla structure parity remains desired, buried treasure is a small
-     follow-up proof once container/block-entity ownership exists.
-   - Desert pyramid, jungle temple, and swamp hut can then validate larger
-     custom-piece footprints before template or jigsaw work.
+   - A separately requested legacy comparison could use buried treasure or a
+     custom-piece family after container/block-entity ownership exists, but it
+     is not the product sequence.
 
-5. **Mineshafts**
+5. **Optional Java reference: mineshafts**
    - Mineshafts are structure starts, not carvers. They randomly decide starts, create an initial room, recursively add corridor/crossing/stair pieces, then place those pieces in `UNDERGROUND_STRUCTURES` ([`MineshaftFeature.java:29`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/levelgen/feature/MineshaftFeature.java), [`MineshaftFeature.java:55`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/levelgen/feature/MineshaftFeature.java), [`MineShaftPieces.java:70`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/levelgen/structure/MineShaftPieces.java)).
    - They are a good middle step because they are multi-piece and cross-chunk, but do not require the jigsaw pool system.
 
-6. **Template-backed medium structures**
-   - Port template loading from extracted structure NBTs, placement settings, rotation/mirror, processors, and block entities.
-   - Then add shipwrecks, igloos, ocean ruins, and overworld ruined portals.
+6. **Original template-backed medium structures**
+   - Build a first-party template format and placement settings, rotation,
+     mirror, processors, and block entities as original content requires.
+   - Minecraft's shipwrecks, igloos, ocean ruins, and ruined portals remain
+     reference examples, not the content queue.
 
-7. **Strongholds and terrain-blending foundation**
+7. **Optional Java reference: strongholds and terrain blending**
    - Strongholds have special global placement via `ChunkGenerator.generateStrongholds(...)` and are noise-affecting ([`ChunkGenerator.java:80`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/chunk/ChunkGenerator.java)).
-   - Port the metadata and placement path, but treat exact terrain blending as blocked on `Beardifier`.
+   - Reuse lessons only when an original large structure needs comparable
+     metadata or terrain blending; exact `Beardifier` behavior is not required.
 
-8. **Large custom/template structures**
+8. **Original large custom/template structures**
    - Ocean monuments and woodland mansions have large custom/template piece systems and many block/entity consequences. Do these after the smaller placement/template paths are stable.
 
-9. **Beardifier, jigsaw, villages, and pillager outposts**
-   - Port `Beardifier` and jigsaw pools before claiming village/outpost parity.
+9. **Optional Java reference: Beardifier and jigsaw**
+   - A scoped legacy parity claim would need `Beardifier` and jigsaw-pool
+     evidence; original settlements may use different first-party systems.
    - Villages use `JigsawFeature`, configured village pools, `JigsawPlacement`, `PoolElementStructurePiece`, terrain matching, and jigsaw junctions ([`VillageFeature.java:6`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/levelgen/feature/VillageFeature.java), [`JigsawFeature.java:42`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/levelgen/feature/JigsawFeature.java), [`StructureFeatures.java:80`](../reference/minecraft-1.17.1/src/net/minecraft/data/worldgen/StructureFeatures.java)).
    - Pillager outposts share the jigsaw shape and also avoid nearby village candidates.
 

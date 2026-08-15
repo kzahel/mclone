@@ -1,6 +1,8 @@
 # Lighting Worker Architecture
 
-Target design for moving vanilla-style lighting out of the generated-world host worker.
+Target design for moving authoritative stored lighting out of the
+generated-world host worker. The current solver's Java-shaped origin does not
+make Minecraft behavior the product target.
 
 This document is the lighting-specific service design. The broader worker/cache ownership baseline lives in [`worker-ownership.md`](worker-ownership.md).
 
@@ -138,14 +140,18 @@ A later optimization can replace block state ids with compact light facts:
 ```text
 opacity: 4-bit or 8-bit light blocking
 emission: 4-bit block light source
-shape flags: only if shape-occlusion parity needs them
+shape flags: only if Mclone's occlusion rules need them
 ```
 
 Do not use `SharedArrayBuffer` for the first version. Transferable typed arrays are enough and avoid COOP/COEP deployment constraints.
 
 ## Neighbor Readiness
 
-Vanilla `ChunkStatus.LIGHT` has range 1. `mclone` should mirror that scheduling fact even if the worker implementation is browser-specific; see [`worldgen-deterministic-order.md`](worldgen-deterministic-order.md) for the status gate and source references.
+The current solver's initial-light contract uses the center chunk plus its
+eight horizontal neighbors. Preserve that declared input footprint across
+worker implementations; do not justify it merely as a vanilla parity rule.
+See [`worldgen-deterministic-order.md`](worldgen-deterministic-order.md) for
+the retained origin and scheduling history.
 
 For a chunk to produce an initial lit snapshot:
 
@@ -207,7 +213,11 @@ Vanilla reference shape:
 - each `runUpdate()` batch runs up to `taskPerBatch` queued tasks, calls `LevelLightEngine.runUpdates(...)`, then runs matching post-update tasks.
 - `lightChunk(...)` completes its future in `POST_UPDATE`, sets `lightCorrect`, retains/removes transient light data, and releases the light ticket.
 
-`mclone` does not need JVM executors, but the service should preserve that ordering. The current batching optimization is useful, but it is not the same as vanilla scheduling: it batches ready `request_initial_light` commands and drains propagation for the union. The next scheduler slice should keep the shared-propagation win while making `LIGHT` a priority/status queue participant rather than a whole-view service phase.
+The service should preserve its tested pre-update, propagation, and
+post-update semantics where Mclone relies on them; matching JVM scheduling is
+not a goal. The next scheduler slice should keep the shared-propagation win
+while making `LIGHT` a priority/status queue participant rather than a
+whole-view service phase.
 
 Queue phases:
 

@@ -273,8 +273,8 @@ Minecraft Java 1.17.1 runs goal cleanup, new-goal eligibility, and running-goal
 updates from `GoalSelector` on each mob tick. Expensive individual goals often
 self-throttle: default random stroll has a 1-in-120 eligibility roll, while a
 default nearest-attackable-target search has a 1-in-10 roll. Mclone should
-preserve recognizable outcomes where parity matters without treating one
-global full-rate AI pass as the only possible runtime schedule.
+preserve its intended recognizable outcomes without treating one global
+full-rate AI pass as the only possible runtime schedule.
 
 ### Explicit Work Cadences
 

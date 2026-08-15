@@ -9,8 +9,10 @@ to fit through, even when a first slice implements only one cow or one chicken.
 A feature may leave behavior stubbed, but it should not bypass the ownership,
 chunk-status, tracking, persistence, or shared module boundaries.
 
-For vanilla behavior, read the Minecraft Java 1.17.1 source before porting a
-class or system. Useful entry points include:
+The Minecraft Java 1.17.1 source remains comparative ownership research. Read
+it only when a scoped task asks about Minecraft or modifies retained
+reference-shaped code; original entity work follows Mclone's ecology and
+gameplay topics. Useful reference entry points include:
 
 | Concern | Vanilla source |
 |---|---|
@@ -140,18 +142,17 @@ The first shared ground/collision scaffold is also in place:
   fake visibility by mutating authoritative body yaw; body yaw remains the
   locomotion-facing yaw sent through the current entity update field.
 
-This does not complete full Java `WalkNodeEvaluator` parity, cauldron/sun path
-trim behavior, the full Java `AttributeMap` / modifier/effect stack, or full
-`LivingEntity.travel(...)` for fluids, ladders, climbables, powder snow,
-effects, special block ids that are not yet present in the terrain-MVP lane, or
-tracked head/body yaw presentation parity. Those remain required foundations
-before natural passive movement can be considered complete.
+The implementation still lacks several useful movement and presentation
+capabilities: fluid and climbable travel, richer attributes/effects, broader
+block-path facts, and tracked head/body-yaw presentation. Prior Java comparison
+gaps are evidence, not a checklist; natural passive movement is complete when
+Mclone's intended creatures and environments are covered.
 
-Pathfinding should keep the Minecraft module shape even where native runtime
-execution diverges for performance. Goals should ask navigation to move;
+Pathfinding should keep the useful neutral layering already proven in the
+engine. Goals should ask navigation to move;
 navigation should ask a path service for a path; `PathFinder` and
 `NodeEvaluator` should own the search and terrain graph. The first native path
-service may execute synchronously on the host thread with Minecraft-shaped
+service may execute synchronously on the host thread with bounded Mclone
 limits, but the boundary must remain explicit so later slices can add fixed
 node budgets, wall-clock budgets, priorities, deferred results, or worker
 execution without rewriting goals.
@@ -190,7 +191,7 @@ native/crates/mclone-server/src/entity/
     biome_tables.rs
     placements.rs
     spawn_state.rs       category counts, caps, spawnable chunks
-    natural.rs           NaturalSpawner port
+    natural.rs           retained Java-shaped spawning plus profile policy
 ```
 
 Shared protocol facts remain in `mclone-protocol`. Client interpolation and
@@ -229,7 +230,7 @@ Use the existing native chunk-ticket backbone:
 - `mclone-server::scheduler` reports `block_ticking_chunks` and
   `entity_ticking_chunks`.
 
-Entity activity should follow the vanilla-shaped mapping:
+Entity activity currently follows this shared mapping:
 
 | Full chunk status | Entity visibility | Ordinary entity ticking |
 |---|---|---|
@@ -260,7 +261,7 @@ and future revision policy.
 
 ## Mob AI Stack
 
-The AI stack should mirror vanilla layering:
+The AI stack uses this layered Mclone contract:
 
 - `GoalSelector` owns priority, flags, replacement, start/stop, and running
   goal ticks.
@@ -277,31 +278,29 @@ The AI stack should mirror vanilla layering:
 - World queries, pathfinding, collision, and lighting are shared services
   consumed by goals/navigation/spawning.
 
-For the first passive animals, it is acceptable to port a narrow goal subset:
-random stroll, look at player, and random look around. It is not acceptable to
-hard-code animal movement directly in the renderer or app shell.
+For the first passive animals, implement only the narrow behavior subset the
+creatures need, such as random stroll, looking at a player, and idle looking.
+It is not acceptable to hard-code animal movement directly in the renderer or
+app shell.
 
 ## Spawning And Despawn
 
 Spawning is its own subsystem, not a side effect of rendering assets.
 
 Generation-time original mobs and live natural spawning are distinct paths.
-Natural spawning depends on player-distance spawnable chunks, mob category
-caps, category counts, biome spawn lists, gamerules/server flags, light,
-collision, placement predicates, player/spawn distance exclusions, and chunk
-entity-ticking status.
+Mclone population and spawning depend on habitat, durable population policy,
+player/session interest, light/collision/placement facts, and chunk activity as
+defined by the original ecology topics.
 
-The current cow/chicken slice plus Mclone mallard flock path implement most of
-that shape but still lack complete Java group geometry, shared-spawn exclusion,
-synchronized gamerules/dedicated
-flags, every passive species, hostile categories, and the complete Java
-attempt geometry. Habitat lookup must use the active generated chunk payload;
-it must not query a seed-only biome source belonging to another profile.
+The current cow/chicken slice plus Mclone mallard flock path implement part of
+that shape. Missing Java group geometry, species, categories, and gamerules are
+not product gaps by themselves. Habitat lookup must use the active generated
+chunk payload; it must not query a seed-only biome source belonging to another
+profile.
 
-Despawn rules are also foundational. Passive animals usually feel persistent
-because vanilla `Animal.removeWhenFarAway(...)` returns false, but killed
-animals are not seed-respawned decorations. Replacement animals arrive only
-through normal spawning rules.
+Lifecycle/removal rules are also foundational. Materialized Mclone animals are
+durable world state rather than seed-respawned decorations; replacement
+population follows the documented ecology policy.
 
 Do not add a feature that assumes killed generation-time animals can be restored
 from world seed. Once an entity is inserted into runtime state, it is normal

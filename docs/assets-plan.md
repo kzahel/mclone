@@ -1,13 +1,21 @@
-# Asset extraction plan
+# Minecraft Reference-Asset Extraction Plan
 
-The decompile pipeline only produces `.java` source. The `client.jar` contains a lot more — PNG textures, block models, structure NBTs, etc. — that's useful for bootstrapping the renderer and world populator without writing placeholder content from scratch.
+Status: development-only reference tooling. Mclone ships and advances its
+first-party asset pipeline; extracted Minecraft content is not a product
+content source or an authoring backlog.
+
+The decompile pipeline only produces `.java` source. The `client.jar` contains
+PNG textures, block models, structure NBTs, and other material that has been
+useful for development-only renderer bootstrap and comparative inspection.
 
 ## What's worth extracting (ranked)
 
 1. **Textures** (`assets/minecraft/textures/`) — 16×16 PNGs for every block, item, entity, particle, GUI element. Drop directly into our texture atlas during dev. Biggest immediate unblocker for the renderer.
 2. **Block models** (`assets/minecraft/models/block/`) — JSON geometry for non-cube blocks (stairs, slabs, fences, torches, buttons). Each has an `elements` array of box pieces with per-face UVs. Reference for our own model system; also parseable directly if we port the JSON format.
 3. **Blockstates** (`assets/minecraft/blockstates/`) — JSON that maps stateful blocks (e.g. `stairs[facing=east,half=top]`) to a specific model + rotation. The adapter between game state and renderable geometry.
-4. **Structure NBT** (`data/minecraft/structures/`) — actual building templates for villages, pillager outposts, woodland mansions, ancient cities, etc. Translated structure-position finders give coordinates; these give the blocks. Requires a small NBT parser (~200 LOC, well-documented binary format).
+4. **Structure NBT** (`data/minecraft/structures/`) — reference building
+   templates for comparative inspection. They are not Mclone structure content
+   and must not enter distributable packs.
 5. **`version.json`** + **`pack.png`** — version/build metadata and the default pack icon. Tiny.
 
    (Note: `pack.mcmeta` is *not* present in 1.17.1's vanilla `client.jar` despite earlier guesses; the resource-pack `pack_format` integer lives in `version.json`'s `pack_version.resource` instead.)

@@ -13,8 +13,9 @@ remains the historical source study.**
 The purpose of this study is to expose Minecraft's early core world-generation
 system before biomes, dimensions, structures, registries, data-driven content,
 and later collaborators made that system harder to see. It is both a historical
-reference and a possible small clone target; it does not replace mclone's
-Minecraft Java 1.17.1 parity target or the original mclone Overworld direction.
+reference and a possible small historical profile target; it does not replace
+the original Mclone Overworld product direction. Minecraft Java 1.17.1 is also
+now comparative/legacy material rather than a parity target.
 Its age and compactness make it a good proxy for an early core, but bytecode
 archaeology does not establish class-by-class authorship; this report does not
 claim that every recovered system had exactly one author.
@@ -358,10 +359,13 @@ The probe overrides the unseeded winter choice with an explicit Boolean, uses a
 temporary world directory, deletes it after the run, and produces identical
 output on repeated runs.
 
-## Implications For A Native Alpha Profile
+## Historical Implications For The Native Alpha Profile
 
-A useful first port should be narrow and reference-locked to v1.1.2_01 rather
-than described generically as "Alpha":
+The following implementation direction records the bounded historical profile
+that was later completed. It is not a template for current Mclone feature work.
+
+A useful bounded historical profile was narrow and explicitly tied to
+v1.1.2_01 rather than described generically as "Alpha":
 
 1. add an explicit generator identity such as `alpha-a1.1.2_01` to the shared
    `mclone-worldgen` profile boundary and update the compatibility ledger;

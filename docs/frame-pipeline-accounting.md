@@ -536,7 +536,7 @@ Behavior:
   results, sections, bytes, updates, publications, or elapsed microseconds;
 - keep current-frame critical work conservative on Quest;
 - allow desktop to ramp higher when frame headroom is consistently large;
-- preserve vanilla/reference correctness gates: status order, light readiness,
+- preserve engine correctness gates: profile-declared status order, light and
   neighbor readiness, stale-result rejection, and atomic drawable publication.
 
 Policy placement rule: no new budget, pacing, throttle, or admission constant

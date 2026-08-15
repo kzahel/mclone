@@ -216,10 +216,10 @@ before any plan-owned chunk can be published. Tactical 291 intentionally
 replaced `5daca45d...` when the garden piece began consuming the promoted
 working record.
 
-This separation is especially important for the reference `overworld` profile.
-Pure `overworld` must remain Minecraft Java 1.17.1 seed-parity output.
-`overworld` plus an explicitly selected `intro-homestead-v1` overlay is a
-different world identity whose terrain delta is intentional and persisted.
+This separation also applies to the legacy Java-shaped `overworld` profile.
+Pure `overworld` and `overworld` plus an explicitly selected
+`intro-homestead-v1` overlay are different persisted world identities. The
+base profile is internal-mutable rather than a seed-parity promise.
 Flat Grass, Small Island, Mclone Overworld, Alpha, and Beta can consume the
 same overlay engine without pretending that their terrain generators are the
 same.
@@ -246,7 +246,7 @@ fits every world:
 | Flat Grass | nearly no grading; authored pond/channel; useful deterministic placement canary |
 | Small Island | fit a compact variant, prune named optional parcels, use a coastal outlet, or reject when the usable land cannot honestly hold the plan |
 | Mclone Overworld | use bounded grading now; prefer a natural valley/tributary when original hydrology exists |
-| reference Overworld | survey vanilla terrain but apply only through the explicit overlay identity, leaving pure parity output unchanged |
+| legacy Java-shaped Overworld | survey its terrain and apply only through the explicit overlay identity; base output is mutable under the normal ledger |
 | Alpha/Beta | admit only after their survey adapter and structure compatibility are proven |
 
 Topology remains orthogonal. A finite world must fit the complete plan and its
@@ -391,9 +391,9 @@ The site plan may use vanilla-shaped pieces and processors afterward, but owns:
 - player arrival/spawn intent; and
 - resident spawn markers and enclosure associations.
 
-This extension should make future terrain parity easier, not fork the shared
-structure lifecycle. The realized farmstead remains a true cross-chunk
-structure with starts, references, pieces, clipping, and persistence.
+This extension should strengthen the shared structure lifecycle without
+forking it. The realized farmstead remains a true cross-chunk structure with
+starts, references, pieces, clipping, and persistence.
 
 ## Farmstead Authoring Vocabulary
 
@@ -576,8 +576,9 @@ numbers. If a later composition covers more chunks than vanilla's fixed
 `+/-8` lookup can discover from one central start, that still does not require
 all of those chunks to be live together. Original structures should declare
 their reach/touched-chunk set or use an exact spatial index rather than silently
-raising one global fixed radius. Vanilla parity structures must retain
-vanilla's exact range and semantics.
+raising one global fixed radius. A bounded task that explicitly compares a
+legacy vanilla structure can test its observed range without making that range
+a constraint on original structures.
 
 The future tactical should still impose an explicit maximum farmstead extent,
 piece count, grade volume, and planning-sample budget. Those are content and
@@ -931,7 +932,7 @@ each composition expansion before moving on.
 - Continue original valleys and hydrology as terrain-owned systems, while
   exposing optional neutral water facts to site selection.
 - Treat the farmstead as an explicit starter-content overlay orthogonal to the
-  base profile and topology; do not modify pure reference Overworld parity.
+  base profile and topology; do not mutate any base generator implicitly.
 - Reuse one survey/plan/template engine across profiles, with profile adapters,
   composition tiers, fallbacks, and honest rejection rather than a promise
   that the maximal plan fits everywhere.

@@ -81,7 +81,7 @@ The first menu exposes all four modes rather than prematurely selecting one:
 | Mode | Optical model | Purpose | Expected fragment cost |
 |---|---|---|---|
 | Off | none in open air | clear diagnostic baseline | branch only |
-| Classic | linear distance fade | vanilla-shaped cutoff baseline | distance plus small ALU |
+| Classic | linear distance fade | hard-cutoff comparison | distance plus small ALU |
 | Natural | homogeneous exponential extinction | smooth aerial haze without a visible start wall | distance plus one `exp2` |
 | Ground Haze | exponential extinction modulated by a low atmospheric layer | smog, mist, and altitude-sensitive silhouettes | distance, height arithmetic, and up to two `exp2` operations |
 
@@ -398,7 +398,7 @@ under `/tmp`.
 - `native/crates/mclone-ui/src/lib.rs` and `src/v2.rs` — typed player values,
   Fog submenu, scrolling, and interaction.
 - `reference/minecraft-1.17.1/src/net/minecraft/client/renderer/FogRenderer.java`
-  — vanilla color and range baseline.
+  — optional color and range comparison specimen.
 
 ## Decision Gate After Evaluation
 

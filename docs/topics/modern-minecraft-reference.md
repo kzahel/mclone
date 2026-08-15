@@ -5,8 +5,8 @@ Topic: `modern-minecraft-reference`
 Status: **Active comparative side reference as of 2026-07-27. Minecraft Java
 26.2 is the pinned current-stable specimen. Its official unobfuscated client
 jar is SHA-1 verified and a focused 18-file worldgen source tree decompiles
-reproducibly. This does not change the reference-locked Java 1.17.1 Overworld
-target.**
+reproducibly. Both modern Java and the older 1.17.1 tree are comparative
+research inputs, not Mclone product targets.**
 
 ## Scope
 
@@ -23,11 +23,11 @@ It does not own:
 
 - Mclone terrain design, which remains in
   [`mclone-macro-landscape-planning.md`](mclone-macro-landscape-planning.md);
-- Java 1.17.1 parity, oracle fixtures, or vanilla implementation policy;
+- legacy Java 1.17.1 maintenance or oracle fixtures;
 - modern Minecraft seed parity;
 - a rolling snapshot checkout;
 - Minecraft assets in Mclone's distributable content; or
-- permission to port systems excluded by the 1.17.1 reference target.
+- permission to port Minecraft systems into Mclone's original world.
 
 ## Selected Specimen
 
@@ -232,8 +232,7 @@ Tactical 265 selects an original bounded hybrid for that missing layer:
 regional envelopes guide a coarse drainage solve, significant raster facts
 become compact ridge/divide, drainage, and basin objects, and analytic
 profiles reconstruct a continuous point-queryable heightfield. This remains
-Mclone design research, not a port, parity claim, or change to the Java 1.17.1
-target.
+Mclone design research, not a port or parity claim.
 
 ## Refresh Protocol
 
@@ -245,8 +244,8 @@ When intentionally moving to a newer stable release:
    Vineflower version, and selected class count;
 4. diff the focused source questions that motivated the refresh;
 5. update this topic and any affected research tactical;
-6. retain 1.17.1 as the parity target unless a separate product decision
-   explicitly changes it; and
+6. keep the specimen comparative and reconcile any affected original Mclone
+   design notes without introducing a parity target; and
 7. commit only tooling and written findings.
 
 ## Related

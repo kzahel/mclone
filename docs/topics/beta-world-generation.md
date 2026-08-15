@@ -24,9 +24,10 @@ Beta 1.7.3 Overworld language:
 
 The source archaeology and measured Alpha comparison remain in
 [`beta-1.7.3-reference.md`](beta-1.7.3-reference.md). This topic owns the live
-native product contract and evidence.
+internal historical-profile contract and evidence; it is not the product
+worldgen direction.
 
-## Scope And Parity Boundary
+## Scope And Reference Boundary
 
 `beta-v1` means the Beta 1.7.3 Overworld, not every generator present in the
 jar. The Nether and normally inaccessible Skylands generator are separate

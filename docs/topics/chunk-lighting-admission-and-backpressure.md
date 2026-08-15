@@ -478,10 +478,10 @@ already-admitted lighting after player interest changes. The general chunk
 worldgen/light sorter is constructed with `Integer.MAX_VALUE`, and there is no
 hard byte budget for queued light work.
 
-Mclone should port the behavioral invariants—upstream admission, keyed
-priority, stale queued-ticket clearing, status gating, shared data, and light
-ticket lifetime—without copying Java's lack of a hard memory ceiling. Quest
-requires a stronger explicit bound.
+Mclone should retain the useful behavioral invariants—upstream admission,
+keyed priority, stale queued-ticket clearing, status gating, shared data, and
+light-ticket lifetime—without copying Java's lack of a hard memory ceiling.
+Quest requires a stronger explicit bound.
 
 ## Accepted Direction
 

@@ -108,10 +108,11 @@ grass, flowers, crops, player-planted trees, tree growth, falling-tree
 simulation, structures, and general-purpose natural-feature serialization are
 separate concerns.
 
-This migration applies only to the original Mclone profile. The
-reference-locked Java 1.17.1 `overworld` must retain its exact vanilla feature
-placement and random-order semantics. Alpha, Beta, Small Island, and other
-profiles do not acquire this system merely because they also place trees.
+This migration applies only to the original Mclone profile. The legacy
+Java-1.17-shaped `overworld`, Alpha, Beta, Small Island, and other profiles do
+not acquire this system merely because they also place trees. If a shared
+refactor touches those profiles, use their own scoped regression evidence; no
+Java parity lock applies.
 
 ## Originating Direction
 
@@ -258,10 +259,10 @@ current tree placement. The migration may intentionally change its exact
 output in place, provided revisions, fingerprints, deterministic fixtures,
 maps, captures, documentation, and disposable internal worlds are updated.
 
-The stored `overworld` profile is reference-locked for Minecraft Java 1.17.1
-parity. A shared refactor that touches its tree implementation must prove
-oracle-identical output; avoiding such a refactor is preferred when a
-Mclone-specific realization path is sufficient.
+The stored `overworld` profile is an internal-mutable legacy reference surface.
+A shared refactor that touches its tree implementation should update affected
+regression fixtures; exact oracle comparison is needed only when the change
+continues to make a specific Minecraft-behavior claim.
 
 ## Vocabulary
 

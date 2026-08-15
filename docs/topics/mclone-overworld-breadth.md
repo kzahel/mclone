@@ -36,8 +36,8 @@ This topic answers three recurring questions:
    families are live, active, or still missing?
 
 The durable terrain architecture remains in
-[`mclone-overworld-generation.md`](mclone-overworld-generation.md). Exact Java
-1.17.1 biome parity remains in
+[`mclone-overworld-generation.md`](mclone-overworld-generation.md). The
+historical Java 1.17.1 biome-parity campaign remains recorded in
 [`../tactical/135-overworld-biome-palette-matrix.md`](../tactical/135-overworld-biome-palette-matrix.md).
 This ledger is deliberately neither a parity checklist nor a requirement to
 copy all vanilla biome IDs. Cross-system sequencing and the composition of
@@ -286,9 +286,9 @@ vocabularies. Mclone should reuse those lessons and existing shared
 mechanisms, while owning the distribution and formation recipes.
 
 This does not authorize porting the disabled Caves & Cliffs Part 1
-`Aquifer`, `Cavifier`, `NoodleCavifier`, or ore-vein paths into the
-reference-locked Overworld. A later Mclone-only density tactical should be an
-explicit original-profile system.
+`Aquifer`, `Cavifier`, `NoodleCavifier`, or ore-vein paths merely because they
+exist in the Minecraft reference. A later Mclone-only density tactical should
+be an explicit original-profile system.
 
 ### Performance and LOD contract
 

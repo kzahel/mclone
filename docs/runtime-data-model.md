@@ -6,7 +6,8 @@ This document owns the shape of the data. [`architecture.md`](./architecture.md)
 
 ## Core Rule
 
-The canonical chunk-content model should be vanilla-shaped, not browser-storage-shaped and not renderer-shaped.
+The canonical chunk-content model should be engine-owned, sectioned, and
+palette-based—not browser-storage-shaped or renderer-shaped.
 
 That means:
 
@@ -16,7 +17,10 @@ That means:
 - section cells store packed local palette indices
 - transport, persistence, and meshing consume this logical model through different codecs or views
 
-The model should stay close to Minecraft Java 1.17.1 where that shape is still a good fit. Divergence belongs in the carrier, adapter, or runtime owner, not in the meaning of the chunk data.
+The existing Minecraft-like section/palette shape is a useful implementation,
+not a parity constraint. Evolve canonical data from Mclone's simulation,
+storage, protocol, and performance needs; carriers and adapters must not
+silently redefine its meaning.
 
 ## Reference Baseline
 
@@ -31,7 +35,8 @@ Relevant vanilla concepts:
 | `reference/minecraft-1.17.1/src/net/minecraft/client/multiplayer/ClientChunkCache.java` | client chunk cache consumes authoritative chunk state |
 | `reference/minecraft-1.17.1/src/net/minecraft/client/renderer/chunk/ChunkRenderDispatcher.java` | chunk section compilation is async client work |
 
-The browser cannot use vanilla's shared JVM heap. It can still preserve vanilla's logical section model.
+The browser cannot use a shared JVM heap. It still consumes the same logical
+Mclone section model as native hosts.
 
 ## Current Mismatch
 

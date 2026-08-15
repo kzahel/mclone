@@ -197,7 +197,7 @@ toggles. Their resolution order is:
 | Profile | Resolution order | Intended use |
 |---|---|---|
 | **Mclone Original** | curated, provisional | Default distributable game presentation |
-| **Minecraft Reference** | Minecraft, provisional | Vanilla parity and direct comparison |
+| **Minecraft Reference** | Minecraft, provisional | Development-only direct comparison |
 | **Hybrid Authoring** | curated, Minecraft, provisional | See accepted Mclone work over a complete vanilla baseline |
 | **First-party Coverage** | curated, numbered missing | Expose every canonical material that still lacks curated first-party art |
 | **Provisional Audit** | provisional | Review the generated baseline without curated art hiding it |
@@ -207,7 +207,8 @@ Rules:
 - **Mclone Original** is the default when only first-party packs are present.
   It must look coherent enough to play without an opt-in diagnostic mode.
 - **Minecraft Reference** may resolve engine-only materials from provisional
-  Mclone, but the UI must identify that fallback and must not claim pure parity.
+  Mclone, but the UI must identify that fallback and must not claim an exact
+  Minecraft match.
 - **Hybrid Authoring** is explicitly proprietary/local while Minecraft content
   resolves.
 - **First-party Coverage** intentionally ignores Minecraft and provisional art.
@@ -305,7 +306,7 @@ provisional first-party build must not require Minecraft artifacts.
 Terrain Lab exposes the same visual-profile and presentation-detail selectors
 as the runtime and stores them in shareable URL state.
 
-For parity work it also offers a synchronized comparison view:
+For explicit visual research it also offers a synchronized comparison view:
 
 - comparison is off by default;
 - enabling Minecraft Reference adds it beside the primary Mclone Original

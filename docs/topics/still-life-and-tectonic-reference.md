@@ -26,8 +26,8 @@ custom mclone profile remains original work. In particular:
 - Tectonic is MIT-licensed and has public source, but its implementation is
   deeply shaped by Minecraft's density-function and multi-noise formats.
   Reusing its concepts is more valuable than translating its JSON literally.
-- Minecraft Java 1.17.1 remains the correctness target for the separate
-  `overworld` profile. These recommendations apply only to
+- The legacy Java-1.17-shaped `overworld` profile is separate but no longer a
+  correctness target. These recommendations apply only to the product-default
   `mclone-overworld-v1`.
 
 The compact answer is:

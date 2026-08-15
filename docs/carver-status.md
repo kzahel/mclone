@@ -1,14 +1,19 @@
-# Carver Status
+# Legacy Java-Shaped Carver Status
 
-Living status page for the overworld carver path.
+Status and oracle record for the retained Java-shaped `overworld` carver path.
+It is not the active cave roadmap for Mclone Overworld.
 
 This doc is narrower than [`worldgen-status.md`](./worldgen-status.md): it only tracks classic 1.17.1 overworld carvers and their oracle coverage. The status-order contract for when carvers run relative to structures, decoration, lighting, and publication lives in [`worldgen-deterministic-order.md`](worldgen-deterministic-order.md).
 
 ## Scope
 
-- Target: vanilla Java `1.17.1` overworld carver parity.
-- In scope: classic overworld `GenerationStep.Carving.AIR` plus `GenerationStep.Carving.LIQUID` behavior for the default 1.17.1 overworld path, plus the biome/config/oracle plumbing needed to verify both steps.
-- Still out of scope in the current native port: aquifer-enabled carving and the disabled Caves & Cliffs Part 1 cave systems called out in [`../AGENTS.md`](../AGENTS.md). Runtime fluid execution is handled by the native liquid path, not by carvers themselves.
+- Recorded scope: classic Java Overworld `GenerationStep.Carving.AIR` plus
+  `GenerationStep.Carving.LIQUID` behavior and the existing oracle plumbing.
+- Minecraft parity is no longer a project target. Gaps below describe the
+  retained reference implementation rather than prioritized product work.
+- Aquifer-enabled carving and disabled Caves & Cliffs Part 1 systems are not
+  part of this legacy implementation. Any Mclone cave or groundwater work
+  should follow the original worldgen topics.
 
 ## Current state
 
@@ -23,14 +28,17 @@ The repo now has a real, integrated native classic-overworld carver path for bot
 
 That is enough to truthfully say classic overworld carvers are implemented and integrated.
 
-It is not enough to call the path full parity yet.
+The path was never proven exhaustively equivalent to Java.
 
-## Confirmed parity gaps
+## Recorded comparison gaps
 
 These are the highest-signal gaps between the current native port and the 1.17.1 reference behavior.
 
 - Underwater scheduled tick consequences are now captured and oracled at generation time, but the runtime still only records them; it does not execute the later fluid/block updates that a full server tick loop would consume.
-- The native replaceable-block set now covers the live desert/ocean/frozen/badlands/podzol/coarse-dirt/mycelium families that the repo can currently surface-build, but it is still narrower than full vanilla `WorldCarver`. The highest-signal remaining gaps are broader block-state distinctions and later families that the current 1.17.1 target still flattens or defers.
+- The native replaceable-block set covers the live
+  desert/ocean/frozen/badlands/podzol/coarse-dirt/mycelium families that the
+  legacy profile can surface-build, but remains narrower than full vanilla
+  `WorldCarver`.
 - The numeric chunk/oracle palette now includes the current live surface families plus the earlier underwater-floor outputs (`obsidian`, `magma_block`), but it still intentionally collapses some vanilla block-state distinctions that exhaustive parity work would eventually have to separate.
 - The current carved-stage oracle matrix now includes a neighbor-cave regression for the carver source scan radius, but it is still targeted coverage rather than exhaustive coverage.
 - The native path still collapses some vanilla block-state distinctions in the carved-stage numeric model, which is acceptable for narrow chunk diffs but not the final form of exhaustive parity work.
@@ -68,20 +76,23 @@ Current carver verification is real but still intentionally narrow:
 
 That supports “partially oracled,” not “exhaustively covered.”
 
-## Recommended next slices
+## Optional legacy follow-up
 
-The highest-value sequence from here is:
+Only use this sequence when an explicit task puts the legacy comparison path in
+scope:
 
 1. Decide whether recorded scheduled underwater ticks should stay a measured generation artifact or grow into a later runtime simulation requirement.
 2. If exhaustive carved-stage diffs remain a priority, widen the flattened numeric model / oracle mapping where vanilla block-state distinctions are still collapsed instead of continuing to hide that lossiness behind a single ID.
 3. Keep browser validation aimed at exposed cave mouths / ravines after each substantial carver change, and keep surface-family validation aimed at the widened matrix when the surface path changes.
-4. For broader overworld recognizability, classic carvers no longer need to stay above the next biome-table slice; bamboo-jungle parity is now landed too, so the next broad follow-through is the later ore/underground slice outside the narrower exhaustive-parity work.
+4. Do not treat broader Java biome, ore, or underground coverage as the next
+   product slice; original Mclone cave and geology priorities live elsewhere.
 
-## Practical definition of “full parity”
+## Historical definition of “full parity”
 
-For this repo, carvers should only be described as full-parity when all of the following are true:
+If a future bounded report claims full Java carver parity, it would still need
+all of the following evidence:
 
-- AIR and LIQUID carver steps are both ported for the 1.17.1 overworld target.
+- AIR and LIQUID carver steps both match the selected 1.17.1 reference scope.
 - Per-biome configured-carver selection matches vanilla through biome generation settings rather than ad hoc fallback logic.
 - The carveable/replaceable material set matches vanilla for the current target.
 - Underwater scheduled water/magma tick behavior is either executed later in runtime or intentionally measured, stored, and documented as an accepted generation-stage boundary.

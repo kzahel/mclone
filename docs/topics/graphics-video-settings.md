@@ -24,11 +24,13 @@ It does not own Steam Deck provisioning or deployment; those remain in
 toggles, server simulation policy, or world persistence into graphics
 preferences merely because they currently appear near the same Options hub.
 
-Minecraft Java 1.17.1 is the parity reference, but Mclone may add settings for
-its own renderer, such as internal world scale. The reference
+Minecraft Java 1.17.1 remains one comparative settings inventory, while Mclone
+owns the settings required by its renderer and product experience, such as
+internal world scale. The reference
 [`VideoSettingsScreen.java`](../../reference/minecraft-1.17.1/src/net/minecraft/client/gui/screens/VideoSettingsScreen.java)
 and [`Options.java`](../../reference/minecraft-1.17.1/src/net/minecraft/client/Options.java)
-are the source baseline for the inventory below.
+provides historical input for the inventory below rather than a product
+baseline.
 
 ## Current Product Behavior
 

@@ -23,8 +23,9 @@ recognizable pre-biome Alpha terrain language:
 
 The reference specimen and decompilation receipts remain in
 [`alpha-era-reference.md`](alpha-era-reference.md). This topic owns the native
-product contract, current implementation truth, deliberate divergences,
-validation, and recommended follow-up.
+internal historical-profile contract, current implementation truth, deliberate
+differences, validation, and optional follow-up; it is not the product worldgen
+direction.
 
 ## Product Identity And Compatibility
 

@@ -83,12 +83,12 @@ materialization lives in
   in N ticks (N=3) against tracked packet coordinates. The exponential form
   is cadence-independent (good for variable tick and XR frame rates) but
   never exactly converges and can lag differently at different frame rates.
-  Keep, but note the parity lever: vanilla's fixed-window lerp is the
-  fallback if remote motion ever needs exact vanilla feel. The replacement
+  Keep, but note the tuning lever: a fixed-window lerp is available if Mclone
+  remote motion needs exact finite convergence. The replacement
   direction for remote players is owned by
   [`remote-player-presentation.md`](remote-player-presentation.md).
 
-## Vanilla baseline (what "as good as Minecraft" means here)
+## Comparative Vanilla Behavior
 
 Vanilla 1.17.1 is client-authoritative with server sanity checks — full
 receipts in the reference doc. The checks, in order: NaN/coordinate clamps,
@@ -156,7 +156,7 @@ work with client-reported poses.
   lanes. Changing the integrated server from 20 to 60 Hz therefore does not
   triple local movement or movement packets.
 - The current publication deadline makes the 20-attempt move reminder one
-  second at its fixed 20 Hz vanilla baseline. It should become
+  second at the current fixed 20 Hz publication baseline. It should become
   handshake-rate-aware when variable publication rates land.
 - No server-side 60 Hz player-movement lane is required. A server cadence
   change affects when accepted poses are consumed and published, not how often

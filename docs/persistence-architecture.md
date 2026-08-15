@@ -57,10 +57,10 @@ Read these before implementing persistence behavior:
 | saved data dirty flag | `reference/minecraft-1.17.1/src/net/minecraft/world/level/saveddata/SavedData.java` |
 | player data files | `reference/minecraft-1.17.1/src/net/minecraft/world/level/storage/PlayerDataStorage.java` |
 
-The important parity target is the lifecycle and ownership shape, not literal
-Anvil file compatibility in the first native implementation.
+The useful reference lesson is the lifecycle and ownership shape, not literal
+Anvil compatibility or broader Minecraft parity.
 
-## Vanilla Shape To Preserve
+## Java Reference Shape
 
 Minecraft Java 1.17.1 uses an authoritative server even in singleplayer. The
 server owns chunk residency, dirty state, entities, scheduled ticks, and disk
@@ -186,7 +186,8 @@ supports it.
 The implemented typed metadata v1 singleton includes:
 
 - an explicit codec version and monotonically coalesced revision;
-- target Minecraft version (`1.17.1`);
+- the legacy format's Minecraft-version field (`1.17.1`), retained as a codec
+  fact rather than a product target;
 - seed plus world-generation and behavior profiles;
 - creation and last-played Unix timestamps;
 - durable game time and day time; and
@@ -493,7 +494,7 @@ Do not use one version number for everything long-term. Track at least:
 - content/registry version
 - generation output version
 - light trust/algorithm version
-- target Minecraft version
+- legacy reference-format/version field, while it remains in the codec
 
 General principle: cache records may be dropped with a log line; durable
 records are never silently dropped — they migrate or fail open with an
@@ -508,7 +509,7 @@ Default policy per version stamp:
 | light algorithm version | never blocks; stored light becomes untrusted (`light_correct = false`) |
 | schema / durable codec versions (chunk, entity, player) | newer-than-code always blocks; older-than-code blocks unless a migration exists |
 | seed, min build height, world height | block — these change the meaning of every stored record; a different seed is a different world, not a reset condition |
-| target Minecraft version | block until a migration exists |
+| legacy reference-format/version field | block until a migration exists while this field remains part of world identity |
 | content/registry version | blocks durable saves and resets cache records until stable palette identifiers land (see Chunk Records) |
 
 ## Light Policy
@@ -531,7 +532,7 @@ later.
 
 ## Scheduling And Ticks
 
-Saved scheduled ticks should behave like vanilla:
+Saved scheduled ticks follow this Mclone lifecycle:
 
 - pending ticks are stored with the owning chunk record
 - chunk load does not run ticks to completion

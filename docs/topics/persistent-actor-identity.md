@@ -137,7 +137,7 @@ The shared stack now implements the intended identity shape:
   routes. Persistent catalog and app-private routes load saved actors instead.
 
 `AgeableMob` baby/breeding age, health, equipment, effects, and other subtype
-state remain future system work. They must follow the same vanilla owner rule
+state remain future system work. They must follow the same domain-owner rule
 rather than reuse `tick_count`.
 
 ## Constraints
@@ -154,13 +154,14 @@ rather than reuse `tick_count`.
   round trip is necessary but not sufficient for the authored-destination
   lifecycle.
 - Do not add offline wall-clock aging.
-- Read the relevant Minecraft 1.17.1 source before adding each subtype's saved
-  state.
+- Define each new subtype's saved state from its Mclone lifecycle and gameplay
+  requirements. Consult Minecraft source only for an explicitly scoped legacy
+  comparison.
 
 ## Outcome and Follow-on Scope
 
 Tactical 218 completed this concern. Further entity kinds should extend their
-own vanilla-shaped save payload and round-trip tests. They should not reopen
+own engine-owned save payload and round-trip tests. They should not reopen
 runtime-ID persistence, generic tick persistence, offline catch-up, or browser
 platform policy. Tactical
 [`277`](../tactical/277-habitat-driven-creature-ecology-foundation.md) now

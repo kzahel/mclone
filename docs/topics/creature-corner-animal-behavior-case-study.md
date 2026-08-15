@@ -43,9 +43,9 @@ Hunger causes coyotes and caracaras to scavenge and hunt. Gallians counter
 predators and gather young animals. Animation and sound expose those state
 changes to the player.
 
-This study does not change the Minecraft Java 1.17.1 vanilla Overworld target.
-Any non-vanilla creature adoption would need an explicit content/profile
-decision and the normal shared-first engine ownership.
+This study informs Mclone's original creature direction; Minecraft Java 1.17.1
+is not a competing Overworld target. Any creature adoption still needs an
+explicit content/profile decision and the normal shared-first engine ownership.
 
 ## Specimen And Provenance
 

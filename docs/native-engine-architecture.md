@@ -337,7 +337,10 @@ depends on app-local orchestration.
 - Keep `winit`, Android activity glue, browser glue, and OpenXR session/swapchain ownership in app/platform adapters.
 - Keep renderer-facing view/projection and render-target data explicit.
 - Keep headless/offscreen validation available.
-- Use `reference/minecraft-1.17.1/src/` as the source of truth for vanilla gameplay, assets, rendering semantics, and visual correctness; see [`reference-minecraft.md`](reference-minecraft.md).
+- Use `reference/minecraft-1.17.1/src/` only for explicitly scoped Minecraft
+  comparisons, legacy maintenance, or oracle work; it is not the source of
+  truth for new Mclone gameplay, content, rendering, or visual direction. See
+  [`reference-minecraft.md`](reference-minecraft.md).
 - Use `~/code/playbox` as an app/render/XR pattern library only; see [`platforms.md`](platforms.md#reference-engine).
 
 ## Current Alignment Work
@@ -351,7 +354,8 @@ Current alignment areas:
 - keep the platform parity/contract matrix in [`topics/platform-parity.md`](topics/platform-parity.md) current
 - keep host-mode convergence shared across web, desktop, Android, and XR lanes
 - keep XR terrain, actor, UI, and comfort features in shared XR crates where practical
-- advance lighting correctness, rendering parity, menu/HUD/options/loading UI, and persistence as platform-neutral features
+- advance lighting and rendering correctness, menu/HUD/options/loading UI, and
+  persistence as platform-neutral features
 - add adapter conformance tests for render targets/views, asset discovery, input intent mapping, and render-section compile contracts
 
 ## Historical Notes

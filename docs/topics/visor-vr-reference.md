@@ -10,9 +10,8 @@ decision is implied by this note.
 This note records ideas worth carrying from
 [Visor](https://github.com/VisorModStudio/Visor) into mclone, especially its XR
 UI, input, rendering, lifecycle, addon, settings, and remote-pose structure.
-Visor is a secondary architecture reference, not a source of vanilla gameplay
-truth; Minecraft 1.17.1 remains mclone's gameplay and visual-correctness
-reference.
+Visor and Minecraft 1.17.1 are secondary comparative references, not sources
+of product truth for Mclone's original gameplay or visual direction.
 
 The useful conclusion is not "port Visor." Visor is a Java mod embedded in
 Minecraft 1.20.1 and its codebase exposes Minecraft, OpenGL, GLFW, and AtumVR

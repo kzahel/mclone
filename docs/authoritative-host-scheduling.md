@@ -2,7 +2,14 @@
 
 Durable guidance for keeping authoritative player/session work responsive while chunk loading, generation, saving, and snapshot assembly are active.
 
-This document fills a gap left by [`architecture.md`](./architecture.md), [`protocol.md`](./protocol.md), and [`loading-persistence.md`](./loading-persistence.md). Those docs say the host owns authority and chunk lifecycle; this doc says how host work must be scheduled so authority does not stall behind chunk jobs. The parity-critical generation, lighting, and publication order is centralized in [`worldgen-deterministic-order.md`](worldgen-deterministic-order.md).
+This document fills a gap left by [`architecture.md`](./architecture.md),
+[`protocol.md`](./protocol.md), and
+[`loading-persistence.md`](./loading-persistence.md). Those docs say the host
+owns authority and chunk lifecycle; this doc says how host work must be
+scheduled so authority does not stall behind chunk jobs. Generator-declared
+prerequisites and publication gates are the current product contract;
+[`worldgen-deterministic-order.md`](worldgen-deterministic-order.md) records the
+legacy Java model and retained mechanisms.
 
 ## Core Rule
 
@@ -100,9 +107,16 @@ This is the part we missed in the earlier architecture analysis: vanilla's serve
 
 ### Worldgen Order Contract
 
-The detailed vanilla generation order lives in [`worldgen-deterministic-order.md`](worldgen-deterministic-order.md). This host-scheduling doc does not decide that order.
+The detailed legacy Java generation order lives in
+[`worldgen-deterministic-order.md`](worldgen-deterministic-order.md). This
+host-scheduling doc does not decide any generator's order.
 
-For `mclone`, a `vanilla17` path may use engine-native workers and queues, but the host scheduler must treat the deterministic-order contract as an input: enqueue eligible work, prioritize it, cancel stale work, and publish completed chunks without weakening the documented status, lighting, and send gates. If a scheduling change needs to alter status order or finality, update [`worldgen-deterministic-order.md`](worldgen-deterministic-order.md) with source evidence first.
+For Mclone, the host scheduler treats each active generator's declared
+prerequisites, deterministic-write contract, lighting readiness, and
+publication gates as inputs. It may enqueue eligible work, prioritize it, and
+cancel stale work without weakening those declarations. The legacy
+`overworld` path may retain its existing status graph, but that graph does not
+automatically govern original generators.
 
 ### Vanilla Still Has Blocking Escape Hatches
 
@@ -170,9 +184,9 @@ global Minecraft-style tick. A profile names the wall-clock host pump rate and
 the rates of individual lanes such as gameplay, physics, AI, and snapshot
 publication.
 
-The default Minecraft-like profile may keep host/gameplay at 20 Hz and run
-physics as substeps. That is a compatibility default, not a permanent engine
-constraint. Other profiles should be able to run a higher-fidelity server, such
+The current Mclone profile may keep host/gameplay at 20 Hz and run physics as
+substeps. That is a measured product choice, not a permanent engine constraint.
+Other profiles should be able to run a higher-fidelity server, such
 as 60 Hz host and 60 Hz gameplay, or a lower-CPU server with lower host,
 gameplay, AI, or network publication rates.
 

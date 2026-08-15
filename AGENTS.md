@@ -30,13 +30,15 @@ Background docs own the long-form project context:
 
 - [`docs/platforms.md`](docs/platforms.md) owns the current platform posture, Playbox reference entry points, platform boundaries, and validation matrix.
 - [`docs/native-engine-architecture.md`](docs/native-engine-architecture.md) owns the current engine architecture and shared crate/app ownership shape.
-- [`docs/reference-minecraft.md`](docs/reference-minecraft.md) owns the Minecraft 1.17.1 reference tree, bootstrap/mapping notes, vanilla target, and disabled Caves & Cliffs Part 1 systems.
+- [`docs/reference-minecraft.md`](docs/reference-minecraft.md) owns the Minecraft 1.17.1 reference tree, bootstrap/mapping notes, comparative/oracle use, and the legacy Java-shaped profile.
 - [`docs/native-web.md`](docs/native-web.md) owns Rust/WASM web build, smoke, deploy, and local deploy-hook notes.
 
 Agent guardrails:
 
 - Use `~/code/playbox` as a native `winit`/`wgpu`/headless/Android/OpenXR pattern library only. Do not depend on it directly or copy its PhysX/VaM-specific runtime shape. When the user mentions "Playbox", inspect that sibling repo directly.
-- Use `reference/minecraft-1.17.1/src/` before Playbox for vanilla gameplay, assets, rendering semantics, and visual correctness.
+- For explicitly Minecraft-specific research, use `reference/minecraft-1.17.1/src/`
+  before Playbox. Do not treat either reference as the source of truth for new
+  Mclone gameplay, content, world generation, or visual direction.
 - For feature requests without an explicit platform constraint, implement behavior in its shared owner and validate every platform boundary affected by the change. No client target is the default or preferred product target. Keep gameplay, runtime, asset, mesh, UI, renderer, and XR contracts host-neutral.
 - Treat code that heavily grows `mclone-native-client` as a cleanup smell unless it is genuinely `winit`, desktop surface, native input, CLI, headless capture, or desktop diagnostics glue.
 - Keep `winit`, Android activity glue, browser glue, and OpenXR session/swapchain ownership in app/platform adapters.
@@ -207,21 +209,33 @@ rendering when it should also appear in full-frame multiview. For per-view data,
 preserve the invariant that each eye/layer uses its own view/projection data;
 never share mutable per-eye uniforms across one submission.
 
-## Reference-porting policy
+## Minecraft reference policy
 
-For vanilla parity ports, every class or system has a 1:1 counterpart in `reference/minecraft-1.17.1/src/`. **Always read the source file before writing the port.** The default is direct translation: same field names where practical, same method names where practical, same logic flow. This applies to client graphics behavior as well as simulation and content systems. Diverge only when the target platform, runtime ownership, or Rust type system forces it.
+Mclone is original-first. `mclone-overworld-v1` (Mclone Overworld) is the
+product default, and current gameplay, world-generation, content, and visual
+work should advance Mclone's own direction. Minecraft Java 1.17.1 parity is no
+longer a project target or default implementation policy.
 
-The main rule is:
+The local reference tree remains useful for bounded comparative research,
+historical implementation context, legacy `overworld` maintenance, and
+explicit oracle investigations. When a task explicitly calls for one of those
+uses, read the relevant source before making claims about Minecraft behavior
+and clearly separate observed reference facts from Mclone design decisions.
+Do not begin a parity port, preserve a path back to parity, or constrain an
+original feature to Minecraft semantics unless the user explicitly requests
+that bounded work.
 
-- simulation/content/vanilla visual behavior parity is the default
-- runtime orchestration may diverge when platform constraints require it
-- any such divergence must preserve a clear path for future parity work instead of making it opaque or harder to recover
-
-Before making an architectural divergence, explicitly determine what the reference Minecraft source does today, why that shape is a poor fit for the engine or affected platform target, the exact scope of the divergence, and whether the divergence makes future parity work easier, neutral, or harder.
+Completed parity tacticals and archived parity plans are historical execution
+records. Do not use their scope statements to override this policy or the
+current living topic and architecture docs.
 
 ### Reference tree must be present
 
-Reference bootstrap details live in [`docs/reference-minecraft.md`](docs/reference-minecraft.md). Run `./scripts/decompile-mc.sh` if `reference/minecraft-1.17.1/src/` is missing. Do not write a port without the source in hand.
+Reference bootstrap details live in [`docs/reference-minecraft.md`](docs/reference-minecraft.md).
+If an explicitly requested reference/oracle task needs the 1.17.1 source and
+`reference/minecraft-1.17.1/src/` is missing, run
+`./scripts/decompile-mc.sh`. Original Mclone work does not require hydrating or
+consulting the Minecraft tree.
 
 ### Oracle and jar prerequisites
 
@@ -259,11 +273,19 @@ Use the current default and platform-specific validation commands in [`docs/plat
 
 For rendered-output validation, use the smallest capture path that exercises the affected target contract and save debug, smoke, and probe screenshots to `/tmp` (for example `/tmp/mclone-debug.png`). Never write screenshots into the repo, into `test-results/`, or anywhere that risks getting committed.
 
-## Target: Minecraft Java 1.17.1 vanilla overworld
+## Product world direction
 
-Seed parity against 1.17.1 vanilla overworld is the correctness bar. Detailed target notes, active pipeline, and disabled Caves & Cliffs Part 1 systems live in [`docs/reference-minecraft.md`](docs/reference-minecraft.md).
+Mclone Overworld is the normal new-world default and Mclone's original
+terrain, ecology, structures, gameplay, and presentation are the correctness
+direction. The stored `overworld` profile is a legacy Java-1.17-shaped
+development/reference profile, not the product default, an active parity
+campaign, or a correctness bar.
 
-Do not port `Aquifer`, `Cavifier`, `NoodleCavifier`, `OreVeinifier`, the disabled deepslate path, or other disabled Caves & Cliffs Part 1 worldgen paths for MVP. If asked to port any of these, push back and confirm the target has changed before writing code.
+Do not port `Aquifer`, `Cavifier`, `NoodleCavifier`, `OreVeinifier`, the
+disabled deepslate path, or other Minecraft systems merely because they exist
+in the reference tree. If an original Mclone feature needs similar behavior,
+design it from Mclone's requirements and shared ownership contracts; use the
+reference only as explicitly scoped comparative evidence.
 
 ### Worldgen compatibility safety
 
@@ -272,12 +294,11 @@ safety ledger in
 [`docs/topics/world-generation-profiles.md`](docs/topics/world-generation-profiles.md#compatibility-safety-ledger).
 A `v1` name, persisted tag, or checked-in fingerprint is not by itself a
 release compatibility promise. The current project is internal and unshipped:
-`flat-grass-v1`, `small-island-v1`, and authored-only behavior may be changed
+all current generation profiles, including legacy `overworld`, may be changed
 intentionally in place when their fixtures, docs, and disposable internal
-worlds are updated. The `overworld` profile remains reference-locked because
-Minecraft Java 1.17.1 parity is its correctness target, not because it has
-shipped users. Update the ledger before relying on a new release freeze or a
-specific world that must survive generator changes.
+worlds are updated. No profile is reference-locked or release-frozen today.
+Update the ledger before relying on a new release freeze or a specific world
+that must survive generator changes.
 
 ## Commit Message Guidance
 

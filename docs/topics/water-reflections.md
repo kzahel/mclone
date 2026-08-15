@@ -24,11 +24,10 @@ reflection system for arbitrary materials. Those systems may eventually share
 render resources, but above-water reflection should not silently change their
 contracts.
 
-Minecraft Java 1.17.1 remains the geometry and visibility baseline.
+Mclone's authoritative liquid geometry and visibility are the baseline.
 [`LiquidBlockRenderer.java`](../../reference/minecraft-1.17.1/src/net/minecraft/client/renderer/block/LiquidBlockRenderer.java)
-is the reference for liquid corner heights and exposed face classes. Reflective
-water is an optional presentation extension rather than a vanilla-parity
-requirement.
+remains an optional comparison for liquid corner heights and exposed face
+classes. Reflective water is an original presentation feature.
 
 ## Working Decision
 

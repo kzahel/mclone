@@ -169,7 +169,7 @@ client core, a flat/XR/offscreen projection, or a platform adapter.
 Near-term product gaps are feature parity and codebase alignment, not more
 platform bring-up:
 
-- lighting correctness and render integration still need continued parity work
+- lighting correctness and render integration still need continued product work
 - menu/HUD/options/loading UI need enough shared Rust/WebGPU coverage to stop
   each platform inventing its own surface
 - platform adapters should be thinner around shared runtime/render/session
@@ -548,7 +548,8 @@ manual checks:
    work behind that shared scene boundary instead of reintroducing app-local XR
    forks.
 7. **Promote lighting and UI as shared feature contracts.** Lighting and
-   menus/HUD/options/loading UI are the next user-visible parity blockers.
+   menus/HUD/options/loading UI are the next user-visible shared-feature
+   blockers.
    Land them once through shared data/UI/render contracts instead of per
    platform paths.
 8. **Add adapter conformance tests.** Prefer tests for render-target/view

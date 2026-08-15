@@ -6,8 +6,9 @@ The project is internal and unreleased today, but it is being built for an
 eventual public release rather than only personal or home/LAN use. Release
 readiness requires a complete distributable first-party asset set, sufficiently
 complete world generation and gameplay, and the remaining product and release
-work. Local Minecraft 1.17.1 reference code and assets are development and
-parity-testing inputs only; they are not public release content.
+work. Local Minecraft 1.17.1 reference code and assets are optional comparative
+and legacy-test inputs only; they are not the product direction or public
+release content.
 
 ## Project Status
 
@@ -73,13 +74,13 @@ Platform-specific entry points:
 
 Worldgen, rendering, and subsystem docs:
 
-- [`docs/strategy.md`](docs/strategy.md) — translation/oracle policy
-- [`docs/worldgen-deterministic-order.md`](docs/worldgen-deterministic-order.md) — vanilla status order, decoration finality, lighting gates, and chunk publication gates
+- [`docs/strategy.md`](docs/strategy.md) — original-product/reference boundary
+- [`docs/worldgen-deterministic-order.md`](docs/worldgen-deterministic-order.md) — retained Java-order research and shared scheduling lessons
 - [`docs/topics/lod.md`](docs/topics/lod.md) — current LOD terminology, ownership, and documentation routes
 - [`docs/topics/procedural-horizon-clipmap.md`](docs/topics/procedural-horizon-clipmap.md) — current shared terrain-horizon LOD implementation
 - [`docs/lod-architecture.md`](docs/lod-architecture.md) — retired chunk-based Far LOD architecture archive
-- [`docs/carver-status.md`](docs/carver-status.md) — carver-parity/oracle tracker
-- [`docs/structures.md`](docs/structures.md) — vanilla overworld structure generation architecture
+- [`docs/carver-status.md`](docs/carver-status.md) — legacy Java-shaped carver/oracle record
+- [`docs/structures.md`](docs/structures.md) — original structure foundation and retained Java architecture reference
 - [`docs/liquids.md`](docs/liquids.md) — liquid simulation architecture
 - [`docs/entity-architecture.md`](docs/entity-architecture.md) — entity/mob runtime boundaries
 - [`docs/creatures.md`](docs/creatures.md) — overworld creature spawning architecture
@@ -94,13 +95,16 @@ Worldgen, rendering, and subsystem docs:
 
 Reference and oracle material:
 
-- `reference/minecraft-1.17.1/src/` — generated, gitignored local source tree for vanilla behavior and visual correctness
+- `reference/minecraft-1.17.1/src/` — generated, gitignored local source tree for comparative behavior and visual research
 - [`oracle/`](oracle/) — retained Java and TypeScript reference tooling
 - [`test/fixtures/`](test/fixtures/) — shared oracle fixture data consumed by Rust tests
 
 The generated reference tree and extracted Minecraft assets are not part of the
-live engine or distributable content. World generation aims for **seed parity**
-with Minecraft Java 1.17.1 so it can be oracle-tested against reference output.
+live engine or distributable content. **Mclone Overworld**
+(`mclone-overworld-v1`) is the normal new-world default and the active product
+world-generation direction. The retained Java-1.17-shaped `overworld` profile
+and oracle fixtures are legacy development/reference surfaces, not an active
+seed-parity target.
 
 ## Code Layout
 
