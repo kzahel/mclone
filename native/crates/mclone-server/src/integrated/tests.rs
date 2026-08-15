@@ -101,7 +101,9 @@ fn load_chunk_view_with_lighting(
     for _ in 0..60_000 {
         let updates = server.try_poll().expect("poll");
         accept_player_position_updates(server, &updates);
-        if server.pending_job_count() == 0 {
+        if server.pending_job_count() == 0
+            && server.scheduler().pending_persistence_load_count() == 0
+        {
             return;
         }
         if server.pending_publication_count() == 0 {
