@@ -1,7 +1,8 @@
 # Tactical 307: Seasonal Solar Path And Cyclical Latitude
 
-Status: implementation complete 2026-08-16; physical-headset, full-game
-WebGPU, performance, and Human Review acceptance remain pending
+Status: implementation and Human Review accepted 2026-08-16; physical Quest
+launch/populated-terrain smoke complete; full-game WebGPU, physical Debug
+interaction, and Quest performance remain pending
 
 Topic: `seasons`
 
@@ -21,8 +22,10 @@ one pure solar sample. Use that sample consistently for the visible sun,
 sunrise/sunset glow, sky brightness, and rendered skylight. Expose typed Debug
 overrides for orbital phase, latitude source/value, and solar time so the user
 can inspect the result interactively in desktop flat, desktop OpenXR, and
-Android XR. Reuse Tactical 306's client-local `Season Preview` master switch;
-when it is off, retain the accepted fixed-path sky exactly.
+Android XR. Reuse Tactical 306's client-local `Season Preview` master switch.
+When it is off, retain the fixed clock path and rendered lighting exactly;
+original Mclone fixed and seasonal paths share the accepted Earth-like sun
+size.
 
 This tactical establishes the latitude policy as shared climate vocabulary
 but does not change terrain generation. A later tactical may combine the same
@@ -280,6 +283,13 @@ the commits and execution records must make the boundary clear:
 Do not fake acceptance with only the existing sunrise glow. The user must be
 able to observe the actual sun path.
 
+The accepted original-Mclone sun has a `0.53`-degree apparent diameter in
+both the fixed-clock and seasonal paths. This is presentation identity, not a
+Debug slider. Retained Minecraft-reference profiles keep Java 1.17.1's
+deliberately oversized `60 x 60` quad at distance `100`, approximately
+`33.398` degrees, so the original-product correction does not rewrite vanilla
+parity.
+
 ### Every daylight consumer uses the shared elevation
 
 For opted-in Mclone seasonal solar presentation, route the same `SolarSample`
@@ -334,8 +344,9 @@ screen may disable world-dependent values.
 
 New processes and scenes reset to preview off, world latitude, world clock,
 and the northward-equinox Debug orbital phase. Do not save these controls in
-world records or preferences. Preview off is an exact no-op for the accepted
-fixed-path sky and rendered light.
+world records or preferences. Preview off is an exact no-op for fixed-path
+direction, sky response, and rendered light. It uses the same Earth-like
+Mclone sun size as preview on, so toggling the preview never resizes the disc.
 
 ### Slider changes do no world or mesh work
 
@@ -385,8 +396,8 @@ independent until separate map review supports a stronger coupling.
 
 Status: complete 2026-08-16 for implementation and automated evidence.
 Tactical 036's shared visible textured sun is complete in mono, per-eye, and
-multiview renderer paths. Physical Quest cost measurement remains pending
-because no authorized headset was attached.
+multiview renderer paths. Physical Quest launch and populated-terrain render
+smoke now pass; physical sky-pass cost measurement remains pending.
 
 - Confirm default Mclone creation and existing review worlds use the unbounded
   plane; pin an explicitly created cylinder only as secondary evidence.
@@ -476,8 +487,9 @@ drift.
 
 ### Slice 4: Spatial/temporal matrix, performance, and Human Review
 
-Status: automated matrix complete 2026-08-16. Full-game WebGPU, physical
-OpenXR/Quest, Quest performance, and Human Review remain pending.
+Status: automated matrix and Human Review complete 2026-08-16. Physical Quest
+launch/populated-terrain smoke passes. Full-game WebGPU, physical seasonal
+Debug interaction, and Quest performance remain pending.
 
 Add a focused capture runner, such as
 `pnpm native:seasons:solar-capture`, that records under `/tmp`:
@@ -525,7 +537,9 @@ The implementation landed as the following `Topic: seasons` series:
 - `d285752c` adds the map and capture runner;
 - `bca1ffb6` expands the spatial, temporal, stereo, retained-profile, and
   cylinder evidence; and
-- `39f19df5` closes the Web host's exhaustive diagnostic action label.
+- `39f19df5` closes the Web host's exhaustive diagnostic action label; and
+- `df5c776c` corrects original Mclone's apparent sun diameter while preserving
+  the retained Minecraft-reference size.
 
 `mclone-season` owns `OrbitalPhase`, latitude and solar-time source enums,
 the unsaved `SeasonPreviewSettings`, the profile/topology-selected coordinate
@@ -593,7 +607,7 @@ not alter the product-default plane.
 
 ### Reproducible visual evidence
 
-The final exact-revision receipt is:
+The original exact-revision receipt was:
 
 ```text
 /tmp/mclone-seasonal-solar-39f19df5d683-1786862553496/
@@ -621,6 +635,29 @@ readable shared Debug rows. The preview-off Mclone pair and the opted-out
 Overworld pair are byte-identical within the runner; cylinder seam solar
 directions are identical.
 
+### Earth-like apparent-size correction and Human Review
+
+Human Review found the original `30`-unit half-size sun quad much too large.
+The accepted Mclone presentation now uses a `0.53`-degree apparent diameter,
+matching the real Sun's approximate angular size. One typed render-state query
+selects that size for both Mclone fixed-clock and seasonal states, so toggling
+`Season Preview` does not resize the disc. `VanillaFixed` retains the reference
+`30`-unit half-size at distance `100`.
+
+The exact-revision replacement receipt is:
+
+```text
+/tmp/mclone-seasonal-solar-df5c776cbeea-1786874764148/
+  capture-receipt.json
+  solar-review.json
+```
+
+It records revision `df5c776cbeea` and 39 passing captures. Inspected direct
+sun and fixed-path comparison pixels show the restrained Mclone disc and the
+unchanged oversized reference disc. Both Mclone and Overworld preview-off A/B
+pairs remain byte-identical. Focused renderer tests reconstruct the quad and
+measure `0.53` degrees rather than relying only on screenshot size.
+
 ### Validation and remaining gates
 
 Passed:
@@ -645,13 +682,17 @@ at `dede8faf^`, before the visible-sun and seasonal commits, so this record
 does not attribute that host/session failure to Tactical 307 and does not
 claim headed full-game Web pixel acceptance.
 
-The Quest provider reported that no attached, authorized Quest was available.
-Consequently physical Android XR pixels, desktop-headset interaction, Quest
-sky/total-frame GPU p95, comfort, and the final Human Review decision are not
-claimed. The implementation is complete, but the tactical remains open for
-those acceptance gates. The static cost boundary is one observer-local pure
-sample and existing small render-state writes; no physical performance number
-is fabricated.
+An authorized Quest 3 subsequently passed current-package installation,
+OpenXR/controller/session initialization, a populated new-world replacement,
+and coherent stereo compositor capture. After the apparent-size correction,
+the Android XR APK was rebuilt, installed over the same-signature package, and
+passed the same populated-world smoke. Its automated spawn view did not frame
+the sun, so physical corrected-size pixels and live seasonal Debug interaction
+remain unclaimed, alongside full-game WebGPU and Quest sky/total-frame GPU p95.
+Human Review accepts the coordinate/solar behavior with the `0.53`-degree
+correction. The static cost boundary is one observer-local pure sample and
+existing small render-state writes; no physical performance number is
+fabricated.
 
 ## Acceptance
 
@@ -675,6 +716,8 @@ is fabricated.
 ### Visual and renderer gates
 
 - A visible sun disc exists before seasonal-path acceptance.
+- Original Mclone fixed and seasonal paths use the accepted `0.53`-degree sun;
+  retained Minecraft-reference profiles preserve their vanilla apparent size.
 - Preview off reproduces the accepted fixed-path sky and rendered-light output.
 - Sun position, sunrise/sunset glow, sky brightness, atmosphere where active,
   and rendered sky light derive from one `SolarSample`.

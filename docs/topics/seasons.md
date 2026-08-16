@@ -7,9 +7,13 @@ Status: **active design record created 2026-08-15. Tactical
 implemented as a client-local visual proof. The default unbounded Mclone plane
 now has a provisional 98,304-block cyclical latitude wavelength, a
 27-degree-tilt pure solar model, one visible-sun/sky/rendered-light sample, and
-shared desktop/XR Debug controls. Its automated matrix is complete; physical
-headset, Quest performance, full-game WebGPU, and Human Review acceptance
-remain pending. The optional cylinder stays secondary. Tactical
+shared desktop/XR Debug controls. Human Review accepts its coordinate/solar
+behavior after correcting the original-Mclone sun to an Earth-like
+`0.53`-degree apparent diameter in both fixed and seasonal modes. Its automated
+matrix and a physical Quest launch/populated-terrain smoke are complete;
+physical seasonal Debug interaction, Quest performance, and full-game WebGPU
+remain pending. Retained Minecraft-reference profiles keep the Java 1.17.1
+oversized sun. The optional cylinder stays secondary. Tactical
 [`306`](../tactical/306-seasonal-appearance-preview.md) remains planned for
 continuous exact-terrain material response and one bounded recent-snow pulse;
 it must extend Tactical 307's shared `Season Preview` state and continues to
@@ -497,10 +501,12 @@ logic.
 
 ## Recommended Evidence Ladder
 
-1. Complete Tactical 307's remaining physical-headset, Quest-performance,
-   full-game WebGPU, and Human Review gates. Its pure orbital/solar sample,
-   primary cyclical-plane policy, secondary cylinder proof, fixed-seed maps,
-   and 39-case exact-revision capture receipt are implemented.
+1. Complete Tactical 307's remaining physical seasonal-Debug interaction,
+   Quest-performance, and full-game WebGPU gates. Human Review accepts the
+   coordinate/solar behavior and Earth-like apparent sun size; its pure
+   orbital/solar sample, primary cyclical-plane policy, secondary cylinder
+   proof, fixed-seed maps, physical launch/render smoke, and replacement
+   39-case exact-revision capture receipt are implemented.
 2. Calibrate year length, climate wavelength/scale, continental size, and
    travel time together in Terrain Lab or another shared review surface.
 3. Add foliage/material response and a bounded derived snow/wetness surface.
