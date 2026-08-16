@@ -891,7 +891,11 @@ fn terrain_vertex(
                 // that profile at this segment endpoint. Taking endpoint
                 // envelopes preserves the cardinal face winding even where
                 // the two profiles cross inside one block-wide segment.
-                let endpoint = i32(corner.x);
+                // The camera-centered fine clipmap observes this perimeter
+                // from inside. Reverse only the connector's horizontal
+                // endpoint order so its front face points inward; ordinary
+                // voxel risers retain their outward cardinal winding.
+                let endpoint = 1 - i32(corner.x);
                 var parent_sample_x = i32(cell_x);
                 var parent_sample_z = i32(cell_z);
                 if face_index == 1u {
@@ -920,7 +924,12 @@ fn terrain_vertex(
                 surface_kind = 1u;
             }
 
-            let horizontal = f32(corner.x);
+            let cardinal_horizontal = f32(corner.x);
+            let horizontal = select(
+                cardinal_horizontal,
+                1.0 - cardinal_horizontal,
+                use_parent_boundary,
+            );
             if use_parent_boundary {
                 bottom_y = min(top_y, parent_boundary_y);
                 upper_y = max(top_y, parent_boundary_y);

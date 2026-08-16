@@ -4923,6 +4923,8 @@ mod tests {
         assert!(shader.contains("bottom_y = min(top_y, parent_boundary_y);"));
         assert!(shader.contains("upper_y = max(top_y, parent_boundary_y);"));
         assert!(!shader.contains("bottom_y = min(top_y, neighbor_y);"));
+        assert!(shader.contains("let endpoint = 1 - i32(corner.x);"));
+        assert!(shader.contains("1.0 - cardinal_horizontal,"));
         assert_eq!(
             shader
                 .matches("let left = terrain_horizon_geometry_height(")
