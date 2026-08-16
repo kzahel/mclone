@@ -174,18 +174,25 @@ remains the single visible water owner through exact-painted chunks so
 translucent exact water cannot form a differently shaded square. Native,
 desktop/mobile WebGPU, stereo, flat-Android build, and Android-XR build
 boundaries pass; subjective Human Review remains pending.
-Active Tactical
+Tactical
 [`309`](../tactical/309-procedural-horizon-lighting-and-seam-convergence.md)
-now inherits that unresolved visual gate. Human Review 0 accepted the fixed
-diagnostic packet, and Human Review 1 accepted Phase 1's shared environmental
-illumination on 2026-08-16. Human Review 2 found the Phase 2 appearance
-transition substantially improved but rejected a blue exposed-sky crack where
-the rounded spacing-one voxel edge fails to terminate on the continuous
-spacing-two parent profile. Human Review then rejected the endpoint-matched
-correction because its outward cardinal winding remained back-face culled from
-the camera-inside view. The inward-winding correction and expanded steep-seam
-packet are implemented and awaiting renewed Human Review 2; Phase 3 remains
-blocked.
+accepted the fixed diagnostic packet and Phase 1's shared environmental
+illumination on 2026-08-16. Human Review 2 then rejected two corrections for
+the voxel-to-smooth seam. The inward-winding correction and expanded
+steep-seam packet remain implemented evidence, but user review redirected the
+product before exact-to-voxel polishing: the several-chunk-deep blocky
+intermediate adds an unconvincing topology pop and a second transition before
+exact terrain.
+Planned Tactical
+[`313`](../tactical/313-direct-exact-to-smooth-horizon-transition.md) now owns
+the visual gate. It will restore smooth spacing-one geometry, preserve the
+successful near/far parameter interpolation as a bounded smooth-side
+appearance band, admit one player-connected non-rectangular exact set, and
+close that set with an exact-profile perimeter connector. A temporary
+developer-only A/B may exist for the first review packet, but completion
+requires deleting the voxel shell and selector rather than retaining a
+fallback mode. Until Tactical 313 lands, the current implementation still
+contains the Tactical 304 voxel shell.
 The exact renderer's full-sky/zero-block-light RGB now applies once to every
 procedural terrain level, sampled and analytic water, and proxy tree after
 albedo and geometric shade composition. A fixed 32-image, two-seed native
@@ -198,11 +205,10 @@ horizon allocation.
 Inspected midnight pixels no longer contain daytime-green smooth land,
 bright-cyan procedural water, or daylight proxy crowns. The environmental
 diagnostic is constant across procedural topology and surface class, while
-noon remains normally illuminated. The tactical next treats the
-spacing-one-to-smooth and exact-to-spacing-one borders as separately diagnosed,
-separately reviewed convergence phases. Tactical 304's ownership,
-bounded frontier curtain, voxel-shell topology, and fixed clipmap allocation
-remain the foundation rather than being replaced to hide the seams.
+noon remains normally illuminated. That topology-independent lighting result
+is retained by Tactical 313. Tactical 304's single-owner exact coverage,
+material, water, and bounded connector lessons remain foundations, while its
+voxel-shell topology is now explicitly selected for removal.
 The first Phase 2 review packet improved the appearance terms but was rejected
 for the geometric crack above. Voxel face shade
 approaches the smooth slope response over the existing committed presentation

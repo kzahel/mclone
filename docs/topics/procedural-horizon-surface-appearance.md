@@ -26,17 +26,19 @@ material transition. Independent water geometry and decoration-lake summaries
 remain separate work; subjective Human Review of the new terrain character is
 pending.
 
-Active Tactical
+Tactical
 [`309`](../tactical/309-procedural-horizon-lighting-and-seam-convergence.md)
-owns the resulting appearance closeout as a phase-gated campaign. Human Review
-0 accepted the fixed diagnostic packet on 2026-08-15, and Human Review 1
-accepted the shared environmental-light result on 2026-08-16. Human Review 2
-found the Phase 2 lighting, material, water, and vegetation transition
-substantially improved but rejected an exposed-sky crack at the
-voxel-to-smooth geometric boundary. Human Review then rejected the first
-endpoint-matched correction because its outer cardinal face remained
-back-face culled from the camera-inside view. The inward-winding correction is
-implemented and awaiting renewed Human Review 2.
+accepted its diagnostic baseline and shared environmental-light result.
+Human Review then rejected two voxel-to-smooth seam corrections and redirected
+the remaining appearance closeout rather than polishing the exact-to-voxel
+border. Planned Tactical
+[`313`](../tactical/313-direct-exact-to-smooth-horizon-transition.md) now owns
+the selected replacement: one smooth spacing-one surface approaches exact
+materials over a bounded distance from a connected non-rectangular exact
+perimeter, an exact edge profile supplies the watertight connector, and the
+voxel shell plus temporary A/B path are deleted after direct-path review.
+The current code remains the Tactical 304 voxel implementation until that
+replacement lands.
 
 Every procedural land level, sampled and analytic water, and proxy tree now
 consumes the exact renderer's full-sky/zero-block-light environmental RGB once
@@ -68,7 +70,7 @@ collar; the resulting material wall on extreme height disagreement remains a
 Human Review tradeoff. A bounded two-sided connector or zipper ring remains
 fallback work if the inward-facing version fails that review.
 Procedural local occlusion remains identity-white, so it may matter at the
-later exact/model-AO frontier but cannot explain the resolved global night
+direct exact/smooth frontier but cannot explain the resolved global night
 failure. Seasonal solar-path policy and independent water geometry remain
 outside this scope.
 

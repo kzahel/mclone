@@ -1,8 +1,9 @@
 # Tactical 309: Procedural Horizon Lighting and Seam Convergence
 
-Status: Phase 0 and Phase 1 accepted; Human Review 2 rejected two Phase 2
-attempts. The inward-winding correction and expanded steep-seam packet are
-implemented and awaiting renewed Human Review 2.
+Status: redirected 2026-08-16 after Phase 0 and Phase 1 acceptance. Human
+Review 2 rejected two voxel-seam attempts; the implemented inward-winding
+correction remains evidence, but the voxel-specific remainder is superseded
+by Tactical 313's direct exact-to-smooth replacement.
 
 Topic: `procedural-horizon-clipmap`
 
@@ -29,6 +30,25 @@ horizontal owner, the bounded exact-frontier curtain, the spacing-one
 top-and-riser shell, worldgen-owned side strata, and active-pack near
 materials. This tactical owns the unresolved visual-acceptance gate rather
 than reopening the clipmap residency or terrain-ownership architecture.
+
+## Product Direction Redirect
+
+User review on 2026-08-16 accepted the appearance principle but rejected the
+value of retaining three visible terrain representations. The broad blocky
+intermediate can pop across several chunk depths, adds a second transition
+before exact terrain, and still depends on conditional beard geometry at the
+exact frontier. The selected direction now removes that shell and applies the
+successful parameter transition directly to smooth spacing-one terrain.
+
+Tactical
+[`313`](313-direct-exact-to-smooth-horizon-transition.md) owns connected
+non-rectangular exact admission, a bounded smooth-side appearance-distance
+field, an exact-profile perimeter connector, direct-path Human Review, and
+final deletion of the voxel implementation. Phase 1's shared environmental
+illumination and this tactical's diagnostic evidence remain inputs. The
+unaccepted voxel-specific Phase 2 correction is not promoted, and Phases 3
+and 4 below are retained only as the historical plan that preceded the
+redirect.
 
 ## Observed Baseline
 
@@ -448,9 +468,9 @@ Accepted by the user on 2026-08-16.
 
 ## Phase 2: Voxel-to-Smooth Procedural Convergence
 
-Status: Human Review 2 rejected the first implementation and its first crack
-correction; the inward-facing connector is implemented and awaiting renewed
-Human Review 2.
+Status: not accepted and superseded by Tactical 313. Human Review 2 rejected
+the first implementation and its first crack correction; the implemented
+inward-facing connector remains diagnostic evidence for the replacement.
 
 - Reconcile top-face and slope-derived geometric shade over a stable bounded
   transition without blending geometry owners.
@@ -746,13 +766,14 @@ Automated evidence passes:
   cardinal gates; and
 - the clean 17-second headed traversal above.
 
-Gate — Human Review 2: the procedural topology becomes smoother with distance
-without exposed sky or a stable square/annulus in land color, water tint,
-lighting, texture contrast, or vegetation brightness.
+Historical Gate — Human Review 2: the procedural topology becomes smoother
+with distance without exposed sky or a stable square/annulus in land color,
+water tint, lighting, texture contrast, or vegetation brightness. This gate
+was not accepted and is replaced by Tactical 313's direct-path review.
 
 ## Phase 3: Exact-to-Voxel Frontier Convergence
 
-Status: blocked on renewed Human Review 2.
+Status: superseded by Tactical 313; do not execute.
 
 - Compare controlled exact and voxel faces under equal atlas, biome, fog-off,
   transfer, full-sky, zero-block-light, and unoccluded inputs.
@@ -765,13 +786,14 @@ Status: blocked on renewed Human Review 2.
 - Inspect straight boundaries, corners, holes, slopes, water edges, trees,
   negative coordinates, admission, and eviction at noon and midnight.
 
-Gate — Human Review 3: the exact/voxel frontier is coherent in representative
-natural terrain. Any remaining discontinuity is tied to a documented fact the
-procedural source does not carry, not a mismatched shader formula.
+Historical Gate — Human Review 3: the exact/voxel frontier is coherent in
+representative natural terrain. Any remaining discontinuity is tied to a
+documented fact the procedural source does not carry, not a mismatched shader
+formula. This gate will not be run.
 
 ## Phase 4: Motion, Platform, and Performance Acceptance
 
-Status: blocked on Human Review 3.
+Status: superseded by Tactical 313; do not execute.
 
 - Repeat the accepted scenario set during walking, orbit, clipmap rebase,
   exact admission/eviction, teleport, and source reset.
@@ -783,11 +805,14 @@ Status: blocked on Human Review 3.
   frame summaries, and available GPU timing before and after.
 - Verify exact-only allocation and pixels remain unchanged.
 
-Gate — Human Review 4: accept the final composed frontier and both LOD border
-types in still and moving evidence. Only then mark this tactical and Tactical
-304's inherited visual-acceptance gate complete.
+Historical Gate — Human Review 4: accept the final composed frontier and both
+LOD border types in still and moving evidence. This gate will not be run.
 
-## Acceptance
+## Historical Acceptance Checklist
+
+Only the Phase 0 diagnostic contract and Phase 1 environmental-light items
+were accepted. Tactical 313 owns replacement acceptance; the uncompleted
+voxel-specific items below remain the original record, not active gates.
 
 - At ticks `0`, `6000`, `12000`, and `18000`, all procedural surface classes
   consume the same environmental time-of-day state as exact terrain.

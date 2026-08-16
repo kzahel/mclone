@@ -1,6 +1,7 @@
 # Tactical 304: LOD Frontier and Near-Field Voxel Convergence
 
-Status: implemented 2026-08-15; Human Review pending
+Status: implemented 2026-08-15; product acceptance redirected 2026-08-16 to
+Tactical 313's direct exact-to-smooth replacement
 
 Topic: `procedural-horizon-clipmap`
 
@@ -465,11 +466,14 @@ and `/tmp/mclone-xr-emulation.png`.
 
 ### Acceptance disposition and remaining limits
 
-Automated acceptance and agent pixel inspection pass. Human Review is still
-required for the subjective block-character gate; it is not self-certified by
-this record. Physical flat-Android pixels were not captured, while both flat
-Android and Android-XR APK build boundaries pass and the shared stereo renderer
-has inspected pixels.
+Automated acceptance and agent pixel inspection pass. The subjective
+block-character gate was not accepted. User review on 2026-08-16 selected
+Tactical
+[`313`](313-direct-exact-to-smooth-horizon-transition.md) to replace the
+spacing-one shell with a direct exact-to-smooth transition and delete the
+voxel path after comparison. Physical flat-Android pixels were not captured,
+while both flat Android and Android-XR APK build boundaries pass and the
+shared stereo renderer has inspected pixels.
 
 The bounded frontier curtain is an explicit approximation until the immutable
 exact snapshot carries a per-edge exact height/material profile. The
@@ -480,7 +484,11 @@ Explorer `Exact` mode continues to keep switch-ready horizon residency, as it
 did before this tactical; the live game's exact-only allocation policy is a
 separate host/session contract.
 
-## Acceptance
+The current implementation remains the voxel-shell baseline until Tactical
+313 lands. The checklist below records the original gate; its unaccepted
+subjective items are not continuing work for this tactical.
+
+## Historical Acceptance Checklist
 
 - Exactly one opaque horizontal terrain owner exists at every tested X/Z.
 - No outer-exact-block z-fighting remains in stationary or moving low-grazing
