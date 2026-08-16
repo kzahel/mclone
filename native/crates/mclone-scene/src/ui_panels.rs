@@ -1,5 +1,92 @@
 use super::*;
 
+pub(crate) const FIELD_GUIDE_NOTIFICATION_DURATION: Duration = Duration::from_secs(5);
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) struct FieldGuideProgressSnapshot {
+    pub(super) mallard: mclone_protocol::MallardFieldGuideProgress,
+    pub(super) deer: mclone_protocol::DeerFieldGuideProgress,
+    pub(super) bee: mclone_protocol::BeeFieldGuideProgress,
+    pub(super) rabbit: mclone_protocol::RabbitFieldGuideProgress,
+}
+
+impl FieldGuideProgressSnapshot {
+    pub(super) const fn new(
+        mallard: mclone_protocol::MallardFieldGuideProgress,
+        deer: mclone_protocol::DeerFieldGuideProgress,
+        bee: mclone_protocol::BeeFieldGuideProgress,
+        rabbit: mclone_protocol::RabbitFieldGuideProgress,
+    ) -> Self {
+        Self {
+            mallard,
+            deer,
+            bee,
+            rabbit,
+        }
+    }
+
+    fn gained_discovery_since(self, previous: Self) -> bool {
+        self.mallard.bits() & !previous.mallard.bits() != 0
+            || self.deer.bits() & !previous.deer.bits() != 0
+            || self.bee.bits() & !previous.bee.bits() != 0
+            || self.rabbit.bits() & !previous.rabbit.bits() != 0
+    }
+
+    fn has_discoveries(self) -> bool {
+        self.mallard.bits() != 0
+            || self.deer.bits() != 0
+            || self.bee.bits() != 0
+            || self.rabbit.bits() != 0
+    }
+
+    fn lost_discovery_since(self, previous: Self) -> bool {
+        previous.mallard.bits() & !self.mallard.bits() != 0
+            || previous.deer.bits() & !self.deer.bits() != 0
+            || previous.bee.bits() & !self.bee.bits() != 0
+            || previous.rabbit.bits() & !self.rabbit.bits() != 0
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) struct FieldGuideNotificationState {
+    observed: Option<FieldGuideProgressSnapshot>,
+    expires_at: Option<MonotonicInstant>,
+}
+
+impl FieldGuideNotificationState {
+    pub(super) fn reset(&mut self) {
+        *self = Self::default();
+    }
+
+    pub(super) fn observe(
+        &mut self,
+        now: MonotonicInstant,
+        progress: FieldGuideProgressSnapshot,
+    ) -> Option<FieldGuideProgressSnapshot> {
+        let previous = self.observed.replace(progress);
+        match previous {
+            None if progress.has_discoveries() => {
+                self.expires_at = Some(now.saturating_add(FIELD_GUIDE_NOTIFICATION_DURATION));
+            }
+            None => self.expires_at = None,
+            Some(previous) if progress.lost_discovery_since(previous) => {
+                self.expires_at = None;
+            }
+            Some(previous) if progress.gained_discovery_since(previous) => {
+                self.expires_at = Some(now.saturating_add(FIELD_GUIDE_NOTIFICATION_DURATION));
+            }
+            Some(_) => {}
+        }
+
+        if self.expires_at.is_some_and(|expires_at| now < expires_at) {
+            Some(progress)
+        } else {
+            self.expires_at = None;
+            None
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) struct XrGameplayInteractionEdges {
     pub(super) attack: bool,

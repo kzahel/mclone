@@ -464,6 +464,7 @@ struct LocalParticipantPresentation {
     movement: player_movement::PlayerMovementState,
     interaction: ClientInteractionController,
     player_model: GamePlayerModel,
+    field_guide_notification: FieldGuideNotificationState,
 }
 
 impl LocalParticipantPresentation {
@@ -474,6 +475,7 @@ impl LocalParticipantPresentation {
             movement: player_movement::PlayerMovementState::new(cadence, snapshot),
             interaction: ClientInteractionController::new(),
             player_model: GamePlayerModel::default(),
+            field_guide_notification: FieldGuideNotificationState::default(),
         }
     }
 
@@ -1175,6 +1177,7 @@ impl DrawableWorldSlot {
         self.render_stats = install.render_stats;
         self.accepted_entry_pose = install.accepted_entry_pose;
         self.pending_startup_sections = install.pending_startup_sections;
+        self.reset_field_guide_notification();
     }
 
     fn clear_stream_state(&mut self) {
@@ -1216,6 +1219,7 @@ impl DrawableWorldSlot {
         self.render_stats = RenderStreamStats::default();
         self.actor_interpolation = ActorInterpolationState::new();
         self.last_actor_presentation_update = None;
+        self.reset_field_guide_notification();
     }
 
     fn interpolated_actor_presentations(
@@ -1245,6 +1249,30 @@ impl DrawableWorldSlot {
                 ActorInterpolationConfig::default(),
             );
         self.actor_interpolation.presentations()
+    }
+
+    fn visible_field_guide_notification(
+        &mut self,
+        now: MonotonicInstant,
+    ) -> Option<FieldGuideProgressSnapshot> {
+        let progress = self.field_guide_progress()?;
+        self.local_participant
+            .field_guide_notification
+            .observe(now, progress)
+    }
+
+    fn reset_field_guide_notification(&mut self) {
+        self.local_participant.field_guide_notification.reset();
+    }
+
+    fn field_guide_progress(&self) -> Option<FieldGuideProgressSnapshot> {
+        let runtime = self.runtime.as_ref()?;
+        Some(FieldGuideProgressSnapshot::new(
+            runtime.client().mallard_field_guide(),
+            runtime.client().deer_field_guide(),
+            runtime.client().bee_field_guide(),
+            runtime.client().rabbit_field_guide(),
+        ))
     }
 }
 
@@ -3601,17 +3629,18 @@ impl McloneSceneHost {
             .context("render XR diagnostic panel multiview")?;
         panel_stats.add(diagnostic_panel_stats);
         draw_cache_stats.add(diagnostic_draw_cache);
+        let field_guide_notification = self
+            .active_world
+            .visible_field_guide_notification(self.services.clock.now());
         if !self.ui.is_active() {
-            let guides = self.active_world.runtime.as_ref().map(|runtime| {
-                (
-                    runtime.client().mallard_field_guide(),
-                    runtime.client().deer_field_guide(),
-                    runtime.client().bee_field_guide(),
-                    runtime.client().rabbit_field_guide(),
+            let draw = field_guide_notification.map_or_else(GuiDrawList::new, |progress| {
+                xr_field_guide_draw(
+                    progress.mallard,
+                    progress.deer,
+                    progress.bee,
+                    progress.rabbit,
                 )
             });
-            let (mallard, deer, bee, rabbit) = guides.unwrap_or_default();
-            let draw = xr_field_guide_draw(mallard, deer, bee, rabbit);
             if !draw.commands().is_empty() {
                 panel_stats.add(
                     self.world_gui_overlay_renderer
@@ -5180,17 +5209,18 @@ impl McloneSceneHost {
         xr_world_panel_ms += diagnostic_panel_start.map_or(0.0, |start| {
             elapsed_ms(self.services.clock.elapsed_since(start))
         });
+        let field_guide_notification = self
+            .active_world
+            .visible_field_guide_notification(self.services.clock.now());
         if !ui_active {
-            let guides = self.active_world.runtime.as_ref().map(|runtime| {
-                (
-                    runtime.client().mallard_field_guide(),
-                    runtime.client().deer_field_guide(),
-                    runtime.client().bee_field_guide(),
-                    runtime.client().rabbit_field_guide(),
+            let draw = field_guide_notification.map_or_else(GuiDrawList::new, |progress| {
+                xr_field_guide_draw(
+                    progress.mallard,
+                    progress.deer,
+                    progress.bee,
+                    progress.rabbit,
                 )
             });
-            let (mallard, deer, bee, rabbit) = guides.unwrap_or_default();
-            let draw = xr_field_guide_draw(mallard, deer, bee, rabbit);
             if !draw.commands().is_empty() {
                 let guide_start = collect_split_timing.then(|| self.services.clock.now());
                 ui_panel_stats.add(
@@ -7047,6 +7077,110 @@ mod tests {
             )
             .commands()
             .is_empty()
+        );
+    }
+
+    #[test]
+    fn field_guide_notification_auto_dismisses_and_rearms_for_new_discoveries() {
+        let start = MonotonicInstant::from_nanos(1_000_000_000);
+        let one_mallard = FieldGuideProgressSnapshot::new(
+            mclone_protocol::MallardFieldGuideProgress::from_bits_retain(1),
+            Default::default(),
+            Default::default(),
+            Default::default(),
+        );
+        let mallard_and_deer = FieldGuideProgressSnapshot::new(
+            one_mallard.mallard,
+            mclone_protocol::DeerFieldGuideProgress::from_bits_retain(1),
+            Default::default(),
+            Default::default(),
+        );
+        let mut initially_empty = FieldGuideNotificationState::default();
+        assert_eq!(
+            initially_empty.observe(start, FieldGuideProgressSnapshot::default()),
+            None
+        );
+        assert_eq!(
+            initially_empty.observe(start.saturating_add(Duration::from_secs(1)), one_mallard),
+            Some(one_mallard)
+        );
+
+        let mut notification = FieldGuideNotificationState::default();
+
+        assert_eq!(notification.observe(start, one_mallard), Some(one_mallard));
+        assert_eq!(
+            notification.observe(
+                start.saturating_add(Duration::from_secs(5) - Duration::from_nanos(1)),
+                one_mallard,
+            ),
+            Some(one_mallard)
+        );
+        assert_eq!(
+            notification.observe(start.saturating_add(Duration::from_secs(5)), one_mallard),
+            None
+        );
+        assert_eq!(
+            notification.observe(
+                start.saturating_add(Duration::from_secs(6)),
+                mallard_and_deer
+            ),
+            Some(mallard_and_deer)
+        );
+        assert_eq!(
+            notification.observe(
+                start.saturating_add(Duration::from_secs(11) - Duration::from_nanos(1)),
+                mallard_and_deer,
+            ),
+            Some(mallard_and_deer)
+        );
+        assert_eq!(
+            notification.observe(
+                start.saturating_add(Duration::from_secs(11)),
+                mallard_and_deer
+            ),
+            None
+        );
+
+        let two_mallard_and_deer = FieldGuideProgressSnapshot::new(
+            mclone_protocol::MallardFieldGuideProgress::from_bits_retain(3),
+            mallard_and_deer.deer,
+            Default::default(),
+            Default::default(),
+        );
+        assert_eq!(
+            notification.observe(
+                start.saturating_add(Duration::from_secs(12)),
+                two_mallard_and_deer,
+            ),
+            Some(two_mallard_and_deer)
+        );
+    }
+
+    #[test]
+    fn field_guide_notification_treats_progress_regression_as_a_new_baseline() {
+        let start = MonotonicInstant::from_nanos(1_000_000_000);
+        let one_mallard = FieldGuideProgressSnapshot::new(
+            mclone_protocol::MallardFieldGuideProgress::from_bits_retain(1),
+            Default::default(),
+            Default::default(),
+            Default::default(),
+        );
+        let two_mallard = FieldGuideProgressSnapshot::new(
+            mclone_protocol::MallardFieldGuideProgress::from_bits_retain(3),
+            Default::default(),
+            Default::default(),
+            Default::default(),
+        );
+        let mut notification = FieldGuideNotificationState::default();
+
+        assert_eq!(notification.observe(start, one_mallard), Some(one_mallard));
+        assert_eq!(
+            notification.observe(start.saturating_add(Duration::from_secs(1)), two_mallard),
+            Some(two_mallard)
+        );
+        assert_eq!(
+            notification.observe(start.saturating_add(Duration::from_secs(2)), one_mallard),
+            None
         );
     }
 

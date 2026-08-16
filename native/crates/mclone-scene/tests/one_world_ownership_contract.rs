@@ -226,7 +226,13 @@ fn participant_private_scene_state_has_primary_and_guest_preview_envelopes() {
 
     assert_eq!(
         field_names(participant),
-        ["camera", "movement", "interaction", "player_model"]
+        [
+            "camera",
+            "movement",
+            "interaction",
+            "player_model",
+            "field_guide_notification"
+        ]
     );
     assert!(slot.contains("local_participant: LocalParticipantPresentation"));
     assert!(slot.contains("local_guest_preview: Option<LocalParticipantPresentation>"));

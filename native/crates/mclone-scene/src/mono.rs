@@ -2861,7 +2861,10 @@ impl McloneSceneHost {
         }
     }
 
-    fn mono_flat_hud(&self, menu_active: bool) -> Option<FlatHud> {
+    fn mono_flat_hud(&mut self, menu_active: bool) -> Option<FlatHud> {
+        let field_guide_notification = self
+            .active_world
+            .visible_field_guide_notification(self.services.clock.now());
         let runtime = self.active_world.runtime.as_ref()?;
         let context = self.mono_ui_context.clone().unwrap_or_default();
         let palette_active = self.ui.screen() == Some(GameScreen::BlockPalette);
@@ -2901,30 +2904,28 @@ impl McloneSceneHost {
             jumps: statistics.jump_count(),
             successful_block_placements: statistics.successful_block_placement_count(),
         });
-        let guide = runtime.client().mallard_field_guide();
-        hud.mallard_field_guide = Some(mclone_ui::MallardFieldGuideHud {
-            discovered: guide.discovered_count(),
-            total: mclone_protocol::MALLARD_FIELD_GUIDE_OBSERVATION_COUNT,
-            complete: guide.is_complete(),
-        });
-        let deer_guide = runtime.client().deer_field_guide();
-        hud.deer_field_guide = Some(mclone_ui::DeerFieldGuideHud {
-            discovered: deer_guide.discovered_count(),
-            total: mclone_protocol::DEER_FIELD_GUIDE_OBSERVATION_COUNT,
-            complete: deer_guide.is_complete(),
-        });
-        let bee_guide = runtime.client().bee_field_guide();
-        hud.bee_field_guide = Some(mclone_ui::BeeFieldGuideHud {
-            discovered: bee_guide.discovered_count(),
-            total: mclone_protocol::BEE_FIELD_GUIDE_OBSERVATION_COUNT,
-            complete: bee_guide.is_complete(),
-        });
-        let rabbit_guide = runtime.client().rabbit_field_guide();
-        hud.rabbit_field_guide = Some(mclone_ui::RabbitFieldGuideHud {
-            discovered: rabbit_guide.discovered_count(),
-            total: mclone_protocol::RABBIT_FIELD_GUIDE_OBSERVATION_COUNT,
-            complete: rabbit_guide.is_complete(),
-        });
+        if let Some(progress) = field_guide_notification {
+            hud.mallard_field_guide = Some(mclone_ui::MallardFieldGuideHud {
+                discovered: progress.mallard.discovered_count(),
+                total: mclone_protocol::MALLARD_FIELD_GUIDE_OBSERVATION_COUNT,
+                complete: progress.mallard.is_complete(),
+            });
+            hud.deer_field_guide = Some(mclone_ui::DeerFieldGuideHud {
+                discovered: progress.deer.discovered_count(),
+                total: mclone_protocol::DEER_FIELD_GUIDE_OBSERVATION_COUNT,
+                complete: progress.deer.is_complete(),
+            });
+            hud.bee_field_guide = Some(mclone_ui::BeeFieldGuideHud {
+                discovered: progress.bee.discovered_count(),
+                total: mclone_protocol::BEE_FIELD_GUIDE_OBSERVATION_COUNT,
+                complete: progress.bee.is_complete(),
+            });
+            hud.rabbit_field_guide = Some(mclone_ui::RabbitFieldGuideHud {
+                discovered: progress.rabbit.discovered_count(),
+                total: mclone_protocol::RABBIT_FIELD_GUIDE_OBSERVATION_COUNT,
+                complete: progress.rabbit.is_complete(),
+            });
+        }
         hud.touch = context.touch_overlay;
         hud.frame_pipeline = self
             .diagnostic_panel
