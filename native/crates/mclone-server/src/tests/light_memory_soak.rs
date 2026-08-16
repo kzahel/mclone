@@ -1,9 +1,10 @@
-//! Tactical 155 P0 acceptance gate: the light worker's `RetainedInitialLightState`
-//! is now evicted on unload (Fix A), so its live entry count
+//! Tactical 155 P0 and Tactical 312 acceptance gate: the light worker's
+//! `RetainedInitialLightState` is evicted on unload (Fix A), so its live entry count
 //! (`retained_light_world_chunks`) tracks the bounded loaded set instead of
-//! growing without bound. This test drives sustained one-axis movement and
-//! asserts the retained light world plateaus at a fixed band width while the
-//! scheduler's loaded set (`holder_count`) stays flat.
+//! growing without bound. Restartable Feature-to-Light metadata is likewise
+//! bounded by resident holders and released on successful publication or
+//! authoritative unload. These tests drive settled and non-quiescing movement
+//! and assert both stores remain bounded.
 //!
 //! It is the before/after guard for the P0 diagnosis in
 //! `docs/tactical/155-pipeline-capacity-follow-up.md`: before the fix this
@@ -75,6 +76,8 @@ fn run_movement_soak(seed: i64) -> (Vec<usize>, Vec<usize>) {
         assert!(scheduler_metrics.player_promotion_max_active <= 4);
         assert_eq!(scheduler_metrics.light_ticket_count, 0);
         assert_eq!(scheduler_metrics.light_ticket_conservation_failures, 0);
+        assert_eq!(scheduler_metrics.light_restartable_contexts, 0);
+        assert_eq!(scheduler_metrics.light_restartable_context_bytes, 0);
         assert_eq!(mailbox_metrics.admitted_statuses, 0);
         assert_eq!(mailbox_metrics.admitted_owned_bytes, 0);
         assert!(mailbox_metrics.max_pending_statuses <= 18);
@@ -83,6 +86,106 @@ fn run_movement_soak(seed: i64) -> (Vec<usize>, Vec<usize>) {
         retained.push(scheduler_metrics.retained_light_world_chunks);
     }
     (holders, retained)
+}
+
+#[test]
+fn delayed_admission_churn_bounds_restart_context_memory() {
+    const CHURN_STEPS: i32 = 24;
+    const CHURN_RENDER_DISTANCE: u32 = 1;
+    const CHURN_TRACKING_RADIUS: u32 = 2;
+    const CHUNK_JUMP: i32 = 16;
+    const LIGHT_ADMISSION_DELAY_TICKS: u32 = 80;
+    const DELAYED_DEMAND_TARGET: usize = 4;
+    const MAX_CONTEXT_BYTES_PER_HOLDER: usize = 64;
+
+    let mut scheduler = ChunkScheduler::new(12_345);
+    scheduler
+        .set_world_generation_profile(WorldGenerationProfile::FlatGrassV1)
+        .unwrap();
+    scheduler.set_lighting_enabled(true);
+    scheduler.set_debug_light_admission_delay_ticks(LIGHT_ADMISSION_DELAY_TICKS);
+
+    let mut post_unload_holder_counts = Vec::with_capacity(CHURN_STEPS as usize);
+    let mut context_peak = 0_usize;
+    let mut context_byte_peak = 0_usize;
+    for step in 0..CHURN_STEPS {
+        let center = ChunkPos::new(step * CHUNK_JUMP, 0);
+        scheduler
+            .apply_interest(ChunkView {
+                center,
+                render_distance: CHURN_RENDER_DISTANCE,
+                chunk_tracking_radius: CHURN_TRACKING_RADIUS,
+            })
+            .unwrap();
+
+        // The jump cancels delayed demands from the preceding view. Process its
+        // now-authoritative holder unload before preparing the next cancellation
+        // so restart metadata cannot hide in an ever-growing obsolete tail.
+        scheduler.process_pending_unloads(usize::MAX).unwrap();
+        post_unload_holder_counts.push(scheduler.holder_count());
+
+        let mut prepared = false;
+        for _ in 0..60_000 {
+            scheduler.poll().unwrap();
+            let metrics = scheduler.metrics();
+            context_peak = context_peak.max(metrics.light_restartable_contexts);
+            context_byte_peak = context_byte_peak.max(metrics.light_restartable_context_bytes);
+            assert!(
+                metrics.player_promotion_max_active <= DELAYED_DEMAND_TARGET,
+                "step {step}: Player promotion admission exceeded four: {}",
+                metrics.player_promotion_max_active,
+            );
+            assert!(
+                metrics.light_restartable_contexts <= scheduler.holder_count(),
+                "step {step}: restart context exists without a resident holder: {} contexts / \
+                 {} holders",
+                metrics.light_restartable_contexts,
+                scheduler.holder_count(),
+            );
+            assert!(
+                metrics.light_restartable_context_bytes
+                    <= scheduler
+                        .holder_count()
+                        .saturating_mul(MAX_CONTEXT_BYTES_PER_HOLDER),
+                "step {step}: tick-free FlatGrass restart metadata exceeded its resident-holder \
+                 envelope: {} bytes / {} holders",
+                metrics.light_restartable_context_bytes,
+                scheduler.holder_count(),
+            );
+            if metrics.debug_light_admission_delayed_demands >= DELAYED_DEMAND_TARGET {
+                prepared = true;
+                break;
+            }
+            wait_for_scheduler_completion(&mut scheduler);
+        }
+        assert!(
+            prepared,
+            "step {step}: did not prepare four delayed Light demands"
+        );
+    }
+
+    let holder_min = *post_unload_holder_counts.iter().min().unwrap();
+    let holder_max = *post_unload_holder_counts.iter().max().unwrap();
+    assert_eq!(
+        holder_min, holder_max,
+        "resident holder set grew under repeated far-view churn"
+    );
+    assert!(context_peak >= DELAYED_DEMAND_TARGET);
+    assert!(context_peak <= holder_max);
+    assert!(context_byte_peak <= holder_max * MAX_CONTEXT_BYTES_PER_HOLDER);
+
+    let final_center = ChunkPos::new(CHURN_STEPS * CHUNK_JUMP, 0);
+    scheduler
+        .apply_interest(ChunkView {
+            center: final_center,
+            render_distance: CHURN_RENDER_DISTANCE,
+            chunk_tracking_radius: CHURN_TRACKING_RADIUS,
+        })
+        .unwrap();
+    scheduler.process_pending_unloads(usize::MAX).unwrap();
+    let final_metrics = scheduler.metrics();
+    assert_eq!(final_metrics.light_restartable_contexts, 0);
+    assert_eq!(final_metrics.light_restartable_context_bytes, 0);
 }
 
 fn assert_retained_light_is_bounded(seed: i64, holders: &[usize], retained: &[usize]) {
