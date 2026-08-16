@@ -69,6 +69,17 @@ const lateWinter = captures.find((entry) => entry.id === "north-late-winter");
 if (recentFull && lateWinter && recentFull.sha256 === lateWinter.sha256) {
   throw new Error("full recent snow did not change the late-winter frame");
 }
+for (const [id, expected] of [
+  ["north-late-winter", "Winter"],
+  ["south-at-north-summer", "Winter"],
+  ["south-at-north-winter", "Summer"],
+  ["equatorial-weak-cycle", "Weak Thermal Cycle"],
+]) {
+  const capture = captures.find((entry) => entry.id === id);
+  if (capture && capture.seasonal.evaluated?.localSeason.label !== expected) {
+    throw new Error(`${id} evaluated as ${capture.seasonal.evaluated?.localSeason.label}, expected ${expected}`);
+  }
+}
 
 const contactSheet = resolve(output, "seasonal-appearance-contact-sheet.png");
 const montageFont = run("fc-match", ["-f", "%{file}", "sans"], repo).trim();
