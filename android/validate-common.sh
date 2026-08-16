@@ -120,6 +120,10 @@ mclone_online_devices() {
     "$ADB" devices | tr -d '\r' | awk '$2 == "device" { print $1 }'
 }
 
+mclone_unauthorized_devices() {
+    "$ADB" devices | tr -d '\r' | awk '$2 == "unauthorized" { print $1 }'
+}
+
 mclone_wait_for_boot() {
     local serial="$1"
     local timeout_seconds="$2"
