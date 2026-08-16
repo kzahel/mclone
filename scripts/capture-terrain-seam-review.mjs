@@ -168,6 +168,34 @@ const views = {
     eye: [-2072, 165, -1096],
     target: [-2072, 100, -1350],
   },
+  snowSteepNorth: {
+    label: "steep snow seam viewed north from inside the finest ring",
+    seed: 12345,
+    chunk: [-130, -69],
+    eye: [-2072, 165, -1096],
+    target: [-2072, 100, -900],
+  },
+  snowSteepEast: {
+    label: "steep snow seam viewed east from inside the finest ring",
+    seed: 12345,
+    chunk: [-130, -69],
+    eye: [-2072, 165, -1096],
+    target: [-1876, 100, -1096],
+  },
+  snowSteepSouth: {
+    label: "steep snow seam viewed south from inside the finest ring",
+    seed: 12345,
+    chunk: [-130, -69],
+    eye: [-2072, 165, -1096],
+    target: [-2072, 100, -1292],
+  },
+  snowSteepWest: {
+    label: "steep snow seam viewed west from inside the finest ring",
+    seed: 12345,
+    chunk: [-130, -69],
+    eye: [-2072, 165, -1096],
+    target: [-2268, 100, -1096],
+  },
 };
 
 const times = [
@@ -274,6 +302,22 @@ function buildCampaign(reviewPhase) {
         view,
         time: 6000,
       }));
+    }
+    for (const view of [
+      "snowSteepNorth",
+      "snowSteepEast",
+      "snowSteepSouth",
+      "snowSteepWest",
+    ]) {
+      for (const diagnostic of ["natural", "topology"]) {
+        captures.push(captureDefinition({
+          name: `seam-${view}-${diagnostic}`,
+          group: `seam-${view}`,
+          view,
+          time: 6000,
+          diagnostic,
+        }));
+      }
     }
   }
   return captures;
@@ -539,6 +583,16 @@ const receipt = {
         secondOrbitAngle: "stability-lowOrbit-noon",
         farTeleportEndpoint: "focus-forest-noon",
       },
+      steepSnowCardinal: [
+        "seam-snowSteepNorth-natural",
+        "seam-snowSteepNorth-topology",
+        "seam-snowSteepEast-natural",
+        "seam-snowSteepEast-topology",
+        "seam-snowSteepSouth-natural",
+        "seam-snowSteepSouth-topology",
+        "seam-snowSteepWest-natural",
+        "seam-snowSteepWest-topology",
+      ],
     } : {}),
   },
   diagnosticLegend: {
