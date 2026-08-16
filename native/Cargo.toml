@@ -19,6 +19,7 @@ members = [
   "crates/mclone-render",
   "crates/mclone-render-color",
   "crates/mclone-render-session",
+  "crates/mclone-season",
   "crates/mclone-server",
   "crates/mclone-terrain-view",
   "crates/mclone-ui",
@@ -83,6 +84,7 @@ mclone-protocol = { path = "crates/mclone-protocol" }
 mclone-render = { path = "crates/mclone-render" }
 mclone-render-color = { path = "crates/mclone-render-color" }
 mclone-render-session = { path = "crates/mclone-render-session" }
+mclone-season = { path = "crates/mclone-season" }
 mclone-server = { path = "crates/mclone-server" }
 mclone-terrain-view = { path = "crates/mclone-terrain-view" }
 mclone-ui = { path = "crates/mclone-ui" }

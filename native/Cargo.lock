@@ -1857,6 +1857,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "mclone-season"
+version = "0.0.0"
+dependencies = [
+ "mclone-core",
+]
+
+[[package]]
 name = "mclone-server"
 version = "0.0.0"
 dependencies = [
