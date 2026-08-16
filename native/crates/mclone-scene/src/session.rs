@@ -7169,6 +7169,28 @@ mod camera_config_tests {
     }
 
     #[test]
+    fn default_mclone_wild_menu_projection_resolves_the_reproduced_inland_center() {
+        let mut scene = McloneSceneHostOptions::default();
+        scene.chunk_x = 0;
+        scene.chunk_z = 0;
+        project_ordinary_local_world_identity(
+            &mut scene,
+            553_534_047_293_117_028,
+            WorldGenerationProfile::McloneOverworldV1,
+            mclone_server::StarterContentDescriptor::Wild,
+        );
+
+        let plan = local_session_launch_plan(&scene, false);
+        assert_eq!(
+            plan.receipt().entry.intent,
+            mclone_app_runtime::local_session_launch::LocalSessionEntryIntent::ProfilePreferred
+        );
+        assert_eq!(plan.receipt().entry.requested_center, ChunkPos::new(0, 0));
+        assert_eq!(plan.initial_view.center, ChunkPos::new(-48, 20));
+        assert_eq!(plan.receipt().authority, plan.authority);
+    }
+
+    #[test]
     fn catalog_lobby_destination_keeps_homestead_identity_and_mutable_behavior() {
         let content = mclone_app_runtime::scenario_content::LobbyScenarioContent::for_intent(
             mclone_app_runtime::scenario::ScenarioLaunchIntent::lobby_preview(),

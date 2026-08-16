@@ -1120,6 +1120,35 @@ mod tests {
     }
 
     #[test]
+    fn coordinate_free_launch_keeps_profile_preferred_entry_provenance() {
+        let argv = parse(&[
+            ARG_SEED,
+            "553534047293117028",
+            ARG_GENERATION_PROFILE,
+            "mclone-overworld-v1",
+        ]);
+        assert_eq!(
+            argv.scene.local_entry_intent,
+            crate::local_session_launch::LocalSessionEntryIntent::ProfilePreferred
+        );
+
+        let mut query = StartupArgState::default();
+        assert!(
+            query
+                .parse_query_param(
+                    QUERY_SEED,
+                    Some("553534047293117028".to_owned()),
+                    RenderDistanceLimits::new(1, 16),
+                )
+                .unwrap()
+        );
+        assert_eq!(
+            query.finish().scene.local_entry_intent,
+            crate::local_session_launch::LocalSessionEntryIntent::ProfilePreferred
+        );
+    }
+
+    #[test]
     fn alpha_winter_is_an_order_independent_explicit_override() {
         for args in [
             [ARG_GENERATION_PROFILE, "alpha-v1", ARG_ALPHA_WINTER, "true"],

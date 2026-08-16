@@ -162,6 +162,16 @@ impl LocalIntegratedSceneOptions {
         self
     }
 
+    pub const fn render_compile_mechanism_receipt(
+        &self,
+    ) -> crate::host_mode::RenderCompileMechanismReceipt {
+        crate::host_mode::RenderCompileMechanismReceipt::native(
+            self.render_compile_worker_count,
+            self.render_compile_max_pending_jobs,
+            self.render_compile_worker_timing_enabled,
+        )
+    }
+
     pub const fn with_cadence(mut self, cadence: SimulationCadenceConfig) -> Self {
         self.authority.cadence = cadence;
         self
@@ -1061,14 +1071,13 @@ impl<R: IntegratedServerRunner> LocalIntegratedSceneRuntime<R> {
         server_runner: R,
     ) -> Result<Self> {
         validate_local_integrated_scene_topology(&options)?;
+        let render_compile = options.render_compile_mechanism_receipt();
         let render_compile_dispatcher =
             NativeRenderSectionCompileDispatcher::with_worker_count_and_max_pending_jobs_and_timing(
                 mesh_assets.catalog.clone(),
-                options.render_compile_worker_count,
-                options
-                    .render_compile_max_pending_jobs
-                    .unwrap_or(options.render_compile_worker_count),
-                options.render_compile_worker_timing_enabled,
+                render_compile.applied_worker_count,
+                render_compile.applied_max_pending_jobs,
+                render_compile.applied_worker_timing_enabled,
             )?;
         let core = SingleViewRuntime::local_integrated_with_seed(
             options.authority.seed,
@@ -2686,14 +2695,13 @@ where
         mesh_assets: TexturedMeshAssets,
     ) -> Result<Self> {
         let mut connection = RemoteDedicatedConnection::new(session);
+        let render_compile = options.render_compile_mechanism_receipt();
         let render_compile_dispatcher =
             NativeRenderSectionCompileDispatcher::with_worker_count_and_max_pending_jobs_and_timing(
                 mesh_assets.catalog.clone(),
-                options.render_compile_worker_count,
-                options
-                    .render_compile_max_pending_jobs
-                    .unwrap_or(options.render_compile_worker_count),
-                options.render_compile_worker_timing_enabled,
+                render_compile.applied_worker_count,
+                render_compile.applied_max_pending_jobs,
+                render_compile.applied_worker_timing_enabled,
             )?;
         let mut core = SingleViewRuntime::remote_dedicated(
             options.center,

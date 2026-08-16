@@ -16,6 +16,7 @@ use mclone_app_runtime::client_entry::{
 };
 use mclone_app_runtime::client_experience::web_client_experience_profile;
 use mclone_app_runtime::frame_render::FlatSurfacePresentation;
+use mclone_app_runtime::host_mode::RenderCompileMechanismReceipt;
 use mclone_app_runtime::input_preferences::{
     ClientInputPreferences, PreferenceKeyValueStore, parse_touch_controls_mode,
     touch_controls_mode_label,
@@ -558,6 +559,7 @@ pub struct WebSceneHost {
     render_color_profile: String,
     last_runner_kind: String,
     last_runtime_start_error: Option<String>,
+    last_render_compile_mechanism_receipt: Option<RenderCompileMechanismReceipt>,
 }
 
 impl WebSceneHost {
@@ -2578,6 +2580,7 @@ async fn create_scene_host(
         render_color_profile,
         last_runner_kind: "none".to_owned(),
         last_runtime_start_error: None,
+        last_render_compile_mechanism_receipt: None,
     };
     web_host.refresh_touch_overlay_from_input()?;
     Ok(web_host)
@@ -2862,6 +2865,11 @@ impl WebSceneHost {
         runtime: crate::WebRuntime,
     ) -> Result<JsValue, JsValue> {
         self.last_runtime_start_error = None;
+        let render_compile_mechanism_receipt = RenderCompileMechanismReceipt::web_resident_worker(
+            pending.scene.render_compile_worker_count,
+            pending.scene.render_compile_max_pending_jobs,
+            pending.scene.render_compile_worker_timing_enabled,
+        );
         let descriptor = pending.descriptor.clone();
         let active_assets = self
             .host_ref()?
@@ -2899,6 +2907,7 @@ impl WebSceneHost {
             .ok_or_else(|| JsValue::from_str("scene host is shut down"))?
             .complete_external_session_start(device, queue, pending, runtime)
             .map_err(js_error)?;
+        self.last_render_compile_mechanism_receipt = Some(render_compile_mechanism_receipt);
         self.last_frame = LastFrameStats::default();
         if resets_active_presentation {
             self.initial_presentation_stable_frames = 0;
@@ -3203,6 +3212,48 @@ impl WebSceneHost {
             "exitRequested",
             self.frame_input_effects.exit_requested,
         )?;
+        if let Some(receipt) = self.last_render_compile_mechanism_receipt {
+            report_set_string(
+                &object,
+                "renderCompileCapacityDisposition",
+                receipt.disposition.label(),
+            )?;
+            report_set_number(
+                &object,
+                "renderCompileRequestedWorkerCount",
+                receipt.requested_worker_count as f64,
+            )?;
+            report_set_bool(
+                &object,
+                "renderCompileRequestedMaxPendingJobsBounded",
+                receipt.requested_max_pending_jobs.is_some(),
+            )?;
+            report_set_number(
+                &object,
+                "renderCompileRequestedMaxPendingJobs",
+                receipt.requested_max_pending_jobs.unwrap_or_default() as f64,
+            )?;
+            report_set_bool(
+                &object,
+                "renderCompileRequestedWorkerTimingEnabled",
+                receipt.requested_worker_timing_enabled,
+            )?;
+            report_set_number(
+                &object,
+                "renderCompileAppliedWorkerCount",
+                receipt.applied_worker_count as f64,
+            )?;
+            report_set_number(
+                &object,
+                "renderCompileAppliedMaxPendingJobs",
+                receipt.applied_max_pending_jobs as f64,
+            )?;
+            report_set_bool(
+                &object,
+                "renderCompileAppliedWorkerTimingEnabled",
+                receipt.applied_worker_timing_enabled,
+            )?;
+        }
         if let Some(host) = self.host.as_ref() {
             let ui_active = host.mono_ui_is_active();
             let movement_cadence = host.player_movement_cadence();

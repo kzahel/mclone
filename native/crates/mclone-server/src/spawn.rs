@@ -436,6 +436,49 @@ mod tests {
     }
 
     #[test]
+    fn reproduced_web_menu_seed_selects_the_expected_dry_spawn() {
+        let seed = 553_534_047_293_117_028;
+        let profile = WorldGenerationProfile::McloneOverworldV1;
+        let center = initial_spawn_center_for_profile(seed, profile);
+        assert_eq!(center, ChunkPos::new(-48, 20));
+
+        let chunk = generate_mclone_overworld_chunk(seed, center.x, center.z);
+        let spawn = find_safe_surface_spawn_for_loaded_profile(
+            seed,
+            profile,
+            center,
+            |pos| {
+                (pos.chunk_pos() == center).then(|| {
+                    chunk
+                        .block_at_y(
+                            pos.x - center.min_block_x(),
+                            pos.y,
+                            pos.z - center.min_block_z(),
+                        )
+                        .0
+                })
+            },
+            |pos| pos == center,
+        )
+        .expect("reproduced menu seed has a safe spawn");
+        let feet = BlockPos::new(
+            spawn.x.floor() as i32,
+            spawn.y.floor() as i32,
+            spawn.z.floor() as i32,
+        );
+        let local_x = feet.x - center.min_block_x();
+        let local_z = feet.z - center.min_block_z();
+
+        assert_eq!(feet.y, 73);
+        assert_eq!(
+            chunk.block_at_y(local_x, feet.y - 1, local_z).0,
+            GRASS_BLOCK
+        );
+        assert_eq!(chunk.block_at_y(local_x, feet.y, local_z).0, AIR);
+        assert_eq!(chunk.block_at_y(local_x, feet.y + 1, local_z).0, AIR);
+    }
+
+    #[test]
     fn periodic_mclone_spawn_uses_the_periodic_surface_contract() {
         let seed = -98_765;
         let profile = WorldGenerationProfile::McloneOverworldV1;

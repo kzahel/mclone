@@ -17,6 +17,94 @@ pub enum SingleViewHostMode {
     RemoteDedicated,
 }
 
+/// Observable disposition of host-specific render-compiler capacity knobs.
+///
+/// These values select a physical thread/Worker mechanism rather than local
+/// authority semantics. Hosts may normalize them to their supported topology,
+/// but must report that normalization instead of silently using defaults.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PlatformMechanismDisposition {
+    Applied,
+    Normalized,
+}
+
+impl PlatformMechanismDisposition {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Applied => "applied",
+            Self::Normalized => "normalized",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RenderCompileMechanismReceipt {
+    pub requested_worker_count: usize,
+    pub requested_max_pending_jobs: Option<usize>,
+    pub requested_worker_timing_enabled: bool,
+    pub applied_worker_count: usize,
+    pub applied_max_pending_jobs: usize,
+    pub applied_worker_timing_enabled: bool,
+    pub disposition: PlatformMechanismDisposition,
+}
+
+impl RenderCompileMechanismReceipt {
+    pub const fn native(
+        requested_worker_count: usize,
+        requested_max_pending_jobs: Option<usize>,
+        requested_worker_timing_enabled: bool,
+    ) -> Self {
+        let applied_max_pending_jobs = match requested_max_pending_jobs {
+            Some(value) => value,
+            None => requested_worker_count,
+        };
+        let disposition = if requested_max_pending_jobs.is_some() {
+            PlatformMechanismDisposition::Applied
+        } else {
+            PlatformMechanismDisposition::Normalized
+        };
+        Self {
+            requested_worker_count,
+            requested_max_pending_jobs,
+            requested_worker_timing_enabled,
+            applied_worker_count: requested_worker_count,
+            applied_max_pending_jobs,
+            applied_worker_timing_enabled: requested_worker_timing_enabled,
+            disposition,
+        }
+    }
+
+    /// The browser compiler has one resident Worker and one in-flight request.
+    /// Scene compile timing is not collected by this adapter; Worker transport
+    /// diagnostics remain separately observable.
+    pub const fn web_resident_worker(
+        requested_worker_count: usize,
+        requested_max_pending_jobs: Option<usize>,
+        requested_worker_timing_enabled: bool,
+    ) -> Self {
+        let applied_worker_count = 1;
+        let applied_max_pending_jobs = 1;
+        let applied_worker_timing_enabled = false;
+        let disposition = if requested_worker_count == applied_worker_count
+            && matches!(requested_max_pending_jobs, Some(1))
+            && requested_worker_timing_enabled == applied_worker_timing_enabled
+        {
+            PlatformMechanismDisposition::Applied
+        } else {
+            PlatformMechanismDisposition::Normalized
+        };
+        Self {
+            requested_worker_count,
+            requested_max_pending_jobs,
+            requested_worker_timing_enabled,
+            applied_worker_count,
+            applied_max_pending_jobs,
+            applied_worker_timing_enabled,
+            disposition,
+        }
+    }
+}
+
 impl SingleViewHostMode {
     pub const fn label(self) -> &'static str {
         match self {
@@ -80,12 +168,50 @@ impl SingleViewHostOptions {
         self
     }
 
+    pub const fn render_compile_mechanism_receipt(&self) -> RenderCompileMechanismReceipt {
+        RenderCompileMechanismReceipt::native(
+            self.render_compile_worker_count,
+            self.render_compile_max_pending_jobs,
+            self.render_compile_worker_timing_enabled,
+        )
+    }
+
     pub fn chunk_view_command(&self) -> ClientCommand {
         ClientCommand::SetChunkView(chunk_view(
             self.center,
             self.render_distance,
             self.chunk_tracking_radius,
         ))
+    }
+}
+
+#[cfg(test)]
+mod mechanism_receipt_tests {
+    use super::*;
+
+    #[test]
+    fn native_receipt_reports_exact_capacity_and_named_none_normalization() {
+        let exact = RenderCompileMechanismReceipt::native(3, Some(7), true);
+        assert_eq!(exact.applied_worker_count, 3);
+        assert_eq!(exact.applied_max_pending_jobs, 7);
+        assert!(exact.applied_worker_timing_enabled);
+        assert_eq!(exact.disposition, PlatformMechanismDisposition::Applied);
+
+        let normalized = RenderCompileMechanismReceipt::native(3, None, false);
+        assert_eq!(normalized.applied_max_pending_jobs, 3);
+        assert_eq!(
+            normalized.disposition,
+            PlatformMechanismDisposition::Normalized
+        );
+    }
+
+    #[test]
+    fn browser_receipt_never_hides_resident_worker_normalization() {
+        let receipt = RenderCompileMechanismReceipt::web_resident_worker(4, Some(9), true);
+        assert_eq!(receipt.applied_worker_count, 1);
+        assert_eq!(receipt.applied_max_pending_jobs, 1);
+        assert!(!receipt.applied_worker_timing_enabled);
+        assert_eq!(receipt.disposition.label(), "normalized");
     }
 }
 

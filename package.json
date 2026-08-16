@@ -188,7 +188,7 @@
     "native:web:rabbit-showcase-deployed-smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --deployed-base-url https://mclone.kzahel.com --showcase rabbit-burrow --skip-threading",
     "native:web:rabbit-showcase-mobile-deployed-smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --deployed-base-url https://mclone.kzahel.com --showcase rabbit-burrow --mobile-showcase --skip-threading",
     "native:web:lobby-runtime-smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --lobby-runtime-probe",
-    "native:web:catalog-smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --catalog-ui-probe",
+    "native:web:catalog-smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --catalog-ui-probe --seed -8711654666216244498",
     "native:web:homestead-catalog-smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --catalog-ui-probe --catalog-homestead",
     "native:web:asset-pack-smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --asset-pack-ui-probe",
     "native:web:mobile-smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --mobile-app-loop",

@@ -153,6 +153,40 @@ mod tests {
     }
 
     #[test]
+    fn authored_entry_preserves_its_declared_coordinate() {
+        let mut authority = LocalAuthorityStartConfig::new(17_501);
+        authority.world_generation_profile = WorldGenerationProfile::authored_only();
+        let plan = resolve_local_session_launch_plan(
+            authority,
+            ChunkPos::new(3, -2),
+            2,
+            LocalSessionEntryIntent::AuthoredCoordinate,
+        )
+        .unwrap();
+
+        assert_eq!(plan.initial_view.center, ChunkPos::new(3, -2));
+        assert_eq!(
+            plan.receipt().entry.intent,
+            LocalSessionEntryIntent::AuthoredCoordinate
+        );
+    }
+
+    #[test]
+    fn persisted_resume_uses_the_profile_center_as_its_preload_fallback() {
+        let authority = LocalAuthorityStartConfig::new(553_534_047_293_117_028);
+        let plan = resolve_local_session_launch_plan(
+            authority,
+            ChunkPos::new(9, 9),
+            5,
+            LocalSessionEntryIntent::PersistedPlayerOrProfilePreferred,
+        )
+        .unwrap();
+
+        assert_eq!(plan.initial_view.center, ChunkPos::new(-48, 20));
+        assert_eq!(plan.receipt().entry.requested_center, ChunkPos::new(9, 9));
+    }
+
+    #[test]
     fn receipt_retains_every_non_default_authority_fact() {
         let mut authority = LocalAuthorityStartConfig::new(-99);
         authority.world_generation_profile = WorldGenerationProfile::FlatGrassV1;

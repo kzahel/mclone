@@ -8619,7 +8619,7 @@ async function runCatalogUiProbe(page, canvas, homestead = false) {
   await waitForNativeUiScreen(page, "worldCreate", { openCreateReport });
   const firstProfileReport = homestead
     ? await clickWorldCreateShowcase(page)
-    : await clickWorldCreateProfile(page);
+    : null;
   if (homestead) {
     await canvas.screenshot({ path: homesteadCreateScreenshotPath, timeout: 60_000 });
   }
@@ -8630,6 +8630,13 @@ async function runCatalogUiProbe(page, canvas, homestead = false) {
   const firstSession = await waitForSessionWorldId(page, { notWorldId: null });
   const firstWorldId = String(firstSession.sessionWorldId);
   const firstHomesteadState = homestead ? await waitForHomesteadPlayable(page) : null;
+  const firstEntryBlocks = homestead ? null : await browserEntryBlockState(page);
+  const firstEntryScreenshot = homestead
+    ? null
+    : "/tmp/mclone-native-web-catalog-default-mclone.png";
+  if (firstEntryScreenshot) {
+    await canvas.screenshot({ path: firstEntryScreenshot, timeout: 60_000 });
+  }
   if (homestead) {
     await canvas.screenshot({ path: homesteadPlayableScreenshotPath, timeout: 60_000 });
   }
@@ -8706,21 +8713,38 @@ async function runCatalogUiProbe(page, canvas, homestead = false) {
       && firstSessionProgressTrace.operationFrameCountDelta > 0
       && firstSessionProgressTrace.operationRenderCountDelta > 0
       && firstSessionProgressTrace.operationInputFrameCountDelta > 0
-      && firstProfileReport?.action === (homestead
-        ? "applyHomesteadShowcasePreset"
-        : "cycleWorldGenerationProfile")
+      && (homestead
+        ? firstProfileReport?.action === "applyHomesteadShowcasePreset"
+        : firstProfileReport === null)
       && secondProfileReport?.action === (homestead
         ? "cycleWorldStarterContent"
         : "cycleWorldGenerationProfile")
       && afterFirstCreate.some((/** @type {any} */ world) => (
         world.id === firstWorldId
-          && world.generationProfile === (homestead ? "mclone-overworld-v1" : "overworld")
+          && world.generationProfile === "mclone-overworld-v1"
           && world.starterContent === (homestead ? "intro-homestead-v1" : "wild")
       ))
       && afterSecondCreate.some((/** @type {any} */ world) => (
         world.id === secondWorldId
-          && world.generationProfile === (homestead ? "mclone-overworld-v1" : "flat-grass-v1")
+          && world.generationProfile === (homestead ? "mclone-overworld-v1" : "overworld")
           && world.starterContent === "wild"
+      ))
+      && (homestead || (
+        firstSession.sessionSeedText === "553534047293117028"
+          && Number(firstSession.acceptedCenterX) === -48
+          && Number(firstSession.acceptedCenterZ) === 20
+          && Number(firstSession.centerX) === -48
+          && Number(firstSession.centerZ) === 20
+          && firstSession.renderCompileCapacityDisposition === "normalized"
+          && Number(firstSession.renderCompileRequestedWorkerCount) === 1
+          && Number(firstSession.renderCompileRequestedMaxPendingJobs) === 4
+          && firstSession.renderCompileRequestedWorkerTimingEnabled === true
+          && Number(firstSession.renderCompileAppliedWorkerCount) === 1
+          && Number(firstSession.renderCompileAppliedMaxPendingJobs) === 1
+          && firstSession.renderCompileAppliedWorkerTimingEnabled === false
+          && firstEntryBlocks?.floor?.blockStateId !== AIR_BLOCK_STATE_ID
+          && firstEntryBlocks?.feet?.blockStateId === AIR_BLOCK_STATE_ID
+          && firstEntryBlocks?.head?.blockStateId === AIR_BLOCK_STATE_ID
       ))
       && (!homestead || Number(firstRecords.savedData) > 0)
       && (!homestead || Number(firstHomesteadState?.activePersistentPassiveActorCount) === 5)
@@ -8746,6 +8770,8 @@ async function runCatalogUiProbe(page, canvas, homestead = false) {
     firstSessionProgressTrace,
     secondProfileReport,
     firstSession,
+    firstEntryBlocks,
+    firstEntryScreenshot,
     firstHomesteadState,
     firstEdit,
     reopenedEdit,
@@ -9606,12 +9632,48 @@ async function waitForSessionWorldId(page, options) {
       sessionFailureMessage: state.sessionFailureMessage,
       statusOverlayMessage: state.statusOverlayMessage,
       lastRuntimeStartError: state.lastRuntimeStartError,
+      centerX: state.centerX,
+      centerZ: state.centerZ,
+      acceptedCenterX: state.acceptedCenterX,
+      acceptedCenterZ: state.acceptedCenterZ,
+      cameraX: state.cameraX,
+      cameraY: state.cameraY,
+      cameraZ: state.cameraZ,
+      renderCompileCapacityDisposition: state.renderCompileCapacityDisposition,
+      renderCompileRequestedWorkerCount: state.renderCompileRequestedWorkerCount,
+      renderCompileRequestedMaxPendingJobs: state.renderCompileRequestedMaxPendingJobs,
+      renderCompileRequestedWorkerTimingEnabled:
+        state.renderCompileRequestedWorkerTimingEnabled,
+      renderCompileAppliedWorkerCount: state.renderCompileAppliedWorkerCount,
+      renderCompileAppliedMaxPendingJobs: state.renderCompileAppliedMaxPendingJobs,
+      renderCompileAppliedWorkerTimingEnabled: state.renderCompileAppliedWorkerTimingEnabled,
     };
   });
   if (session.sessionState === "failed") {
     throw new Error(`catalog session failed:\n${JSON.stringify(session, null, 2)}`);
   }
   return session;
+}
+
+/** @param {Page} page */
+async function browserEntryBlockState(page) {
+  return page.evaluate(() => {
+    const app = globalThis.__mcloneWebApp;
+    const state = app?.state ?? {};
+    const x = Math.floor(Number(state.cameraX));
+    const z = Math.floor(Number(state.cameraZ));
+    const feetY = Math.floor(Number(state.cameraY) - 1.5);
+    return {
+      camera: {
+        x: Number(state.cameraX),
+        y: Number(state.cameraY),
+        z: Number(state.cameraZ),
+      },
+      floor: app?.blockStateAt?.(x, feetY - 1, z) ?? null,
+      feet: app?.blockStateAt?.(x, feetY, z) ?? null,
+      head: app?.blockStateAt?.(x, feetY + 1, z) ?? null,
+    };
+  });
 }
 
 /**

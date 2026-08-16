@@ -165,3 +165,86 @@ fn app_startup_literals_are_named_overlays_not_complete_schemas() {
         }
     }
 }
+
+#[test]
+fn local_session_platform_configs_retain_the_shared_authority_whole() {
+    let server_runner = read("crates/mclone-server/src/runner.rs");
+    let native_config = braced_item(
+        &server_runner,
+        "pub struct NativeIntegratedServerRunnerConfig",
+    );
+    assert!(native_config.contains("pub authority: crate::LocalAuthorityStartConfig"));
+
+    let native_assembly = read("crates/mclone-app-runtime/src/native_service_assembly.rs");
+    let scene_options = braced_item(&native_assembly, "pub struct LocalIntegratedSceneOptions");
+    assert!(scene_options.contains("pub authority: mclone_server::LocalAuthorityStartConfig"));
+
+    let web_runner = read("apps/mclone-web-client/src/web_server_worker.rs");
+    let web_config = braced_item(&web_runner, "pub struct WebIntegratedServerRunnerConfig");
+    assert!(web_config.contains("pub authority: mclone_server::LocalAuthorityStartConfig"));
+    let startup = read("apps/mclone-web-client/src/web_integrated_server_startup.rs");
+    let startup_config = braced_item(&startup, "struct WebIntegratedServerStartupConfig");
+    assert!(startup_config.contains("pub authority: LocalAuthorityStartConfig"));
+}
+
+#[test]
+fn local_session_lowering_cannot_reintroduce_parallel_semantic_projection() {
+    let scene = read("crates/mclone-scene/src/session.rs");
+    assert_eq!(
+        scene.matches("resolve_local_session_launch_plan(").count(),
+        1,
+        "scene policy must have exactly one production launch-plan resolver call"
+    );
+
+    let desktop = read("apps/mclone-native-client/src/scene_runtime.rs");
+    let desktop_lowering = braced_item(&desktop, "fn local_integrated_scene_options(");
+    assert!(desktop_lowering.contains("mclone_scene::local_integrated_scene_options"));
+    assert!(!desktop_lowering.contains("LocalAuthorityStartConfig::new"));
+
+    let web = read("apps/mclone-web-client/src/web_scene_host.rs");
+    let web_lowering = braced_item(&web, "fn lower_runtime_start(");
+    assert!(web_lowering.contains("local_launch_plan"));
+    assert!(web_lowering.contains(".with_authority(launch_plan.authority.clone())"));
+    for forbidden in [
+        ".with_world_generation_profile(",
+        ".with_starter_content(",
+        ".with_world_topology(",
+        ".with_world_behavior_profile(",
+        ".with_day_time(",
+        ".with_light_status_batch_size(",
+        ".with_cadence(",
+    ] {
+        assert!(
+            !web_lowering.contains(forbidden),
+            "Web lowering regained field-by-field authority projection through {forbidden}"
+        );
+    }
+
+    let native_root = native_root();
+    for relative in [
+        "apps/mclone-native-client/src",
+        "apps/mclone-web-client/src",
+        "crates/mclone-scene/src",
+        "crates/mclone-app-runtime/src/native_service_assembly.rs",
+    ] {
+        let path = native_root.join(relative);
+        let source = if path.is_dir() {
+            let mut combined = String::new();
+            for entry in std::fs::read_dir(path).expect("source directory readable") {
+                let path = entry.expect("source entry readable").path();
+                if path.extension().is_some_and(|extension| extension == "rs") {
+                    combined.push_str(
+                        &std::fs::read_to_string(path).expect("Rust source file readable"),
+                    );
+                }
+            }
+            combined
+        } else {
+            std::fs::read_to_string(path).expect("source file readable")
+        };
+        assert!(
+            !source.contains("use_initial_spawn_center"),
+            "retired ambiguous entry flag returned under {relative}"
+        );
+    }
+}

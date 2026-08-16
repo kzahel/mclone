@@ -59,4 +59,11 @@ mod tests {
         assert_eq!(reroll.next_seed(), -4887674302230904222);
         assert_eq!(reroll.next_seed(), 4677552153845975689);
     }
+
+    #[test]
+    fn browser_catalog_canary_predecessor_rerolls_to_the_reproduced_seed() {
+        let mut reroll = NewWorldSeedReroll::new(-8_711_654_666_216_244_498);
+
+        assert_eq!(reroll.next_seed(), 553_534_047_293_117_028);
+    }
 }

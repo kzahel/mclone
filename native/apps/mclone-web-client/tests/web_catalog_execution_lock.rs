@@ -68,3 +68,21 @@ fn indexed_db_schema_and_record_played_atomicity_stay_locked() {
     assert!(indexed_db.contains("record-played get/put must remain in one"));
     assert!(indexed_db.contains("Promise.all(step.transactions.map"));
 }
+
+#[test]
+fn default_catalog_create_keeps_the_reproduced_mclone_entry_canary() {
+    let root = app_root();
+    let smoke = fs::read_to_string(root.join("scripts/browser-smoke.mjs")).unwrap();
+    let package = fs::read_to_string(root.join("../../../package.json")).unwrap();
+
+    assert!(package.contains("--catalog-ui-probe --seed -8711654666216244498"));
+    assert!(smoke.contains("firstProfileReport = homestead"));
+    assert!(smoke.contains(": null;"));
+    assert!(smoke.contains("firstSession.sessionSeedText === \"553534047293117028\""));
+    assert!(smoke.contains("Number(firstSession.acceptedCenterX) === -48"));
+    assert!(smoke.contains("Number(firstSession.acceptedCenterZ) === 20"));
+    assert!(smoke.contains("firstSession.renderCompileCapacityDisposition === \"normalized\""));
+    assert!(smoke.contains("Number(firstSession.renderCompileAppliedMaxPendingJobs) === 1"));
+    assert!(smoke.contains("firstEntryBlocks?.feet?.blockStateId === AIR_BLOCK_STATE_ID"));
+    assert!(smoke.contains("mclone-native-web-catalog-default-mclone.png"));
+}

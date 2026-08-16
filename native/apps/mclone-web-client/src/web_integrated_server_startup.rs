@@ -511,6 +511,57 @@ mod tests {
         }
     }
 
+    fn mutation_base() -> LocalAuthorityStartConfig {
+        let mut authority = config().authority;
+        authority.world_topology = HorizontalTopology::UNBOUNDED;
+        authority
+    }
+
+    fn authority_mutations() -> Vec<(&'static str, LocalAuthorityStartConfig)> {
+        let base = mutation_base();
+        let mut cases = Vec::new();
+        macro_rules! mutation {
+            ($label:literal, $field:ident = $value:expr) => {{
+                let mut authority = base.clone();
+                authority.$field = $value;
+                cases.push(($label, authority));
+            }};
+        }
+        mutation!("seed", seed = 99);
+        mutation!(
+            "profile",
+            world_generation_profile = WorldGenerationProfile::McloneOverworldV1
+        );
+        mutation!("starter", starter_content = StarterContentDescriptor::Wild);
+        mutation!(
+            "topology",
+            world_topology = HorizontalTopology::cylinder_x(0, 32)
+        );
+        mutation!(
+            "behavior",
+            world_behavior_profile = WorldBehaviorProfile::Mutable
+        );
+        mutation!("lighting", lighting_enabled = false);
+        mutation!("light-batch", light_status_batch_size = 23);
+        mutation!("day-time", day_time = Some(7_000));
+        mutation!("time-freeze", day_time_frozen = false);
+        mutation!("fluid-freeze", scheduled_fluid_ticks_frozen = false);
+        mutation!("passive-showcase", debug_passive_showcase = false);
+        mutation!("auxiliary-player", debug_auxiliary_player_script = false);
+        mutation!(
+            "cadence",
+            cadence = SimulationCadenceConfig::new(120, 30, 60).with_max_catch_up_host_frames(5)
+        );
+        mutation!("publication", adaptive_chunk_publication_budget = false);
+        mutation!(
+            "identity",
+            local_player_identity =
+                Some(ClientIdentity::new(PlayerProfileId::new([8; 16]), "Other Player").unwrap())
+        );
+        mutation!("observer", observer_only = false);
+        cases
+    }
+
     #[test]
     fn startup_frame_roundtrips_every_authority_field() {
         let expected = config();
@@ -519,6 +570,38 @@ mod tests {
             WebIntegratedServerStartupConfig::decode(&frame),
             Ok(expected)
         );
+    }
+
+    #[test]
+    fn every_authority_mutation_reaches_native_and_worker_startup_whole() {
+        let base = mutation_base();
+        for (label, authority) in authority_mutations() {
+            assert_ne!(authority, base, "{label} must be a real sentinel mutation");
+            let plan = mclone_app_runtime::local_session_launch::resolve_local_session_launch_plan(
+                authority.clone(),
+                mclone_core::ChunkPos::new(4, -3),
+                3,
+                mclone_app_runtime::local_session_launch::LocalSessionEntryIntent::ExplicitCoordinate,
+            )
+            .unwrap_or_else(|error| panic!("{label} launch plan: {error:#}"));
+            let native = mclone_server::NativeIntegratedServerRunnerConfig::new(authority.seed)
+                .with_authority(plan.authority.clone());
+            let startup = WebIntegratedServerStartupConfig {
+                authority: plan.authority.clone(),
+                transient_authored_fixture: None,
+                transient_playable_showcase: None,
+            };
+            let decoded = WebIntegratedServerStartupConfig::decode(
+                &startup
+                    .encode()
+                    .unwrap_or_else(|error| panic!("{label} encode: {error}")),
+            )
+            .unwrap_or_else(|error| panic!("{label} decode: {error}"));
+
+            assert_eq!(plan.receipt().authority, authority, "{label} plan receipt");
+            assert_eq!(native.authority, authority, "{label} native config");
+            assert_eq!(decoded.authority, authority, "{label} Worker startup");
+        }
     }
 
     #[test]
