@@ -43,7 +43,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     if input.opacity <= 0.001 {
         discard;
     }
-    let sampled = textureSample(sun_texture, sun_sampler, input.uv);
+    let sampled = textureSampleLevel(sun_texture, sun_sampler, input.uv, 0.0);
     if input.mode < 0.5 {
         return vec4<f32>(sampled.rgb, sampled.a * input.opacity);
     }
@@ -75,6 +75,6 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let frame = u32(round(input.phase)) % 8u;
     let atlas_cell = vec2<f32>(f32(frame % 4u), f32(frame / 4u));
     let atlas_uv = (atlas_cell + input.uv) / vec2<f32>(4.0, 2.0);
-    let moon = textureSample(sun_texture, sun_sampler, atlas_uv);
+    let moon = textureSampleLevel(sun_texture, sun_sampler, atlas_uv, 0.0);
     return vec4<f32>(moon.rgb, moon.a * input.opacity);
 }
