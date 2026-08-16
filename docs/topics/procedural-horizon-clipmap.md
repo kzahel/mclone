@@ -178,8 +178,8 @@ Active Tactical
 [`309`](../tactical/309-procedural-horizon-lighting-and-seam-convergence.md)
 now inherits that unresolved visual gate. Human Review 0 accepted the fixed
 diagnostic packet, and Human Review 1 accepted Phase 1's shared environmental
-illumination on 2026-08-16. Phase 2 is in progress on the voxel-to-smooth
-transition.
+illumination on 2026-08-16. Phase 2 is implemented and awaiting Human Review 2
+on the voxel-to-smooth transition.
 The exact renderer's full-sky/zero-block-light RGB now applies once to every
 procedural terrain level, sampled and analytic water, and proxy tree after
 albedo and geometric shade composition. A fixed 32-image, two-seed native
@@ -197,6 +197,15 @@ spacing-one-to-smooth and exact-to-spacing-one borders as separately diagnosed,
 separately reviewed convergence phases. Tactical 304's ownership,
 bounded frontier curtain, voxel-shell topology, and fixed clipmap allocation
 remain the foundation rather than being replaced to hide the seams.
+Phase 2 is now implemented and awaiting Human Review 2. Voxel face shade
+approaches the smooth slope response over the existing committed presentation
+band, both procedural representations share active-pack grass tint, and
+analytic river texture strength uses that same continuous weight. A strict
+48-image packet covers all prior scenes plus multi-scene term diagnostics and
+camera stability endpoints. A clean 18-second headed traversal crosses a
+spacing-one tile boundary with every frame presented and final view interest
+fully ready. No residency, ownership, geometry, sample-record, or fixed-byte
+contract changed.
 Post-review Explorer evidence then showed that Slice 3B's viewer-forward
 anchor was useful for foreground diagnosis but confusing as the product
 default: it moves exact residency when yaw changes and can place exact terrain

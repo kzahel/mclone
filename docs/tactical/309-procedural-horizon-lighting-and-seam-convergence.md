@@ -1,6 +1,7 @@
 # Tactical 309: Procedural Horizon Lighting and Seam Convergence
 
-Status: Phase 0 and Phase 1 accepted; Phase 2 began 2026-08-16.
+Status: Phase 0 and Phase 1 accepted; Phase 2 implemented and awaiting Human
+Review 2.
 
 Topic: `procedural-horizon-clipmap`
 
@@ -446,7 +447,7 @@ Accepted by the user on 2026-08-16.
 
 ## Phase 2: Voxel-to-Smooth Procedural Convergence
 
-Status: in progress.
+Status: implemented; blocked on Human Review 2.
 
 - Reconcile top-face and slope-derived geometric shade over a stable bounded
   transition without blending geometry owners.
@@ -459,6 +460,92 @@ Status: in progress.
   the boundary.
 - Inspect procedural tree lighting and density presentation at the same ring.
 - Exercise stationary, slow movement, orbit, rebase, and teleport captures.
+
+### Phase 2 execution record
+
+Commits `f533c1e0`, `2b8e2812`, `281a2121`, `6db9677b`,
+`7de18bd5`, and `a519552b` implement and verify this phase. The
+spacing-one voxel shell keeps sole ownership of its flat tops and cardinal
+risers, but its fixed top/side shade now approaches the already-computed
+slope shade over the existing 32-cell committed outer-footprint band. The
+connector's bounded two-cell coarse normal footprint and fine/coarse geometry
+weld remain unchanged; there is no second geometry owner or height crossfade.
+
+Textured grass on both procedural representations now resolves biome color
+from the same active-pack tint table. Untinted far materials retain their
+low-frequency fallback as atlas detail recedes. Material texture treatment now
+takes a continuous exact-style weight rather than a topology boolean. Land
+uses the same existing transition as before, while analytic river water now
+uses that weight instead of switching texture strength at the voxel/smooth
+bit. Sampled water color/depth and water classification were already shared
+and remain unchanged.
+
+The forest topology, albedo, and geometric-shade diagnostics do not show a
+separate proxy brightness or density annulus. Phase 1 already gave every proxy
+the shared environmental response, and the whole-record vegetation admission
+contract remains stable at the level boundary, so this phase deliberately adds
+no tree-only fade, duplicate record, or density branch.
+
+The accepted command was:
+
+```bash
+pnpm native:terrain-seam-review:capture -- \
+  --output /tmp/mclone-terrain-seam-review-hr2 \
+  --review-phase 2 \
+  --settle-frames 300 \
+  --skip-build
+```
+
+The schema-one receipt is
+`/tmp/mclone-terrain-seam-review-hr2/receipt.json` and records revision
+`a519552b13626a6ed2be976a1b579ec01ceeefa7`. Its 48 1280-by-720
+captures include the complete Phase 1 time/scene/control grid, all eight low
+diagnostics, focused voxel/smooth diagnostics over the elevated coast, forest,
+exposed-stone, and snow scenes, and stationary, sub-cell, spacing-one-tile
+rebase, second-orbit-angle, and far-teleport endpoints.
+
+One rejected campaign attempt exposed the known fresh-process
+`view-settled` race at 18 rather than 25 exact columns. The runner now rejects
+and replaces an incomplete process up to a hard limit of three, records the
+accepted attempt, and still fails on exhaustion. The final packet needed no
+retry: all 48 accepted captures passed on attempt one. Every composed capture
+has all 25 RD2 exact columns, all 160 clipmap slots, target-ready terrain,
+drained failure-free vegetation, and identical settled facts inside each
+comparison group. Exact Only continues to report no horizon allocation.
+
+The complete natural, diagnostic, material/tree, and stability sheets were
+visually inspected at full resolution. The topology change remains legible as
+the intended blocky-to-smooth silhouette. It no longer adds a stable annulus
+in land hue, geometric shade, water tint/classification, texture contrast, or
+proxy brightness. The texture diagnostic shows a broad monotonic committed
+transition instead of a topology-bit switch; the geometric diagnostic does
+not show a square shade ring; and water classification is continuous through
+the same terrain.
+
+A clean headed traversal at the packet revision moved the low camera at four
+blocks per second for 18 seconds, from X8 to X80, crossing a spacing-one tile
+boundary while reconciling authoritative interest from chunk X0 to X4. All
+2,155 frames presented with no surface skip or reconfigure. The final runtime
+had 49/49 target chunks, zero pending jobs, publications, or unloads, and
+terrain GPU duration at 0.132 ms median, 0.218 ms P95, and 1.153 ms P99. The
+report is `/tmp/mclone-terrain-seam-phase2-slow-traversal-final.json`.
+Existing focused clipmap tests also cover sub-cell retention, one-cell shifts,
+long walks, and whole-level teleport rebases.
+
+The implementation adds no uniform bytes, sample fields, additional atlas
+samples, textures, bind groups, fixed allocations, per-view products, or
+geometry. It adds a tint-table lookup for textured grass where the smooth path
+formerly used its hard-coded approximation, and replaces boolean texture
+selects with bounded scalar mixes. Automated evidence passes:
+
+- `cargo test --manifest-path native/Cargo.toml -p mclone-terrain-view --lib`
+  (`100` passed, `1` GPU-only test ignored), including mono and generated
+  multiview shader validation;
+- `cargo build --manifest-path native/Cargo.toml -p mclone-native-client
+  --bin mclone-native-client`;
+- `node --check scripts/capture-terrain-seam-review.mjs`;
+- the 48-capture PNG/readiness/vegetation/group-identity campaign; and
+- the clean 18-second headed slow-traversal report above.
 
 Gate — Human Review 2: the procedural topology becomes smoother with distance
 without a stable square/annulus in land color, water tint, lighting, texture
