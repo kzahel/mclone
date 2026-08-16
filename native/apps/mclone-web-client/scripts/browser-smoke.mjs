@@ -216,6 +216,9 @@ const deployedBaseUrlArgIndex = process.argv.indexOf("--deployed-base-url");
 const deployedBaseUrl = deployedBaseUrlArgIndex >= 0
   ? String(process.argv[deployedBaseUrlArgIndex + 1] ?? "").replace(/\/+$/, "")
   : "";
+const externalCdpEndpoint = String(
+  process.env.MCLONE_NATIVE_WEB_CDP_ENDPOINT ?? "",
+).trim();
 if (deployedBaseUrl) {
   let parsed;
   try {
@@ -436,6 +439,14 @@ const cardinalViewReplayEventualWaitMs = Number.parseInt(
   process.env.MCLONE_NATIVE_WEB_CARDINAL_VIEW_REPLAY_EVENTUAL_WAIT_MS ?? "90000",
   10,
 );
+const cardinalViewReplayMaxConvergenceMs = Number.parseInt(
+  process.env.MCLONE_NATIVE_WEB_CARDINAL_VIEW_REPLAY_MAX_CONVERGENCE_MS ?? "60000",
+  10,
+);
+const cardinalViewReplayStabilityWindowMs = Number.parseInt(
+  process.env.MCLONE_NATIVE_WEB_CARDINAL_VIEW_REPLAY_STABILITY_WINDOW_MS ?? "60000",
+  10,
+);
 const blockEditProbeReportPath = process.env.MCLONE_NATIVE_WEB_BLOCK_EDIT_PROBE_REPORT
   ?? "/tmp/mclone-native-web-block-edit-probe.json";
 const deathUiProbeReportPath = process.env.MCLONE_NATIVE_WEB_DEATH_UI_PROBE_REPORT
@@ -544,36 +555,43 @@ async function run() {
       await serveUntilStopped(baseUrl, remoteServer);
       return;
     }
-    if (browserLaunch.useWayland) {
+    if (browserLaunch.useWayland && !externalCdpEndpoint) {
       console.log(
         `browser launch: ${browserLaunch.autoConfiguredWayland ? "auto-selected" : "using"} `
           + `headed Wayland (${browserLaunch.waylandDisplay}); `
           + "set MCLONE_NATIVE_WEB_FORCE_HEADLESS=1 only for an intentional headless diagnostic",
       );
     }
-    browser = await chromium.launch({
-      channel: process.env.PLAYWRIGHT_CHROME_CHANNEL ?? "chrome",
-      headless: browserLaunch.headless,
-      args: [
-        "--enable-unsafe-webgpu",
-        ...(process.platform === "darwin" ? ["--use-angle=metal"] : []),
-        ...browserLaunch.chromeArgs,
-      ],
-      env: {
-        ...process.env,
-        ...browserLaunch.browserEnv,
-      },
-    });
-    const context = await browser.newContext(mobileViewport
-      ? {
-          viewport: { width: 390, height: 844 },
-          deviceScaleFactor: 2,
-          isMobile: true,
-          hasTouch: true,
-        }
-      : showcase
-      ? { viewport: { width: 1600, height: 900 } }
-      : undefined);
+    browser = externalCdpEndpoint
+      ? await chromium.connectOverCDP(externalCdpEndpoint)
+      : await chromium.launch({
+          channel: process.env.PLAYWRIGHT_CHROME_CHANNEL ?? "chrome",
+          headless: browserLaunch.headless,
+          args: [
+            "--enable-unsafe-webgpu",
+            ...(process.platform === "darwin" ? ["--use-angle=metal"] : []),
+            ...browserLaunch.chromeArgs,
+          ],
+          env: {
+            ...process.env,
+            ...browserLaunch.browserEnv,
+          },
+        });
+    const context = externalCdpEndpoint
+      ? browser.contexts()[0]
+      : await browser.newContext(mobileViewport
+        ? {
+            viewport: { width: 390, height: 844 },
+            deviceScaleFactor: 2,
+            isMobile: true,
+            hasTouch: true,
+          }
+        : showcase
+        ? { viewport: { width: 1600, height: 900 } }
+        : undefined);
+    if (!context) {
+      throw new Error(`CDP browser at ${externalCdpEndpoint} exposed no default context`);
+    }
     const page = await context.newPage();
     await page.addInitScript(() => {
       const adapterPrototype = globalThis.GPUAdapter?.prototype;
@@ -4316,6 +4334,8 @@ async function run() {
         );
         const report = {
           url: appUrl,
+          browserVersion: browser.version(),
+          externalCdp: externalCdpEndpoint !== "",
           screenshotPath,
           pageScreenshotCaptured,
           canvasScreenshotPath,
@@ -7682,8 +7702,11 @@ async function runCardinalViewReplayProbe(page, canvas, targetRenderDistance) {
     ).catch(() => {});
     eventual = await capture("eventual-wait-end");
   }
-  await page.waitForTimeout(1_500);
+  const convergence = eventual;
+  const convergenceMillis = convergence.timeMs - reverse.timeMs;
+  await page.waitForTimeout(cardinalViewReplayStabilityWindowMs);
   const stable = await capture("stability-window-end");
+  const stabilityWindowMillis = stable.timeMs - convergence.timeMs;
   const samples = /** @type {Array<Record<string, any>>} */ (await page.evaluate(() => {
     const probe = /** @type {any} */ (globalThis).__mcloneCardinalViewReplayProbe;
     if (!probe) return [];
@@ -7712,14 +7735,18 @@ async function runCardinalViewReplayProbe(page, canvas, targetRenderDistance) {
         Math.abs(reverse.centerX - north2.centerX),
         Math.abs(reverse.centerZ - north2.centerZ),
       ) >= 2
-      && exactAndSettled(normalWait)
+      && exactAndSettled(convergence)
+      && convergenceMillis <= cardinalViewReplayMaxConvergenceMs
       && exactAndSettled(stable)
-      && stable.loadedChunkSetHash === normalWait.loadedChunkSetHash
-      && stable.snapshotUpdateCount === normalWait.snapshotUpdateCount
-      && stable.unloadUpdateCount === normalWait.unloadUpdateCount,
+      && stable.loadedChunkSetHash === convergence.loadedChunkSetHash
+      && stable.snapshotUpdateCount === convergence.snapshotUpdateCount
+      && stable.unloadUpdateCount === convergence.unloadUpdateCount,
     targetRenderDistance,
     expectedLoadedChunkCount,
     normalWaitMillis: normalWait.timeMs - reverse.timeMs,
+    convergenceMillis,
+    maxConvergenceMillis: cardinalViewReplayMaxConvergenceMs,
+    stabilityWindowMillis,
     before,
     selected,
     routeStart,
