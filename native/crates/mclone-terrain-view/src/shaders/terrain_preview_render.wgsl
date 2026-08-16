@@ -82,6 +82,9 @@ var<uniform> material_table: TerrainPreviewMaterialTable;
 struct TerrainExactCoverageParams {
     origin_size: vec4<i32>,
     mode_count_generation: vec4<u32>,
+    transition_origin_size: vec4<i32>,
+    boundary_origin_size: vec4<i32>,
+    options: vec4<u32>,
 };
 
 @group(2) @binding(0)
@@ -89,6 +92,12 @@ var<uniform> exact_coverage: TerrainExactCoverageParams;
 
 @group(2) @binding(1)
 var<storage, read> exact_coverage_words: array<u32>;
+
+@group(2) @binding(2)
+var exact_transition_field: texture_2d<f32>;
+
+@group(2) @binding(3)
+var exact_transition_sampler: sampler;
 
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
@@ -128,6 +137,33 @@ fn exact_chunk_masked(chunk: vec2<i32>) -> bool {
 
 fn exact_chunk_painted(world_xz: vec2<f32>) -> bool {
     return exact_chunk_masked(vec2<i32>(floor(world_xz / 16.0)));
+}
+
+fn direct_exact_handoff() -> bool {
+    return exact_coverage.options.x == 1u;
+}
+
+fn exact_transition_weight(world_xz: vec2<f32>) -> f32 {
+    if !direct_exact_handoff()
+        || exact_coverage.mode_count_generation.x == 0u
+        || exact_coverage.transition_origin_size.z <= 0
+        || exact_coverage.transition_origin_size.w <= 0 {
+        return 0.0;
+    }
+    let local_blocks = world_xz
+        - vec2<f32>(exact_coverage.transition_origin_size.xy);
+    let field_blocks = vec2<f32>(exact_coverage.transition_origin_size.zw) * 4.0;
+    if any(local_blocks < vec2<f32>(0.0))
+        || any(local_blocks >= field_blocks) {
+        return 0.0;
+    }
+    let texture_size = vec2<f32>(textureDimensions(exact_transition_field));
+    return textureSampleLevel(
+        exact_transition_field,
+        exact_transition_sampler,
+        local_blocks / 4.0 / texture_size,
+        0.0,
+    ).x;
 }
 
 fn grid_corner(vertex_in_cell: u32) -> vec2<u32> {
@@ -680,7 +716,8 @@ fn terrain_vertex(
     let cells = u32(params.origin_spacing_cells.w);
     let cell_stride = max(terrain_render_cell_stride, 1u);
     let render_cells = cells / cell_stride;
-    let voxel_shell = sample_halo_radius() > 0
+    let voxel_shell = !direct_exact_handoff()
+        && sample_halo_radius() > 0
         && params.origin_spacing_cells.z == 1
         && cell_stride == 1u;
     let vertices_per_cell = select(6u, 30u, voxel_shell);
@@ -819,6 +856,13 @@ fn terrain_vertex(
         terrain_horizon_near_material_weight(cell_x, cell_z, cells),
         voxel_shell,
     );
+    var appearance_transition_weight = voxel_smooth_transition_weight;
+    if direct_exact_handoff() {
+        appearance_transition_weight = exact_transition_weight(vec2<f32>(
+            vertex_world_x,
+            vertex_world_z,
+        ));
+    }
 
     if voxel_shell {
         let top_y = round(stitched_height) + 1.0;
@@ -1028,7 +1072,7 @@ fn terrain_vertex(
         vertex_world_x,
         vertex_world_y,
         vertex_world_z,
-        voxel_smooth_transition_weight,
+        appearance_transition_weight,
     );
     out.biome = u32(round(sample.semantics.y));
     out.surface_y = sample.terrain.x;
@@ -1218,7 +1262,9 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
     }
     let side_surface = input.near_shell != 0u && input.surface_kind != 0u;
     let display_material = resolved_surface_material(input);
-    if input.textured != 0u && input.near_shell != 0u && display_material < 256u {
+    if input.textured != 0u
+        && (input.near_shell != 0u || direct_exact_handoff())
+        && display_material < 256u {
         var far_color = color;
         var far_albedo = albedo;
         if input.material < 256u {

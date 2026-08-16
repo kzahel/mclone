@@ -207,6 +207,27 @@ pub enum TerrainExactCoverageMode {
     VisualizePainted = 2,
 }
 
+/// Temporary review selector for Tactical 313.
+///
+/// The voxel option exists only long enough to capture the before/after
+/// packet. It is not a durable graphics setting.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[repr(u32)]
+pub enum TerrainExactHandoffTopology {
+    #[default]
+    VoxelShell = 0,
+    DirectSmooth = 1,
+}
+
+impl TerrainExactHandoffTopology {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::VoxelShell => "voxel-shell",
+            Self::DirectSmooth => "direct-smooth",
+        }
+    }
+}
+
 impl TerrainExactCoverageMode {
     pub const fn label(self) -> &'static str {
         match self {

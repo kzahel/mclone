@@ -24,15 +24,16 @@ use mclone_worldgen::terrain_vegetation::{
 use super::{
     BoundedRepresentationOwnershipSnapshot, ExactPaintedCoverageSnapshot, McloneTreeOccurrenceId,
     McloneTreeOwnershipCandidate, TERRAIN_EXACT_COVERAGE_MASK_BYTES,
-    TERRAIN_EXACT_FRONTIER_TREE_INSET_BLOCKS, TERRAIN_PREVIEW_DEPTH_FORMAT,
-    TERRAIN_PREVIEW_SAMPLE_BYTES, TERRAIN_PREVIEW_UNIFORM_BYTES, TERRAIN_PREVIEW_WORKGROUP_AXIS,
-    TerrainClipmap, TerrainClipmapConfig, TerrainClipmapDiagnostics, TerrainClipmapTile,
-    TerrainCompositionSourceIdentity, TerrainExactCoverageMask, TerrainExactCoverageMode,
-    TerrainHorizonPresentation, TerrainPreviewCamera, TerrainPreviewDrawOptions,
-    TerrainPreviewLayer, TerrainPreviewSource, TerrainPreviewSplitLayout,
-    TerrainVegetationCoordinator, TerrainVegetationCoordinatorState, TerrainVegetationDesiredTile,
-    TerrainVegetationExecutor, TerrainVegetationExecutorKind, TerrainVegetationSlotToken,
-    TerrainViewportPlan, TerrainViewportTileId,
+    TERRAIN_EXACT_FRONTIER_TREE_INSET_BLOCKS, TERRAIN_EXACT_TRANSITION_MAX_TEXELS_PER_AXIS,
+    TERRAIN_PREVIEW_DEPTH_FORMAT, TERRAIN_PREVIEW_SAMPLE_BYTES, TERRAIN_PREVIEW_UNIFORM_BYTES,
+    TERRAIN_PREVIEW_WORKGROUP_AXIS, TerrainClipmap, TerrainClipmapConfig,
+    TerrainClipmapDiagnostics, TerrainClipmapTile, TerrainCompositionSourceIdentity,
+    TerrainExactCoverageMask, TerrainExactCoverageMode, TerrainExactHandoffTopology,
+    TerrainExactTransitionField, TerrainHorizonPresentation, TerrainPreviewCamera,
+    TerrainPreviewDrawOptions, TerrainPreviewLayer, TerrainPreviewSource,
+    TerrainPreviewSplitLayout, TerrainVegetationCoordinator, TerrainVegetationCoordinatorState,
+    TerrainVegetationDesiredTile, TerrainVegetationExecutor, TerrainVegetationExecutorKind,
+    TerrainVegetationSlotToken, TerrainViewportPlan, TerrainViewportTileId,
     horizon_admission::{
         TERRAIN_HORIZON_STAGING_SLOTS_PER_LEVEL, TerrainHorizonAdmission,
         TerrainHorizonBeginTransition, TerrainHorizonLevelPresentation, TerrainHorizonResourceTile,
@@ -46,7 +47,7 @@ use super::{
 pub const TERRAIN_PREVIEW_MATERIAL_UV_COUNT: usize = 256;
 const TERRAIN_PREVIEW_MATERIAL_TABLE_BYTES: u64 =
     (TERRAIN_PREVIEW_MATERIAL_UV_COUNT * 4 * 4 * size_of::<f32>()) as u64;
-const TERRAIN_EXACT_COVERAGE_UNIFORM_BYTES: u64 = 32;
+const TERRAIN_EXACT_COVERAGE_UNIFORM_BYTES: u64 = 80;
 const TERRAIN_HORIZON_TREE_CULL_MARGIN_BLOCKS: f32 = 16.0;
 const TERRAIN_HORIZON_CULL_MIN_Y: f32 = -64.0;
 const TERRAIN_HORIZON_CULL_MAX_Y: f32 = 512.0;
@@ -268,6 +269,7 @@ pub struct TerrainHorizonFrameStats {
     pub vegetation_bytes: u64,
     pub resident_bytes: u64,
     pub exact_coverage_mode: TerrainExactCoverageMode,
+    pub exact_handoff_topology: TerrainExactHandoffTopology,
     pub exact_coverage_generation: u64,
     pub exact_painted_chunks: u32,
     pub exact_coverage_mask_bytes: u64,
@@ -392,10 +394,16 @@ struct TerrainPreviewMaterialResources {
 struct TerrainExactCoverageResources {
     _uniform_buffer: wgpu::Buffer,
     _mask_buffer: wgpu::Buffer,
+    _transition_texture: wgpu::Texture,
+    _transition_view: wgpu::TextureView,
+    _transition_sampler: wgpu::Sampler,
     bind_group: wgpu::BindGroup,
     mask: TerrainExactCoverageMask,
+    transition: TerrainExactTransitionField,
     mode: TerrainExactCoverageMode,
     uploaded_mode: TerrainExactCoverageMode,
+    topology: TerrainExactHandoffTopology,
+    uploaded_topology: TerrainExactHandoffTopology,
 }
 
 impl TerrainExactCoverageResources {
@@ -410,6 +418,7 @@ impl TerrainExactCoverageResources {
             [],
         )?;
         let mask = snapshot.packed_mask()?;
+        let transition = TerrainExactTransitionField::from_coverage(&snapshot)?;
         let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("mclone_terrain_exact_coverage_uniform"),
             size: TERRAIN_EXACT_COVERAGE_UNIFORM_BYTES,
@@ -422,10 +431,41 @@ impl TerrainExactCoverageResources {
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        let transition_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("mclone_terrain_exact_transition_field"),
+            size: wgpu::Extent3d {
+                width: TERRAIN_EXACT_TRANSITION_MAX_TEXELS_PER_AXIS,
+                height: TERRAIN_EXACT_TRANSITION_MAX_TEXELS_PER_AXIS,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        let transition_view =
+            transition_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let transition_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("mclone_terrain_exact_transition_sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+        let topology = TerrainExactHandoffTopology::VoxelShell;
         queue.write_buffer(
             &uniform_buffer,
             0,
-            &mask.uniform_bytes(TerrainExactCoverageMode::Disabled),
+            &terrain_exact_uniform_bytes(
+                &mask,
+                &transition,
+                TerrainExactCoverageMode::Disabled,
+                topology,
+            ),
         );
         queue.write_buffer(&mask_buffer, 0, &mask.word_bytes());
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -440,15 +480,29 @@ impl TerrainExactCoverageResources {
                     binding: 1,
                     resource: mask_buffer.as_entire_binding(),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(&transition_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::Sampler(&transition_sampler),
+                },
             ],
         });
         Ok(Self {
             _uniform_buffer: uniform_buffer,
             _mask_buffer: mask_buffer,
+            _transition_texture: transition_texture,
+            _transition_view: transition_view,
+            _transition_sampler: transition_sampler,
             bind_group,
             mask,
+            transition,
             mode: TerrainExactCoverageMode::Disabled,
             uploaded_mode: TerrainExactCoverageMode::Disabled,
+            topology,
+            uploaded_topology: topology,
         })
     }
 
@@ -456,14 +510,48 @@ impl TerrainExactCoverageResources {
         &mut self,
         queue: &wgpu::Queue,
         snapshot: &ExactPaintedCoverageSnapshot,
+        transition: &TerrainExactTransitionField,
         mode: TerrainExactCoverageMode,
     ) -> Result<(), String> {
+        if transition.source() != snapshot.source()
+            || transition.generation() != snapshot.generation()
+        {
+            return Err("exact transition field does not match its coverage generation".to_owned());
+        }
         let mask = snapshot.packed_mask()?;
         queue.write_buffer(&self._mask_buffer, 0, &mask.word_bytes());
-        queue.write_buffer(&self._uniform_buffer, 0, &mask.uniform_bytes(mode));
+        let [width, height] = transition.dimensions();
+        if width > 0 && height > 0 {
+            queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &self._transition_texture,
+                    mip_level: 0,
+                    origin: Default::default(),
+                    aspect: Default::default(),
+                },
+                transition.weights(),
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(width),
+                    rows_per_image: Some(height),
+                },
+                wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+            );
+        }
+        queue.write_buffer(
+            &self._uniform_buffer,
+            0,
+            &terrain_exact_uniform_bytes(&mask, transition, mode, self.topology),
+        );
         self.mask = mask;
+        self.transition = transition.clone();
         self.mode = mode;
         self.uploaded_mode = mode;
+        self.uploaded_topology = self.topology;
         Ok(())
     }
 
@@ -471,16 +559,52 @@ impl TerrainExactCoverageResources {
         self.mode = TerrainExactCoverageMode::Disabled;
     }
 
+    fn set_topology(&mut self, topology: TerrainExactHandoffTopology) {
+        self.topology = topology;
+    }
+
     fn sync(&mut self, queue: &wgpu::Queue) {
-        if self.uploaded_mode != self.mode {
+        if self.uploaded_mode != self.mode || self.uploaded_topology != self.topology {
             queue.write_buffer(
                 &self._uniform_buffer,
                 0,
-                &self.mask.uniform_bytes(self.mode),
+                &terrain_exact_uniform_bytes(
+                    &self.mask,
+                    &self.transition,
+                    self.mode,
+                    self.topology,
+                ),
             );
             self.uploaded_mode = self.mode;
+            self.uploaded_topology = self.topology;
         }
     }
+}
+
+fn terrain_exact_uniform_bytes(
+    mask: &TerrainExactCoverageMask,
+    transition: &TerrainExactTransitionField,
+    mode: TerrainExactCoverageMode,
+    topology: TerrainExactHandoffTopology,
+) -> [u8; TERRAIN_EXACT_COVERAGE_UNIFORM_BYTES as usize] {
+    let mut bytes = [0; TERRAIN_EXACT_COVERAGE_UNIFORM_BYTES as usize];
+    bytes[..32].copy_from_slice(&mask.uniform_bytes(mode));
+    let [transition_origin_x, transition_origin_z] = transition.origin_blocks();
+    let [transition_width, transition_height] = transition.dimensions();
+    for (index, value) in [
+        transition_origin_x,
+        transition_origin_z,
+        transition_width as i32,
+        transition_height as i32,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let start = 32 + index * size_of::<i32>();
+        bytes[start..start + size_of::<i32>()].copy_from_slice(&value.to_ne_bytes());
+    }
+    bytes[64..68].copy_from_slice(&(topology as u32).to_ne_bytes());
+    bytes
 }
 
 impl TerrainPreviewMaterialResources {
@@ -1197,6 +1321,22 @@ impl TerrainViewportRenderer {
                         true,
                         TERRAIN_EXACT_COVERAGE_MASK_BYTES,
                     ),
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
                 ],
             });
         let material_resources =
@@ -3030,6 +3170,7 @@ impl TerrainHorizonRenderer {
         &mut self,
         queue: &wgpu::Queue,
         snapshot: &ExactPaintedCoverageSnapshot,
+        transition: &TerrainExactTransitionField,
         mode: TerrainExactCoverageMode,
     ) -> Result<(), String> {
         let expected = TerrainCompositionSourceIdentity::new(
@@ -3045,7 +3186,7 @@ impl TerrainHorizonRenderer {
         }
         self.renderer
             .exact_coverage
-            .set_snapshot(queue, snapshot, mode)?;
+            .set_snapshot(queue, snapshot, transition, mode)?;
         self.exact_coverage_snapshot = Some(snapshot.clone());
         Ok(())
     }
@@ -3053,6 +3194,10 @@ impl TerrainHorizonRenderer {
     pub fn clear_exact_painted_coverage(&mut self) {
         self.renderer.exact_coverage.disable();
         self.exact_coverage_snapshot = None;
+    }
+
+    pub fn set_exact_handoff_topology(&mut self, topology: TerrainExactHandoffTopology) {
+        self.renderer.exact_coverage.set_topology(topology);
     }
 
     pub fn set_authoritative_tree_ownership(&mut self, enabled: bool) {
@@ -3611,7 +3756,10 @@ impl TerrainHorizonRenderer {
                         / self.renderer.horizon_render_cell_stride;
                     pass.draw(
                         0..render_cells.pow(2)
-                            * terrain_horizon_vertices_per_cell(level.snapshot.sample_spacing),
+                            * terrain_horizon_vertices_per_cell(
+                                level.snapshot.sample_spacing,
+                                self.renderer.exact_coverage.topology,
+                            ),
                         0..1,
                     );
                     drawn_tiles = drawn_tiles.saturating_add(1);
@@ -3730,6 +3878,7 @@ impl TerrainHorizonRenderer {
                     .saturating_mul(render_cells.pow(2))
                     .saturating_mul(terrain_horizon_vertices_per_cell(
                         level.snapshot.sample_spacing,
+                        self.renderer.exact_coverage.topology,
                     )),
             )
         });
@@ -3750,7 +3899,8 @@ impl TerrainHorizonRenderer {
                     .saturating_add(TERRAIN_PREVIEW_UNIFORM_BYTES.saturating_mul(2)),
             )
             .saturating_add(TERRAIN_EXACT_COVERAGE_UNIFORM_BYTES)
-            .saturating_add(TERRAIN_EXACT_COVERAGE_MASK_BYTES);
+            .saturating_add(TERRAIN_EXACT_COVERAGE_MASK_BYTES)
+            .saturating_add(super::TERRAIN_EXACT_TRANSITION_MAX_BYTES);
         let vegetation_bytes = self
             .slots
             .iter()
@@ -3859,6 +4009,7 @@ impl TerrainHorizonRenderer {
             vegetation_bytes,
             resident_bytes,
             exact_coverage_mode: self.renderer.exact_coverage.mode,
+            exact_handoff_topology: self.renderer.exact_coverage.topology,
             exact_coverage_generation: self.renderer.exact_coverage.mask.generation,
             exact_painted_chunks: self.renderer.exact_coverage.mask.painted_chunks,
             exact_coverage_mask_bytes: TERRAIN_EXACT_COVERAGE_MASK_BYTES,
@@ -4048,8 +4199,11 @@ fn terrain_horizon_samples_per_axis() -> u32 {
         .saturating_add(TERRAIN_HORIZON_NORMAL_HALO_RADIUS.saturating_mul(2))
 }
 
-const fn terrain_horizon_vertices_per_cell(sample_spacing: u32) -> u32 {
-    if sample_spacing == 1 {
+const fn terrain_horizon_vertices_per_cell(
+    sample_spacing: u32,
+    topology: TerrainExactHandoffTopology,
+) -> u32 {
+    if sample_spacing == 1 && matches!(topology, TerrainExactHandoffTopology::VoxelShell) {
         TERRAIN_HORIZON_VOXEL_SHELL_VERTICES_PER_CELL
     } else {
         TERRAIN_HORIZON_SMOOTH_VERTICES_PER_CELL
@@ -4796,21 +4950,26 @@ mod tests {
     }
 
     #[test]
-    fn horizon_finest_level_uses_one_bounded_voxel_shell() {
+    fn horizon_review_topology_selects_voxel_or_smooth_finest_geometry() {
         assert_eq!(
-            terrain_horizon_vertices_per_cell(1),
+            terrain_horizon_vertices_per_cell(1, TerrainExactHandoffTopology::VoxelShell),
             TERRAIN_HORIZON_VOXEL_SHELL_VERTICES_PER_CELL
+        );
+        assert_eq!(
+            terrain_horizon_vertices_per_cell(1, TerrainExactHandoffTopology::DirectSmooth),
+            TERRAIN_HORIZON_SMOOTH_VERTICES_PER_CELL
         );
         for spacing in [2, 4, 8, 16, 32, 64, 128, 256, 512] {
             assert_eq!(
-                terrain_horizon_vertices_per_cell(spacing),
+                terrain_horizon_vertices_per_cell(spacing, TerrainExactHandoffTopology::VoxelShell,),
                 TERRAIN_HORIZON_SMOOTH_VERTICES_PER_CELL
             );
         }
 
         let shader = super::super::TERRAIN_PREVIEW_RENDER_WGSL;
-        assert!(shader.contains("let voxel_shell = sample_halo_radius() > 0"));
+        assert!(shader.contains("let voxel_shell = !direct_exact_handoff()"));
         assert!(shader.contains("let vertices_per_cell = select(6u, 30u, voxel_shell);"));
+        assert!(shader.contains("appearance_transition_weight = exact_transition_weight"));
         assert!(shader.contains("bottom_y = top_y - 32.0;"));
         assert!(shader.contains("surface_kind = 2u;"));
     }

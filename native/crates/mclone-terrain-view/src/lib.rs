@@ -69,7 +69,8 @@ pub use composition::{
     TERRAIN_EXACT_TRANSITION_DISTANCE_BLOCKS, TERRAIN_EXACT_TRANSITION_HALO_TEXELS,
     TERRAIN_EXACT_TRANSITION_MAX_BYTES, TERRAIN_EXACT_TRANSITION_MAX_TEXELS_PER_AXIS,
     TerrainCompositionSourceIdentity, TerrainExactCoverageMask, TerrainExactCoverageMode,
-    TerrainExactTransitionField, terrain_exact_player_connected_chunks,
+    TerrainExactHandoffTopology, TerrainExactTransitionField,
+    terrain_exact_player_connected_chunks,
 };
 pub use engine::{TerrainViewEngine, TerrainViewEngineConfig};
 #[cfg(not(target_arch = "wasm32"))]

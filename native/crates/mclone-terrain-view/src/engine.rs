@@ -1,9 +1,10 @@
 use crate::{
     BoundedRepresentationOwnershipSnapshot, McloneTreeOccurrenceId,
     TERRAIN_HORIZON_MAX_PROVEN_RENDER_CELL_STRIDE, TerrainClipmap, TerrainClipmapConfig,
-    TerrainExactCoverageMode, TerrainHorizonFrameStats, TerrainHorizonPresentation,
-    TerrainHorizonRenderTarget, TerrainHorizonRenderer, TerrainPreparedExactFrame,
-    TerrainPreviewMaterialAtlas, TerrainVegetationExecutor, TerrainViewSourceIdentity,
+    TerrainExactCoverageMode, TerrainExactHandoffTopology, TerrainHorizonFrameStats,
+    TerrainHorizonPresentation, TerrainHorizonRenderTarget, TerrainHorizonRenderer,
+    TerrainPreparedExactFrame, TerrainPreviewMaterialAtlas, TerrainVegetationExecutor,
+    TerrainViewSourceIdentity,
 };
 use mclone_render_color::{RenderColorProfile, RenderTargetColorTransform};
 use mclone_worldgen::terrain_preview::{
@@ -191,8 +192,12 @@ impl TerrainViewEngine {
     ) -> Result<(), String> {
         if let Some((exact, mode)) = exact {
             validate_prepared_exact(self.config.source, exact)?;
-            self.renderer
-                .set_exact_painted_coverage(queue, exact.coverage(), mode)?;
+            self.renderer.set_exact_painted_coverage(
+                queue,
+                exact.coverage(),
+                exact.transition(),
+                mode,
+            )?;
         } else {
             self.renderer.clear_exact_painted_coverage();
         }
@@ -304,6 +309,11 @@ impl TerrainViewEngine {
     /// canonical ownership snapshot instead.
     pub fn set_authoritative_tree_ownership(&mut self, enabled: bool) {
         self.renderer.set_authoritative_tree_ownership(enabled);
+    }
+
+    /// Select the temporary Tactical 313 A/B geometry path.
+    pub fn set_exact_handoff_topology(&mut self, topology: TerrainExactHandoffTopology) {
+        self.renderer.set_exact_handoff_topology(topology);
     }
 
     pub fn shutdown(&mut self) {

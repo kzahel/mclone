@@ -135,6 +135,7 @@ impl TerrainViewSourceIdentity {
 pub struct TerrainPreparedExactFrame {
     source: TerrainViewSourceIdentity,
     coverage: ExactPaintedCoverageSnapshot,
+    transition: super::TerrainExactTransitionField,
 }
 
 impl TerrainPreparedExactFrame {
@@ -147,7 +148,12 @@ impl TerrainPreparedExactFrame {
                 "prepared exact coverage does not match its terrain-view source".to_owned(),
             );
         }
-        Ok(Self { source, coverage })
+        let transition = super::TerrainExactTransitionField::from_coverage(&coverage)?;
+        Ok(Self {
+            source,
+            coverage,
+            transition,
+        })
     }
 
     pub const fn source(&self) -> TerrainViewSourceIdentity {
@@ -156,6 +162,10 @@ impl TerrainPreparedExactFrame {
 
     pub const fn coverage(&self) -> &ExactPaintedCoverageSnapshot {
         &self.coverage
+    }
+
+    pub const fn transition(&self) -> &super::TerrainExactTransitionField {
+        &self.transition
     }
 }
 
