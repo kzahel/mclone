@@ -128,14 +128,14 @@ const views = {
   lowRebase: {
     label: "low view translated across one spacing-one tile",
     seed: 12345,
-    chunk: [0, 0],
+    chunk: [4, 0],
     eye: [72, 82, 8],
     target: [72, 67, -180],
   },
   lowOrbit: {
     label: "low seam target from a second orbit angle",
     seed: 12345,
-    chunk: [0, 0],
+    chunk: [-3, 0],
     eye: [-36, 92, 6],
     target: [8, 67, -180],
   },
