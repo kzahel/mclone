@@ -59,6 +59,9 @@ pub const REFERENCE_STAR_COUNT: u32 = 780;
 const STAR_INSTANCE_FLOAT_COUNT: usize = 6;
 const STAR_INSTANCE_BYTE_SIZE: wgpu::BufferAddress =
     (STAR_INSTANCE_FLOAT_COUNT * std::mem::size_of::<f32>()) as wgpu::BufferAddress;
+const STAR_INDEX_COUNT: u32 = 6;
+const STAR_INDEX_BYTE_SIZE: wgpu::BufferAddress =
+    STAR_INDEX_COUNT as wgpu::BufferAddress * std::mem::size_of::<u32>() as wgpu::BufferAddress;
 
 pub const MCLONE_SUN_TEXTURE_PATH: &str = "assets/mclone/textures/environment/sun.png";
 pub const REFERENCE_SUN_TEXTURE_PATH: &str = "assets/minecraft/textures/environment/sun.png";
@@ -257,6 +260,7 @@ pub struct SkyRenderer {
     star_pipeline: wgpu::RenderPipeline,
     star_uniforms: PerViewUniformBuffer,
     star_bind_group: wgpu::BindGroup,
+    star_index_buffer: wgpu::Buffer,
     star_instance_buffer: wgpu::Buffer,
     star_count: u32,
     reference_star_instance_buffer: wgpu::Buffer,
@@ -670,6 +674,12 @@ impl SkyRenderer {
             render_config.color_format,
             None,
         );
+        let star_indices = [0_u32, 1, 2, 0, 2, 3];
+        let star_index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("mclone_star_indices"),
+            contents: &index_bytes(&star_indices),
+            usage: wgpu::BufferUsages::INDEX,
+        });
         let star_catalog = mclone_star_catalog();
         debug_assert!(star_catalog.len() as u32 <= MCLONE_STAR_CATALOG_MAX_COUNT);
         let star_count = star_catalog.len() as u32;
@@ -689,6 +699,7 @@ impl SkyRenderer {
             });
         let celestial_resident_resource_bytes = (star_count + reference_star_count) as u64
             * STAR_INSTANCE_BYTE_SIZE
+            + STAR_INDEX_BYTE_SIZE
             + celestial_vertex_slot_size() * u64::from(PER_VIEW_UNIFORM_SLOT_COUNT)
             + sun_texture_assets.rgba.len() as u64
             + moon_texture_assets.rgba.len() as u64;
@@ -717,6 +728,7 @@ impl SkyRenderer {
             star_pipeline,
             star_uniforms,
             star_bind_group,
+            star_index_buffer,
             star_instance_buffer,
             star_count,
             reference_star_instance_buffer,
@@ -1001,7 +1013,8 @@ impl SkyRenderer {
             pass.set_pipeline(&self.star_pipeline);
             pass.set_bind_group(0, &self.star_bind_group, &[star_uniform_offset]);
             pass.set_vertex_buffer(0, star_instance_buffer.slice(..));
-            pass.draw(0..6, 0..star_count);
+            pass.set_index_buffer(self.star_index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+            pass.draw_indexed(0..STAR_INDEX_COUNT, 0, 0..star_count);
         }
         self.last_celestial_stats.set(celestial_stats);
     }
@@ -1135,7 +1148,8 @@ impl SkyRenderer {
             pass.set_pipeline(&renderer.star_pipeline);
             pass.set_bind_group(0, &renderer.star_bind_group, &[]);
             pass.set_vertex_buffer(0, star_instance_buffer.slice(..));
-            pass.draw(0..6, 0..star_count);
+            pass.set_index_buffer(self.star_index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+            pass.draw_indexed(0..STAR_INDEX_COUNT, 0, 0..star_count);
         }
         self.last_celestial_stats.set(celestial_stats);
         Ok(())

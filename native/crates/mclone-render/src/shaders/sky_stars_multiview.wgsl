@@ -22,8 +22,6 @@ fn quad_corner(vertex_index: u32) -> vec2<f32> {
         case 0u: { return vec2<f32>(-1.0, 1.0); }
         case 1u: { return vec2<f32>(1.0, 1.0); }
         case 2u: { return vec2<f32>(1.0, -1.0); }
-        case 3u: { return vec2<f32>(-1.0, 1.0); }
-        case 4u: { return vec2<f32>(1.0, -1.0); }
         default: { return vec2<f32>(-1.0, -1.0); }
     }
 }
