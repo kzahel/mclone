@@ -510,7 +510,7 @@ Execution record:
 
 ### Slice 1: Pure seasonal appearance model
 
-Status: planned.
+Status: complete 2026-08-16 in `mclone-season`.
 
 Extend the existing dependency-leaf `mclone-season` owner with the
 presentation-independent vocabulary and pure response math. It may own:
@@ -557,6 +557,28 @@ Gate: the pure model proves coherent global-date/local-season evaluation,
 continuous regional differentiation, bounded local snowfall response, and
 neutral disabled state without world loading, rendering, an authoritative
 calendar, or a weather scheduler.
+
+Execution record:
+
+- `PreviewCalendarDate` projects fixed-point `OrbitalPhase` onto synthetic
+  days 1..112, while `OrbitalMilestone` retains neutral global equinox and
+  solstice names.
+- `EvaluatedLocalSeason` consumes global phase, signed effective latitude,
+  normalized local temperature/moisture, and altitude. It returns local phase,
+  response strength, thermal forcing, snow tendency, the accepted solar model's
+  day length, and a typed local label. Opposite temperate hemispheres disagree
+  by half a cycle; weak equatorial response reports `Weak Thermal Cycle`.
+- `StaticSeasonalResponse` owns the measured eight-bit family, exposure,
+  temperature, and moisture key plus exact packed-light encode/decode.
+- `LocalSnowPulse` uses fixed-point intensity, one 96-block bounded radius,
+  canonical integer center, smooth radial falloff, and topology-aware shortest
+  displacement. `evaluate_surface_appearance` composes continuous vegetation
+  tint/dormancy with distinct seasonal and recent ground/canopy snow targets.
+- Twenty-three focused crate tests cover calendar anchors/wrap, solar day-length
+  agreement, hemispheres, equatorial weakness, regional climate and material
+  matrices, deciduous/evergreen distinction, landmark continuity, packed-key
+  round trips, recent-snow monotonicity/falloff/cylinder seam, warm retention,
+  canopy/side semantics, non-finite normalization, and exact disabled output.
 
 ### Slice 2: Exact terrain and lush-grass rendering
 

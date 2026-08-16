@@ -30,6 +30,15 @@ pub const MCLONE_AXIAL_TILT_DEGREES: f64 = 27.0;
 /// Fixed-point resolution for client-local Debug orbital state.
 pub const ORBITAL_PHASE_STEPS: u16 = 10_000;
 
+/// Synthetic Debug-only year length selected by Tactical 306.
+///
+/// This is a display projection over [`OrbitalPhase`], not an authoritative
+/// calendar or persistence contract.
+pub const PREVIEW_CALENDAR_DAYS: u16 = 112;
+
+/// Hard-bounded radius for the one client-local recent-snow preview pulse.
+pub const RECENT_SNOW_RADIUS_BLOCKS: u16 = 96;
+
 pub const PREVIEW_LATITUDE_TENTHS_PER_DEGREE: i16 = 10;
 pub const PREVIEW_SOLAR_TIME_MINUTES_PER_DAY: u16 = 1_440;
 
@@ -63,6 +72,533 @@ impl OrbitalPhase {
     pub fn turns(self) -> f64 {
         f64::from(self.0) / f64::from(ORBITAL_PHASE_STEPS)
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct PreviewCalendarDate {
+    day: u16,
+}
+
+impl PreviewCalendarDate {
+    pub const fn from_orbital_phase(phase: OrbitalPhase) -> Self {
+        let day = (phase.steps() as u32 * PREVIEW_CALENDAR_DAYS as u32 / ORBITAL_PHASE_STEPS as u32)
+            as u16
+            + 1;
+        Self { day }
+    }
+
+    pub const fn day(self) -> u16 {
+        self.day
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum OrbitalMilestone {
+    NorthwardEquinox,
+    NorthernSolstice,
+    SouthwardEquinox,
+    SouthernSolstice,
+}
+
+impl OrbitalMilestone {
+    pub const fn nearest(phase: OrbitalPhase) -> Self {
+        let quarter_steps = ORBITAL_PHASE_STEPS / 4;
+        let rounded = (phase.steps() + quarter_steps / 2) / quarter_steps;
+        match rounded % 4 {
+            0 => Self::NorthwardEquinox,
+            1 => Self::NorthernSolstice,
+            2 => Self::SouthwardEquinox,
+            _ => Self::SouthernSolstice,
+        }
+    }
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::NorthwardEquinox => "Northward Equinox",
+            Self::NorthernSolstice => "Northern Solstice",
+            Self::SouthwardEquinox => "Southward Equinox",
+            Self::SouthernSolstice => "Southern Solstice",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum LocalSeasonLabel {
+    Spring,
+    Summer,
+    Autumn,
+    Winter,
+    WeakThermalCycle,
+}
+
+impl LocalSeasonLabel {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Spring => "Spring",
+            Self::Summer => "Summer",
+            Self::Autumn => "Autumn",
+            Self::Winter => "Winter",
+            Self::WeakThermalCycle => "Weak Thermal Cycle",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LocalSeasonInput {
+    pub orbital_phase: OrbitalPhase,
+    pub effective_latitude_degrees: f64,
+    /// Normalized annual-mean thermal character in `[-1, 1]`.
+    pub mean_temperature: f32,
+    /// Normalized local moisture in `[0, 1]`.
+    pub moisture: f32,
+    pub altitude_blocks: f32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EvaluatedLocalSeason {
+    pub local_phase: f32,
+    pub response_strength: f32,
+    pub thermal_forcing: f32,
+    pub current_temperature: f32,
+    pub snow_tendency: f32,
+    pub day_length_fraction: f32,
+    pub label: LocalSeasonLabel,
+}
+
+impl EvaluatedLocalSeason {
+    pub fn evaluate(input: LocalSeasonInput) -> Self {
+        let latitude = finite_f64_or(input.effective_latitude_degrees, 0.0).clamp(-90.0, 90.0);
+        let mean_temperature = finite_f32_or(input.mean_temperature, 0.0).clamp(-1.0, 1.0);
+        let moisture = finite_f32_or(input.moisture, 0.5).clamp(0.0, 1.0);
+        let altitude = finite_f32_or(input.altitude_blocks, 64.0).clamp(-2_048.0, 4_096.0);
+        let altitude_cooling = ((altitude - 80.0) / 160.0).clamp(0.0, 1.0) * 0.8;
+        let annual_temperature = (mean_temperature - altitude_cooling).clamp(-1.0, 1.0);
+        let latitude_strength = smoothstep(8.0, 45.0, latitude.abs()) as f32;
+        let warm_suppression =
+            1.0 - smoothstep(0.55, 0.95, f64::from(annual_temperature)) as f32 * 0.55;
+        let response_strength = (latitude_strength * warm_suppression).clamp(0.0, 1.0);
+        let hemisphere_shift = if latitude < 0.0 { 0.5 } else { 0.0 };
+        let local_phase = (input.orbital_phase.turns() + hemisphere_shift).rem_euclid(1.0) as f32;
+        let latitude_sign = if latitude < 0.0 {
+            -1.0
+        } else if latitude > 0.0 {
+            1.0
+        } else {
+            0.0
+        };
+        let thermal_forcing =
+            ((TAU * input.orbital_phase.turns()).sin() as f32 * latitude_sign * response_strength)
+                .clamp(-1.0, 1.0);
+        let current_temperature = (annual_temperature + thermal_forcing * 0.6).clamp(-1.0, 1.0);
+        let cold_retention =
+            (1.0 - smoothstep(-0.45, 0.18, f64::from(current_temperature)) as f32).clamp(0.0, 1.0);
+        let snow_tendency = (cold_retention * (0.45 + moisture * 0.55)).clamp(0.0, 1.0);
+        let label = if response_strength < 0.2 {
+            LocalSeasonLabel::WeakThermalCycle
+        } else {
+            match ((local_phase * 4.0 + 0.5).floor() as u8) % 4 {
+                0 => LocalSeasonLabel::Spring,
+                1 => LocalSeasonLabel::Summer,
+                2 => LocalSeasonLabel::Autumn,
+                _ => LocalSeasonLabel::Winter,
+            }
+        };
+        let day_length_fraction = SolarSample::compute(SolarInput {
+            orbital_phase: input.orbital_phase,
+            effective_latitude_degrees: latitude,
+            axial_tilt_degrees: MCLONE_AXIAL_TILT_DEGREES,
+            solar_time_fraction: 0.5,
+        })
+        .map_or(0.5, |sample| sample.day_length_fraction);
+
+        Self {
+            local_phase,
+            response_strength,
+            thermal_forcing,
+            current_temperature,
+            snow_tendency,
+            day_length_fraction,
+            label,
+        }
+    }
+}
+
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+pub enum SeasonalSurfaceFamily {
+    #[default]
+    Inert = 0,
+    NaturalGround = 1,
+    Grass = 2,
+    DeciduousFoliage = 3,
+    EvergreenFoliage = 4,
+}
+
+impl SeasonalSurfaceFamily {
+    const fn from_bits(bits: u8) -> Self {
+        match bits {
+            1 => Self::NaturalGround,
+            2 => Self::Grass,
+            3 => Self::DeciduousFoliage,
+            4 => Self::EvergreenFoliage,
+            _ => Self::Inert,
+        }
+    }
+
+    const fn snow_weight(self) -> f32 {
+        match self {
+            Self::Inert => 0.0,
+            Self::NaturalGround => 1.0,
+            Self::Grass => 0.9,
+            Self::DeciduousFoliage => 0.52,
+            Self::EvergreenFoliage => 0.68,
+        }
+    }
+}
+
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+pub enum SeasonalTemperatureClass {
+    Cold = 0,
+    Cool = 1,
+    #[default]
+    Mild = 2,
+    Warm = 3,
+}
+
+impl SeasonalTemperatureClass {
+    const fn from_bits(bits: u8) -> Self {
+        match bits & 0b11 {
+            0 => Self::Cold,
+            1 => Self::Cool,
+            2 => Self::Mild,
+            _ => Self::Warm,
+        }
+    }
+
+    pub const fn representative(self) -> f32 {
+        match self {
+            Self::Cold => -0.75,
+            Self::Cool => -0.25,
+            Self::Mild => 0.25,
+            Self::Warm => 0.75,
+        }
+    }
+}
+
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+pub enum SeasonalMoistureClass {
+    Arid = 0,
+    Dry = 1,
+    #[default]
+    Moist = 2,
+    Wet = 3,
+}
+
+impl SeasonalMoistureClass {
+    const fn from_bits(bits: u8) -> Self {
+        match bits & 0b11 {
+            0 => Self::Arid,
+            1 => Self::Dry,
+            2 => Self::Moist,
+            _ => Self::Wet,
+        }
+    }
+
+    pub const fn representative(self) -> f32 {
+        match self {
+            Self::Arid => 0.05,
+            Self::Dry => 0.30,
+            Self::Moist => 0.65,
+            Self::Wet => 0.95,
+        }
+    }
+}
+
+/// Eight-bit mesh-time response key stored in packed-light's unused high byte.
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+pub struct StaticSeasonalResponse {
+    pub family: SeasonalSurfaceFamily,
+    pub upward_exposed: bool,
+    pub temperature: SeasonalTemperatureClass,
+    pub moisture: SeasonalMoistureClass,
+}
+
+impl StaticSeasonalResponse {
+    pub fn from_climate(
+        family: SeasonalSurfaceFamily,
+        upward_exposed: bool,
+        mean_temperature: f32,
+        moisture: f32,
+        altitude_blocks: f32,
+    ) -> Self {
+        let temperature = finite_f32_or(mean_temperature, 0.0).clamp(-1.0, 1.0);
+        let moisture = finite_f32_or(moisture, 0.5).clamp(0.0, 1.0);
+        let altitude = finite_f32_or(altitude_blocks, 64.0).clamp(-2_048.0, 4_096.0);
+        let adjusted_temperature =
+            (temperature - ((altitude - 80.0) / 160.0).clamp(0.0, 1.0) * 0.8).clamp(-1.0, 1.0);
+        let temperature = if adjusted_temperature < -0.4 {
+            SeasonalTemperatureClass::Cold
+        } else if adjusted_temperature < 0.1 {
+            SeasonalTemperatureClass::Cool
+        } else if adjusted_temperature < 0.55 {
+            SeasonalTemperatureClass::Mild
+        } else {
+            SeasonalTemperatureClass::Warm
+        };
+        let moisture = if moisture < 0.15 {
+            SeasonalMoistureClass::Arid
+        } else if moisture < 0.45 {
+            SeasonalMoistureClass::Dry
+        } else if moisture < 0.78 {
+            SeasonalMoistureClass::Moist
+        } else {
+            SeasonalMoistureClass::Wet
+        };
+        Self {
+            family,
+            upward_exposed,
+            temperature,
+            moisture,
+        }
+    }
+
+    pub const fn encode(self) -> u8 {
+        (self.family as u8)
+            | ((self.upward_exposed as u8) << 3)
+            | ((self.temperature as u8) << 4)
+            | ((self.moisture as u8) << 6)
+    }
+
+    pub const fn decode(value: u8) -> Self {
+        Self {
+            family: SeasonalSurfaceFamily::from_bits(value & 0b111),
+            upward_exposed: value & (1 << 3) != 0,
+            temperature: SeasonalTemperatureClass::from_bits(value >> 4),
+            moisture: SeasonalMoistureClass::from_bits(value >> 6),
+        }
+    }
+
+    pub const fn pack_in_light(self, packed_light: u32) -> u32 {
+        (packed_light & 0x00ff_ffff) | ((self.encode() as u32) << 24)
+    }
+
+    pub const fn unpack_from_light(packed_light: u32) -> Self {
+        Self::decode((packed_light >> 24) as u8)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+pub struct UnitU16(u16);
+
+impl UnitU16 {
+    pub const ZERO: Self = Self(0);
+    pub const FULL: Self = Self(u16::MAX);
+
+    pub const fn from_raw(raw: u16) -> Self {
+        Self(raw)
+    }
+
+    pub fn from_unit_clamped(value: f32) -> Self {
+        let value = finite_f32_or(value, 0.0).clamp(0.0, 1.0);
+        Self((value * f32::from(u16::MAX)).round() as u16)
+    }
+
+    pub const fn raw(self) -> u16 {
+        self.0
+    }
+
+    pub fn unit(self) -> f32 {
+        f32::from(self.0) / f32::from(u16::MAX)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct LocalSnowPulse {
+    pub center_x: i32,
+    pub center_z: i32,
+    pub radius_blocks: u16,
+    pub intensity: UnitU16,
+}
+
+impl LocalSnowPulse {
+    pub fn anchored(
+        topology: HorizontalTopology,
+        world_x: f64,
+        world_z: f64,
+        intensity: UnitU16,
+    ) -> Self {
+        let world_x = finite_f64_or(world_x, 0.0)
+            .floor()
+            .clamp(i32::MIN as f64, i32::MAX as f64) as i32;
+        let world_z = finite_f64_or(world_z, 0.0)
+            .floor()
+            .clamp(i32::MIN as f64, i32::MAX as f64) as i32;
+        Self {
+            center_x: topology.x.canonical_block(world_x).unwrap_or(world_x),
+            center_z: topology.z.canonical_block(world_z).unwrap_or(world_z),
+            radius_blocks: RECENT_SNOW_RADIUS_BLOCKS,
+            intensity,
+        }
+    }
+
+    pub fn coverage_at(self, topology: HorizontalTopology, world_x: f64, world_z: f64) -> f32 {
+        if self.radius_blocks == 0 || self.intensity == UnitU16::ZERO {
+            return 0.0;
+        }
+        let world_x = finite_f64_or(world_x, f64::from(self.center_x));
+        let world_z = finite_f64_or(world_z, f64::from(self.center_z));
+        let dx = topology
+            .x
+            .shortest_position_displacement(f64::from(self.center_x), world_x);
+        let dz = topology
+            .z
+            .shortest_position_displacement(f64::from(self.center_z), world_z);
+        let normalized = (dx.hypot(dz) / f64::from(self.radius_blocks)).clamp(0.0, 1.0);
+        let falloff = 1.0 - smoothstep(0.62, 1.0, normalized);
+        (falloff as f32 * self.intensity.unit()).clamp(0.0, 1.0)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SeasonalSurfaceAppearance {
+    pub tint: [f32; 3],
+    pub seasonal_snow: f32,
+    pub recent_snow: f32,
+    pub total_snow: f32,
+    pub vegetation_visibility: f32,
+}
+
+impl SeasonalSurfaceAppearance {
+    pub const NEUTRAL: Self = Self {
+        tint: [1.0; 3],
+        seasonal_snow: 0.0,
+        recent_snow: 0.0,
+        total_snow: 0.0,
+        vegetation_visibility: 1.0,
+    };
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SeasonalSurfaceInput {
+    pub preview_enabled: bool,
+    pub local_season: EvaluatedLocalSeason,
+    pub response: StaticSeasonalResponse,
+    pub topology: HorizontalTopology,
+    pub world_x: f64,
+    pub world_z: f64,
+    pub recent_snow: Option<LocalSnowPulse>,
+}
+
+pub fn evaluate_surface_appearance(input: SeasonalSurfaceInput) -> SeasonalSurfaceAppearance {
+    if !input.preview_enabled || input.response.family == SeasonalSurfaceFamily::Inert {
+        return SeasonalSurfaceAppearance::NEUTRAL;
+    }
+
+    let phase = input.local_season.local_phase.rem_euclid(1.0);
+    let weights = [
+        landmark_weight(phase, 0.0),
+        landmark_weight(phase, 0.25),
+        landmark_weight(phase, 0.5),
+        landmark_weight(phase, 0.75),
+    ];
+    let moisture = input.response.moisture.representative();
+    let warmth = ((input.response.temperature.representative() + 1.0) * 0.5).clamp(0.0, 1.0);
+    let regional_strength =
+        (input.local_season.response_strength * (1.0 - warmth * moisture * 0.58)).clamp(0.0, 1.0);
+    let targets = seasonal_tint_targets(input.response.family, moisture);
+    let target = weighted_color(targets, weights);
+    let tint = mix_color([1.0; 3], target, regional_strength);
+
+    let current_temperature = (input.response.temperature.representative()
+        + input.local_season.thermal_forcing * 0.6)
+        .clamp(-1.0, 1.0);
+    let retention =
+        (1.0 - smoothstep(-0.45, 0.18, f64::from(current_temperature)) as f32).clamp(0.0, 1.0);
+    let snow_weight = if input.response.upward_exposed {
+        input.response.family.snow_weight()
+    } else {
+        0.0
+    };
+    let seasonal_snow = (weights[3]
+        * input.local_season.response_strength
+        * retention
+        * (0.45 + moisture * 0.55)
+        * snow_weight)
+        .clamp(0.0, 1.0);
+    let recent_snow = input.recent_snow.map_or(0.0, |pulse| {
+        pulse.coverage_at(input.topology, input.world_x, input.world_z) * retention * snow_weight
+    });
+    let total_snow = (seasonal_snow + recent_snow).clamp(0.0, 1.0);
+    let dormancy = match input.response.family {
+        SeasonalSurfaceFamily::Grass => weights[3] * regional_strength * 0.28,
+        _ => 0.0,
+    };
+    let snow_suppression = match input.response.family {
+        SeasonalSurfaceFamily::Grass => total_snow * 0.86,
+        SeasonalSurfaceFamily::DeciduousFoliage | SeasonalSurfaceFamily::EvergreenFoliage => {
+            total_snow * 0.08
+        }
+        _ => 0.0,
+    };
+
+    SeasonalSurfaceAppearance {
+        tint,
+        seasonal_snow,
+        recent_snow,
+        total_snow,
+        vegetation_visibility: (1.0 - dormancy - snow_suppression).clamp(0.0, 1.0),
+    }
+}
+
+fn landmark_weight(phase: f32, landmark: f32) -> f32 {
+    let distance = (phase - landmark + 0.5).rem_euclid(1.0) - 0.5;
+    (distance * std::f32::consts::TAU).cos().max(0.0).powi(2)
+}
+
+fn seasonal_tint_targets(family: SeasonalSurfaceFamily, moisture: f32) -> [[f32; 3]; 4] {
+    match family {
+        SeasonalSurfaceFamily::Grass => [
+            mix_color([0.98, 1.01, 0.96], [0.88, 1.12, 0.84], moisture),
+            [1.0, 1.0, 1.0],
+            mix_color([1.08, 0.78, 0.50], [1.03, 0.88, 0.66], moisture),
+            [0.72, 0.76, 0.68],
+        ],
+        SeasonalSurfaceFamily::DeciduousFoliage => [
+            [0.90, 1.10, 0.86],
+            [1.0, 1.0, 1.0],
+            [1.18, 0.58, 0.30],
+            [0.64, 0.60, 0.52],
+        ],
+        SeasonalSurfaceFamily::EvergreenFoliage => [
+            [0.96, 1.03, 0.95],
+            [1.0, 1.0, 1.0],
+            [0.93, 0.95, 0.85],
+            [0.70, 0.84, 0.83],
+        ],
+        SeasonalSurfaceFamily::NaturalGround | SeasonalSurfaceFamily::Inert => [[1.0; 3]; 4],
+    }
+}
+
+fn weighted_color(colors: [[f32; 3]; 4], weights: [f32; 4]) -> [f32; 3] {
+    let total = weights.into_iter().sum::<f32>().max(f32::EPSILON);
+    let mut result = [0.0; 3];
+    for (color, weight) in colors.into_iter().zip(weights) {
+        for channel in 0..3 {
+            result[channel] += color[channel] * weight / total;
+        }
+    }
+    result
+}
+
+fn mix_color(left: [f32; 3], right: [f32; 3], amount: f32) -> [f32; 3] {
+    let amount = amount.clamp(0.0, 1.0);
+    [
+        left[0] + (right[0] - left[0]) * amount,
+        left[1] + (right[1] - left[1]) * amount,
+        left[2] + (right[2] - left[2]) * amount,
+    ]
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
@@ -465,6 +1001,14 @@ fn validate_finite(field: &'static str, value: f64) -> Result<(), SolarInputErro
         .ok_or(SolarInputError::NonFinite(field))
 }
 
+fn finite_f32_or(value: f32, fallback: f32) -> f32 {
+    if value.is_finite() { value } else { fallback }
+}
+
+fn finite_f64_or(value: f64, fallback: f64) -> f64 {
+    if value.is_finite() { value } else { fallback }
+}
+
 fn smoothstep(edge0: f64, edge1: f64, value: f64) -> f64 {
     let t = ((value - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
@@ -590,6 +1134,438 @@ mod tests {
         );
         assert_eq!(PreviewSolarTime::from_hours_wrapped(25.5).minutes(), 90);
         assert_eq!(PreviewSolarTime::from_hours_wrapped(-1.0).minutes(), 1_380);
+    }
+
+    fn local(
+        latitude: f64,
+        phase: OrbitalPhase,
+        temperature: f32,
+        moisture: f32,
+        altitude: f32,
+    ) -> EvaluatedLocalSeason {
+        EvaluatedLocalSeason::evaluate(LocalSeasonInput {
+            orbital_phase: phase,
+            effective_latitude_degrees: latitude,
+            mean_temperature: temperature,
+            moisture,
+            altitude_blocks: altitude,
+        })
+    }
+
+    fn response(
+        family: SeasonalSurfaceFamily,
+        exposed: bool,
+        temperature: SeasonalTemperatureClass,
+        moisture: SeasonalMoistureClass,
+    ) -> StaticSeasonalResponse {
+        StaticSeasonalResponse {
+            family,
+            upward_exposed: exposed,
+            temperature,
+            moisture,
+        }
+    }
+
+    fn appearance(
+        local_season: EvaluatedLocalSeason,
+        response: StaticSeasonalResponse,
+        recent_snow: Option<LocalSnowPulse>,
+        world_x: f64,
+        world_z: f64,
+        topology: HorizontalTopology,
+    ) -> SeasonalSurfaceAppearance {
+        evaluate_surface_appearance(SeasonalSurfaceInput {
+            preview_enabled: true,
+            local_season,
+            response,
+            topology,
+            world_x,
+            world_z,
+            recent_snow,
+        })
+    }
+
+    #[test]
+    fn synthetic_calendar_projects_quarter_days_and_wrap() {
+        for (phase, day, milestone) in [
+            (
+                OrbitalPhase::NORTHWARD_EQUINOX,
+                1,
+                OrbitalMilestone::NorthwardEquinox,
+            ),
+            (
+                OrbitalPhase::NORTHERN_SOLSTICE,
+                29,
+                OrbitalMilestone::NorthernSolstice,
+            ),
+            (
+                OrbitalPhase::SOUTHWARD_EQUINOX,
+                57,
+                OrbitalMilestone::SouthwardEquinox,
+            ),
+            (
+                OrbitalPhase::SOUTHERN_SOLSTICE,
+                85,
+                OrbitalMilestone::SouthernSolstice,
+            ),
+        ] {
+            assert_eq!(PreviewCalendarDate::from_orbital_phase(phase).day(), day);
+            assert_eq!(OrbitalMilestone::nearest(phase), milestone);
+        }
+        assert_eq!(
+            PreviewCalendarDate::from_orbital_phase(OrbitalPhase::from_steps_wrapped(9_999)).day(),
+            112
+        );
+        assert_eq!(
+            PreviewCalendarDate::from_orbital_phase(OrbitalPhase::from_steps_wrapped(10_000)).day(),
+            1
+        );
+    }
+
+    #[test]
+    fn temperate_hemispheres_evaluate_opposite_local_seasons() {
+        for (phase, north, south) in [
+            (
+                OrbitalPhase::NORTHWARD_EQUINOX,
+                LocalSeasonLabel::Spring,
+                LocalSeasonLabel::Autumn,
+            ),
+            (
+                OrbitalPhase::NORTHERN_SOLSTICE,
+                LocalSeasonLabel::Summer,
+                LocalSeasonLabel::Winter,
+            ),
+            (
+                OrbitalPhase::SOUTHWARD_EQUINOX,
+                LocalSeasonLabel::Autumn,
+                LocalSeasonLabel::Spring,
+            ),
+            (
+                OrbitalPhase::SOUTHERN_SOLSTICE,
+                LocalSeasonLabel::Winter,
+                LocalSeasonLabel::Summer,
+            ),
+        ] {
+            assert_eq!(local(45.0, phase, 0.1, 0.65, 70.0).label, north);
+            assert_eq!(local(-45.0, phase, 0.1, 0.65, 70.0).label, south);
+        }
+    }
+
+    #[test]
+    fn equatorial_and_non_finite_inputs_produce_a_finite_weak_cycle() {
+        for latitude in [-5.0, 0.0, 5.0, f64::NAN] {
+            let sample = local(
+                latitude,
+                OrbitalPhase::SOUTHERN_SOLSTICE,
+                f32::NAN,
+                f32::INFINITY,
+                f32::NAN,
+            );
+            assert_eq!(sample.label, LocalSeasonLabel::WeakThermalCycle);
+            assert!(sample.response_strength < 0.2);
+            assert!(sample.local_phase.is_finite());
+            assert!(sample.current_temperature.is_finite());
+            assert!(sample.snow_tendency.is_finite());
+            assert!(sample.day_length_fraction.is_finite());
+        }
+    }
+
+    #[test]
+    fn evaluated_day_length_matches_the_accepted_solar_sample() {
+        for latitude in [-75.0, -45.0, 0.0, 45.0, 75.0] {
+            for phase in [
+                OrbitalPhase::NORTHWARD_EQUINOX,
+                OrbitalPhase::NORTHERN_SOLSTICE,
+                OrbitalPhase::SOUTHERN_SOLSTICE,
+            ] {
+                let evaluated = local(latitude, phase, 0.0, 0.5, 64.0);
+                let solar = sample(latitude, phase, 3.0);
+                close(
+                    f64::from(evaluated.day_length_fraction),
+                    f64::from(solar.day_length_fraction),
+                    1.0e-6,
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn static_response_round_trips_in_packed_lights_unused_high_byte() {
+        for family in [
+            SeasonalSurfaceFamily::Inert,
+            SeasonalSurfaceFamily::NaturalGround,
+            SeasonalSurfaceFamily::Grass,
+            SeasonalSurfaceFamily::DeciduousFoliage,
+            SeasonalSurfaceFamily::EvergreenFoliage,
+        ] {
+            for exposed in [false, true] {
+                for temperature in [
+                    SeasonalTemperatureClass::Cold,
+                    SeasonalTemperatureClass::Cool,
+                    SeasonalTemperatureClass::Mild,
+                    SeasonalTemperatureClass::Warm,
+                ] {
+                    for moisture in [
+                        SeasonalMoistureClass::Arid,
+                        SeasonalMoistureClass::Dry,
+                        SeasonalMoistureClass::Moist,
+                        SeasonalMoistureClass::Wet,
+                    ] {
+                        let response = response(family, exposed, temperature, moisture);
+                        assert_eq!(StaticSeasonalResponse::decode(response.encode()), response);
+                        let packed = response.pack_in_light(0x00f0_00a0);
+                        assert_eq!(packed & 0x00ff_ffff, 0x00f0_00a0);
+                        assert_eq!(StaticSeasonalResponse::unpack_from_light(packed), response);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn altitude_and_climate_quantization_distinguish_regional_fixtures() {
+        let warm_dry = StaticSeasonalResponse::from_climate(
+            SeasonalSurfaceFamily::Grass,
+            true,
+            0.8,
+            0.05,
+            68.0,
+        );
+        let warm_wet = StaticSeasonalResponse::from_climate(
+            SeasonalSurfaceFamily::Grass,
+            true,
+            0.8,
+            0.95,
+            68.0,
+        );
+        let temperate = StaticSeasonalResponse::from_climate(
+            SeasonalSurfaceFamily::Grass,
+            true,
+            0.2,
+            0.65,
+            70.0,
+        );
+        let cold_high = StaticSeasonalResponse::from_climate(
+            SeasonalSurfaceFamily::NaturalGround,
+            true,
+            0.0,
+            0.45,
+            180.0,
+        );
+        assert_eq!(warm_dry.temperature, SeasonalTemperatureClass::Warm);
+        assert_eq!(warm_dry.moisture, SeasonalMoistureClass::Arid);
+        assert_eq!(warm_wet.moisture, SeasonalMoistureClass::Wet);
+        assert_eq!(temperate.temperature, SeasonalTemperatureClass::Mild);
+        assert_eq!(cold_high.temperature, SeasonalTemperatureClass::Cold);
+    }
+
+    #[test]
+    fn regional_surface_matrix_changes_continuously_and_semantically() {
+        let landmarks = [
+            OrbitalPhase::NORTHWARD_EQUINOX,
+            OrbitalPhase::NORTHERN_SOLSTICE,
+            OrbitalPhase::SOUTHWARD_EQUINOX,
+            OrbitalPhase::SOUTHERN_SOLSTICE,
+            OrbitalPhase::from_steps_wrapped(1_250),
+            OrbitalPhase::from_steps_wrapped(3_750),
+            OrbitalPhase::from_steps_wrapped(6_250),
+            OrbitalPhase::from_steps_wrapped(8_750),
+        ];
+        for phase in landmarks {
+            for (temperature, moisture) in [
+                (SeasonalTemperatureClass::Warm, SeasonalMoistureClass::Wet),
+                (SeasonalTemperatureClass::Warm, SeasonalMoistureClass::Arid),
+                (SeasonalTemperatureClass::Mild, SeasonalMoistureClass::Moist),
+                (SeasonalTemperatureClass::Cold, SeasonalMoistureClass::Dry),
+            ] {
+                let appearance = appearance(
+                    local(
+                        45.0,
+                        phase,
+                        temperature.representative(),
+                        moisture.representative(),
+                        70.0,
+                    ),
+                    response(SeasonalSurfaceFamily::Grass, true, temperature, moisture),
+                    None,
+                    0.0,
+                    0.0,
+                    HorizontalTopology::UNBOUNDED,
+                );
+                assert!(appearance.tint.iter().all(|value| value.is_finite()));
+                assert!((0.0..=1.0).contains(&appearance.total_snow));
+                assert!((0.0..=1.0).contains(&appearance.vegetation_visibility));
+            }
+        }
+
+        let autumn = local(45.0, OrbitalPhase::SOUTHWARD_EQUINOX, 0.1, 0.65, 70.0);
+        let deciduous = appearance(
+            autumn,
+            response(
+                SeasonalSurfaceFamily::DeciduousFoliage,
+                true,
+                SeasonalTemperatureClass::Mild,
+                SeasonalMoistureClass::Moist,
+            ),
+            None,
+            0.0,
+            0.0,
+            HorizontalTopology::UNBOUNDED,
+        );
+        let evergreen = appearance(
+            autumn,
+            response(
+                SeasonalSurfaceFamily::EvergreenFoliage,
+                true,
+                SeasonalTemperatureClass::Cool,
+                SeasonalMoistureClass::Moist,
+            ),
+            None,
+            0.0,
+            0.0,
+            HorizontalTopology::UNBOUNDED,
+        );
+        assert!(deciduous.tint[0] > deciduous.tint[1]);
+        assert!((evergreen.tint[0] - evergreen.tint[1]).abs() < 0.12);
+
+        for center in [0, 2_500, 5_000, 7_500] {
+            let before = local(
+                45.0,
+                OrbitalPhase::from_steps_wrapped(
+                    (center + ORBITAL_PHASE_STEPS - 1) % ORBITAL_PHASE_STEPS,
+                ),
+                0.1,
+                0.65,
+                70.0,
+            );
+            let after = local(
+                45.0,
+                OrbitalPhase::from_steps_wrapped((center + 1) % ORBITAL_PHASE_STEPS),
+                0.1,
+                0.65,
+                70.0,
+            );
+            let key = response(
+                SeasonalSurfaceFamily::DeciduousFoliage,
+                true,
+                SeasonalTemperatureClass::Mild,
+                SeasonalMoistureClass::Moist,
+            );
+            let before = appearance(before, key, None, 0.0, 0.0, HorizontalTopology::UNBOUNDED);
+            let after = appearance(after, key, None, 0.0, 0.0, HorizontalTopology::UNBOUNDED);
+            for channel in 0..3 {
+                assert!((before.tint[channel] - after.tint[channel]).abs() < 0.002);
+            }
+            assert!((before.total_snow - after.total_snow).abs() < 0.002);
+        }
+    }
+
+    #[test]
+    fn snow_pulse_falloff_is_monotonic_bounded_and_cylinder_seam_safe() {
+        let cylinder = HorizontalTopology::cylinder_x(0, 32);
+        let half = LocalSnowPulse::anchored(cylinder, 0.0, 0.0, UnitU16::from_unit_clamped(0.5));
+        let full = LocalSnowPulse::anchored(cylinder, 0.0, 0.0, UnitU16::FULL);
+        assert!(full.coverage_at(cylinder, 0.0, 0.0) > half.coverage_at(cylinder, 0.0, 0.0));
+        assert!(full.coverage_at(cylinder, 32.0, 0.0) > full.coverage_at(cylinder, 80.0, 0.0));
+        assert_eq!(full.coverage_at(cylinder, 97.0, 0.0), 0.0);
+        close(
+            f64::from(full.coverage_at(cylinder, -1.0, 0.0)),
+            f64::from(full.coverage_at(cylinder, 511.0, 0.0)),
+            1.0e-6,
+        );
+    }
+
+    #[test]
+    fn late_winter_recent_snow_dusts_cold_ground_and_canopy_but_not_sides_or_warm_ground() {
+        let late_winter = local(
+            45.0,
+            OrbitalPhase::from_steps_wrapped(8_750),
+            -0.2,
+            0.65,
+            96.0,
+        );
+        let pulse =
+            LocalSnowPulse::anchored(HorizontalTopology::UNBOUNDED, 10.0, 20.0, UnitU16::FULL);
+        let cold_ground = appearance(
+            late_winter,
+            response(
+                SeasonalSurfaceFamily::NaturalGround,
+                true,
+                SeasonalTemperatureClass::Cold,
+                SeasonalMoistureClass::Moist,
+            ),
+            Some(pulse),
+            10.0,
+            20.0,
+            HorizontalTopology::UNBOUNDED,
+        );
+        let canopy = appearance(
+            late_winter,
+            response(
+                SeasonalSurfaceFamily::EvergreenFoliage,
+                true,
+                SeasonalTemperatureClass::Cool,
+                SeasonalMoistureClass::Moist,
+            ),
+            Some(pulse),
+            10.0,
+            20.0,
+            HorizontalTopology::UNBOUNDED,
+        );
+        let side = appearance(
+            late_winter,
+            response(
+                SeasonalSurfaceFamily::EvergreenFoliage,
+                false,
+                SeasonalTemperatureClass::Cool,
+                SeasonalMoistureClass::Moist,
+            ),
+            Some(pulse),
+            10.0,
+            20.0,
+            HorizontalTopology::UNBOUNDED,
+        );
+        let warm_ground = appearance(
+            late_winter,
+            response(
+                SeasonalSurfaceFamily::NaturalGround,
+                true,
+                SeasonalTemperatureClass::Warm,
+                SeasonalMoistureClass::Wet,
+            ),
+            Some(pulse),
+            10.0,
+            20.0,
+            HorizontalTopology::UNBOUNDED,
+        );
+        assert!(cold_ground.recent_snow > canopy.recent_snow);
+        assert!(canopy.recent_snow > 0.0);
+        assert_eq!(side.total_snow, 0.0);
+        assert!(warm_ground.recent_snow < cold_ground.recent_snow * 0.1);
+    }
+
+    #[test]
+    fn preview_disabled_is_an_exact_neutral_surface_output() {
+        let evaluated = local(45.0, OrbitalPhase::SOUTHERN_SOLSTICE, -0.5, 0.8, 120.0);
+        let pulse =
+            LocalSnowPulse::anchored(HorizontalTopology::UNBOUNDED, 0.0, 0.0, UnitU16::FULL);
+        assert_eq!(
+            evaluate_surface_appearance(SeasonalSurfaceInput {
+                preview_enabled: false,
+                local_season: evaluated,
+                response: response(
+                    SeasonalSurfaceFamily::DeciduousFoliage,
+                    true,
+                    SeasonalTemperatureClass::Cold,
+                    SeasonalMoistureClass::Wet,
+                ),
+                topology: HorizontalTopology::UNBOUNDED,
+                world_x: 0.0,
+                world_z: 0.0,
+                recent_snow: Some(pulse),
+            }),
+            SeasonalSurfaceAppearance::NEUTRAL
+        );
     }
 
     #[test]
