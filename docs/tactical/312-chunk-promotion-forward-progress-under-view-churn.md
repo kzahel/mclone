@@ -1,7 +1,8 @@
 # Tactical 312: Chunk Promotion Forward Progress Under View Churn
 
-Status: in progress 2026-08-16; Slices 0-3 implementation and native/headed-
-Web convergence gates complete; physical Android and memory closeout pending
+Status: complete 2026-08-16; restartable initial-Light ownership, shared
+repair, native/Web convergence gates, bounded-memory closeout, and physical
+Android acceptance complete
 
 Topic: `chunk-lighting-admission-and-backpressure`
 
@@ -407,8 +408,93 @@ and
 Cancelled chunks that remain dependency-resident may retain a tiny dormant
 restart record (seven records / 336 bytes in that route). They are not required
 deferred jobs, do not contribute to pending work or scheduled-without-context
-counts, and remain bounded by holder eviction. Slice 4 must confirm that bound
+counts, and remain bounded by holder eviction. Slice 4 confirms that bound
 under the existing movement soak and physical Android route.
+
+## Slice 4 Execution Evidence
+
+The exact product and acceptance series is:
+
+```text
+b94a1c12 Add deterministic promotion churn repro
+e9087ab2 Retain restartable chunk lighting context
+7dd51263 Repair stalled chunk lighting promotions
+8fa1b293 Gate chunk promotion convergence across Web
+337a6964 Bound restart metadata under view churn
+6c4f6f1f Run cardinal convergence on physical Chrome
+```
+
+The ordinary zero-delay cardinal probe ran in physical Chrome
+`151.0.7922.137` on a Pixel 7a. It created a fresh persistent IndexedDB world,
+changed the native Graphics render-distance control from 3 to 8, selected Fly,
+then exercised the production movement path north, west, upward, north again,
+and back across recently cancelled chunk boundaries. The accepted centers
+were `(-12, -12)`, `(-12, -9)`, `(-15, -9)`, `(-15, -6)`, and finally
+`(-15, -8)`; the climb reached approximately Y=215.
+
+The harness delivered movement through browser input events over the physical
+device's DevTools connection rather than ADB coordinate swipes. This does not
+bypass scene input, authoritative movement, view reconciliation, worldgen,
+Light, publication, meshing, or rendering. It deliberately keeps touch hit-
+testing outside a scheduler-liveness acceptance lane while still running the
+complete product topology on the phone.
+
+After the route stopped, the phone converged in 35.53 seconds and then held a
+60.05-second stability window:
+
+```text
+requested / server-ready chunks:                 361 / 361
+exact ready / expected columns:                  289 / 289
+promotion queued / active:                         0 / 0
+Light deferred / demand / restart contexts:        0 / 0 / 0
+restart-context bytes / scheduled without owner:   0 / 0
+jobs / publications:                               0 / 0
+worldgen / Light mailbox:                           0 / 0
+delivery / compile / target-render work:            0 / 0 / 0
+snapshot queued / drained / emitted / applied: 400 / 400 / 400 / 400
+unload queued / drained / emitted / applied:    209 / 209 / 209 / 209
+```
+
+The loaded-set hash `a3f099e2970273f8`, coverage, snapshot count, and unload
+count remained unchanged throughout the stability window. There were no page
+errors. Worldgen completed all 54 request frames and Light completed all 76;
+both reported shared-memory transport with zero final mailbox ownership. The
+integrated-server and render Workers each remained on their original
+generation and both shut down with zero active instances.
+
+The structured receipt and inspected physical capture are
+[`/tmp/mclone-physical-android-cardinal.json`](/tmp/mclone-physical-android-cardinal.json)
+and
+[`/tmp/mclone-physical-android-cardinal-canvas.png`](/tmp/mclone-physical-android-cardinal-canvas.png).
+The capture shows continuous exact terrain around the elevated camera with no
+missing columns.
+
+The same ordinary headed desktop-Chrome route converged in 30.29 seconds and
+held its exact hashes for another 60.00 seconds. The synthetic delayed-
+admission browser route converged in 10.99 seconds and also held for 60.01
+seconds. Both finished with complete 361/361 server and 289/289 exact coverage,
+zero ownership/delivery queues, no page errors, and clean Worker shutdown.
+
+Bounded-memory closeout used two deterministic seeds over the established
+24-step movement soak. The holder set remained flat at 961, retained Light
+state grew only from 81 to 180 chunks (approximately 22 MiB), plateaued by
+step 11/12, and had zero second-half or tail growth. Restart-context count and
+bytes were zero at every settled sample. A separate 24-jump delayed-admission
+churn gate kept active promotions at or below four, bounded restart metadata by
+resident holders during churn, and released the final context count and bytes
+to zero.
+
+The final closeout passes all 751 `mclone-server` tests, all 305
+`mclone-app-runtime` tests, the WASM target check, Web typecheck and scene-host
+adoption gate, native scheduler and movement smokes, native delayed-promotion
+convergence, headed-Web delayed-promotion convergence, and the ordinary headed
+desktop/physical-Android cardinal routes. The host's headed WebGPU probe also
+produced valid inspected pixels.
+
+This closes the incident without raising the four-promotion limit, widening a
+Light or memory ceiling, retaining obsolete executable work, adding a Web-only
+retry, or weakening revision checks. Worker loss and physical reconstruction
+remain the independent scope of Tactical 311.
 
 ## Why Existing Tests Passed
 
@@ -669,26 +755,21 @@ fresh-token, stale-result, publication, and final-ready transitions.
 Add a regression lane to the normal Web smoke suite and a fast shared test to
 the default server suite. Do not rely only on a long optional soak.
 
-### Slice 4: Physical closeout and living-doc correction
+### Slice 4: Physical closeout and living-doc correction (complete)
 
-Build and deploy the exact candidate revision, repeat the real title-screen
-and Graphics-setting flow on the Pixel, inspect the physical screenshot, and
-record:
+The candidate ran in physical Pixel Chrome with a fresh persistent world and
+the real Graphics render-distance control. The command-driven route exercised
+the complete production movement and streaming path while keeping touch hit-
+testing out of the scheduler acceptance boundary. The receipt records browser
+version, centers, coverage, promotion state, Worker frames and mailboxes,
+snapshot/unload conservation, convergence time, and a 60-second stable window.
 
-- deployed revision and browser version;
-- actual touch-driven route and final center;
-- requested, server-ready, client, and exact coverage;
-- promotion states and oldest ages;
-- Worker request/response and mailbox counts;
-- snapshot/unload conservation chains;
-- time to convergence; and
-- a stationary 60-second stability window.
-
-Repeat a long bounded-memory movement lane on native/Quest or the current
-accepted low-memory target before closure. Update
+The established bounded-memory movement lane and an additional rapid-churn
+lane both pass. The living contract in
 [`../topics/chunk-lighting-admission-and-backpressure.md`](../topics/chunk-lighting-admission-and-backpressure.md)
-with the final lifecycle and evidence. Update Tactical 311 only where its
-Worker-recovery integration consumes the new scheduler outcomes.
+now records the final lifecycle and evidence. Tactical 311 remains unchanged
+because its Worker-loss/reconstruction scope consumes, but does not alter, the
+new scheduler outcomes.
 
 ## Acceptance Matrix
 
@@ -788,7 +869,7 @@ series:
 4. add normalized native/Web churn traces and smoke gates; and
 5. record physical Android and bounded-memory closeout evidence.
 
-Do not mark this tactical complete because one clean new world loads. Closure
-requires the exact cancellation/re-entry tests, the non-quiescing route, native
-and Web semantic agreement, physical Android convergence, and preservation of
-the accepted sustained-movement memory ceiling.
+Closure is based on the exact cancellation/re-entry tests, the non-quiescing
+route, native and Web semantic agreement, physical Android convergence, and
+preservation of the accepted sustained-movement memory ceiling. One clean new
+world by itself was never used as acceptance evidence.

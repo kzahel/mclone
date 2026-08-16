@@ -2,8 +2,8 @@
 
 Topic: `chunk-lighting-admission-and-backpressure`
 
-Status: bounded-memory contract implemented and physically accepted
-2026-07-28; forward-progress incident reopened 2026-08-16 by Tactical
+Status: bounded-memory and forward-progress contracts implemented and
+physically accepted; the 2026-08-16 incident is closed by Tactical
 [`312`](../tactical/312-chunk-promotion-forward-progress-under-view-churn.md).
 Tactical [`279`](../tactical/279-chunk-lighting-admission-and-backpressure.md)
 records the original execution, the post-closeout Quest frame-time
@@ -93,9 +93,18 @@ reaches exact coverage after 30 seconds.
 Obsolete cancellation retains context as dormant holder metadata, not required
 deferred work. Re-entry makes it eligible and queues a fresh token; dependency-
 resident dormant records do not inflate pending/deferred/orphan counts and are
-released with holder eviction. The next slice re-runs the established bounded-
-memory soak and the physical phone route without weakening the four-promotion
-or Light-memory bounds.
+released with holder eviction.
+
+Tactical 312 Slice 4 closes the incident on physical Android Chrome. The RD8
+north/west/climb/north/reverse route converged in 35.53 seconds to 361/361
+server-ready chunks and 289/289 exact columns, then held identical hashes and
+fully drained scheduler, delivery, compile, and mailbox ownership for 60.05
+seconds. The desktop route converged in 30.29 seconds and held for 60.00
+seconds. The established two-seed, 24-step soak kept 961 holders, plateaued at
+180 retained Light chunks (approximately 22 MiB), and reported zero restart
+contexts at every settled sample. A second rapid 24-jump churn test kept no
+more than four active promotions, bounded restart records by resident holders,
+and released them all at final settlement.
 
 This incident is separate from Tactical
 [`311`](../tactical/311-cross-platform-worker-liveness-and-replay.md): Worker
@@ -113,6 +122,14 @@ plus explicit Mclone memory ceilings:
   distance, while departed demand cancels before expensive materialization;
 - every Light request has a generation/revision token and temporary Light
   ticket, and only the exact current token may publish;
+- each Features revision scheduled for initial Light retains one minimal,
+  revision-keyed restart record through demand or mailbox cancellation;
+- every ordinary poll classifies required Light holders by their concrete
+  prerequisite, deferred, demand, mailbox, publication, or ready owner and
+  repairs ownerless scheduled/token states through the same shared path;
+- matching Light publication consumes restart metadata exactly once, while
+  holder unload or deliberate lighting disable releases it; dormant dependency-
+  resident records remain holder-bounded and do not count as executable work;
 - overlapping Light targets share one immutable raw-block input per unique
   source chunk during both batch construction and worker materialization;
 - the Light mailbox admits at most 18 statuses and 64 MiB across request,
