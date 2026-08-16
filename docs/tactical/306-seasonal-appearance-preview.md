@@ -449,7 +449,7 @@ exact. That cost must still be measured and justified.
 
 ### Slice 0: Baseline, data-path audit, and failing visual fixtures
 
-Status: planned.
+Status: complete 2026-08-16 at pre-implementation revision `ca064e883607`.
 
 - Capture one fixed temperate exact-only scene with the preview disabled
   under frozen noon light and save it under `/tmp`.
@@ -469,6 +469,44 @@ Status: planned.
 Gate: the execution record contains inspected preview-disabled pixels, pinned
 regional fixtures, the complete affected shader list, and a measured
 data-layout choice. No production seasonal effect lands before this gate.
+
+Execution record:
+
+- The inspected `960x600` exact-only, frozen-noon, preview-off baseline is
+  `/tmp/mclone-seasonal-appearance-baseline-71fb5110/temperate-preview-off.png`
+  with SHA-256
+  `e8ec8e4a7e259293e339114a1564357eda0a0701515a0e50f39454308670caa4`.
+  It drew 84 of 148 resident sections and retained the expected textured
+  terrain, trees, flowers, actors, fog, and sky.
+- Seed `12345` fixtures are pinned from the generated worldgen receipt at
+  `/tmp/mclone-seasonal-appearance-baseline-71fb5110/worldgen/`:
+  warm/dry lowland `(8, 68, 8)`, temperate woodland `(1032, 89, 1032)`,
+  cool/wet conifer `(-632, 88, 136)`, and cold/high alpine
+  `(-1720, 141, -776)`. Pure-model tests retain an additional warm/wet input
+  because the bounded map's useful exact warm site is dry.
+- The complete exact shader surface is `chunk_textured.wgsl`,
+  `chunk_textured_multiview.wgsl`, `chunk_textured_placed.wgsl`,
+  `chunk_textured_placed_multiview.wgsl`, and their generated clipped-placed
+  forms, plus `grass.wgsl`, `grass_multiview.wgsl`, `grass_placed.wgsl`,
+  `grass_placed_multiview.wgsl`, and their generated clipped forms.
+- The RD3 CPU mesh baseline built 1,296 sections / 521 non-empty sections,
+  1,671,148 vertices, 2,506,722 indices, and 417,787 faces in `571.345ms` in
+  the debug optimized profile. At the existing 40-byte exact vertex stride,
+  those vertices occupy `66,845,920` payload bytes; indices occupy
+  `10,026,888` bytes. The run is recorded in
+  `/tmp/mclone-seasonal-appearance-baseline-71fb5110/mesh-cpu.txt`.
+- Physical Quest was not attached during this preflight. The latest accepted
+  stationary RD5 exact-only reference remains Tactical 277's Quest 3
+  `2.330ms` / `2.267ms` Meta app-GPU A/repeat at revision `770ebe89`.
+  Current-revision physical A/B remains required in Slice 4.
+- `TexturedChunkVertex::packed_light` is 40 bytes total and decodes only bits
+  4..7 and 20..23 for block and sky light. Select its currently zero high byte
+  for a compact seasonal key: three surface-family bits, one upward/exposed
+  bit, two temperature-class bits, and two moisture-class bits. This adds zero
+  CPU, GPU, or Worker-transfer bytes. `GrassPatch` retains its existing
+  32-byte ABI and uses its explicit reserved word for the same key. Adding a
+  new vertex word would cost `6,684,592` bytes (`10%`) in the measured corpus,
+  so the zero-growth encoding is strictly preferable.
 
 ### Slice 1: Pure seasonal appearance model
 
