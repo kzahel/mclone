@@ -196,7 +196,7 @@ impl EvaluatedLocalSeason {
         let label = if response_strength < 0.2 {
             LocalSeasonLabel::WeakThermalCycle
         } else {
-            match ((local_phase * 4.0 + 0.5).floor() as u8) % 4 {
+            match (local_phase * 4.0).floor() as u8 % 4 {
                 0 => LocalSeasonLabel::Spring,
                 1 => LocalSeasonLabel::Summer,
                 2 => LocalSeasonLabel::Autumn,
@@ -1257,6 +1257,32 @@ mod tests {
             assert_eq!(local(45.0, phase, 0.1, 0.65, 70.0).label, north);
             assert_eq!(local(-45.0, phase, 0.1, 0.65, 70.0).label, south);
         }
+    }
+
+    #[test]
+    fn documented_late_winter_dates_remain_in_local_winter() {
+        assert_eq!(
+            local(
+                45.0,
+                OrbitalPhase::from_steps_wrapped(8_750),
+                0.1,
+                0.65,
+                70.0,
+            )
+            .label,
+            LocalSeasonLabel::Winter,
+        );
+        assert_eq!(
+            local(
+                -45.0,
+                OrbitalPhase::from_steps_wrapped(3_750),
+                0.1,
+                0.65,
+                70.0,
+            )
+            .label,
+            LocalSeasonLabel::Winter,
+        );
     }
 
     #[test]
