@@ -182,9 +182,10 @@ illumination on 2026-08-16. Human Review 2 found the Phase 2 appearance
 transition substantially improved but rejected a blue exposed-sky crack where
 the rounded spacing-one voxel edge fails to terminate on the continuous
 spacing-two parent profile. Human Review then rejected the endpoint-matched
-correction because its outward cardinal winding remains back-face culled from
-the camera-inside view. An inward-winding correction is in progress; Phase 3
-remains blocked.
+correction because its outward cardinal winding remained back-face culled from
+the camera-inside view. The inward-winding correction and expanded steep-seam
+packet are implemented and awaiting renewed Human Review 2; Phase 3 remains
+blocked.
 The exact renderer's full-sky/zero-block-light RGB now applies once to every
 procedural terrain level, sampled and analytic water, and proxy tree after
 albedo and geometric shade composition. A fixed 32-image, two-seed native
@@ -215,11 +216,15 @@ contract changed. Commit `d2e81187` keeps those constraints: the reserved outer
 voxel cardinal face now spans to the actual stitched parent profile at both
 segment endpoints, without horizontal overlap, a second geometry owner, or a
 crossfade. The strict replacement packet and headed traversal passed, but a
-later steep-snow interactive view exposed that the connector is culled from
+later steep-snow interactive view exposed that the connector was culled from
 the only side the camera-centered fine clipmap normally observes. That Human
-Review evidence overrides the packet's false acceptance. Reverse only the
-outer connector's horizontal endpoint order; retain a bounded two-sided
-connector or dedicated zipper ring only as fallback work.
+Review evidence overrides the packet's false acceptance. Commit `fcc0edfe`
+reverses only the outer connector's horizontal endpoint order, while commit
+`4079d5ba` adds matched natural/topology captures from all four cardinal
+directions at the steep site. The 56-image packet and clean moving-camera
+receipt pass; inspected pixels close the large sky wedge. Retain a bounded
+two-sided connector or dedicated zipper ring only as fallback work if Human
+Review rejects the resulting material wall.
 Post-review Explorer evidence then showed that Slice 3B's viewer-forward
 anchor was useful for foreground diagnosis but confusing as the product
 default: it moves exact residency when yaw changes and can place exact terrain

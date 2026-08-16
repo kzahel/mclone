@@ -1,9 +1,8 @@
 # Tactical 309: Procedural Horizon Lighting and Seam Convergence
 
 Status: Phase 0 and Phase 1 accepted; Human Review 2 rejected two Phase 2
-attempts, most recently because the endpoint-matched voxel-to-smooth connector
-is back-face culled from the camera-inside view. A winding correction is in
-progress.
+attempts. The inward-winding correction and expanded steep-seam packet are
+implemented and awaiting renewed Human Review 2.
 
 Topic: `procedural-horizon-clipmap`
 
@@ -450,7 +449,8 @@ Accepted by the user on 2026-08-16.
 ## Phase 2: Voxel-to-Smooth Procedural Convergence
 
 Status: Human Review 2 rejected the first implementation and its first crack
-correction; an inward-facing connector correction is in progress.
+correction; the inward-facing connector is implemented and awaiting renewed
+Human Review 2.
 
 - Reconcile top-face and slope-derived geometric shade over a stable bounded
   transition without blending geometry owners.
@@ -683,13 +683,76 @@ all four cardinal directions, plus the existing gentle coast, water, corner,
 rebase, and motion cases. Human Review 2 remains rejected; Phase 3 stays
 blocked.
 
+### Inward-winding correction execution record
+
+Commit `fcc0edfe` reverses the horizontal endpoint order only when an outer
+voxel face is the parent-profile connector. Its lower and upper endpoint
+heights, parent sampling, vertical ownership plane, material, and lighting stay
+unchanged. The resulting counter-clockwise front face points into the
+camera-centered finest ring. Ordinary voxel risers retain outward cardinal
+winding, the exact-frontier curtain is untouched, and global terrain back-face
+culling remains enabled.
+
+Commit `4079d5ba` makes the missed failure shape mandatory evidence. Phase 2
+now adds matched natural and topology captures looking north, east, south, and
+west from inside the finest ring at the steep snow site. The four directions
+share the same seed, chunk interest, eye, time, asset pack, and render settings;
+only the target direction and diagnostic vary.
+
+The replacement command was:
+
+```bash
+pnpm native:terrain-seam-review:capture -- \
+  --output /tmp/mclone-terrain-seam-review-hr2-inward \
+  --review-phase 2 \
+  --settle-frames 300 \
+  --skip-build
+```
+
+The schema-one receipt is
+`/tmp/mclone-terrain-seam-review-hr2-inward/receipt.json` and records revision
+`4079d5ba`. All 56 1280-by-720 captures passed on their first attempt. Every
+composed capture has 25 exact columns, 160 ready clipmap slots, target-ready
+terrain, and drained failure-free vegetation; Exact Only reports no horizon
+allocation.
+
+The eight new steep natural/topology images and the retained natural,
+diagnostic, term, and stability sets were inspected at full resolution. The
+north view places a tall smooth snow wall directly beyond the blocky terrain,
+matching the profile relationship that exposed the prior large wedge. Its
+vertical span is now closed, and none of the four directions exposes a stable
+light-blue sky crack or horizontal collar. On this extreme disagreement the
+connector can read as a material wall; that is the explicit remaining Human
+Review tradeoff rather than a hidden opening.
+
+A clean headed traversal moved the low camera from X8 to X76 at four blocks per
+second over 17 seconds, crossing the spacing-one tile boundary. All 2,037
+frames presented. The final interest center was chunk X4 with 49/49 target
+chunks ready and zero pending jobs, publications, unloads, or render compile
+jobs. Terrain GPU duration was 0.145 ms median, 0.206 ms P95, and 0.989 ms P99.
+The clean report is
+`/tmp/mclone-terrain-seam-phase2-inward-traversal-final.json` and records
+revision `4079d5ba` with a clean worktree.
+
+Automated evidence passes:
+
+- `cargo test --manifest-path native/Cargo.toml -p mclone-terrain-view --lib`
+  (`100` passed, `1` GPU-only test ignored), including generated mono and
+  multiview WGSL validation plus the inward parent-connector contract;
+- `cargo build --manifest-path native/Cargo.toml -p mclone-native-client
+  --bin mclone-native-client`;
+- `node --check scripts/capture-terrain-seam-review.mjs`;
+- the strict 56-capture readiness, PNG, vegetation, group-identity, and steep
+  cardinal gates; and
+- the clean 17-second headed traversal above.
+
 Gate — Human Review 2: the procedural topology becomes smoother with distance
 without exposed sky or a stable square/annulus in land color, water tint,
 lighting, texture contrast, or vegetation brightness.
 
 ## Phase 3: Exact-to-Voxel Frontier Convergence
 
-Status: blocked on renewed Human Review 2 after the inward-winding correction.
+Status: blocked on renewed Human Review 2.
 
 - Compare controlled exact and voxel faces under equal atlas, biome, fog-off,
   transfer, full-sky, zero-block-light, and unoccluded inputs.

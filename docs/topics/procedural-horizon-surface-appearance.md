@@ -35,8 +35,8 @@ found the Phase 2 lighting, material, water, and vegetation transition
 substantially improved but rejected an exposed-sky crack at the
 voxel-to-smooth geometric boundary. Human Review then rejected the first
 endpoint-matched correction because its outer cardinal face remained
-back-face culled from the camera-inside view. An inward-winding correction is
-in progress.
+back-face culled from the camera-inside view. The inward-winding correction is
+implemented and awaiting renewed Human Review 2.
 
 Every procedural land level, sampled and analytic water, and proxy tree now
 consumes the exact renderer's full-sky/zero-block-light environmental RGB once
@@ -61,9 +61,12 @@ It preserves one horizontal owner and adds neither overlapping terrain nor a
 geometry crossfade. The first replacement packet missed a steep grazing-angle
 case: endpoint heights agreed, but outward-facing connector triangles were
 culled while the camera viewed the clipmap boundary from inside. The correction
-must reverse only that outer connector's winding. A bounded two-sided connector
-or zipper ring remains fallback work if the inward-facing version fails Human
-Review.
+now reverses only that outer connector's winding. A strict 56-image packet adds
+natural and topology views across the steep snow site in all four cardinal
+directions. Inspected pixels close the large blue wedge without a horizontal
+collar; the resulting material wall on extreme height disagreement remains a
+Human Review tradeoff. A bounded two-sided connector or zipper ring remains
+fallback work if the inward-facing version fails that review.
 Procedural local occlusion remains identity-white, so it may matter at the
 later exact/model-AO frontier but cannot explain the resolved global night
 failure. Seasonal solar-path policy and independent water geometry remain
