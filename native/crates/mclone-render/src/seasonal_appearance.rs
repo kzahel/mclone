@@ -94,4 +94,12 @@ mod tests {
         assert!(source.contains("return vec4<f32>(base_color, 1.0);"));
         assert!(source.contains("let response_key = packed_response & 255u;"));
     }
+
+    #[test]
+    fn seasonal_shader_module_parses_with_coherent_snow_and_autumn_dormancy() {
+        let source = inject_seasonal_appearance_wgsl(WGSL_MARKER);
+        naga::front::wgsl::parse_str(&source).expect("seasonal appearance WGSL parses");
+        assert!(source.contains("mclone_seasonal_value_noise"));
+        assert!(source.contains("let autumn_dormancy"));
+    }
 }

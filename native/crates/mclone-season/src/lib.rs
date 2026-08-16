@@ -532,7 +532,16 @@ pub fn evaluate_surface_appearance(input: SeasonalSurfaceInput) -> SeasonalSurfa
     });
     let total_snow = (seasonal_snow + recent_snow).clamp(0.0, 1.0);
     let dormancy = match input.response.family {
-        SeasonalSurfaceFamily::Grass => weights[3] * regional_strength * 0.28,
+        SeasonalSurfaceFamily::Grass => {
+            let temperature = input.response.temperature.representative();
+            let temperate_fit = (smoothstep(-0.65, -0.15, f64::from(temperature))
+                * (1.0 - smoothstep(0.55, 0.85, f64::from(temperature))))
+                as f32;
+            let autumn_dormancy =
+                weights[2] * regional_strength * temperate_fit * (0.76 - moisture * 0.36);
+            let winter_dormancy = weights[3] * regional_strength * 0.28;
+            autumn_dormancy + winter_dormancy
+        }
         _ => 0.0,
     };
     let snow_suppression = match input.response.family {
@@ -562,7 +571,7 @@ fn seasonal_tint_targets(family: SeasonalSurfaceFamily, moisture: f32) -> [[f32;
         SeasonalSurfaceFamily::Grass => [
             mix_color([0.98, 1.01, 0.96], [0.88, 1.12, 0.84], moisture),
             [1.0, 1.0, 1.0],
-            mix_color([1.08, 0.78, 0.50], [1.03, 0.88, 0.66], moisture),
+            mix_color([1.22, 0.60, 0.26], [1.05, 0.86, 0.58], moisture),
             [0.72, 0.76, 0.68],
         ],
         SeasonalSurfaceFamily::DeciduousFoliage => [
@@ -1492,6 +1501,56 @@ mod tests {
             }
             assert!((before.total_snow - after.total_snow).abs() < 0.002);
         }
+    }
+
+    #[test]
+    fn temperate_dry_autumn_browns_and_dorms_grass_more_than_wet_or_warm_regions() {
+        let phase = OrbitalPhase::SOUTHWARD_EQUINOX;
+        let mild_dry = appearance(
+            local(45.0, phase, 0.25, 0.30, 70.0),
+            response(
+                SeasonalSurfaceFamily::Grass,
+                true,
+                SeasonalTemperatureClass::Mild,
+                SeasonalMoistureClass::Dry,
+            ),
+            None,
+            0.0,
+            0.0,
+            HorizontalTopology::UNBOUNDED,
+        );
+        let mild_wet = appearance(
+            local(45.0, phase, 0.25, 0.95, 70.0),
+            response(
+                SeasonalSurfaceFamily::Grass,
+                true,
+                SeasonalTemperatureClass::Mild,
+                SeasonalMoistureClass::Wet,
+            ),
+            None,
+            0.0,
+            0.0,
+            HorizontalTopology::UNBOUNDED,
+        );
+        let warm_dry = appearance(
+            local(45.0, phase, 0.75, 0.30, 70.0),
+            response(
+                SeasonalSurfaceFamily::Grass,
+                true,
+                SeasonalTemperatureClass::Warm,
+                SeasonalMoistureClass::Dry,
+            ),
+            None,
+            0.0,
+            0.0,
+            HorizontalTopology::UNBOUNDED,
+        );
+
+        assert!(mild_dry.tint[0] > mild_dry.tint[1]);
+        assert!(mild_dry.tint[1] < mild_wet.tint[1]);
+        assert!(mild_dry.vegetation_visibility < 0.45);
+        assert!(mild_wet.vegetation_visibility > mild_dry.vegetation_visibility);
+        assert!(warm_dry.vegetation_visibility > mild_dry.vegetation_visibility);
     }
 
     #[test]
