@@ -7,9 +7,9 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use image::{Rgb, RgbImage};
 use mclone_season::{
-    MCLONE_AXIAL_TILT_DEGREES, MCLONE_PLANE_LATITUDE_PHASE_ORIGIN_Z,
-    MCLONE_PLANE_LATITUDE_WAVELENGTH_BLOCKS, OrbitalPhase, SolarCoordinatePolicy, SolarInput,
-    SolarSample,
+    MCLONE_AXIAL_TILT_DEGREES, MCLONE_CYLINDER_LATITUDE_SCALE_BLOCKS,
+    MCLONE_PLANE_LATITUDE_PHASE_ORIGIN_Z, MCLONE_PLANE_LATITUDE_WAVELENGTH_BLOCKS, OrbitalPhase,
+    SolarCoordinatePolicy, SolarInput, SolarSample,
 };
 use mclone_worldgen::levelgen::{McloneOverworldSampler, McloneOverworldTerrainSample};
 use serde::Serialize;
@@ -22,6 +22,8 @@ const CONNECTED_GRID: usize = 256;
 const CONNECTED_STEP_BLOCKS: i32 = 128;
 const CANDIDATE_WAVELENGTHS: [f64; 3] = [49_152.0, 98_304.0, 196_608.0];
 const METRIC_SEEDS: [i64; 4] = [0, 12_345, 67_890, -98_765];
+const EARTHLIKE_AXIAL_TILT_DEGREES: f64 = 23.44;
+const CYLINDER_PERIOD_BLOCKS: f64 = 384.0 * 16.0;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -34,6 +36,10 @@ struct ReviewReceipt {
     accepted_wavelength_blocks: f64,
     phase_origin_z: f64,
     axial_tilt_degrees: f64,
+    tilt_comparison_image: &'static str,
+    tilt_candidates: Vec<TiltCandidateReceipt>,
+    cylinder_map_image: &'static str,
+    cylinder_cases: Vec<SolarCaseReceipt>,
     candidates: Vec<CandidateReceipt>,
     continent_metrics: Vec<ContinentMetric>,
     solar_cases: Vec<SolarCaseReceipt>,
@@ -47,6 +53,16 @@ struct CandidateReceipt {
     status: &'static str,
     rationale: &'static str,
     image: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TiltCandidateReceipt {
+    axial_tilt_degrees: f64,
+    status: &'static str,
+    rationale: &'static str,
+    north_75_summer_midnight_elevation_degrees: f32,
+    north_75_winter_noon_elevation_degrees: f32,
 }
 
 #[derive(Serialize)]
@@ -65,10 +81,12 @@ struct ContinentMetric {
 #[serde(rename_all = "camelCase")]
 struct SolarCaseReceipt {
     id: &'static str,
+    coordinate_policy: &'static str,
+    topology: &'static str,
     world_x: f64,
     world_z: f64,
     latitude_degrees: f64,
-    latitude_phase: f64,
+    latitude_phase: Option<f64>,
     orbital_phase: f64,
     solar_time_hours: f64,
     axial_tilt_degrees: f64,
@@ -121,6 +139,8 @@ fn main() -> Result<()> {
             image: filename,
         });
     }
+    write_tilt_comparison(&output.join("axial-tilt-comparison.png"))?;
+    write_cylinder_map(&output.join("cylinder-latitude-secondary.png"))?;
 
     let receipt = ReviewReceipt {
         schema_version: 1,
@@ -141,6 +161,10 @@ fn main() -> Result<()> {
         accepted_wavelength_blocks: MCLONE_PLANE_LATITUDE_WAVELENGTH_BLOCKS,
         phase_origin_z: MCLONE_PLANE_LATITUDE_PHASE_ORIGIN_Z,
         axial_tilt_degrees: MCLONE_AXIAL_TILT_DEGREES,
+        tilt_comparison_image: "axial-tilt-comparison.png",
+        tilt_candidates: tilt_candidates()?,
+        cylinder_map_image: "cylinder-latitude-secondary.png",
+        cylinder_cases: cylinder_cases()?,
         candidates,
         continent_metrics: METRIC_SEEDS.into_iter().map(measure_continents).collect(),
         solar_cases: solar_cases()?,
@@ -304,6 +328,157 @@ fn draw_latitude_guides(image: &mut RgbImage, policy: SolarCoordinatePolicy) -> 
     Ok(())
 }
 
+fn write_tilt_comparison(path: &Path) -> Result<()> {
+    const WIDTH: u32 = 960;
+    const HEIGHT: u32 = 420;
+    const PANEL_WIDTH: u32 = WIDTH / 2;
+    let mut image = RgbImage::from_pixel(WIDTH, HEIGHT, Rgb([18, 24, 32]));
+    let curves = [
+        (45.0, 0.25, Rgb([255, 142, 48])),
+        (45.0, 0.75, Rgb([68, 132, 255])),
+        (75.0, 0.25, Rgb([255, 236, 88])),
+        (75.0, 0.75, Rgb([72, 224, 236])),
+    ];
+    for (panel, tilt) in [EARTHLIKE_AXIAL_TILT_DEGREES, MCLONE_AXIAL_TILT_DEGREES]
+        .into_iter()
+        .enumerate()
+    {
+        let x_offset = panel as u32 * PANEL_WIDTH;
+        for hour in [0_u32, 6, 12, 18, 24] {
+            let x = x_offset + hour * (PANEL_WIDTH - 1) / 24;
+            draw_line(&mut image, x, 0, x, HEIGHT - 1, Rgb([45, 55, 68]));
+        }
+        let horizon_y = elevation_y(0.0, HEIGHT);
+        draw_line(
+            &mut image,
+            x_offset,
+            horizon_y,
+            x_offset + PANEL_WIDTH - 1,
+            horizon_y,
+            Rgb([185, 190, 198]),
+        );
+        for (latitude, phase, color) in curves {
+            let mut previous = None;
+            for local_x in 0..PANEL_WIDTH {
+                let hour = f64::from(local_x) / f64::from(PANEL_WIDTH - 1) * 24.0;
+                let sample = solar_for_tilt(latitude, phase, hour, tilt)?;
+                let point = (
+                    x_offset + local_x,
+                    elevation_y(f64::from(sample.elevation_degrees), HEIGHT),
+                );
+                if let Some((previous_x, previous_y)) = previous {
+                    draw_line(&mut image, previous_x, previous_y, point.0, point.1, color);
+                }
+                previous = Some(point);
+            }
+        }
+    }
+    image
+        .save(path)
+        .with_context(|| format!("save {}", path.display()))
+}
+
+fn elevation_y(elevation_degrees: f64, height: u32) -> u32 {
+    (((90.0 - elevation_degrees.clamp(-90.0, 90.0)) / 180.0) * f64::from(height - 1)).round() as u32
+}
+
+fn draw_line(image: &mut RgbImage, x0: u32, y0: u32, x1: u32, y1: u32, color: Rgb<u8>) {
+    let mut x0 = i64::from(x0);
+    let mut y0 = i64::from(y0);
+    let x1 = i64::from(x1);
+    let y1 = i64::from(y1);
+    let dx = (x1 - x0).abs();
+    let step_x = if x0 < x1 { 1 } else { -1 };
+    let dy = -(y1 - y0).abs();
+    let step_y = if y0 < y1 { 1 } else { -1 };
+    let mut error = dx + dy;
+    loop {
+        if x0 >= 0 && y0 >= 0 && x0 < i64::from(image.width()) && y0 < i64::from(image.height()) {
+            image.put_pixel(x0 as u32, y0 as u32, color);
+        }
+        if x0 == x1 && y0 == y1 {
+            break;
+        }
+        let doubled = error * 2;
+        if doubled >= dy {
+            error += dy;
+            x0 += step_x;
+        }
+        if doubled <= dx {
+            error += dx;
+            y0 += step_y;
+        }
+    }
+}
+
+fn write_cylinder_map(path: &Path) -> Result<()> {
+    const WIDTH: u32 = 960;
+    const HEIGHT: u32 = 320;
+    let mut image = RgbImage::new(WIDTH, HEIGHT);
+    for y in 0..HEIGHT {
+        let world_z = MCLONE_CYLINDER_LATITUDE_SCALE_BLOCKS * 3.0
+            - f64::from(y) / f64::from(HEIGHT - 1) * MCLONE_CYLINDER_LATITUDE_SCALE_BLOCKS * 6.0;
+        let latitude = SolarCoordinatePolicy::MCLONE_CYLINDER
+            .latitude_at(0.0, world_z)?
+            .degrees;
+        for x in 0..WIDTH {
+            image.put_pixel(x, y, latitude_color(latitude));
+        }
+    }
+    for seam in [0, WIDTH / 2, WIDTH - 1] {
+        draw_line(&mut image, seam, 0, seam, HEIGHT - 1, Rgb([20, 20, 20]));
+    }
+    image
+        .save(path)
+        .with_context(|| format!("save {}", path.display()))
+}
+
+fn tilt_candidates() -> Result<Vec<TiltCandidateReceipt>> {
+    [
+        (
+            EARTHLIKE_AXIAL_TILT_DEGREES,
+            "reference-not-selected",
+            "Earth-like reference is coherent but gives the polar review less visual separation",
+        ),
+        (
+            MCLONE_AXIAL_TILT_DEGREES,
+            "accepted",
+            "27 degrees remains restrained while making the polar-day and polar-night contrast easier to read",
+        ),
+    ]
+    .into_iter()
+    .map(|(tilt, status, rationale)| {
+        Ok(TiltCandidateReceipt {
+            axial_tilt_degrees: tilt,
+            status,
+            rationale,
+            north_75_summer_midnight_elevation_degrees: solar_for_tilt(
+                75.0, 0.25, 0.0, tilt,
+            )?
+            .elevation_degrees,
+            north_75_winter_noon_elevation_degrees: solar_for_tilt(
+                75.0, 0.75, 12.0, tilt,
+            )?
+            .elevation_degrees,
+        })
+    })
+    .collect()
+}
+
+fn solar_for_tilt(
+    latitude_degrees: f64,
+    orbital_phase: f64,
+    solar_time_hours: f64,
+    axial_tilt_degrees: f64,
+) -> Result<SolarSample> {
+    Ok(SolarSample::compute(SolarInput {
+        orbital_phase: OrbitalPhase::from_turns_wrapped(orbital_phase)?,
+        effective_latitude_degrees: latitude_degrees,
+        axial_tilt_degrees,
+        solar_time_fraction: solar_time_hours / 24.0,
+    })?)
+}
+
 fn measure_continents(seed: i64) -> ContinentMetric {
     let sampler = McloneOverworldSampler::new(seed);
     let mut land = vec![false; CONNECTED_GRID * CONNECTED_GRID];
@@ -373,11 +548,24 @@ fn solar_cases() -> Result<Vec<SolarCaseReceipt>> {
         * ((75.0_f64 / 90.0).asin() / std::f64::consts::TAU);
     [
         ("equator-north-solstice-noon", 0.0, 0.25, 12.0),
+        ("equator-south-solstice-noon", 0.0, 0.75, 12.0),
         (
             "north45-north-solstice-09",
             MCLONE_PLANE_LATITUDE_WAVELENGTH_BLOCKS / 12.0,
             0.25,
             9.0,
+        ),
+        (
+            "north45-north-solstice-15",
+            MCLONE_PLANE_LATITUDE_WAVELENGTH_BLOCKS / 12.0,
+            0.25,
+            15.0,
+        ),
+        (
+            "north45-south-solstice-noon",
+            MCLONE_PLANE_LATITUDE_WAVELENGTH_BLOCKS / 12.0,
+            0.75,
+            12.0,
         ),
         ("north75-polar-day-midnight", north_75_z, 0.25, 0.0),
         ("north75-polar-night-noon", north_75_z, 0.75, 12.0),
@@ -394,10 +582,30 @@ fn solar_cases() -> Result<Vec<SolarCaseReceipt>> {
             15.0,
         ),
         (
-            "north45-equinox-sunrise",
+            "south45-north-solstice-noon",
+            -MCLONE_PLANE_LATITUDE_WAVELENGTH_BLOCKS / 12.0,
+            0.25,
+            12.0,
+        ),
+        ("south75-polar-day-midnight", -north_75_z, 0.75, 0.0),
+        ("south75-polar-night-noon", -north_75_z, 0.25, 12.0),
+        (
+            "south-pole-summer-midnight",
+            -MCLONE_PLANE_LATITUDE_WAVELENGTH_BLOCKS / 4.0,
+            0.75,
+            0.0,
+        ),
+        (
+            "north45-northward-equinox-sunrise",
             MCLONE_PLANE_LATITUDE_WAVELENGTH_BLOCKS / 12.0,
             0.0,
             6.0,
+        ),
+        (
+            "north45-southward-equinox-sunset",
+            MCLONE_PLANE_LATITUDE_WAVELENGTH_BLOCKS / 12.0,
+            0.5,
+            18.0,
         ),
     ]
     .into_iter()
@@ -411,7 +619,48 @@ fn solar_case(
     orbital_phase: f64,
     solar_time_hours: f64,
 ) -> Result<SolarCaseReceipt> {
-    let latitude = SolarCoordinatePolicy::MCLONE_PLANE.latitude_at(0.0, world_z)?;
+    solar_case_for_policy(
+        id,
+        SolarCoordinatePolicy::MCLONE_PLANE,
+        "unbounded-plane",
+        0.0,
+        world_z,
+        orbital_phase,
+        solar_time_hours,
+    )
+}
+
+fn cylinder_cases() -> Result<Vec<SolarCaseReceipt>> {
+    [
+        ("cylinder-secondary-seam-a", 0.0),
+        ("cylinder-secondary-seam-b", CYLINDER_PERIOD_BLOCKS),
+    ]
+    .into_iter()
+    .map(|(id, world_x)| {
+        solar_case_for_policy(
+            id,
+            SolarCoordinatePolicy::MCLONE_CYLINDER,
+            "cylinder-x:384",
+            world_x,
+            MCLONE_CYLINDER_LATITUDE_SCALE_BLOCKS,
+            0.25,
+            12.0,
+        )
+    })
+    .collect()
+}
+
+#[allow(clippy::too_many_arguments)]
+fn solar_case_for_policy(
+    id: &'static str,
+    policy: SolarCoordinatePolicy,
+    topology: &'static str,
+    world_x: f64,
+    world_z: f64,
+    orbital_phase: f64,
+    solar_time_hours: f64,
+) -> Result<SolarCaseReceipt> {
+    let latitude = policy.latitude_at(world_x, world_z)?;
     let phase = OrbitalPhase::from_turns_wrapped(orbital_phase)?;
     let sample = SolarSample::compute(SolarInput {
         orbital_phase: phase,
@@ -421,10 +670,12 @@ fn solar_case(
     })?;
     Ok(SolarCaseReceipt {
         id,
-        world_x: 0.0,
+        coordinate_policy: policy.label(),
+        topology,
+        world_x,
         world_z,
         latitude_degrees: latitude.degrees,
-        latitude_phase: latitude.phase.unwrap_or(0.0),
+        latitude_phase: latitude.phase,
         orbital_phase: phase.turns(),
         solar_time_hours,
         axial_tilt_degrees: MCLONE_AXIAL_TILT_DEGREES,

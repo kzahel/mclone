@@ -64,6 +64,7 @@ if (!quick) {
   }
   captures.push(captureDebugMenu(review.solarCases[0]));
   captures.push(...captureNoOpPairs(review.solarCases[0]));
+  captures.push(...captureCylinderPair(review.cylinderCases));
 }
 
 const receipt = {
@@ -73,6 +74,11 @@ const receipt = {
   output,
   quick,
   sourceReview: "solar-review.json",
+  reviewArtifacts: {
+    latitudeMaps: review.candidates.map((entry) => entry.image),
+    tiltComparison: review.tiltComparisonImage,
+    cylinderMap: review.cylinderMapImage,
+  },
   captures,
 };
 writeFileSync(resolve(output, "capture-receipt.json"), `${JSON.stringify(receipt, null, 2)}\n`);
@@ -80,7 +86,8 @@ process.stdout.write(`${output}\n`);
 
 function capture(sample, view, stereo) {
   if (!sample) throw new Error("missing requested seasonal solar sample");
-  const eye = [0, 112, 0];
+  const latitudeSource = view === "sun" ? "world" : "manual";
+  const eye = latitudeSource === "world" ? [sample.worldX, 112, sample.worldZ] : [0, 112, 0];
   const target =
     view === "sun"
       ? eye.map((value, index) => value + sample.direction[index] * 100)
@@ -89,7 +96,7 @@ function capture(sample, view, stereo) {
   const path = resolve(output, `${sample.id}-${view}-${suffix}.png`);
   const mode = stereo ? "--xr-emulation-screenshot" : "--screenshot";
   const args = [mode, path, "--width", stereo ? "480" : "800", "--height", stereo ? "480" : "500"];
-  args.push(...sceneArgs(sample, eye, target));
+  args.push(...sceneArgs(sample, eye, target, latitudeSource));
   const stdout = run(executable, args, repo);
   return fileReceipt(sample, view, suffix, path, args, stdout);
 }
@@ -107,15 +114,47 @@ function captureDebugMenu(sample) {
     "540",
     "--screenshot-ui",
     "options-debug",
-    ...sceneArgs(sample, eye, target),
+    ...sceneArgs(sample, eye, target, "manual"),
   ];
   const stdout = run(executable, args, repo);
   return fileReceipt(sample, "debug-menu", "mono", path, args, stdout);
 }
 
+function captureCylinderPair(samples) {
+  if (!Array.isArray(samples) || samples.length !== 2) {
+    throw new Error("season lab must provide exactly two cylinder seam samples");
+  }
+  const receipts = samples.map((sample) => {
+    const eye = [sample.worldX, 112, sample.worldZ];
+    const target = eye.map((value, index) => value + sample.direction[index] * 100);
+    const path = resolve(output, `${sample.id}-sun-mono.png`);
+    const args = [
+      "--screenshot",
+      path,
+      "--width",
+      "800",
+      "--height",
+      "500",
+      ...sceneArgs(sample, eye, target, "world"),
+      "--world-topology",
+      sample.topology,
+    ];
+    return fileReceipt(sample, "sun", "mono", path, args, run(executable, args, repo));
+  });
+  if (receipts[0].sha256 !== receipts[1].sha256) {
+    throw new Error("secondary cylinder X-seam pixels differ");
+  }
+  receipts[0].identicalTo = receipts[1].path;
+  receipts[1].identicalTo = receipts[0].path;
+  return receipts;
+}
+
 function captureNoOpPairs(sample) {
   const eye = [0, 112, 0];
-  const target = [0, 66, -52];
+  // Keep whole-frame equality focused on solar-owned sky pixels. Natural
+  // wildlife advances during separate process startup and is intentionally
+  // outside this client-local presentation proof.
+  const target = [0, 212, 0];
   const pairs = [];
   for (const profile of ["mclone-overworld-v1", "overworld"]) {
     const paths = [
@@ -178,8 +217,8 @@ function captureNoOpPairs(sample) {
   return pairs;
 }
 
-function sceneArgs(sample, eye, target) {
-  return [
+function sceneArgs(sample, eye, target, latitudeSource) {
+  const args = [
     "--transient",
     "--asset-pack",
     "original",
@@ -205,14 +244,16 @@ function sceneArgs(sample, eye, target) {
     "--season-orbital-phase",
     String(sample.orbitalPhase),
     "--season-latitude-source",
-    "manual",
-    "--season-latitude",
-    String(sample.latitudeDegrees),
+    latitudeSource,
     "--season-solar-time-source",
     "manual",
     "--season-solar-time",
     String(sample.solarTimeHours),
   ];
+  if (latitudeSource === "manual") {
+    args.push("--season-latitude", String(sample.latitudeDegrees));
+  }
+  return args;
 }
 
 function fileReceipt(sample, view, renderPath, path, args, stdout) {
@@ -221,6 +262,7 @@ function fileReceipt(sample, view, renderPath, path, args, stdout) {
     case: sample.id,
     view,
     renderPath,
+    latitudeSource: optionValue(args, "--season-latitude-source"),
     path,
     byteLength: statSync(path).size,
     sha256: createHash("sha256").update(bytes).digest("hex"),
@@ -228,6 +270,11 @@ function fileReceipt(sample, view, renderPath, path, args, stdout) {
     argv: args,
     stdout: stdout.trim(),
   };
+}
+
+function optionValue(args, flag) {
+  const index = args.indexOf(flag);
+  return index >= 0 ? args[index + 1] : undefined;
 }
 
 function csv(values) {

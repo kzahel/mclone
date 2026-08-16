@@ -34,6 +34,9 @@ fn vs_main(input: VertexInput) -> VertexOutput {
 
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
+    if input.opacity <= 0.001 {
+        discard;
+    }
     let sampled = textureSample(sun_texture, sun_sampler, input.uv);
     return vec4<f32>(sampled.rgb, sampled.a * input.opacity);
 }
