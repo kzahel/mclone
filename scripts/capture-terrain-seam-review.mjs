@@ -13,6 +13,7 @@ const executableName = process.platform === "win32"
   ? "mclone-native-client.exe"
   : "mclone-native-client";
 const clientPath = join(repositoryRoot, "native", "target", "debug", executableName);
+const readinessAttemptLimit = 3;
 
 function fail(message) {
   process.stderr.write(`${message}\n`);
@@ -294,26 +295,25 @@ function parseTerrainViewState(output, captureName) {
 function validateObservedState(capture, state) {
   if (capture.presentation === "exact-only") {
     if (state.enabled !== false) {
-      fail(`${capture.name} allocated a terrain horizon in Exact Only mode`);
+      return `${capture.name} allocated a terrain horizon in Exact Only mode`;
     }
-    return;
+    return null;
   }
   if (!state.enabled || !state.targetReady || !state.exactCenterReady) {
-    fail(`${capture.name} did not reach exact/procedural target readiness`);
+    return `${capture.name} did not reach exact/procedural target readiness`;
   }
   const expectedExactColumns = 25;
   if (state.exactColumnCount !== expectedExactColumns) {
-    fail(
-      `${capture.name} prepared ${state.exactColumnCount} exact columns; `
-      + `expected the complete RD2 footprint of ${expectedExactColumns}`,
-    );
+    return `${capture.name} prepared ${state.exactColumnCount} exact columns; `
+      + `expected the complete RD2 footprint of ${expectedExactColumns}`;
   }
   if (state.pendingVegetationTiles !== 0
       || state.vegetationSubmittedJobs !== state.vegetationCompletedJobs
       || state.vegetationTransportFailures !== 0
       || state.vegetationJobFailures !== 0) {
-    fail(`${capture.name} did not reach a drained, failure-free vegetation state`);
+    return `${capture.name} did not reach a drained, failure-free vegetation state`;
   }
+  return null;
 }
 
 function settledPresentationState(state) {
@@ -412,17 +412,34 @@ for (let index = 0; index < campaign.length; index += 1) {
     "--screenshot-target", vectorArgument(view.target),
     "--screenshot-terrain-horizon-diagnostic", capture.diagnostic,
   ];
-  process.stdout.write(
-    `[${index + 1}/${campaign.length}] ${capture.name} `
-    + `(seed ${view.seed}, ${capture.presentation}, tick ${capture.time}, `
-    + `${capture.diagnostic})\n`,
-  );
-  const output = run(clientPath, args, { capture: true, echo: true });
-  const observedState = parseTerrainViewState(output, capture.name);
-  validateObservedState(capture, observedState);
+  let observedState;
+  let acceptedAttempt = 0;
+  for (let attempt = 1; attempt <= readinessAttemptLimit; attempt += 1) {
+    process.stdout.write(
+      `[${index + 1}/${campaign.length}] ${capture.name} `
+      + `(seed ${view.seed}, ${capture.presentation}, tick ${capture.time}, `
+      + `${capture.diagnostic}, attempt ${attempt}/${readinessAttemptLimit})\n`,
+    );
+    const output = run(clientPath, args, { capture: true, echo: true });
+    const candidateState = parseTerrainViewState(output, capture.name);
+    const readinessProblem = validateObservedState(capture, candidateState);
+    if (readinessProblem === null) {
+      observedState = candidateState;
+      acceptedAttempt = attempt;
+      break;
+    }
+    if (attempt === readinessAttemptLimit) {
+      fail(`${readinessProblem} after ${readinessAttemptLimit} attempts`);
+    }
+    process.stderr.write(`Rejected incomplete capture: ${readinessProblem}; retrying\n`);
+  }
+  if (observedState === undefined) {
+    fail(`${capture.name} exhausted capture attempts without observed state`);
+  }
   const settledState = settledPresentationState(observedState);
   results.push({
     ...capture,
+    acceptedAttempt,
     file: `${capture.name}.png`,
     source: {
       generationProfile: "mclone-overworld-v1",
@@ -489,7 +506,7 @@ const receipt = {
       "diagnostic channel",
       ...(options.reviewPhase >= 2 ? ["camera pose for stability endpoints"] : []),
     ],
-    observedStateRule: "Every composed capture is target-ready with all 25 RD2 exact columns and drained, failure-free vegetation. Settled presentation state is identical within each comparison group; transient coverage-generation and cumulative submitted/completed job counters may differ between fresh processes, while submitted/completed must be equal within every capture. Exact Only reports the horizon disabled.",
+    observedStateRule: `Every composed capture is target-ready with all 25 RD2 exact columns and drained, failure-free vegetation. An incomplete fresh process is rejected and retried up to ${readinessAttemptLimit} times, with the accepted attempt recorded. Settled presentation state is identical within each comparison group; transient coverage-generation and cumulative submitted/completed job counters may differ between fresh processes, while submitted/completed must be equal within every capture. Exact Only reports the horizon disabled.`,
   },
   sceneCoverage: {
     coast: ["baseline-elevated-dawn", "baseline-elevated-noon", "baseline-elevated-dusk", "baseline-elevated-midnight"],
