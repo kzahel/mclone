@@ -4831,6 +4831,7 @@ mod tests {
         assert!(shader.contains("fn mclone_preview_column_profile("));
         assert!(shader.contains("material_table.side_uvs[material]"));
         assert!(shader.contains("material_table.grass_tints"));
+        assert!(shader.contains("material_uses_grass_tint(input.material, false)"));
         assert!(shader.contains("full_sky_environmental_illumination()"));
         assert!(shader.contains("if display_material != 2u"));
         assert!(shader.contains("terrain_horizon_near_material_weight("));
@@ -4883,6 +4884,19 @@ mod tests {
             1
         );
         assert!(!shader.contains("mix(stitched_height"));
+    }
+
+    #[test]
+    fn horizon_surface_response_converges_across_voxel_and_smooth_terrain() {
+        let shader = super::super::TERRAIN_PREVIEW_RENDER_WGSL;
+        assert!(shader.contains("fn material_uses_grass_tint("));
+        assert!(shader.contains("albedo = surface_tint(input, input.material, false);"));
+        assert!(shader.contains("let resolved_exact_weight = clamp(exact_weight"));
+        assert_eq!(
+            shader.matches("input.world_position.w,").count(),
+            3
+        );
+        assert!(!shader.contains("input.near_shell != 0u,\n            );"));
     }
 
     #[test]

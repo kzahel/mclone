@@ -989,7 +989,7 @@ fn apply_material_texture(
     world_dx: vec2<f32>,
     world_dy: vec2<f32>,
     blocks_per_pixel: f32,
-    exact_weight: bool,
+    exact_weight: f32,
 ) -> vec3<f32> {
     let sprite = select(
         material_table.top_uvs[material],
@@ -1008,32 +1008,30 @@ fn apply_material_texture(
         atlas_dx,
         atlas_dy,
     );
-    let texture_weight = select(
+    let far_texture_weight = mix(
+        0.82,
+        0.42,
+        clamp((blocks_per_pixel - 1.0) / 7.0, 0.0, 1.0),
+    );
+    let resolved_exact_weight = clamp(exact_weight, 0.0, 1.0);
+    let texture_weight = mix(far_texture_weight, 1.0, resolved_exact_weight);
+    let texture_detail = mix(
+        clamp(texel.rgb * 1.25, vec3<f32>(0.0), vec3<f32>(1.5)),
+        texel.rgb,
+        resolved_exact_weight,
+    );
+    return base_color * mix(vec3<f32>(1.0), texture_detail, texture_weight);
+}
+
+fn material_texture_weight(blocks_per_pixel: f32, exact_weight: f32) -> f32 {
+    return mix(
         mix(
             0.82,
             0.42,
             clamp((blocks_per_pixel - 1.0) / 7.0, 0.0, 1.0),
         ),
         1.0,
-        exact_weight,
-    );
-    let texture_detail = select(
-        clamp(texel.rgb * 1.25, vec3<f32>(0.0), vec3<f32>(1.5)),
-        texel.rgb,
-        exact_weight,
-    );
-    return base_color * mix(vec3<f32>(1.0), texture_detail, texture_weight);
-}
-
-fn material_texture_weight(blocks_per_pixel: f32, exact_weight: bool) -> f32 {
-    return select(
-        mix(
-        0.82,
-        0.42,
-        clamp((blocks_per_pixel - 1.0) / 7.0, 0.0, 1.0),
-        ),
-        1.0,
-        exact_weight,
+        clamp(exact_weight, 0.0, 1.0),
     );
 }
 
@@ -1069,10 +1067,13 @@ fn resolved_surface_material(input: VertexOutput) -> u32 {
     return profile.w;
 }
 
-fn near_surface_tint(input: VertexOutput, material: u32, side_surface: bool) -> vec3<f32> {
+fn material_uses_grass_tint(material: u32, side_surface: bool) -> bool {
     let flags = material_table.tint_flags[material];
-    let grass_tinted = select(flags.x, flags.y, side_surface) >= 0.5;
-    if !grass_tinted {
+    return select(flags.x, flags.y, side_surface) >= 0.5;
+}
+
+fn surface_tint(input: VertexOutput, material: u32, side_surface: bool) -> vec3<f32> {
+    if !material_uses_grass_tint(material, side_surface) {
         return vec3<f32>(1.0);
     }
     let biome = select(
@@ -1141,6 +1142,15 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
         && vanilla_mountain_exposure_biome(input.biome);
     let grass_family = input.material == 4u || input.material == 5u
         || input.material == 13u || input.material == 14u;
+    // Resolve grass from the same active-pack tint table on both sides of the
+    // voxel-to-smooth boundary. The vertex color remains the fallback for
+    // untinted materials, whose far response deliberately retains a stable
+    // low-frequency approximation as texture detail recedes.
+    if input.textured != 0u && input.material < 256u
+        && material_uses_grass_tint(input.material, false) {
+        albedo = surface_tint(input, input.material, false);
+        color = albedo * input.light;
+    }
     if preview_profile() == 1u && surface_quality() >= 1u
         && steep_mountain_face && grass_family {
         color = vec3<f32>(0.48, 0.49, 0.47) * input.light;
@@ -1160,7 +1170,7 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
                 material_dx,
                 material_dy,
                 material_blocks_per_pixel,
-                false,
+                0.0,
             );
             if albedo_diagnostic {
                 far_albedo = apply_material_texture(
@@ -1171,14 +1181,14 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
                     material_dx,
                     material_dy,
                     material_blocks_per_pixel,
-                    false,
+                    0.0,
                 );
             }
         }
         var near_color = far_color;
         var near_albedo = far_albedo;
         if display_material != 2u {
-            near_color = near_surface_tint(input, display_material, side_surface)
+            near_color = surface_tint(input, display_material, side_surface)
                 * input.light;
             near_color = apply_material_texture(
                 near_color,
@@ -1188,18 +1198,18 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
                 material_dx,
                 material_dy,
                 material_blocks_per_pixel,
-                true,
+                1.0,
             );
             if albedo_diagnostic {
                 near_albedo = apply_material_texture(
-                    near_surface_tint(input, display_material, side_surface),
+                    surface_tint(input, display_material, side_surface),
                     display_material,
                     side_surface,
                     input.world_uv,
                     material_dx,
                     material_dy,
                     material_blocks_per_pixel,
-                    true,
+                    1.0,
                 );
             }
         }
@@ -1216,7 +1226,7 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
             material_dx,
             material_dy,
             material_blocks_per_pixel,
-            false,
+            0.0,
         );
         if albedo_diagnostic {
             albedo = apply_material_texture(
@@ -1227,7 +1237,7 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
                 material_dx,
                 material_dy,
                 material_blocks_per_pixel,
-                false,
+                0.0,
             );
         }
     }
@@ -1265,7 +1275,7 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
                 world_dx,
                 world_dy,
                 blocks_per_pixel,
-                input.near_shell != 0u,
+                input.world_position.w,
             );
             if albedo_diagnostic {
                 river_albedo = apply_material_texture(
@@ -1276,7 +1286,7 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
                     world_dx,
                     world_dy,
                     blocks_per_pixel,
-                    input.near_shell != 0u,
+                    input.world_position.w,
                 );
             }
         }
@@ -1364,14 +1374,14 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
     } else if horizon_diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_TEXTURE {
         var texture_weight = 0.0;
         if input.textured != 0u {
-            texture_weight = material_texture_weight(material_blocks_per_pixel, false);
+            texture_weight = material_texture_weight(material_blocks_per_pixel, 0.0);
             if input.near_shell != 0u && display_material != 2u {
                 texture_weight = mix(texture_weight, 1.0, input.world_position.w);
             }
             if diagnostic_river_alpha > 0.0 {
                 let river_texture_weight = material_texture_weight(
                     blocks_per_pixel,
-                    input.near_shell != 0u,
+                    input.world_position.w,
                 );
                 texture_weight = mix(
                     texture_weight,
