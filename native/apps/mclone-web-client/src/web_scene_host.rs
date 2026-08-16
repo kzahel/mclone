@@ -5102,6 +5102,73 @@ impl WebSceneHost {
                     "renderInflightSectionCount",
                     stats.inflight_render_sections as f64,
                 )?;
+                let view_settled = host.view_settled_status(camera_position);
+                report_set_bool(&object, "sharedViewSettled", view_settled.ready())?;
+                report_set_number(
+                    &object,
+                    "requestedViewExpectedChunkCount",
+                    view_settled.requested_view.expected_chunk_count as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "requestedViewLoadedChunkCount",
+                    view_settled.requested_view.loaded_chunk_count as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "requestedViewServerReadyChunkCount",
+                    view_settled
+                        .requested_view
+                        .server_ready_chunk_count
+                        .unwrap_or(0) as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "requestedViewServerChunkCount",
+                    view_settled.requested_view.server_chunk_count.unwrap_or(0) as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "targetPendingRenderChunkCount",
+                    view_settled.target_render_work.pending_render_chunks as f64,
+                )?;
+                report_set_bool(
+                    &object,
+                    "targetReadyRenderWorkPending",
+                    view_settled.target_render_work.ready_render_work_pending,
+                )?;
+                if let Some(coverage) = host.exact_chunk_coverage_status() {
+                    report_set_number(
+                        &object,
+                        "exactCoverageExpectedColumnCount",
+                        coverage.expected_column_count as f64,
+                    )?;
+                    report_set_number(
+                        &object,
+                        "exactCoverageReadyColumnCount",
+                        coverage.ready_column_count as f64,
+                    )?;
+                    report_set_number(
+                        &object,
+                        "exactCoverageMissingColumnCount",
+                        coverage.missing_column_count as f64,
+                    )?;
+                    report_set_number(
+                        &object,
+                        "exactCoverageOutsideTargetColumnCount",
+                        coverage.outside_target_column_count as f64,
+                    )?;
+                    report_set_string(
+                        &object,
+                        "exactCoverageReadyColumnHash",
+                        &format!("{:016x}", coverage.ready_column_hash),
+                    )?;
+                    report_set_string(
+                        &object,
+                        "exactCoverageMissingColumnHash",
+                        &format!("{:016x}", coverage.missing_column_hash),
+                    )?;
+                }
             }
             if let Some(diagnostics) = host.runtime_poll_diagnostics() {
                 report_set_string(

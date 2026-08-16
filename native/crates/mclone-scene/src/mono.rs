@@ -109,6 +109,20 @@ pub struct ViewSettledStatus {
     pub asset_replacement_in_progress: bool,
 }
 
+/// Exact-column coverage consumed by the active draw store for the current
+/// render-distance square. Loaded snapshots are intentionally not enough:
+/// these columns have resident sections and passed the same neighbor-readiness
+/// gate used by ordinary exact rendering and Terrain Horizon masking.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ExactChunkCoverageStatus {
+    pub expected_column_count: usize,
+    pub ready_column_count: usize,
+    pub missing_column_count: usize,
+    pub outside_target_column_count: usize,
+    pub ready_column_hash: u64,
+    pub missing_column_hash: u64,
+}
+
 impl ViewSettledStatus {
     pub fn ready(self) -> bool {
         self.startup_complete
@@ -2244,6 +2258,36 @@ impl McloneSceneHost {
         }
     }
 
+    pub fn exact_chunk_coverage_status(&self) -> Option<ExactChunkCoverageStatus> {
+        let runtime = self.active_world.runtime.as_ref()?;
+        let stats = runtime.stats();
+        let target_columns = runtime
+            .client()
+            .topology()
+            .chunk_view(stats.interest_center, stats.render_distance)
+            .ok()?
+            .into_iter()
+            .map(|entry| entry.canonical)
+            .collect::<std::collections::BTreeSet<_>>();
+        let ready_columns = self.active_world.draw.traversal_ready_columns_snapshot();
+        let ready_target_columns = ready_columns
+            .intersection(&target_columns)
+            .copied()
+            .collect::<std::collections::BTreeSet<_>>();
+        let missing_columns = target_columns
+            .difference(&ready_columns)
+            .copied()
+            .collect::<std::collections::BTreeSet<_>>();
+        Some(ExactChunkCoverageStatus {
+            expected_column_count: target_columns.len(),
+            ready_column_count: ready_target_columns.len(),
+            missing_column_count: missing_columns.len(),
+            outside_target_column_count: ready_columns.difference(&target_columns).count(),
+            ready_column_hash: chunk_position_set_hash(&ready_target_columns),
+            missing_column_hash: chunk_position_set_hash(&missing_columns),
+        })
+    }
+
     fn render_mono_frame_inner(
         &mut self,
         frame: RenderFrameContext<'_>,
@@ -3035,6 +3079,17 @@ impl McloneSceneHost {
         }
         Ok(())
     }
+}
+
+fn chunk_position_set_hash(positions: &std::collections::BTreeSet<ChunkPos>) -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+    for pos in positions {
+        for byte in pos.x.to_le_bytes().into_iter().chain(pos.z.to_le_bytes()) {
+            hash ^= u64::from(byte);
+            hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    }
+    hash
 }
 
 fn auxiliary_split_layout_for_mode(

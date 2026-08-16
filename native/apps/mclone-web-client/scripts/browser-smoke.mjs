@@ -154,7 +154,9 @@ const viewReplayProbe = process.argv.includes("--view-replay-probe")
   || process.env.MCLONE_NATIVE_WEB_VIEW_REPLAY_PROBE === "1";
 const renderDistanceReplayProbe = process.argv.includes("--render-distance-replay-probe")
   || process.env.MCLONE_NATIVE_WEB_RENDER_DISTANCE_REPLAY_PROBE === "1";
-const renderDistanceReplayTarget = renderDistance ?? 10;
+const cardinalViewReplayProbe = process.argv.includes("--cardinal-view-replay-probe")
+  || process.env.MCLONE_NATIVE_WEB_CARDINAL_VIEW_REPLAY_PROBE === "1";
+const renderDistanceReplayTarget = renderDistance ?? (cardinalViewReplayProbe ? 8 : 10);
 const blockEditProbe = process.argv.includes("--block-edit-probe")
   || process.env.MCLONE_NATIVE_WEB_BLOCK_EDIT_PROBE === "1";
 const deathUiProbe = process.argv.includes("--death-ui-probe")
@@ -262,6 +264,7 @@ const menuEntryProbe = process.argv.includes("--menu-entry-probe")
 const appLoop = movementPerf
   || viewReplayProbe
   || renderDistanceReplayProbe
+  || cardinalViewReplayProbe
   || blockEditProbe
   || deathUiProbe
   || auxiliarySplitProbe
@@ -291,6 +294,7 @@ const mobileViewport = mobileAppLoop
   || mobileShowcase
   || movementPerf
   || renderDistanceReplayProbe
+  || cardinalViewReplayProbe
   || lobbyScenarioMobileProbe
   || terrainHorizonProbe;
 const serveOnly = process.argv.includes("--serve")
@@ -302,6 +306,8 @@ const screenshotPath = process.env.MCLONE_NATIVE_WEB_SMOKE_SCREENSHOT
     ? "/tmp/mclone-native-web-view-replay.png"
     : renderDistanceReplayProbe
     ? "/tmp/mclone-native-web-render-distance-replay.png"
+    : cardinalViewReplayProbe
+    ? "/tmp/mclone-native-web-cardinal-view-replay.png"
     : blockEditProbe
     ? "/tmp/mclone-native-web-block-edit-probe.png"
     : deathUiProbe
@@ -342,6 +348,8 @@ const canvasScreenshotPath = process.env.MCLONE_NATIVE_WEB_CANVAS_SCREENSHOT
     ? "/tmp/mclone-native-web-view-replay-canvas.png"
     : renderDistanceReplayProbe
     ? "/tmp/mclone-native-web-render-distance-replay-canvas.png"
+    : cardinalViewReplayProbe
+    ? "/tmp/mclone-native-web-cardinal-view-replay-canvas.png"
     : blockEditProbe
     ? "/tmp/mclone-native-web-block-edit-probe-canvas.png"
     : deathUiProbe
@@ -396,6 +404,9 @@ const viewReplayProbeReportPath = process.env.MCLONE_NATIVE_WEB_VIEW_REPLAY_PROB
 const renderDistanceReplayProbeReportPath =
   process.env.MCLONE_NATIVE_WEB_RENDER_DISTANCE_REPLAY_PROBE_REPORT
     ?? "/tmp/mclone-native-web-render-distance-replay.json";
+const cardinalViewReplayProbeReportPath =
+  process.env.MCLONE_NATIVE_WEB_CARDINAL_VIEW_REPLAY_PROBE_REPORT
+    ?? "/tmp/mclone-native-web-cardinal-view-replay.json";
 const blockEditProbeReportPath = process.env.MCLONE_NATIVE_WEB_BLOCK_EDIT_PROBE_REPORT
   ?? "/tmp/mclone-native-web-block-edit-probe.json";
 const deathUiProbeReportPath = process.env.MCLONE_NATIVE_WEB_DEATH_UI_PROBE_REPORT
@@ -596,6 +607,7 @@ async function run() {
       || halfSpaceTerrainProbe
       || actorCompositionProbe
       || renderDistanceReplayProbe
+      || cardinalViewReplayProbe
     ) {
       await page.addInitScript(() => {
         const root = /** @type {any} */ (globalThis);
@@ -727,7 +739,12 @@ async function run() {
         console.error(`browser console: ${message.text()}`);
       }
     });
-    if (mobileAppLoop || lobbyScenarioMobileProbe || renderDistanceReplayProbe) {
+    if (
+      mobileAppLoop
+      || lobbyScenarioMobileProbe
+      || renderDistanceReplayProbe
+      || cardinalViewReplayProbe
+    ) {
       const cdp = await page.context().newCDPSession(page);
       await cdp.send("Emulation.setCPUThrottlingRate", { rate: 2 });
     }
@@ -764,19 +781,32 @@ async function run() {
       const deathUiQuery = deathUiProbe
         ? `?worldStorage=indexeddb&worldId=${encodeURIComponent(deathUiWorldId)}&clearWorldStorage=1`
         : "";
+      const cardinalViewReplayWorldId = cardinalViewReplayProbe
+        ? `cardinal-view-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`
+        : "";
+      const cardinalViewReplayQuery = cardinalViewReplayProbe
+        ? `?worldStorage=indexeddb&worldId=${encodeURIComponent(cardinalViewReplayWorldId)}&clearWorldStorage=1`
+        : "";
       const lobbyScenarioQuery = lobbyScenarioProbe
         ? "?debugAuxiliaryPlayerScript=1"
         : "";
       const baseAppUrl = remoteServer
         ? `${baseUrl}/app.html?remoteWsUrl=${encodeURIComponent(remoteServer.websocketUrl)}`
-        : `${baseUrl}/app.html${indexedDbReloadQuery || deathUiQuery || lobbyScenarioQuery}`;
+        : `${baseUrl}/app.html${indexedDbReloadQuery
+          || deathUiQuery
+          || cardinalViewReplayQuery
+          || lobbyScenarioQuery}`;
       const startupParameters = new URLSearchParams();
       startupParameters.set("smokeObserver", "1");
       if (!menuEntryProbe) startupParameters.set("startInWorld", "1");
       if (mobileAppLoop) startupParameters.set("holdStartupProgress", "1");
       if (seed) startupParameters.set("seed", seed);
       if (generationProfile) startupParameters.set("generationProfile", generationProfile);
-      if (renderDistance !== null && !renderDistanceReplayProbe) {
+      if (
+        renderDistance !== null
+        && !renderDistanceReplayProbe
+        && !cardinalViewReplayProbe
+      ) {
         startupParameters.set("renderDistance", String(renderDistance));
       }
       if (starterContent) startupParameters.set("starterContent", starterContent);
@@ -4172,6 +4202,64 @@ async function run() {
         console.log(JSON.stringify(report, null, 2));
         return;
       }
+      if (cardinalViewReplayProbe) {
+        const cardinalViewReplayProbeResult = await runCardinalViewReplayProbe(
+          page,
+          canvas,
+          renderDistanceReplayTarget,
+        );
+        const result = await captureRenderDistanceReplayState(page, "final");
+        const pageScreenshotCaptured = await page.screenshot({
+          path: screenshotPath,
+          fullPage: false,
+          timeout: 60_000,
+        }).then(() => true, () => false);
+        const canvasPng = await canvas.screenshot({
+          path: canvasScreenshotPath,
+          timeout: 60_000,
+        });
+        const canvasPixels = analyzePng(canvasPng);
+        const shutdownResult = await page.evaluate(
+          () => globalThis.__mcloneWebApp.shutdownForSmoke?.() ?? null,
+        );
+        const workerStatsAfterShutdown = await page.evaluate(
+          () => /** @type {any} */ (globalThis).__mcloneWorkerStats ?? null,
+        );
+        const report = {
+          url: appUrl,
+          screenshotPath,
+          pageScreenshotCaptured,
+          canvasScreenshotPath,
+          cardinalViewReplayProbeReportPath,
+          cardinalViewReplayWorldId,
+          renderDistanceReplayTarget,
+          mobileViewport,
+          canvasPixels,
+          cardinalViewReplayProbeResult,
+          shutdownResult,
+          workerStatsAfterShutdown,
+          result,
+          pageErrors,
+        };
+        await writeFile(
+          cardinalViewReplayProbeReportPath,
+          `${JSON.stringify(report, null, 2)}\n`,
+        );
+        if (
+          cardinalViewReplayProbeResult.ok !== true
+          || shutdownResult?.shutdownComplete !== true
+          || Number(workerStatsAfterShutdown?.active?.["mclone-integrated-server"]) !== 0
+          || Number(workerStatsAfterShutdown?.active?.["mclone-render-compiler-app"]) !== 0
+          || canvasPixels.nonClearInteriorPixelCount <= 128
+          || pageErrors.length > 0
+        ) {
+          throw new Error(
+            `browser cardinal view replay failed:\n${JSON.stringify(report, null, 2)}`,
+          );
+        }
+        console.log(JSON.stringify(report, null, 2));
+        return;
+      }
       if (mobileAppLoop) {
         await page.waitForFunction(
           () => {
@@ -6798,6 +6886,8 @@ async function runViewReplayProbe(page, canvas) {
           cameraX: Number(state.cameraX),
           cameraY: Number(state.cameraY),
           cameraZ: Number(state.cameraZ),
+          cameraYawRadians: Number(state.cameraYawRadians),
+          cameraPitchRadians: Number(state.cameraPitchRadians),
           cameraSpeedBlocksPerSecond: Number(state.cameraSpeedBlocksPerSecond),
           movementMode: String(state.movementMode ?? ""),
           onGround: state.onGround === true,
@@ -6914,18 +7004,11 @@ async function runViewReplayProbe(page, canvas) {
 }
 
 /**
- * Reproduce the reported Web sequence: settle the default radius, raise it
- * through the production Graphics slider, then fly vertically while the new
- * view remains stationary. Exact loaded coverage is checked independently of
- * the broader streaming-idle envelope so an accidentally partial view cannot
- * report itself settled.
- *
  * @param {Page} page
  * @param {Locator} canvas
  * @param {number} targetRenderDistance
- * @returns {Promise<any>}
  */
-async function runRenderDistanceReplayProbe(page, canvas, targetRenderDistance) {
+async function selectRenderDistanceThroughNativeUi(page, canvas, targetRenderDistance) {
   await canvas.evaluate((element) => element.focus());
   await page.evaluate(() => globalThis.__mcloneWebApp?.frameInteractionSurface?.());
   await waitForWebAppStreamingSettled(page, 120_000);
@@ -6962,6 +7045,27 @@ async function runRenderDistanceReplayProbe(page, canvas, targetRenderDistance) 
   }
   const selected = await captureRenderDistanceReplayState(page, "selected");
   await page.evaluate(() => globalThis.__mcloneWebApp?.closeNativeUi?.());
+  return { before, selected };
+}
+
+/**
+ * Reproduce the reported Web sequence: settle the default radius, raise it
+ * through the production Graphics slider, then fly vertically while the new
+ * view remains stationary. Exact loaded coverage is checked independently of
+ * the broader streaming-idle envelope so an accidentally partial view cannot
+ * report itself settled.
+ *
+ * @param {Page} page
+ * @param {Locator} canvas
+ * @param {number} targetRenderDistance
+ * @returns {Promise<any>}
+ */
+async function runRenderDistanceReplayProbe(page, canvas, targetRenderDistance) {
+  const { before, selected } = await selectRenderDistanceThroughNativeUi(
+    page,
+    canvas,
+    targetRenderDistance,
+  );
 
   await page.evaluate(() => {
     const root = /** @type {any} */ (globalThis);
@@ -6996,6 +7100,21 @@ async function runRenderDistanceReplayProbe(page, canvas, targetRenderDistance) 
           renderDirtyChunkCount: Number(state.renderDirtyChunkCount) || 0,
           renderInflightSectionCount: Number(state.renderInflightSectionCount) || 0,
           residentSectionCount: Number(state.residentSectionCount) || 0,
+          exactCoverageExpectedColumnCount:
+            Number(state.exactCoverageExpectedColumnCount) || 0,
+          exactCoverageReadyColumnCount:
+            Number(state.exactCoverageReadyColumnCount) || 0,
+          exactCoverageMissingColumnCount:
+            Number(state.exactCoverageMissingColumnCount) || 0,
+          exactCoverageReadyColumnHash:
+            String(state.exactCoverageReadyColumnHash ?? ""),
+          sharedViewSettled: state.sharedViewSettled === true,
+          requestedViewExpectedChunkCount:
+            Number(state.requestedViewExpectedChunkCount) || 0,
+          requestedViewLoadedChunkCount:
+            Number(state.requestedViewLoadedChunkCount) || 0,
+          targetPendingRenderChunkCount:
+            Number(state.targetPendingRenderChunkCount) || 0,
           streamingSettled: state.streamingSettled === true,
         };
         const signature = [
@@ -7052,6 +7171,10 @@ async function runRenderDistanceReplayProbe(page, canvas, targetRenderDistance) 
           && state.acceptedViewAvailable === true
           && Number(state.acceptedRenderDistance) === targetRenderDistance
           && Number(state.loadedChunkCount) === expectedLoadedChunkCount
+          && Number(state.exactCoverageExpectedColumnCount) === expectedLoadedChunkCount
+          && Number(state.exactCoverageReadyColumnCount) === expectedLoadedChunkCount
+          && Number(state.exactCoverageMissingColumnCount) === 0
+          && state.sharedViewSettled === true
           && state.streamingSettled === true;
       },
       { targetRenderDistance, expectedLoadedChunkCount },
@@ -7113,6 +7236,260 @@ async function runRenderDistanceReplayProbe(page, canvas, targetRenderDistance) 
   };
 }
 
+/**
+ * Reproduce the reported persistent-hole sequence without waiting for each
+ * intermediate view to settle: raise the production render-distance setting,
+ * move along two cardinal legs, climb, and move again. The normal wait is the
+ * acceptance window; a longer eventual wait is retained only to distinguish a
+ * slow pipeline from a genuinely stranded one in the diagnostic artifact.
+ *
+ * @param {Page} page
+ * @param {Locator} canvas
+ * @param {number} targetRenderDistance
+ * @returns {Promise<any>}
+ */
+async function runCardinalViewReplayProbe(page, canvas, targetRenderDistance) {
+  const { before, selected } = await selectRenderDistanceThroughNativeUi(
+    page,
+    canvas,
+    targetRenderDistance,
+  );
+  await page.evaluate(() => {
+    const root = /** @type {any} */ (globalThis);
+    /** @type {any[]} */
+    const samples = [];
+    const probe = {
+      phase: "selected",
+      samples,
+      lastSignature: "",
+      intervalId: /** @type {ReturnType<typeof setInterval> | 0} */ (0),
+      record(label = "transition", force = false) {
+        const state = root.__mcloneWebApp?.state;
+        if (!state) return;
+        const sample = {
+          label,
+          phase: probe.phase,
+          timeMs: performance.now(),
+          renderDistance: Number(state.radiusChunks) || 0,
+          requestedCenterX: Number(state.centerX),
+          requestedCenterZ: Number(state.centerZ),
+          acceptedCenterX: state.acceptedViewAvailable === true
+            ? Number(state.acceptedCenterX)
+            : null,
+          acceptedCenterZ: state.acceptedViewAvailable === true
+            ? Number(state.acceptedCenterZ)
+            : null,
+          acceptedRenderDistance: state.acceptedViewAvailable === true
+            ? Number(state.acceptedRenderDistance)
+            : null,
+          loadedChunkCount: Number(state.loadedChunkCount) || 0,
+          loadedChunkSetHash: String(state.loadedChunkSetHash ?? ""),
+          snapshotUpdateCount: Number(state.snapshotUpdateCount) || 0,
+          unloadUpdateCount: Number(state.unloadUpdateCount) || 0,
+          commandQueueDepth: Number(state.runnerCommandQueueDepth) || 0,
+          updateQueueDepth: Number(state.runnerUpdateQueueDepth) || 0,
+          pendingJobs: Number(state.runnerPendingJobs) || 0,
+          pendingPublications: Number(state.runnerPendingPublications) || 0,
+          pendingPersistenceLoads: Number(state.runnerPendingPersistenceLoads) || 0,
+          pendingPersistenceSaves: Number(state.runnerPendingPersistenceSaves) || 0,
+          worldgenMailboxPendingJobs: Number(state.worldgenMailboxPendingJobs) || 0,
+          lightStatusMailboxPendingStatuses:
+            Number(state.lightStatusMailboxPendingStatuses) || 0,
+          pendingStreamWork: Number(state.pendingStreamWork) || 0,
+          pendingCompileJobCount: Number(state.pendingCompileJobCount) || 0,
+          renderWorkerPendingRequestCount:
+            Number(state.renderWorkerPendingRequestCount) || 0,
+          renderDirtyChunkCount: Number(state.renderDirtyChunkCount) || 0,
+          renderInflightSectionCount: Number(state.renderInflightSectionCount) || 0,
+          residentSectionCount: Number(state.residentSectionCount) || 0,
+          exactCoverageExpectedColumnCount:
+            Number(state.exactCoverageExpectedColumnCount) || 0,
+          exactCoverageReadyColumnCount:
+            Number(state.exactCoverageReadyColumnCount) || 0,
+          exactCoverageMissingColumnCount:
+            Number(state.exactCoverageMissingColumnCount) || 0,
+          exactCoverageReadyColumnHash:
+            String(state.exactCoverageReadyColumnHash ?? ""),
+          sharedViewSettled: state.sharedViewSettled === true,
+          requestedViewExpectedChunkCount:
+            Number(state.requestedViewExpectedChunkCount) || 0,
+          requestedViewLoadedChunkCount:
+            Number(state.requestedViewLoadedChunkCount) || 0,
+          targetPendingRenderChunkCount:
+            Number(state.targetPendingRenderChunkCount) || 0,
+          sectionCount: Number(state.sectionCount) || 0,
+          drawnSectionCount: Number(state.drawnSectionCount) || 0,
+          meshBuildCount: Number(state.meshBuildCount) || 0,
+          clientDeferredChunkDropBacklogItems:
+            Number(state.clientDeferredChunkDropBacklogItems) || 0,
+          updatePumpStalled: state.updatePumpStalled === true,
+          streamingSettled: state.streamingSettled === true,
+          cameraX: Number(state.cameraX),
+          cameraY: Number(state.cameraY),
+          cameraZ: Number(state.cameraZ),
+        };
+        const signature = [
+          sample.phase,
+          sample.requestedCenterX,
+          sample.requestedCenterZ,
+          sample.acceptedCenterX,
+          sample.acceptedCenterZ,
+          sample.loadedChunkSetHash,
+          sample.pendingJobs,
+          sample.pendingPublications,
+          sample.pendingCompileJobCount,
+          sample.renderDirtyChunkCount,
+          sample.residentSectionCount,
+          sample.streamingSettled,
+        ].join(":");
+        if (force || signature !== probe.lastSignature) {
+          samples.push(sample);
+          probe.lastSignature = signature;
+        }
+      },
+    };
+    probe.intervalId = setInterval(() => probe.record(), 250);
+    root.__mcloneCardinalViewReplayProbe = probe;
+    probe.record("start", true);
+  });
+  /** @param {string} phase */
+  const setPhase = async (phase) => page.evaluate((nextPhase) => {
+    const probe = /** @type {any} */ (globalThis).__mcloneCardinalViewReplayProbe;
+    if (!probe) return;
+    probe.phase = nextPhase;
+    probe.record("phase-start", true);
+  }, phase);
+  /** @param {string} label */
+  const capture = async (label) => {
+    await page.evaluate((sampleLabel) => {
+      const probe = /** @type {any} */ (globalThis).__mcloneCardinalViewReplayProbe;
+      probe?.record(sampleLabel, true);
+    }, label);
+    return captureRenderDistanceReplayState(page, label);
+  };
+
+  const expectedLoadedChunkCount = (targetRenderDistance * 2 + 1) ** 2;
+  await dispatchKeyboardEvent(page, "keydown", { code: "KeyN", key: "n" });
+  await dispatchKeyboardEvent(page, "keyup", { code: "KeyN", key: "n" });
+  await page.waitForFunction(
+    () => globalThis.__mcloneWebApp?.state?.movementMode === "FLY",
+    undefined,
+    { timeout: 10_000 },
+  );
+  await setCardinalProbePitch(page, 0);
+
+  await setPhase("north-1");
+  const routeStart = await capture("route-start");
+  await moveAcrossViewReplayChunks(page, "KeyW", "w", routeStart, 3, 60_000);
+  const north1 = await capture("north-1-end");
+
+  await setPhase("west");
+  await moveAcrossViewReplayChunks(page, "KeyD", "d", north1, 3, 60_000);
+  const west = await capture("west-end");
+
+  await setPhase("climb");
+  const climbStartY = Number(west.cameraY);
+  await dispatchKeyboardEvent(page, "keydown", { code: "Space", key: " " });
+  try {
+    await page.waitForFunction(
+      (startY) => Number(globalThis.__mcloneWebApp?.state?.cameraY) >= startY + 128,
+      climbStartY,
+      { timeout: 45_000 },
+    );
+  } finally {
+    await dispatchKeyboardEvent(page, "keyup", { code: "Space", key: " " });
+  }
+  const climb = await capture("climb-end");
+
+  await setPhase("north-2");
+  await moveAcrossViewReplayChunks(page, "KeyW", "w", climb, 3, 60_000);
+  const north2 = await capture("north-2-end");
+  await setCardinalProbePitch(page, -1.25);
+  const overview = await capture("overview-framed");
+
+  await setPhase("normal-wait");
+  await page.waitForTimeout(30_000);
+  const normalWait = await capture("normal-wait-end");
+  /** @param {any} state */
+  const exactAndSettled = (state) => state.acceptedCenterX === state.centerX
+    && state.acceptedCenterZ === state.centerZ
+    && state.acceptedRenderDistance === targetRenderDistance
+    && state.loadedChunkCount === expectedLoadedChunkCount
+    && state.exactCoverageExpectedColumnCount === expectedLoadedChunkCount
+    && state.exactCoverageReadyColumnCount === expectedLoadedChunkCount
+    && state.exactCoverageMissingColumnCount === 0
+    && state.sharedViewSettled === true
+    && state.streamingSettled === true;
+  let eventual = normalWait;
+  if (!exactAndSettled(normalWait)) {
+    await setPhase("eventual-wait");
+    await page.waitForFunction(
+      ({ targetRenderDistance, expectedLoadedChunkCount }) => {
+        const state = globalThis.__mcloneWebApp?.state;
+        return state?.acceptedViewAvailable === true
+          && Number(state.acceptedCenterX) === Number(state.centerX)
+          && Number(state.acceptedCenterZ) === Number(state.centerZ)
+          && Number(state.acceptedRenderDistance) === targetRenderDistance
+          && Number(state.loadedChunkCount) === expectedLoadedChunkCount
+          && Number(state.exactCoverageExpectedColumnCount) === expectedLoadedChunkCount
+          && Number(state.exactCoverageReadyColumnCount) === expectedLoadedChunkCount
+          && Number(state.exactCoverageMissingColumnCount) === 0
+          && state.sharedViewSettled === true
+          && state.streamingSettled === true;
+      },
+      { targetRenderDistance, expectedLoadedChunkCount },
+      { timeout: 90_000 },
+    ).catch(() => {});
+    eventual = await capture("eventual-wait-end");
+  }
+  await page.waitForTimeout(1_500);
+  const stable = await capture("stability-window-end");
+  const samples = /** @type {Array<Record<string, any>>} */ (await page.evaluate(() => {
+    const probe = /** @type {any} */ (globalThis).__mcloneCardinalViewReplayProbe;
+    if (!probe) return [];
+    clearInterval(probe.intervalId);
+    probe.record("end", true);
+    return probe.samples;
+  }));
+
+  return {
+    ok: before.renderDistance === 3
+      && selected.renderDistance === targetRenderDistance
+      && Math.max(
+        Math.abs(north1.centerX - routeStart.centerX),
+        Math.abs(north1.centerZ - routeStart.centerZ),
+      ) >= 3
+      && Math.max(
+        Math.abs(west.centerX - north1.centerX),
+        Math.abs(west.centerZ - north1.centerZ),
+      ) >= 3
+      && climb.cameraY >= climbStartY + 128
+      && Math.max(
+        Math.abs(north2.centerX - climb.centerX),
+        Math.abs(north2.centerZ - climb.centerZ),
+      ) >= 3
+      && exactAndSettled(normalWait)
+      && stable.loadedChunkSetHash === normalWait.loadedChunkSetHash
+      && stable.snapshotUpdateCount === normalWait.snapshotUpdateCount
+      && stable.unloadUpdateCount === normalWait.unloadUpdateCount,
+    targetRenderDistance,
+    expectedLoadedChunkCount,
+    normalWaitMillis: normalWait.timeMs - north2.timeMs,
+    before,
+    selected,
+    routeStart,
+    north1,
+    west,
+    climb,
+    north2,
+    overview,
+    normalWait,
+    eventual,
+    stable,
+    samples,
+  };
+}
+
 /** @param {Page} page @param {string} label */
 async function captureRenderDistanceReplayState(page, label) {
   return page.evaluate((label) => {
@@ -7147,10 +7524,43 @@ async function captureRenderDistanceReplayState(page, label) {
       renderDirtyChunkCount: Number(state.renderDirtyChunkCount) || 0,
       renderInflightSectionCount: Number(state.renderInflightSectionCount) || 0,
       residentSectionCount: Number(state.residentSectionCount) || 0,
+      exactCoverageExpectedColumnCount:
+        Number(state.exactCoverageExpectedColumnCount) || 0,
+      exactCoverageReadyColumnCount:
+        Number(state.exactCoverageReadyColumnCount) || 0,
+      exactCoverageMissingColumnCount:
+        Number(state.exactCoverageMissingColumnCount) || 0,
+      exactCoverageReadyColumnHash:
+        String(state.exactCoverageReadyColumnHash ?? ""),
+      exactCoverageMissingColumnHash:
+        String(state.exactCoverageMissingColumnHash ?? ""),
+      sharedViewSettled: state.sharedViewSettled === true,
+      requestedViewExpectedChunkCount:
+        Number(state.requestedViewExpectedChunkCount) || 0,
+      requestedViewLoadedChunkCount:
+        Number(state.requestedViewLoadedChunkCount) || 0,
+      requestedViewServerReadyChunkCount:
+        Number(state.requestedViewServerReadyChunkCount) || 0,
+      requestedViewServerChunkCount:
+        Number(state.requestedViewServerChunkCount) || 0,
+      targetPendingRenderChunkCount:
+        Number(state.targetPendingRenderChunkCount) || 0,
+      targetReadyRenderWorkPending: state.targetReadyRenderWorkPending === true,
+      sectionCount: Number(state.sectionCount) || 0,
+      drawnSectionCount: Number(state.drawnSectionCount) || 0,
+      meshBuildCount: Number(state.meshBuildCount) || 0,
+      pendingStreamWork: Number(state.pendingStreamWork) || 0,
+      renderWorkerPendingRequestCount:
+        Number(state.renderWorkerPendingRequestCount) || 0,
+      clientDeferredChunkDropBacklogItems:
+        Number(state.clientDeferredChunkDropBacklogItems) || 0,
+      updatePumpStalled: state.updatePumpStalled === true,
       streamingSettled: state.streamingSettled === true,
       cameraX: Number(state.cameraX),
       cameraY: Number(state.cameraY),
       cameraZ: Number(state.cameraZ),
+      cameraYawRadians: Number(state.cameraYawRadians),
+      cameraPitchRadians: Number(state.cameraPitchRadians),
       movementMode: String(state.movementMode ?? ""),
       lastUiAction: String(state.lastReport?.action ?? ""),
       worldgenJobFrameMetrics: state.worldgenJobFrameMetrics ?? null,
@@ -7159,6 +7569,49 @@ async function captureRenderDistanceReplayState(page, label) {
       renderCompilerMetrics: state.lastCompileReport?.renderCompilerMetrics ?? null,
     };
   }, label);
+}
+
+/**
+ * Use the production touch-look path to establish a deterministic horizontal
+ * travel pitch or downward overview pitch while retaining the current pose.
+ *
+ * @param {Page} page
+ * @param {number} targetPitchRadians
+ */
+async function setCardinalProbePitch(page, targetPitchRadians) {
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const pitch = Number(await page.evaluate(
+      () => globalThis.__mcloneWebApp?.state?.cameraPitchRadians,
+    ));
+    const deltaPitch = targetPitchRadians - pitch;
+    if (Math.abs(deltaPitch) <= 0.035) return;
+    const pointerId = 70 + attempt;
+    const dragFraction = Math.max(-0.18, Math.min(0.18, -deltaPitch * 0.12));
+    await dispatchCanvasPointerEvent(page, "pointerdown", {
+      pointerId,
+      xFraction: 0.78,
+      yFraction: 0.5,
+      buttons: 1,
+    });
+    await dispatchCanvasPointerEvent(page, "pointermove", {
+      pointerId,
+      xFraction: 0.78,
+      yFraction: 0.5 + dragFraction,
+      buttons: 1,
+    });
+    await dispatchCanvasPointerEvent(page, "pointerup", {
+      pointerId,
+      xFraction: 0.78,
+      yFraction: 0.5 + dragFraction,
+      buttons: 0,
+    });
+    await page.waitForTimeout(50);
+  }
+  const state = await captureRenderDistanceReplayState(page, "pitch-timeout");
+  throw new Error(
+    `cardinal replay could not establish pitch ${targetPitchRadians}:\n`
+      + JSON.stringify(state, null, 2),
+  );
 }
 
 /**
