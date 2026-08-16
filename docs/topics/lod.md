@@ -3,7 +3,7 @@
 Topic: `lod`
 
 Status: canonical current terminology and document-routing entry point as of
-2026-08-11. Detailed implementation status remains in
+2026-08-16. Detailed implementation status remains in
 [`procedural-horizon-clipmap.md`](procedural-horizon-clipmap.md); this page does
 not duplicate its execution ledger.
 
@@ -62,8 +62,10 @@ Current detailed status, limitations, evidence, and next work live in
 [`procedural-horizon-clipmap.md`](procedural-horizon-clipmap.md). In particular,
 that topic records the supported local `mclone-overworld-v1` source, the live
 `Terrain Horizon: Exact Only / Composed` control, platform coverage, and the
-spacing-one voxel shell. Full-frame XR multiview shares the same terrain
-contract but remains an opt-in diagnostic path rather than the default.
+direct exact-to-smooth Human Review 1 candidate. The former spacing-one voxel
+shell is now only a temporary capture comparison pending mandatory deletion.
+Full-frame XR multiview shares the same terrain contract but remains an opt-in
+diagnostic path rather than the default.
 
 ## Historical Routes
 

@@ -3,9 +3,15 @@
 Topic: `procedural-horizon-clipmap`
 
 Status: the standalone cross-platform proof, transition hardening, shared
-vegetation service, and spacing-one voxel-frontier convergence are complete.
-Terrain Lab runtime-composition adoption, PH-4 live-game scene adoption, and
-their hosted human reviews are also complete. As of 2026-08-11, the shared
+vegetation service, Terrain Lab composition, and live-game adoption are
+complete. Tactical
+[`313`](../tactical/313-direct-exact-to-smooth-horizon-transition.md) now has
+its direct exact-to-smooth candidate at Human Review 1: ordinary sessions use
+smooth spacing-one geometry, a generation-cached 32-block appearance field,
+focus-connected irregular exact admission, and a measured exact-profile
+perimeter connector. The former spacing-one voxel shell remains only behind a
+capture environment selector until that review; acceptance requires deleting
+it rather than retaining a disabled fallback. As of 2026-08-11, the shared
 in-game Graphics screen exposes
 `Terrain Horizon: Exact Only / Composed` as a live session control. The same
 UI action, settings reducer, and scene effect serve desktop, browser, flat
@@ -161,10 +167,10 @@ procedural geometry to occlude it. Desktop and phone browser semantic gates
 pass, and hosted interactive Human Review 1B accepted the corrected
 composition on 2026-07-27. Minor z-fighting limited to the outermost exact
 blocks remained a known near-coincident frontier-overlap issue at that
-checkpoint; it did not reopen the shared-depth correction. Tactical
+checkpoint; it did not reopen the shared-depth correction. Historical Tactical
 [`304`](../tactical/304-lod-frontier-and-near-field-voxel-convergence.md)
-now implements the correction. Solid procedural tops and ordinary risers are
-discarded over the complete exact-painted footprint; a bounded
+implemented the first correction. Solid procedural tops and ordinary risers
+were discarded over the complete exact-painted footprint; a bounded
 procedural-side curtain covers height disagreement without a horizontal
 collar. The spacing-one level is a flat-top/cardinal-riser voxel shell, while
 coarser levels remain smooth. Active-pack face materials, worldgen-owned side
@@ -173,7 +179,7 @@ converge the near shell on exact terrain. Opaque procedural water deliberately
 remains the single visible water owner through exact-painted chunks so
 translucent exact water cannot form a differently shaded square. Native,
 desktop/mobile WebGPU, stereo, flat-Android build, and Android-XR build
-boundaries pass; subjective Human Review remains pending.
+boundaries passed, but later product review rejected the intermediate topology.
 Tactical
 [`309`](../tactical/309-procedural-horizon-lighting-and-seam-convergence.md)
 accepted the fixed diagnostic packet and Phase 1's shared environmental
@@ -183,16 +189,24 @@ steep-seam packet remain implemented evidence, but user review redirected the
 product before exact-to-voxel polishing: the several-chunk-deep blocky
 intermediate adds an unconvincing topology pop and a second transition before
 exact terrain.
-Planned Tactical
+Tactical
 [`313`](../tactical/313-direct-exact-to-smooth-horizon-transition.md) now owns
-the visual gate. It will restore smooth spacing-one geometry, preserve the
-successful near/far parameter interpolation as a bounded smooth-side
-appearance band, admit one player-connected non-rectangular exact set, and
-close that set with an exact-profile perimeter connector. A temporary
-developer-only A/B may exist for the first review packet, but completion
-requires deleting the voxel shell and selector rather than retaining a
-fallback mode. Until Tactical 313 lands, the current implementation still
-contains the Tactical 304 voxel shell.
+the visual gate and has implemented its pre-deletion candidate. Smooth
+spacing-one geometry carries the successful near/far parameter interpolation
+through a 32-block world-space field prepared once per admitted generation.
+The exact draw, procedural discard, connector, field, and vegetation ownership
+share one focus-connected non-rectangular exact set, so disconnected ready
+chunks remain procedural. Canonical exact surface columns feed a compact
+two-sided vertical perimeter connector over measured height differences.
+
+The revision-`3f0ff7ee` Human Review 1 packet contains 28 matched and
+state-validated captures. Its ordinary 5-by-5 field is `1,296` bytes and took
+`18-37` microseconds to prepare natively; direct terrain submits `1,633,494`
+vertices versus `2,614,872` for the temporary voxel comparison. Native window,
+offscreen, headed desktop WebGPU, and synthetic-stereo gates pass movement,
+negative rebase, teleport, and orbit. The capture-only voxel selector remains
+solely for Human Review 1. It and all voxel shader topology must be deleted
+after acceptance, followed by the final platform and physical-device matrix.
 The exact renderer's full-sky/zero-block-light RGB now applies once to every
 procedural terrain level, sampled and analytic water, and proxy tree after
 albedo and geometric shade composition. A fixed 32-image, two-seed native

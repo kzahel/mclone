@@ -14,31 +14,39 @@ shared workspace check, and matched release performance receipts on
 decoration-lake summaries, flat water geometry, stored lighting, and GPU
 timestamp instrumentation remain separate work.
 
-Tactical
+Historical Tactical
 [`304`](../tactical/304-lod-frontier-and-near-field-voxel-convergence.md)
-implements the near-field convergence step with the exact-frontier correction.
-The spacing-one level now presents flat tops and cardinal risers with
+implemented the first near-field convergence step with an exact-frontier
+correction. Its spacing-one level presented flat tops and cardinal risers with
 worldgen-owned side strata, direction-specific active-pack faces, pack-native
 grass tint, exact face shade, and shared sky-darken/lightmap inputs. Farther
-rings remain smooth. Opaque procedural water remains the single visible water
+rings remained smooth. Opaque procedural water remains the single visible water
 owner through exact-painted chunks and uses one treatment across the near/far
 material transition. Independent water geometry and decoration-lake summaries
-remain separate work; subjective Human Review of the new terrain character is
-pending.
+remain separate work. Later review rejected the blocky intermediate topology,
+not these retained material and water lessons.
 
 Tactical
 [`309`](../tactical/309-procedural-horizon-lighting-and-seam-convergence.md)
 accepted its diagnostic baseline and shared environmental-light result.
 Human Review then rejected two voxel-to-smooth seam corrections and redirected
 the remaining appearance closeout rather than polishing the exact-to-voxel
-border. Planned Tactical
+border. Tactical
 [`313`](../tactical/313-direct-exact-to-smooth-horizon-transition.md) now owns
-the selected replacement: one smooth spacing-one surface approaches exact
-materials over a bounded distance from a connected non-rectangular exact
-perimeter, an exact edge profile supplies the watertight connector, and the
-voxel shell plus temporary A/B path are deleted after direct-path review.
-The current code remains the Tactical 304 voxel implementation until that
-replacement lands.
+the selected replacement and has implemented the Human Review 1 candidate.
+One smooth spacing-one surface approaches exact materials over a 32-block
+world-space distance from a connected non-rectangular exact perimeter, while
+an exact surface profile supplies compact vertical connector quads. The
+ordinary live, Explorer, and Terrain Lab paths select direct smooth topology.
+The old voxel shell remains only behind a capture environment selector and is
+scheduled for mandatory deletion immediately after candidate acceptance.
+
+The revision-`3f0ff7ee` packet validates natural, material, lighting, water,
+texture, topology, irregular-footprint, and motion views. Its direct candidate
+submits `37.53%` fewer terrain vertices in the primary scene. The ordinary
+transition field is `1,296` bytes, prepares in `18-37` microseconds natively,
+and is cached by exact coverage generation; settled frames skip identical GPU
+uploads. Human Review 1 is the current binding stop.
 
 Every procedural land level, sampled and analytic water, and proxy tree now
 consumes the exact renderer's full-sky/zero-block-light environmental RGB once
@@ -48,11 +56,11 @@ allocation, or fragment branches. The accepted midnight pixels no longer
 contain a daytime-green horizon, bright-cyan procedural water, or daylight
 proxy crowns, while noon remains normally illuminated.
 
-The spacing-one shell now approaches slope-derived shade over its existing
+The rejected spacing-one shell approached slope-derived shade over its
 committed 32-cell presentation band without blending geometry owners. Grass
-on both procedural representations uses one active-pack tint source, and
-analytic river texture response uses the same continuous near/far weight as
-land instead of a topology switch. The 48-image review packet shows no
+on both procedural representations used one active-pack tint source, and
+analytic river texture response used the same continuous near/far weight as
+land instead of a topology switch. Its 48-image review packet showed no
 stable voxel/smooth annulus in land hue, shade, water tint, texture contrast,
 or proxy brightness; the intentional blocky-to-smooth silhouette remains. The
 first review nevertheless exposed that rounded voxel tops can terminate away
@@ -112,9 +120,9 @@ fixed 32-float TerrainPreviewSample
         +--> surface recipe --> worldgen-owned side/subsurface/body strata
         |
         v
-spacing-one voxel shell / stitched smooth farther rings
+smooth spacing-one surface / stitched smooth farther rings
         |
-        +--> near: exact-style face shade + atlas texel
+        +--> near exact perimeter: exact-style response + atlas texel
         |
         +--> far: approximate slope light + reduced atlas detail
         |
@@ -153,9 +161,10 @@ avoids inventing nonsensical fractional block ids, but it also means a coarse
 triangle has one atlas sprite. Continuous fields such as river distance,
 wetland-pool influence, light, and world position interpolate normally.
 
-### Near voxel shell and side strata
+### Historical near voxel shell and retained side strata
 
-Only the spacing-one level changes topology. Each one-block cell has a rounded
+The temporary Human Review comparison still contains Tactical 304's topology,
+but it is not the ordinary path. Its spacing-one one-block cell has a rounded
 integer-height flat top plus reserved north, south, east, and west risers;
 unexposed risers become degenerate triangles. The coarser levels remain the
 stitched smooth heightfield.
@@ -167,6 +176,22 @@ gravel, clay, snow, water, and exposed-stone recipes select their own bounded
 profiles. This is approximate untouched-natural-terrain semantics, not a
 renderer-authored raw-id strata table or a cache of canonical columns.
 
+### Current direct smooth appearance band
+
+The ordinary spacing-one level now keeps the same six-vertex smooth heightfield
+as every coarser level. A CPU-prepared `R8` field measures world-space distance
+from the admitted exact union every four blocks and saturates over a 32-block
+halo. Its filtered scalar drives the bounded near/far parameter mixes without
+changing geometry ownership. Internal exact chunk edges produce neither a new
+band nor a connector.
+
+Canonical exact surface columns retain their top height, side material, and
+water classification through native-thread and browser-Worker publication.
+Only exposed solid perimeter columns produce two-sided vertical connector
+quads, and each quad spans the exact/procedural height difference rather than
+an unconditional depth. The transition field, profile, exact draw, procedural
+discard, and vegetation ownership share one admitted coverage generation.
+
 ### Texture selection and filtering
 
 The scene maps each raw material id through the same baked asset catalog used
@@ -177,10 +202,10 @@ once. Its sampler uses nearest magnification and linear minification/mipmap
 filtering.
 
 The fragment shader repeats the selected block sprite in world space with
-`fract(world_xz)` and samples it with explicit gradients. Solid faces in the
-spacing-one shell use exact-strength atlas texels. Their material character
-transitions over the outer 32 cells toward the smooth far presentation, whose
-texture contribution falls from `0.82` near one block per pixel toward `0.42`
+`fract(world_xz)` and samples it with explicit gradients. The direct
+spacing-one surface approaches exact-strength atlas response near the admitted
+perimeter, then transitions over 32 blocks toward the smooth far presentation,
+whose texture contribution falls from `0.82` near one block per pixel toward `0.42`
 at eight or more blocks per pixel. Water uses the same far-style treatment on
 both sides of that transition so open ocean does not reveal the finest ring as
 a square.
@@ -224,17 +249,17 @@ the normal halo supplies real samples beyond tile boundaries. These rules stop
 lighting seams from revealing clipmap tiles.
 
 Smooth levels retain one normalized directional term plus ambient bias,
-clamped to `0.34..1.05`. The spacing-one shell instead assumes exposed full
-sky/zero block light and applies the ordinary top/east-west/north-south face
-shades of `1.0`, `0.6`, and `0.8`. After material, geometric shade, and water
-composition, every terrain topology and water path consumes the same
-sky-darken-dependent full-sky/zero-block-light RGB used by exact chunks.
+clamped to `0.34..1.05`. The direct spacing-one surface keeps that continuous
+slope geometry and uses exact proximity to approach the retained near-material
+response without introducing block-face topology. After material, geometric
+shade, and water composition, every terrain topology and water path consumes
+the same sky-darken-dependent full-sky/zero-block-light RGB used by exact chunks.
 Procedural tree trunks and crowns consume the same term after their family
 albedo and geometric height shade. The final target-color transfer and fog
 remain shared with the other WGPU paths.
 
-The near shell still does not carry stored per-column light, shadow maps,
-weather attenuation, water specular, or reflections. Those effects require
+The direct near presentation still does not carry stored per-column light,
+shadow maps, weather attenuation, water specular, or reflections. Those effects require
 compact world semantics and shared mono/per-eye/multiview-aware render
 contracts rather than renderer-local guesses.
 
@@ -312,6 +337,18 @@ movement captures report `4,709,496..5,294,208` submitted terrain-plus-tree
 vertices after tile culling. This slice does not claim a GPU-time result;
 portable timestamp evidence remains future work. Exact command lines and
 inspected pixel paths are recorded in Tactical 304.
+
+### Tactical 313 direct candidate cost
+
+The revision-`3f0ff7ee` primary matched scene submits `1,633,494` direct
+terrain vertices instead of `2,614,872` through the temporary voxel shell, a
+`981,378`-vertex or `37.53%` reduction. Its perimeter connector is `277`
+segments, `1,662` vertices, and `3,324` bytes. The ordinary transition payload
+is `1,296` bytes and took `18-37` microseconds to prepare in the native review
+packet. The field is cached by admitted exact generation, and identical GPU
+coverage uploads are skipped. Fixed allocation remains `133,209,640` bytes in
+both temporary A/B modes because the comparison build still reserves the same
+bounded resources; final allocation is remeasured after voxel deletion.
 
 ### Tactical 276 baseline
 
@@ -396,9 +433,8 @@ remain under `/tmp` by policy.
    heightfield overlay produces sloped rivers or ponds at grazing angles.
 4. Decide whether decoration lakes receive deterministic multiscale summaries
    or deliberately remain exact-range-only.
-5. Close Tactical 309's rejected voxel-to-smooth crack and complete Human
-   Review 2, then use its controlled terms for the separately gated
-   exact-to-voxel frontier comparison.
+5. Complete Tactical 313 Human Review 1, delete the temporary voxel topology,
+   and run its final cross-platform and Human Review 2 gates.
 6. Add renderer GPU timing before increasing atlas samples, biome blending, or
    water shading complexity.
 

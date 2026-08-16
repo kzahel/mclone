@@ -1,7 +1,7 @@
 # Tactical 313: Direct Exact-to-Smooth Horizon Transition
 
-Status: planned 2026-08-16; direct-path implementation and phased Human
-Review required
+Status: Phases 0-2 candidate implemented 2026-08-16; Human Review 1 pending
+before mandatory voxel-path deletion
 
 Topic: `procedural-horizon-clipmap`
 
@@ -383,6 +383,71 @@ in still and moving evidence after voxel deletion. Supported platforms share
 the result, direct composition remains bounded, and measured cost does not
 regress the accepted baseline without an explicit product decision.
 
+## Human Review 1 Candidate Record
+
+Revision `3f0ff7ee` implements the pre-deletion candidate. The ordinary live,
+World Explorer, and Terrain Lab sessions select direct smooth topology. The
+voxel shell remains reachable only through the capture-only
+`MCLONE_TERRAIN_HANDOFF_REVIEW=voxel` environment selector and must be deleted
+if this review accepts the candidate.
+
+Implemented contracts:
+
+- `mclone-scene` admits only the focus-connected ready exact component and
+  derives exact draw, procedural discard, transition preparation, connector,
+  and vegetation ownership from that admitted generation. Focused fixtures
+  cover rectangles, L shapes, staircases, concave bays, holes, negative
+  coordinates, disconnected islands, growth, eviction, and source reset.
+- `mclone-terrain-view` prepares one four-block-per-texel `R8` proximity field
+  with a 32-block halo. The maximum allocation is `272x272 = 73,984` bytes;
+  the ordinary 5-by-5 exact footprint uses `1,296` payload bytes. Prepared
+  frames are cached by coverage generation and identical GPU coverage uploads
+  are skipped.
+- The spacing-one direct candidate uses the ordinary six-vertex smooth cell.
+  Exact surface columns survive native-thread and browser-Worker publication,
+  and exposed perimeter cells produce compact two-sided vertical connector
+  quads spanning only the measured exact/procedural height difference. Exact
+  water edges do not emit an opaque solid connector.
+- Mono and full-frame multiview entry points consume the same transition and
+  connector resources. The temporary voxel comparison uses the former
+  30-vertex flat-top/cardinal-riser cell only for this review packet.
+
+The reproducible command
+`pnpm native:terrain-handoff-review:capture -- --output DIR` produced 28
+validated `1280x720` captures plus a hash-and-state receipt under
+`/tmp/mclone-t313-human-review-1-v4`. The packet fixes profile, seed, camera,
+lighting, exact readiness, coverage generation, and drained vegetation across
+each matched pair. It includes eight low-view diagnostics, steep snow, L and
+holed footprints, a suppressed disconnected island, sub-cell motion, rebase,
+and a second orbit angle.
+
+Measured candidate facts:
+
+- primary voxel shell: `2,614,872` submitted terrain vertices;
+- primary direct smooth: `1,633,494` vertices, saving `981,378` (`37.53%`);
+- primary connector: `277` segments, `1,662` vertices, `3,324` bytes;
+- direct transition payload: `784-1,296` bytes across captured shapes;
+- native transition preparation: `18-37` microseconds across the packet; and
+- fixed resident allocation: `133,209,640` bytes in both temporary A/B modes.
+
+The final native World Explorer window and offscreen smoke at
+`/tmp/mclone-t313-world-explorer-smoke-final` passes continuous X, Z, and
+diagonal travel, negative-coordinate rebase, million-block teleport, zoom,
+map, and orbit with direct topology at every checkpoint. Initial and movement
+connectors report `277/320` segments and `18/26` microseconds of preparation.
+The headed desktop WebGPU smoke also passes pointer/touch motion, Worker
+restart, negative coordinates, and teleport; its Rust-authored snapshots
+report direct topology and a `1,296`-byte transition payload throughout.
+Synthetic stereo renders distinct, valid per-eye pixels. Focused tests pass
+`112` terrain-view tests plus one adapter-dependent GPU test ignored without a
+native adapter, and all five scene terrain-view tests.
+
+Human Review 1 is now the binding stop. Phase 3 has deliberately not started:
+the voxel shader topology, comparison enum, environment selector, and A/B
+capture definitions remain present only so the reviewer can compare the
+candidate. Acceptance authorizes their deletion and final cross-platform
+Phase 4 validation; rejection keeps this tactical open for correction.
+
 ## Acceptance
 
 - The composed frame has only exact terrain and smooth procedural terrain as
@@ -448,8 +513,8 @@ regress the accepted baseline without an explicit product decision.
   the existing prepared mesh contract owns them.
 - `native/crates/mclone-worldgen` -- procedural endpoint material and retained
   side-profile semantics used by the connector.
-- `scripts/capture-terrain-seam-review.mjs` -- temporary A/B evidence followed
-  by final direct-only review evidence.
+- `scripts/capture-direct-terrain-handoff-review.mjs` -- temporary A/B
+  evidence, mandatory deletion gate, and review receipt.
 - [`309-procedural-horizon-lighting-and-seam-convergence.md`](309-procedural-horizon-lighting-and-seam-convergence.md)
   -- accepted environmental-light foundation and redirected voxel-specific
   closeout.
