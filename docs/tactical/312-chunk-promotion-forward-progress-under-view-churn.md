@@ -1,6 +1,7 @@
 # Tactical 312: Chunk Promotion Forward Progress Under View Churn
 
-Status: planned 2026-08-16; natural physical Android reproduction complete
+Status: in progress 2026-08-16; Slice 0 deterministic native/Web
+reproduction complete
 
 Topic: `chunk-lighting-admission-and-backpressure`
 
@@ -228,6 +229,72 @@ blockers. The first implementation slice must capture that final per-position
 receipt before changing behavior. Until then, this is a source-proven
 forward-progress hole and the leading explanation of the natural plateau, not
 a claim that the omitted live counters were somehow observed.
+
+## Slice 0 Execution Evidence
+
+Slice 0 adds a zero-default diagnostic delay immediately before shared initial-
+Light mailbox admission. The delay is measured in scheduler polls rather than
+wall time: it does not sleep or stop a thread or Worker, and native and WASM
+execute the same delayed-demand, cancellation, and re-entry state machine.
+Production behavior is unchanged unless
+`debug_light_admission_delay_ticks`/`debugLightAdmissionDelayTicks` is
+explicitly selected.
+
+The scheduler diagnostics now split Player promotion into desired, queued,
+active, oldest active age, and bounded active-blocker classes. They also count
+all Light `Scheduled` slots without a token and, separately, those exact
+orphans occupying active Player-promotion slots. The focused shared test
+constructs a delayed Light demand, cancels it through ordinary interest
+change, re-enters its still-resident holder, and proves the terminal blocker.
+
+The native deterministic probe runs at render distance 8 with four promotion
+slots and an 80-poll Light-admission delay. After a far-and-return view cycle,
+187 stationary polls produced this stable pre-fix receipt:
+
+```text
+requested chunks:                         361
+client-visible chunks:                     14
+Player promotions queued / active:      357 / 4
+active Light Scheduled without token:       4
+pending publications:                       0
+worldgen / Light mailbox pending:        0 / 0
+```
+
+The structured artifact is
+[`/tmp/mclone-native-promotion-churn.json`](/tmp/mclone-native-promotion-churn.json).
+`pnpm native:scheduler:promotion-churn` intentionally exits unsuccessfully
+while the pre-fix view cannot converge.
+
+The headed Chrome probe applies the same 80-poll shared delay through the real
+integrated-server and retained worldgen/Light Worker topology. An explicit
+smoke-only camera jump widens the interest-change window; it does not kill,
+pause, replace, or bypass a Worker. The probe waited for all four delayed
+demands, moved 32 chunks away, immediately returned to the original RD8 view,
+and then held still for 30 seconds plus a stability window. It reproduced:
+
+```text
+requested / server-ready chunks:        361 / 172
+exact ready / expected columns:         112 / 289
+Player promotions queued / active:      236 / 4
+active Light Scheduled without token:         4
+Light demand / worldgen mailbox / Light mailbox: 0 / 0 / 0
+pending publications:                         0
+runner error / page errors:              empty / 0
+```
+
+All four blocker counts and the queued count remained unchanged through the
+stationary window. The browser report and inspected capture are
+[`/tmp/mclone-native-web-promotion-churn.json`](/tmp/mclone-native-web-promotion-churn.json)
+and
+[`/tmp/mclone-native-web-promotion-churn-canvas.png`](/tmp/mclone-native-web-promotion-churn-canvas.png).
+The probe shuts down both browser Workers cleanly after recording the receipt.
+
+This closes the earlier evidence gap: both native execution and the real WASM
+Worker topology prove that four active promotions can be Light `Scheduled`
+with no token or executable mailbox work. Slice 1 may proceed against the
+source-correlated cancellation/re-entry blocker. The delay and smoke jump are
+window-widening controls, not explanations of the natural phone failure; the
+unchanged production build already supplied that ordinary-route evidence.
 
 ## Why Existing Tests Passed
 
@@ -556,6 +623,7 @@ cargo test --manifest-path native/Cargo.toml -p mclone-server
 cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime
 cargo check --manifest-path native/Cargo.toml -p mclone-web-client \
   --target wasm32-unknown-unknown
+pnpm native:scheduler:promotion-churn
 pnpm native:scheduler:smoke
 pnpm native:movement:smoke
 pnpm native:web:cardinal-view-replay

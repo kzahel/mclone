@@ -1047,6 +1047,20 @@ impl WebSceneSmokeHarness {
         host.frame_block_for_smoke(x, y, z, preserve_position)
     }
 
+    /// Move the ordinary player camera to an arbitrary diagnostic position.
+    /// This stays on the smoke-only harness so production browser glue cannot
+    /// bypass shared locomotion or authoritative movement semantics.
+    #[wasm_bindgen(js_name = teleportPlayer)]
+    pub fn teleport_player(
+        &mut self,
+        host: &mut WebSceneHost,
+        x: f64,
+        y: f64,
+        z: f64,
+    ) -> Result<JsValue, JsValue> {
+        host.teleport_player_for_smoke(x, y, z)
+    }
+
     /// Aim ordinary player controls at a replicated entity. This remains on
     /// the explicit smoke surface and does not add a product-host control API.
     #[wasm_bindgen(js_name = frameEntity)]
@@ -1718,6 +1732,23 @@ impl WebSceneHost {
         } else {
             aim_player_host_at_block(self.host_mut()?, block);
         }
+        self.diagnostic_report(None, false, 0.0, false)
+            .map_err(JsValue::from)
+    }
+
+    fn teleport_player_for_smoke(&mut self, x: f64, y: f64, z: f64) -> Result<JsValue, JsValue> {
+        if !x.is_finite() || !y.is_finite() || !z.is_finite() {
+            return Err(JsValue::from_str(
+                "smoke player teleport requires finite coordinates",
+            ));
+        }
+        let camera = self.host_ref()?.camera_frame_state().camera;
+        self.host_mut()?.set_mono_player_camera(
+            Vec3d::new(x, y, z),
+            camera.yaw_radians,
+            camera.pitch_radians,
+            camera.speed_blocks_per_second,
+        );
         self.diagnostic_report(None, false, 0.0, false)
             .map_err(JsValue::from)
     }
@@ -5482,6 +5513,52 @@ impl WebSceneHost {
                     &object,
                     "lightStatusMailboxPendingStatuses",
                     diagnostics.scheduler_light_mailbox_pending_statuses as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "schedulerPlayerPromotionDesired",
+                    diagnostics.scheduler_player_promotion_desired as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "schedulerPlayerPromotionQueued",
+                    diagnostics.scheduler_player_promotion_queued as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "schedulerPlayerPromotionActive",
+                    diagnostics.scheduler_player_promotion_active as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "schedulerPlayerPromotionMaxActive",
+                    diagnostics.scheduler_player_promotion_max_active as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "schedulerPlayerPromotionActiveLightScheduledWithoutToken",
+                    diagnostics.scheduler_player_promotion_active_light_scheduled_without_token
+                        as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "schedulerLightDemandQueued",
+                    diagnostics.scheduler_light_demand_queued as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "schedulerLightScheduledWithoutToken",
+                    diagnostics.scheduler_light_scheduled_without_token as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "schedulerDebugLightAdmissionDelayTicks",
+                    diagnostics.scheduler_debug_light_admission_delay_ticks as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "schedulerDebugLightAdmissionDelayedDemands",
+                    diagnostics.scheduler_debug_light_admission_delayed_demands as f64,
                 )?;
             }
         } else {

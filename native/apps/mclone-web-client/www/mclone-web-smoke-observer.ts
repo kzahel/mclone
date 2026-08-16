@@ -37,6 +37,7 @@ interface SmokeRuntime {
     z: number,
     preservePosition?: boolean,
   ) => WasmReport | null;
+  teleportPlayer?: (x: number, y: number, z: number) => WasmReport | null;
   frameEntity?: (
     entityId: number,
     preservePosition?: boolean,
@@ -459,6 +460,9 @@ export function installWebSmokeObserver(
     observer.observeTarget(app.sceneHostForObserver()?.previewBlockTarget());
     return report;
   };
+  runtime.teleportPlayer = (x, y, z) => applySmoke(
+    (harness, session) => harness.teleportPlayer(session, x, y, z),
+  );
   runtime.frameEntity = (entityId, preservePosition = false) => {
     const report = applySmoke((harness, session) => harness.frameEntity(
       session,

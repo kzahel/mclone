@@ -1826,6 +1826,33 @@ fn parse_diagnostics(
         number_prop(value, "schedulerLoadedSnapshotChunks").unwrap_or(0.0) as usize;
     diagnostics.scheduler_metrics.active_ticket_chunks =
         number_prop(value, "schedulerActiveTicketChunks").unwrap_or(0.0) as usize;
+    diagnostics.scheduler_metrics.player_promotion_desired =
+        number_prop(value, "schedulerPlayerPromotionDesired").unwrap_or(0.0) as usize;
+    diagnostics.scheduler_metrics.player_promotion_queued =
+        number_prop(value, "schedulerPlayerPromotionQueued").unwrap_or(0.0) as usize;
+    diagnostics.scheduler_metrics.player_promotion_active =
+        number_prop(value, "schedulerPlayerPromotionActive").unwrap_or(0.0) as usize;
+    diagnostics.scheduler_metrics.player_promotion_max_active =
+        number_prop(value, "schedulerPlayerPromotionMaxActive").unwrap_or(0.0) as usize;
+    diagnostics
+        .scheduler_metrics
+        .player_promotion_active_light_scheduled_without_token = number_prop(
+        value,
+        "schedulerPlayerPromotionActiveLightScheduledWithoutToken",
+    )
+    .unwrap_or(0.0) as usize;
+    diagnostics.scheduler_metrics.light_demand_queued =
+        number_prop(value, "schedulerLightDemandQueued").unwrap_or(0.0) as usize;
+    diagnostics.scheduler_metrics.light_scheduled_without_token =
+        number_prop(value, "schedulerLightScheduledWithoutToken").unwrap_or(0.0) as usize;
+    diagnostics
+        .scheduler_metrics
+        .debug_light_admission_delay_ticks =
+        number_prop(value, "schedulerDebugLightAdmissionDelayTicks").unwrap_or(0.0) as u32;
+    diagnostics
+        .scheduler_metrics
+        .debug_light_admission_delayed_demands =
+        number_prop(value, "schedulerDebugLightAdmissionDelayedDemands").unwrap_or(0.0) as usize;
     diagnostics.chunk_tracking.total_player_visible_chunks =
         number_prop(value, "trackingPlayerVisibleChunks").unwrap_or(0.0) as usize;
     diagnostics.chunk_tracking.total_player_published_chunks =
@@ -3879,6 +3906,57 @@ fn diagnostics_to_js(diagnostics: &ServerRunnerDiagnostics) -> Result<JsValue, S
         &object,
         "schedulerActiveTicketChunks",
         diagnostics.scheduler_metrics.active_ticket_chunks as f64,
+    )?;
+    set_number(
+        &object,
+        "schedulerPlayerPromotionDesired",
+        diagnostics.scheduler_metrics.player_promotion_desired as f64,
+    )?;
+    set_number(
+        &object,
+        "schedulerPlayerPromotionQueued",
+        diagnostics.scheduler_metrics.player_promotion_queued as f64,
+    )?;
+    set_number(
+        &object,
+        "schedulerPlayerPromotionActive",
+        diagnostics.scheduler_metrics.player_promotion_active as f64,
+    )?;
+    set_number(
+        &object,
+        "schedulerPlayerPromotionMaxActive",
+        diagnostics.scheduler_metrics.player_promotion_max_active as f64,
+    )?;
+    set_number(
+        &object,
+        "schedulerPlayerPromotionActiveLightScheduledWithoutToken",
+        diagnostics
+            .scheduler_metrics
+            .player_promotion_active_light_scheduled_without_token as f64,
+    )?;
+    set_number(
+        &object,
+        "schedulerLightDemandQueued",
+        diagnostics.scheduler_metrics.light_demand_queued as f64,
+    )?;
+    set_number(
+        &object,
+        "schedulerLightScheduledWithoutToken",
+        diagnostics.scheduler_metrics.light_scheduled_without_token as f64,
+    )?;
+    set_number(
+        &object,
+        "schedulerDebugLightAdmissionDelayTicks",
+        diagnostics
+            .scheduler_metrics
+            .debug_light_admission_delay_ticks as f64,
+    )?;
+    set_number(
+        &object,
+        "schedulerDebugLightAdmissionDelayedDemands",
+        diagnostics
+            .scheduler_metrics
+            .debug_light_admission_delayed_demands as f64,
     )?;
     set_number(
         &object,

@@ -165,7 +165,10 @@ const viewReplayProbe = process.argv.includes("--view-replay-probe")
   || process.env.MCLONE_NATIVE_WEB_VIEW_REPLAY_PROBE === "1";
 const renderDistanceReplayProbe = process.argv.includes("--render-distance-replay-probe")
   || process.env.MCLONE_NATIVE_WEB_RENDER_DISTANCE_REPLAY_PROBE === "1";
+const promotionChurnProbe = process.argv.includes("--promotion-churn-probe")
+  || process.env.MCLONE_NATIVE_WEB_PROMOTION_CHURN_PROBE === "1";
 const cardinalViewReplayProbe = process.argv.includes("--cardinal-view-replay-probe")
+  || promotionChurnProbe
   || process.env.MCLONE_NATIVE_WEB_CARDINAL_VIEW_REPLAY_PROBE === "1";
 const renderDistanceReplayTarget = renderDistance ?? (cardinalViewReplayProbe ? 8 : 10);
 const blockEditProbe = process.argv.includes("--block-edit-probe")
@@ -318,6 +321,8 @@ const screenshotPath = process.env.MCLONE_NATIVE_WEB_SMOKE_SCREENSHOT
     ? "/tmp/mclone-native-web-view-replay.png"
     : renderDistanceReplayProbe
     ? "/tmp/mclone-native-web-render-distance-replay.png"
+    : promotionChurnProbe
+    ? "/tmp/mclone-native-web-promotion-churn.png"
     : cardinalViewReplayProbe
     ? "/tmp/mclone-native-web-cardinal-view-replay.png"
     : blockEditProbe
@@ -362,6 +367,8 @@ const canvasScreenshotPath = process.env.MCLONE_NATIVE_WEB_CANVAS_SCREENSHOT
     ? "/tmp/mclone-native-web-view-replay-canvas.png"
     : renderDistanceReplayProbe
     ? "/tmp/mclone-native-web-render-distance-replay-canvas.png"
+    : promotionChurnProbe
+    ? "/tmp/mclone-native-web-promotion-churn-canvas.png"
     : cardinalViewReplayProbe
     ? "/tmp/mclone-native-web-cardinal-view-replay-canvas.png"
     : blockEditProbe
@@ -422,7 +429,9 @@ const renderDistanceReplayProbeReportPath =
     ?? "/tmp/mclone-native-web-render-distance-replay.json";
 const cardinalViewReplayProbeReportPath =
   process.env.MCLONE_NATIVE_WEB_CARDINAL_VIEW_REPLAY_PROBE_REPORT
-    ?? "/tmp/mclone-native-web-cardinal-view-replay.json";
+    ?? (promotionChurnProbe
+      ? "/tmp/mclone-native-web-promotion-churn.json"
+      : "/tmp/mclone-native-web-cardinal-view-replay.json");
 const cardinalViewReplayEventualWaitMs = Number.parseInt(
   process.env.MCLONE_NATIVE_WEB_CARDINAL_VIEW_REPLAY_EVENTUAL_WAIT_MS ?? "90000",
   10,
@@ -839,6 +848,9 @@ async function run() {
       if (screenshotEye) startupParameters.set("screenshotEye", screenshotEye);
       if (screenshotTarget) startupParameters.set("screenshotTarget", screenshotTarget);
       if (worldTopology) startupParameters.set("worldTopology", worldTopology);
+      if (promotionChurnProbe) {
+        startupParameters.set("debugLightAdmissionDelayTicks", "80");
+      }
       if (showcase) startupParameters.set("showcase", showcase);
       const appUrl = startupParameters.size > 0
         ? `${baseAppUrl}${baseAppUrl.includes("?") ? "&" : "?"}${startupParameters}`
@@ -4282,11 +4294,9 @@ async function run() {
         return;
       }
       if (cardinalViewReplayProbe) {
-        const cardinalViewReplayProbeResult = await runCardinalViewReplayProbe(
-          page,
-          canvas,
-          renderDistanceReplayTarget,
-        );
+        const cardinalViewReplayProbeResult = promotionChurnProbe
+          ? await runPromotionChurnProbe(page, canvas, renderDistanceReplayTarget)
+          : await runCardinalViewReplayProbe(page, canvas, renderDistanceReplayTarget);
         const result = await captureRenderDistanceReplayState(page, "final");
         const pageScreenshotCaptured = await page.screenshot({
           path: screenshotPath,
@@ -4326,6 +4336,9 @@ async function run() {
         );
         if (
           cardinalViewReplayProbeResult.ok !== true
+          || (promotionChurnProbe
+            && cardinalViewReplayProbeResult.selected
+              ?.schedulerDebugLightAdmissionDelayTicks !== 80)
           || shutdownResult?.shutdownComplete !== true
           || Number(workerStatsAfterShutdown?.active?.["mclone-integrated-server"]) !== 0
           || Number(workerStatsAfterShutdown?.active?.["mclone-render-compiler-app"]) !== 0
@@ -7209,6 +7222,22 @@ async function runRenderDistanceReplayProbe(page, canvas, targetRenderDistance) 
           worldgenMailboxPendingJobs: Number(state.worldgenMailboxPendingJobs) || 0,
           lightStatusMailboxPendingStatuses:
             Number(state.lightStatusMailboxPendingStatuses) || 0,
+          schedulerPlayerPromotionDesired:
+            Number(state.schedulerPlayerPromotionDesired) || 0,
+          schedulerPlayerPromotionQueued:
+            Number(state.schedulerPlayerPromotionQueued) || 0,
+          schedulerPlayerPromotionActive:
+            Number(state.schedulerPlayerPromotionActive) || 0,
+          schedulerPlayerPromotionActiveLightScheduledWithoutToken:
+            Number(state.schedulerPlayerPromotionActiveLightScheduledWithoutToken) || 0,
+          schedulerLightDemandQueued:
+            Number(state.schedulerLightDemandQueued) || 0,
+          schedulerLightScheduledWithoutToken:
+            Number(state.schedulerLightScheduledWithoutToken) || 0,
+          schedulerDebugLightAdmissionDelayTicks:
+            Number(state.schedulerDebugLightAdmissionDelayTicks) || 0,
+          schedulerDebugLightAdmissionDelayedDemands:
+            Number(state.schedulerDebugLightAdmissionDelayedDemands) || 0,
           pendingCompileJobCount: Number(state.pendingCompileJobCount) || 0,
           renderDirtyChunkCount: Number(state.renderDirtyChunkCount) || 0,
           renderInflightSectionCount: Number(state.renderInflightSectionCount) || 0,
@@ -7439,6 +7468,22 @@ async function runCardinalViewReplayProbe(page, canvas, targetRenderDistance) {
           worldgenMailboxPendingJobs: Number(state.worldgenMailboxPendingJobs) || 0,
           lightStatusMailboxPendingStatuses:
             Number(state.lightStatusMailboxPendingStatuses) || 0,
+          schedulerPlayerPromotionDesired:
+            Number(state.schedulerPlayerPromotionDesired) || 0,
+          schedulerPlayerPromotionQueued:
+            Number(state.schedulerPlayerPromotionQueued) || 0,
+          schedulerPlayerPromotionActive:
+            Number(state.schedulerPlayerPromotionActive) || 0,
+          schedulerPlayerPromotionActiveLightScheduledWithoutToken:
+            Number(state.schedulerPlayerPromotionActiveLightScheduledWithoutToken) || 0,
+          schedulerLightDemandQueued:
+            Number(state.schedulerLightDemandQueued) || 0,
+          schedulerLightScheduledWithoutToken:
+            Number(state.schedulerLightScheduledWithoutToken) || 0,
+          schedulerDebugLightAdmissionDelayTicks:
+            Number(state.schedulerDebugLightAdmissionDelayTicks) || 0,
+          schedulerDebugLightAdmissionDelayedDemands:
+            Number(state.schedulerDebugLightAdmissionDelayedDemands) || 0,
           pendingStreamWork: Number(state.pendingStreamWork) || 0,
           pendingCompileJobCount: Number(state.pendingCompileJobCount) || 0,
           renderWorkerPendingRequestCount:
@@ -7549,6 +7594,10 @@ async function runCardinalViewReplayProbe(page, canvas, targetRenderDistance) {
   await setPhase("north-2");
   await moveAcrossViewReplayChunks(page, "KeyW", "w", climb, 3, 60_000);
   const north2 = await capture("north-2-end");
+
+  await setPhase("reverse");
+  await moveAcrossViewReplayChunks(page, "KeyS", "s", north2, 2, 60_000);
+  const reverse = await capture("reverse-end");
   await setCardinalProbePitch(page, -1.25);
   const overview = await capture("overview-framed");
 
@@ -7575,6 +7624,9 @@ async function runCardinalViewReplayProbe(page, canvas, targetRenderDistance) {
     && state.exactCoverageExpectedColumnCount === expectedLoadedChunkCount
     && state.exactCoverageReadyColumnCount === expectedLoadedChunkCount
     && state.exactCoverageMissingColumnCount === 0
+    && state.schedulerPlayerPromotionQueued === 0
+    && state.schedulerPlayerPromotionActive === 0
+    && state.schedulerPlayerPromotionActiveLightScheduledWithoutToken === 0
     && state.sharedViewSettled === true
     && deliveryChainComplete(state);
   let eventual = normalWait;
@@ -7591,6 +7643,9 @@ async function runCardinalViewReplayProbe(page, canvas, targetRenderDistance) {
           && Number(state.exactCoverageExpectedColumnCount) === expectedLoadedChunkCount
           && Number(state.exactCoverageReadyColumnCount) === expectedLoadedChunkCount
           && Number(state.exactCoverageMissingColumnCount) === 0
+          && Number(state.schedulerPlayerPromotionQueued) === 0
+          && Number(state.schedulerPlayerPromotionActive) === 0
+          && Number(state.schedulerPlayerPromotionActiveLightScheduledWithoutToken) === 0
           && state.sharedViewSettled === true
           && String(state.runnerLastError ?? "") === ""
           && Number(state.serverPlayerQueuedSnapshotUpdateCount)
@@ -7637,6 +7692,10 @@ async function runCardinalViewReplayProbe(page, canvas, targetRenderDistance) {
         Math.abs(north2.centerX - climb.centerX),
         Math.abs(north2.centerZ - climb.centerZ),
       ) >= 3
+      && Math.max(
+        Math.abs(reverse.centerX - north2.centerX),
+        Math.abs(reverse.centerZ - north2.centerZ),
+      ) >= 2
       && exactAndSettled(normalWait)
       && exactAndSettled(stable)
       && stable.loadedChunkSetHash === normalWait.loadedChunkSetHash
@@ -7644,7 +7703,7 @@ async function runCardinalViewReplayProbe(page, canvas, targetRenderDistance) {
       && stable.unloadUpdateCount === normalWait.unloadUpdateCount,
     targetRenderDistance,
     expectedLoadedChunkCount,
-    normalWaitMillis: normalWait.timeMs - north2.timeMs,
+    normalWaitMillis: normalWait.timeMs - reverse.timeMs,
     before,
     selected,
     routeStart,
@@ -7652,11 +7711,129 @@ async function runCardinalViewReplayProbe(page, canvas, targetRenderDistance) {
     west,
     climb,
     north2,
+    reverse,
     overview,
     normalWait,
     eventual,
     stable,
     samples,
+  };
+}
+
+/**
+ * Deterministically widen the shared scheduler's Light-admission window, move
+ * far enough to cancel the four active Player promotions, and immediately
+ * re-enter their original view. No Worker is stopped or delayed: the position
+ * jump is confined to the explicit smoke harness, while all view commands,
+ * cancellation, Worker work, and publication use the production topology.
+ *
+ * This is intentionally a pre-fix proof probe. `ok` means the known orphaned
+ * promotion state was reproduced; Slice 1 will invert the acceptance contract
+ * to require bounded convergence.
+ *
+ * @param {Page} page
+ * @param {Locator} canvas
+ * @param {number} targetRenderDistance
+ * @returns {Promise<any>}
+ */
+async function runPromotionChurnProbe(page, canvas, targetRenderDistance) {
+  const { before, selected } = await selectRenderDistanceThroughNativeUi(
+    page,
+    canvas,
+    targetRenderDistance,
+  );
+  const expectedLoadedChunkCount = (targetRenderDistance * 2 + 1) ** 2;
+  await page.waitForFunction(
+    () => {
+      const state = globalThis.__mcloneWebApp?.state;
+      return Number(state?.schedulerPlayerPromotionActive) === 4
+        && Number(state?.schedulerDebugLightAdmissionDelayedDemands) >= 4;
+    },
+    undefined,
+    { timeout: 30_000 },
+  );
+  const prepared = await captureRenderDistanceReplayState(page, "prepared");
+  const origin = {
+    x: Number(prepared.cameraX),
+    y: Number(prepared.cameraY),
+    z: Number(prepared.cameraZ),
+    centerX: Number(prepared.centerX),
+    centerZ: Number(prepared.centerZ),
+  };
+  const jumpBlocks = 32 * 16;
+  await page.evaluate(
+    ({ x, y, z }) => globalThis.__mcloneWebApp.teleportPlayer?.(x, y, z),
+    { x: origin.x + jumpBlocks, y: origin.y, z: origin.z },
+  );
+  await page.waitForFunction(
+    ({ originCenterX }) => {
+      const state = globalThis.__mcloneWebApp?.state;
+      return Math.abs(Number(state?.acceptedCenterX) - originCenterX) >= 32;
+    },
+    { originCenterX: origin.centerX },
+    { timeout: 30_000 },
+  );
+  const far = await captureRenderDistanceReplayState(page, "far-accepted");
+  await page.evaluate(
+    ({ x, y, z }) => globalThis.__mcloneWebApp.teleportPlayer?.(x, y, z),
+    { x: origin.x, y: origin.y, z: origin.z },
+  );
+  await page.waitForFunction(
+    ({ centerX, centerZ }) => {
+      const state = globalThis.__mcloneWebApp?.state;
+      return Number(state?.acceptedCenterX) === centerX
+        && Number(state?.acceptedCenterZ) === centerZ
+        && Number(state?.schedulerPlayerPromotionActiveLightScheduledWithoutToken) > 0;
+    },
+    { centerX: origin.centerX, centerZ: origin.centerZ },
+    { timeout: 30_000 },
+  );
+  const reentered = await captureRenderDistanceReplayState(page, "reentered");
+  await setCardinalProbePitch(page, -1.25);
+  await page.waitForTimeout(30_000);
+  const stationary = await captureRenderDistanceReplayState(page, "stationary-30s");
+  await page.waitForTimeout(1_500);
+  const stable = await captureRenderDistanceReplayState(page, "stability-window-end");
+  const deliveryIdle = stable.runnerLastError === ""
+    && stable.pendingPublications === 0
+    && stable.worldgenMailboxPendingJobs === 0
+    && stable.lightStatusMailboxPendingStatuses === 0;
+  const reproduced = prepared.schedulerDebugLightAdmissionDelayTicks === 80
+    && prepared.schedulerPlayerPromotionActive === 4
+    && prepared.schedulerDebugLightAdmissionDelayedDemands >= 4
+    && reentered.schedulerPlayerPromotionActiveLightScheduledWithoutToken > 0
+    && stable.schedulerPlayerPromotionActiveLightScheduledWithoutToken > 0
+    && stable.schedulerPlayerPromotionQueued > 0
+    && stable.requestedViewServerReadyChunkCount
+      < stable.requestedViewExpectedChunkCount
+    && stable.exactCoverageReadyColumnCount < expectedLoadedChunkCount
+    && deliveryIdle
+    && stable.schedulerPlayerPromotionActiveLightScheduledWithoutToken
+      === stationary.schedulerPlayerPromotionActiveLightScheduledWithoutToken
+    && stable.schedulerPlayerPromotionQueued === stationary.schedulerPlayerPromotionQueued;
+  await page.evaluate(
+    ({ x, y, z }) => globalThis.__mcloneWebApp.teleportPlayer?.(x, y, z),
+    { x: origin.x, y: origin.y + 96, z: origin.z },
+  );
+  await page.waitForFunction(
+    ({ targetY }) => Number(globalThis.__mcloneWebApp?.state?.cameraY) >= targetY - 1,
+    { targetY: origin.y + 96 },
+    { timeout: 10_000 },
+  );
+  const overview = await captureRenderDistanceReplayState(page, "overview-framed");
+  return {
+    ok: reproduced,
+    reproduced,
+    expectedLoadedChunkCount,
+    jumpBlocks,
+    before,
+    selected,
+    prepared,
+    far,
+    reentered,
+    overview,
+    stationary,
+    stable,
   };
 }
 
@@ -7724,6 +7901,22 @@ async function captureRenderDistanceReplayState(page, label) {
       worldgenMailboxPendingJobs: Number(state.worldgenMailboxPendingJobs) || 0,
       lightStatusMailboxPendingStatuses:
         Number(state.lightStatusMailboxPendingStatuses) || 0,
+      schedulerPlayerPromotionDesired:
+        Number(state.schedulerPlayerPromotionDesired) || 0,
+      schedulerPlayerPromotionQueued:
+        Number(state.schedulerPlayerPromotionQueued) || 0,
+      schedulerPlayerPromotionActive:
+        Number(state.schedulerPlayerPromotionActive) || 0,
+      schedulerPlayerPromotionActiveLightScheduledWithoutToken:
+        Number(state.schedulerPlayerPromotionActiveLightScheduledWithoutToken) || 0,
+      schedulerLightDemandQueued:
+        Number(state.schedulerLightDemandQueued) || 0,
+      schedulerLightScheduledWithoutToken:
+        Number(state.schedulerLightScheduledWithoutToken) || 0,
+      schedulerDebugLightAdmissionDelayTicks:
+        Number(state.schedulerDebugLightAdmissionDelayTicks) || 0,
+      schedulerDebugLightAdmissionDelayedDemands:
+        Number(state.schedulerDebugLightAdmissionDelayedDemands) || 0,
       pendingCompileJobCount: Number(state.pendingCompileJobCount) || 0,
       renderDirtyChunkCount: Number(state.renderDirtyChunkCount) || 0,
       renderInflightSectionCount: Number(state.renderInflightSectionCount) || 0,

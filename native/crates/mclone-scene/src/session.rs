@@ -6889,6 +6889,7 @@ pub fn local_session_launch_plan(
     authority.world_behavior_profile = scene.world_behavior_profile;
     authority.lighting_enabled = scene.lighting_enabled;
     authority.light_status_batch_size = scene.light_status_batch_size;
+    authority.debug_light_admission_delay_ticks = scene.debug_light_admission_delay_ticks;
     authority.day_time = scene.day_time_override;
     authority.day_time_frozen = scene.freeze_time;
     authority.scheduled_fluid_ticks_frozen = scene.freeze_scheduled_fluid_ticks;

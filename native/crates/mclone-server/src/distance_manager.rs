@@ -28,6 +28,7 @@ pub(crate) struct PlayerPromotionDiagnostics {
     pub admitted_total: u64,
     pub cancelled_before_admission: u64,
     pub oldest_queued_age_ticks: u64,
+    pub oldest_active_age_ticks: u64,
 }
 
 #[derive(Debug)]
@@ -401,6 +402,13 @@ impl ChunkDistanceManager {
             .map(|first_tick| self.ticket_tick.saturating_sub(*first_tick))
             .max()
             .unwrap_or(0);
+        let oldest_active_age_ticks = self
+            .active_player_promotions
+            .iter()
+            .filter_map(|pos| self.player_promotion_first_desired_tick.get(pos))
+            .map(|first_tick| self.ticket_tick.saturating_sub(*first_tick))
+            .max()
+            .unwrap_or(0);
         PlayerPromotionDiagnostics {
             desired: self.aggregate_simulation_positions.len(),
             queued,
@@ -409,6 +417,7 @@ impl ChunkDistanceManager {
             admitted_total: self.player_promotions_admitted_total,
             cancelled_before_admission: self.player_promotions_cancelled_before_admission,
             oldest_queued_age_ticks,
+            oldest_active_age_ticks,
         }
     }
 

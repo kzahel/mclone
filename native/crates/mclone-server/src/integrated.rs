@@ -1169,6 +1169,10 @@ impl RealmServer {
         let policy = self.active_dimension.chunk_tracking.policy();
         let lighting_enabled = self.active_dimension.scheduler.lighting_enabled();
         let light_status_batch_size = self.active_dimension.scheduler.light_status_batch_size();
+        let debug_light_admission_delay_ticks = self
+            .active_dimension
+            .scheduler
+            .debug_light_admission_delay_ticks();
         let publication_budget = self.active_dimension.scheduler.publication_budget_config();
         let mailbox = self
             .active_dimension
@@ -1178,6 +1182,7 @@ impl RealmServer {
         scheduler.set_world_generation_profile(definition.generation_profile)?;
         scheduler.set_lighting_enabled(lighting_enabled);
         scheduler.set_light_status_batch_size(light_status_batch_size);
+        scheduler.set_debug_light_admission_delay_ticks(debug_light_admission_delay_ticks);
         scheduler.set_publication_budget_config(publication_budget);
         Ok(DimensionRuntime::new(key, definition, scheduler, policy))
     }
@@ -1777,6 +1782,10 @@ impl RealmServer {
 
     pub fn set_light_status_batch_size(&mut self, batch_size: usize) {
         self.scheduler.set_light_status_batch_size(batch_size);
+    }
+
+    pub fn set_debug_light_admission_delay_ticks(&mut self, ticks: u32) {
+        self.scheduler.set_debug_light_admission_delay_ticks(ticks);
     }
 
     pub fn publication_budget_config(&self) -> ChunkPublicationBudgetConfig {

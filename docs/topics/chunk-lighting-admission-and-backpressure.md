@@ -55,11 +55,21 @@ A quickly re-entered resident holder can therefore be not ready while owning no
 executable Light work. Four such holders can occupy the complete bounded Player-
 promotion allowance.
 
-The deployed diagnostics do not expose the four active promotion positions or
-their blockers, so Tactical 312 first adds that proof and a deterministic non-
-quiescing churn test. It then makes Feature-to-Light context restartable,
-repairs required deferred work in the shared scheduler, and re-runs the
-physical route without weakening the four-promotion or Light-memory bounds.
+Tactical 312 Slice 0 now closes the diagnostic gap. A zero-default,
+poll-counted delay before shared Light mailbox admission deterministically
+widens the cancellation window without sleeping or stopping an executor. The
+native scheduler probe and real headed Chrome/Web Worker probe both reach the
+same terminal state: all four active Player promotions are Light `Scheduled`
+without a token, queued demand, mailbox owner, or pending publication. The Web
+receipt remains at 172/361 server-ready chunks and 112/289 exact columns after
+30 stationary seconds, with 236 promotions queued and both job mailboxes
+empty. See Tactical 312's Slice 0 execution evidence and `/tmp` artifacts.
+
+The next slice makes Feature-to-Light context restartable, repairs required
+deferred work in the shared scheduler, and re-runs the physical route without
+weakening the four-promotion or Light-memory bounds. The synthetic probe is a
+window-widening cross-platform state-machine control; the unchanged deployed
+phone build remains the proof that ordinary movement reaches this condition.
 
 This incident is separate from Tactical
 [`311`](../tactical/311-cross-platform-worker-liveness-and-replay.md): Worker

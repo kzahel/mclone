@@ -1098,9 +1098,13 @@ pub struct RuntimePollDiagnostics {
     pub scheduler_player_promotion_active: usize,
     pub scheduler_player_promotion_max_active: usize,
     pub scheduler_player_promotion_cancelled_before_admission: u64,
+    pub scheduler_player_promotion_active_light_scheduled_without_token: usize,
     pub scheduler_light_demand_queued: usize,
     pub scheduler_light_demands_cancelled: u64,
     pub scheduler_light_statuses_stale: u64,
+    pub scheduler_light_scheduled_without_token: usize,
+    pub scheduler_debug_light_admission_delay_ticks: u32,
+    pub scheduler_debug_light_admission_delayed_demands: usize,
     pub block_tick_ms: f64,
     pub fluid_tick_ms: f64,
     pub fluid_event_apply_ms: f64,
@@ -3108,12 +3112,25 @@ impl SingleViewRuntime {
         diagnostics.scheduler_player_promotion_cancelled_before_admission = runner_diagnostics
             .scheduler_metrics
             .player_promotion_cancelled_before_admission;
+        diagnostics.scheduler_player_promotion_active_light_scheduled_without_token =
+            runner_diagnostics
+                .scheduler_metrics
+                .player_promotion_active_light_scheduled_without_token;
         diagnostics.scheduler_light_demand_queued =
             runner_diagnostics.scheduler_metrics.light_demand_queued;
         diagnostics.scheduler_light_demands_cancelled =
             runner_diagnostics.scheduler_metrics.light_demands_cancelled;
         diagnostics.scheduler_light_statuses_stale =
             runner_diagnostics.scheduler_metrics.light_statuses_stale;
+        diagnostics.scheduler_light_scheduled_without_token = runner_diagnostics
+            .scheduler_metrics
+            .light_scheduled_without_token;
+        diagnostics.scheduler_debug_light_admission_delay_ticks = runner_diagnostics
+            .scheduler_metrics
+            .debug_light_admission_delay_ticks;
+        diagnostics.scheduler_debug_light_admission_delayed_demands = runner_diagnostics
+            .scheduler_metrics
+            .debug_light_admission_delayed_demands;
         diagnostics.block_tick_ms = micros_to_ms(tick.timing.block_tick_us);
         diagnostics.fluid_tick_ms = micros_to_ms(tick.timing.fluid_tick_us);
         diagnostics.fluid_event_apply_ms = micros_to_ms(tick.timing.fluid_event_apply_us);

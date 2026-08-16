@@ -6,7 +6,7 @@ use mclone_server::{
 };
 
 const STARTUP_MAGIC: [u8; 4] = *b"MCSI";
-const STARTUP_VERSION: u16 = 5;
+const STARTUP_VERSION: u16 = 6;
 const TOPOLOGY_PLANE: u8 = 0;
 const TOPOLOGY_CYLINDER_X: u8 = 1;
 const FLAG_FREEZE_SCHEDULED_FLUID_TICKS: u8 = 1 << 0;
@@ -84,6 +84,12 @@ impl WebIntegratedServerStartupConfig {
         }
         frame.push(flags);
         frame.extend_from_slice(&light_status_batch_size.to_le_bytes());
+        frame.extend_from_slice(
+            &self
+                .authority
+                .debug_light_admission_delay_ticks
+                .to_le_bytes(),
+        );
         frame.extend_from_slice(&self.authority.cadence.host_rate_hz.to_le_bytes());
         frame.extend_from_slice(&self.authority.cadence.gameplay_rate_hz.to_le_bytes());
         frame.extend_from_slice(&self.authority.cadence.physics_rate_hz.to_le_bytes());
@@ -143,6 +149,7 @@ impl WebIntegratedServerStartupConfig {
         }
         let light_status_batch_size = usize::try_from(decoder.u32()?)
             .map_err(|_| "integrated-server light batch size exceeds usize".to_owned())?;
+        let debug_light_admission_delay_ticks = if version >= 6 { decoder.u32()? } else { 0 };
         let cadence = if version >= 5 {
             SimulationCadenceConfig::new(decoder.u32()?, decoder.u32()?, decoder.u32()?)
                 .with_max_catch_up_host_frames(decoder.u32()?)
@@ -179,6 +186,7 @@ impl WebIntegratedServerStartupConfig {
         authority.debug_passive_showcase = flags & FLAG_DEBUG_PASSIVE_SHOWCASE != 0;
         authority.debug_auxiliary_player_script = flags & FLAG_DEBUG_AUXILIARY_PLAYER_SCRIPT != 0;
         authority.light_status_batch_size = light_status_batch_size;
+        authority.debug_light_admission_delay_ticks = debug_light_admission_delay_ticks;
         authority.local_player_identity = Some(local_player_identity);
         authority.observer_only = flags & FLAG_OBSERVER_ONLY != 0;
         authority.lighting_enabled = version < 5 || flags & FLAG_LIGHTING_ENABLED != 0;
@@ -498,6 +506,7 @@ mod tests {
         authority.scheduled_fluid_ticks_frozen = true;
         authority.debug_auxiliary_player_script = true;
         authority.light_status_batch_size = 17;
+        authority.debug_light_admission_delay_ticks = 40;
         authority.cadence =
             SimulationCadenceConfig::new(45, 15, 90).with_max_catch_up_host_frames(7);
         authority.adaptive_chunk_publication_budget = true;
@@ -543,6 +552,10 @@ mod tests {
         );
         mutation!("lighting", lighting_enabled = false);
         mutation!("light-batch", light_status_batch_size = 23);
+        mutation!(
+            "light-admission-delay",
+            debug_light_admission_delay_ticks = 80
+        );
         mutation!("day-time", day_time = Some(7_000));
         mutation!("time-freeze", day_time_frozen = false);
         mutation!("fluid-freeze", scheduled_fluid_ticks_frozen = false);
@@ -611,6 +624,7 @@ mod tests {
         expected.authority.day_time = None;
         expected.authority.day_time_frozen = false;
         expected.authority.lighting_enabled = true;
+        expected.authority.debug_light_admission_delay_ticks = 0;
         expected.authority.adaptive_chunk_publication_budget = false;
         expected.authority.cadence = SimulationCadenceConfig::default();
         let mut frame = expected.encode().unwrap();
@@ -618,7 +632,7 @@ mod tests {
         let showcase_index = 4 + 2 + 1 + 1 + 1 + 4 + 1 + 1;
         frame.drain(showcase_index..showcase_index + 1 + 8);
         let cadence_index = showcase_index + 1 + 4;
-        frame.drain(cadence_index..cadence_index + 4 * 4);
+        frame.drain(cadence_index..cadence_index + 4 * 5);
 
         assert_eq!(
             WebIntegratedServerStartupConfig::decode(&frame),

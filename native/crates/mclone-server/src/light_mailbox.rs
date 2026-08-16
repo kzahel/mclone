@@ -267,6 +267,10 @@ impl LightStatusMailbox {
         self.pending_count
     }
 
+    pub(crate) fn owns_token(&self, token: LightRequestToken) -> bool {
+        self.reservations.contains_key(&token)
+    }
+
     pub(crate) const fn remaining_status_capacity(&self) -> usize {
         self.max_admitted_statuses
             .saturating_sub(self.pending_count)

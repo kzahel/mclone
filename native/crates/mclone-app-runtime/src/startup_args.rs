@@ -40,6 +40,7 @@ pub const ARG_MOVEMENT_MODE: &str = "--movement-mode";
 pub const ARG_DEBUG_PASSIVE_SHOWCASE: &str = "--debug-passive-showcase";
 pub const ARG_LIGHTING: &str = "--lighting";
 pub const ARG_LIGHT_STATUS_BATCH_SIZE: &str = "--light-status-batch-size";
+pub const ARG_DEBUG_LIGHT_ADMISSION_DELAY_TICKS: &str = "--debug-light-admission-delay-ticks";
 pub const ARG_SECTION_OCCLUSION: &str = "--section-occlusion";
 pub const ARG_FULLBRIGHT: &str = "--fullbright";
 pub const ARG_RENDER_COLOR_PROFILE: &str = "--render-color-profile";
@@ -73,6 +74,7 @@ pub const STARTUP_ARG_FLAGS: &[&str] = &[
     ARG_DEBUG_PASSIVE_SHOWCASE,
     ARG_LIGHTING,
     ARG_LIGHT_STATUS_BATCH_SIZE,
+    ARG_DEBUG_LIGHT_ADMISSION_DELAY_TICKS,
     ARG_SECTION_OCCLUSION,
     ARG_FULLBRIGHT,
     ARG_RENDER_COLOR_PROFILE,
@@ -101,6 +103,7 @@ pub const QUERY_DEBUG_PASSIVE_SHOWCASE: &str = "debugPassiveShowcase";
 pub const QUERY_DEBUG_AUXILIARY_PLAYER_SCRIPT: &str = "debugAuxiliaryPlayerScript";
 pub const QUERY_LIGHTING: &str = "lighting";
 pub const QUERY_LIGHT_STATUS_BATCH_SIZE: &str = "lightStatusBatchSize";
+pub const QUERY_DEBUG_LIGHT_ADMISSION_DELAY_TICKS: &str = "debugLightAdmissionDelayTicks";
 pub const QUERY_SECTION_OCCLUSION: &str = "sectionOcclusion";
 pub const QUERY_FULLBRIGHT: &str = "fullbright";
 pub const QUERY_RENDER_COLOR_PROFILE: &str = "renderColorProfile";
@@ -129,6 +132,7 @@ pub const STARTUP_QUERY_KEYS: &[&str] = &[
     QUERY_DEBUG_AUXILIARY_PLAYER_SCRIPT,
     QUERY_LIGHTING,
     QUERY_LIGHT_STATUS_BATCH_SIZE,
+    QUERY_DEBUG_LIGHT_ADMISSION_DELAY_TICKS,
     QUERY_SECTION_OCCLUSION,
     QUERY_FULLBRIGHT,
     QUERY_RENDER_COLOR_PROFILE,
@@ -192,6 +196,7 @@ pub struct StartupSceneOptions {
     pub debug_auxiliary_player_script: bool,
     pub lighting_enabled: bool,
     pub light_status_batch_size: usize,
+    pub debug_light_admission_delay_ticks: u32,
     pub terrain_presentation: TerrainPresentationMode,
     pub terrain_presentation_explicit: bool,
 }
@@ -220,6 +225,7 @@ impl Default for StartupSceneOptions {
             debug_auxiliary_player_script: false,
             lighting_enabled: true,
             light_status_batch_size: DEFAULT_LIGHT_STATUS_BATCH_SIZE,
+            debug_light_admission_delay_ticks: 0,
             terrain_presentation: TerrainPresentationMode::ExactOnly,
             terrain_presentation_explicit: false,
         }
@@ -514,6 +520,10 @@ impl StartupArgState {
                 self.scene.light_status_batch_size =
                     parse_usize_arg(ARG_LIGHT_STATUS_BATCH_SIZE, args.next())?;
             }
+            ARG_DEBUG_LIGHT_ADMISSION_DELAY_TICKS => {
+                self.scene.debug_light_admission_delay_ticks =
+                    parse_u32_arg(ARG_DEBUG_LIGHT_ADMISSION_DELAY_TICKS, args.next())?;
+            }
             ARG_SECTION_OCCLUSION => {
                 self.render_options.section_occlusion_culling =
                     parse_bool_arg(ARG_SECTION_OCCLUSION, args.next())?;
@@ -640,6 +650,10 @@ impl StartupArgState {
             QUERY_LIGHT_STATUS_BATCH_SIZE => {
                 self.scene.light_status_batch_size =
                     parse_usize_arg(QUERY_LIGHT_STATUS_BATCH_SIZE, value)?;
+            }
+            QUERY_DEBUG_LIGHT_ADMISSION_DELAY_TICKS => {
+                self.scene.debug_light_admission_delay_ticks =
+                    parse_u32_arg(QUERY_DEBUG_LIGHT_ADMISSION_DELAY_TICKS, value)?;
             }
             QUERY_SECTION_OCCLUSION => {
                 self.render_options.section_occlusion_culling =
@@ -950,6 +964,7 @@ mod tests {
                 debug_auxiliary_player_script: false,
                 lighting_enabled: true,
                 light_status_batch_size: DEFAULT_LIGHT_STATUS_BATCH_SIZE,
+                debug_light_admission_delay_ticks: 0,
                 terrain_presentation: TerrainPresentationMode::ExactOnly,
                 terrain_presentation_explicit: false,
             }
@@ -1106,6 +1121,7 @@ mod tests {
                 debug_auxiliary_player_script: false,
                 lighting_enabled: true,
                 light_status_batch_size: 5,
+                debug_light_admission_delay_ticks: 0,
                 terrain_presentation: TerrainPresentationMode::ExactOnly,
                 terrain_presentation_explicit: false,
             }
@@ -1423,6 +1439,7 @@ mod tests {
             (QUERY_DEBUG_AUXILIARY_PLAYER_SCRIPT, "true"),
             (QUERY_LIGHTING, "false"),
             (QUERY_LIGHT_STATUS_BATCH_SIZE, "5"),
+            (QUERY_DEBUG_LIGHT_ADMISSION_DELAY_TICKS, "40"),
             (QUERY_SECTION_OCCLUSION, "false"),
             (QUERY_FULLBRIGHT, "true"),
             (QUERY_RENDER_COLOR_PROFILE, "stylized-bright"),
@@ -1469,6 +1486,7 @@ mod tests {
                 debug_auxiliary_player_script: true,
                 lighting_enabled: false,
                 light_status_batch_size: 5,
+                debug_light_admission_delay_ticks: 40,
                 terrain_presentation: TerrainPresentationMode::ExactOnly,
                 terrain_presentation_explicit: false,
             }
