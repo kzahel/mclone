@@ -373,6 +373,8 @@ pub struct ServerRunnerDiagnostics {
     pub last_tick: ServerRunnerTickDiagnostics,
     pub cumulative_feature_chunks_published: u64,
     pub cumulative_light_statuses_published: u64,
+    pub runner_emitted_snapshot_updates: u64,
+    pub runner_emitted_unload_updates: u64,
     pub last_error: Option<String>,
     diagnostics_detail_refreshed_at: Option<std::time::Instant>,
 }
@@ -417,6 +419,8 @@ impl ServerRunnerDiagnostics {
             last_tick: ServerRunnerTickDiagnostics::default(),
             cumulative_feature_chunks_published: 0,
             cumulative_light_statuses_published: 0,
+            runner_emitted_snapshot_updates: 0,
+            runner_emitted_unload_updates: 0,
             last_error: None,
             diagnostics_detail_refreshed_at: None,
         }
@@ -1431,7 +1435,13 @@ mod native {
                 }
                 let wall_us = wall_start.elapsed().as_micros();
                 let updates = std::mem::take(&mut report.updates);
-                publish_updates(&update_tx, update_queue_depth, update_queue_bytes, updates)?;
+                publish_updates(
+                    &update_tx,
+                    update_queue_depth,
+                    update_queue_bytes,
+                    diagnostics,
+                    updates,
+                )?;
                 last_gameplay_tick = Some((report, wall_us));
             }
 
@@ -1447,7 +1457,13 @@ mod native {
                 physics_wall_us = wall_start.elapsed().as_micros();
                 let updates = std::mem::take(&mut report.updates);
                 physics_published_updates = !updates.is_empty();
-                publish_updates(&update_tx, update_queue_depth, update_queue_bytes, updates)?;
+                publish_updates(
+                    &update_tx,
+                    update_queue_depth,
+                    update_queue_bytes,
+                    diagnostics,
+                    updates,
+                )?;
                 physics_report = Some(report);
             }
 
@@ -1679,7 +1695,13 @@ mod native {
                     .map_err(ServerRunnerError::from);
                 command_queue_depth.fetch_sub(1, Ordering::SeqCst);
                 let updates = result?;
-                publish_updates(update_tx, update_queue_depth, update_queue_bytes, updates)?;
+                publish_updates(
+                    update_tx,
+                    update_queue_depth,
+                    update_queue_bytes,
+                    diagnostics,
+                    updates,
+                )?;
                 refresh_diagnostics(
                     diagnostics,
                     server,
@@ -1713,10 +1735,15 @@ mod native {
         update_tx: &mpsc::Sender<NativeQueuedServerUpdate>,
         update_queue_depth: &AtomicUsize,
         update_queue_bytes: &AtomicUsize,
+        diagnostics: &Arc<Mutex<ServerRunnerDiagnostics>>,
         updates: Vec<ServerUpdate>,
     ) -> ServerRunnerResult<()> {
+        let mut emitted_snapshot_updates = 0_u64;
+        let mut emitted_unload_updates = 0_u64;
         for update in updates {
             let encoded_len = encode_server_update(&update)?.len();
+            let is_snapshot = matches!(&update, ServerUpdate::ChunkSnapshot(_));
+            let is_unload = matches!(&update, ServerUpdate::ChunkUnload { .. });
             update_queue_depth.fetch_add(1, Ordering::SeqCst);
             update_queue_bytes.fetch_add(encoded_len, Ordering::SeqCst);
             let queued = NativeQueuedServerUpdate {
@@ -1727,10 +1754,38 @@ mod native {
             if update_tx.send(queued).is_err() {
                 update_queue_depth.fetch_sub(1, Ordering::SeqCst);
                 update_queue_bytes.fetch_sub(encoded_len, Ordering::SeqCst);
+                record_emitted_chunk_updates(
+                    diagnostics,
+                    emitted_snapshot_updates,
+                    emitted_unload_updates,
+                );
                 return Err(ServerRunnerError::UpdateChannelClosed);
             }
+            emitted_snapshot_updates += u64::from(is_snapshot);
+            emitted_unload_updates += u64::from(is_unload);
         }
+        record_emitted_chunk_updates(
+            diagnostics,
+            emitted_snapshot_updates,
+            emitted_unload_updates,
+        );
         Ok(())
+    }
+
+    fn record_emitted_chunk_updates(
+        diagnostics: &Arc<Mutex<ServerRunnerDiagnostics>>,
+        snapshot_updates: u64,
+        unload_updates: u64,
+    ) {
+        let Ok(mut diagnostics) = diagnostics.lock() else {
+            return;
+        };
+        diagnostics.runner_emitted_snapshot_updates = diagnostics
+            .runner_emitted_snapshot_updates
+            .saturating_add(snapshot_updates);
+        diagnostics.runner_emitted_unload_updates = diagnostics
+            .runner_emitted_unload_updates
+            .saturating_add(unload_updates);
     }
 
     fn refresh_diagnostics(
@@ -2221,27 +2276,45 @@ mod native {
             let (update_tx, update_rx) = mpsc::channel();
             let update_queue_depth = AtomicUsize::new(0);
             let update_queue_bytes = AtomicUsize::new(0);
+            let diagnostics = Arc::new(Mutex::new(ServerRunnerDiagnostics::initial(
+                ServerRunnerKind::NativeThread,
+                0,
+                0,
+            )));
             let update = ServerUpdate::TimeUpdate {
                 game_time: 81,
                 day_time: 42,
                 daylight_cycle_running: true,
             };
+            let unload = ServerUpdate::ChunkUnload {
+                pos: ChunkPos::new(3, -4),
+            };
             let expected_len = encode_server_update(&update).unwrap().len();
+            let expected_unload_len = encode_server_update(&unload).unwrap().len();
 
             publish_updates(
                 &update_tx,
                 &update_queue_depth,
                 &update_queue_bytes,
-                vec![update.clone()],
+                &diagnostics,
+                vec![update.clone(), unload.clone()],
             )
             .unwrap();
 
-            assert_eq!(update_queue_depth.load(Ordering::SeqCst), 1);
-            assert_eq!(update_queue_bytes.load(Ordering::SeqCst), expected_len);
+            assert_eq!(update_queue_depth.load(Ordering::SeqCst), 2);
+            assert_eq!(
+                update_queue_bytes.load(Ordering::SeqCst),
+                expected_len + expected_unload_len
+            );
             let queued = update_rx.try_recv().unwrap();
             assert_eq!(queued.update, update);
             assert_eq!(queued.encoded_len, expected_len);
             assert!(queued.queued_at.elapsed() < Duration::from_secs(1));
+            let queued = update_rx.try_recv().unwrap();
+            assert_eq!(queued.update, unload);
+            assert_eq!(queued.encoded_len, expected_unload_len);
+            assert!(queued.queued_at.elapsed() < Duration::from_secs(1));
+            assert_eq!(diagnostics.lock().unwrap().runner_emitted_unload_updates, 1);
         }
 
         #[test]

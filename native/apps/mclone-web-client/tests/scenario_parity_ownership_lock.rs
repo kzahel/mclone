@@ -164,6 +164,9 @@ fn integrated_server_startup_domain_is_an_opaque_rust_frame() {
     assert!(WEB_SERVER_WORKER.contains("backgroundPollIntervalMs"));
     assert!(WEB_SERVER_WORKER.contains("backgroundPollRequested"));
     assert!(WEB_SERVER_WORKER.contains("integrated_server_background_poll_requested"));
+    assert!(WEB_SERVER_WORKER.contains("LOCAL_REALM_BOOTSTRAP_SAVED_DATA_KEYS"));
+    assert!(WEB_SERVER_WORKER.contains("WEB_BOOTSTRAP_SAVED_DATA_REQUEST_ID_BASE"));
+    assert!(WEB_SERVER_WORKER.contains("WEB_BOOTSTRAP_PROBE_REQUEST_ID"));
     assert!(WEB_SERVER_WORKER.contains("outstanding_command_request_ids"));
     assert!(WEB_SERVER_WORKER.contains(
         "diagnostics.command_queue_depth = self.outstanding_command_request_ids.borrow().len()"
@@ -194,6 +197,35 @@ fn integrated_server_startup_domain_is_an_opaque_rust_frame() {
     assert!(command_handler.contains(".try_handle_command(command)"));
     assert!(!command_handler.contains(".try_poll()"));
     assert!(!command_handler.contains("autosave_indexed_db_dirty_chunks"));
+
+    let tick_autosave = WEB_SERVER_WORKER
+        .split("fn autosave_indexed_db_dirty_chunks(")
+        .nth(1)
+        .expect("Web integrated server tick autosave exists")
+        .split("fn refresh_diagnostics(")
+        .next()
+        .expect("Web tick autosave has a bounded source region");
+    assert!(tick_autosave.contains("queue_indexed_db_persistence"));
+    assert!(!tick_autosave.contains("self.server.try_poll()"));
+    assert!(!tick_autosave.contains("pending_persistence_save_count"));
+
+    let tick_operation = WEB_SERVER_WORKER
+        .split("pub fn tick(")
+        .nth(1)
+        .expect("Web integrated server tick operation exists")
+        .split("#[wasm_bindgen(js_name = flushPersistence)]")
+        .next()
+        .expect("Web tick operation has a bounded source region");
+    let tick_success = tick_operation
+        .split("Ok(report) =>")
+        .nth(1)
+        .expect("Web tick success arm exists")
+        .split("Err(error) =>")
+        .next()
+        .expect("Web tick success arm is bounded by its failure arm");
+    assert!(tick_success.contains("autosave_indexed_db_dirty_chunks().err()"));
+    assert!(tick_success.contains("self.worker_response(updates)"));
+    assert!(!tick_success.contains("return Err(JsValue::from_str(&error))"));
 
     let ordinary_operation = INTEGRATED_SERVER_WORKER
         .split("function finishActorOperation(")

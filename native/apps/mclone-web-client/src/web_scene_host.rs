@@ -5029,6 +5029,11 @@ impl WebSceneHost {
                     "loadedChunkCount",
                     stats.loaded_chunks.min(visible_chunk_capacity) as f64,
                 )?;
+                report_set_number(
+                    &object,
+                    "clientLoadedChunkCount",
+                    stats.loaded_chunks as f64,
+                )?;
                 report_set_number(&object, "commandCount", stats.command_count as f64)?;
                 report_set_number(&object, "updateCount", stats.update_count as f64)?;
                 report_set_number(
@@ -5102,6 +5107,81 @@ impl WebSceneHost {
                     "renderInflightSectionCount",
                     stats.inflight_render_sections as f64,
                 )?;
+                report_set_number(
+                    &object,
+                    "serverClientVisibleChunkCount",
+                    stats.client_visible_chunks as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "serverActiveTicketChunkCount",
+                    stats.active_ticket_chunks as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "serverPlayerVisibleChunkCount",
+                    stats.player_visible_chunks as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "serverPlayerPublishedChunkCount",
+                    stats.player_published_chunks as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "serverPlayerPublishedVisibleChunkCount",
+                    stats.player_published_visible_chunks as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "serverPlayerMissingPublishedChunkCount",
+                    stats.player_missing_published_chunks as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "serverPlayerPublishedOutsideVisibleChunkCount",
+                    stats.player_published_outside_visible_chunks as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "serverPlayerQueuedSnapshotUpdateCount",
+                    stats.player_queued_snapshot_updates as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "serverPlayerQueuedUnloadUpdateCount",
+                    stats.player_queued_unload_updates as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "serverPlayerDrainedSnapshotUpdateCount",
+                    stats.player_drained_snapshot_updates as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "serverPlayerDrainedUnloadUpdateCount",
+                    stats.player_drained_unload_updates as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "serverRunnerEmittedSnapshotUpdateCount",
+                    stats.runner_emitted_snapshot_updates as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "serverRunnerEmittedUnloadUpdateCount",
+                    stats.runner_emitted_unload_updates as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "serverAggregatePlayerTicketChunkCount",
+                    stats.aggregate_player_ticket_chunks as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "serverPlayerOutboundQueueDepth",
+                    stats.player_outbound_queue_depth as f64,
+                )?;
                 let view_settled = host.view_settled_status(camera_position);
                 report_set_bool(&object, "sharedViewSettled", view_settled.ready())?;
                 report_set_number(
@@ -5171,6 +5251,9 @@ impl WebSceneHost {
                 }
             }
             if let Some(diagnostics) = host.runtime_poll_diagnostics() {
+                if let Some(error) = diagnostics.server_last_error.as_deref() {
+                    report_set_string(&object, "runnerLastError", error)?;
+                }
                 report_set_string(
                     &object,
                     "runnerTransportKind",

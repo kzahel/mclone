@@ -1014,6 +1014,7 @@ pub struct RuntimeExchangeApplyReport {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RuntimePollDiagnostics {
     pub server_runner_kind: Option<ServerRunnerKind>,
+    pub server_last_error: Option<String>,
     pub accepted_local_chunk_view: Option<ChunkView>,
     pub server_command_queue_depth: usize,
     pub server_update_queue_depth: usize,
@@ -1183,6 +1184,16 @@ pub struct SingleViewRuntimeStats {
     pub loading_progress: Option<ChunkLoadingProgressStats>,
     pub tracked_players: usize,
     pub player_visible_chunks: usize,
+    pub player_published_chunks: usize,
+    pub player_published_visible_chunks: usize,
+    pub player_missing_published_chunks: usize,
+    pub player_published_outside_visible_chunks: usize,
+    pub player_queued_snapshot_updates: u64,
+    pub player_queued_unload_updates: u64,
+    pub player_drained_snapshot_updates: u64,
+    pub player_drained_unload_updates: u64,
+    pub runner_emitted_snapshot_updates: u64,
+    pub runner_emitted_unload_updates: u64,
     pub aggregate_player_ticket_chunks: usize,
     pub player_outbound_queue_depth: usize,
     pub max_player_visible_chunks: usize,
@@ -2896,6 +2907,36 @@ impl SingleViewRuntime {
                 .map_or(self.client().loaded_chunk_count(), |diagnostics| {
                     diagnostics.total_player_visible_chunks
                 }),
+            player_published_chunks: chunk_tracking
+                .map_or(self.client().loaded_chunk_count(), |diagnostics| {
+                    diagnostics.total_player_published_chunks
+                }),
+            player_published_visible_chunks: chunk_tracking
+                .map_or(self.client().loaded_chunk_count(), |diagnostics| {
+                    diagnostics.total_player_published_visible_chunks
+                }),
+            player_missing_published_chunks: chunk_tracking.map_or(0, |diagnostics| {
+                diagnostics.total_player_missing_published_chunks
+            }),
+            player_published_outside_visible_chunks: chunk_tracking.map_or(0, |diagnostics| {
+                diagnostics.total_player_published_outside_visible_chunks
+            }),
+            player_queued_snapshot_updates: chunk_tracking.map_or(0, |diagnostics| {
+                diagnostics.total_player_queued_snapshot_updates
+            }),
+            player_queued_unload_updates: chunk_tracking.map_or(0, |diagnostics| {
+                diagnostics.total_player_queued_unload_updates
+            }),
+            player_drained_snapshot_updates: chunk_tracking.map_or(0, |diagnostics| {
+                diagnostics.total_player_drained_snapshot_updates
+            }),
+            player_drained_unload_updates: chunk_tracking.map_or(0, |diagnostics| {
+                diagnostics.total_player_drained_unload_updates
+            }),
+            runner_emitted_snapshot_updates: runner_diagnostics
+                .map_or(0, |diagnostics| diagnostics.runner_emitted_snapshot_updates),
+            runner_emitted_unload_updates: runner_diagnostics
+                .map_or(0, |diagnostics| diagnostics.runner_emitted_unload_updates),
             aggregate_player_ticket_chunks: chunk_tracking
                 .map_or(0, |diagnostics| diagnostics.aggregate_player_ticket_chunks),
             player_outbound_queue_depth: chunk_tracking
@@ -2942,6 +2983,7 @@ impl SingleViewRuntime {
     ) {
         let tick = &runner_diagnostics.last_tick;
         diagnostics.server_runner_kind = Some(runner_diagnostics.kind);
+        diagnostics.server_last_error = runner_diagnostics.last_error.clone();
         diagnostics.accepted_local_chunk_view =
             runner_diagnostics.accepted_local_chunk_view.clone();
         diagnostics.server_command_queue_depth = runner_diagnostics.command_queue_depth;

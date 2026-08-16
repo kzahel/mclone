@@ -407,6 +407,10 @@ const renderDistanceReplayProbeReportPath =
 const cardinalViewReplayProbeReportPath =
   process.env.MCLONE_NATIVE_WEB_CARDINAL_VIEW_REPLAY_PROBE_REPORT
     ?? "/tmp/mclone-native-web-cardinal-view-replay.json";
+const cardinalViewReplayEventualWaitMs = Number.parseInt(
+  process.env.MCLONE_NATIVE_WEB_CARDINAL_VIEW_REPLAY_EVENTUAL_WAIT_MS ?? "90000",
+  10,
+);
 const blockEditProbeReportPath = process.env.MCLONE_NATIVE_WEB_BLOCK_EDIT_PROBE_REPORT
   ?? "/tmp/mclone-native-web-block-edit-probe.json";
 const deathUiProbeReportPath = process.env.MCLONE_NATIVE_WEB_DEATH_UI_PROBE_REPORT
@@ -6867,11 +6871,43 @@ async function runViewReplayProbe(page, canvas) {
             : null,
           commandQueueDepth: Number(state.runnerCommandQueueDepth) || 0,
           updateQueueDepth: Number(state.runnerUpdateQueueDepth) || 0,
+          runnerLastError: String(state.runnerLastError ?? ""),
           pendingJobs: Number(state.runnerPendingJobs) || 0,
           pendingPublications: Number(state.runnerPendingPublications) || 0,
           pendingPersistenceLoads: Number(state.runnerPendingPersistenceLoads) || 0,
           pendingPersistenceSaves: Number(state.runnerPendingPersistenceSaves) || 0,
+          serverClientVisibleChunkCount:
+            Number(state.serverClientVisibleChunkCount) || 0,
+          serverActiveTicketChunkCount:
+            Number(state.serverActiveTicketChunkCount) || 0,
+          serverPlayerVisibleChunkCount:
+            Number(state.serverPlayerVisibleChunkCount) || 0,
+          serverPlayerPublishedChunkCount:
+            Number(state.serverPlayerPublishedChunkCount) || 0,
+          serverPlayerPublishedVisibleChunkCount:
+            Number(state.serverPlayerPublishedVisibleChunkCount) || 0,
+          serverPlayerMissingPublishedChunkCount:
+            Number(state.serverPlayerMissingPublishedChunkCount) || 0,
+          serverPlayerPublishedOutsideVisibleChunkCount:
+            Number(state.serverPlayerPublishedOutsideVisibleChunkCount) || 0,
+          serverPlayerQueuedSnapshotUpdateCount:
+            Number(state.serverPlayerQueuedSnapshotUpdateCount) || 0,
+          serverPlayerQueuedUnloadUpdateCount:
+            Number(state.serverPlayerQueuedUnloadUpdateCount) || 0,
+          serverPlayerDrainedSnapshotUpdateCount:
+            Number(state.serverPlayerDrainedSnapshotUpdateCount) || 0,
+          serverPlayerDrainedUnloadUpdateCount:
+            Number(state.serverPlayerDrainedUnloadUpdateCount) || 0,
+          serverRunnerEmittedSnapshotUpdateCount:
+            Number(state.serverRunnerEmittedSnapshotUpdateCount) || 0,
+          serverRunnerEmittedUnloadUpdateCount:
+            Number(state.serverRunnerEmittedUnloadUpdateCount) || 0,
+          serverAggregatePlayerTicketChunkCount:
+            Number(state.serverAggregatePlayerTicketChunkCount) || 0,
+          serverPlayerOutboundQueueDepth:
+            Number(state.serverPlayerOutboundQueueDepth) || 0,
           loadedChunkCount: Number(state.loadedChunkCount) || 0,
+          clientLoadedChunkCount: Number(state.clientLoadedChunkCount) || 0,
           loadedChunkSetHash: String(state.loadedChunkSetHash ?? ""),
           snapshotUpdateCount: Number(state.snapshotUpdateCount) || 0,
           unloadUpdateCount: Number(state.unloadUpdateCount) || 0,
@@ -7086,11 +7122,13 @@ async function runRenderDistanceReplayProbe(page, canvas, targetRenderDistance) 
             ? Number(state.acceptedRenderDistance)
             : null,
           loadedChunkCount: Number(state.loadedChunkCount) || 0,
+          clientLoadedChunkCount: Number(state.clientLoadedChunkCount) || 0,
           loadedChunkSetHash: String(state.loadedChunkSetHash ?? ""),
           snapshotUpdateCount: Number(state.snapshotUpdateCount) || 0,
           unloadUpdateCount: Number(state.unloadUpdateCount) || 0,
           commandQueueDepth: Number(state.runnerCommandQueueDepth) || 0,
           updateQueueDepth: Number(state.runnerUpdateQueueDepth) || 0,
+          runnerLastError: String(state.runnerLastError ?? ""),
           pendingJobs: Number(state.runnerPendingJobs) || 0,
           pendingPublications: Number(state.runnerPendingPublications) || 0,
           worldgenMailboxPendingJobs: Number(state.worldgenMailboxPendingJobs) || 0,
@@ -7288,10 +7326,41 @@ async function runCardinalViewReplayProbe(page, canvas, targetRenderDistance) {
           unloadUpdateCount: Number(state.unloadUpdateCount) || 0,
           commandQueueDepth: Number(state.runnerCommandQueueDepth) || 0,
           updateQueueDepth: Number(state.runnerUpdateQueueDepth) || 0,
+          runnerLastError: String(state.runnerLastError ?? ""),
           pendingJobs: Number(state.runnerPendingJobs) || 0,
           pendingPublications: Number(state.runnerPendingPublications) || 0,
           pendingPersistenceLoads: Number(state.runnerPendingPersistenceLoads) || 0,
           pendingPersistenceSaves: Number(state.runnerPendingPersistenceSaves) || 0,
+          serverClientVisibleChunkCount:
+            Number(state.serverClientVisibleChunkCount) || 0,
+          serverActiveTicketChunkCount:
+            Number(state.serverActiveTicketChunkCount) || 0,
+          serverPlayerVisibleChunkCount:
+            Number(state.serverPlayerVisibleChunkCount) || 0,
+          serverPlayerPublishedChunkCount:
+            Number(state.serverPlayerPublishedChunkCount) || 0,
+          serverPlayerPublishedVisibleChunkCount:
+            Number(state.serverPlayerPublishedVisibleChunkCount) || 0,
+          serverPlayerMissingPublishedChunkCount:
+            Number(state.serverPlayerMissingPublishedChunkCount) || 0,
+          serverPlayerPublishedOutsideVisibleChunkCount:
+            Number(state.serverPlayerPublishedOutsideVisibleChunkCount) || 0,
+          serverPlayerQueuedSnapshotUpdateCount:
+            Number(state.serverPlayerQueuedSnapshotUpdateCount) || 0,
+          serverPlayerQueuedUnloadUpdateCount:
+            Number(state.serverPlayerQueuedUnloadUpdateCount) || 0,
+          serverPlayerDrainedSnapshotUpdateCount:
+            Number(state.serverPlayerDrainedSnapshotUpdateCount) || 0,
+          serverPlayerDrainedUnloadUpdateCount:
+            Number(state.serverPlayerDrainedUnloadUpdateCount) || 0,
+          serverRunnerEmittedSnapshotUpdateCount:
+            Number(state.serverRunnerEmittedSnapshotUpdateCount) || 0,
+          serverRunnerEmittedUnloadUpdateCount:
+            Number(state.serverRunnerEmittedUnloadUpdateCount) || 0,
+          serverAggregatePlayerTicketChunkCount:
+            Number(state.serverAggregatePlayerTicketChunkCount) || 0,
+          serverPlayerOutboundQueueDepth:
+            Number(state.serverPlayerOutboundQueueDepth) || 0,
           worldgenMailboxPendingJobs: Number(state.worldgenMailboxPendingJobs) || 0,
           lightStatusMailboxPendingStatuses:
             Number(state.lightStatusMailboxPendingStatuses) || 0,
@@ -7323,6 +7392,7 @@ async function runCardinalViewReplayProbe(page, canvas, targetRenderDistance) {
           clientDeferredChunkDropBacklogItems:
             Number(state.clientDeferredChunkDropBacklogItems) || 0,
           updatePumpStalled: state.updatePumpStalled === true,
+          runnerFrameMetrics: state.runnerFrameMetrics ?? null,
           streamingSettled: state.streamingSettled === true,
           cameraX: Number(state.cameraX),
           cameraY: Number(state.cameraY),
@@ -7411,6 +7481,18 @@ async function runCardinalViewReplayProbe(page, canvas, targetRenderDistance) {
   await page.waitForTimeout(30_000);
   const normalWait = await capture("normal-wait-end");
   /** @param {any} state */
+  const deliveryChainComplete = (state) => state.runnerLastError === ""
+    && state.serverPlayerQueuedSnapshotUpdateCount
+      === state.serverPlayerDrainedSnapshotUpdateCount
+    && state.serverPlayerDrainedSnapshotUpdateCount
+      === state.serverRunnerEmittedSnapshotUpdateCount
+    && state.serverRunnerEmittedSnapshotUpdateCount === state.snapshotUpdateCount
+    && state.serverPlayerQueuedUnloadUpdateCount
+      === state.serverPlayerDrainedUnloadUpdateCount
+    && state.serverPlayerDrainedUnloadUpdateCount
+      === state.serverRunnerEmittedUnloadUpdateCount
+    && state.serverRunnerEmittedUnloadUpdateCount === state.unloadUpdateCount;
+  /** @param {any} state */
   const exactAndSettled = (state) => state.acceptedCenterX === state.centerX
     && state.acceptedCenterZ === state.centerZ
     && state.acceptedRenderDistance === targetRenderDistance
@@ -7419,7 +7501,7 @@ async function runCardinalViewReplayProbe(page, canvas, targetRenderDistance) {
     && state.exactCoverageReadyColumnCount === expectedLoadedChunkCount
     && state.exactCoverageMissingColumnCount === 0
     && state.sharedViewSettled === true
-    && state.streamingSettled === true;
+    && deliveryChainComplete(state);
   let eventual = normalWait;
   if (!exactAndSettled(normalWait)) {
     await setPhase("eventual-wait");
@@ -7435,10 +7517,22 @@ async function runCardinalViewReplayProbe(page, canvas, targetRenderDistance) {
           && Number(state.exactCoverageReadyColumnCount) === expectedLoadedChunkCount
           && Number(state.exactCoverageMissingColumnCount) === 0
           && state.sharedViewSettled === true
-          && state.streamingSettled === true;
+          && String(state.runnerLastError ?? "") === ""
+          && Number(state.serverPlayerQueuedSnapshotUpdateCount)
+            === Number(state.serverPlayerDrainedSnapshotUpdateCount)
+          && Number(state.serverPlayerDrainedSnapshotUpdateCount)
+            === Number(state.serverRunnerEmittedSnapshotUpdateCount)
+          && Number(state.serverRunnerEmittedSnapshotUpdateCount)
+            === Number(state.snapshotUpdateCount)
+          && Number(state.serverPlayerQueuedUnloadUpdateCount)
+            === Number(state.serverPlayerDrainedUnloadUpdateCount)
+          && Number(state.serverPlayerDrainedUnloadUpdateCount)
+            === Number(state.serverRunnerEmittedUnloadUpdateCount)
+          && Number(state.serverRunnerEmittedUnloadUpdateCount)
+            === Number(state.unloadUpdateCount);
       },
       { targetRenderDistance, expectedLoadedChunkCount },
-      { timeout: 90_000 },
+      { timeout: cardinalViewReplayEventualWaitMs },
     ).catch(() => {});
     eventual = await capture("eventual-wait-end");
   }
@@ -7469,6 +7563,7 @@ async function runCardinalViewReplayProbe(page, canvas, targetRenderDistance) {
         Math.abs(north2.centerZ - climb.centerZ),
       ) >= 3
       && exactAndSettled(normalWait)
+      && exactAndSettled(stable)
       && stable.loadedChunkSetHash === normalWait.loadedChunkSetHash
       && stable.snapshotUpdateCount === normalWait.snapshotUpdateCount
       && stable.unloadUpdateCount === normalWait.unloadUpdateCount,
@@ -7510,13 +7605,47 @@ async function captureRenderDistanceReplayState(page, label) {
         ? Number(state.acceptedCenterZ)
         : null,
       loadedChunkCount: Number(state.loadedChunkCount) || 0,
+      clientLoadedChunkCount: Number(state.clientLoadedChunkCount) || 0,
       loadedChunkSetHash: String(state.loadedChunkSetHash ?? ""),
       snapshotUpdateCount: Number(state.snapshotUpdateCount) || 0,
       unloadUpdateCount: Number(state.unloadUpdateCount) || 0,
       commandQueueDepth: Number(state.runnerCommandQueueDepth) || 0,
       updateQueueDepth: Number(state.runnerUpdateQueueDepth) || 0,
+      runnerLastError: String(state.runnerLastError ?? ""),
       pendingJobs: Number(state.runnerPendingJobs) || 0,
       pendingPublications: Number(state.runnerPendingPublications) || 0,
+      pendingPersistenceLoads: Number(state.runnerPendingPersistenceLoads) || 0,
+      pendingPersistenceSaves: Number(state.runnerPendingPersistenceSaves) || 0,
+      serverClientVisibleChunkCount:
+        Number(state.serverClientVisibleChunkCount) || 0,
+      serverActiveTicketChunkCount:
+        Number(state.serverActiveTicketChunkCount) || 0,
+      serverPlayerVisibleChunkCount:
+        Number(state.serverPlayerVisibleChunkCount) || 0,
+      serverPlayerPublishedChunkCount:
+        Number(state.serverPlayerPublishedChunkCount) || 0,
+      serverPlayerPublishedVisibleChunkCount:
+        Number(state.serverPlayerPublishedVisibleChunkCount) || 0,
+      serverPlayerMissingPublishedChunkCount:
+        Number(state.serverPlayerMissingPublishedChunkCount) || 0,
+      serverPlayerPublishedOutsideVisibleChunkCount:
+        Number(state.serverPlayerPublishedOutsideVisibleChunkCount) || 0,
+      serverPlayerQueuedSnapshotUpdateCount:
+        Number(state.serverPlayerQueuedSnapshotUpdateCount) || 0,
+      serverPlayerQueuedUnloadUpdateCount:
+        Number(state.serverPlayerQueuedUnloadUpdateCount) || 0,
+      serverPlayerDrainedSnapshotUpdateCount:
+        Number(state.serverPlayerDrainedSnapshotUpdateCount) || 0,
+      serverPlayerDrainedUnloadUpdateCount:
+        Number(state.serverPlayerDrainedUnloadUpdateCount) || 0,
+      serverRunnerEmittedSnapshotUpdateCount:
+        Number(state.serverRunnerEmittedSnapshotUpdateCount) || 0,
+      serverRunnerEmittedUnloadUpdateCount:
+        Number(state.serverRunnerEmittedUnloadUpdateCount) || 0,
+      serverAggregatePlayerTicketChunkCount:
+        Number(state.serverAggregatePlayerTicketChunkCount) || 0,
+      serverPlayerOutboundQueueDepth:
+        Number(state.serverPlayerOutboundQueueDepth) || 0,
       worldgenMailboxPendingJobs: Number(state.worldgenMailboxPendingJobs) || 0,
       lightStatusMailboxPendingStatuses:
         Number(state.lightStatusMailboxPendingStatuses) || 0,

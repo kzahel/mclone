@@ -144,6 +144,14 @@ pub(crate) struct PlayerChunkViewState {
     // Chunks the player may still hold locally. Hysteresis policies can retain
     // chunks just outside the accepted target view to avoid edge churn.
     visible_chunks: BTreeSet<ChunkPos>,
+    // Chunks represented by the ordered snapshot/unload stream queued for this
+    // source. Unlike `visible_chunks`, this is delivery state rather than
+    // desired tracking state.
+    published_chunks: BTreeSet<ChunkPos>,
+    queued_snapshot_updates: u64,
+    queued_unload_updates: u64,
+    drained_snapshot_updates: u64,
+    drained_unload_updates: u64,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -169,7 +177,16 @@ pub struct PlayerChunkTrackingDiagnostics {
     pub aggregate_resident_chunks: usize,
     pub aggregate_simulation_ticket_chunks: usize,
     pub total_player_visible_chunks: usize,
+    pub total_player_published_chunks: usize,
+    pub total_player_published_visible_chunks: usize,
+    pub total_player_missing_published_chunks: usize,
+    pub total_player_published_outside_visible_chunks: usize,
+    pub total_player_queued_snapshot_updates: u64,
+    pub total_player_queued_unload_updates: u64,
+    pub total_player_drained_snapshot_updates: u64,
+    pub total_player_drained_unload_updates: u64,
     pub total_observer_visible_chunks: usize,
+    pub total_observer_published_chunks: usize,
     pub total_outbound_queue_depth: usize,
     pub total_observer_outbound_queue_depth: usize,
     pub total_observer_outbound_bytes: usize,
@@ -187,6 +204,14 @@ pub struct PlayerChunkTrackingPlayerDiagnostics {
     pub requested_view: Option<ChunkView>,
     pub accepted_view: Option<ChunkView>,
     pub visible_chunks: usize,
+    pub published_chunks: usize,
+    pub published_visible_chunks: usize,
+    pub missing_published_chunks: usize,
+    pub published_outside_visible_chunks: usize,
+    pub queued_snapshot_updates: u64,
+    pub queued_unload_updates: u64,
+    pub drained_snapshot_updates: u64,
+    pub drained_unload_updates: u64,
     pub outbound_queue_depth: usize,
 }
 
@@ -197,6 +222,7 @@ pub struct ObserverChunkTrackingDiagnostics {
     pub requested_view: Option<ChunkView>,
     pub accepted_view: Option<ChunkView>,
     pub visible_chunks: usize,
+    pub published_chunks: usize,
     pub outbound_queue_depth: usize,
     pub outbound_bytes: usize,
 }
@@ -444,6 +470,23 @@ impl PlayerChunkTracking {
                     requested_view: state.requested.clone(),
                     accepted_view: state.accepted.clone(),
                     visible_chunks: state.visible_chunks.len(),
+                    published_chunks: state.published_chunks.len(),
+                    published_visible_chunks: state
+                        .published_chunks
+                        .intersection(&state.visible_chunks)
+                        .count(),
+                    missing_published_chunks: state
+                        .visible_chunks
+                        .difference(&state.published_chunks)
+                        .count(),
+                    published_outside_visible_chunks: state
+                        .published_chunks
+                        .difference(&state.visible_chunks)
+                        .count(),
+                    queued_snapshot_updates: state.queued_snapshot_updates,
+                    queued_unload_updates: state.queued_unload_updates,
+                    drained_snapshot_updates: state.drained_snapshot_updates,
+                    drained_unload_updates: state.drained_unload_updates,
                     outbound_queue_depth,
                 }
             })
@@ -467,15 +510,50 @@ impl PlayerChunkTracking {
                     requested_view: state.view.requested.clone(),
                     accepted_view: state.view.accepted.clone(),
                     visible_chunks: state.view.visible_chunks.len(),
+                    published_chunks: state.view.published_chunks.len(),
                     outbound_queue_depth,
                     outbound_bytes,
                 }
             })
             .collect::<Vec<_>>();
         let total_player_visible_chunks = players.iter().map(|player| player.visible_chunks).sum();
+        let total_player_published_chunks =
+            players.iter().map(|player| player.published_chunks).sum();
+        let total_player_published_visible_chunks = players
+            .iter()
+            .map(|player| player.published_visible_chunks)
+            .sum();
+        let total_player_missing_published_chunks = players
+            .iter()
+            .map(|player| player.missing_published_chunks)
+            .sum();
+        let total_player_published_outside_visible_chunks = players
+            .iter()
+            .map(|player| player.published_outside_visible_chunks)
+            .sum();
+        let total_player_queued_snapshot_updates = players
+            .iter()
+            .map(|player| player.queued_snapshot_updates)
+            .sum();
+        let total_player_queued_unload_updates = players
+            .iter()
+            .map(|player| player.queued_unload_updates)
+            .sum();
+        let total_player_drained_snapshot_updates = players
+            .iter()
+            .map(|player| player.drained_snapshot_updates)
+            .sum();
+        let total_player_drained_unload_updates = players
+            .iter()
+            .map(|player| player.drained_unload_updates)
+            .sum();
         let total_observer_visible_chunks = observers
             .iter()
             .map(|observer| observer.visible_chunks)
+            .sum();
+        let total_observer_published_chunks = observers
+            .iter()
+            .map(|observer| observer.published_chunks)
             .sum();
         let total_outbound_queue_depth = players
             .iter()
@@ -517,7 +595,16 @@ impl PlayerChunkTracking {
             aggregate_resident_chunks: self.aggregate_resident_positions.len(),
             aggregate_simulation_ticket_chunks: self.aggregate_simulation_ticket_positions.len(),
             total_player_visible_chunks,
+            total_player_published_chunks,
+            total_player_published_visible_chunks,
+            total_player_missing_published_chunks,
+            total_player_published_outside_visible_chunks,
+            total_player_queued_snapshot_updates,
+            total_player_queued_unload_updates,
+            total_player_drained_snapshot_updates,
+            total_player_drained_unload_updates,
             total_observer_visible_chunks,
+            total_observer_published_chunks,
             total_outbound_queue_depth,
             total_observer_outbound_queue_depth,
             total_observer_outbound_bytes,
@@ -565,16 +652,30 @@ impl PlayerChunkTracking {
     }
 
     pub(crate) fn queue_unload_for_player(&mut self, player_id: ServerPlayerId, pos: ChunkPos) {
+        if let Some(state) = self.players.get_mut(&player_id) {
+            state.published_chunks.remove(&pos);
+            state.queued_unload_updates = state.queued_unload_updates.saturating_add(1);
+        }
         self.queue_update_for_player(player_id, ServerUpdate::ChunkUnload { pos });
     }
 
     pub(crate) fn queue_unload_for_observer(&mut self, observer_id: ObserverId, pos: ChunkPos) {
+        if let Some(state) = self.observers.get_mut(&observer_id) {
+            state.view.published_chunks.remove(&pos);
+        }
         self.queue_update_for_observer(observer_id, ServerUpdate::ChunkUnload { pos });
     }
 
     pub(crate) fn queue_unload_for_tracking_sources(&mut self, pos: ChunkPos) {
         for source in self.sources_tracking_chunk(pos) {
-            self.queue_update_for_source(source, ServerUpdate::ChunkUnload { pos });
+            match source {
+                DimensionInterestSource::Player(player_id) => {
+                    self.queue_unload_for_player(player_id, pos);
+                }
+                DimensionInterestSource::Observer(observer_id) => {
+                    self.queue_unload_for_observer(observer_id, pos);
+                }
+            }
         }
     }
 
@@ -583,6 +684,10 @@ impl PlayerChunkTracking {
         player_id: ServerPlayerId,
         snapshot: ChunkSnapshot,
     ) {
+        if let Some(state) = self.players.get_mut(&player_id) {
+            state.published_chunks.insert(snapshot.pos);
+            state.queued_snapshot_updates = state.queued_snapshot_updates.saturating_add(1);
+        }
         self.queue_update_for_player(player_id, ServerUpdate::ChunkSnapshot(snapshot));
     }
 
@@ -591,12 +696,22 @@ impl PlayerChunkTracking {
         observer_id: ObserverId,
         snapshot: ChunkSnapshot,
     ) {
+        if let Some(state) = self.observers.get_mut(&observer_id) {
+            state.view.published_chunks.insert(snapshot.pos);
+        }
         self.queue_update_for_observer(observer_id, ServerUpdate::ChunkSnapshot(snapshot));
     }
 
     pub(crate) fn queue_snapshot_for_tracking_sources(&mut self, snapshot: ChunkSnapshot) {
         for source in self.sources_tracking_chunk(snapshot.pos) {
-            self.queue_update_for_source(source, ServerUpdate::ChunkSnapshot(snapshot.clone()));
+            match source {
+                DimensionInterestSource::Player(player_id) => {
+                    self.queue_snapshot_for_player(player_id, snapshot.clone());
+                }
+                DimensionInterestSource::Observer(observer_id) => {
+                    self.queue_snapshot_for_observer(observer_id, snapshot.clone());
+                }
+            }
         }
     }
 
@@ -622,11 +737,28 @@ impl PlayerChunkTracking {
     }
 
     pub(crate) fn drain_updates(&mut self, player_id: ServerPlayerId) -> Vec<ServerUpdate> {
-        self.pending_updates
+        let updates = self
+            .pending_updates
             .entry(player_id)
             .or_default()
             .drain(..)
-            .collect()
+            .collect::<Vec<_>>();
+        if let Some(state) = self.players.get_mut(&player_id) {
+            for update in &updates {
+                match update {
+                    ServerUpdate::ChunkSnapshot(_) => {
+                        state.drained_snapshot_updates =
+                            state.drained_snapshot_updates.saturating_add(1);
+                    }
+                    ServerUpdate::ChunkUnload { .. } => {
+                        state.drained_unload_updates =
+                            state.drained_unload_updates.saturating_add(1);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        updates
     }
 
     pub(crate) fn drain_observer_updates(&mut self, observer_id: ObserverId) -> Vec<ServerUpdate> {
@@ -963,6 +1095,59 @@ mod tests {
         assert_eq!(moved.removed_chunks, vec![ChunkPos::new(0, 0)]);
         assert!(!tracking.player_tracks_chunk(player, ChunkPos::new(0, 0)));
         assert_eq!(tracking.diagnostics().total_player_visible_chunks, 1);
+    }
+
+    #[test]
+    fn diagnostics_follow_snapshot_and_unload_delivery_stages() {
+        let mut tracking = PlayerChunkTracking::new(PlayerChunkTrackingPolicy::new(4, 4));
+        let player = ServerPlayerId::from_raw_for_tests(0);
+        let pos = ChunkPos::new(2, -3);
+        tracking.set_requested_view(player, view(pos, 0));
+        let snapshot = ChunkSnapshot {
+            pos,
+            status: mclone_core::ChunkStatus::Features,
+            revision: mclone_core::ChunkRevision(1),
+            min_y: 0,
+            height: 16,
+            biomes: Vec::new(),
+            sections: Vec::new(),
+            light_correct: false,
+            light_sections: Vec::new(),
+        };
+
+        tracking.queue_snapshot_for_player(player, snapshot);
+
+        let queued = tracking.diagnostics();
+        assert_eq!(queued.total_player_visible_chunks, 1);
+        assert_eq!(queued.total_player_published_chunks, 1);
+        assert_eq!(queued.total_player_missing_published_chunks, 0);
+        assert_eq!(queued.total_player_queued_snapshot_updates, 1);
+        assert_eq!(queued.total_player_drained_snapshot_updates, 0);
+        assert_eq!(queued.total_outbound_queue_depth, 1);
+
+        assert!(matches!(
+            tracking.drain_updates(player).as_slice(),
+            [ServerUpdate::ChunkSnapshot(snapshot)] if snapshot.pos == pos
+        ));
+        let drained = tracking.diagnostics();
+        assert_eq!(drained.total_player_drained_snapshot_updates, 1);
+        assert_eq!(drained.total_outbound_queue_depth, 0);
+
+        tracking.queue_unload_for_player(player, pos);
+
+        let unloaded = tracking.diagnostics();
+        assert_eq!(unloaded.total_player_published_chunks, 0);
+        assert_eq!(unloaded.total_player_missing_published_chunks, 1);
+        assert_eq!(unloaded.total_player_queued_unload_updates, 1);
+        assert_eq!(unloaded.total_player_drained_unload_updates, 0);
+        assert!(matches!(
+            tracking.drain_updates(player).as_slice(),
+            [ServerUpdate::ChunkUnload { pos: unloaded }] if *unloaded == pos
+        ));
+        assert_eq!(
+            tracking.diagnostics().total_player_drained_unload_updates,
+            1
+        );
     }
 
     #[test]

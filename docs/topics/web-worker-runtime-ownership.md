@@ -3,7 +3,8 @@
 Topic: web-worker-runtime-ownership
 
 Status: bounded campaign complete 2026-07-19; integrated-runner semantic
-parity and independent background progress restored 2026-08-15. Tactical
+parity and independent background progress restored 2026-08-15; persistent-
+world update-loss correction completed 2026-08-16. Tactical
 [`197`](../tactical/197-domain-blind-web-worker-broker.md) completed the
 high-value isolated-actor campaign without justifying shared Wasm memory.
 Human review then authorized Tactical
@@ -773,6 +774,33 @@ existing single budget-one render compiler draining 461 jobs, not stalled
 authority work. See Tactical 303's post-closeout record for exact metrics and
 captures.
 
+A 2026-08-16 persistent-world replay found a separate violation at the
+IndexedDB boundary. Realm startup synchronously reads three saved-data
+records, but Web bootstrap had preloaded only the realized starter plan. The
+first wildlife autosave therefore failed revision-safe mutation after a
+simulation tick had already drained chunk snapshots. The tick returned an
+error instead of its updates while the server's published-chunk state
+advanced, permanently leaving the client short of chunks. Transient worlds
+could not reproduce this failure.
+
+Web bootstrap now consumes the server-owned complete saved-data key list.
+Tick autosave only queues record work and never polls the server while the
+browser owes IndexedDB completions; explicit flush and shutdown remain the
+durable fences. A background autosave error is retained in runner diagnostics
+without sacrificing the already-produced ordered updates. Shared diagnostics
+also count queued, drained, runner-emitted, and client-applied chunk lifecycle
+updates so native and Web can expose the same delivery contract.
+
+The load-bearing persistent cardinal replay raises the production Graphics
+setting from 3 to 8, moves north three chunks, west three, climbs 128 blocks,
+then moves north another three before a normal 30-second wait. Its corrected
+run reached all 361 requested client chunks and all 289 exact drawable
+columns. The 458 snapshots and 171 unloads matched at every server, runner,
+and client boundary, the runner error was empty, and the 1.5-second stability
+window retained the exact loaded-set hash. The inspected canvas at
+[/tmp/mclone-native-web-cardinal-view-replay-canvas.png](/tmp/mclone-native-web-cardinal-view-replay-canvas.png)
+contains coherent terrain without rectangular holes.
+
 ## Subsequent Scene Boundary Cleanup
 
 Tactical 202 completed a fresh production inventory after the managed lobby
@@ -892,8 +920,10 @@ Primary implementation surfaces:
 ## Recommended Next Work
 
 Keep both Tactical 303 movement replays, the ownership inventory, scene-host
-gate, and IndexedDB reload lane as regression checks. Do not couple scheduler
-progress back to simulation ticks or rebuild retained actor state per frame.
+gate, cardinal persistent-world replay, and IndexedDB reload lane as
+regression checks. Do not couple scheduler progress back to simulation ticks,
+poll the server while browser persistence completions are outstanding, or
+rebuild retained actor state per frame.
 The next justified investigation, if representative physical-phone review
 still finds the 13-second post-server visual tail unacceptable, is a focused
 render-compiler throughput/presentation tactical with frame-time and memory

@@ -632,3 +632,81 @@ already advancing. This correction does not raise the app-local render budget
 or add a second render Worker; either change needs a separate frame-time and
 representative-device tactical rather than being hidden inside server-runner
 semantics.
+
+## Persistent-World Update-Loss Correction
+
+Physical-phone review on 2026-08-16 still found permanent rectangular holes
+after increasing a fresh persistent world from render distance 3 to 7 or 8,
+moving in several cardinal directions, and flying upward. Unlike the earlier
+transient radius replay, waiting did not repair the missing columns.
+
+The new `pnpm native:web:cardinal-view-replay` gate reproduces that exact
+production path against a freshly cleared IndexedDB world. It raises the
+Graphics slider from 3 to 8, moves north three chunks, west three chunks,
+climbs 128 blocks, moves north three more chunks, frames the terrain from
+above, waits 30 seconds, and then checks a stability window. The failing run
+showed 361 server-ready and server-published chunks with empty queues, but the
+client retained only about 330 chunks and exact drawable coverage remained
+near 200 of 289 columns.
+
+Delivery counters localized the loss. Server queued and drained snapshot
+counts matched; Worker-emitted and client-applied counts matched each other
+but were lower. Runner diagnostics exposed the hidden failure:
+
+```text
+browser record PersistenceRecordAddress {
+  namespace: SavedData,
+  key: [Text("mclone:wildlife-forage-v1")]
+} must be read before revision-safe mutation
+```
+
+Realm construction synchronously loads the realized starter plan, deer
+population history, and wildlife forage saved data. IndexedDB bootstrap had
+preloaded only the starter-plan address into the external record executor.
+After `try_simulation_tick_report` drained ordered chunk snapshots, tick
+autosave attempted the first wildlife mutation and failed. The Web operation
+discarded that tick's updates even though the authoritative published-chunk
+shadow had advanced, so no later tick considered those snapshots missing.
+The transient store did not use this revision-safe external cache and
+therefore passed.
+
+The correction makes the required local-realm bootstrap key set one shared
+server-owned constant and has Web request every address before constructing
+the realm. Tick autosave now queues external record work and returns
+immediately; it does not repeatedly call `try_poll` while IndexedDB
+completions can only arrive after the operation returns. Already-produced
+updates are returned even if background autosave records a failure. Explicit
+flush and shutdown still use the existing durable TypeScript continuation
+fence.
+
+Shared diagnostics now distinguish desired visible chunks from the ordered
+published shadow and count snapshot/unload updates at queue, drain, runner
+emission, and client application. Native channel publication and Web Worker
+responses populate the same runner-emission fields. The cardinal gate requires
+these cumulative counts to agree in addition to requested-view and exact
+render coverage; a broad global render-dirty count is not allowed to override
+the exact target-view readiness contract.
+
+The corrected production Worker run completed within the ordinary 30-second
+wait:
+
+- requested client coverage: `361 / 361` chunks;
+- exact drawable coverage: `289 / 289` columns, zero missing;
+- snapshot chain: `458` queued, drained, emitted, and applied;
+- unload chain: `171` queued, drained, emitted, and applied;
+- accepted and requested center: `(-3, 6)` at render distance `8`;
+- runner error, command/update queues, jobs, and publications: empty; and
+- loaded-set hash: stable through the 1.5-second window.
+
+The inspected 780 by 1688 canvas contains continuous terrain without the
+previous rectangular voids:
+
+- [canvas capture](/tmp/mclone-native-web-cardinal-view-replay-canvas.png)
+- [page capture](/tmp/mclone-native-web-cardinal-view-replay.png)
+- [cardinal report](/tmp/mclone-native-web-cardinal-view-replay.json)
+
+Focused validation passed all 737 `mclone-server` library tests, the ten Web
+ownership locks, the `wasm32-unknown-unknown` Web client check, and the browser
+smoke script typecheck. The persistent cardinal replay is now a load-bearing
+regression gate alongside the transient movement, dynamic-radius, and
+IndexedDB reload probes.

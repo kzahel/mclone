@@ -19,18 +19,17 @@ use mclone_protocol::{
 use mclone_server::{
     AuthoredWorldFixtureKind, ChunkLoadingProgressCell, ChunkLoadingProgressSnapshot,
     ChunkLoadingProgressStats, ChunkStoreError, ChunkStoreResult, DimensionRecord,
-    INITIAL_DAY_TIME, IntegratedServerRunner, LightStatusMailboxKind, LocalRealmSession,
-    ObserverSimulationInterest, PersistenceErrorKind, PersistenceExecutorFailureLatch,
-    PersistenceRecordAddress, PersistenceRecordBatch, PersistenceRecordExecutor,
-    PersistenceRecordKeyPart, PersistenceRecordMutation, PersistenceRecordNamespace,
-    PersistenceRecordPayload, PersistenceRecordRequest, PersistenceRecordResponse,
-    REALIZED_STARTER_PLAN_SAVED_DATA_KEY, RecordExecutorWorldStore, ServerJobActor,
-    ServerRunnerDiagnostics, ServerRunnerError, ServerRunnerKind, ServerRunnerResult,
-    ServerRunnerTickDiagnostics, ServerUpdateEnvelope, WasmServerJobWorkerConfig,
-    WorkerFrameMetrics, WorkerFrameTransportKind, WorldGenerationProfile, WorldMetadata,
-    WorldStore, WorldStoreRequest, WorldgenMailboxKind, dimension_record_address,
-    record_read_for_world_store_request, saved_data_record_address, world_metadata_record_address,
-    world_store_completion_from_record_read,
+    INITIAL_DAY_TIME, IntegratedServerRunner, LOCAL_REALM_BOOTSTRAP_SAVED_DATA_KEYS,
+    LightStatusMailboxKind, LocalRealmSession, ObserverSimulationInterest, PersistenceErrorKind,
+    PersistenceExecutorFailureLatch, PersistenceRecordAddress, PersistenceRecordBatch,
+    PersistenceRecordExecutor, PersistenceRecordKeyPart, PersistenceRecordMutation,
+    PersistenceRecordNamespace, PersistenceRecordPayload, PersistenceRecordRequest,
+    PersistenceRecordResponse, RecordExecutorWorldStore, ServerJobActor, ServerRunnerDiagnostics,
+    ServerRunnerError, ServerRunnerKind, ServerRunnerResult, ServerRunnerTickDiagnostics,
+    ServerUpdateEnvelope, WasmServerJobWorkerConfig, WorkerFrameMetrics, WorkerFrameTransportKind,
+    WorldGenerationProfile, WorldMetadata, WorldStore, WorldStoreRequest, WorldgenMailboxKind,
+    dimension_record_address, record_read_for_world_store_request, saved_data_record_address,
+    world_metadata_record_address, world_store_completion_from_record_read,
 };
 use wasm_bindgen::JsCast;
 use wasm_bindgen::closure::Closure;
@@ -1801,6 +1800,52 @@ fn parse_diagnostics(
         number_prop(value, "worldgenMailboxPendingJobs").unwrap_or(0.0) as usize;
     diagnostics.light_status_mailbox_pending_statuses =
         number_prop(value, "lightStatusMailboxPendingStatuses").unwrap_or(0.0) as usize;
+    diagnostics.scheduler_metrics.client_visible_chunks =
+        number_prop(value, "schedulerClientVisibleChunks").unwrap_or(0.0) as usize;
+    diagnostics.scheduler_metrics.loaded_snapshot_chunks =
+        number_prop(value, "schedulerLoadedSnapshotChunks").unwrap_or(0.0) as usize;
+    diagnostics.scheduler_metrics.active_ticket_chunks =
+        number_prop(value, "schedulerActiveTicketChunks").unwrap_or(0.0) as usize;
+    diagnostics.chunk_tracking.total_player_visible_chunks =
+        number_prop(value, "trackingPlayerVisibleChunks").unwrap_or(0.0) as usize;
+    diagnostics.chunk_tracking.total_player_published_chunks =
+        number_prop(value, "trackingPlayerPublishedChunks").unwrap_or(0.0) as usize;
+    diagnostics
+        .chunk_tracking
+        .total_player_published_visible_chunks =
+        number_prop(value, "trackingPlayerPublishedVisibleChunks").unwrap_or(0.0) as usize;
+    diagnostics
+        .chunk_tracking
+        .total_player_missing_published_chunks =
+        number_prop(value, "trackingPlayerMissingPublishedChunks").unwrap_or(0.0) as usize;
+    diagnostics
+        .chunk_tracking
+        .total_player_published_outside_visible_chunks =
+        number_prop(value, "trackingPlayerPublishedOutsideVisibleChunks").unwrap_or(0.0) as usize;
+    diagnostics
+        .chunk_tracking
+        .total_player_queued_snapshot_updates =
+        number_prop(value, "trackingPlayerQueuedSnapshotUpdates").unwrap_or(0.0) as u64;
+    diagnostics
+        .chunk_tracking
+        .total_player_queued_unload_updates =
+        number_prop(value, "trackingPlayerQueuedUnloadUpdates").unwrap_or(0.0) as u64;
+    diagnostics
+        .chunk_tracking
+        .total_player_drained_snapshot_updates =
+        number_prop(value, "trackingPlayerDrainedSnapshotUpdates").unwrap_or(0.0) as u64;
+    diagnostics
+        .chunk_tracking
+        .total_player_drained_unload_updates =
+        number_prop(value, "trackingPlayerDrainedUnloadUpdates").unwrap_or(0.0) as u64;
+    diagnostics.chunk_tracking.aggregate_player_ticket_chunks =
+        number_prop(value, "trackingAggregatePlayerTicketChunks").unwrap_or(0.0) as usize;
+    diagnostics.chunk_tracking.total_outbound_queue_depth =
+        number_prop(value, "trackingPlayerOutboundQueueDepth").unwrap_or(0.0) as usize;
+    diagnostics.runner_emitted_snapshot_updates =
+        number_prop(value, "runnerEmittedSnapshotUpdates").unwrap_or(0.0) as u64;
+    diagnostics.runner_emitted_unload_updates =
+        number_prop(value, "runnerEmittedUnloadUpdates").unwrap_or(0.0) as u64;
     diagnostics.runner_frame_metrics = frame_metrics_prop(
         value,
         "runnerFrameMetrics",
@@ -2091,6 +2136,9 @@ struct WebIntegratedServerOperation {
 }
 
 const WEB_EXECUTOR_REQUEST_ID_BASE: u64 = 1_u64 << 63;
+const WEB_BOOTSTRAP_SAVED_DATA_REQUEST_ID_BASE: u64 = 3;
+const WEB_BOOTSTRAP_PROBE_REQUEST_ID: u64 =
+    WEB_BOOTSTRAP_SAVED_DATA_REQUEST_ID_BASE + LOCAL_REALM_BOOTSTRAP_SAVED_DATA_KEYS.len() as u64;
 
 #[derive(Debug)]
 struct WebPersistenceRecordState {
@@ -2275,11 +2323,15 @@ fn web_persistence_state_from_bootstrap(
                 request_id,
                 address,
                 result,
-            } if request_id == 1 || request_id == 2 || request_id == 3 => {
+            } if request_id == 1
+                || request_id == 2
+                || (WEB_BOOTSTRAP_SAVED_DATA_REQUEST_ID_BASE..WEB_BOOTSTRAP_PROBE_REQUEST_ID)
+                    .contains(&request_id) =>
+            {
                 records.insert(address, result?);
             }
             PersistenceRecordResponse::ProbeAny {
-                request_id: 4,
+                request_id: WEB_BOOTSTRAP_PROBE_REQUEST_ID,
                 result,
             } => {
                 legacy_records_present = Some(result?);
@@ -2294,8 +2346,13 @@ fn web_persistence_state_from_bootstrap(
     for address in [
         world_metadata_record_address(),
         dimension_record_address(&DimensionKey::overworld()),
-        saved_data_record_address(REALIZED_STARTER_PLAN_SAVED_DATA_KEY),
-    ] {
+    ]
+    .into_iter()
+    .chain(
+        LOCAL_REALM_BOOTSTRAP_SAVED_DATA_KEYS
+            .iter()
+            .map(|key| saved_data_record_address(key)),
+    ) {
         if !records.contains_key(&address) {
             return Err(ChunkStoreError::InvalidData(format!(
                 "IndexedDB bootstrap omitted record address {address:?}"
@@ -2361,7 +2418,7 @@ impl WebIntegratedServerStartup {
 
     #[wasm_bindgen(js_name = indexedDbBootstrapRequests)]
     pub fn indexed_db_bootstrap_requests(&self) -> Result<Array, JsValue> {
-        let requests = vec![
+        let mut requests = vec![
             PersistenceRecordRequest::Read {
                 request_id: 1,
                 address: world_metadata_record_address(),
@@ -2370,20 +2427,25 @@ impl WebIntegratedServerStartup {
                 request_id: 2,
                 address: dimension_record_address(&DimensionKey::overworld()),
             },
-            PersistenceRecordRequest::Read {
-                request_id: 3,
-                address: saved_data_record_address(REALIZED_STARTER_PLAN_SAVED_DATA_KEY),
-            },
-            PersistenceRecordRequest::ProbeAny {
-                request_id: 4,
-                namespaces: vec![
-                    PersistenceRecordNamespace::Dimension,
-                    PersistenceRecordNamespace::Chunk,
-                    PersistenceRecordNamespace::EntityChunk,
-                    PersistenceRecordNamespace::Player,
-                ],
-            },
         ];
+        requests.extend(
+            LOCAL_REALM_BOOTSTRAP_SAVED_DATA_KEYS
+                .iter()
+                .enumerate()
+                .map(|(index, key)| PersistenceRecordRequest::Read {
+                    request_id: WEB_BOOTSTRAP_SAVED_DATA_REQUEST_ID_BASE + index as u64,
+                    address: saved_data_record_address(key),
+                }),
+        );
+        requests.push(PersistenceRecordRequest::ProbeAny {
+            request_id: WEB_BOOTSTRAP_PROBE_REQUEST_ID,
+            namespaces: vec![
+                PersistenceRecordNamespace::Dimension,
+                PersistenceRecordNamespace::Chunk,
+                PersistenceRecordNamespace::EntityChunk,
+                PersistenceRecordNamespace::Player,
+            ],
+        });
         persistence_record_requests_to_js(requests).map_err(|error| JsValue::from_str(&error))
     }
 
@@ -3073,15 +3135,12 @@ impl McloneWebIntegratedServerWorker {
         match self.server.try_simulation_tick_report() {
             Ok(report) => {
                 let wall_us = ((js_sys::Date::now() - wall_start).max(0.0) * 1000.0) as u128;
-                let mut updates = report.updates.clone();
-                if let Err(error) = self.autosave_indexed_db_dirty_chunks(&mut updates) {
-                    self.refresh_diagnostics(None, false, Some(error.clone()));
-                    return Err(JsValue::from_str(&error));
-                }
+                let updates = report.updates.clone();
+                let autosave_error = self.autosave_indexed_db_dirty_chunks().err();
                 self.refresh_diagnostics(
                     Some(ServerRunnerTickDiagnostics::from_report(&report, wall_us)),
                     false,
-                    None,
+                    autosave_error,
                 );
                 self.worker_response(updates).map_err(JsValue::from)
             }
@@ -3112,13 +3171,12 @@ impl McloneWebIntegratedServerWorker {
 
     #[wasm_bindgen(js_name = flushPersistence)]
     pub fn flush_persistence(&mut self) -> Result<JsValue, JsValue> {
-        let mut updates = Vec::new();
-        if let Err(error) = self.flush_indexed_db_persistence(&mut updates, true) {
+        if let Err(error) = self.queue_indexed_db_persistence(true) {
             self.refresh_diagnostics(None, false, Some(error.clone()));
             return Err(JsValue::from_str(&error));
         }
         self.refresh_diagnostics(None, false, None);
-        self.worker_response(updates).map_err(JsValue::from)
+        self.worker_response(Vec::new()).map_err(JsValue::from)
     }
 }
 
@@ -3174,18 +3232,11 @@ impl McloneWebIntegratedServerWorker {
         Ok(response)
     }
 
-    fn autosave_indexed_db_dirty_chunks(
-        &mut self,
-        updates: &mut Vec<ServerUpdate>,
-    ) -> Result<(), String> {
-        self.flush_indexed_db_persistence(updates, self.server.game_time().is_multiple_of(6_000))
+    fn autosave_indexed_db_dirty_chunks(&mut self) -> Result<(), String> {
+        self.queue_indexed_db_persistence(self.server.game_time().is_multiple_of(6_000))
     }
 
-    fn flush_indexed_db_persistence(
-        &mut self,
-        updates: &mut Vec<ServerUpdate>,
-        save_world_metadata: bool,
-    ) -> Result<(), String> {
+    fn queue_indexed_db_persistence(&mut self, save_world_metadata: bool) -> Result<(), String> {
         if self.indexed_db_state.is_none() {
             return Ok(());
         }
@@ -3200,13 +3251,7 @@ impl McloneWebIntegratedServerWorker {
                 .save_world_metadata_blocking()
                 .map_err(|error| error.to_string())?;
         }
-        for _ in 0..256 {
-            if self.server.scheduler().pending_persistence_save_count() == 0 {
-                return Ok(());
-            }
-            updates.extend(self.server.try_poll().map_err(|error| error.to_string())?);
-        }
-        Err("timed out waiting for IndexedDB autosave persistence writes".to_owned())
+        Ok(())
     }
 
     fn refresh_diagnostics(
@@ -3259,6 +3304,20 @@ fn worker_response(
     updates: Vec<ServerUpdate>,
     diagnostics: &mut ServerRunnerDiagnostics,
 ) -> Result<JsValue, String> {
+    diagnostics.runner_emitted_snapshot_updates =
+        diagnostics.runner_emitted_snapshot_updates.saturating_add(
+            updates
+                .iter()
+                .filter(|update| matches!(update, ServerUpdate::ChunkSnapshot(_)))
+                .count() as u64,
+        );
+    diagnostics.runner_emitted_unload_updates =
+        diagnostics.runner_emitted_unload_updates.saturating_add(
+            updates
+                .iter()
+                .filter(|update| matches!(update, ServerUpdate::ChunkUnload { .. }))
+                .count() as u64,
+        );
     let object = Object::new();
     let packed_updates = Array::new();
     for update in updates {
@@ -3687,6 +3746,100 @@ fn diagnostics_to_js(diagnostics: &ServerRunnerDiagnostics) -> Result<JsValue, S
         &object,
         "lightStatusMailboxPendingStatuses",
         diagnostics.light_status_mailbox_pending_statuses as f64,
+    )?;
+    set_number(
+        &object,
+        "schedulerClientVisibleChunks",
+        diagnostics.scheduler_metrics.client_visible_chunks as f64,
+    )?;
+    set_number(
+        &object,
+        "schedulerLoadedSnapshotChunks",
+        diagnostics.scheduler_metrics.loaded_snapshot_chunks as f64,
+    )?;
+    set_number(
+        &object,
+        "schedulerActiveTicketChunks",
+        diagnostics.scheduler_metrics.active_ticket_chunks as f64,
+    )?;
+    set_number(
+        &object,
+        "trackingPlayerVisibleChunks",
+        diagnostics.chunk_tracking.total_player_visible_chunks as f64,
+    )?;
+    set_number(
+        &object,
+        "trackingPlayerPublishedChunks",
+        diagnostics.chunk_tracking.total_player_published_chunks as f64,
+    )?;
+    set_number(
+        &object,
+        "trackingPlayerPublishedVisibleChunks",
+        diagnostics
+            .chunk_tracking
+            .total_player_published_visible_chunks as f64,
+    )?;
+    set_number(
+        &object,
+        "trackingPlayerMissingPublishedChunks",
+        diagnostics
+            .chunk_tracking
+            .total_player_missing_published_chunks as f64,
+    )?;
+    set_number(
+        &object,
+        "trackingPlayerPublishedOutsideVisibleChunks",
+        diagnostics
+            .chunk_tracking
+            .total_player_published_outside_visible_chunks as f64,
+    )?;
+    set_number(
+        &object,
+        "trackingPlayerQueuedSnapshotUpdates",
+        diagnostics
+            .chunk_tracking
+            .total_player_queued_snapshot_updates as f64,
+    )?;
+    set_number(
+        &object,
+        "trackingPlayerQueuedUnloadUpdates",
+        diagnostics
+            .chunk_tracking
+            .total_player_queued_unload_updates as f64,
+    )?;
+    set_number(
+        &object,
+        "trackingPlayerDrainedSnapshotUpdates",
+        diagnostics
+            .chunk_tracking
+            .total_player_drained_snapshot_updates as f64,
+    )?;
+    set_number(
+        &object,
+        "trackingPlayerDrainedUnloadUpdates",
+        diagnostics
+            .chunk_tracking
+            .total_player_drained_unload_updates as f64,
+    )?;
+    set_number(
+        &object,
+        "trackingAggregatePlayerTicketChunks",
+        diagnostics.chunk_tracking.aggregate_player_ticket_chunks as f64,
+    )?;
+    set_number(
+        &object,
+        "trackingPlayerOutboundQueueDepth",
+        diagnostics.chunk_tracking.total_outbound_queue_depth as f64,
+    )?;
+    set_number(
+        &object,
+        "runnerEmittedSnapshotUpdates",
+        diagnostics.runner_emitted_snapshot_updates as f64,
+    )?;
+    set_number(
+        &object,
+        "runnerEmittedUnloadUpdates",
+        diagnostics.runner_emitted_unload_updates as f64,
     )?;
     if let Some(view) = diagnostics.accepted_local_chunk_view.as_ref() {
         set_bool(&object, "acceptedLocalViewAvailable", true)?;

@@ -96,9 +96,10 @@ pub use homestead_plan::{
 pub use homestead_structure::{INTRO_HOMESTEAD_STRUCTURE_ID, IntroHomesteadStructureOverlay};
 pub use homestead_terrain::{HomesteadTerrainPlacementReceipt, IntroHomesteadTerrainOverlay};
 pub use integrated::{
-    DimensionInterestDiagnostics, DimensionRuntime, INITIAL_DAY_TIME, LocalRealmSession,
-    LocalRealmSessionRole, PlayerDimensionTransferDiagnostics, PlayerDimensionTransferPhase,
-    RealmInterestDiagnostics, RealmServer,
+    DimensionInterestDiagnostics, DimensionRuntime, INITIAL_DAY_TIME,
+    LOCAL_REALM_BOOTSTRAP_SAVED_DATA_KEYS, LocalRealmSession, LocalRealmSessionRole,
+    PlayerDimensionTransferDiagnostics, PlayerDimensionTransferPhase, RealmInterestDiagnostics,
+    RealmServer,
 };
 pub use job_codec::{
     ServerJobActor, ServerJobActorDiagnostics, ServerJobActorKind, WorldgenJobSession,
