@@ -3271,6 +3271,7 @@ const UI_V2_OPTIONS_SEASON_LOCAL: UiWidgetId = UiWidgetId(181);
 const UI_V2_OPTIONS_SEASON_DAYLIGHT: UiWidgetId = UiWidgetId(182);
 const UI_V2_OPTIONS_SEASON_RECENT_SNOW: UiWidgetId = UiWidgetId(183);
 const UI_V2_OPTIONS_SEASON_LOD: UiWidgetId = UiWidgetId(184);
+const UI_V2_OPTIONS_SEASON_APPEARANCE: UiWidgetId = UiWidgetId(185);
 const UI_V2_STORAGE_PROFILE_NAME: UiWidgetId = UiWidgetId(133);
 const UI_V2_STORAGE_PROFILE_ID: UiWidgetId = UiWidgetId(134);
 const UI_V2_STORAGE_BACKEND: UiWidgetId = UiWidgetId(135);
@@ -3943,13 +3944,18 @@ const fn options_category_row_count(category: GameOptionsCategory) -> usize {
         GameOptionsCategory::Display => 3,
         GameOptionsCategory::LocalPlay => 5,
         GameOptionsCategory::Debug => 6,
-        GameOptionsCategory::SeasonalDebug => 11,
+        GameOptionsCategory::SeasonalDebug => 12,
         GameOptionsCategory::StorageProfile => 8,
     }
 }
 
 fn toggle_season_preview(mut settings: crate::SeasonPreviewSettings) -> GameUiAction {
     settings.enabled = !settings.enabled;
+    GameUiAction::SetSeasonPreview(settings)
+}
+
+fn toggle_season_appearance(mut settings: crate::SeasonPreviewSettings) -> GameUiAction {
+    settings.appearance_enabled = !settings.appearance_enabled;
     GameUiAction::SetSeasonPreview(settings)
 }
 
@@ -3982,7 +3988,7 @@ fn season_recent_snow_action(
 }
 
 fn seasonal_debug_summary(state: GameUiRenderState) -> String {
-    if !state.season_preview.enabled {
+    if !state.season_preview.evaluation_enabled() {
         return "Off".to_owned();
     }
     let date = crate::PreviewCalendarDate::from_orbital_phase(state.season_preview.orbital_phase);
@@ -3990,9 +3996,19 @@ fn seasonal_debug_summary(state: GameUiRenderState) -> String {
         diagnostics.local_season.label()
     });
     format!(
-        "Day {}/{} / {local}",
+        "Day {}/{} / {local} / S{} G{}",
         date.day(),
-        crate::PREVIEW_CALENDAR_DAYS
+        crate::PREVIEW_CALENDAR_DAYS,
+        if state.season_preview.enabled {
+            "+"
+        } else {
+            "-"
+        },
+        if state.season_preview.appearance_enabled {
+            "+"
+        } else {
+            "-"
+        },
     )
 }
 
@@ -4030,10 +4046,20 @@ fn seasonal_debug_rows(state: GameUiRenderState) -> Vec<(f32, UiWidget)> {
             UiWidget::checkbox(
                 UI_V2_OPTIONS_SEASON_PREVIEW,
                 ph,
-                "Season Preview",
+                "Solar Preview",
                 settings.enabled,
             )
             .action(toggle_season_preview(settings)),
+        ),
+        (
+            18.0,
+            UiWidget::checkbox(
+                UI_V2_OPTIONS_SEASON_APPEARANCE,
+                ph,
+                "Ground Appearance",
+                settings.appearance_enabled,
+            )
+            .action(toggle_season_appearance(settings)),
         ),
         (
             20.0,
@@ -4043,7 +4069,7 @@ fn seasonal_debug_rows(state: GameUiRenderState) -> Vec<(f32, UiWidget)> {
                 format!("Date: Day {}/{}", date.day(), crate::PREVIEW_CALENDAR_DAYS),
                 settings.orbital_phase.turns() as f32,
             )
-            .enabled(settings.enabled)
+            .enabled(settings.evaluation_enabled())
             .slider_action(UiSliderAction::SeasonOrbitalPhase),
         ),
         (
@@ -4072,7 +4098,7 @@ fn seasonal_debug_rows(state: GameUiRenderState) -> Vec<(f32, UiWidget)> {
                 "Latitude Source",
                 settings.latitude_source.label(),
             )
-            .enabled(settings.enabled)
+            .enabled(settings.evaluation_enabled())
             .action(cycle_season_latitude_source(settings)),
         ),
         (
@@ -4083,7 +4109,10 @@ fn seasonal_debug_rows(state: GameUiRenderState) -> Vec<(f32, UiWidget)> {
                 format!("Preview Lat {:+.1} deg", settings.manual_latitude.degrees()),
                 ((settings.manual_latitude.degrees() + 90.0) / 180.0) as f32,
             )
-            .enabled(settings.enabled && settings.latitude_source == crate::LatitudeSource::Manual)
+            .enabled(
+                settings.evaluation_enabled()
+                    && settings.latitude_source == crate::LatitudeSource::Manual,
+            )
             .slider_action(UiSliderAction::SeasonManualLatitude),
         ),
         (
@@ -4123,7 +4152,7 @@ fn seasonal_debug_rows(state: GameUiRenderState) -> Vec<(f32, UiWidget)> {
                 recent_snow,
             )
             .enabled(
-                settings.enabled
+                settings.appearance_enabled
                     && (state.seasonal_debug.is_some() || settings.recent_snow.is_some()),
             )
             .slider_action(UiSliderAction::SeasonRecentSnow),

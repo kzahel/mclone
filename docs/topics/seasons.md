@@ -29,6 +29,16 @@ currently visible, so physical seasonal Debug interaction and
 current-revision Quest performance also remain open. Procedural-horizon LOD
 is still explicitly deferred.
 
+A post-implementation control split now makes `Solar Preview` and `Ground
+Appearance` independent. Date and latitude are shared climate inputs, but the
+solar toggle alone admits the seasonal sun/sky/rendered-daylight sample and
+the ground toggle alone admits exact-terrain tint, vegetation dormancy, and
+derived snow. Both default off. This permits solar/date/latitude review with
+an exactly neutral seasonal ground, or material review while retaining the
+ordinary world-clock sky. The original `--season-preview` capture switch stays
+a combined compatibility control; `--season-appearance` can override its
+ground half explicitly.
+
 No authoritative season clock, terrain or biome season generation, active
 weather event, migration producer, seasonal hydrology, wildlife tagging, or
 managed-habitat infrastructure is implemented.
@@ -118,6 +128,25 @@ length beside the preview, latitude, solar-time, and recent-snow controls.
 When a real calendar lands, that screen should offer `World Calendar | Manual
 Preview`; a compact player-facing date plus local-season display can reuse the
 same evaluation in a separate slice.
+
+### Debug time and simulation isolation
+
+The current simulation is tick-driven but is not independent of time of day.
+The authoritative server advances `game_time` and `day_time` from simulation
+ticks, replicates them to clients, and may let gameplay schedules such as
+animal activity read that value. Seasonal Debug does not mutate either clock.
+
+`World Clock` is a one-way presentation input: the client reads replicated
+`day_time` to place the seasonal sun. `Manual` date, latitude, and solar time
+remain unsaved fields in client-local `SeasonPreviewSettings`; changing them
+emits only a client-experience render-setting effect. It sends no server
+command and performs no block, entity, crop, weather, scheduled-tick,
+persistence, or light-engine update. The seasonal daylight factor changes the
+rendered sky and material illumination only, so a manual preview may
+intentionally disagree with authoritative mob schedules or propagated
+skylight. A future gameplay calendar or true light-mechanics integration must
+be an explicit server-owned feature rather than an extension of this Debug
+override.
 
 ## Climate Coordinates And Topology
 

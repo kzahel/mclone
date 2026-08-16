@@ -667,6 +667,7 @@ fn cli_parses_typed_season_preview_capture_options() {
         options.season_preview,
         mclone_season::SeasonPreviewSettings {
             enabled: true,
+            appearance_enabled: true,
             orbital_phase: mclone_season::OrbitalPhase::NORTHERN_SOLSTICE,
             latitude_source: mclone_season::LatitudeSource::Manual,
             manual_latitude: mclone_season::PreviewLatitude::from_tenths_clamped(750),
@@ -680,6 +681,24 @@ fn cli_parses_typed_season_preview_capture_options() {
             }),
         }
     );
+
+    for seasonal_args in [
+        ["--season-preview", "true", "--season-appearance", "false"],
+        ["--season-appearance", "false", "--season-preview", "true"],
+    ] {
+        let cli = Cli::parse(
+            ["--screenshot", "/tmp/mclone-season-solar-only.png"]
+                .into_iter()
+                .chain(seasonal_args)
+                .map(str::to_owned),
+        )
+        .unwrap();
+        let Cli::HeadlessScreenshot { options } = cli else {
+            panic!("expected screenshot mode")
+        };
+        assert!(options.season_preview.enabled);
+        assert!(!options.season_preview.appearance_enabled);
+    }
 
     let error = Cli::parse(["--season-preview".to_owned(), "true".to_owned()]).unwrap_err();
     assert!(error.to_string().contains("require --screenshot"));

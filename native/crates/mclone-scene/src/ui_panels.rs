@@ -1033,7 +1033,13 @@ impl McloneSceneHost {
         if let Some(solar) = self.solar_frame_diagnostics() {
             let date = PreviewCalendarDate::from_orbital_phase(solar.settings.orbital_phase);
             lines.push(format!(
-                "SOLAR {} LAT {} W{:+.3} E{:+.3}",
+                "SOLAR {} GROUND {} {} LAT {} W{:+.3} E{:+.3}",
+                if solar.settings.enabled { "ON" } else { "OFF" },
+                if solar.settings.appearance_enabled {
+                    "ON"
+                } else {
+                    "OFF"
+                },
                 solar.policy.label(),
                 solar.settings.latitude_source.label(),
                 solar.world_latitude.degrees,
@@ -1095,7 +1101,7 @@ impl McloneSceneHost {
         } else {
             lines.push(format!(
                 "SOLAR PREVIEW {} PROFILE {}",
-                if self.season_preview.enabled {
+                if self.season_preview.evaluation_enabled() {
                     "UNSUPPORTED"
                 } else {
                     "OFF"

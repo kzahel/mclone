@@ -5795,13 +5795,16 @@ impl McloneSceneHost {
         } else {
             SkyRenderState::vanilla(self.time_of_day(), self.sun_angle())
         };
+        if !self.season_preview.enabled {
+            return fixed;
+        }
         self.solar_frame_diagnostics().map_or(fixed, |diagnostics| {
             SkyRenderState::SeasonalSolar(diagnostics.sample)
         })
     }
 
     pub fn solar_frame_diagnostics(&self) -> Option<SolarFrameDiagnostics> {
-        if !self.season_preview.enabled
+        if !self.season_preview.evaluation_enabled()
             || self.active_world.scene.startup.world_generation_profile
                 != mclone_server::WorldGenerationProfile::McloneOverworldV1
         {
@@ -5908,16 +5911,20 @@ impl McloneSceneHost {
             .map_or(mclone_core::HorizontalTopology::UNBOUNDED, |runtime| {
                 runtime.client().topology()
             });
-        options.seasonal_appearance = self.solar_frame_diagnostics().map_or_else(
-            SeasonalAppearanceRenderState::default,
-            |diagnostics| {
-                SeasonalAppearanceRenderState::evaluated(
-                    true,
-                    diagnostics.local_season,
-                    self.season_preview.recent_snow,
-                )
-            },
-        );
+        options.seasonal_appearance = if self.season_preview.appearance_enabled {
+            self.solar_frame_diagnostics().map_or_else(
+                SeasonalAppearanceRenderState::default,
+                |diagnostics| {
+                    SeasonalAppearanceRenderState::evaluated(
+                        true,
+                        diagnostics.local_season,
+                        self.season_preview.recent_snow,
+                    )
+                },
+            )
+        } else {
+            SeasonalAppearanceRenderState::default()
+        };
         if self.camera_inside_occluding_block(camera_position) {
             options.section_occlusion_culling = false;
         }

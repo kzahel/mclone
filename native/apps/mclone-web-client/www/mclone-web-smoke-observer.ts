@@ -54,7 +54,8 @@ interface SmokeRuntime {
   renderOverviewFrame?: () => WasmReport | null;
   setDebugOverlay?: (visible: boolean) => WasmReport | null;
   setSeasonPreviewForSmoke?: (
-    enabled: boolean,
+    solarEnabled: boolean,
+    appearanceEnabled: boolean,
     orbitalTurns: number,
     latitudeDegrees: number,
     solarTimeHours: number,
@@ -508,7 +509,8 @@ export function installWebSmokeObserver(
     (session) => session.setDebugOverlayVisible(visible),
   );
   runtime.setSeasonPreviewForSmoke = (
-    enabled,
+    solarEnabled,
+    appearanceEnabled,
     orbitalTurns,
     latitudeDegrees,
     solarTimeHours,
@@ -518,7 +520,8 @@ export function installWebSmokeObserver(
   ) => {
     const session = app.sceneHostForObserver();
     return session?.setSeasonPreviewForSmoke(
-      enabled,
+      solarEnabled,
+      appearanceEnabled,
       orbitalTurns,
       latitudeDegrees,
       solarTimeHours,

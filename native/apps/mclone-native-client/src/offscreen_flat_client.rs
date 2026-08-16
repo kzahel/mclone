@@ -2033,10 +2033,12 @@ pub(crate) fn seasonal_appearance_receipt_json(
         })
     });
     Ok(serde_json::to_string(&serde_json::json!({
-        "schema": 1,
+        "schema": 2,
         "profile": profile.label(),
         "supported": profile == mclone_server::WorldGenerationProfile::McloneOverworldV1,
-        "enabled": settings.enabled,
+        "enabled": settings.evaluation_enabled(),
+        "solarEnabled": settings.enabled,
+        "appearanceEnabled": settings.appearance_enabled,
         "global": {
             "orbitalPhase": settings.orbital_phase.turns(),
             "calendarDay": date.day(),

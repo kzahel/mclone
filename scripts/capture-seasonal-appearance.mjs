@@ -8,6 +8,7 @@ import { basename, resolve } from "node:path";
 const CONTACT_SHEET_TITLES = new Map([
   ["temperate-off", "Preview Off"],
   ["temperate-off-configured", "Preview Off · Configured"],
+  ["solar-only-late-winter", "Solar Only · Ground Off"],
   ["north-spring", "Northern Spring"],
   ["north-spring-summer", "Spring to Summer"],
   ["north-summer", "Northern Summer"],
@@ -64,6 +65,7 @@ const selected = quick
   ? cases.filter((entry) =>
       [
         "temperate-off",
+        "solar-only-late-winter",
         "north-spring",
         "north-summer",
         "north-autumn",
@@ -80,6 +82,10 @@ const off = captures.find((entry) => entry.id === "temperate-off");
 const configuredOff = captures.find((entry) => entry.id === "temperate-off-configured");
 if (configuredOff && off.sha256 !== configuredOff.sha256) {
   throw new Error("preview-disabled terrain pixels changed under configured seasonal inputs");
+}
+const solarOnly = captures.find((entry) => entry.id === "solar-only-late-winter");
+if (solarOnly && solarOnly.sha256 === off.sha256) {
+  throw new Error("solar-only preview did not change the rendered sun/sky frame");
 }
 // Summer deliberately preserves the present baseline family; the other
 // quarter-year landmarks must produce visible exact-terrain responses.
@@ -115,7 +121,9 @@ const contactSheetLegend = {
     "global preview day",
     "evaluated local season",
     "manual latitude",
+    "manual solar time",
     "recent snow",
+    "ground appearance",
     "render path",
   ],
 };
@@ -132,7 +140,7 @@ run(
     "-pointsize",
     "13",
     "-title",
-    `${contactSheetLegend.title}\nTile: global day · evaluated local season · latitude · recent snow · render path`,
+    `${contactSheetLegend.title}\nTile: global day · evaluated local season · latitude · solar time · recent snow · ground · render path`,
     ...captures.flatMap((entry) => ["-label", contactSheetLabel(entry), entry.path]),
     "-thumbnail",
     "320x200",
@@ -175,6 +183,15 @@ function buildCases() {
       enabled: false,
       phase: 0.75,
       latitude: 47.5,
+      snow: 1,
+      snowCenter: [1032, 1032],
+    }),
+    captureCase("solar-only-late-winter", fixtures.temperate, {
+      enabled: true,
+      appearance: false,
+      phase: 0.875,
+      latitude: 47.5,
+      solarTime: 7,
       snow: 1,
       snowCenter: [1032, 1032],
     }),
@@ -277,7 +294,7 @@ function buildCases() {
 }
 
 function captureCase(id, location, options) {
-  return { id, location, ...options };
+  return { id, location, appearance: options.appearance ?? options.enabled, ...options };
 }
 
 function fixture(id, x, y, z) {
@@ -332,6 +349,8 @@ function capture(entry) {
     args.push(
       "--season-preview",
       String(entry.enabled),
+      "--season-appearance",
+      String(entry.appearance),
       "--season-orbital-phase",
       String(entry.phase ?? 0),
       "--season-latitude-source",
@@ -341,7 +360,7 @@ function capture(entry) {
       "--season-solar-time-source",
       "manual",
       "--season-solar-time",
-      "12",
+      String(entry.solarTime ?? 12),
     );
     if (entry.snow !== undefined) {
       args.push(
@@ -354,10 +373,13 @@ function capture(entry) {
   }
   const stdout = run(executable, args, repo);
   const seasonal = parseReceipt(stdout);
-  if (seasonal.enabled !== entry.enabled) {
-    throw new Error(`${entry.id} receipt disagrees with requested preview state`);
+  if (
+    seasonal.solarEnabled !== entry.enabled
+    || seasonal.appearanceEnabled !== entry.appearance
+  ) {
+    throw new Error(`${entry.id} receipt disagrees with requested solar/ground state`);
   }
-  if (entry.enabled && (!seasonal.evaluated || seasonal.renderScope.seasonalLodDeferred !== true)) {
+  if ((entry.enabled || entry.appearance) && (!seasonal.evaluated || seasonal.renderScope.seasonalLodDeferred !== true)) {
     throw new Error(`${entry.id} did not publish evaluated exact-only seasonal diagnostics`);
   }
   if (entry.snow > 0) {
@@ -403,10 +425,13 @@ function contactSheetLabel(entry) {
   const localSeason = entry.seasonal.evaluated?.localSeason.label ?? "Unavailable";
   const latitude = Number(entry.seasonal.controls.manualLatitudeDegrees);
   const latitudeLabel = `Lat ${latitude >= 0 ? "+" : ""}${latitude.toFixed(1)}°`;
+  const solarMinutes = Number(entry.seasonal.controls.manualSolarTimeMinutes);
+  const solarTimeLabel = `Time ${String(Math.floor(solarMinutes / 60)).padStart(2, "0")}:${String(solarMinutes % 60).padStart(2, "0")}`;
   const snow = entry.seasonal.recentSnow;
   const snowLabel = snow ? `Snow ${Math.round(snow.intensity * 100)}%` : "Snow 0%";
+  const groundLabel = entry.seasonal.appearanceEnabled ? "Ground On" : "Ground Off";
   const renderLabel = entry.renderPath === "synthetic-stereo" ? "Stereo" : "Mono";
-  return `${title}\n${day} · ${localSeason}\n${latitudeLabel} · ${snowLabel} · ${renderLabel}`;
+  return `${title}\n${day} · ${localSeason}\n${latitudeLabel} · ${solarTimeLabel} · ${snowLabel} · ${groundLabel} · ${renderLabel}`;
 }
 
 function csv(values) {

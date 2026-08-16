@@ -2445,6 +2445,9 @@ mod tests {
 
         let season_preview = SeasonPreviewSettings {
             enabled: true,
+            appearance_enabled: false,
+            solar_time_source: mclone_season::SolarTimeSource::Manual,
+            manual_solar_time: mclone_season::PreviewSolarTime::from_hours_wrapped(7.0),
             ..SeasonPreviewSettings::default()
         };
         let effects = settings.apply_ui_action(

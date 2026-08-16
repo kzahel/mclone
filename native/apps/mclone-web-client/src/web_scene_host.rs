@@ -1935,7 +1935,8 @@ impl WebSceneHost {
     #[wasm_bindgen(js_name = setSeasonPreviewForSmoke)]
     pub fn set_season_preview_for_smoke(
         &mut self,
-        enabled: bool,
+        solar_enabled: bool,
+        appearance_enabled: bool,
         orbital_turns: f64,
         latitude_degrees: f64,
         solar_time_hours: f64,
@@ -1953,7 +1954,8 @@ impl WebSceneHost {
             intensity: recent_snow_intensity,
         });
         let settings = SeasonPreviewSettings {
-            enabled,
+            enabled: solar_enabled,
+            appearance_enabled,
             orbital_phase,
             latitude_source: LatitudeSource::Manual,
             manual_latitude: PreviewLatitude::from_degrees_clamped(latitude_degrees),
@@ -1966,7 +1968,10 @@ impl WebSceneHost {
         let object = js_sys::Object::new();
         let date = PreviewCalendarDate::from_orbital_phase(orbital_phase);
         report_set_bool(&object, "ok", true).map_err(JsValue::from)?;
-        report_set_bool(&object, "enabled", enabled).map_err(JsValue::from)?;
+        report_set_bool(&object, "enabled", settings.evaluation_enabled())
+            .map_err(JsValue::from)?;
+        report_set_bool(&object, "solarEnabled", solar_enabled).map_err(JsValue::from)?;
+        report_set_bool(&object, "appearanceEnabled", appearance_enabled).map_err(JsValue::from)?;
         report_set_number(
             &object,
             "orbitalPhaseSteps",

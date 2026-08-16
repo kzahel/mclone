@@ -122,6 +122,7 @@ pub(crate) const DESKTOP_LOCAL_ARG_FLAGS: &[&str] = &[
     "--season-latitude",
     "--season-latitude-source",
     "--season-orbital-phase",
+    "--season-appearance",
     "--season-preview",
     "--season-recent-snow",
     "--season-recent-snow-center",
@@ -958,6 +959,7 @@ impl Cli {
         let mut screenshot_camera_view = EngineCameraViewMode::FirstPerson;
         let mut season_preview = SeasonPreviewSettings::default();
         let mut season_preview_options_explicit = false;
+        let mut season_appearance_explicit = false;
         let mut season_recent_snow_intensity = None;
         let mut season_recent_snow_center = None;
         let mut actor_walk_review_video = None;
@@ -1524,7 +1526,19 @@ impl Cli {
                 }
                 "--season-preview" => {
                     season_preview_options_explicit = true;
-                    season_preview.enabled = parse_bool_arg(&arg, args.next())?;
+                    let enabled = parse_bool_arg(&arg, args.next())?;
+                    // Preserve the original combined CLI switch for existing
+                    // capture scripts. The dedicated appearance switch below
+                    // can override the ground consumer independently.
+                    season_preview.enabled = enabled;
+                    if !season_appearance_explicit {
+                        season_preview.appearance_enabled = enabled;
+                    }
+                }
+                "--season-appearance" => {
+                    season_preview_options_explicit = true;
+                    season_appearance_explicit = true;
+                    season_preview.appearance_enabled = parse_bool_arg(&arg, args.next())?;
                 }
                 "--season-orbital-phase" => {
                     season_preview_options_explicit = true;
@@ -3168,7 +3182,7 @@ fn print_help() {
            mclone-native-client --headless-clear /tmp/mclone-native-clear.png [--width 96] [--height 64]\n\
            mclone-native-client --actor-review-sheet /tmp/mclone-actor-review.png [--width 1152] [--height 512] [--fullbright true|false]\n\
            mclone-native-client --actor-walk-review /tmp/mclone-actor-walk-review.png [--actor-walk-review-video /tmp/mclone-actor-walk-review.mp4] [--width 360] [--height 360] [--walk-review-frames 24] [--walk-review-fps 12] [--walk-review-cycles 2] [--fullbright true|false]\n\
-          mclone-native-client --screenshot /tmp/mclone-frame.png [--asset-pack saved|original] [--width 1280] [--height 720] [--startup-wait none|progress|playable|view-settled|frames:N] [--warm-world-standby-seed -98765] [--screenshot-ui none|title|world-list|world-create|world-delete-confirm|new-world|join-remote|pause|death|help|controls|block-palette|options-title|options-pause|options-local-play|options-seasonal-debug|storage-profile-title|storage-factory-confirm|server-settings-pause|asset-packs-pause] [--screenshot-hud true|false] [--screenshot-frame-pipeline-overlay true|false] [--screenshot-debug-pane true|false] [--screenshot-worldgen-lens off|biome|landform|surface|hydrology] [--screenshot-player-box true|false] [--screenshot-blink-debug true|false] [--screenshot-controller-focus true|false] [--screenshot-scripted-interaction true|false] [--screenshot-settle-ms 0] [--screenshot-settle-frames 0] [--screenshot-terrain-horizon-diagnostic natural|ownership-level|topology|albedo|environmental-illumination|geometric-shade|local-occlusion|water|texture] [--screenshot-eye x,y,z] [--screenshot-target x,y,z] [--screenshot-camera-view first-person|third-person] [--season-preview true|false] [--season-orbital-phase 0..1] [--season-latitude-source world|manual] [--season-latitude -90..90] [--season-solar-time-source world-clock|manual] [--season-solar-time 0..<24] [--season-recent-snow 0..1] [--season-recent-snow-center x,z] [--first-person-player true|false] [--seed 12345] [--generation-profile mclone-overworld-v1] [--starter-content wild|intro-homestead-v1] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--movement-speed-multiplier 1.0] [--simulation-cadence 20/20/60] [--debug-passive-showcase true|false] [--section-occlusion true|false] [--lighting true|false] [--fullbright true|false]\n\
+          mclone-native-client --screenshot /tmp/mclone-frame.png [--asset-pack saved|original] [--width 1280] [--height 720] [--startup-wait none|progress|playable|view-settled|frames:N] [--warm-world-standby-seed -98765] [--screenshot-ui none|title|world-list|world-create|world-delete-confirm|new-world|join-remote|pause|death|help|controls|block-palette|options-title|options-pause|options-local-play|options-seasonal-debug|storage-profile-title|storage-factory-confirm|server-settings-pause|asset-packs-pause] [--screenshot-hud true|false] [--screenshot-frame-pipeline-overlay true|false] [--screenshot-debug-pane true|false] [--screenshot-worldgen-lens off|biome|landform|surface|hydrology] [--screenshot-player-box true|false] [--screenshot-blink-debug true|false] [--screenshot-controller-focus true|false] [--screenshot-scripted-interaction true|false] [--screenshot-settle-ms 0] [--screenshot-settle-frames 0] [--screenshot-terrain-horizon-diagnostic natural|ownership-level|topology|albedo|environmental-illumination|geometric-shade|local-occlusion|water|texture] [--screenshot-eye x,y,z] [--screenshot-target x,y,z] [--screenshot-camera-view first-person|third-person] [--season-preview true|false] [--season-appearance true|false] [--season-orbital-phase 0..1] [--season-latitude-source world|manual] [--season-latitude -90..90] [--season-solar-time-source world-clock|manual] [--season-solar-time 0..<24] [--season-recent-snow 0..1] [--season-recent-snow-center x,z] [--first-person-player true|false] [--seed 12345] [--generation-profile mclone-overworld-v1] [--starter-content wild|intro-homestead-v1] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--movement-speed-multiplier 1.0] [--simulation-cadence 20/20/60] [--debug-passive-showcase true|false] [--section-occlusion true|false] [--lighting true|false] [--fullbright true|false]\n\
            mclone-native-client --worldgen-showcase-card /tmp/mclone-worldgen-showcase [--width 640] [--height 400] [--generation-profile small-island-v1] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 16] [--day-time 6000] [--lighting true|false] [--fullbright true|false]\n\
            mclone-native-client --warm-world-swap-smoke /tmp/mclone-warm-world-swap --warm-world-standby-seed 67890 [--warm-world-standby-cadence 5/5/5] [--warm-world-cost-sample-ms 3000] [--width 1280] [--height 720] [scene/render options as --screenshot]\n\
            mclone-native-client --live-diorama-smoke /tmp/mclone-live-diorama --world-dir ./table-a --live-diorama-world-dir ./island-b [--live-diorama-scale 0.125] [--live-diorama-soak-seconds 600] [--width 960] [--height 640]\n\

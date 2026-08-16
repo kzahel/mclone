@@ -3241,6 +3241,7 @@ async function run() {
           screenshotTarget.split(",").map(Number)
         );
         const offScreenshotPath = canvasScreenshotPath.replace(/\.png$/, "-off.png");
+        const solarOnlyScreenshotPath = canvasScreenshotPath.replace(/\.png$/, "-solar-only.png");
         const restoredScreenshotPath = canvasScreenshotPath.replace(/\.png$/, "-restored.png");
         const probe = await runSeasonalAppearanceProbe(
           page,
@@ -3248,6 +3249,7 @@ async function run() {
           eye,
           target,
           offScreenshotPath,
+          solarOnlyScreenshotPath,
           canvasScreenshotPath,
           restoredScreenshotPath,
         );
@@ -3259,10 +3261,18 @@ async function run() {
         if (
           pageErrors.length > 0
           || probe.offPixels.distinctInteriorColorCount < 2
+          || probe.solarOnlyPixels.distinctInteriorColorCount < 2
           || probe.activePixels.distinctInteriorColorCount < 2
           || probe.activeDifference.differentPixelCount <= 0
+          || probe.solarDifference.differentPixelCount <= 0
+          || probe.appearanceDifference.differentPixelCount <= 0
           || probe.restoredDifference.differentPixelCount !== 0
-          || probe.activeState?.enabled !== true
+          || probe.offState?.solarEnabled !== false
+          || probe.offState?.appearanceEnabled !== false
+          || probe.solarOnlyState?.solarEnabled !== true
+          || probe.solarOnlyState?.appearanceEnabled !== false
+          || probe.activeState?.solarEnabled !== true
+          || probe.activeState?.appearanceEnabled !== true
           || probe.activeState?.orbitalPhaseSteps !== 8750
           || probe.activeState?.calendarDay !== 99
           || probe.activeState?.localSeason !== "Winter"
@@ -3270,9 +3280,15 @@ async function run() {
           || probe.activeState?.recentSnowRadiusBlocks !== 96
           || probe.restoredState?.enabled !== false
           || probe.offResult?.meshBuildCount !== probe.activeResult?.meshBuildCount
+          || probe.offResult?.meshBuildCount !== probe.solarOnlyResult?.meshBuildCount
           || probe.activeResult?.meshBuildCount !== probe.restoredResult?.meshBuildCount
           || probe.offResult?.commandCount !== probe.activeResult?.commandCount
+          || probe.offResult?.commandCount !== probe.solarOnlyResult?.commandCount
           || probe.activeResult?.commandCount !== probe.restoredResult?.commandCount
+          || probe.solarOnlyResult?.sectionBlockUpdateCount !== 0
+          || probe.solarOnlyResult?.pendingCompileJobCount !== 0
+          || probe.solarOnlyResult?.acceptedCompileSectionCount !== 0
+          || probe.activeResult?.sectionBlockUpdateCount !== 0
           || probe.activeResult?.pendingCompileJobCount !== 0
           || probe.activeResult?.acceptedCompileSectionCount !== 0
         ) {
@@ -3286,6 +3302,7 @@ async function run() {
           screenshotPath,
           pageScreenshotCaptured,
           offScreenshotPath,
+          solarOnlyScreenshotPath,
           canvasScreenshotPath,
           restoredScreenshotPath,
           probe,
@@ -11308,6 +11325,7 @@ async function readNativeUiState(page) {
  * @param {[number, number, number]} eye
  * @param {[number, number, number]} target
  * @param {string} offScreenshotPath
+ * @param {string} solarOnlyScreenshotPath
  * @param {string} activeScreenshotPath
  * @param {string} restoredScreenshotPath
  */
@@ -11317,6 +11335,7 @@ async function runSeasonalAppearanceProbe(
   eye,
   target,
   offScreenshotPath,
+  solarOnlyScreenshotPath,
   activeScreenshotPath,
   restoredScreenshotPath,
 ) {
@@ -11361,19 +11380,28 @@ async function runSeasonalAppearanceProbe(
     { timeout: 10_000 },
   );
 
-  /** @param {boolean} enabled */
-  const setPreview = (enabled) => page.evaluate(
-    ({ enabled, centerX, centerZ }) => globalThis.__mcloneWebApp
+  /**
+   * @param {boolean} solarEnabled
+   * @param {boolean} appearanceEnabled
+   */
+  const setPreview = (solarEnabled, appearanceEnabled) => page.evaluate(
+    ({ solarEnabled, appearanceEnabled, centerX, centerZ }) => globalThis.__mcloneWebApp
       ?.setSeasonPreviewForSmoke?.(
-        enabled,
+        solarEnabled,
+        appearanceEnabled,
         0.875,
         47.5,
-        12.0,
-        enabled ? 1.0 : 0.0,
+        7.0,
+        appearanceEnabled ? 1.0 : 0.0,
         centerX,
         centerZ,
       ) ?? null,
-    { enabled, centerX: Math.floor(eye[0]), centerZ: Math.floor(eye[2]) },
+    {
+      solarEnabled,
+      appearanceEnabled,
+      centerX: Math.floor(eye[0]),
+      centerZ: Math.floor(eye[2]),
+    },
   );
   /** @param {string} path */
   const renderAndCapture = async (path) => {
@@ -11384,23 +11412,30 @@ async function runSeasonalAppearanceProbe(
     return { result, png, pixels: analyzePng(png) };
   };
 
-  const offState = await setPreview(false);
+  const offState = await setPreview(false, false);
   const off = await renderAndCapture(offScreenshotPath);
-  const activeState = await setPreview(true);
+  const solarOnlyState = await setPreview(true, false);
+  const solarOnly = await renderAndCapture(solarOnlyScreenshotPath);
+  const activeState = await setPreview(true, true);
   const active = await renderAndCapture(activeScreenshotPath);
-  const restoredState = await setPreview(false);
+  const restoredState = await setPreview(false, false);
   const restored = await renderAndCapture(restoredScreenshotPath);
 
   return {
     offState,
+    solarOnlyState,
     activeState,
     restoredState,
     offResult: summarizeSeasonalAppearanceRenderResult(off.result),
+    solarOnlyResult: summarizeSeasonalAppearanceRenderResult(solarOnly.result),
     activeResult: summarizeSeasonalAppearanceRenderResult(active.result),
     restoredResult: summarizeSeasonalAppearanceRenderResult(restored.result),
     offPixels: off.pixels,
+    solarOnlyPixels: solarOnly.pixels,
     activePixels: active.pixels,
     restoredPixels: restored.pixels,
+    solarDifference: comparePngPixels(off.png, solarOnly.png),
+    appearanceDifference: comparePngPixels(solarOnly.png, active.png),
     activeDifference: comparePngPixels(off.png, active.png),
     restoredDifference: comparePngPixels(off.png, restored.png),
   };

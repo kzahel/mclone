@@ -1,20 +1,22 @@
 # Tactical 306: Seasonal Appearance Preview
 
-Status: implementation and automated evidence complete 2026-08-16; Human
-Review plus current-revision physical Quest interaction/performance remain
-pending because no authorized headset is attached
+Status: implementation and automated evidence complete 2026-08-16, including
+independent solar and ground controls; Human Review plus current-revision
+physical Quest interaction/performance remain pending because no authorized
+headset is attached
 
 Topic: `seasons`
 
 Dependency update 2026-08-16: Tactical
 [`307`](307-seasonal-solar-path-and-cyclical-latitude.md) landed the shared
-dependency-leaf `mclone-season` crate, unsaved `SeasonPreviewSettings`, one
-typed `SetSeasonPreview` UI action/effect, and the shared Debug `Season Preview`
-master. Human Review accepts its global orbital phase, effective-latitude
-policy, solar sample, and Earth-like original-Mclone sun size. This tactical
-must extend that owner for evaluated local appearance and recent snow rather
-than create another master, action family, or independently controlled local
-phase. Solar and material response consume the same global phase and latitude.
+dependency-leaf `mclone-season` crate, unsaved `SeasonPreviewSettings`, and one
+typed `SetSeasonPreview` UI action/effect. Human Review accepts its global
+orbital phase, effective-latitude policy, solar sample, and Earth-like
+original-Mclone sun size. This tactical extends that owner for evaluated local
+appearance and recent snow rather than create another action family or
+independently controlled local phase. Solar and material response consume the
+same global phase and latitude, but their render consumers can now be enabled
+independently.
 
 ## Instruction Synthesis
 
@@ -32,6 +34,12 @@ calendar display, evaluated local season, and recent-snow control. The global
 preview date and local evaluated result must be visible together. All rows use
 the same shared UI actions and scene/render state in desktop flat, desktop
 OpenXR, and Android XR; do not add a desktop shortcut or XR-only menu branch.
+
+The resulting Debug surface must also support solar-only review: keep the
+global date, latitude, sun path, sky, and rendered daylight active while
+seasonal ground tint, vegetation dormancy, and derived snow remain exactly
+neutral. Solar controls and ground appearance are independent consumers of
+shared climate inputs, not one all-or-nothing season master.
 
 Explicitly defer the procedural-horizon LOD. Tacticals
 [`304`](304-lod-frontier-and-near-field-voxel-convergence.md) and
@@ -112,7 +120,9 @@ The scene changes immediately and coherently:
 - a bounded `Recent Snow` pulse can temporarily raise ground and exposed
   canopy coverage around one anchored location, with smooth spatial falloff;
   and
-- disabling `Season Preview` restores the current renderer output exactly.
+- disabling both visual consumers restores the current renderer output
+  exactly; disabling only `Ground Appearance` retains seasonal solar/sky/light
+  while restoring exact neutral seasonal ground.
 
 Changing preview state performs no authoritative mutation, persistence,
 lighting, chunk scheduling, mesh rebuild, or atlas replacement. The proof
@@ -127,7 +137,8 @@ Use fixed-point shared values equivalent to:
 
 ```text
 SeasonPreviewSettings {
-    enabled,
+    enabled,             // solar/sky/rendered daylight
+    appearance_enabled,  // terrain/vegetation/derived snow
     orbital_phase: OrbitalPhase,
     latitude_source,
     manual_latitude,
@@ -150,13 +161,13 @@ LocalSnowPulse {
 }
 ```
 
-`enabled = false` is the default on process start, world entry, and new scene
-construction. The existing northward-equinox orbital default is retained, and
-a new preview has no recent-snow pulse. Fixed point avoids float-equality state
-drift; the renderer may receive normalized finite floats derived from it. The
-evaluated local result is recomputed from the preview/calendar input and
-observer-local facts; it is never a second stored or independently editable
-phase. The value is developer presentation state:
+Both enable flags are false by default on process start, world entry, and new
+scene construction. The existing northward-equinox orbital default is
+retained, and a new preview has no recent-snow pulse. Fixed point avoids
+float-equality state drift; the renderer may receive normalized finite floats
+derived from it. The evaluated local result is recomputed from the
+preview/calendar input and observer-local facts; it is never a second stored
+or independently editable phase. The value is developer presentation state:
 
 - it is not written to world records or client preferences;
 - it is not sent through gameplay protocol or server commands;
@@ -167,10 +178,11 @@ phase. The value is developer presentation state:
   appearance vocabulary without inheriting the Debug controls' ownership.
 
 The existing Debug category exposes one `Seasonal Debug...` navigation row
-with a compact `Off` or `Day N/112 · <local result>` summary. The dedicated
-shared screen exposes:
+with a compact `Off` or `Day N/112 · <local result> · S+/- G+/-` summary. The
+dedicated shared screen exposes:
 
-- `Season Preview`, the existing enable checkbox;
+- `Solar Preview`, the sun/sky/rendered-daylight checkbox;
+- `Ground Appearance`, the exact-terrain/vegetation/derived-snow checkbox;
 - `Global Preview Date`, the existing orbital-phase value presented as a
   cyclic slider with a synthetic `Day N/112` label;
 - `Global Milestone`, a read-only equinox/solstice interpretation;
@@ -605,7 +617,8 @@ Status: complete 2026-08-16.
 
 After the view is settled, drag `Global Preview Date` through a full cycle,
 observe the sun and evaluated local material response move together, drag
-recent snow `0 -> 1 -> 0`, and disable the preview. Assert zero new section
+recent snow `0 -> 1 -> 0`, exercise solar-only and ground-only states, and
+disable both consumers. Assert zero new section
 builds, section uploads, atlas uploads, block/light updates, persistence
 dirties, or server commands. One compact existing per-frame uniform write may
 carry the orbital/local evaluation, pulse center/radius, and intensity; do not
@@ -646,9 +659,10 @@ Status: complete for implementation and automated interaction contracts
 
 - Add one controller-friendly `Seasonal Debug...` navigation row to the shared
   Debug options category, with a compact disabled/date/local-result summary.
-- Add one shared `Seasonal Debug` screen containing the existing season master,
-  global preview date, latitude source/value, solar-time source/value, recent
-  snow, and read-only global milestone/local season/daylight/LOD rows. Group
+- Add one shared `Seasonal Debug` screen containing independent solar and
+  ground controls, global preview date, latitude source/value, solar-time
+  source/value, recent snow, and read-only global milestone/local
+  season/daylight/LOD rows. Group
   them as calendar/evaluation, location/sun, and weather-preview sections so
   the controller and XR scan order remains predictable. Move the existing
   Tactical 307 rows; do not duplicate them.
@@ -663,9 +677,9 @@ Status: complete for implementation and automated interaction contracts
 - On the first zero-to-positive recent-snow effect, anchor the bounded pulse at
   the current canonical player/camera XZ. Clear it at zero and do not silently
   recenter it while the slider remains positive.
-- Reset to preview off, northward-equinox phase / synthetic Day 1, and no recent
-  snow for a new process/session; keep all preview state out of preference and
-  world persistence.
+- Reset both consumers off, northward-equinox phase / synthetic Day 1, and no
+  recent snow for a new process/session; keep all preview state out of
+  preference and world persistence.
 - Expose enable, exact orbital phase, synthetic global date/milestone,
   effective latitude, typed evaluated local result, daylight, pulse
   intensity/center/radius, exact-only/composed presentation, and `LOD deferred`
@@ -693,7 +707,8 @@ reload, or menu-state drift.
 Execution record:
 
 - The shared Debug category now has exactly one `Seasonal Debug...` entry. Its
-  shared nested screen owns `Season Preview`, `Date: Day N/112`, milestone,
+  shared nested screen owns independent `Solar Preview` and `Ground
+  Appearance` checkboxes, `Date: Day N/112`, milestone,
   evaluated local season/response/snow tendency, daylight/effective latitude,
   latitude source/value, solar-time source/value, `Recent Snow`, and the
   read-only `Seasonal LOD: Deferred` row.
@@ -714,6 +729,17 @@ Execution record:
 - New process/session defaults remain preview off, Day 1/northward equinox,
   world latitude/time sources, and no pulse. No preference, world record,
   protocol, server command, or authoritative state was added.
+
+Post-completion control-isolation record:
+
+- Date and latitude remain available when either visual consumer is active.
+  Solar time source/value is available only to `Solar Preview`; recent snow is
+  available only to `Ground Appearance`.
+- `World Clock` only reads replicated authoritative `day_time`. Manual solar
+  time is an unsaved client-render input and never sets server `game_time` or
+  `day_time`. The same action produces only `SetSeasonPreview`, with no server
+  command, gameplay protocol, persistence, scheduled tick, or light-engine
+  mutation.
 
 ### Slice 4: Visual matrix, performance, and Human Review
 

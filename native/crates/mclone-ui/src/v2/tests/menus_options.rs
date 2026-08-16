@@ -1055,6 +1055,13 @@ fn seasonal_debug_rows_share_typed_state_and_gate_manual_controls() {
             .unwrap()
             .enabled
     );
+    assert!(
+        surface
+            .layout()
+            .widget(UI_V2_OPTIONS_SEASON_APPEARANCE)
+            .unwrap()
+            .enabled
+    );
     for id in [
         UI_V2_OPTIONS_SEASON_ORBITAL_PHASE,
         UI_V2_OPTIONS_SEASON_LATITUDE_SOURCE,
@@ -1125,7 +1132,7 @@ fn seasonal_debug_rows_share_typed_state_and_gate_manual_controls() {
             .enabled
     );
     assert!(
-        surface
+        !surface
             .layout()
             .widget(UI_V2_OPTIONS_SEASON_RECENT_SNOW)
             .unwrap()
@@ -1141,6 +1148,76 @@ fn seasonal_debug_rows_share_typed_state_and_gate_manual_controls() {
         Some("Spring 80% / snow 20%")
     );
 
+    let appearance_only = crate::SeasonPreviewSettings {
+        enabled: false,
+        appearance_enabled: true,
+        ..settings
+    };
+    surface.set_render_state(GameUiRenderState {
+        season_preview: appearance_only,
+        seasonal_debug: Some(diagnostics),
+        ..GameUiRenderState::default()
+    });
+    assert!(
+        surface
+            .layout()
+            .widget(UI_V2_OPTIONS_SEASON_ORBITAL_PHASE)
+            .unwrap()
+            .enabled
+    );
+    assert!(
+        surface
+            .layout()
+            .widget(UI_V2_OPTIONS_SEASON_LATITUDE_SOURCE)
+            .unwrap()
+            .enabled
+    );
+    assert!(
+        !surface
+            .layout()
+            .widget(UI_V2_OPTIONS_SEASON_SOLAR_TIME_SOURCE)
+            .unwrap()
+            .enabled
+    );
+    assert!(
+        !surface
+            .layout()
+            .widget(UI_V2_OPTIONS_SEASON_SOLAR_TIME)
+            .unwrap()
+            .enabled
+    );
+    assert!(
+        surface
+            .layout()
+            .widget(UI_V2_OPTIONS_SEASON_RECENT_SNOW)
+            .unwrap()
+            .enabled
+    );
+    surface.set_render_state(GameUiRenderState {
+        season_preview: settings,
+        seasonal_debug: Some(diagnostics),
+        ..GameUiRenderState::default()
+    });
+
+    let appearance_rect = surface
+        .layout()
+        .widget(UI_V2_OPTIONS_SEASON_APPEARANCE)
+        .unwrap()
+        .rect;
+    assert!(surface.pointer_down(point_in(appearance_rect), surface.render_state));
+    assert_eq!(
+        surface
+            .pointer_up(point_in(appearance_rect), surface.render_state)
+            .1,
+        Some(GameUiAction::SetSeasonPreview(
+            crate::SeasonPreviewSettings {
+                appearance_enabled: true,
+                ..settings
+            }
+        ))
+    );
+
+    settings.appearance_enabled = true;
     settings.latitude_source = crate::LatitudeSource::Manual;
     settings.solar_time_source = crate::SolarTimeSource::Manual;
     surface.set_render_state(GameUiRenderState {
@@ -1148,6 +1225,13 @@ fn seasonal_debug_rows_share_typed_state_and_gate_manual_controls() {
         seasonal_debug: Some(diagnostics),
         ..GameUiRenderState::default()
     });
+    assert!(
+        surface
+            .layout()
+            .widget(UI_V2_OPTIONS_SEASON_RECENT_SNOW)
+            .unwrap()
+            .enabled
+    );
     for (id, expected) in [
         (
             UI_V2_OPTIONS_SEASON_ORBITAL_PHASE,

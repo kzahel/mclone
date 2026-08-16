@@ -718,7 +718,10 @@ impl PreviewSolarTime {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct SeasonPreviewSettings {
+    /// Drives the client-only seasonal sun, sky, and daylight sample.
     pub enabled: bool,
+    /// Admits exact-terrain tint, vegetation dormancy, and derived snow.
+    pub appearance_enabled: bool,
     pub orbital_phase: OrbitalPhase,
     pub latitude_source: LatitudeSource,
     pub manual_latitude: PreviewLatitude,
@@ -731,6 +734,7 @@ impl Default for SeasonPreviewSettings {
     fn default() -> Self {
         Self {
             enabled: false,
+            appearance_enabled: false,
             orbital_phase: OrbitalPhase::NORTHWARD_EQUINOX,
             latitude_source: LatitudeSource::World,
             manual_latitude: PreviewLatitude::EQUATOR,
@@ -738,6 +742,14 @@ impl Default for SeasonPreviewSettings {
             manual_solar_time: PreviewSolarTime::NOON,
             recent_snow: None,
         }
+    }
+}
+
+impl SeasonPreviewSettings {
+    /// Whether shared local climate evaluation is needed for either visual
+    /// consumer. Neither flag mutates authoritative game or day time.
+    pub const fn evaluation_enabled(self) -> bool {
+        self.enabled || self.appearance_enabled
     }
 }
 
@@ -1132,6 +1144,7 @@ mod tests {
             SeasonPreviewSettings::default(),
             SeasonPreviewSettings {
                 enabled: false,
+                appearance_enabled: false,
                 orbital_phase: OrbitalPhase::NORTHWARD_EQUINOX,
                 latitude_source: LatitudeSource::World,
                 manual_latitude: PreviewLatitude::EQUATOR,
@@ -1139,6 +1152,21 @@ mod tests {
                 manual_solar_time: PreviewSolarTime::NOON,
                 recent_snow: None,
             }
+        );
+        assert!(!SeasonPreviewSettings::default().evaluation_enabled());
+        assert!(
+            SeasonPreviewSettings {
+                enabled: true,
+                ..SeasonPreviewSettings::default()
+            }
+            .evaluation_enabled()
+        );
+        assert!(
+            SeasonPreviewSettings {
+                appearance_enabled: true,
+                ..SeasonPreviewSettings::default()
+            }
+            .evaluation_enabled()
         );
         assert_eq!(
             PreviewLatitude::from_degrees_clamped(-200.0).degrees(),
