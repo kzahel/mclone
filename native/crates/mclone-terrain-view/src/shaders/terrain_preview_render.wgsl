@@ -777,7 +777,12 @@ fn terrain_vertex(
         slope_z = mix(narrow_slope_z, wide_slope_z, coarse_footprint_weight);
     }
     let normal = normalize(vec3<f32>(-slope_x * 4.0, 1.0, -slope_z * 4.0));
-    var light = clamp(dot(normal, normalize(vec3<f32>(-0.45, 0.82, -0.35))) * 0.48 + 0.58, 0.34, 1.05);
+    let smooth_geometric_shade = clamp(
+        dot(normal, normalize(vec3<f32>(-0.45, 0.82, -0.35))) * 0.48 + 0.58,
+        0.34,
+        1.05,
+    );
+    var light = smooth_geometric_shade;
 
     let cell_world_x = params.origin_spacing_cells.x
         + i32(cell_x) * params.origin_spacing_cells.z;
@@ -790,6 +795,11 @@ fn terrain_vertex(
     var vertex_world_y = stitched_height + 1.0;
     var world_uv = vec2<f32>(vertex_world_x, vertex_world_z);
     var surface_kind = 0u;
+    let voxel_smooth_transition_weight = select(
+        0.0,
+        terrain_horizon_near_material_weight(cell_x, cell_z, cells),
+        voxel_shell,
+    );
 
     if voxel_shell {
         let top_y = round(stitched_height) + 1.0;
@@ -892,6 +902,10 @@ fn terrain_vertex(
                 face_index >= 3u,
             );
         }
+        // Keep one voxel geometry owner while its face shade approaches the
+        // smooth owner's slope shade over the same committed outer-footprint
+        // band already used by material presentation.
+        light = mix(smooth_geometric_shade, light, voxel_smooth_transition_weight);
     }
 
     let relative_x = vertex_world_x - f32(params.viewport_center_extent.x)
@@ -954,11 +968,7 @@ fn terrain_vertex(
         vertex_world_x,
         vertex_world_y,
         vertex_world_z,
-        select(
-            0.0,
-            terrain_horizon_near_material_weight(cell_x, cell_z, cells),
-            voxel_shell,
-        ),
+        voxel_smooth_transition_weight,
     );
     out.biome = u32(round(sample.semantics.y));
     out.surface_y = sample.terrain.x;

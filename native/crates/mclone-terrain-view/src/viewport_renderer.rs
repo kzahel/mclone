@@ -4869,6 +4869,23 @@ mod tests {
     }
 
     #[test]
+    fn horizon_voxel_shade_converges_without_blending_geometry_owners() {
+        let shader = super::super::TERRAIN_PREVIEW_RENDER_WGSL;
+        assert!(shader.contains("let smooth_geometric_shade = clamp("));
+        assert!(shader.contains("let voxel_smooth_transition_weight = select("));
+        assert!(shader.contains(
+            "light = mix(smooth_geometric_shade, light, voxel_smooth_transition_weight);"
+        ));
+        assert_eq!(
+            shader
+                .matches("terrain_horizon_near_material_weight(cell_x, cell_z, cells)")
+                .count(),
+            1
+        );
+        assert!(!shader.contains("mix(stitched_height"));
+    }
+
+    #[test]
     fn horizon_exact_coverage_has_one_horizontal_owner() {
         let shader = super::super::TERRAIN_PREVIEW_RENDER_WGSL;
         assert!(!shader.contains("exact_chunk_painted_interior"));
