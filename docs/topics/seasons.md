@@ -39,6 +39,14 @@ ordinary world-clock sky. The original `--season-preview` capture switch stays
 a combined compatibility control; `--season-appearance` can override its
 ground half explicitly.
 
+Planned Tactical
+[`314`](../tactical/314-celestial-moon-stars-and-square-sun.md) is the next
+celestial-sky slice. It keeps the accepted Earth-sized solar core but makes the
+original Mclone sun square, adds a continuous square phased moon and stable
+latitude-aware stars, and requires independent live-off cost controls. It
+retains Java moon/star behavior for reference profiles and makes no gameplay
+calendar or light-engine claim.
+
 No authoritative season clock, terrain or biome season generation, active
 weather event, migration producer, seasonal hydrology, wildlife tagging, or
 managed-habitat infrastructure is implemented.
@@ -626,6 +634,7 @@ gameplay milestone must prove bounded work with inactive regions held frozen.
 
 ## Related
 
+- [`../tactical/314-celestial-moon-stars-and-square-sun.md`](../tactical/314-celestial-moon-stars-and-square-sun.md)
 - [`../tactical/306-seasonal-appearance-preview.md`](../tactical/306-seasonal-appearance-preview.md)
 - [`../tactical/307-seasonal-solar-path-and-cyclical-latitude.md`](../tactical/307-seasonal-solar-path-and-cyclical-latitude.md)
 - [`habitat-driven-creature-ecology.md`](habitat-driven-creature-ecology.md)

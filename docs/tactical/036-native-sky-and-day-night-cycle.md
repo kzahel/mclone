@@ -88,9 +88,14 @@ Original plan:
   The ordinary fixed celestial rig drives one quad implementation in mono,
   placed/per-eye, and full-frame multiview paths. The same CPU-side texture is
   retained across renderer-device rebuilds.
-- Moon quad and 4×2 `moon_phases.png` atlas — still planned.
-- Star field with `getStarBrightness` fade — still planned.
-- Validate moon/stars with captures across a full day cycle after they land.
+- Moon and star completion now has a bounded execution owner in Tactical
+  [`314`](314-celestial-moon-stars-and-square-sun.md). It retains this
+  tactical's Java 4×2 moon-atlas, seeded-star, brightness, and draw-order
+  baseline while adding the explicit original-Mclone square moon,
+  latitude-aware star law, per-feature cost controls, and cross-platform
+  evidence.
+- Validate moon/stars with captures across a full day cycle through Tactical
+  314 rather than growing this historical phase checklist in parallel.
 
 The first sun pixel gate used frozen `day_time=6000` captures. Looking straight
 up produced an inspected centered textured sun at
