@@ -4,7 +4,9 @@ Topic: web-worker-runtime-ownership
 
 Status: bounded campaign complete 2026-07-19; integrated-runner semantic
 parity and independent background progress restored 2026-08-15; persistent-
-world update-loss correction completed 2026-08-16. Tactical
+world update-loss correction completed 2026-08-16; physical Android worker-
+liveness and replay correction planned by Tactical
+[`311`](../tactical/311-cross-platform-worker-liveness-and-replay.md). Tactical
 [`197`](../tactical/197-domain-blind-web-worker-broker.md) completed the
 high-value isolated-actor campaign without justifying shared Wasm memory.
 Human review then authorized Tactical
@@ -34,6 +36,18 @@ coupled to 20 Hz simulation ticks and that the Web Light actor did not retain
 native-equivalent state. A bounded Rust-authored poll operation now advances
 pending work independently, while the Light actor retains state and observes
 unloads across frames.
+
+Physical Android fault testing on 2026-08-16 then proved a deeper lifecycle
+gap. Silently stopping the production worldgen or lighting Worker left
+unmatched requests and permanent terrain boundaries for more than one minute,
+without an error or replacement generation. An explicit worldgen exception
+tore down the integrated authority and stranded later commands. The render
+Worker did restart after its existing timeout, but its interrupted compile was
+consumed without replay and the view falsely settled at 288 of 289 exact
+columns. A separate persistent-world run also found that a newly generated
+chunk can reach revision-safe mutation without a prior browser record read.
+Tactical 311 owns the complete receipts and the shared native/Web lifecycle,
+deadline, replay, exact-settlement, and generated-record continuation plan.
 
 On 2026-07-25 human review selected one focused continuation: migrate Terrain
 Lab's exact-terrain Worker to the same isolated Rust-actor, opaque browser
@@ -805,6 +819,36 @@ loaded-set hash. The inspected canvas at
 [/tmp/mclone-native-web-cardinal-view-replay-canvas.png](/tmp/mclone-native-web-cardinal-view-replay-canvas.png)
 contains coherent terrain without rectangular holes.
 
+## Physical Android Worker-Liveness Evidence
+
+The physical Pixel 7a baseline established that render-distance-8 throughput is
+sufficient: a clean run reached all 361 requested client chunks and all 289
+exact drawable columns in roughly 14 seconds. The permanent human-review holes
+are therefore not explained by the ordinary cost of generating that view.
+
+Controlled loss of the worldgen Worker followed by six chunks of movement
+plateaued for 61 seconds at 238 of 361 requested chunks, 180 of 289 exact
+columns, 124 pending server jobs, and one unmatched worldgen request. Controlled
+loss of the lighting Worker reached the same coverage plateau with 163 pending
+server jobs, 18 pending lighting mailbox entries, and ten unmatched lighting
+requests. Neither path reported an error or constructed a replacement Worker.
+
+The render Worker has stronger transport recovery but incomplete logical-job
+recovery. After controlled loss it advanced from generation 1 to 2 and resumed
+compilation, yet stopped permanently at 288 of 289 exact columns with every
+pending count at zero and `streamingSettled` true. Source correlation shows the
+failed compile targets are removed from in-flight state before the error is
+returned and are never made dirty again. Exact coverage is computed separately
+and is not part of the settled predicate.
+
+These tests prove failure consequences and recovery gaps; they do not yet prove
+why the Worker disappeared in the original unforced session. Multi-session
+Chrome memory observations justify a dedicated stress lane but are not a clean
+OOM receipt. Tactical 311 requires deterministic native and browser fault
+injection, shared logical job generations and outcomes, oldest-in-flight
+deadlines, scheduler-level replay, acknowledged retained-state reconstruction,
+lossless render requeue, exact settlement, and physical Android closeout.
+
 ## Subsequent Scene Boundary Cleanup
 
 Tactical 202 completed a fresh production inventory after the managed lobby
@@ -923,15 +967,19 @@ Primary implementation surfaces:
 
 ## Recommended Next Work
 
-Keep both Tactical 303 movement replays, the ownership inventory, scene-host
-gate, cardinal persistent-world replay, and IndexedDB reload lane as
-regression checks. Do not couple scheduler progress back to simulation ticks,
-poll the server while browser persistence completions are outstanding, or
-rebuild retained actor state per frame.
-The next justified investigation, if representative physical-phone review
-still finds the 13-second post-server visual tail unacceptable, is a focused
-render-compiler throughput/presentation tactical with frame-time and memory
-acceptance. Do not raise a fixed Web render budget or add a Worker without
-that evidence. Managed provisioning, shared Wasm memory, Web-only view
-coalescing, and broader browser-native long-tail movement still require a
-separate human decision.
+Execute Tactical
+[`311`](../tactical/311-cross-platform-worker-liveness-and-replay.md) before
+treating the remaining phone behavior as render throughput. Keep both Tactical
+303 movement replays, the ownership inventory, scene-host gate, cardinal
+persistent-world replay, and IndexedDB reload lane as regression checks. Add
+native and physical-browser fault injection for silent loss, explicit failure,
+no response, stale response, and background/resume. Require generation restart,
+scheduler replay, exact target coverage, and zero pending work before settled.
+
+Do not couple scheduler progress back to simulation ticks, poll the server
+while browser persistence completions are outstanding, rebuild retained actor
+state per frame, raise a fixed Web render budget, or add another Worker as a
+liveness workaround. Render throughput can be reconsidered only after the
+proven lost-work paths recover correctly. Managed provisioning, shared Wasm
+memory, Web-only view coalescing, and broader browser-native long-tail movement
+still require a separate human decision.
