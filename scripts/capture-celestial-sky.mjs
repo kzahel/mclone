@@ -86,9 +86,9 @@ for (const entry of [baseline, restored]) {
   }
 }
 for (const [id, expected] of [
-  ["stars-quarter", 384],
-  ["stars-half", 768],
-  ["stars-full", 1536],
+  ["stars-quarter", 512],
+  ["stars-half", 1024],
+  ["stars-full", 2048],
 ]) {
   const actual = captures.find((entry) => entry.id === id)?.celestial.evaluated?.stars
     ?.submittedCount;
