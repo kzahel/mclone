@@ -5754,11 +5754,16 @@ impl McloneSceneHost {
     }
 
     fn solar_render_state(&self) -> SkyRenderState {
-        let vanilla = SkyRenderState::vanilla(self.time_of_day(), self.sun_angle());
-        self.solar_frame_diagnostics()
-            .map_or(vanilla, |diagnostics| {
-                SkyRenderState::SeasonalSolar(diagnostics.sample)
-            })
+        let fixed = if self.active_world.scene.startup.world_generation_profile
+            == mclone_server::WorldGenerationProfile::McloneOverworldV1
+        {
+            SkyRenderState::mclone_fixed(self.time_of_day(), self.sun_angle())
+        } else {
+            SkyRenderState::vanilla(self.time_of_day(), self.sun_angle())
+        };
+        self.solar_frame_diagnostics().map_or(fixed, |diagnostics| {
+            SkyRenderState::SeasonalSolar(diagnostics.sample)
+        })
     }
 
     pub fn solar_frame_diagnostics(&self) -> Option<SolarFrameDiagnostics> {

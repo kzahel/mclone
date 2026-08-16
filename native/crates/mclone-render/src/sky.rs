@@ -18,6 +18,13 @@ use mclone_season::SolarSample;
 /// the client renderer (`VanillaBiomes` passes `0.8` for plains).
 pub const PLAINS_TEMPERATURE: f32 = 0.8;
 
+/// Minecraft Java 1.17.1 renders a 60-unit-wide sun quad 100 units away.
+/// Retained reference profiles keep that deliberately oversized presentation.
+pub const VANILLA_SUN_ANGULAR_DIAMETER_DEGREES: f32 = 33.398_49;
+
+/// Original Mclone worlds use an Earth-like apparent solar diameter.
+pub const MCLONE_SUN_ANGULAR_DIAMETER_DEGREES: f32 = 0.53;
+
 /// Port of `Mth.hsvToRgb`, returning `[0, 1]` RGB components.
 fn hsv_to_rgb(hue: f32, saturation: f32, value: f32) -> [f32; 3] {
     let sextant = (hue * 6.0) as i32 % 6;
@@ -83,6 +90,7 @@ pub fn overworld_clear_color(time_of_day: f32) -> wgpu::Color {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum SkyRenderState {
     VanillaFixed { time_of_day: f32, sun_angle: f32 },
+    McloneFixed { time_of_day: f32, sun_angle: f32 },
     SeasonalSolar(SolarSample),
 }
 
@@ -94,9 +102,18 @@ impl SkyRenderState {
         }
     }
 
+    pub const fn mclone_fixed(time_of_day: f32, sun_angle: f32) -> Self {
+        Self::McloneFixed {
+            time_of_day,
+            sun_angle,
+        }
+    }
+
     pub fn clear_color(self) -> wgpu::Color {
         match self {
-            Self::VanillaFixed { time_of_day, .. } => overworld_clear_color(time_of_day),
+            Self::VanillaFixed { time_of_day, .. } | Self::McloneFixed { time_of_day, .. } => {
+                overworld_clear_color(time_of_day)
+            }
             Self::SeasonalSolar(sample) => {
                 let base = calculate_sky_color(PLAINS_TEMPERATURE);
                 let factor =
@@ -113,15 +130,28 @@ impl SkyRenderState {
 
     pub fn sky_darken(self) -> f32 {
         match self {
-            Self::VanillaFixed { time_of_day, .. } => crate::light_texture::sky_darken(time_of_day),
+            Self::VanillaFixed { time_of_day, .. } | Self::McloneFixed { time_of_day, .. } => {
+                crate::light_texture::sky_darken(time_of_day)
+            }
             Self::SeasonalSolar(sample) => 0.2 + sample.daylight_factor * 0.8,
         }
     }
 
     pub fn sun_direction(self) -> [f32; 3] {
         match self {
-            Self::VanillaFixed { sun_angle, .. } => [-sun_angle.sin(), sun_angle.cos(), 0.0],
+            Self::VanillaFixed { sun_angle, .. } | Self::McloneFixed { sun_angle, .. } => {
+                [-sun_angle.sin(), sun_angle.cos(), 0.0]
+            }
             Self::SeasonalSolar(sample) => sample.direction,
+        }
+    }
+
+    pub const fn sun_angular_diameter_degrees(self) -> f32 {
+        match self {
+            Self::VanillaFixed { .. } => VANILLA_SUN_ANGULAR_DIAMETER_DEGREES,
+            Self::McloneFixed { .. } | Self::SeasonalSolar(_) => {
+                MCLONE_SUN_ANGULAR_DIAMETER_DEGREES
+            }
         }
     }
 
@@ -132,7 +162,7 @@ impl SkyRenderState {
     /// daylight, so polar night cannot leave a bright sun in a night sky.
     pub fn sun_opacity(self) -> f32 {
         match self {
-            Self::VanillaFixed { .. } => 1.0,
+            Self::VanillaFixed { .. } | Self::McloneFixed { .. } => 1.0,
             Self::SeasonalSolar(sample) => {
                 (sample.daylight_factor + sample.twilight_factor).clamp(0.0, 1.0)
             }
@@ -142,6 +172,10 @@ impl SkyRenderState {
     pub fn glow(self) -> Option<SkyGlow> {
         match self {
             Self::VanillaFixed {
+                time_of_day,
+                sun_angle,
+            }
+            | Self::McloneFixed {
                 time_of_day,
                 sun_angle,
             } => sunrise_color(time_of_day).map(|color| SkyGlow::Vanilla { color, sun_angle }),
@@ -279,6 +313,22 @@ mod tests {
         assert_eq!(polar_night.sky_darken(), 0.2);
         assert_eq!(polar_night.clear_color().b, 0.0);
         assert_eq!(SkyRenderState::vanilla(0.5, PI).sun_opacity(), 1.0);
+    }
+
+    #[test]
+    fn original_and_reference_worlds_select_distinct_sun_sizes() {
+        assert_eq!(
+            SkyRenderState::vanilla(0.0, 0.0).sun_angular_diameter_degrees(),
+            VANILLA_SUN_ANGULAR_DIAMETER_DEGREES
+        );
+        assert_eq!(
+            SkyRenderState::mclone_fixed(0.0, 0.0).sun_angular_diameter_degrees(),
+            MCLONE_SUN_ANGULAR_DIAMETER_DEGREES
+        );
+        assert_eq!(
+            seasonal(45.0, OrbitalPhase::NORTHERN_SOLSTICE, 12.0).sun_angular_diameter_degrees(),
+            MCLONE_SUN_ANGULAR_DIAMETER_DEGREES
+        );
     }
 
     #[test]

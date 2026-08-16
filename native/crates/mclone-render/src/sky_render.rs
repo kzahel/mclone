@@ -39,7 +39,6 @@ const SUN_VERTEX_FLOAT_COUNT: usize = 6; // position(3) + uv(2) + opacity(1)
 const SUN_VERTEX_BYTE_SIZE: wgpu::BufferAddress =
     (SUN_VERTEX_FLOAT_COUNT * std::mem::size_of::<f32>()) as wgpu::BufferAddress;
 const SUN_VERTEX_COUNT: usize = 4;
-const SUN_HALF_SIZE: f32 = 30.0;
 const SUN_DISTANCE: f32 = 100.0;
 
 pub const MCLONE_SUN_TEXTURE_PATH: &str = "assets/mclone/textures/environment/sun.png";
@@ -623,6 +622,7 @@ impl SkyRenderer {
             &sun_vertex_bytes(&sun_vertices(
                 Vec3::from_array(sky_state.sun_direction()),
                 sky_state.sun_opacity(),
+                sky_state.sun_angular_diameter_degrees(),
             )),
         );
 
@@ -798,6 +798,7 @@ impl SkyRenderer {
             &sun_vertex_bytes(&sun_vertices(
                 Vec3::from_array(sky_state.sun_direction()),
                 sky_state.sun_opacity(),
+                sky_state.sun_angular_diameter_degrees(),
             )),
         );
         (clear_color, disc_range, glow_range, sun_range)
@@ -1160,7 +1161,11 @@ fn directional_glow_vertices(color: [f32; 4], sun_direction: Vec3) -> Vec<SkyVer
     vertices
 }
 
-fn sun_vertices(direction: Vec3, opacity: f32) -> [SunVertex; SUN_VERTEX_COUNT] {
+fn sun_vertices(
+    direction: Vec3,
+    opacity: f32,
+    angular_diameter_degrees: f32,
+) -> [SunVertex; SUN_VERTEX_COUNT] {
     let direction = direction.try_normalize().unwrap_or(Vec3::Y);
     let reference_up = if direction.y.abs() > 0.95 {
         Vec3::X
@@ -1170,8 +1175,9 @@ fn sun_vertices(direction: Vec3, opacity: f32) -> [SunVertex; SUN_VERTEX_COUNT] 
     let right = direction.cross(reference_up).normalize();
     let up = right.cross(direction).normalize();
     let center = direction * SUN_DISTANCE;
-    let right = right * SUN_HALF_SIZE;
-    let up = up * SUN_HALF_SIZE;
+    let half_size = SUN_DISTANCE * (angular_diameter_degrees.to_radians() * 0.5).tan();
+    let right = right * half_size;
+    let up = up * half_size;
     [
         to_sun_vertex(center - right + up, [0.0, 0.0], opacity),
         to_sun_vertex(center + right + up, [1.0, 0.0], opacity),
@@ -1280,7 +1286,11 @@ mod tests {
             )
             .abs_diff_eq(Vec3::NEG_X, 1.0e-6)
         );
-        let vertices = sun_vertices(Vec3::Y, 0.625);
+        let vertices = sun_vertices(
+            Vec3::Y,
+            0.625,
+            crate::sky::VANILLA_SUN_ANGULAR_DIAMETER_DEGREES,
+        );
         let center = vertices.iter().fold(Vec3::ZERO, |sum, vertex| {
             sum + Vec3::new(vertex[0], vertex[1], vertex[2])
         }) / vertices.len() as f32;
@@ -1291,6 +1301,15 @@ mod tests {
                 .iter()
                 .all(|vertex| vertex.iter().all(|value| value.is_finite()))
         );
+    }
+
+    #[test]
+    fn mclone_sun_quad_has_earth_like_angular_diameter() {
+        let diameter = crate::sky::MCLONE_SUN_ANGULAR_DIAMETER_DEGREES;
+        let vertices = sun_vertices(Vec3::Y, 1.0, diameter);
+        let half_size = (vertices[1][2] - vertices[0][2]).abs() * 0.5;
+        let measured_degrees = 2.0 * (half_size / SUN_DISTANCE).atan().to_degrees();
+        assert!((measured_degrees - 0.53).abs() < 1.0e-4);
     }
 
     #[test]
