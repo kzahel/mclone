@@ -35,7 +35,7 @@ const SKY_MULTIVIEW_UNIFORM_BYTE_SIZE: wgpu::BufferAddress = SKY_UNIFORM_BYTE_SI
 const SKY_VERTEX_FLOAT_COUNT: usize = 7; // position(3) + color(4)
 const SKY_VERTEX_BYTE_SIZE: wgpu::BufferAddress =
     (SKY_VERTEX_FLOAT_COUNT * std::mem::size_of::<f32>()) as wgpu::BufferAddress;
-const SUN_VERTEX_FLOAT_COUNT: usize = 5; // position(3) + uv(2)
+const SUN_VERTEX_FLOAT_COUNT: usize = 6; // position(3) + uv(2) + opacity(1)
 const SUN_VERTEX_BYTE_SIZE: wgpu::BufferAddress =
     (SUN_VERTEX_FLOAT_COUNT * std::mem::size_of::<f32>()) as wgpu::BufferAddress;
 const SUN_VERTEX_COUNT: usize = 4;
@@ -620,7 +620,10 @@ impl SkyRenderer {
         queue.write_buffer(
             &self.sun_vertex_buffer,
             sun_range.start,
-            &sun_vertex_bytes(&sun_vertices(Vec3::from_array(sky_state.sun_direction()))),
+            &sun_vertex_bytes(&sun_vertices(
+                Vec3::from_array(sky_state.sun_direction()),
+                sky_state.sun_opacity(),
+            )),
         );
 
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -792,7 +795,10 @@ impl SkyRenderer {
         queue.write_buffer(
             &self.sun_vertex_buffer,
             sun_range.start,
-            &sun_vertex_bytes(&sun_vertices(Vec3::from_array(sky_state.sun_direction()))),
+            &sun_vertex_bytes(&sun_vertices(
+                Vec3::from_array(sky_state.sun_direction()),
+                sky_state.sun_opacity(),
+            )),
         );
         (clear_color, disc_range, glow_range, sun_range)
     }
@@ -1022,6 +1028,11 @@ fn make_sun_pipeline(
                         shader_location: 1,
                         format: wgpu::VertexFormat::Float32x2,
                     },
+                    wgpu::VertexAttribute {
+                        offset: 20,
+                        shader_location: 2,
+                        format: wgpu::VertexFormat::Float32,
+                    },
                 ],
             }],
         },
@@ -1149,7 +1160,7 @@ fn directional_glow_vertices(color: [f32; 4], sun_direction: Vec3) -> Vec<SkyVer
     vertices
 }
 
-fn sun_vertices(direction: Vec3) -> [SunVertex; SUN_VERTEX_COUNT] {
+fn sun_vertices(direction: Vec3, opacity: f32) -> [SunVertex; SUN_VERTEX_COUNT] {
     let direction = direction.try_normalize().unwrap_or(Vec3::Y);
     let reference_up = if direction.y.abs() > 0.95 {
         Vec3::X
@@ -1162,15 +1173,15 @@ fn sun_vertices(direction: Vec3) -> [SunVertex; SUN_VERTEX_COUNT] {
     let right = right * SUN_HALF_SIZE;
     let up = up * SUN_HALF_SIZE;
     [
-        to_sun_vertex(center - right + up, [0.0, 0.0]),
-        to_sun_vertex(center + right + up, [1.0, 0.0]),
-        to_sun_vertex(center + right - up, [1.0, 1.0]),
-        to_sun_vertex(center - right - up, [0.0, 1.0]),
+        to_sun_vertex(center - right + up, [0.0, 0.0], opacity),
+        to_sun_vertex(center + right + up, [1.0, 0.0], opacity),
+        to_sun_vertex(center + right - up, [1.0, 1.0], opacity),
+        to_sun_vertex(center - right - up, [0.0, 1.0], opacity),
     ]
 }
 
-fn to_sun_vertex(position: Vec3, uv: [f32; 2]) -> SunVertex {
-    [position.x, position.y, position.z, uv[0], uv[1]]
+fn to_sun_vertex(position: Vec3, uv: [f32; 2], opacity: f32) -> SunVertex {
+    [position.x, position.y, position.z, uv[0], uv[1], opacity]
 }
 
 fn vertex_bytes(vertices: &[SkyVertex]) -> Vec<u8> {
@@ -1269,11 +1280,12 @@ mod tests {
             )
             .abs_diff_eq(Vec3::NEG_X, 1.0e-6)
         );
-        let vertices = sun_vertices(Vec3::Y);
+        let vertices = sun_vertices(Vec3::Y, 0.625);
         let center = vertices.iter().fold(Vec3::ZERO, |sum, vertex| {
             sum + Vec3::new(vertex[0], vertex[1], vertex[2])
         }) / vertices.len() as f32;
         assert!(center.abs_diff_eq(Vec3::Y * SUN_DISTANCE, 1.0e-5));
+        assert!(vertices.iter().all(|vertex| vertex[5] == 0.625));
         assert!(
             vertices
                 .iter()

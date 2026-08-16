@@ -125,6 +125,20 @@ impl SkyRenderState {
         }
     }
 
+    /// Visibility of the sun quad through the seasonal horizon transition.
+    ///
+    /// The retained vanilla path keeps its exact opaque quad. Seasonal solar
+    /// fades with the same elevation-derived factors that own sky and rendered
+    /// daylight, so polar night cannot leave a bright sun in a night sky.
+    pub fn sun_opacity(self) -> f32 {
+        match self {
+            Self::VanillaFixed { .. } => 1.0,
+            Self::SeasonalSolar(sample) => {
+                (sample.daylight_factor + sample.twilight_factor).clamp(0.0, 1.0)
+            }
+        }
+    }
+
     pub fn glow(self) -> Option<SkyGlow> {
         match self {
             Self::VanillaFixed {
@@ -251,6 +265,7 @@ mod tests {
         };
         assert_eq!(day_sample.polar_state, PolarState::PolarDay);
         assert!(day_sample.direction[1] > 0.0);
+        assert_eq!(polar_day.sun_opacity(), 1.0);
         assert!(polar_day.sky_darken() > 0.9);
         assert!(polar_day.clear_color().b > 0.5);
 
@@ -260,8 +275,10 @@ mod tests {
         };
         assert_eq!(night_sample.polar_state, PolarState::PolarNight);
         assert!(night_sample.direction[1] < 0.0);
+        assert_eq!(polar_night.sun_opacity(), 0.0);
         assert_eq!(polar_night.sky_darken(), 0.2);
         assert_eq!(polar_night.clear_color().b, 0.0);
+        assert_eq!(SkyRenderState::vanilla(0.5, PI).sun_opacity(), 1.0);
     }
 
     #[test]

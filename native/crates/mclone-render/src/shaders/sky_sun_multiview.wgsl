@@ -14,11 +14,13 @@ var sun_sampler: sampler;
 struct VertexInput {
     @location(0) position: vec3<f32>,
     @location(1) uv: vec2<f32>,
+    @location(2) opacity: f32,
 };
 
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) uv: vec2<f32>,
+    @location(1) opacity: f32,
 };
 
 @vertex
@@ -29,10 +31,12 @@ fn vs_main(
     var output: VertexOutput;
     output.position = uniforms.view_projections[u32(view_index)] * vec4<f32>(input.position, 1.0);
     output.uv = input.uv;
+    output.opacity = input.opacity;
     return output;
 }
 
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
-    return textureSample(sun_texture, sun_sampler, input.uv);
+    let sampled = textureSample(sun_texture, sun_sampler, input.uv);
+    return vec4<f32>(sampled.rgb, sampled.a * input.opacity);
 }
