@@ -741,6 +741,42 @@ fn sample_color(
     return terrain_color(sample, light);
 }
 
+fn terrain_clip_position(
+    world_position: vec3<f32>,
+    instance_index: u32,
+    view_index: u32,
+) -> vec4<f32> {
+    let relative_x = world_position.x - f32(params.viewport_center_extent.x)
+        - params.presentation_center_extent.x;
+    let relative_z = world_position.z - f32(params.viewport_center_extent.y)
+        - params.presentation_center_extent.y;
+    let compare = params.seed_source_view.z == 2u;
+    let stacked_compare = compare && params.content_stage_flags.z == 1u;
+    var view_projection = params.view_projection;
+    if view_index != 0u {
+        view_projection = params.view_projection_right;
+    }
+    var clip_position = view_projection * vec4<f32>(
+        vec3<f32>(relative_x, world_position.y, relative_z),
+        1.0,
+    );
+    if (params.multiview_options.x & (1u << view_index)) == 0u {
+        clip_position = vec4<f32>(2.0, 2.0, 2.0, 1.0);
+    }
+    if compare {
+        if stacked_compare {
+            let panel_center = select(0.5, -0.5, instance_index == 1u);
+            clip_position.y = clip_position.y * 0.5
+                + panel_center * clip_position.w;
+        } else {
+            let panel_center = select(-0.5, 0.5, instance_index == 1u);
+            clip_position.x = clip_position.x * 0.5
+                + panel_center * clip_position.w;
+        }
+    }
+    return clip_position;
+}
+
 fn terrain_vertex(
     vertex_index: u32,
     instance_index: u32,
@@ -899,51 +935,6 @@ fn terrain_vertex(
     }
 
 
-    if direct_exact_handoff()
-        && params.origin_spacing_cells.z == 1
-        && cell_stride == 1u
-        && vertex_material != 2u
-        && !exact_chunk_painted(vec2<f32>(
-            f32(cell_world_x) + 0.5,
-            f32(cell_world_z) + 0.5,
-        )) {
-        let boundary_profiles = array<u32, 4>(
-            exact_boundary_column(vec2<i32>(cell_world_x - 1, cell_world_z)),
-            exact_boundary_column(vec2<i32>(cell_world_x + 1, cell_world_z)),
-            exact_boundary_column(vec2<i32>(cell_world_x, cell_world_z - 1)),
-            exact_boundary_column(vec2<i32>(cell_world_x, cell_world_z + 1)),
-        );
-        let corner_touches_side = array<bool, 4>(
-            corner.x == 0u,
-            corner.x == 1u,
-            corner.y == 0u,
-            corner.y == 1u,
-        );
-        var connector_top_y = 0.0;
-        var connector_vertex = false;
-        for (var side = 0u; side < 4u; side += 1u) {
-            let packed = boundary_profiles[side];
-            if exact_boundary_valid(packed) && !exact_boundary_water(packed) {
-                if (packed & 0x02000000u) != 0u {
-                    vertex_material = (packed >> 16u) & 0xffu;
-                }
-                if corner_touches_side[side] {
-                    let top_y = exact_boundary_top_y(packed);
-                    connector_top_y = select(
-                        max(connector_top_y, top_y),
-                        top_y,
-                        !connector_vertex,
-                    );
-                    connector_vertex = true;
-                }
-            }
-        }
-        if connector_vertex {
-            vertex_world_y = connector_top_y;
-            surface_kind = 3u;
-        }
-    }
-
     if voxel_shell {
         let top_y = round(stitched_height) + 1.0;
         vertex_world_x = f32(cell_world_x) + f32(corner.x);
@@ -1092,41 +1083,12 @@ fn terrain_vertex(
         light = mix(smooth_geometric_shade, light, voxel_smooth_transition_weight);
     }
 
-    let relative_x = vertex_world_x - f32(params.viewport_center_extent.x)
-        - params.presentation_center_extent.x;
-    let relative_z = vertex_world_z - f32(params.viewport_center_extent.y)
-        - params.presentation_center_extent.y;
-    let compare = params.seed_source_view.z == 2u;
-    let stacked_compare = compare && params.content_stage_flags.z == 1u;
-    var view_projection = params.view_projection;
-    if view_index != 0u {
-        view_projection = params.view_projection_right;
-    }
-    var clip_position = view_projection * vec4<f32>(
-        vec3<f32>(
-            relative_x,
-            vertex_world_y,
-            relative_z,
-        ),
-        1.0,
-    );
-    if (params.multiview_options.x & (1u << view_index)) == 0u {
-        clip_position = vec4<f32>(2.0, 2.0, 2.0, 1.0);
-    }
-    if compare {
-        if stacked_compare {
-            let panel_center = select(0.5, -0.5, instance_index == 1u);
-            clip_position.y = clip_position.y * 0.5
-                + panel_center * clip_position.w;
-        } else {
-            let panel_center = select(-0.5, 0.5, instance_index == 1u);
-            clip_position.x = clip_position.x * 0.5
-                + panel_center * clip_position.w;
-        }
-    }
-
     var out: VertexOutput;
-    out.position = clip_position;
+    out.position = terrain_clip_position(
+        vec3<f32>(vertex_world_x, vertex_world_y, vertex_world_z),
+        instance_index,
+        view_index,
+    );
     out.color = sample_color(sample, reference, gpu, light);
     out.world_xz = vec2<f32>(vertex_world_x, vertex_world_z);
     out.light = light;
@@ -1162,6 +1124,120 @@ fn terrain_vertex(
     out.near_shell = select(0u, 1u, voxel_shell);
     out.surface_recipe = u32(round(sample.semantics.w));
     out.column_top_y = select(stitched_height + 1.0, round(stitched_height) + 1.0, voxel_shell);
+    return out;
+}
+
+fn exact_connector_vertex(
+    vertex_index: u32,
+    cell_world_xz: vec2<i32>,
+    side: u32,
+    view_index: u32,
+) -> VertexOutput {
+    let corner = grid_corner(vertex_index % 6u);
+    let edge_t = f32(corner.x);
+    let cells = i32(params.origin_spacing_cells.w);
+    let cell_x = cell_world_xz.x - params.origin_spacing_cells.x;
+    let cell_z = cell_world_xz.y - params.origin_spacing_cells.y;
+    var sample_x = cell_x;
+    var sample_z = cell_z;
+    var exact_block = vec2<i32>(cell_world_xz.x - 1, cell_world_xz.y);
+    var world_x = f32(cell_world_xz.x) + 0.001;
+    var world_z = f32(cell_world_xz.y) + 1.0 - edge_t;
+    var light = 0.6;
+    if side == 0u {
+        sample_z += i32(round(1.0 - edge_t));
+    } else if side == 1u {
+        exact_block = vec2<i32>(cell_world_xz.x + 1, cell_world_xz.y);
+        sample_x += 1;
+        sample_z += i32(round(edge_t));
+        world_x = f32(cell_world_xz.x) + 0.999;
+        world_z = f32(cell_world_xz.y) + edge_t;
+    } else if side == 2u {
+        exact_block = vec2<i32>(cell_world_xz.x, cell_world_xz.y - 1);
+        sample_x += i32(round(edge_t));
+        world_x = f32(cell_world_xz.x) + edge_t;
+        world_z = f32(cell_world_xz.y) + 0.001;
+        light = 0.8;
+    } else {
+        exact_block = vec2<i32>(cell_world_xz.x, cell_world_xz.y + 1);
+        sample_x += i32(round(1.0 - edge_t));
+        sample_z += 1;
+        world_x = f32(cell_world_xz.x) + 1.0 - edge_t;
+        world_z = f32(cell_world_xz.y) + 0.999;
+        light = 0.8;
+    }
+
+    let packed = exact_boundary_column(exact_block);
+    let connector_valid = direct_exact_handoff()
+        && exact_boundary_valid(packed)
+        && !exact_boundary_water(packed)
+        && cell_x >= 0
+        && cell_z >= 0
+        && cell_x < cells
+        && cell_z < cells;
+    let sample_index = u32(sample_z) * params.layer_samples_size.y + u32(sample_x);
+    let sample = selected_sample(sample_index, 0u);
+    let reference = reference_samples[sample_index];
+    let gpu = gpu_samples[sample_index];
+    let procedural_y = terrain_horizon_geometry_height(
+        sample_x,
+        sample_z,
+        cells,
+        1,
+        0u,
+    ) + 1.0;
+    let exact_y = exact_boundary_top_y(packed);
+    let bottom_y = min(procedural_y, exact_y);
+    let top_y = max(procedural_y, exact_y);
+    let world_y = mix(bottom_y, top_y, f32(corner.y));
+    let world_position = vec3<f32>(world_x, world_y, world_z);
+    var material = terrain_material(sample);
+    if (packed & 0x02000000u) != 0u {
+        material = (packed >> 16u) & 0xffu;
+    }
+
+    var out: VertexOutput;
+    out.position = terrain_clip_position(world_position, 0u, view_index);
+    if !connector_valid {
+        out.position = vec4<f32>(2.0, 2.0, 2.0, 1.0);
+    }
+    out.color = sample_color(sample, reference, gpu, light);
+    out.world_xz = world_position.xz;
+    out.light = light;
+    out.material = material;
+    out.textured = select(
+        0u,
+        1u,
+        params.layer_samples_size.x == 0u && preview_profile() == 0u,
+    );
+    out.river = vec4<f32>(
+        sample.hydrology.x,
+        sample.hydrology.w,
+        sample.hydrology.y,
+        sample.terrain.x,
+    );
+    out.semantics = vec4<f32>(
+        sample.hydrology_detail.x,
+        sample.hydrology_detail.y,
+        sample.semantics.x,
+        select(0.0, sample.forest_summary.x, params.content_stage_flags.x >= 4u),
+    );
+    out.world_position = vec4<f32>(
+        world_position,
+        exact_transition_weight(world_position.xz),
+    );
+    out.biome = u32(round(sample.semantics.y));
+    out.surface_y = sample.terrain.x;
+    out.view_index = view_index;
+    out.world_uv = select(
+        vec2<f32>(world_z, world_y),
+        vec2<f32>(world_x, world_y),
+        side >= 2u,
+    );
+    out.surface_kind = 3u;
+    out.near_shell = 0u;
+    out.surface_recipe = u32(round(sample.semantics.w));
+    out.column_top_y = top_y;
     return out;
 }
 
@@ -1282,6 +1358,15 @@ fn vertex_main(
     @builtin(instance_index) instance_index: u32,
 ) -> VertexOutput {
     return terrain_vertex(vertex_index, instance_index, 0u);
+}
+
+@vertex
+fn exact_connector_vertex_main(
+    @builtin(vertex_index) vertex_index: u32,
+    @location(0) cell_world_xz: vec2<i32>,
+    @location(1) side: u32,
+) -> VertexOutput {
+    return exact_connector_vertex(vertex_index, cell_world_xz, side, 0u);
 }
 
 // __MCLONE_MULTIVIEW_VERTEX_ENTRY__

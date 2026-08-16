@@ -3,7 +3,7 @@ use std::mem::size_of;
 use std::num::{NonZeroU32, NonZeroU64};
 use std::sync::mpsc;
 
-use mclone_core::BlockStateId;
+use mclone_core::{BlockStateId, ChunkPos};
 use mclone_mesh::{TexturedBlockTint, TexturedMeshCatalog};
 use mclone_render_color::{RenderTargetColorTransform, color_transform_wgpu};
 use mclone_worldgen::levelgen::{
@@ -49,9 +49,31 @@ pub const TERRAIN_PREVIEW_MATERIAL_UV_COUNT: usize = 256;
 const TERRAIN_PREVIEW_MATERIAL_TABLE_BYTES: u64 =
     (TERRAIN_PREVIEW_MATERIAL_UV_COUNT * 4 * 4 * size_of::<f32>()) as u64;
 const TERRAIN_EXACT_COVERAGE_UNIFORM_BYTES: u64 = 80;
+const TERRAIN_EXACT_CONNECTOR_INSTANCE_BYTES: u64 = 12;
+const TERRAIN_EXACT_CONNECTOR_VERTICES_PER_INSTANCE: u32 = 6;
 const TERRAIN_HORIZON_TREE_CULL_MARGIN_BLOCKS: f32 = 16.0;
 const TERRAIN_HORIZON_CULL_MIN_Y: f32 = -64.0;
 const TERRAIN_HORIZON_CULL_MAX_Y: f32 = 512.0;
+const TERRAIN_EXACT_CONNECTOR_VERTEX_ATTRIBUTES: [wgpu::VertexAttribute; 2] = [
+    wgpu::VertexAttribute {
+        format: wgpu::VertexFormat::Sint32x2,
+        offset: 0,
+        shader_location: 0,
+    },
+    wgpu::VertexAttribute {
+        format: wgpu::VertexFormat::Uint32,
+        offset: 8,
+        shader_location: 1,
+    },
+];
+
+fn terrain_exact_connector_vertex_buffer_layout() -> wgpu::VertexBufferLayout<'static> {
+    wgpu::VertexBufferLayout {
+        array_stride: TERRAIN_EXACT_CONNECTOR_INSTANCE_BYTES,
+        step_mode: wgpu::VertexStepMode::Instance,
+        attributes: &TERRAIN_EXACT_CONNECTOR_VERTEX_ATTRIBUTES,
+    }
+}
 
 #[derive(Clone, Copy, Debug)]
 pub struct TerrainHorizonRenderTarget<'a> {
@@ -253,6 +275,8 @@ pub struct TerrainHorizonFrameStats {
     pub far_culled_tiles: u32,
     pub drawn_tree_tiles: u32,
     pub drawn_tree_instances: u32,
+    pub exact_connector_segments: u32,
+    pub exact_connector_vertex_count: u32,
     pub vertex_count: u32,
     pub vegetation_ready_tiles: u32,
     pub pending_vegetation_tiles: u32,
@@ -267,6 +291,7 @@ pub struct TerrainHorizonFrameStats {
     pub exact_owned_tree_records: u32,
     pub proxy_owned_tree_records: u32,
     pub fixed_resident_bytes: u64,
+    pub exact_connector_bytes: u64,
     pub vegetation_bytes: u64,
     pub resident_bytes: u64,
     pub exact_coverage_mode: TerrainExactCoverageMode,
@@ -404,10 +429,28 @@ struct TerrainExactCoverageResources {
     mask: TerrainExactCoverageMask,
     transition: TerrainExactTransitionField,
     boundary: TerrainExactBoundaryProfile,
+    connector_instances: Vec<TerrainExactConnectorInstance>,
     mode: TerrainExactCoverageMode,
     uploaded_mode: TerrainExactCoverageMode,
     topology: TerrainExactHandoffTopology,
     uploaded_topology: TerrainExactHandoffTopology,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct TerrainExactConnectorInstance {
+    cell_world_x: i32,
+    cell_world_z: i32,
+    side: u32,
+}
+
+impl TerrainExactConnectorInstance {
+    fn bytes(self) -> [u8; TERRAIN_EXACT_CONNECTOR_INSTANCE_BYTES as usize] {
+        let mut bytes = [0; TERRAIN_EXACT_CONNECTOR_INSTANCE_BYTES as usize];
+        bytes[0..4].copy_from_slice(&self.cell_world_x.to_ne_bytes());
+        bytes[4..8].copy_from_slice(&self.cell_world_z.to_ne_bytes());
+        bytes[8..12].copy_from_slice(&self.side.to_ne_bytes());
+        bytes
+    }
 }
 
 impl TerrainExactCoverageResources {
@@ -527,6 +570,7 @@ impl TerrainExactCoverageResources {
             mask,
             transition,
             boundary,
+            connector_instances: Vec::new(),
             mode: TerrainExactCoverageMode::Disabled,
             uploaded_mode: TerrainExactCoverageMode::Disabled,
             topology,
@@ -605,6 +649,7 @@ impl TerrainExactCoverageResources {
         self.mask = mask;
         self.transition = transition.clone();
         self.boundary = boundary.clone();
+        self.connector_instances = terrain_exact_connector_instances(&self.mask, boundary);
         self.mode = mode;
         self.uploaded_mode = mode;
         self.uploaded_topology = self.topology;
@@ -636,6 +681,45 @@ impl TerrainExactCoverageResources {
             self.uploaded_topology = self.topology;
         }
     }
+}
+
+fn terrain_exact_connector_instances(
+    mask: &TerrainExactCoverageMask,
+    boundary: &TerrainExactBoundaryProfile,
+) -> Vec<TerrainExactConnectorInstance> {
+    let [origin_x, origin_z] = boundary.origin_blocks();
+    let [width, height] = boundary.dimensions();
+    let mut instances = Vec::new();
+    for local_z in 0..height {
+        for local_x in 0..width {
+            let packed = boundary.packed()[(local_z * width + local_x) as usize];
+            if packed & 0x8000_0000 == 0 || packed & 0x0100_0000 != 0 {
+                continue;
+            }
+            let Some(world_x) = origin_x.checked_add(local_x as i32) else {
+                continue;
+            };
+            let Some(world_z) = origin_z.checked_add(local_z as i32) else {
+                continue;
+            };
+            for (dx, dz, side) in [(1, 0, 0), (-1, 0, 1), (0, 1, 2), (0, -1, 3)] {
+                let Some(cell_world_x) = world_x.checked_add(dx) else {
+                    continue;
+                };
+                let Some(cell_world_z) = world_z.checked_add(dz) else {
+                    continue;
+                };
+                if !mask.contains(ChunkPos::from_block_coords(cell_world_x, cell_world_z)) {
+                    instances.push(TerrainExactConnectorInstance {
+                        cell_world_x,
+                        cell_world_z,
+                        side,
+                    });
+                }
+            }
+        }
+    }
+    instances
 }
 
 fn terrain_exact_uniform_bytes(
@@ -852,6 +936,11 @@ struct TerrainViewportGpuTile {
     tree_instance_count: u32,
     tree_suppressed_instance_count: u32,
     tree_instance_bytes: u64,
+    exact_connector_buffer: Option<wgpu::Buffer>,
+    exact_connector_instance_count: u32,
+    exact_connector_instance_bytes: u64,
+    exact_connector_generation: u64,
+    exact_connector_request: Option<TerrainPreviewRequest>,
     last_used: u64,
 }
 
@@ -1024,6 +1113,11 @@ impl TerrainViewportGpuTile {
             tree_instance_count: 0,
             tree_suppressed_instance_count: 0,
             tree_instance_bytes: 0,
+            exact_connector_buffer: None,
+            exact_connector_instance_count: 0,
+            exact_connector_instance_bytes: 0,
+            exact_connector_generation: 0,
+            exact_connector_request: None,
             last_used: 0,
         })
     }
@@ -1137,6 +1231,67 @@ impl TerrainViewportGpuTile {
         self.tree_instance_bytes = 0;
     }
 
+    fn refresh_exact_connectors(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        generation: u64,
+        instances: &[TerrainExactConnectorInstance],
+    ) {
+        let request = self.request.request();
+        if self.exact_connector_generation == generation
+            && self.exact_connector_request == Some(request)
+        {
+            return;
+        }
+        let min_x = self.request.min_x();
+        let min_z = self.request.min_z();
+        let max_x = min_x.saturating_add_unsigned(self.request.footprint_blocks());
+        let max_z = min_z.saturating_add_unsigned(self.request.footprint_blocks());
+        let selected = if request.sample_spacing == 1 {
+            instances
+                .iter()
+                .copied()
+                .filter(|instance| {
+                    instance.cell_world_x >= min_x
+                        && instance.cell_world_x < max_x
+                        && instance.cell_world_z >= min_z
+                        && instance.cell_world_z < max_z
+                })
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+        let bytes = selected
+            .iter()
+            .flat_map(|instance| instance.bytes())
+            .collect::<Vec<_>>();
+        self.exact_connector_buffer = if bytes.is_empty() {
+            None
+        } else {
+            let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("mclone_terrain_exact_connector_instances"),
+                size: bytes.len() as u64,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            queue.write_buffer(&buffer, 0, &bytes);
+            Some(buffer)
+        };
+        self.exact_connector_instance_count = selected.len().try_into().unwrap_or(u32::MAX);
+        self.exact_connector_instance_bytes = bytes.len() as u64;
+        self.exact_connector_generation = generation;
+        self.exact_connector_request = Some(request);
+    }
+
+    fn clear_exact_connectors(&mut self) {
+        self.exact_connector_buffer = None;
+        self.exact_connector_instance_count = 0;
+        self.exact_connector_instance_bytes = 0;
+        self.exact_connector_generation = 0;
+        self.exact_connector_request = None;
+    }
+
     fn upload_macro(
         &mut self,
         queue: &wgpu::Queue,
@@ -1171,6 +1326,8 @@ pub struct TerrainViewportRenderer {
     render_pipeline: Option<wgpu::RenderPipeline>,
     horizon_render_pipeline: Option<wgpu::RenderPipeline>,
     horizon_multiview_render_pipeline: Option<wgpu::RenderPipeline>,
+    horizon_exact_connector_pipeline: Option<wgpu::RenderPipeline>,
+    horizon_exact_connector_multiview_pipeline: Option<wgpu::RenderPipeline>,
     horizon_render_cell_stride: u32,
     tree_pipeline: wgpu::RenderPipeline,
     tree_multiview_pipeline: Option<wgpu::RenderPipeline>,
@@ -1637,6 +1794,91 @@ impl TerrainViewportRenderer {
                 cache: None,
             })
         });
+        let horizon_exact_connector_pipeline =
+            (pipeline_set == TerrainViewportPipelineSet::Horizon).then(|| {
+                device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                    label: Some("mclone_terrain_horizon_exact_connector_pipeline"),
+                    layout: Some(&render_pipeline_layout),
+                    vertex: wgpu::VertexState {
+                        module: &render_shader,
+                        entry_point: Some("exact_connector_vertex_main"),
+                        buffers: &[terrain_exact_connector_vertex_buffer_layout()],
+                        compilation_options: wgpu::PipelineCompilationOptions {
+                            constants: &horizon_render_constants,
+                            ..Default::default()
+                        },
+                    },
+                    fragment: Some(wgpu::FragmentState {
+                        module: &render_shader,
+                        entry_point: Some("fragment_main"),
+                        targets: &[Some(wgpu::ColorTargetState {
+                            format: color_format,
+                            blend: None,
+                            write_mask: wgpu::ColorWrites::ALL,
+                        })],
+                        compilation_options: Default::default(),
+                    }),
+                    primitive: wgpu::PrimitiveState {
+                        topology: wgpu::PrimitiveTopology::TriangleList,
+                        front_face: wgpu::FrontFace::Ccw,
+                        cull_mode: None,
+                        ..Default::default()
+                    },
+                    depth_stencil: Some(wgpu::DepthStencilState {
+                        format: TERRAIN_PREVIEW_DEPTH_FORMAT,
+                        depth_write_enabled: true,
+                        depth_compare: wgpu::CompareFunction::GreaterEqual,
+                        stencil: Default::default(),
+                        bias: Default::default(),
+                    }),
+                    multisample: Default::default(),
+                    multiview: None,
+                    cache: None,
+                })
+            });
+        let horizon_exact_connector_multiview_pipeline = multiview_enabled.then(|| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("mclone_terrain_horizon_exact_connector_multiview_pipeline"),
+                layout: Some(&render_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: multiview_render_shader
+                        .as_ref()
+                        .expect("multiview shader exists when multiview is enabled"),
+                    entry_point: Some("exact_connector_vertex_multiview_main"),
+                    buffers: &[terrain_exact_connector_vertex_buffer_layout()],
+                    compilation_options: wgpu::PipelineCompilationOptions {
+                        constants: &horizon_render_constants,
+                        ..Default::default()
+                    },
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &render_shader,
+                    entry_point: Some("fragment_main"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: color_format,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: Default::default(),
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: None,
+                    ..Default::default()
+                },
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: TERRAIN_PREVIEW_DEPTH_FORMAT,
+                    depth_write_enabled: true,
+                    depth_compare: wgpu::CompareFunction::GreaterEqual,
+                    stencil: Default::default(),
+                    bias: Default::default(),
+                }),
+                multisample: Default::default(),
+                multiview: NonZeroU32::new(2),
+                cache: None,
+            })
+        });
         let tree_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("mclone_terrain_viewport_tree_pipeline"),
             layout: Some(&tree_pipeline_layout),
@@ -1766,6 +2008,8 @@ impl TerrainViewportRenderer {
             render_pipeline,
             horizon_render_pipeline,
             horizon_multiview_render_pipeline,
+            horizon_exact_connector_pipeline,
+            horizon_exact_connector_multiview_pipeline,
             horizon_render_cell_stride,
             tree_pipeline,
             tree_multiview_pipeline,
@@ -3071,6 +3315,7 @@ impl TerrainHorizonRenderer {
         self.pending.clear();
         for slot in &mut self.slots {
             slot.clear_vegetation();
+            slot.clear_exact_connectors();
         }
         self.renderer.exact_coverage.disable();
         self.exact_coverage_snapshot = None;
@@ -3670,6 +3915,15 @@ impl TerrainHorizonRenderer {
         let mut inner_hole_culled_tiles = 0_u32;
         let mut frustum_culled_tiles = 0_u32;
         let mut far_culled_tiles = 0_u32;
+        let exact_connector_generation = self.renderer.exact_coverage.mask.generation;
+        let exact_connector_instances = if self.renderer.exact_coverage.mode
+            != TerrainExactCoverageMode::Disabled
+            && self.renderer.exact_coverage.topology == TerrainExactHandoffTopology::DirectSmooth
+        {
+            self.renderer.exact_coverage.connector_instances.clone()
+        } else {
+            Vec::new()
+        };
         for level in &terrain_levels {
             let inner_hole = finer_level_bounds(&terrain_levels, level.snapshot.level);
             for resource in &level.tiles {
@@ -3705,7 +3959,18 @@ impl TerrainHorizonRenderer {
                     uniform_presentation,
                 );
                 let slot_index = resource.resource_slot as usize;
-                let slot = &self.slots[slot_index];
+                let outer_edge_flags = terrain_horizon_outer_edge_flags(
+                    level,
+                    resource.tile,
+                    self.clipmap.config().level_count,
+                );
+                let slot = &mut self.slots[slot_index];
+                slot.refresh_exact_connectors(
+                    device,
+                    queue,
+                    exact_connector_generation,
+                    &exact_connector_instances,
+                );
                 queue.write_buffer(
                     &slot.uniform_buffer,
                     0,
@@ -3718,11 +3983,7 @@ impl TerrainHorizonRenderer {
                         uniform_presentation,
                         focus_y,
                         inner_hole,
-                        terrain_horizon_outer_edge_flags(
-                            level,
-                            resource.tile,
-                            self.clipmap.config().level_count,
-                        ),
+                        outer_edge_flags,
                         view_mask,
                         render_view_overrides,
                         presentation.sky_darken,
@@ -3786,6 +4047,7 @@ impl TerrainHorizonRenderer {
 
         let mut drawn_levels = 0_u32;
         let mut drawn_tiles = 0_u32;
+        let mut drawn_exact_connector_segments = 0_u32;
         let mut drawn_tree_tiles = 0_u32;
         let mut drawn_tree_instances = 0_u32;
         {
@@ -3850,6 +4112,45 @@ impl TerrainHorizonRenderer {
                 }
                 if level_drawn {
                     drawn_levels = drawn_levels.saturating_add(1);
+                }
+            }
+            if self.renderer.exact_coverage.mode != TerrainExactCoverageMode::Disabled
+                && self.renderer.exact_coverage.topology
+                    == TerrainExactHandoffTopology::DirectSmooth
+            {
+                let connector_pipeline = if multiview {
+                    self.renderer
+                        .horizon_exact_connector_multiview_pipeline
+                        .as_ref()
+                        .expect("validated exact connector multiview pipeline remains available")
+                } else {
+                    self.renderer
+                        .horizon_exact_connector_pipeline
+                        .as_ref()
+                        .expect("horizon renderer owns its exact connector pipeline")
+                };
+                pass.set_pipeline(connector_pipeline);
+                for level in &terrain_levels {
+                    if level.snapshot.sample_spacing != 1 {
+                        continue;
+                    }
+                    for resource in &level.tiles {
+                        if !self.visible_terrain_slots[resource.resource_slot as usize] {
+                            continue;
+                        }
+                        let slot = &self.slots[resource.resource_slot as usize];
+                        let Some(instance_buffer) = slot.exact_connector_buffer.as_ref() else {
+                            continue;
+                        };
+                        pass.set_bind_group(0, &slot.render_bind_group, &[]);
+                        pass.set_vertex_buffer(0, instance_buffer.slice(..));
+                        pass.draw(
+                            0..TERRAIN_EXACT_CONNECTOR_VERTICES_PER_INSTANCE,
+                            0..slot.exact_connector_instance_count,
+                        );
+                        drawn_exact_connector_segments = drawn_exact_connector_segments
+                            .saturating_add(slot.exact_connector_instance_count);
+                    }
                 }
             }
             let tree_pipeline = if multiview {
@@ -3965,9 +4266,13 @@ impl TerrainHorizonRenderer {
                     )),
             )
         });
-        let vertex_count = terrain_vertex_count.saturating_add(
-            drawn_tree_instances.saturating_mul(TERRAIN_PREVIEW_TREE_VERTICES_PER_INSTANCE),
-        );
+        let exact_connector_vertex_count = drawn_exact_connector_segments
+            .saturating_mul(TERRAIN_EXACT_CONNECTOR_VERTICES_PER_INSTANCE);
+        let vertex_count = terrain_vertex_count
+            .saturating_add(exact_connector_vertex_count)
+            .saturating_add(
+                drawn_tree_instances.saturating_mul(TERRAIN_PREVIEW_TREE_VERTICES_PER_INSTANCE),
+            );
         let normal_halo_samples_per_tile = terrain_horizon_normal_halo_samples_per_tile();
         let normal_halo_fixed_bytes = u64::from(self.admission.resource_slots())
             .saturating_mul(u64::from(normal_halo_samples_per_tile))
@@ -3990,7 +4295,14 @@ impl TerrainHorizonRenderer {
             .iter()
             .map(|slot| slot.tree_instance_bytes)
             .sum::<u64>();
-        let resident_bytes = fixed_resident_bytes.saturating_add(vegetation_bytes);
+        let exact_connector_bytes = self
+            .slots
+            .iter()
+            .map(|slot| slot.exact_connector_instance_bytes)
+            .sum::<u64>();
+        let resident_bytes = fixed_resident_bytes
+            .saturating_add(exact_connector_bytes)
+            .saturating_add(vegetation_bytes);
         let vegetation_ready_tiles = vegetation_resources
             .iter()
             .filter(|resource| {
@@ -4076,6 +4388,8 @@ impl TerrainHorizonRenderer {
             far_culled_tiles,
             drawn_tree_tiles,
             drawn_tree_instances,
+            exact_connector_segments: drawn_exact_connector_segments,
+            exact_connector_vertex_count,
             vertex_count,
             vegetation_ready_tiles,
             pending_vegetation_tiles,
@@ -4090,6 +4404,7 @@ impl TerrainHorizonRenderer {
             exact_owned_tree_records,
             proxy_owned_tree_records,
             fixed_resident_bytes,
+            exact_connector_bytes,
             vegetation_bytes,
             resident_bytes,
             exact_coverage_mode: self.renderer.exact_coverage.mode,
@@ -5055,10 +5370,37 @@ mod tests {
         assert!(shader.contains("let vertices_per_cell = select(6u, 30u, voxel_shell);"));
         assert!(shader.contains("appearance_transition_weight = exact_transition_weight"));
         assert!(shader.contains("var exact_boundary_profile: texture_2d<u32>;"));
-        assert!(shader.contains("vertex_world_y = connector_top_y;"));
+        assert!(shader.contains("fn exact_connector_vertex("));
+        assert!(shader.contains("bottom_y = min(procedural_y, exact_y)"));
+        assert!(shader.contains("fn exact_connector_vertex_main("));
         assert!(shader.contains("surface_kind = 3u;"));
         assert!(shader.contains("bottom_y = top_y - 32.0;"));
         assert!(shader.contains("surface_kind = 2u;"));
+    }
+
+    #[test]
+    fn exact_connector_instances_are_perimeter_bounded() {
+        let source =
+            TerrainCompositionSourceIdentity::new(TerrainPreviewProfile::McloneOverworldV1, 12_345);
+        let coverage = ExactPaintedCoverageSnapshot::new(source, 7, [ChunkPos::new(0, 0)]).unwrap();
+        let columns = crate::terrain_exact_exposed_boundary_blocks(
+            &coverage,
+            mclone_core::HorizontalTopology::UNBOUNDED,
+        )
+        .unwrap()
+        .into_iter()
+        .map(|[world_x, world_z]| crate::TerrainExactBoundaryColumn {
+            world_x,
+            world_z,
+            solid_top_y: 72,
+            side_material: Some(4),
+            water: false,
+        });
+        let boundary = TerrainExactBoundaryProfile::from_columns(&coverage, columns).unwrap();
+        let instances =
+            terrain_exact_connector_instances(&coverage.packed_mask().unwrap(), &boundary);
+        assert_eq!(instances.len(), 16 * 4);
+        assert!(instances.iter().all(|instance| instance.side < 4));
     }
 
     #[test]

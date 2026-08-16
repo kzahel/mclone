@@ -210,6 +210,16 @@ fn vertex_multiview_main(
     @builtin(view_index) view_index: i32,
 ) -> VertexOutput {
     return terrain_vertex(vertex_index, instance_index, u32(view_index));
+}
+
+@vertex
+fn exact_connector_vertex_multiview_main(
+    @builtin(vertex_index) vertex_index: u32,
+    @location(0) cell_world_xz: vec2<i32>,
+    @location(1) side: u32,
+    @builtin(view_index) view_index: i32,
+) -> VertexOutput {
+    return exact_connector_vertex(vertex_index, cell_world_xz, side, u32(view_index));
 }"#,
     );
     let source = inject_multiview_vertex_entry(TERRAIN_PREVIEW_RENDER_WGSL, multiview_entry);

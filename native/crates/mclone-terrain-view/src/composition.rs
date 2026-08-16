@@ -1133,6 +1133,115 @@ mod tests {
     }
 
     #[test]
+    fn exact_admission_accepts_connected_shape_fixture_matrix() {
+        let fixtures = [
+            BTreeSet::from([
+                ChunkPos::new(0, 0),
+                ChunkPos::new(1, 0),
+                ChunkPos::new(0, 1),
+                ChunkPos::new(1, 1),
+            ]),
+            BTreeSet::from([
+                ChunkPos::new(0, 0),
+                ChunkPos::new(1, 0),
+                ChunkPos::new(2, 0),
+                ChunkPos::new(0, 1),
+                ChunkPos::new(0, 2),
+            ]),
+            BTreeSet::from([
+                ChunkPos::new(0, 0),
+                ChunkPos::new(1, 0),
+                ChunkPos::new(1, 1),
+                ChunkPos::new(2, 1),
+                ChunkPos::new(2, 2),
+            ]),
+            BTreeSet::from([
+                ChunkPos::new(0, 0),
+                ChunkPos::new(1, 0),
+                ChunkPos::new(2, 0),
+                ChunkPos::new(0, 1),
+                ChunkPos::new(0, 2),
+                ChunkPos::new(1, 2),
+                ChunkPos::new(2, 2),
+            ]),
+            (-2..=2)
+                .flat_map(|z| {
+                    (-2..=2)
+                        .filter(move |x| !(*x == 1 && z == 0))
+                        .map(move |x| ChunkPos::new(x, z))
+                })
+                .collect(),
+            BTreeSet::from([
+                ChunkPos::new(-4, -3),
+                ChunkPos::new(-3, -3),
+                ChunkPos::new(-4, -2),
+            ]),
+        ];
+        for ready in fixtures {
+            let focus = *ready.first().unwrap();
+            assert_eq!(
+                terrain_exact_player_connected_chunks(
+                    &ready,
+                    &BTreeSet::new(),
+                    focus,
+                    HorizontalTopology::UNBOUNDED,
+                ),
+                ready
+            );
+        }
+    }
+
+    #[test]
+    fn exact_admission_growth_eviction_and_source_reset_remain_atomic() {
+        let previous = BTreeSet::from([ChunkPos::new(0, 0), ChunkPos::new(1, 0)]);
+        let grown_ready = BTreeSet::from([
+            ChunkPos::new(0, 0),
+            ChunkPos::new(1, 0),
+            ChunkPos::new(2, 0),
+            ChunkPos::new(8, 8),
+        ]);
+        let grown = terrain_exact_player_connected_chunks(
+            &grown_ready,
+            &previous,
+            ChunkPos::new(0, 0),
+            HorizontalTopology::UNBOUNDED,
+        );
+        assert_eq!(
+            grown,
+            BTreeSet::from([
+                ChunkPos::new(0, 0),
+                ChunkPos::new(1, 0),
+                ChunkPos::new(2, 0),
+            ])
+        );
+
+        let evicted_ready = BTreeSet::from([
+            ChunkPos::new(1, 0),
+            ChunkPos::new(2, 0),
+            ChunkPos::new(8, 8),
+        ]);
+        assert_eq!(
+            terrain_exact_player_connected_chunks(
+                &evicted_ready,
+                &grown,
+                ChunkPos::new(0, 0),
+                HorizontalTopology::UNBOUNDED,
+            ),
+            BTreeSet::from([ChunkPos::new(1, 0), ChunkPos::new(2, 0)])
+        );
+        assert!(
+            terrain_exact_player_connected_chunks(
+                &evicted_ready,
+                &BTreeSet::new(),
+                ChunkPos::new(0, 0),
+                HorizontalTopology::UNBOUNDED,
+            )
+            .is_empty(),
+            "a source reset must not inherit the retired admitted component"
+        );
+    }
+
+    #[test]
     fn exact_transition_field_follows_irregular_negative_coverage() {
         let coverage = ExactPaintedCoverageSnapshot::new(
             source(),
