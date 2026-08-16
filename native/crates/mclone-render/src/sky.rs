@@ -12,6 +12,8 @@
 
 use std::f32::consts::{PI, TAU};
 
+use mclone_season::SolarSample;
+
 /// Plains temperature, the biome whose sky color we use until biome data reaches
 /// the client renderer (`VanillaBiomes` passes `0.8` for plains).
 pub const PLAINS_TEMPERATURE: f32 = 0.8;
@@ -74,6 +76,84 @@ pub fn overworld_clear_color(time_of_day: f32) -> wgpu::Color {
     }
 }
 
+/// One frame's coherent sky and rendered-daylight input.
+///
+/// `VanillaFixed` preserves the existing smoothed clock path exactly. The
+/// seasonal branch carries the one observer-root sample computed by the scene.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum SkyRenderState {
+    VanillaFixed { time_of_day: f32, sun_angle: f32 },
+    SeasonalSolar(SolarSample),
+}
+
+impl SkyRenderState {
+    pub const fn vanilla(time_of_day: f32, sun_angle: f32) -> Self {
+        Self::VanillaFixed {
+            time_of_day,
+            sun_angle,
+        }
+    }
+
+    pub fn clear_color(self) -> wgpu::Color {
+        match self {
+            Self::VanillaFixed { time_of_day, .. } => overworld_clear_color(time_of_day),
+            Self::SeasonalSolar(sample) => {
+                let base = calculate_sky_color(PLAINS_TEMPERATURE);
+                let factor =
+                    (sample.daylight_factor + sample.twilight_factor * 0.14).clamp(0.0, 1.0);
+                wgpu::Color {
+                    r: f64::from(base[0] * factor),
+                    g: f64::from(base[1] * factor),
+                    b: f64::from(base[2] * factor),
+                    a: 1.0,
+                }
+            }
+        }
+    }
+
+    pub fn sky_darken(self) -> f32 {
+        match self {
+            Self::VanillaFixed { time_of_day, .. } => crate::light_texture::sky_darken(time_of_day),
+            Self::SeasonalSolar(sample) => 0.2 + sample.daylight_factor * 0.8,
+        }
+    }
+
+    pub fn sun_direction(self) -> [f32; 3] {
+        match self {
+            Self::VanillaFixed { sun_angle, .. } => [-sun_angle.sin(), sun_angle.cos(), 0.0],
+            Self::SeasonalSolar(sample) => sample.direction,
+        }
+    }
+
+    pub fn glow(self) -> Option<SkyGlow> {
+        match self {
+            Self::VanillaFixed {
+                time_of_day,
+                sun_angle,
+            } => sunrise_color(time_of_day).map(|color| SkyGlow::Vanilla { color, sun_angle }),
+            Self::SeasonalSolar(sample) if sample.twilight_factor > 0.001 => {
+                Some(SkyGlow::Directional {
+                    color: [0.92, 0.42, 0.18, sample.twilight_factor],
+                    sun_direction: sample.direction,
+                })
+            }
+            Self::SeasonalSolar(_) => None,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum SkyGlow {
+    Vanilla {
+        color: [f32; 4],
+        sun_angle: f32,
+    },
+    Directional {
+        color: [f32; 4],
+        sun_direction: [f32; 3],
+    },
+}
+
 /// Port of `DimensionSpecialEffects.getSunriseColor` (overworld). Returns the
 /// sunrise/sunset glow color as `[r, g, b, a]` when the sun is within ±0.4 of the
 /// dawn/dusk band (in `cos(timeOfDay·2π)` space), or `None` outside it.
@@ -93,6 +173,19 @@ pub fn sunrise_color(time_of_day: f32) -> Option<[f32; 4]> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mclone_season::{MCLONE_AXIAL_TILT_DEGREES, OrbitalPhase, PolarState, SolarInput};
+
+    fn seasonal(latitude: f64, phase: OrbitalPhase, hour: f64) -> SkyRenderState {
+        SkyRenderState::SeasonalSolar(
+            SolarSample::compute(SolarInput {
+                orbital_phase: phase,
+                effective_latitude_degrees: latitude,
+                axial_tilt_degrees: MCLONE_AXIAL_TILT_DEGREES,
+                solar_time_fraction: hour / 24.0,
+            })
+            .unwrap(),
+        )
+    }
 
     #[test]
     fn plains_base_color_matches_vanilla_packed_value() {
@@ -148,5 +241,43 @@ mod tests {
         assert!((color.r - r as f64).abs() < 1e-6);
         assert!((color.g - g as f64).abs() < 1e-6);
         assert!((color.b - b as f64).abs() < 1e-6);
+    }
+
+    #[test]
+    fn seasonal_state_keeps_polar_light_and_visible_sun_coherent() {
+        let polar_day = seasonal(80.0, OrbitalPhase::NORTHERN_SOLSTICE, 0.0);
+        let SkyRenderState::SeasonalSolar(day_sample) = polar_day else {
+            unreachable!()
+        };
+        assert_eq!(day_sample.polar_state, PolarState::PolarDay);
+        assert!(day_sample.direction[1] > 0.0);
+        assert!(polar_day.sky_darken() > 0.9);
+        assert!(polar_day.clear_color().b > 0.5);
+
+        let polar_night = seasonal(80.0, OrbitalPhase::SOUTHERN_SOLSTICE, 12.0);
+        let SkyRenderState::SeasonalSolar(night_sample) = polar_night else {
+            unreachable!()
+        };
+        assert_eq!(night_sample.polar_state, PolarState::PolarNight);
+        assert!(night_sample.direction[1] < 0.0);
+        assert_eq!(polar_night.sky_darken(), 0.2);
+        assert_eq!(polar_night.clear_color().b, 0.0);
+    }
+
+    #[test]
+    fn seasonal_twilight_orients_glow_from_the_shared_direction() {
+        let twilight = seasonal(45.0, OrbitalPhase::NORTHWARD_EQUINOX, 6.0);
+        let SkyRenderState::SeasonalSolar(sample) = twilight else {
+            unreachable!()
+        };
+        let Some(SkyGlow::Directional {
+            sun_direction,
+            color,
+        }) = twilight.glow()
+        else {
+            panic!("horizon sample should emit directional glow")
+        };
+        assert_eq!(sun_direction, sample.direction);
+        assert_eq!(color[3], sample.twilight_factor);
     }
 }

@@ -13,3 +13,4 @@ path = "src/lib.rs"
 mclone-diagnostics.workspace = true
 mclone-input.workspace = true
 mclone-protocol.workspace = true
+mclone-season.workspace = true

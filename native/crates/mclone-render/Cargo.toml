@@ -22,6 +22,7 @@ mclone-core.workspace = true
 mclone-diagnostics.workspace = true
 mclone-mesh.workspace = true
 mclone-render-color.workspace = true
+mclone-season.workspace = true
 mclone-ui.workspace = true
 rustc-hash = "1"
 serde.workspace = true

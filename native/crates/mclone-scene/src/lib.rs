@@ -164,7 +164,7 @@ use mclone_render::screen_effect::{
     UnderwaterOverlay,
 };
 use mclone_render::selection_outline::{SelectionOutline, SelectionOutlineRenderer};
-use mclone_render::sky::overworld_clear_color;
+use mclone_render::sky::SkyRenderState;
 use mclone_render::sky_render::SkyRenderer;
 use mclone_render::target::{RenderFrameContext, RenderFrameTarget};
 use mclone_render::uniform::{
@@ -186,6 +186,11 @@ use mclone_render_session::{
     actor_instances_from_presentations_near_observer, engine_debug_world_lines,
     local_player_actor_instance_for_view, render_pose_from_snapshot_with_view_mode,
     render_view_from_world_pose,
+};
+use mclone_season::{
+    LatitudeSource, MCLONE_AXIAL_TILT_DEGREES, SeasonPreviewSettings, SolarCoordinatePolicy,
+    SolarFrameDiagnostics, SolarInput, SolarSample, SolarTimeSource,
+    solar_time_fraction_from_day_time,
 };
 use mclone_server::{SimulationCadenceConfig, WorkerFrameMetrics};
 use mclone_ui::{
@@ -1290,6 +1295,7 @@ pub struct McloneSceneHost {
     storage_profile_ui: StorageProfileUiState,
     initial_alignment_mode: XrViewAlignmentMode,
     render_options: TexturedSectionRenderOptions,
+    season_preview: SeasonPreviewSettings,
     player_collision_box_visible: bool,
     crosshair_visible: bool,
     travel_assist_mode: GameTravelAssistMode,
@@ -2193,10 +2199,9 @@ impl McloneSceneHost {
             frame_deadline,
             &mut timing,
         )?;
-        let render_options = self.effective_render_options(center_position);
-        let sky_clear_color = self.sky_clear_color();
-        let time_of_day = self.time_of_day();
-        let sun_angle = self.sun_angle();
+        let sky_state = self.solar_render_state();
+        let render_options = self.effective_render_options(center_position, sky_state);
+        let sky_clear_color = sky_state.clear_color();
         let underwater_overlays = self.underwater_overlays(render_views);
         let actor_instances = self.current_actor_instances();
         let preview_actor_instances = self.current_preview_actor_instances();
@@ -2220,7 +2225,7 @@ impl McloneSceneHost {
             elapsed_ms(self.services.clock.elapsed_since(start))
         });
         let (terrain_views, mut terrain_options, _) =
-            self.terrain_render_views_and_options(render_views);
+            self.terrain_render_views_and_options(render_views, sky_state);
         terrain_options = terrain_options
             .map(|options| render_options_with_actor_grass_interactors(options, &actor_instances));
         let (prepared_stereo_draw, stereo_draw_timing) = if collect_split_timing {
@@ -2251,27 +2256,22 @@ impl McloneSceneHost {
                         let records = slot
                             .draw
                             .prepare_render_records_for_context(preview.context);
-                        let preview_time = slot
-                            .runtime
-                            .as_ref()
-                            .map_or(0.0, |runtime| runtime.time_of_day());
-                        let options = self
-                            .render_options
-                            .with_sky_darken(mclone_render::light_texture::sky_darken(preview_time))
-                            .with_grass_time_seconds(render_options.grass_time_seconds)
-                            .with_grass_interactors(
-                                preview_actor_instances
-                                    .as_ref()
-                                    .map_or_else(GrassInteractorSet::default, |actors| {
-                                        grass_interactors_from_actors(None, &actors.instances)
-                                    }),
-                            )
-                            .with_topology(
-                                slot.runtime.as_ref().map_or(
+                        let options =
+                            self.render_options
+                                .with_sky_darken(sky_state.sky_darken())
+                                .with_grass_time_seconds(render_options.grass_time_seconds)
+                                .with_grass_interactors(
+                                    preview_actor_instances.as_ref().map_or_else(
+                                        GrassInteractorSet::default,
+                                        |actors| {
+                                            grass_interactors_from_actors(None, &actors.instances)
+                                        },
+                                    ),
+                                )
+                                .with_topology(slot.runtime.as_ref().map_or(
                                     mclone_core::HorizontalTopology::UNBOUNDED,
                                     |runtime| runtime.client().topology(),
-                                ),
-                            );
+                                ));
                         let bounded_section_count = records.section_keys().len();
                         let out_of_region_submission_count = records
                             .section_keys()
@@ -2325,8 +2325,7 @@ impl McloneSceneHost {
             preview_actor_instances.as_ref(),
             render_options,
             sky_clear_color,
-            time_of_day,
-            sun_angle,
+            sky_state,
             underwater_overlays[0],
             "left",
             left_view_slot,
@@ -2353,8 +2352,7 @@ impl McloneSceneHost {
             preview_actor_instances.as_ref(),
             render_options,
             sky_clear_color,
-            time_of_day,
-            sun_angle,
+            sky_state,
             underwater_overlays[1],
             "right",
             right_view_slot,
@@ -2587,6 +2585,7 @@ impl McloneSceneHost {
     fn terrain_render_views_and_options(
         &mut self,
         render_views: [ChunkRenderView; 2],
+        sky_state: SkyRenderState,
     ) -> (
         [ChunkRenderView; 2],
         [TexturedSectionRenderOptions; 2],
@@ -2595,8 +2594,8 @@ impl McloneSceneHost {
         let center_position =
             (render_views[0].camera_position + render_views[1].camera_position) * 0.5;
         let base_options = self
-            .effective_render_options(center_position)
-            .with_sky_darken(mclone_render::light_texture::sky_darken(self.time_of_day()));
+            .effective_render_options(center_position, sky_state)
+            .with_sky_darken(sky_state.sky_darken());
         let underwater_overlays = self.underwater_overlays(render_views);
         let terrain_views = [
             render_view_with_underwater_effect(render_views[0], underwater_overlays[0]),
@@ -2641,8 +2640,9 @@ impl McloneSceneHost {
         include_actors: bool,
     ) -> Result<XrTerrainStereoFrameSummary> {
         self.poll_asset_replacement(device, queue)?;
+        let sky_state = self.solar_render_state();
         let (terrain_views, mut terrain_options, _) =
-            self.terrain_render_views_and_options(render_views);
+            self.terrain_render_views_and_options(render_views, sky_state);
         let actor_instances = if include_actors {
             self.current_actor_instances()
         } else {
@@ -2683,6 +2683,7 @@ impl McloneSceneHost {
             include_sky,
             include_actors,
             terrain_view_enabled,
+            sky_state,
         )?;
         let right = self.render_terrain_eye_only_target(
             device,
@@ -2697,6 +2698,7 @@ impl McloneSceneHost {
             include_sky,
             include_actors,
             terrain_view_enabled,
+            sky_state,
         )?;
 
         self.active_world.render_stats.drawn_section_count = left.drawn_section_count;
@@ -2750,6 +2752,7 @@ impl McloneSceneHost {
         include_sky: bool,
         include_actors: bool,
         terrain_view_enabled: bool,
+        sky_state: SkyRenderState,
     ) -> Result<TexturedSectionRenderStats> {
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some(match label {
@@ -2762,17 +2765,16 @@ impl McloneSceneHost {
             target.color_view,
             &target.depth.view,
             target.size,
-            self.sky_clear_color(),
+            sky_state.clear_color(),
         );
         if include_sky {
             self.sky.render_in_slot(
                 queue,
                 &mut encoder,
                 target.color_view,
-                self.sky_clear_color(),
+                sky_state.clear_color(),
                 render_view.sky_view_projection(),
-                self.time_of_day(),
-                self.sun_angle(),
+                sky_state,
                 view_slot,
             );
             render_target = render_target.with_loaded_color();
@@ -2987,8 +2989,9 @@ impl McloneSceneHost {
         terrain_view_enabled: bool,
         mut timing: Option<&mut XrTerrainFrameTiming>,
     ) -> Result<XrTerrainMultiviewFrameSummary> {
+        let sky_state = self.solar_render_state();
         let (terrain_views, mut terrain_options, underwater_overlays) =
-            self.terrain_render_views_and_options(render_views);
+            self.terrain_render_views_and_options(render_views, sky_state);
         let actor_instances = if include_actors {
             self.current_actor_instances()
         } else {
@@ -2999,9 +3002,7 @@ impl McloneSceneHost {
             .flatten();
         terrain_options = terrain_options
             .map(|options| render_options_with_actor_grass_interactors(options, &actor_instances));
-        let sky_clear_color = self.sky_clear_color();
-        let time_of_day = self.time_of_day();
-        let sun_angle = self.sun_angle();
+        let sky_clear_color = sky_state.clear_color();
         let records_start = self.services.clock.now();
         let (prepared_records, record_cache_prepare) =
             self.active_world.draw.prepare_render_records_with_stats();
@@ -3030,8 +3031,7 @@ impl McloneSceneHost {
                     terrain_views[0].sky_view_projection(),
                     terrain_views[1].sky_view_projection(),
                 ],
-                time_of_day,
-                sun_angle,
+                sky_state,
             )?;
             if let Some(timing) = timing.as_deref_mut() {
                 timing.multiview_sky_ms = elapsed_ms(self.services.clock.elapsed_since(sky_start));
@@ -3066,27 +3066,22 @@ impl McloneSceneHost {
                         let records = slot
                             .draw
                             .prepare_render_records_for_context(preview.context);
-                        let preview_time = slot
-                            .runtime
-                            .as_ref()
-                            .map_or(0.0, |runtime| runtime.time_of_day());
-                        let options = self
-                            .render_options
-                            .with_sky_darken(mclone_render::light_texture::sky_darken(preview_time))
-                            .with_grass_time_seconds(terrain_options[0].grass_time_seconds)
-                            .with_grass_interactors(
-                                preview_actor_instances
-                                    .as_ref()
-                                    .map_or_else(GrassInteractorSet::default, |actors| {
-                                        grass_interactors_from_actors(None, &actors.instances)
-                                    }),
-                            )
-                            .with_topology(
-                                slot.runtime.as_ref().map_or(
+                        let options =
+                            self.render_options
+                                .with_sky_darken(sky_state.sky_darken())
+                                .with_grass_time_seconds(terrain_options[0].grass_time_seconds)
+                                .with_grass_interactors(
+                                    preview_actor_instances.as_ref().map_or_else(
+                                        GrassInteractorSet::default,
+                                        |actors| {
+                                            grass_interactors_from_actors(None, &actors.instances)
+                                        },
+                                    ),
+                                )
+                                .with_topology(slot.runtime.as_ref().map_or(
                                     mclone_core::HorizontalTopology::UNBOUNDED,
                                     |runtime| runtime.client().topology(),
-                                ),
-                            );
+                                ));
                         let bounded_section_count = records.section_keys().len();
                         let out_of_region_submission_count = records
                             .section_keys()
@@ -3249,13 +3244,7 @@ impl McloneSceneHost {
                 .as_mut()
                 .filter(|slot| slot.id == actors.source_world)
                 .context("preview actor source lost its world slot")?;
-            let preview_time = standby
-                .runtime
-                .as_ref()
-                .map_or(0.0, |runtime| runtime.time_of_day());
-            let options = self
-                .render_options
-                .with_sky_darken(mclone_render::light_texture::sky_darken(preview_time));
+            let options = self.render_options.with_sky_darken(sky_state.sky_darken());
             let actor_start = self.services.clock.now();
             let resources = standby
                 .actors
@@ -4782,8 +4771,7 @@ impl McloneSceneHost {
         preview_actor_instances: Option<&PreviewActorInstances>,
         render_options: TexturedSectionRenderOptions,
         sky_clear_color: wgpu::Color,
-        time_of_day: f32,
-        sun_angle: f32,
+        sky_state: mclone_render::sky::SkyRenderState,
         underwater_overlay: Option<UnderwaterOverlay>,
         label: &'static str,
         view_slot: PerViewSlot,
@@ -4840,13 +4828,9 @@ impl McloneSceneHost {
                         .standby_world
                         .as_mut()
                         .filter(|slot| slot.id == preview.source_world)?;
-                    let preview_time = standby
-                        .runtime
-                        .as_ref()
-                        .map_or(0.0, |runtime| runtime.time_of_day());
                     let preview_options =
                         self.render_options
-                            .with_sky_darken(mclone_render::light_texture::sky_darken(preview_time))
+                            .with_sky_darken(sky_state.sky_darken())
                             .with_grass_time_seconds(render_options.grass_time_seconds)
                             .with_grass_interactors(
                                 preview_actor_instances
@@ -4904,8 +4888,7 @@ impl McloneSceneHost {
                     actor_instances,
                     underwater_overlay,
                     sky_clear_color,
-                    time_of_day,
-                    sun_angle,
+                    sky_state,
                     render_options,
                     FullFrameGui::new(false, false, [gui_scale.width, gui_scale.height]),
                     |_| summary_ui_draw,
@@ -4936,8 +4919,7 @@ impl McloneSceneHost {
                     actor_instances,
                     underwater_overlay,
                     sky_clear_color,
-                    time_of_day,
-                    sun_angle,
+                    sky_state,
                     render_options,
                     FullFrameGui::new(false, false, [gui_scale.width, gui_scale.height]),
                     |_| summary_ui_draw,
@@ -4965,8 +4947,7 @@ impl McloneSceneHost {
                     actor_instances,
                     underwater_overlay,
                     sky_clear_color,
-                    time_of_day,
-                    sun_angle,
+                    sky_state,
                     render_options,
                     FullFrameGui::new(false, false, [gui_scale.width, gui_scale.height]),
                     |_| summary_ui_draw,
@@ -4996,8 +4977,7 @@ impl McloneSceneHost {
                     actor_instances,
                     underwater_overlay,
                     sky_clear_color,
-                    time_of_day,
-                    sun_angle,
+                    sky_state,
                     render_options,
                     FullFrameGui::new(false, false, [gui_scale.width, gui_scale.height]),
                     |_| summary_ui_draw,
@@ -5028,8 +5008,7 @@ impl McloneSceneHost {
                     actor_instances,
                     underwater_overlay,
                     sky_clear_color,
-                    time_of_day,
-                    sun_angle,
+                    sky_state,
                     render_options,
                     FullFrameGui::new(false, false, [gui_scale.width, gui_scale.height]),
                     |_| summary_ui_draw,
@@ -5057,8 +5036,7 @@ impl McloneSceneHost {
                     actor_instances,
                     underwater_overlay,
                     sky_clear_color,
-                    time_of_day,
-                    sun_angle,
+                    sky_state,
                     render_options,
                     FullFrameGui::new(false, false, [gui_scale.width, gui_scale.height]),
                     |_| summary_ui_draw,
@@ -5754,11 +5732,89 @@ impl McloneSceneHost {
             .play_with(UI_ERROR, PlaybackParams::default());
     }
 
-    fn sky_clear_color(&self) -> wgpu::Color {
+    pub fn season_preview_settings(&self) -> SeasonPreviewSettings {
+        self.season_preview
+    }
+
+    pub fn set_season_preview_settings(&mut self, settings: SeasonPreviewSettings) {
+        self.season_preview = settings;
+    }
+
+    fn day_time(&self) -> u64 {
         self.active_world.runtime.as_ref().map_or_else(
-            || overworld_clear_color(self.time_of_day()),
-            |runtime| runtime.sky_clear_color(),
+            || {
+                self.active_world
+                    .scene
+                    .startup
+                    .day_time_override
+                    .unwrap_or(0)
+            },
+            |runtime| runtime.client().day_time(),
         )
+    }
+
+    fn solar_render_state(&self) -> SkyRenderState {
+        let vanilla = SkyRenderState::vanilla(self.time_of_day(), self.sun_angle());
+        self.solar_frame_diagnostics()
+            .map_or(vanilla, |diagnostics| {
+                SkyRenderState::SeasonalSolar(diagnostics.sample)
+            })
+    }
+
+    pub fn solar_frame_diagnostics(&self) -> Option<SolarFrameDiagnostics> {
+        if !self.season_preview.enabled
+            || self.active_world.scene.startup.world_generation_profile
+                != mclone_server::WorldGenerationProfile::McloneOverworldV1
+        {
+            return None;
+        }
+
+        let topology = self
+            .active_world
+            .runtime
+            .as_ref()
+            .map_or(self.active_world.scene.startup.world_topology, |runtime| {
+                runtime.client().topology()
+            });
+        let policy = SolarCoordinatePolicy::mclone_for_topology(topology);
+        let eye = self.active_world.camera.snapshot().eye;
+        let world_latitude = match policy.latitude_at(eye.x, eye.z) {
+            Ok(latitude) => latitude,
+            Err(error) => {
+                log::warn!("seasonal solar latitude fallback: {error}");
+                return None;
+            }
+        };
+        let effective_latitude_degrees = match self.season_preview.latitude_source {
+            LatitudeSource::World => world_latitude.degrees,
+            LatitudeSource::Manual => self.season_preview.manual_latitude.degrees(),
+        };
+        let solar_time_fraction = match self.season_preview.solar_time_source {
+            SolarTimeSource::WorldClock => solar_time_fraction_from_day_time(self.day_time()),
+            SolarTimeSource::Manual => self.season_preview.manual_solar_time.fraction(),
+        };
+        let sample = match SolarSample::compute(SolarInput {
+            orbital_phase: self.season_preview.orbital_phase,
+            effective_latitude_degrees,
+            axial_tilt_degrees: MCLONE_AXIAL_TILT_DEGREES,
+            solar_time_fraction,
+        }) {
+            Ok(sample) => sample,
+            Err(error) => {
+                log::warn!("seasonal solar sample fallback: {error}");
+                return None;
+            }
+        };
+        Some(SolarFrameDiagnostics {
+            settings: self.season_preview,
+            policy,
+            observer_world_x: eye.x,
+            observer_world_z: eye.z,
+            world_latitude,
+            effective_latitude_degrees,
+            solar_time_fraction,
+            sample,
+        })
     }
 
     fn time_of_day(&self) -> f32 {
@@ -5775,9 +5831,13 @@ impl McloneSceneHost {
         )
     }
 
-    fn effective_render_options(&self, camera_position: Vec3) -> TexturedSectionRenderOptions {
+    fn effective_render_options(
+        &self,
+        camera_position: Vec3,
+        sky_state: SkyRenderState,
+    ) -> TexturedSectionRenderOptions {
         let mut options = self.render_options;
-        options.fog = self.open_air_fog();
+        options.fog = self.open_air_fog(sky_state);
         options.grass_time_seconds = grass_presentation_time_seconds(self.services.clock.now());
         options.grass_interactors =
             grass_interactors_from_actors(Some(self.active_world.camera.feet_position()), &[]);
@@ -5794,7 +5854,7 @@ impl McloneSceneHost {
         options
     }
 
-    fn open_air_fog(&self) -> RenderFog {
+    fn open_air_fog(&self, sky_state: SkyRenderState) -> RenderFog {
         let settings = self.fog_settings.normalized();
         let mode = match settings.mode {
             mclone_ui::GameFogMode::Off => RenderFogMode::Off,
@@ -5802,7 +5862,7 @@ impl McloneSceneHost {
             mclone_ui::GameFogMode::Natural => RenderFogMode::Exponential,
             mclone_ui::GameFogMode::GroundHaze => RenderFogMode::GroundHaze,
         };
-        let clear = self.sky_clear_color();
+        let clear = sky_state.clear_color();
         let sky_color = [clear.r as f32, clear.g as f32, clear.b as f32];
         let color = match settings.color_mode {
             mclone_ui::GameFogColorMode::Sky => sky_color,

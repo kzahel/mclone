@@ -489,6 +489,7 @@ impl McloneSceneHost {
                 XrViewAlignmentMode::PlayerSpawn
             },
             render_options,
+            season_preview: SeasonPreviewSettings::default(),
             player_collision_box_visible: false,
             crosshair_visible: true,
             travel_assist_mode: GameTravelAssistMode::Off,
@@ -703,6 +704,7 @@ impl McloneSceneHost {
                 XrViewAlignmentMode::PlayerSpawn
             },
             render_options,
+            season_preview: SeasonPreviewSettings::default(),
             player_collision_box_visible: false,
             crosshair_visible: true,
             travel_assist_mode: GameTravelAssistMode::Off,
@@ -998,6 +1000,7 @@ impl McloneSceneHost {
                 XrViewAlignmentMode::PlayerSpawn
             },
             render_options,
+            season_preview: SeasonPreviewSettings::default(),
             player_collision_box_visible: false,
             crosshair_visible: true,
             travel_assist_mode: GameTravelAssistMode::Off,
@@ -6408,6 +6411,11 @@ impl ClientExperienceSettingsHost for McloneSceneHost {
         self.fog_settings = settings.normalized();
         self.persist_graphics_preferences();
         log::info!("fog settings set to {:?}", self.fog_settings);
+        Ok(())
+    }
+
+    fn set_season_preview(&mut self, settings: SeasonPreviewSettings) -> Result<()> {
+        self.season_preview = settings;
         Ok(())
     }
 

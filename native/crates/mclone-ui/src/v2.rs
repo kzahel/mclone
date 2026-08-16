@@ -341,6 +341,9 @@ enum UiSliderAction {
     FlySpeed,
     MovementSpeed,
     TouchLook,
+    SeasonOrbitalPhase,
+    SeasonManualLatitude,
+    SeasonManualSolarTime,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -2226,6 +2229,30 @@ impl UiSurface {
                             value, settings,
                         ))
                     }
+                    UiSliderAction::SeasonOrbitalPhase => {
+                        let mut settings = self.render_state.season_preview;
+                        settings.orbital_phase = crate::OrbitalPhase::from_steps_wrapped(
+                            (value.clamp(0.0, 1.0) * f32::from(crate::ORBITAL_PHASE_STEPS - 1))
+                                .round() as u16,
+                        );
+                        GameUiAction::SetSeasonPreview(settings)
+                    }
+                    UiSliderAction::SeasonManualLatitude => {
+                        let mut settings = self.render_state.season_preview;
+                        settings.manual_latitude = crate::PreviewLatitude::from_degrees_clamped(
+                            f64::from(value.clamp(0.0, 1.0)) * 180.0 - 90.0,
+                        );
+                        GameUiAction::SetSeasonPreview(settings)
+                    }
+                    UiSliderAction::SeasonManualSolarTime => {
+                        let mut settings = self.render_state.season_preview;
+                        settings.manual_solar_time = crate::PreviewSolarTime::from_minutes_wrapped(
+                            (value.clamp(0.0, 1.0)
+                                * f32::from(crate::PREVIEW_SOLAR_TIME_MINUTES_PER_DAY - 1))
+                            .round() as u16,
+                        );
+                        GameUiAction::SetSeasonPreview(settings)
+                    }
                 })
             }
         }
@@ -2955,6 +2982,7 @@ impl GameUiHost {
             | GameUiAction::SetGrassDetail(_)
             | GameUiAction::SetTerrainPresentation(_)
             | GameUiAction::SetFogSettings(_)
+            | GameUiAction::SetSeasonPreview(_)
             | GameUiAction::ToggleAssetPack(_)
             | GameUiAction::CycleTexturePresentation
             | GameUiAction::ApplyAssetPacks
@@ -3212,6 +3240,12 @@ const UI_V2_FOG_COLOR_RED: UiWidgetId = UiWidgetId(169);
 const UI_V2_FOG_COLOR_GREEN: UiWidgetId = UiWidgetId(170);
 const UI_V2_FOG_COLOR_BLUE: UiWidgetId = UiWidgetId(171);
 const UI_V2_OPTIONS_XR_RENDER_PATH: UiWidgetId = UiWidgetId(172);
+const UI_V2_OPTIONS_SEASON_PREVIEW: UiWidgetId = UiWidgetId(173);
+const UI_V2_OPTIONS_SEASON_ORBITAL_PHASE: UiWidgetId = UiWidgetId(174);
+const UI_V2_OPTIONS_SEASON_LATITUDE_SOURCE: UiWidgetId = UiWidgetId(175);
+const UI_V2_OPTIONS_SEASON_LATITUDE: UiWidgetId = UiWidgetId(176);
+const UI_V2_OPTIONS_SEASON_SOLAR_TIME_SOURCE: UiWidgetId = UiWidgetId(177);
+const UI_V2_OPTIONS_SEASON_SOLAR_TIME: UiWidgetId = UiWidgetId(178);
 const UI_V2_STORAGE_PROFILE_NAME: UiWidgetId = UiWidgetId(133);
 const UI_V2_STORAGE_PROFILE_ID: UiWidgetId = UiWidgetId(134);
 const UI_V2_STORAGE_BACKEND: UiWidgetId = UiWidgetId(135);
@@ -3882,9 +3916,24 @@ const fn options_category_row_count(category: GameOptionsCategory) -> usize {
         GameOptionsCategory::Movement => 8,
         GameOptionsCategory::Display => 3,
         GameOptionsCategory::LocalPlay => 5,
-        GameOptionsCategory::Debug => 5,
+        GameOptionsCategory::Debug => 11,
         GameOptionsCategory::StorageProfile => 8,
     }
+}
+
+fn toggle_season_preview(mut settings: crate::SeasonPreviewSettings) -> GameUiAction {
+    settings.enabled = !settings.enabled;
+    GameUiAction::SetSeasonPreview(settings)
+}
+
+fn cycle_season_latitude_source(mut settings: crate::SeasonPreviewSettings) -> GameUiAction {
+    settings.latitude_source = settings.latitude_source.next();
+    GameUiAction::SetSeasonPreview(settings)
+}
+
+fn cycle_season_solar_time_source(mut settings: crate::SeasonPreviewSettings) -> GameUiAction {
+    settings.solar_time_source = settings.solar_time_source.next();
+    GameUiAction::SetSeasonPreview(settings)
 }
 
 /// The Options hub: a short list of category buttons plus the shared
@@ -4519,6 +4568,87 @@ fn options_category_rows(
             ]
         }
         GameOptionsCategory::Debug => vec![
+            (
+                18.0,
+                UiWidget::checkbox(
+                    UI_V2_OPTIONS_SEASON_PREVIEW,
+                    ph,
+                    "Season Preview",
+                    state.season_preview.enabled,
+                )
+                .action(toggle_season_preview(state.season_preview)),
+            ),
+            (
+                20.0,
+                UiWidget::slider(
+                    UI_V2_OPTIONS_SEASON_ORBITAL_PHASE,
+                    ph,
+                    format!(
+                        "Orbital Phase {:.2}%",
+                        state.season_preview.orbital_phase.turns() * 100.0
+                    ),
+                    state.season_preview.orbital_phase.turns() as f32,
+                )
+                .enabled(state.season_preview.enabled)
+                .slider_action(UiSliderAction::SeasonOrbitalPhase),
+            ),
+            (
+                20.0,
+                UiWidget::cycle(
+                    UI_V2_OPTIONS_SEASON_LATITUDE_SOURCE,
+                    ph,
+                    "Latitude Source",
+                    state.season_preview.latitude_source.label(),
+                )
+                .enabled(state.season_preview.enabled)
+                .action(cycle_season_latitude_source(state.season_preview)),
+            ),
+            (
+                20.0,
+                UiWidget::slider(
+                    UI_V2_OPTIONS_SEASON_LATITUDE,
+                    ph,
+                    format!(
+                        "Preview Latitude {:+.1} deg",
+                        state.season_preview.manual_latitude.degrees()
+                    ),
+                    ((state.season_preview.manual_latitude.degrees() + 90.0) / 180.0) as f32,
+                )
+                .enabled(
+                    state.season_preview.enabled
+                        && state.season_preview.latitude_source == crate::LatitudeSource::Manual,
+                )
+                .slider_action(UiSliderAction::SeasonManualLatitude),
+            ),
+            (
+                20.0,
+                UiWidget::cycle(
+                    UI_V2_OPTIONS_SEASON_SOLAR_TIME_SOURCE,
+                    ph,
+                    "Solar Time Source",
+                    state.season_preview.solar_time_source.label(),
+                )
+                .enabled(state.season_preview.enabled)
+                .action(cycle_season_solar_time_source(state.season_preview)),
+            ),
+            (
+                20.0,
+                UiWidget::slider(
+                    UI_V2_OPTIONS_SEASON_SOLAR_TIME,
+                    ph,
+                    format!(
+                        "Preview Solar Time {:02}:{:02}",
+                        state.season_preview.manual_solar_time.minutes() / 60,
+                        state.season_preview.manual_solar_time.minutes() % 60
+                    ),
+                    state.season_preview.manual_solar_time.fraction() as f32,
+                )
+                .enabled(
+                    state.season_preview.enabled
+                        && state.season_preview.solar_time_source == crate::SolarTimeSource::Manual,
+                )
+                .slider_action(UiSliderAction::SeasonManualSolarTime),
+            ),
             (
                 20.0,
                 optional_cycle(

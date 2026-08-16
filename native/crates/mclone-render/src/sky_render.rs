@@ -25,7 +25,7 @@ use crate::color_profile::{
     color_transform_wgpu,
 };
 use crate::gpu_timestamps::GpuTimestampFrameEncoder;
-use crate::sky::sunrise_color;
+use crate::sky::{SkyGlow, SkyRenderState};
 use crate::uniform::{
     PER_VIEW_UNIFORM_SLOT_COUNT, PerViewSlot, PerViewUniformBuffer, SINGLE_VIEW_SLOT,
 };
@@ -493,8 +493,7 @@ impl SkyRenderer {
         color_view: &wgpu::TextureView,
         clear_color: wgpu::Color,
         sky_view_projection: Mat4,
-        time_of_day: f32,
-        sun_angle: f32,
+        sky_state: SkyRenderState,
     ) {
         self.render_in_slot(
             queue,
@@ -502,8 +501,7 @@ impl SkyRenderer {
             color_view,
             clear_color,
             sky_view_projection,
-            time_of_day,
-            sun_angle,
+            sky_state,
             SINGLE_VIEW_SLOT,
         );
     }
@@ -516,8 +514,7 @@ impl SkyRenderer {
         color_view: &wgpu::TextureView,
         clear_color: wgpu::Color,
         sky_view_projection: Mat4,
-        time_of_day: f32,
-        sun_angle: f32,
+        sky_state: SkyRenderState,
         gpu_timestamps: &GpuTimestampFrameEncoder,
     ) {
         self.render_in_slot_inner(
@@ -526,8 +523,7 @@ impl SkyRenderer {
             color_view,
             clear_color,
             sky_view_projection,
-            time_of_day,
-            sun_angle,
+            sky_state,
             SINGLE_VIEW_SLOT,
             Some(gpu_timestamps),
         );
@@ -541,8 +537,7 @@ impl SkyRenderer {
         color_view: &wgpu::TextureView,
         clear_color: wgpu::Color,
         sky_view_projection: Mat4,
-        time_of_day: f32,
-        sun_angle: f32,
+        sky_state: SkyRenderState,
         view_slot: PerViewSlot,
     ) {
         self.render_in_slot_inner(
@@ -551,8 +546,7 @@ impl SkyRenderer {
             color_view,
             clear_color,
             sky_view_projection,
-            time_of_day,
-            sun_angle,
+            sky_state,
             view_slot,
             None,
         );
@@ -566,8 +560,7 @@ impl SkyRenderer {
         color_view: &wgpu::TextureView,
         clear_color: wgpu::Color,
         sky_view_projection: Mat4,
-        time_of_day: f32,
-        sun_angle: f32,
+        sky_state: SkyRenderState,
         view_slot: PerViewSlot,
         gpu_timestamps: &GpuTimestampFrameEncoder,
     ) {
@@ -577,8 +570,7 @@ impl SkyRenderer {
             color_view,
             clear_color,
             sky_view_projection,
-            time_of_day,
-            sun_angle,
+            sky_state,
             view_slot,
             Some(gpu_timestamps),
         );
@@ -592,8 +584,7 @@ impl SkyRenderer {
         color_view: &wgpu::TextureView,
         clear_color: wgpu::Color,
         sky_view_projection: Mat4,
-        time_of_day: f32,
-        sun_angle: f32,
+        sky_state: SkyRenderState,
         view_slot: PerViewSlot,
         gpu_timestamps: Option<&GpuTimestampFrameEncoder>,
     ) {
@@ -614,16 +605,12 @@ impl SkyRenderer {
             disc_range.start,
             &vertex_bytes(&disc_vertices(sky_color)),
         );
-        let glow = sunrise_color(time_of_day);
-        let glow_range = if let Some(color) = glow {
+        let glow_range = if let Some(glow) = sky_state.glow() {
             let range = sky_vertex_slot_range(view_slot, GLOW_VERTEX_COUNT);
             queue.write_buffer(
                 &self.glow_vertex_buffer,
                 range.start,
-                &vertex_bytes(&glow_vertices(
-                    color_transform_rgba(color, self.color_transform),
-                    sun_angle,
-                )),
+                &vertex_bytes(&sky_glow_vertices(glow, self.color_transform)),
             );
             Some(range)
         } else {
@@ -633,7 +620,7 @@ impl SkyRenderer {
         queue.write_buffer(
             &self.sun_vertex_buffer,
             sun_range.start,
-            &sun_vertex_bytes(&sun_vertices(vanilla_sun_direction(sun_angle))),
+            &sun_vertex_bytes(&sun_vertices(Vec3::from_array(sky_state.sun_direction()))),
         );
 
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -678,8 +665,7 @@ impl SkyRenderer {
         color_view: &wgpu::TextureView,
         clear_color: wgpu::Color,
         sky_view_projections: [Mat4; 2],
-        time_of_day: f32,
-        sun_angle: f32,
+        sky_state: SkyRenderState,
     ) -> Result<()> {
         self.render_multiview_inner(
             device,
@@ -688,8 +674,7 @@ impl SkyRenderer {
             color_view,
             clear_color,
             sky_view_projections,
-            time_of_day,
-            sun_angle,
+            sky_state,
             None,
         )
     }
@@ -703,8 +688,7 @@ impl SkyRenderer {
         color_view: &wgpu::TextureView,
         clear_color: wgpu::Color,
         sky_view_projections: [Mat4; 2],
-        time_of_day: f32,
-        sun_angle: f32,
+        sky_state: SkyRenderState,
         gpu_timestamps: &GpuTimestampFrameEncoder,
     ) -> Result<()> {
         self.render_multiview_inner(
@@ -714,8 +698,7 @@ impl SkyRenderer {
             color_view,
             clear_color,
             sky_view_projections,
-            time_of_day,
-            sun_angle,
+            sky_state,
             Some(gpu_timestamps),
         )
     }
@@ -729,12 +712,11 @@ impl SkyRenderer {
         color_view: &wgpu::TextureView,
         clear_color: wgpu::Color,
         sky_view_projections: [Mat4; 2],
-        time_of_day: f32,
-        sun_angle: f32,
+        sky_state: SkyRenderState,
         gpu_timestamps: Option<&GpuTimestampFrameEncoder>,
     ) -> Result<()> {
         let (clear_color, disc_range, glow_range, sun_range) =
-            self.prepare_vertices(queue, clear_color, time_of_day, sun_angle);
+            self.prepare_vertices(queue, clear_color, sky_state);
         let renderer = self.multiview_renderer(device)?;
         renderer.write_uniforms(queue, sky_view_projections);
 
@@ -776,8 +758,7 @@ impl SkyRenderer {
         &self,
         queue: &wgpu::Queue,
         clear_color: wgpu::Color,
-        time_of_day: f32,
-        sun_angle: f32,
+        sky_state: SkyRenderState,
     ) -> (
         wgpu::Color,
         Range<wgpu::BufferAddress>,
@@ -796,15 +777,12 @@ impl SkyRenderer {
             disc_range.start,
             &vertex_bytes(&disc_vertices(sky_color)),
         );
-        let glow_range = if let Some(color) = sunrise_color(time_of_day) {
+        let glow_range = if let Some(glow) = sky_state.glow() {
             let range = sky_vertex_slot_range(SINGLE_VIEW_SLOT, GLOW_VERTEX_COUNT);
             queue.write_buffer(
                 &self.glow_vertex_buffer,
                 range.start,
-                &vertex_bytes(&glow_vertices(
-                    color_transform_rgba(color, self.color_transform),
-                    sun_angle,
-                )),
+                &vertex_bytes(&sky_glow_vertices(glow, self.color_transform)),
             );
             Some(range)
         } else {
@@ -814,7 +792,7 @@ impl SkyRenderer {
         queue.write_buffer(
             &self.sun_vertex_buffer,
             sun_range.start,
-            &sun_vertex_bytes(&sun_vertices(vanilla_sun_direction(sun_angle))),
+            &sun_vertex_bytes(&sun_vertices(Vec3::from_array(sky_state.sun_direction()))),
         );
         (clear_color, disc_range, glow_range, sun_range)
     }
@@ -1137,8 +1115,38 @@ fn glow_vertices(color: [f32; 4], sun_angle: f32) -> Vec<SkyVertex> {
     vertices
 }
 
-fn vanilla_sun_direction(sun_angle: f32) -> Vec3 {
-    Vec3::new(-sun_angle.sin(), sun_angle.cos(), 0.0)
+fn sky_glow_vertices(glow: SkyGlow, color_transform: RenderTargetColorTransform) -> Vec<SkyVertex> {
+    match glow {
+        SkyGlow::Vanilla { color, sun_angle } => {
+            glow_vertices(color_transform_rgba(color, color_transform), sun_angle)
+        }
+        SkyGlow::Directional {
+            color,
+            sun_direction,
+        } => directional_glow_vertices(
+            color_transform_rgba(color, color_transform),
+            Vec3::from_array(sun_direction),
+        ),
+    }
+}
+
+fn directional_glow_vertices(color: [f32; 4], sun_direction: Vec3) -> Vec<SkyVertex> {
+    let horizontal = Vec3::new(sun_direction.x, 0.0, sun_direction.z)
+        .try_normalize()
+        .unwrap_or(Vec3::X);
+    let tangent = Vec3::Y.cross(horizontal).normalize();
+    let [r, g, b, alpha] = color;
+    let center = horizontal * 100.0;
+    let mut vertices = Vec::with_capacity(GLOW_VERTEX_COUNT);
+    vertices.push([center.x, center.y, center.z, r, g, b, alpha]);
+    for i in 0..GLOW_RING_COUNT {
+        let angle = i as f32 * std::f32::consts::TAU / 16.0;
+        let (sin_a, cos_a) = angle.sin_cos();
+        let point = center + tangent * (sin_a * 120.0) + Vec3::Y * (cos_a * 120.0)
+            - horizontal * (cos_a * 40.0 * alpha);
+        vertices.push([point.x, point.y, point.z, r, g, b, 0.0]);
+    }
+    vertices
 }
 
 fn sun_vertices(direction: Vec3) -> [SunVertex; SUN_VERTEX_COUNT] {
@@ -1251,9 +1259,15 @@ mod tests {
 
     #[test]
     fn vanilla_sun_direction_and_quad_follow_clock_anchors() {
-        assert!(vanilla_sun_direction(0.0).abs_diff_eq(Vec3::Y, 1.0e-6));
         assert!(
-            vanilla_sun_direction(std::f32::consts::FRAC_PI_2).abs_diff_eq(Vec3::NEG_X, 1.0e-6)
+            Vec3::from_array(SkyRenderState::vanilla(0.0, 0.0).sun_direction())
+                .abs_diff_eq(Vec3::Y, 1.0e-6)
+        );
+        assert!(
+            Vec3::from_array(
+                SkyRenderState::vanilla(0.0, std::f32::consts::FRAC_PI_2).sun_direction(),
+            )
+            .abs_diff_eq(Vec3::NEG_X, 1.0e-6)
         );
         let vertices = sun_vertices(Vec3::Y);
         let center = vertices.iter().fold(Vec3::ZERO, |sum, vertex| {

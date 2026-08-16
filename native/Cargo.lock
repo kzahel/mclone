@@ -1577,6 +1577,7 @@ dependencies = [
  "mclone-protocol",
  "mclone-render",
  "mclone-render-session",
+ "mclone-season",
  "mclone-server",
  "mclone-ui",
  "mclone-worldgen",
@@ -1797,6 +1798,7 @@ dependencies = [
  "mclone-diagnostics",
  "mclone-mesh",
  "mclone-render-color",
+ "mclone-season",
  "mclone-ui",
  "naga",
  "pollster",
@@ -1849,6 +1851,7 @@ dependencies = [
  "mclone-protocol",
  "mclone-render",
  "mclone-render-session",
+ "mclone-season",
  "mclone-server",
  "mclone-terrain-view",
  "mclone-ui",
@@ -1949,6 +1952,7 @@ dependencies = [
  "mclone-diagnostics",
  "mclone-input",
  "mclone-protocol",
+ "mclone-season",
 ]
 
 [[package]]

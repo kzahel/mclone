@@ -127,6 +127,7 @@ const SCENE_HOST_FIELDS: &[&str] = &[
     "storage_profile_ui",
     "initial_alignment_mode",
     "render_options",
+    "season_preview",
     "player_collision_box_visible",
     "crosshair_visible",
     "travel_assist_mode",
@@ -146,6 +147,7 @@ const SCENE_HOST_FIELDS: &[&str] = &[
     "sky",
     "screen_effects",
     "terrain_view",
+    "terrain_horizon_diagnostic",
     "terrain_vegetation_executor_factory",
     "underwater_effects",
     "last_underwater_update",
@@ -192,7 +194,7 @@ fn host_has_one_active_and_one_optional_concrete_drawable_slot() {
     assert_eq!(slot_fields, DRAWABLE_WORLD_SLOT_FIELDS);
     assert_eq!(slot_fields.len(), 25);
     assert_eq!(host_fields, SCENE_HOST_FIELDS);
-    assert_eq!(host_fields.len(), 96);
+    assert_eq!(host_fields.len(), 98);
     assert_eq!(host.matches("active_world: DrawableWorldSlot").count(), 1);
     assert_eq!(
         host.matches("standby_world: Option<DrawableWorldSlot>")

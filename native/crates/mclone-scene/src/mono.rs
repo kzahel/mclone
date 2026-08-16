@@ -1969,9 +1969,8 @@ impl McloneSceneHost {
         )?;
         self.sync_player_lifecycle_ui();
 
-        let sky_clear_color = self.sky_clear_color();
-        let time_of_day = self.time_of_day();
-        let sun_angle = self.sun_angle();
+        let sky_state = self.solar_render_state();
+        let sky_clear_color = sky_state.clear_color();
         let actor_instances = self.current_actor_instances();
         let prepared_records = self.active_world.draw.prepare_render_records();
         let uniform_frame = self.next_per_view_uniform_frame();
@@ -1982,7 +1981,7 @@ impl McloneSceneHost {
             let view_index = PresentationViewIndex::new(index as u32);
             let view_slot = PerViewSlot::for_view(view_index).in_uniform_frame(uniform_frame);
             let render_options = render_options_with_actor_grass_interactors(
-                self.effective_render_options(view.render_view.camera_position),
+                self.effective_render_options(view.render_view.camera_position, sky_state),
                 &actor_instances,
             );
             let underwater_overlay = self.mono_underwater_overlay(view.render_view);
@@ -2026,8 +2025,7 @@ impl McloneSceneHost {
                     &actor_instances,
                     underwater_overlay,
                     sky_clear_color,
-                    time_of_day,
-                    sun_angle,
+                    sky_state,
                     render_options,
                     world_gui,
                     |_| GuiDrawList::new(),
@@ -2283,10 +2281,9 @@ impl McloneSceneHost {
         // Frame-input assembly reuses the shared accessors. The shared
         // `render_full_frame_for_view*` entry applies sky-darken and underwater
         // fog internally, so pass the base effective options plus the overlay.
-        let render_options = self.effective_render_options(center_position);
-        let sky_clear_color = self.sky_clear_color();
-        let time_of_day = self.time_of_day();
-        let sun_angle = self.sun_angle();
+        let sky_state = self.solar_render_state();
+        let render_options = self.effective_render_options(center_position, sky_state);
+        let sky_clear_color = sky_state.clear_color();
         let underwater_overlay = self.mono_underwater_overlay(render_view);
         let actor_instances = self.current_actor_instances();
         let preview_actor_instances = self.current_preview_actor_instances();
@@ -2345,13 +2342,9 @@ impl McloneSceneHost {
                     .standby_world
                     .as_mut()
                     .expect("visible preview retains its source slot");
-                let preview_time = standby
-                    .runtime
-                    .as_ref()
-                    .map_or(0.0, |runtime| runtime.time_of_day());
                 let preview_options = self
                     .render_options
-                    .with_sky_darken(mclone_render::light_texture::sky_darken(preview_time))
+                    .with_sky_darken(sky_state.sky_darken())
                     .with_grass_time_seconds(render_options.grass_time_seconds)
                     .with_grass_interactors(
                         preview_actor_instances
@@ -2437,8 +2430,7 @@ impl McloneSceneHost {
                     &actor_instances,
                     underwater_overlay,
                     sky_clear_color,
-                    time_of_day,
-                    sun_angle,
+                    sky_state,
                     render_options,
                     world_gui,
                     |_| GuiDrawList::new(),
@@ -2470,8 +2462,7 @@ impl McloneSceneHost {
                         &actor_instances,
                         underwater_overlay,
                         sky_clear_color,
-                        time_of_day,
-                        sun_angle,
+                        sky_state,
                         render_options,
                         world_gui,
                         |_| GuiDrawList::new(),
@@ -2497,8 +2488,7 @@ impl McloneSceneHost {
                         &actor_instances,
                         underwater_overlay,
                         sky_clear_color,
-                        time_of_day,
-                        sun_angle,
+                        sky_state,
                         render_options,
                         world_gui,
                         |_| GuiDrawList::new(),
@@ -2903,7 +2893,10 @@ impl McloneSceneHost {
                 .camera
                 .frame_state(&self.active_world.interaction);
             let snapshot = self.active_world.camera.snapshot();
-            let render_options = self.effective_render_options(glam_vec3_from_vec3d(snapshot.eye));
+            let render_options = self.effective_render_options(
+                glam_vec3_from_vec3d(snapshot.eye),
+                self.solar_render_state(),
+            );
             let topology = runtime.client().topology();
             let topology_actor = (!topology.is_unbounded())
                 .then(|| {

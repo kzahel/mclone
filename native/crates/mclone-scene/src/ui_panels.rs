@@ -755,6 +755,7 @@ impl McloneSceneHost {
             terrain_presentation: self.terrain_presentation_preference(),
             terrain_presentation_available: self.terrain_presentation_supported(),
             fog: self.fog_settings,
+            season_preview: self.season_preview,
             force_fullbright: self.render_options.force_fullbright,
             player_collision_box_visible: self.player_collision_box_visible,
             first_person_player_visible: self.active_world.camera.first_person_player_visible(),
@@ -919,6 +920,46 @@ impl McloneSceneHost {
                 self.render_options.color_profile.label()
             ),
         ];
+        if let Some(solar) = self.solar_frame_diagnostics() {
+            lines.push(format!(
+                "SOLAR {} LAT {} W{:+.3} E{:+.3}",
+                solar.policy.label(),
+                solar.settings.latitude_source.label(),
+                solar.world_latitude.degrees,
+                solar.effective_latitude_degrees,
+            ));
+            lines.push(format!(
+                "SOLAR PHASE {} ORBIT {:.4} DECL {:+.3}",
+                solar
+                    .world_latitude
+                    .phase
+                    .map_or_else(|| "-".to_owned(), |phase| format!("{phase:.6}")),
+                solar.settings.orbital_phase.turns(),
+                solar.sample.declination_degrees,
+            ));
+            lines.push(format!(
+                "SOLAR TIME {} {:.3} ELEV {:+.3}",
+                solar.settings.solar_time_source.label(),
+                solar.solar_time_fraction * 24.0,
+                solar.sample.elevation_degrees,
+            ));
+            lines.push(format!(
+                "SOLAR DAY {:.3} TWILIGHT {:.3} {}",
+                solar.sample.day_length_fraction * 24.0,
+                solar.sample.twilight_factor,
+                solar.sample.polar_state.label(),
+            ));
+        } else {
+            lines.push(format!(
+                "SOLAR PREVIEW {} PROFILE {}",
+                if self.season_preview.enabled {
+                    "UNSUPPORTED"
+                } else {
+                    "OFF"
+                },
+                self.active_world.scene.world_generation_profile.label(),
+            ));
+        }
         #[cfg(not(target_arch = "wasm32"))]
         if let Some(preview) = self.embedded_world_preview_snapshot() {
             let standby = self.warm_world_standby_snapshot();

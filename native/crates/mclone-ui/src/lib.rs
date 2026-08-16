@@ -1,5 +1,10 @@
 #![forbid(unsafe_code)]
 
+pub use mclone_season::{
+    LatitudeSource, ORBITAL_PHASE_STEPS, OrbitalPhase, PREVIEW_SOLAR_TIME_MINUTES_PER_DAY,
+    PreviewLatitude, PreviewSolarTime, SeasonPreviewSettings, SolarTimeSource,
+};
+
 use mclone_input::{
     ControllerLayoutFamily, FLAT_HOTBAR_SLOT_COUNT, GamepadBindings, GamepadControl,
     InputBindingAction, InputPromptKind, ResolvedFlatInput, TouchControl, TouchControlsMode,
@@ -2030,6 +2035,7 @@ pub enum GameUiAction {
     SetGrassDetail(GameGrassDetail),
     SetTerrainPresentation(GameTerrainPresentation),
     SetFogSettings(GameFogSettings),
+    SetSeasonPreview(SeasonPreviewSettings),
     ToggleFullbright,
     TogglePlayerCollisionBox,
     ToggleFirstPersonPlayer,
@@ -2605,6 +2611,7 @@ pub struct GameUiRenderState {
     pub terrain_presentation: GameTerrainPresentation,
     pub terrain_presentation_available: bool,
     pub fog: GameFogSettings,
+    pub season_preview: SeasonPreviewSettings,
     pub force_fullbright: bool,
     pub player_collision_box_visible: bool,
     pub first_person_player_visible: bool,
@@ -2655,6 +2662,7 @@ impl Default for GameUiRenderState {
             terrain_presentation: GameTerrainPresentation::ExactOnly,
             terrain_presentation_available: true,
             fog: GameFogSettings::default(),
+            season_preview: SeasonPreviewSettings::default(),
             force_fullbright: false,
             player_collision_box_visible: false,
             first_person_player_visible: false,

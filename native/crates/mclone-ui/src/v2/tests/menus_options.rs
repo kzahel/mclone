@@ -1014,6 +1014,116 @@ fn options_debug_and_display_category_rows_emit_expected_actions() {
 }
 
 #[test]
+fn seasonal_debug_rows_share_typed_state_and_gate_manual_controls() {
+    let screen = UiScreenId::OptionsCategory {
+        parent: GameOptionsParent::Pause,
+        category: GameOptionsCategory::Debug,
+    };
+    let mut surface = UiSurface::new();
+    surface.set_screen(Some(screen));
+    surface.set_scale(GuiScale::from_pixels(960, 540));
+    surface.set_render_state(GameUiRenderState::default());
+
+    assert!(
+        surface
+            .layout()
+            .widget(UI_V2_OPTIONS_SEASON_PREVIEW)
+            .unwrap()
+            .enabled
+    );
+    for id in [
+        UI_V2_OPTIONS_SEASON_ORBITAL_PHASE,
+        UI_V2_OPTIONS_SEASON_LATITUDE_SOURCE,
+        UI_V2_OPTIONS_SEASON_LATITUDE,
+        UI_V2_OPTIONS_SEASON_SOLAR_TIME_SOURCE,
+        UI_V2_OPTIONS_SEASON_SOLAR_TIME,
+    ] {
+        assert!(!surface.layout().widget(id).unwrap().enabled);
+    }
+
+    let mut settings = crate::SeasonPreviewSettings {
+        enabled: true,
+        ..crate::SeasonPreviewSettings::default()
+    };
+    surface.set_render_state(GameUiRenderState {
+        season_preview: settings,
+        ..GameUiRenderState::default()
+    });
+    assert!(
+        surface
+            .layout()
+            .widget(UI_V2_OPTIONS_SEASON_ORBITAL_PHASE)
+            .unwrap()
+            .enabled
+    );
+    assert!(
+        surface
+            .layout()
+            .widget(UI_V2_OPTIONS_SEASON_LATITUDE_SOURCE)
+            .unwrap()
+            .enabled
+    );
+    assert!(
+        !surface
+            .layout()
+            .widget(UI_V2_OPTIONS_SEASON_LATITUDE)
+            .unwrap()
+            .enabled
+    );
+    assert!(
+        surface
+            .layout()
+            .widget(UI_V2_OPTIONS_SEASON_SOLAR_TIME_SOURCE)
+            .unwrap()
+            .enabled
+    );
+    assert!(
+        !surface
+            .layout()
+            .widget(UI_V2_OPTIONS_SEASON_SOLAR_TIME)
+            .unwrap()
+            .enabled
+    );
+
+    settings.latitude_source = crate::LatitudeSource::Manual;
+    settings.solar_time_source = crate::SolarTimeSource::Manual;
+    surface.set_render_state(GameUiRenderState {
+        season_preview: settings,
+        ..GameUiRenderState::default()
+    });
+    for (id, expected) in [
+        (
+            UI_V2_OPTIONS_SEASON_ORBITAL_PHASE,
+            GameUiAction::SetSeasonPreview(crate::SeasonPreviewSettings {
+                orbital_phase: crate::OrbitalPhase::SOUTHWARD_EQUINOX,
+                ..settings
+            }),
+        ),
+        (
+            UI_V2_OPTIONS_SEASON_LATITUDE,
+            GameUiAction::SetSeasonPreview(crate::SeasonPreviewSettings {
+                manual_latitude: crate::PreviewLatitude::EQUATOR,
+                ..settings
+            }),
+        ),
+        (
+            UI_V2_OPTIONS_SEASON_SOLAR_TIME,
+            GameUiAction::SetSeasonPreview(crate::SeasonPreviewSettings {
+                manual_solar_time: crate::PreviewSolarTime::NOON,
+                ..settings
+            }),
+        ),
+    ] {
+        let rect = surface.layout().widget(id).unwrap().rect;
+        assert!(surface.pointer_down(point_in(rect), surface.render_state));
+        assert_eq!(
+            surface.pointer_up(point_in(rect), surface.render_state).1,
+            Some(expected)
+        );
+    }
+}
+
+#[test]
 fn server_settings_buttons_emit_expected_actions_from_committed_rects() {
     let mut surface = UiSurface::new();
     surface.set_screen(Some(UiScreenId::ServerSettings {

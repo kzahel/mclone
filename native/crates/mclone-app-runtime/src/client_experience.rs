@@ -5,6 +5,7 @@ use crate::client_session_policy::{
     ClientSessionActionContext, ClientSessionEffects, client_session_effects_for_action,
 };
 use mclone_input::TouchControlsMode;
+use mclone_season::SeasonPreviewSettings;
 use mclone_ui::{
     DebugActorTool, GameAuxiliarySplitMode, GameCollisionMode, GameFogSettings,
     GameFramePacingMode, GameGrassDetail, GameLeafDetail, GameLocalPlayGuestInput,
@@ -160,6 +161,7 @@ impl ClientExperienceController {
             | GameUiAction::SetGrassDetail(_)
             | GameUiAction::SetTerrainPresentation(_)
             | GameUiAction::SetFogSettings(_)
+            | GameUiAction::SetSeasonPreview(_)
             | GameUiAction::ToggleFullbright
             | GameUiAction::TogglePlayerCollisionBox
             | GameUiAction::ToggleFirstPersonPlayer
@@ -801,6 +803,12 @@ impl ClientExperienceSettingsController {
                         self.state.fog,
                     ));
             }
+            GameUiAction::SetSeasonPreview(settings) => {
+                self.state.season_preview = settings;
+                effects
+                    .setting_effects
+                    .push(ClientExperienceSettingEffect::SetSeasonPreview(settings));
+            }
             GameUiAction::ToggleFullbright => {
                 self.state.force_fullbright = !self.state.force_fullbright;
                 effects
@@ -1295,6 +1303,7 @@ pub struct ClientExperienceSettingsState {
     pub grass_detail: GameGrassDetail,
     pub terrain_presentation: GameTerrainPresentation,
     pub fog: GameFogSettings,
+    pub season_preview: SeasonPreviewSettings,
     pub force_fullbright: bool,
     pub player_collision_box_visible: bool,
     pub first_person_player_visible: bool,
@@ -1340,6 +1349,7 @@ impl From<GameUiRenderState> for ClientExperienceSettingsState {
             grass_detail: state.grass_detail,
             terrain_presentation: state.terrain_presentation,
             fog: state.fog.normalized(),
+            season_preview: state.season_preview,
             force_fullbright: state.force_fullbright,
             player_collision_box_visible: state.player_collision_box_visible,
             first_person_player_visible: state.first_person_player_visible,
@@ -1386,6 +1396,7 @@ impl ClientExperienceSettingsState {
         state.grass_detail = self.grass_detail;
         state.terrain_presentation = self.terrain_presentation;
         state.fog = self.fog.normalized();
+        state.season_preview = self.season_preview;
         state.force_fullbright = self.force_fullbright;
         state.player_collision_box_visible = self.player_collision_box_visible;
         state.first_person_player_visible = self.first_person_player_visible;
@@ -1595,6 +1606,7 @@ pub enum ClientExperienceSettingEffect {
     SetGrassDetail(GameGrassDetail),
     SetTerrainPresentation(GameTerrainPresentation),
     SetFogSettings(GameFogSettings),
+    SetSeasonPreview(SeasonPreviewSettings),
     SetFullbright(bool),
     SetPlayerCollisionBoxVisible(bool),
     SetFirstPersonPlayerVisible(bool),
@@ -1689,6 +1701,7 @@ pub enum ClientExperienceActionKind {
     SetGrassDetail,
     SetTerrainPresentation,
     SetFogSettings,
+    SetSeasonPreview,
     ToggleFullbright,
     TogglePlayerCollisionBox,
     ToggleFirstPersonPlayer,
@@ -1779,6 +1792,7 @@ pub fn client_experience_action_kind(action: GameUiAction) -> ClientExperienceAc
             ClientExperienceActionKind::SetTerrainPresentation
         }
         GameUiAction::SetFogSettings(_) => ClientExperienceActionKind::SetFogSettings,
+        GameUiAction::SetSeasonPreview(_) => ClientExperienceActionKind::SetSeasonPreview,
         GameUiAction::ToggleFullbright => ClientExperienceActionKind::ToggleFullbright,
         GameUiAction::TogglePlayerCollisionBox => {
             ClientExperienceActionKind::TogglePlayerCollisionBox
@@ -1858,6 +1872,7 @@ pub const fn classify_client_experience_action_kind(
         | ClientExperienceActionKind::SetGrassDetail
         | ClientExperienceActionKind::SetTerrainPresentation
         | ClientExperienceActionKind::SetFogSettings
+        | ClientExperienceActionKind::SetSeasonPreview
         | ClientExperienceActionKind::ToggleFullbright
         | ClientExperienceActionKind::TogglePlayerCollisionBox
         | ClientExperienceActionKind::ToggleFirstPersonPlayer
@@ -2134,6 +2149,7 @@ mod tests {
             GameUiAction::QuitToTitle,
             GameUiAction::ToggleSectionOcclusion,
             GameUiAction::SetLeafDetail(GameLeafDetail::Bushy),
+            GameUiAction::SetSeasonPreview(SeasonPreviewSettings::default()),
             GameUiAction::ToggleFullbright,
             GameUiAction::TogglePlayerCollisionBox,
             GameUiAction::ToggleFirstPersonPlayer,
@@ -2159,7 +2175,7 @@ mod tests {
             GameUiAction::Quit,
         ];
 
-        assert_eq!(samples.len(), 64);
+        assert_eq!(samples.len(), 65);
         for sample in samples {
             let _ = classify_game_ui_action(sample);
         }
@@ -2425,6 +2441,22 @@ mod tests {
         assert_eq!(
             effects.setting_effects,
             vec![ClientExperienceSettingEffect::SetFogSettings(expected_fog)]
+        );
+
+        let season_preview = SeasonPreviewSettings {
+            enabled: true,
+            ..SeasonPreviewSettings::default()
+        };
+        let effects = settings.apply_ui_action(
+            GameUiAction::SetSeasonPreview(season_preview),
+            ClientExperienceSettingsProfile::default(),
+        );
+        assert_eq!(settings.state().season_preview, season_preview);
+        assert_eq!(
+            effects.setting_effects,
+            vec![ClientExperienceSettingEffect::SetSeasonPreview(
+                season_preview
+            )]
         );
 
         let effects = settings.apply_ui_action(

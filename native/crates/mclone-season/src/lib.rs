@@ -30,6 +30,9 @@ pub const MCLONE_AXIAL_TILT_DEGREES: f64 = 27.0;
 /// Fixed-point resolution for client-local Debug orbital state.
 pub const ORBITAL_PHASE_STEPS: u16 = 10_000;
 
+pub const PREVIEW_LATITUDE_TENTHS_PER_DEGREE: i16 = 10;
+pub const PREVIEW_SOLAR_TIME_MINUTES_PER_DAY: u16 = 1_440;
+
 /// A normalized orbital turn stored without accumulating floating-point drift.
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 pub struct OrbitalPhase(u16);
@@ -59,6 +62,135 @@ impl OrbitalPhase {
 
     pub fn turns(self) -> f64 {
         f64::from(self.0) / f64::from(ORBITAL_PHASE_STEPS)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+pub enum LatitudeSource {
+    #[default]
+    World,
+    Manual,
+}
+
+impl LatitudeSource {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::World => "World",
+            Self::Manual => "Manual",
+        }
+    }
+
+    pub const fn next(self) -> Self {
+        match self {
+            Self::World => Self::Manual,
+            Self::Manual => Self::World,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+pub enum SolarTimeSource {
+    #[default]
+    WorldClock,
+    Manual,
+}
+
+impl SolarTimeSource {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::WorldClock => "World Clock",
+            Self::Manual => "Manual",
+        }
+    }
+
+    pub const fn next(self) -> Self {
+        match self {
+            Self::WorldClock => Self::Manual,
+            Self::Manual => Self::WorldClock,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+pub struct PreviewLatitude(i16);
+
+impl PreviewLatitude {
+    pub const EQUATOR: Self = Self(0);
+
+    pub const fn from_tenths_clamped(tenths: i16) -> Self {
+        Self(if tenths < -900 {
+            -900
+        } else if tenths > 900 {
+            900
+        } else {
+            tenths
+        })
+    }
+
+    pub fn from_degrees_clamped(degrees: f64) -> Self {
+        let degrees = if degrees.is_finite() { degrees } else { 0.0 };
+        Self::from_tenths_clamped((degrees * 10.0).round().clamp(-900.0, 900.0) as i16)
+    }
+
+    pub const fn tenths(self) -> i16 {
+        self.0
+    }
+
+    pub fn degrees(self) -> f64 {
+        f64::from(self.0) / f64::from(PREVIEW_LATITUDE_TENTHS_PER_DEGREE)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+pub struct PreviewSolarTime(u16);
+
+impl PreviewSolarTime {
+    pub const MIDNIGHT: Self = Self(0);
+    pub const NOON: Self = Self(PREVIEW_SOLAR_TIME_MINUTES_PER_DAY / 2);
+
+    pub const fn from_minutes_wrapped(minutes: u16) -> Self {
+        Self(minutes % PREVIEW_SOLAR_TIME_MINUTES_PER_DAY)
+    }
+
+    pub fn from_hours_wrapped(hours: f64) -> Self {
+        let hours = if hours.is_finite() { hours } else { 0.0 };
+        let minutes = (hours.rem_euclid(24.0) * 60.0).round() as u16;
+        Self::from_minutes_wrapped(minutes)
+    }
+
+    pub const fn minutes(self) -> u16 {
+        self.0
+    }
+
+    pub fn hours(self) -> f64 {
+        f64::from(self.0) / 60.0
+    }
+
+    pub fn fraction(self) -> f64 {
+        f64::from(self.0) / f64::from(PREVIEW_SOLAR_TIME_MINUTES_PER_DAY)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SeasonPreviewSettings {
+    pub enabled: bool,
+    pub orbital_phase: OrbitalPhase,
+    pub latitude_source: LatitudeSource,
+    pub manual_latitude: PreviewLatitude,
+    pub solar_time_source: SolarTimeSource,
+    pub manual_solar_time: PreviewSolarTime,
+}
+
+impl Default for SeasonPreviewSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            orbital_phase: OrbitalPhase::NORTHWARD_EQUINOX,
+            latitude_source: LatitudeSource::World,
+            manual_latitude: PreviewLatitude::EQUATOR,
+            solar_time_source: SolarTimeSource::WorldClock,
+            manual_solar_time: PreviewSolarTime::NOON,
+        }
     }
 }
 
@@ -167,6 +299,16 @@ pub enum PolarState {
     PolarNight,
 }
 
+impl PolarState {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Normal => "normal",
+            Self::PolarDay => "polar-day",
+            Self::PolarNight => "polar-night",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SolarInput {
     pub orbital_phase: OrbitalPhase,
@@ -188,6 +330,19 @@ pub struct SolarSample {
     pub twilight_factor: f32,
     pub day_length_fraction: f32,
     pub polar_state: PolarState,
+}
+
+/// Exact client-local inputs and output used to reproduce one seasonal frame.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SolarFrameDiagnostics {
+    pub settings: SeasonPreviewSettings,
+    pub policy: SolarCoordinatePolicy,
+    pub observer_world_x: f64,
+    pub observer_world_z: f64,
+    pub world_latitude: LatitudeSample,
+    pub effective_latitude_degrees: f64,
+    pub solar_time_fraction: f64,
+    pub sample: SolarSample,
 }
 
 impl SolarSample {
@@ -409,6 +564,44 @@ mod tests {
         for (ticks, hours) in [(0, 6.0), (6_000, 12.0), (12_000, 18.0), (18_000, 0.0)] {
             close(solar_time_hours_from_day_time(ticks), hours, 1.0e-12);
         }
+    }
+
+    #[test]
+    fn preview_settings_are_bounded_typed_and_reset_client_local() {
+        assert_eq!(
+            SeasonPreviewSettings::default(),
+            SeasonPreviewSettings {
+                enabled: false,
+                orbital_phase: OrbitalPhase::NORTHWARD_EQUINOX,
+                latitude_source: LatitudeSource::World,
+                manual_latitude: PreviewLatitude::EQUATOR,
+                solar_time_source: SolarTimeSource::WorldClock,
+                manual_solar_time: PreviewSolarTime::NOON,
+            }
+        );
+        assert_eq!(
+            PreviewLatitude::from_degrees_clamped(-200.0).degrees(),
+            -90.0
+        );
+        assert_eq!(PreviewLatitude::from_degrees_clamped(200.0).degrees(), 90.0);
+        assert_eq!(
+            PreviewLatitude::from_degrees_clamped(f64::NAN).degrees(),
+            0.0
+        );
+        assert_eq!(PreviewSolarTime::from_hours_wrapped(25.5).minutes(), 90);
+        assert_eq!(PreviewSolarTime::from_hours_wrapped(-1.0).minutes(), 1_380);
+    }
+
+    #[test]
+    fn mclone_policy_selection_distinguishes_plane_and_opt_in_cylinder() {
+        assert_eq!(
+            SolarCoordinatePolicy::mclone_for_topology(HorizontalTopology::UNBOUNDED),
+            SolarCoordinatePolicy::MCLONE_PLANE,
+        );
+        assert_eq!(
+            SolarCoordinatePolicy::mclone_for_topology(HorizontalTopology::cylinder_x(0, 384)),
+            SolarCoordinatePolicy::MCLONE_CYLINDER,
+        );
     }
 
     #[test]
