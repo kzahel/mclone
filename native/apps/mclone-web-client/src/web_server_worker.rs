@@ -1836,6 +1836,10 @@ fn parse_diagnostics(
         number_prop(value, "schedulerPlayerPromotionMaxActive").unwrap_or(0.0) as usize;
     diagnostics
         .scheduler_metrics
+        .player_promotion_active_light_deferred =
+        number_prop(value, "schedulerPlayerPromotionActiveLightDeferred").unwrap_or(0.0) as usize;
+    diagnostics
+        .scheduler_metrics
         .player_promotion_active_light_scheduled_without_token = number_prop(
         value,
         "schedulerPlayerPromotionActiveLightScheduledWithoutToken",
@@ -1843,6 +1847,22 @@ fn parse_diagnostics(
     .unwrap_or(0.0) as usize;
     diagnostics.scheduler_metrics.light_demand_queued =
         number_prop(value, "schedulerLightDemandQueued").unwrap_or(0.0) as usize;
+    diagnostics.scheduler_metrics.light_restartable_contexts =
+        number_prop(value, "schedulerLightRestartableContexts").unwrap_or(0.0) as usize;
+    diagnostics
+        .scheduler_metrics
+        .light_restartable_context_bytes =
+        number_prop(value, "schedulerLightRestartableContextBytes").unwrap_or(0.0) as usize;
+    diagnostics.scheduler_metrics.light_deferred =
+        number_prop(value, "schedulerLightDeferred").unwrap_or(0.0) as usize;
+    diagnostics.scheduler_metrics.light_retries =
+        number_prop(value, "schedulerLightRetries").unwrap_or(0.0) as u64;
+    diagnostics.scheduler_metrics.light_repairs =
+        number_prop(value, "schedulerLightRepairs").unwrap_or(0.0) as u64;
+    diagnostics
+        .scheduler_metrics
+        .light_repairs_without_persistence_metadata =
+        number_prop(value, "schedulerLightRepairsWithoutPersistenceMetadata").unwrap_or(0.0) as u64;
     diagnostics.scheduler_metrics.light_scheduled_without_token =
         number_prop(value, "schedulerLightScheduledWithoutToken").unwrap_or(0.0) as usize;
     diagnostics
@@ -3929,6 +3949,13 @@ fn diagnostics_to_js(diagnostics: &ServerRunnerDiagnostics) -> Result<JsValue, S
     )?;
     set_number(
         &object,
+        "schedulerPlayerPromotionActiveLightDeferred",
+        diagnostics
+            .scheduler_metrics
+            .player_promotion_active_light_deferred as f64,
+    )?;
+    set_number(
+        &object,
         "schedulerPlayerPromotionActiveLightScheduledWithoutToken",
         diagnostics
             .scheduler_metrics
@@ -3938,6 +3965,40 @@ fn diagnostics_to_js(diagnostics: &ServerRunnerDiagnostics) -> Result<JsValue, S
         &object,
         "schedulerLightDemandQueued",
         diagnostics.scheduler_metrics.light_demand_queued as f64,
+    )?;
+    set_number(
+        &object,
+        "schedulerLightRestartableContexts",
+        diagnostics.scheduler_metrics.light_restartable_contexts as f64,
+    )?;
+    set_number(
+        &object,
+        "schedulerLightRestartableContextBytes",
+        diagnostics
+            .scheduler_metrics
+            .light_restartable_context_bytes as f64,
+    )?;
+    set_number(
+        &object,
+        "schedulerLightDeferred",
+        diagnostics.scheduler_metrics.light_deferred as f64,
+    )?;
+    set_number(
+        &object,
+        "schedulerLightRetries",
+        diagnostics.scheduler_metrics.light_retries as f64,
+    )?;
+    set_number(
+        &object,
+        "schedulerLightRepairs",
+        diagnostics.scheduler_metrics.light_repairs as f64,
+    )?;
+    set_number(
+        &object,
+        "schedulerLightRepairsWithoutPersistenceMetadata",
+        diagnostics
+            .scheduler_metrics
+            .light_repairs_without_persistence_metadata as f64,
     )?;
     set_number(
         &object,

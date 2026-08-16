@@ -82,11 +82,20 @@ repair without canonical tick metadata does not overwrite the earlier cache
 record. Retry, repair, deferred, context-count, and context-byte metrics are
 incremental.
 
-The next slice converts the native and headed Web repros into convergence
-gates, then re-runs the physical phone route without weakening the four-
-promotion or Light-memory bounds. The synthetic probe is a window-widening
-cross-platform state-machine control; the unchanged deployed phone build
-remains the proof that ordinary movement reaches this condition.
+Tactical 312 Slice 3 converts the native and headed Web repros into convergence
+gates. The delayed native route reaches 361/361 visible chunks with four
+retries and drained ownership. The real browser Worker route reaches 361/361
+server-ready and 289/289 exact coverage in 10.94 seconds, then holds identical
+coverage hashes for 60 seconds with all scheduler, delivery, and compile work
+drained. The ordinary zero-delay north/west/climb/north/reverse route also
+reaches exact coverage after 30 seconds.
+
+Obsolete cancellation retains context as dormant holder metadata, not required
+deferred work. Re-entry makes it eligible and queues a fresh token; dependency-
+resident dormant records do not inflate pending/deferred/orphan counts and are
+released with holder eviction. The next slice re-runs the established bounded-
+memory soak and the physical phone route without weakening the four-promotion
+or Light-memory bounds.
 
 This incident is separate from Tactical
 [`311`](../tactical/311-cross-platform-worker-liveness-and-replay.md): Worker

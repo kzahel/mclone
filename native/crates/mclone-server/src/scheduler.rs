@@ -2238,6 +2238,14 @@ impl ChunkScheduler {
                         .status_slot(ChunkStatus::Light)
                         .is_some_and(|slot| slot.step == ChunkStatusStep::Scheduled)
                     && holder.light_request_token().is_none()
+                    && !self
+                        .restartable_light_contexts
+                        .get(&holder.pos())
+                        .is_some_and(|context| {
+                            holder.published_snapshot.as_ref().is_some_and(|snapshot| {
+                                snapshot.revision == context.feature_revision
+                            })
+                        })
             })
             .count();
         let debug_light_admission_delayed_demands = self
@@ -3684,10 +3692,7 @@ impl ChunkScheduler {
                     repairs = repairs.saturating_add(1);
                 }
                 RequiredLightProgress::Deferred => {
-                    if self.deferred_light_contexts.insert(pos) {
-                        self.light_repairs = self.light_repairs.saturating_add(1);
-                        repairs = repairs.saturating_add(1);
-                    }
+                    self.deferred_light_contexts.insert(pos);
                 }
                 RequiredLightProgress::Prerequisite
                 | RequiredLightProgress::DemandQueued
@@ -4739,7 +4744,11 @@ impl ChunkScheduler {
             .get(&token.pos)
             .is_some_and(|context| context.feature_revision == token.feature_revision)
         {
-            self.deferred_light_contexts.insert(token.pos);
+            if self.initial_light_request_remains_required(token.pos) {
+                self.deferred_light_contexts.insert(token.pos);
+            } else {
+                self.deferred_light_contexts.remove(&token.pos);
+            }
         }
         self.light_demands_cancelled = self.light_demands_cancelled.saturating_add(1);
         true
@@ -6856,7 +6865,7 @@ mod tests {
                 .and_then(ChunkHolder::light_request_token),
             None
         );
-        assert_eq!(scheduler.metrics().light_deferred, 1);
+        assert_eq!(scheduler.metrics().light_deferred, 0);
         assert_eq!(scheduler.restartable_light_contexts.len(), 1);
 
         scheduler
@@ -7153,7 +7162,7 @@ mod tests {
             ChunkTicketKey::Chunk(pos),
         );
         scheduler.reconcile_ticketed_holders().unwrap();
-        assert_eq!(scheduler.metrics().light_deferred, 1);
+        assert_eq!(scheduler.metrics().light_deferred, 0);
 
         assert_eq!(scheduler.process_pending_unloads(1).unwrap(), 1);
         assert!(!scheduler.holders.contains_key(&pos));

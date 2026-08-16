@@ -1098,9 +1098,16 @@ pub struct RuntimePollDiagnostics {
     pub scheduler_player_promotion_active: usize,
     pub scheduler_player_promotion_max_active: usize,
     pub scheduler_player_promotion_cancelled_before_admission: u64,
+    pub scheduler_player_promotion_active_light_deferred: usize,
     pub scheduler_player_promotion_active_light_scheduled_without_token: usize,
     pub scheduler_light_demand_queued: usize,
+    pub scheduler_light_restartable_contexts: usize,
+    pub scheduler_light_restartable_context_bytes: usize,
+    pub scheduler_light_deferred: usize,
     pub scheduler_light_demands_cancelled: u64,
+    pub scheduler_light_retries: u64,
+    pub scheduler_light_repairs: u64,
+    pub scheduler_light_repairs_without_persistence_metadata: u64,
     pub scheduler_light_statuses_stale: u64,
     pub scheduler_light_scheduled_without_token: usize,
     pub scheduler_debug_light_admission_delay_ticks: u32,
@@ -3112,14 +3119,29 @@ impl SingleViewRuntime {
         diagnostics.scheduler_player_promotion_cancelled_before_admission = runner_diagnostics
             .scheduler_metrics
             .player_promotion_cancelled_before_admission;
+        diagnostics.scheduler_player_promotion_active_light_deferred = runner_diagnostics
+            .scheduler_metrics
+            .player_promotion_active_light_deferred;
         diagnostics.scheduler_player_promotion_active_light_scheduled_without_token =
             runner_diagnostics
                 .scheduler_metrics
                 .player_promotion_active_light_scheduled_without_token;
         diagnostics.scheduler_light_demand_queued =
             runner_diagnostics.scheduler_metrics.light_demand_queued;
+        diagnostics.scheduler_light_restartable_contexts = runner_diagnostics
+            .scheduler_metrics
+            .light_restartable_contexts;
+        diagnostics.scheduler_light_restartable_context_bytes = runner_diagnostics
+            .scheduler_metrics
+            .light_restartable_context_bytes;
+        diagnostics.scheduler_light_deferred = runner_diagnostics.scheduler_metrics.light_deferred;
         diagnostics.scheduler_light_demands_cancelled =
             runner_diagnostics.scheduler_metrics.light_demands_cancelled;
+        diagnostics.scheduler_light_retries = runner_diagnostics.scheduler_metrics.light_retries;
+        diagnostics.scheduler_light_repairs = runner_diagnostics.scheduler_metrics.light_repairs;
+        diagnostics.scheduler_light_repairs_without_persistence_metadata = runner_diagnostics
+            .scheduler_metrics
+            .light_repairs_without_persistence_metadata;
         diagnostics.scheduler_light_statuses_stale =
             runner_diagnostics.scheduler_metrics.light_statuses_stale;
         diagnostics.scheduler_light_scheduled_without_token = runner_diagnostics

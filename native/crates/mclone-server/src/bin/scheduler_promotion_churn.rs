@@ -2,9 +2,8 @@
 //!
 //! The shared scheduler delays initial-Light admission long enough to move
 //! interest away and back before the original demand enters either physical
-//! executor. The final stationary phase is a forward-progress assertion: it
-//! exits nonzero while the pre-fix Scheduled-without-token orphan survives and
-//! will pass once the shared repair converges.
+//! executor. The final stationary phase requires complete coverage and drained
+//! ownership; the pre-fix scheduler exits nonzero with four inert promotions.
 
 use std::time::{Duration, Instant};
 
@@ -111,7 +110,15 @@ fn run() -> Result<(), String> {
         || final_metrics.player_promotion_queued != 0
         || final_metrics.player_promotion_active != 0
         || final_metrics.pending_jobs != 0
+        || final_metrics.light_deferred != 0
+        || final_metrics.light_demand_queued != 0
+        || final_metrics.light_restartable_contexts != 0
+        || final_metrics.light_ticket_count != 0
+        || final_metrics.light_scheduled_without_token != 0
+        || final_metrics.player_promotion_active_light_token_without_owner != 0
         || scheduler.pending_publication_count() != 0
+        || scheduler.worldgen_mailbox_pending_count() != 0
+        || scheduler.light_status_mailbox_pending_count() != 0
     {
         return Err(format!(
             "stationary RD{RENDER_DISTANCE} view did not converge; active_orphans={} queued={} visible={}/{}",
@@ -165,6 +172,16 @@ fn print_report(
         "  \"reentered_active_scheduled_without_token\": {},",
         reentered.player_promotion_active_light_scheduled_without_token
     );
+    println!(
+        "  \"reentered_active_light_deferred\": {},",
+        reentered.player_promotion_active_light_deferred
+    );
+    println!(
+        "  \"reentered_active_light_demand_queued\": {},",
+        reentered.player_promotion_active_light_demand_queued
+    );
+    println!("  \"light_retries\": {},", final_metrics.light_retries);
+    println!("  \"light_repairs\": {},", final_metrics.light_repairs);
     println!("  \"final\": {{");
     println!(
         "    \"client_visible_chunks\": {},",
@@ -182,6 +199,31 @@ fn print_report(
     println!(
         "    \"active_scheduled_without_token\": {},",
         final_metrics.player_promotion_active_light_scheduled_without_token
+    );
+    println!(
+        "    \"active_token_without_owner\": {},",
+        final_metrics.player_promotion_active_light_token_without_owner
+    );
+    println!("    \"light_deferred\": {},", final_metrics.light_deferred);
+    println!(
+        "    \"light_demand_queued\": {},",
+        final_metrics.light_demand_queued
+    );
+    println!(
+        "    \"light_restartable_contexts\": {},",
+        final_metrics.light_restartable_contexts
+    );
+    println!(
+        "    \"light_restartable_context_bytes\": {},",
+        final_metrics.light_restartable_context_bytes
+    );
+    println!(
+        "    \"light_ticket_count\": {},",
+        final_metrics.light_ticket_count
+    );
+    println!(
+        "    \"light_scheduled_without_token\": {},",
+        final_metrics.light_scheduled_without_token
     );
     println!("    \"pending_jobs\": {},", final_metrics.pending_jobs);
     println!("    \"pending_publications\": {pending_publications},");

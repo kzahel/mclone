@@ -1,7 +1,7 @@
 # Tactical 312: Chunk Promotion Forward Progress Under View Churn
 
-Status: in progress 2026-08-16; Slices 0-2 reproduction, restartable
-Feature-to-Light ownership, and shared forward-progress repair complete
+Status: in progress 2026-08-16; Slices 0-3 implementation and native/headed-
+Web convergence gates complete; physical Android and memory closeout pending
 
 Topic: `chunk-lighting-admission-and-backpressure`
 
@@ -353,6 +353,62 @@ bounded Player-promotion slots becoming productive in one reconciliation.
 All 45 scheduler tests pass. Slice 3 converts the deterministic native and Web
 reproduction probes into bounded convergence gates and carries the normalized
 metrics through their reports.
+
+## Slice 3 Execution Evidence
+
+The native reproduction is now a positive convergence gate. With the same RD8
+view, four-promotion cap, and 80-poll admission delay, re-entry immediately
+owned four queued Light demands rather than four inert Scheduled slots. It
+completed 361/361 client-visible chunks in 1,011 settle polls with four retries
+and zero active/queued promotions, deferred work, contexts, Light tickets,
+scheduled-without-context holders, jobs, publications, or mailbox work. The
+receipt is
+[`/tmp/mclone-native-promotion-churn-fixed.json`](/tmp/mclone-native-promotion-churn-fixed.json).
+
+The normalized diagnostics now cross the app-runtime and browser Worker
+boundaries: active deferred blockers, restart-context count/bytes, deferred
+count, retry/repair totals, and incomplete-metadata repair count appear beside
+the established promotion and physical mailbox metrics.
+
+The real headed Chrome/WebGPU gate uses the integrated-server Worker plus
+worldgen and Light actors. After four delayed promotions were cancelled by the
+far-and-return cycle, re-entry reported executable demand ownership and nine
+retries. It converged in 10.94 seconds, then held unchanged loaded/exact hashes
+for 60.00 seconds:
+
+```text
+requested server-ready coverage: 361 / 361
+exact drawable coverage:         289 / 289
+promotion queued / active:         0 / 0
+Light deferred / demand:           0 / 0
+restart contexts / tickets:        0 / 0
+scheduled without context:         0
+jobs / publications:               0 / 0
+worldgen / Light mailbox:           0 / 0
+delivery / compile target work:     0 / 0
+```
+
+The report and inspected mobile-size capture are
+[`/tmp/mclone-native-web-promotion-churn.json`](/tmp/mclone-native-web-promotion-churn.json)
+and
+[`/tmp/mclone-native-web-promotion-churn-canvas.png`](/tmp/mclone-native-web-promotion-churn-canvas.png).
+There were no page errors, and both browser Workers shut down cleanly.
+
+The ordinary zero-delay cardinal route also passed after changing render
+distance through the native UI, flying north three chunks, west three, climbing
+128 blocks, flying north three more, reversing two, and waiting 30 seconds.
+It ended at 361/361 server-ready and 289/289 exact coverage with zero pending,
+deferred, demand, orphan, mailbox, publication, delivery, or compile work. Its
+report and inspected capture are
+[`/tmp/mclone-native-web-cardinal-view-replay.json`](/tmp/mclone-native-web-cardinal-view-replay.json)
+and
+[`/tmp/mclone-native-web-cardinal-view-replay-canvas.png`](/tmp/mclone-native-web-cardinal-view-replay-canvas.png).
+
+Cancelled chunks that remain dependency-resident may retain a tiny dormant
+restart record (seven records / 336 bytes in that route). They are not required
+deferred jobs, do not contribute to pending work or scheduled-without-context
+counts, and remain bounded by holder eviction. Slice 4 must confirm that bound
+under the existing movement soak and physical Android route.
 
 ## Why Existing Tests Passed
 

@@ -5536,6 +5536,11 @@ impl WebSceneHost {
                 )?;
                 report_set_number(
                     &object,
+                    "schedulerPlayerPromotionActiveLightDeferred",
+                    diagnostics.scheduler_player_promotion_active_light_deferred as f64,
+                )?;
+                report_set_number(
+                    &object,
                     "schedulerPlayerPromotionActiveLightScheduledWithoutToken",
                     diagnostics.scheduler_player_promotion_active_light_scheduled_without_token
                         as f64,
@@ -5544,6 +5549,36 @@ impl WebSceneHost {
                     &object,
                     "schedulerLightDemandQueued",
                     diagnostics.scheduler_light_demand_queued as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "schedulerLightRestartableContexts",
+                    diagnostics.scheduler_light_restartable_contexts as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "schedulerLightRestartableContextBytes",
+                    diagnostics.scheduler_light_restartable_context_bytes as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "schedulerLightDeferred",
+                    diagnostics.scheduler_light_deferred as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "schedulerLightRetries",
+                    diagnostics.scheduler_light_retries as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "schedulerLightRepairs",
+                    diagnostics.scheduler_light_repairs as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "schedulerLightRepairsWithoutPersistenceMetadata",
+                    diagnostics.scheduler_light_repairs_without_persistence_metadata as f64,
                 )?;
                 report_set_number(
                     &object,

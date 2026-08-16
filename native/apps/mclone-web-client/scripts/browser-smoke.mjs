@@ -7626,7 +7626,15 @@ async function runCardinalViewReplayProbe(page, canvas, targetRenderDistance) {
     && state.exactCoverageMissingColumnCount === 0
     && state.schedulerPlayerPromotionQueued === 0
     && state.schedulerPlayerPromotionActive === 0
+    && state.schedulerPlayerPromotionActiveLightDeferred === 0
     && state.schedulerPlayerPromotionActiveLightScheduledWithoutToken === 0
+    && state.schedulerLightDeferred === 0
+    && state.schedulerLightDemandQueued === 0
+    && state.schedulerLightScheduledWithoutToken === 0
+    && state.pendingJobs === 0
+    && state.pendingPublications === 0
+    && state.worldgenMailboxPendingJobs === 0
+    && state.lightStatusMailboxPendingStatuses === 0
     && state.sharedViewSettled === true
     && deliveryChainComplete(state);
   let eventual = normalWait;
@@ -7645,7 +7653,15 @@ async function runCardinalViewReplayProbe(page, canvas, targetRenderDistance) {
           && Number(state.exactCoverageMissingColumnCount) === 0
           && Number(state.schedulerPlayerPromotionQueued) === 0
           && Number(state.schedulerPlayerPromotionActive) === 0
+          && Number(state.schedulerPlayerPromotionActiveLightDeferred) === 0
           && Number(state.schedulerPlayerPromotionActiveLightScheduledWithoutToken) === 0
+          && Number(state.schedulerLightDeferred) === 0
+          && Number(state.schedulerLightDemandQueued) === 0
+          && Number(state.schedulerLightScheduledWithoutToken) === 0
+          && Number(state.runnerPendingJobs) === 0
+          && Number(state.runnerPendingPublications) === 0
+          && Number(state.worldgenMailboxPendingJobs) === 0
+          && Number(state.lightStatusMailboxPendingStatuses) === 0
           && state.sharedViewSettled === true
           && String(state.runnerLastError ?? "") === ""
           && Number(state.serverPlayerQueuedSnapshotUpdateCount)
@@ -7727,9 +7743,9 @@ async function runCardinalViewReplayProbe(page, canvas, targetRenderDistance) {
  * jump is confined to the explicit smoke harness, while all view commands,
  * cancellation, Worker work, and publication use the production topology.
  *
- * This is intentionally a pre-fix proof probe. `ok` means the known orphaned
- * promotion state was reproduced; Slice 1 will invert the acceptance contract
- * to require bounded convergence.
+ * `ok` requires the formerly orphaned promotions to retry and converge through
+ * the real integrated-server, worldgen Worker, Light Worker, delivery, compile,
+ * and drawable-coverage topology.
  *
  * @param {Page} page
  * @param {Locator} canvas
@@ -7783,34 +7799,94 @@ async function runPromotionChurnProbe(page, canvas, targetRenderDistance) {
       const state = globalThis.__mcloneWebApp?.state;
       return Number(state?.acceptedCenterX) === centerX
         && Number(state?.acceptedCenterZ) === centerZ
-        && Number(state?.schedulerPlayerPromotionActiveLightScheduledWithoutToken) > 0;
+        && Number(state?.schedulerLightRetries) > 0;
     },
     { centerX: origin.centerX, centerZ: origin.centerZ },
     { timeout: 30_000 },
   );
   const reentered = await captureRenderDistanceReplayState(page, "reentered");
   await setCardinalProbePitch(page, -1.25);
-  await page.waitForTimeout(30_000);
-  const stationary = await captureRenderDistanceReplayState(page, "stationary-30s");
-  await page.waitForTimeout(1_500);
+  const convergenceStartedAt = performance.now();
+  let convergenceWaitError = "";
+  await page.waitForFunction(
+    ({ targetRenderDistance, expectedLoadedChunkCount }) => {
+      const state = globalThis.__mcloneWebApp?.state;
+      return state?.acceptedViewAvailable === true
+        && Number(state.acceptedCenterX) === Number(state.centerX)
+        && Number(state.acceptedCenterZ) === Number(state.centerZ)
+        && Number(state.acceptedRenderDistance) === targetRenderDistance
+        && Number(state.requestedViewServerReadyChunkCount)
+          === Number(state.requestedViewExpectedChunkCount)
+        && Number(state.exactCoverageExpectedColumnCount) === expectedLoadedChunkCount
+        && Number(state.exactCoverageReadyColumnCount) === expectedLoadedChunkCount
+        && Number(state.exactCoverageMissingColumnCount) === 0
+        && Number(state.schedulerPlayerPromotionQueued) === 0
+        && Number(state.schedulerPlayerPromotionActive) === 0
+        && Number(state.schedulerPlayerPromotionActiveLightDeferred) === 0
+        && Number(state.schedulerPlayerPromotionActiveLightScheduledWithoutToken) === 0
+        && Number(state.schedulerLightDeferred) === 0
+        && Number(state.schedulerLightDemandQueued) === 0
+        && Number(state.schedulerLightRestartableContexts) === 0
+        && Number(state.schedulerLightScheduledWithoutToken) === 0
+        && Number(state.runnerPendingJobs) === 0
+        && Number(state.runnerPendingPublications) === 0
+        && Number(state.worldgenMailboxPendingJobs) === 0
+        && Number(state.lightStatusMailboxPendingStatuses) === 0
+        && Number(state.runnerUpdateQueueDepth) === 0
+        && Number(state.pendingCompileJobCount) === 0
+        && Number(state.renderInflightSectionCount) === 0
+        && Number(state.targetPendingRenderChunkCount) === 0
+        && state.sharedViewSettled === true
+        && String(state.runnerLastError ?? "") === "";
+    },
+    { targetRenderDistance, expectedLoadedChunkCount },
+    { timeout: 60_000 },
+  ).catch((error) => {
+    convergenceWaitError = error instanceof Error ? error.message : String(error);
+  });
+  const stationary = await captureRenderDistanceReplayState(
+    page,
+    convergenceWaitError === "" ? "converged" : "convergence-timeout",
+  );
+  const convergenceMillis = performance.now() - convergenceStartedAt;
+  await page.waitForTimeout(convergenceWaitError === "" ? 60_000 : 1_500);
   const stable = await captureRenderDistanceReplayState(page, "stability-window-end");
-  const deliveryIdle = stable.runnerLastError === ""
-    && stable.pendingPublications === 0
-    && stable.worldgenMailboxPendingJobs === 0
-    && stable.lightStatusMailboxPendingStatuses === 0;
-  const reproduced = prepared.schedulerDebugLightAdmissionDelayTicks === 80
+  /** @param {any} state */
+  const exactAndDrained = (state) => state.runnerLastError === ""
+    && state.acceptedCenterX === state.centerX
+    && state.acceptedCenterZ === state.centerZ
+    && state.acceptedRenderDistance === targetRenderDistance
+    && state.requestedViewServerReadyChunkCount
+      === state.requestedViewExpectedChunkCount
+    && state.exactCoverageExpectedColumnCount === expectedLoadedChunkCount
+    && state.exactCoverageReadyColumnCount === expectedLoadedChunkCount
+    && state.exactCoverageMissingColumnCount === 0
+    && state.schedulerPlayerPromotionQueued === 0
+    && state.schedulerPlayerPromotionActive === 0
+    && state.schedulerPlayerPromotionActiveLightDeferred === 0
+    && state.schedulerPlayerPromotionActiveLightScheduledWithoutToken === 0
+    && state.schedulerLightDeferred === 0
+    && state.schedulerLightDemandQueued === 0
+    && state.schedulerLightRestartableContexts === 0
+    && state.schedulerLightScheduledWithoutToken === 0
+    && state.pendingJobs === 0
+    && state.pendingPublications === 0
+    && state.worldgenMailboxPendingJobs === 0
+    && state.lightStatusMailboxPendingStatuses === 0
+    && state.updateQueueDepth === 0
+    && state.pendingCompileJobCount === 0
+    && state.renderInflightSectionCount === 0
+    && state.targetPendingRenderChunkCount === 0
+    && state.sharedViewSettled === true;
+  const converged = prepared.schedulerDebugLightAdmissionDelayTicks === 80
     && prepared.schedulerPlayerPromotionActive === 4
     && prepared.schedulerDebugLightAdmissionDelayedDemands >= 4
-    && reentered.schedulerPlayerPromotionActiveLightScheduledWithoutToken > 0
-    && stable.schedulerPlayerPromotionActiveLightScheduledWithoutToken > 0
-    && stable.schedulerPlayerPromotionQueued > 0
-    && stable.requestedViewServerReadyChunkCount
-      < stable.requestedViewExpectedChunkCount
-    && stable.exactCoverageReadyColumnCount < expectedLoadedChunkCount
-    && deliveryIdle
-    && stable.schedulerPlayerPromotionActiveLightScheduledWithoutToken
-      === stationary.schedulerPlayerPromotionActiveLightScheduledWithoutToken
-    && stable.schedulerPlayerPromotionQueued === stationary.schedulerPlayerPromotionQueued;
+    && reentered.schedulerLightRetries > 0
+    && exactAndDrained(stationary)
+    && exactAndDrained(stable)
+    && stable.loadedChunkSetHash === stationary.loadedChunkSetHash
+    && stable.snapshotUpdateCount === stationary.snapshotUpdateCount
+    && stable.unloadUpdateCount === stationary.unloadUpdateCount;
   await page.evaluate(
     ({ x, y, z }) => globalThis.__mcloneWebApp.teleportPlayer?.(x, y, z),
     { x: origin.x, y: origin.y + 96, z: origin.z },
@@ -7822,8 +7898,11 @@ async function runPromotionChurnProbe(page, canvas, targetRenderDistance) {
   );
   const overview = await captureRenderDistanceReplayState(page, "overview-framed");
   return {
-    ok: reproduced,
-    reproduced,
+    ok: converged,
+    converged,
+    convergenceWaitError,
+    convergenceMillis,
+    stabilityWindowMillis: stable.timeMs - stationary.timeMs,
     expectedLoadedChunkCount,
     jumpBlocks,
     before,
@@ -7907,10 +7986,24 @@ async function captureRenderDistanceReplayState(page, label) {
         Number(state.schedulerPlayerPromotionQueued) || 0,
       schedulerPlayerPromotionActive:
         Number(state.schedulerPlayerPromotionActive) || 0,
+      schedulerPlayerPromotionActiveLightDeferred:
+        Number(state.schedulerPlayerPromotionActiveLightDeferred) || 0,
       schedulerPlayerPromotionActiveLightScheduledWithoutToken:
         Number(state.schedulerPlayerPromotionActiveLightScheduledWithoutToken) || 0,
       schedulerLightDemandQueued:
         Number(state.schedulerLightDemandQueued) || 0,
+      schedulerLightRestartableContexts:
+        Number(state.schedulerLightRestartableContexts) || 0,
+      schedulerLightRestartableContextBytes:
+        Number(state.schedulerLightRestartableContextBytes) || 0,
+      schedulerLightDeferred:
+        Number(state.schedulerLightDeferred) || 0,
+      schedulerLightRetries:
+        Number(state.schedulerLightRetries) || 0,
+      schedulerLightRepairs:
+        Number(state.schedulerLightRepairs) || 0,
+      schedulerLightRepairsWithoutPersistenceMetadata:
+        Number(state.schedulerLightRepairsWithoutPersistenceMetadata) || 0,
       schedulerLightScheduledWithoutToken:
         Number(state.schedulerLightScheduledWithoutToken) || 0,
       schedulerDebugLightAdmissionDelayTicks:
