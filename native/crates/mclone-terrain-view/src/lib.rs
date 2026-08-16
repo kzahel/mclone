@@ -65,8 +65,11 @@ pub use composition::{
     BoundedRepresentationOwnershipSnapshot, BoundedRepresentationReadiness,
     BoundedRepresentationUnit, ExactPaintedCoverageSnapshot, TERRAIN_EXACT_COVERAGE_MASK_BYTES,
     TERRAIN_EXACT_COVERAGE_MAX_CHUNKS_PER_AXIS, TERRAIN_EXACT_COVERAGE_WORD_COUNT,
-    TERRAIN_EXACT_FRONTIER_TREE_INSET_BLOCKS, TerrainCompositionSourceIdentity,
-    TerrainExactCoverageMask, TerrainExactCoverageMode,
+    TERRAIN_EXACT_FRONTIER_TREE_INSET_BLOCKS, TERRAIN_EXACT_TRANSITION_BLOCKS_PER_TEXEL,
+    TERRAIN_EXACT_TRANSITION_DISTANCE_BLOCKS, TERRAIN_EXACT_TRANSITION_HALO_TEXELS,
+    TERRAIN_EXACT_TRANSITION_MAX_BYTES, TERRAIN_EXACT_TRANSITION_MAX_TEXELS_PER_AXIS,
+    TerrainCompositionSourceIdentity, TerrainExactCoverageMask, TerrainExactCoverageMode,
+    TerrainExactTransitionField, terrain_exact_player_connected_chunks,
 };
 pub use engine::{TerrainViewEngine, TerrainViewEngineConfig};
 #[cfg(not(target_arch = "wasm32"))]

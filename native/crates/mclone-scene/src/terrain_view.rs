@@ -12,7 +12,7 @@ use mclone_terrain_view::{
     TerrainHorizonPresentation, TerrainHorizonRenderTarget, TerrainPreparedExactFrame,
     TerrainPreviewCamera, TerrainPreviewMaterialAtlas, TerrainPreviewMaterialTable,
     TerrainPreviewView, TerrainVegetationExecutor, TerrainViewEngine, TerrainViewEngineConfig,
-    TerrainViewSourceIdentity,
+    TerrainViewSourceIdentity, terrain_exact_player_connected_chunks,
 };
 use mclone_worldgen::terrain_preview::{TerrainPreviewContentStage, TerrainPreviewProfile};
 
@@ -149,7 +149,8 @@ impl SceneTerrainViewState {
         topology: HorizontalTopology,
         focus: [f64; 3],
         ready_columns: BTreeSet<ChunkPos>,
-    ) -> Result<()> {
+    ) -> Result<BTreeSet<ChunkPos>> {
+        let mut source_changed = false;
         if self.world != world
             || self
                 .source
@@ -166,22 +167,34 @@ impl SceneTerrainViewState {
                 .map_err(anyhow::Error::msg)?;
             self.ready_columns.clear();
             self.coverage_generation = 1;
+            source_changed = true;
         }
-        if ready_columns != self.ready_columns {
-            self.ready_columns = ready_columns;
+        let focus_chunk =
+            ChunkPos::from_block_coords(floor_f64_to_i32(focus[0]), floor_f64_to_i32(focus[2]));
+        let admitted_columns = terrain_exact_player_connected_chunks(
+            &ready_columns,
+            &self.ready_columns,
+            focus_chunk,
+            topology,
+        );
+        let coverage_changed = admitted_columns != self.ready_columns;
+        if coverage_changed {
+            self.ready_columns = admitted_columns;
             self.coverage_generation = self.coverage_generation.saturating_add(1).max(1);
         }
-        let coverage = ExactPaintedCoverageSnapshot::new(
-            self.source
-                .composition_source()
-                .map_err(anyhow::Error::msg)?,
-            self.coverage_generation,
-            self.ready_columns.iter().copied(),
-        )
-        .map_err(anyhow::Error::msg)
-        .context("pack live exact-painted terrain coverage")?;
-        self.exact =
-            TerrainPreparedExactFrame::new(self.source, coverage).map_err(anyhow::Error::msg)?;
+        if source_changed || coverage_changed {
+            let coverage = ExactPaintedCoverageSnapshot::new(
+                self.source
+                    .composition_source()
+                    .map_err(anyhow::Error::msg)?,
+                self.coverage_generation,
+                self.ready_columns.iter().copied(),
+            )
+            .map_err(anyhow::Error::msg)
+            .context("pack live exact-painted terrain coverage")?;
+            self.exact = TerrainPreparedExactFrame::new(self.source, coverage)
+                .map_err(anyhow::Error::msg)?;
+        }
         self.anchor = [focus[0], focus[2]];
         self.engine.set_residency(
             floor_f64_to_i32(focus[0]),
@@ -194,7 +207,7 @@ impl SceneTerrainViewState {
             u32::try_from(self.ready_columns.len()).unwrap_or(u32::MAX);
         self.diagnostics.exact_center_ready =
             terrain_exact_center_ready(&self.ready_columns, focus);
-        Ok(())
+        Ok(self.ready_columns.clone())
     }
 
     pub(crate) const fn diagnostics(&self) -> SceneTerrainViewDiagnostics {
@@ -343,7 +356,11 @@ impl McloneSceneHost {
             .map_or(self.active_world.scene.world_topology, |runtime| {
                 runtime.client().topology()
             });
-        let ready_columns = self.active_world.draw.traversal_ready_columns_snapshot();
+        let ready_columns = self
+            .active_world
+            .traversal_ready_sections
+            .ready_columns()
+            .clone();
         if self.terrain_view.is_none() {
             let vegetation_executor = self
                 .terrain_vegetation_executor_factory
@@ -368,10 +385,14 @@ impl McloneSceneHost {
             .as_mut()
             .expect("composed terrain view was initialized")
             .set_diagnostic(self.terrain_horizon_diagnostic);
-        self.terrain_view
+        let admitted_columns = self
+            .terrain_view
             .as_mut()
             .expect("composed terrain view was initialized")
             .prepare(world, seed, topology, focus, ready_columns)?;
+        self.active_world
+            .draw
+            .set_traversal_ready_columns_with_context(&admitted_columns, false);
         Ok(true)
     }
 
@@ -391,6 +412,14 @@ impl McloneSceneHost {
     pub(crate) fn reset_terrain_view(&mut self) {
         if let Some(mut terrain_view) = self.terrain_view.take() {
             terrain_view.shutdown();
+            let ready_columns = self
+                .active_world
+                .traversal_ready_sections
+                .ready_columns()
+                .clone();
+            self.active_world
+                .draw
+                .set_traversal_ready_columns_with_context(&ready_columns, false);
         }
     }
 

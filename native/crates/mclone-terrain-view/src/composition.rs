@@ -1,6 +1,6 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
-use mclone_core::ChunkPos;
+use mclone_core::{ChunkPos, HorizontalTopology};
 use mclone_worldgen::terrain_preview::TerrainPreviewProfile;
 
 pub const TERRAIN_EXACT_COVERAGE_MAX_CHUNKS_PER_AXIS: u32 = 64;
@@ -10,6 +10,16 @@ pub const TERRAIN_EXACT_COVERAGE_WORD_COUNT: usize = (TERRAIN_EXACT_COVERAGE_MAX
     / u32::BITS as usize;
 pub const TERRAIN_EXACT_COVERAGE_MASK_BYTES: u64 =
     (TERRAIN_EXACT_COVERAGE_WORD_COUNT * size_of::<u32>()) as u64;
+pub const TERRAIN_EXACT_TRANSITION_BLOCKS_PER_TEXEL: u32 = 4;
+pub const TERRAIN_EXACT_TRANSITION_DISTANCE_BLOCKS: u32 = 32;
+pub const TERRAIN_EXACT_TRANSITION_HALO_TEXELS: u32 =
+    TERRAIN_EXACT_TRANSITION_DISTANCE_BLOCKS / TERRAIN_EXACT_TRANSITION_BLOCKS_PER_TEXEL;
+pub const TERRAIN_EXACT_TRANSITION_MAX_TEXELS_PER_AXIS: u32 =
+    TERRAIN_EXACT_COVERAGE_MAX_CHUNKS_PER_AXIS * 16 / TERRAIN_EXACT_TRANSITION_BLOCKS_PER_TEXEL
+        + TERRAIN_EXACT_TRANSITION_HALO_TEXELS * 2;
+pub const TERRAIN_EXACT_TRANSITION_MAX_BYTES: u64 = (TERRAIN_EXACT_TRANSITION_MAX_TEXELS_PER_AXIS
+    as u64)
+    * (TERRAIN_EXACT_TRANSITION_MAX_TEXELS_PER_AXIS as u64);
 /// Horizontal inset used when assigning whole procedural tree records to an
 /// exact-painted footprint.
 ///
@@ -17,6 +27,54 @@ pub const TERRAIN_EXACT_COVERAGE_MASK_BYTES: u64 =
 /// complete working bounds are covered by exact-painted chunks can therefore
 /// use the exact owner all the way to the chunk boundary.
 pub const TERRAIN_EXACT_FRONTIER_TREE_INSET_BLOCKS: f32 = 0.0;
+
+/// Select the exact-ready component that is safe to present around the focus.
+///
+/// A ready focus chunk starts a fresh four-connected component. While the
+/// focus itself is temporarily unready, the previously admitted component is
+/// retained from any still-ready member. Ready islands that have never joined
+/// the admitted component remain procedural.
+pub fn terrain_exact_player_connected_chunks(
+    ready: &BTreeSet<ChunkPos>,
+    previous: &BTreeSet<ChunkPos>,
+    focus: ChunkPos,
+    topology: HorizontalTopology,
+) -> BTreeSet<ChunkPos> {
+    let canonical_focus = topology.canonicalize_chunk(focus);
+    let seed = canonical_focus
+        .filter(|focus| ready.contains(focus))
+        .or_else(|| {
+            let focus = canonical_focus.unwrap_or(focus);
+            previous
+                .intersection(ready)
+                .min_by_key(|candidate| {
+                    let [dx, dz] = topology.shortest_chunk_displacement(focus, **candidate);
+                    (
+                        i128::from(dx) * i128::from(dx) + i128::from(dz) * i128::from(dz),
+                        candidate.x,
+                        candidate.z,
+                    )
+                })
+                .copied()
+        });
+    let Some(seed) = seed else {
+        return BTreeSet::new();
+    };
+
+    let mut admitted = BTreeSet::from([seed]);
+    let mut pending = VecDeque::from([seed]);
+    while let Some(chunk) = pending.pop_front() {
+        for (dx, dz) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
+            let Some(neighbor) = topology.neighbor_chunk(chunk, dx, dz) else {
+                continue;
+            };
+            if ready.contains(&neighbor) && admitted.insert(neighbor) {
+                pending.push_back(neighbor);
+            }
+        }
+    }
+    admitted
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct BoundedRepresentationBounds {
@@ -387,6 +445,203 @@ impl TerrainExactCoverageMask {
     }
 }
 
+/// CPU-prepared proximity to the admitted exact footprint.
+///
+/// The field is rebuilt only when exact coverage changes. One byte represents
+/// a 4x4-block cell; 255 is exact-adjacent and 0 is at least 32 blocks from
+/// exact terrain. The fixed worst-case footprint remains below 80 KiB.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TerrainExactTransitionField {
+    source: TerrainCompositionSourceIdentity,
+    generation: u64,
+    origin_block_x: i32,
+    origin_block_z: i32,
+    width: u32,
+    height: u32,
+    weights: Vec<u8>,
+}
+
+impl TerrainExactTransitionField {
+    pub fn from_coverage(snapshot: &ExactPaintedCoverageSnapshot) -> Result<Self, String> {
+        let mask = snapshot.packed_mask()?;
+        if mask.painted_chunks == 0 {
+            return Ok(Self {
+                source: snapshot.source(),
+                generation: snapshot.generation(),
+                origin_block_x: 0,
+                origin_block_z: 0,
+                width: 0,
+                height: 0,
+                weights: Vec::new(),
+            });
+        }
+
+        let halo_blocks = i64::from(TERRAIN_EXACT_TRANSITION_DISTANCE_BLOCKS);
+        let origin_block_x = i64::from(mask.origin_chunk_x)
+            .checked_mul(16)
+            .and_then(|origin| origin.checked_sub(halo_blocks))
+            .and_then(|origin| i32::try_from(origin).ok())
+            .ok_or_else(|| "exact transition X origin exceeds block coordinates".to_owned())?;
+        let origin_block_z = i64::from(mask.origin_chunk_z)
+            .checked_mul(16)
+            .and_then(|origin| origin.checked_sub(halo_blocks))
+            .and_then(|origin| i32::try_from(origin).ok())
+            .ok_or_else(|| "exact transition Z origin exceeds block coordinates".to_owned())?;
+        let width = mask
+            .width
+            .checked_mul(16 / TERRAIN_EXACT_TRANSITION_BLOCKS_PER_TEXEL)
+            .and_then(|width| width.checked_add(TERRAIN_EXACT_TRANSITION_HALO_TEXELS * 2))
+            .ok_or_else(|| "exact transition width overflowed".to_owned())?;
+        let height = mask
+            .height
+            .checked_mul(16 / TERRAIN_EXACT_TRANSITION_BLOCKS_PER_TEXEL)
+            .and_then(|height| height.checked_add(TERRAIN_EXACT_TRANSITION_HALO_TEXELS * 2))
+            .ok_or_else(|| "exact transition height overflowed".to_owned())?;
+        if width > TERRAIN_EXACT_TRANSITION_MAX_TEXELS_PER_AXIS
+            || height > TERRAIN_EXACT_TRANSITION_MAX_TEXELS_PER_AXIS
+        {
+            return Err("exact transition field exceeds its fixed resident bound".to_owned());
+        }
+
+        const FAR: u16 = u16::MAX / 4;
+        let width_usize = width as usize;
+        let height_usize = height as usize;
+        let mut distances = vec![FAR; width_usize * height_usize];
+        for texel_z in 0..height_usize {
+            for texel_x in 0..width_usize {
+                let world_x = i64::from(origin_block_x)
+                    + i64::try_from(texel_x).expect("texel X fits i64")
+                        * i64::from(TERRAIN_EXACT_TRANSITION_BLOCKS_PER_TEXEL)
+                    + i64::from(TERRAIN_EXACT_TRANSITION_BLOCKS_PER_TEXEL / 2);
+                let world_z = i64::from(origin_block_z)
+                    + i64::try_from(texel_z).expect("texel Z fits i64")
+                        * i64::from(TERRAIN_EXACT_TRANSITION_BLOCKS_PER_TEXEL)
+                    + i64::from(TERRAIN_EXACT_TRANSITION_BLOCKS_PER_TEXEL / 2);
+                let world_x = i32::try_from(world_x)
+                    .map_err(|_| "exact transition sample X exceeds block coordinates")?;
+                let world_z = i32::try_from(world_z)
+                    .map_err(|_| "exact transition sample Z exceeds block coordinates")?;
+                if snapshot.contains(ChunkPos::from_block_coords(world_x, world_z)) {
+                    distances[texel_z * width_usize + texel_x] = 0;
+                }
+            }
+        }
+
+        // An 8-neighbor chamfer transform is close to Euclidean distance but
+        // much cheaper than scanning the exact footprint for every texel.
+        for texel_z in 0..height_usize {
+            for texel_x in 0..width_usize {
+                relax_transition_distance(
+                    &mut distances,
+                    width_usize,
+                    height_usize,
+                    texel_x,
+                    texel_z,
+                    [(-1, 0, 4), (0, -1, 4), (-1, -1, 6), (1, -1, 6)],
+                );
+            }
+        }
+        for texel_z in (0..height_usize).rev() {
+            for texel_x in (0..width_usize).rev() {
+                relax_transition_distance(
+                    &mut distances,
+                    width_usize,
+                    height_usize,
+                    texel_x,
+                    texel_z,
+                    [(1, 0, 4), (0, 1, 4), (1, 1, 6), (-1, 1, 6)],
+                );
+            }
+        }
+
+        let weights = distances
+            .into_iter()
+            .map(|distance| {
+                let boundary_distance =
+                    distance.saturating_sub(TERRAIN_EXACT_TRANSITION_BLOCKS_PER_TEXEL as u16 / 2);
+                let remaining = (TERRAIN_EXACT_TRANSITION_DISTANCE_BLOCKS as u16)
+                    .saturating_sub(boundary_distance);
+                u8::try_from(
+                    (u32::from(remaining) * u32::from(u8::MAX)
+                        + TERRAIN_EXACT_TRANSITION_DISTANCE_BLOCKS / 2)
+                        / TERRAIN_EXACT_TRANSITION_DISTANCE_BLOCKS,
+                )
+                .unwrap_or(u8::MAX)
+            })
+            .collect();
+        Ok(Self {
+            source: snapshot.source(),
+            generation: snapshot.generation(),
+            origin_block_x,
+            origin_block_z,
+            width,
+            height,
+            weights,
+        })
+    }
+
+    pub const fn source(&self) -> TerrainCompositionSourceIdentity {
+        self.source
+    }
+
+    pub const fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    pub const fn origin_blocks(&self) -> [i32; 2] {
+        [self.origin_block_x, self.origin_block_z]
+    }
+
+    pub const fn dimensions(&self) -> [u32; 2] {
+        [self.width, self.height]
+    }
+
+    pub fn weights(&self) -> &[u8] {
+        &self.weights
+    }
+
+    pub fn nearest_weight_at_world(&self, world_x: i32, world_z: i32) -> u8 {
+        if self.width == 0 || self.height == 0 {
+            return 0;
+        }
+        let local_x = i64::from(world_x) - i64::from(self.origin_block_x);
+        let local_z = i64::from(world_z) - i64::from(self.origin_block_z);
+        if local_x < 0 || local_z < 0 {
+            return 0;
+        }
+        let texel_x = local_x / i64::from(TERRAIN_EXACT_TRANSITION_BLOCKS_PER_TEXEL);
+        let texel_z = local_z / i64::from(TERRAIN_EXACT_TRANSITION_BLOCKS_PER_TEXEL);
+        if texel_x >= i64::from(self.width) || texel_z >= i64::from(self.height) {
+            return 0;
+        }
+        self.weights[texel_z as usize * self.width as usize + texel_x as usize]
+    }
+}
+
+fn relax_transition_distance<const N: usize>(
+    distances: &mut [u16],
+    width: usize,
+    height: usize,
+    texel_x: usize,
+    texel_z: usize,
+    neighbors: [(isize, isize, u16); N],
+) {
+    let index = texel_z * width + texel_x;
+    let mut distance = distances[index];
+    for (dx, dz, cost) in neighbors {
+        let neighbor_x = texel_x.checked_add_signed(dx);
+        let neighbor_z = texel_z.checked_add_signed(dz);
+        let (Some(neighbor_x), Some(neighbor_z)) = (neighbor_x, neighbor_z) else {
+            continue;
+        };
+        if neighbor_x < width && neighbor_z < height {
+            distance =
+                distance.min(distances[neighbor_z * width + neighbor_x].saturating_add(cost));
+        }
+    }
+    distances[index] = distance;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -584,5 +839,108 @@ mod tests {
         assert_eq!(words[0..6], [-1, 4, 1, 1, 2, 1]);
         assert_eq!(words[6] as u32, 0x89ab_cdef);
         assert_eq!(words[7] as u32, 0x0123_4567);
+    }
+
+    #[test]
+    fn exact_admission_suppresses_ready_islands() {
+        let ready = BTreeSet::from([
+            ChunkPos::new(0, 0),
+            ChunkPos::new(1, 0),
+            ChunkPos::new(1, 1),
+            ChunkPos::new(8, 8),
+        ]);
+        let admitted = terrain_exact_player_connected_chunks(
+            &ready,
+            &BTreeSet::new(),
+            ChunkPos::new(0, 0),
+            HorizontalTopology::UNBOUNDED,
+        );
+        assert_eq!(
+            admitted,
+            BTreeSet::from([
+                ChunkPos::new(0, 0),
+                ChunkPos::new(1, 0),
+                ChunkPos::new(1, 1),
+            ])
+        );
+    }
+
+    #[test]
+    fn exact_admission_retains_a_connected_prior_component() {
+        let previous = BTreeSet::from([
+            ChunkPos::new(0, 0),
+            ChunkPos::new(1, 0),
+            ChunkPos::new(2, 0),
+        ]);
+        let ready = BTreeSet::from([
+            ChunkPos::new(0, 0),
+            ChunkPos::new(1, 0),
+            ChunkPos::new(2, 0),
+            ChunkPos::new(9, 9),
+        ]);
+        let admitted = terrain_exact_player_connected_chunks(
+            &ready,
+            &previous,
+            ChunkPos::new(3, 0),
+            HorizontalTopology::UNBOUNDED,
+        );
+        assert_eq!(admitted, previous);
+    }
+
+    #[test]
+    fn exact_admission_crosses_periodic_topology() {
+        let topology = HorizontalTopology::cylinder_x(-2, 4);
+        let ready = BTreeSet::from([ChunkPos::new(1, 0), ChunkPos::new(-2, 0)]);
+        let admitted = terrain_exact_player_connected_chunks(
+            &ready,
+            &BTreeSet::new(),
+            ChunkPos::new(1, 0),
+            topology,
+        );
+        assert_eq!(admitted, ready);
+    }
+
+    #[test]
+    fn exact_transition_field_follows_irregular_negative_coverage() {
+        let coverage = ExactPaintedCoverageSnapshot::new(
+            source(),
+            9,
+            [
+                ChunkPos::new(-2, -2),
+                ChunkPos::new(-1, -2),
+                ChunkPos::new(-2, -1),
+            ],
+        )
+        .unwrap();
+        let field = TerrainExactTransitionField::from_coverage(&coverage).unwrap();
+        assert_eq!(field.origin_blocks(), [-64, -64]);
+        assert_eq!(field.dimensions(), [24, 24]);
+        assert_eq!(field.nearest_weight_at_world(-24, -24), u8::MAX);
+        assert!(field.nearest_weight_at_world(-8, -8) < u8::MAX);
+        assert!(field.nearest_weight_at_world(-8, -8) > 0);
+        assert_eq!(field.nearest_weight_at_world(-17, -8), u8::MAX);
+        assert_eq!(field.source(), source());
+        assert_eq!(field.generation(), 9);
+    }
+
+    #[test]
+    fn exact_transition_field_is_bounded_below_eighty_kibibytes() {
+        let chunks = (0..TERRAIN_EXACT_COVERAGE_MAX_CHUNKS_PER_AXIS as i32).flat_map(|z| {
+            (0..TERRAIN_EXACT_COVERAGE_MAX_CHUNKS_PER_AXIS as i32).map(move |x| ChunkPos::new(x, z))
+        });
+        let coverage = ExactPaintedCoverageSnapshot::new(source(), 1, chunks).unwrap();
+        let field = TerrainExactTransitionField::from_coverage(&coverage).unwrap();
+        assert_eq!(
+            field.dimensions(),
+            [
+                TERRAIN_EXACT_TRANSITION_MAX_TEXELS_PER_AXIS,
+                TERRAIN_EXACT_TRANSITION_MAX_TEXELS_PER_AXIS,
+            ]
+        );
+        assert_eq!(
+            field.weights().len() as u64,
+            TERRAIN_EXACT_TRANSITION_MAX_BYTES
+        );
+        assert!(TERRAIN_EXACT_TRANSITION_MAX_BYTES < 80 * 1024);
     }
 }
