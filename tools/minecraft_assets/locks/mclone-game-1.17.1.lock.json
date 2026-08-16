@@ -1,24 +1,24 @@
 {
   "asset_set": "mclone-game-1.17.1",
   "format_version": 1,
-  "generated_at": "2026-08-13T05:23:55.642576Z",
+  "generated_at": "2026-08-16T12:52:29.313305Z",
   "minecraft_version": "1.17.1",
   "pack": {
     "asset_set": "mclone-game-1.17.1",
-    "content_manifest_sha256": "1b6de3477016666de9e78182af209512cbf5fa185bfd435f9916269d0ed2b5b2",
-    "file_count": 7180,
+    "content_manifest_sha256": "bf1c310a33b2b661ed1a92ab009cf9f1743662382cb9787c86976f34f697acae",
+    "file_count": 7193,
     "fingerprints": {
       "payload_raw_v1": {
         "algorithm": "sha256",
-        "bytes": 15372707,
-        "file_count": 7180,
-        "sha256": "34f9e3b24a663d6930a03a946067bc6dcda040014556ce264bdfd532ad139f8c"
+        "bytes": 15791041,
+        "file_count": 7193,
+        "sha256": "2711d9d6a7a6b41db3dd7c4800d2306d6354ee99effd223f31f9263a5c64ef92"
       },
       "portable_json_text_v1": {
         "algorithm": "sha256",
-        "excluded_file_count": 3217,
-        "fingerprinted_file_count": 3963,
-        "sha256": "1b6de3477016666de9e78182af209512cbf5fa185bfd435f9916269d0ed2b5b2"
+        "excluded_file_count": 3218,
+        "fingerprinted_file_count": 3975,
+        "sha256": "bf1c310a33b2b661ed1a92ab009cf9f1743662382cb9787c86976f34f697acae"
       }
     },
     "manifest_path": "reference/minecraft-1.17.1/extracted.zip.json",
@@ -52,14 +52,14 @@
           "sha256": "a63606fda22e109505571dde88fc2c997a439fa2e84f8bbb76c4a9b8a5fdc19d"
         },
         {
-          "bytes": 46521,
+          "bytes": 46949,
           "path": "assets/mclone/audio/provenance.v1.json",
-          "sha256": "0234e6710ddc14ddf340f2dd57bf3b32c3036e6bf0dfbf853ddcd89a6b68fb77"
+          "sha256": "06f3bfbd0565c16455ef0929ad5e7d64cbcebe5eed2fda2af28ab707cb48cfb9"
         },
         {
-          "bytes": 18112,
+          "bytes": 19575,
           "path": "assets/mclone/audio/sound-bank.v1.json",
-          "sha256": "141218bacd768aaca9b77b869d1039e0a2b7a315e45e0e1c05945e40a3577498"
+          "sha256": "5832ad370b9649b5a9b851ee0176f18ca4e510f06e0d3e1fc011a623773b6a36"
         },
         {
           "bytes": 89947,
@@ -85,6 +85,11 @@
           "bytes": 1579,
           "path": "assets/mclone/figures/beeswax.figure.json",
           "sha256": "bf5e00388fc3f74cdf41f848111d3a087bc2a3a8c9595f24b6712fdc20f277ee"
+        },
+        {
+          "bytes": 1760,
+          "path": "assets/mclone/figures/carrot.figure.json",
+          "sha256": "d3d5963e772adb5b8918b89505dd7a0db5a75bff7492b6f54b8c5394193dedc3"
         },
         {
           "bytes": 23923,
@@ -132,9 +137,29 @@
           "sha256": "3807b6559c22877ba32200946e05162997dec89d9df8aa7b87d2c8b8520eb602"
         },
         {
+          "bytes": 1557,
+          "path": "assets/mclone/figures/oak_fence_gate_item.figure.json",
+          "sha256": "f03a2760d644b9a22d41f64ce2144814211efa2c5db0286d75b686e43946ddb1"
+        },
+        {
+          "bytes": 969,
+          "path": "assets/mclone/figures/oak_fence_item.figure.json",
+          "sha256": "76d262b41ec5420445ccf1c95a314810427fd0e999025000f1bc5153939920db"
+        },
+        {
           "bytes": 17365,
           "path": "assets/mclone/figures/player.figure.json",
           "sha256": "3e5f885ed57fa86051e647cb98ca8c2238285e2fc14b511159601acb33f300fc"
+        },
+        {
+          "bytes": 73916,
+          "path": "assets/mclone/figures/rabbit.figure.json",
+          "sha256": "f5804b91cc86cd9d7755b4a33d72d9ab204b396f7471b4c96920e0d0dce6917e"
+        },
+        {
+          "bytes": 5057,
+          "path": "assets/mclone/figures/rabbit_burrow.figure.json",
+          "sha256": "264128043a4b8330d4e99493527dc1451f92e56bd01c1de8b33b361c2082c72c"
         },
         {
           "bytes": 2182,
@@ -152,6 +177,21 @@
           "sha256": "08da142cfc511fc1f8a84ced74c3ea1033f69aea774ffc6ecfb52d88f529ad3a"
         },
         {
+          "bytes": 3767,
+          "path": "assets/mclone/figures/wheat_bundle.figure.json",
+          "sha256": "915229573754b7a900324f1c030c65c9c5f984775ed915b32618ee13504e3ba5"
+        },
+        {
+          "bytes": 2243,
+          "path": "assets/mclone/figures/wheat_seeds_item.figure.json",
+          "sha256": "8ff75e298b3647f4075e475cb0e554c29236ab38e44c8b49aaaf7bfd50c2133e"
+        },
+        {
+          "bytes": 2480,
+          "path": "assets/mclone/figures/wildlife_remains.figure.json",
+          "sha256": "760aa52ce2baf0faceeb2bb848a0d5fc16a84fa70e44b939d431f1c38553dd68"
+        },
+        {
           "bytes": 2308,
           "path": "assets/mclone/showcases/bee-pollination.showcase.json",
           "sha256": "8b9955a3895aed5d3ee15f303a739446ea0683147bdf2cf10c9067d3de9c0895"
@@ -162,14 +202,24 @@
           "sha256": "a915ddc66e7e1e0a059fbbe3311cd079b6c775da085108e143d9b5826eb420b2"
         },
         {
-          "bytes": 2691,
-          "path": "assets/mclone/showcases/mallard-ecology.showcase.json",
-          "sha256": "b263d435f395126bbdf6ef12a8af76e1b16e043bbbfdb5fa52377636f8dfc1a5"
+          "bytes": 8297,
+          "path": "assets/mclone/showcases/kitchen-garden.showcase.json",
+          "sha256": "38da0ce86b8da651c5a96cccc772c158b648785615123791702a9b04c5484f5c"
         },
         {
-          "bytes": 7141,
+          "bytes": 3075,
+          "path": "assets/mclone/showcases/mallard-ecology.showcase.json",
+          "sha256": "ca3c8043115f78d787241be3f9f5da1b795a8018296f1a6e0768159f03a95590"
+        },
+        {
+          "bytes": 11284,
+          "path": "assets/mclone/showcases/rabbit-burrow.showcase.json",
+          "sha256": "42e57c5aeb230ba62c3e85923d3d8b86d7f75b38921a1819460a6a762acfeae2"
+        },
+        {
+          "bytes": 7438,
           "path": "assets/mclone/showcases/wheat-farming.showcase.json",
-          "sha256": "0683eb9ae096ec27bcbe69fcd5654fd4ee5c4769c4f359028b5617cb96a85258"
+          "sha256": "c04eb6ec845d2fca9b88d72171ab77b370db1b94ddba88e00756f467fe9b0505"
         },
         {
           "bytes": 6353,
@@ -817,204 +867,219 @@
           "sha256": "be50c35e8e2be59e1b4a1d4d33a64433b00b713d94012bc77baeccc8d811c087"
         },
         {
-          "bytes": 102944,
-          "path": "assets/mclone/structure-previews/atlases/terrain-4f0c6faf041b7a74fcea0030baf51ca53d673f8c79bb52c6996a3727d76749b2.png",
-          "sha256": "4f0c6faf041b7a74fcea0030baf51ca53d673f8c79bb52c6996a3727d76749b2"
+          "bytes": 71864,
+          "path": "assets/mclone/structure-previews/atlases/terrain-c5e939a662b5a73fbeddad6776eaafa9efc77831f7fdc8e60873786f7d0538fb.png",
+          "sha256": "c5e939a662b5a73fbeddad6776eaafa9efc77831f7fdc8e60873786f7d0538fb"
         },
         {
           "bytes": 737088,
           "path": "assets/mclone/structure-previews/meshes/farmstead-barn-core-a-v2.glb",
-          "sha256": "7453374bbe008a25082a686051f7eab82b9707a53d2b9e3f7859f5462e0a6ef7"
+          "sha256": "1b718ca8f5709ef222d22a7715fb01b314b136f1af39cc324aa51ceddd248134"
         },
         {
           "bytes": 897028,
           "path": "assets/mclone/structure-previews/meshes/farmstead-barn-core-long-v1.glb",
-          "sha256": "377f11e31acf381d60bdeb3d7a9bd1205c9b6198bba1f4b0f295f88d19785d3a"
+          "sha256": "d031fc2a053604c8df5b55a011a994f9f1e1da646e06f90b5ad8e9178ef4c26c"
         },
         {
           "bytes": 576488,
           "path": "assets/mclone/structure-previews/meshes/farmstead-barn-core-short-v1.glb",
-          "sha256": "c2189a6a8250d590255035540a1a71aedcf5e0c24bc27ba6c1028e1c6c8ef843"
+          "sha256": "3bc3b216fb30362767c890a880c83c9e42e00718b494b477ca10baa62c9fd3ee"
         },
         {
           "bytes": 180012,
           "path": "assets/mclone/structure-previews/meshes/farmstead-barn-lean-to-a-v2.glb",
-          "sha256": "861d80aa1f81d913ffbeb54bfeb9464bc53f845e5be75b28f69325a08b0ed4f1"
+          "sha256": "8c1c3776a258671098bfa8c629032712f9695972d744f6ffce04076ad932f902"
         },
         {
           "bytes": 231428,
           "path": "assets/mclone/structure-previews/meshes/farmstead-barn-lean-to-long-v1.glb",
-          "sha256": "860cbee69294723157f01caddc52eccd847a7805ac3b3335790c8f8c6afb8a8c"
+          "sha256": "03683e13d75feba9ee88944dcd28785704ab1fba3a9c1bee600648552afc8569"
         },
         {
           "bytes": 130288,
           "path": "assets/mclone/structure-previews/meshes/farmstead-barn-lean-to-short-v1.glb",
-          "sha256": "943ce120aa851e6a7166560590d4e4cfee52735a2b44bf6e551bb33ca4523290"
+          "sha256": "65c8007330aada0353639de25e539bd4db601199cc67f094a33b786297f14a12"
         },
         {
           "bytes": 599400,
           "path": "assets/mclone/structure-previews/meshes/farmstead-cottage-a-v2.glb",
-          "sha256": "f971965620aba98be3b76532aad3a2aa0aa7475aa38e165449c6c4ff427be645"
+          "sha256": "fef757b2fd9a55b5b12d76e78c55c26d7b616078a86326f603050d31d3ec3150"
         },
         {
           "bytes": 683432,
           "path": "assets/mclone/structure-previews/meshes/farmstead-cottage-deep-canopy-porch-v1.glb",
-          "sha256": "46ae9a1250c33e72355711f6f3d056b799604505aa8281eeacf3c0b6498ec665"
+          "sha256": "d8adbbbf32951e5dfbbb6a52004a3a5ab359c20eaa0afad206cdcc6c78f69cb5"
         },
         {
           "bytes": 670928,
           "path": "assets/mclone/structure-previews/meshes/farmstead-cottage-deep-stoop-v1.glb",
-          "sha256": "c20f2c365698ce86613491c3f0e39d7657016db35f7698f71c35af17459f8248"
+          "sha256": "ad65a5205a58643126193c8005ad6b3d40c3bd5365ef163cb95717bff278fb4f"
         },
         {
           "bytes": 519460,
           "path": "assets/mclone/structure-previews/meshes/farmstead-cottage-snug-canopy-porch-v1.glb",
-          "sha256": "fa17946dbe82495a97fe6c0dfcdc9d14235ca06b154ff0e8b46eb4e8b167b526"
+          "sha256": "a335c6fdce926ee4fac68b30ddafa99b9dc7bd060d77f89dde7fe5fed9b0ade4"
         },
         {
           "bytes": 506960,
           "path": "assets/mclone/structure-previews/meshes/farmstead-cottage-snug-stoop-v1.glb",
-          "sha256": "4c10e30aa209dd14ab0efc117f1af66d56d39adc47689faf4315bb11e9e70d51"
+          "sha256": "e26c081eeecc0ff3e8db9133fa09f0660f229fe9ecb832ba3847a00e34bb2d11"
         },
         {
           "bytes": 586936,
           "path": "assets/mclone/structure-previews/meshes/farmstead-cottage-standard-stoop-v1.glb",
-          "sha256": "2d93dc02447d6d7dc7dd93902162ac908fe2d42f286a96de4d06a3a8b362c84a"
+          "sha256": "798b8891d9d1d3340ac56654855d61f43723b86ab142abd45fd7c7a101bce994"
+        },
+        {
+          "bytes": 312436,
+          "path": "assets/mclone/structure-previews/meshes/farmstead-kitchen-garden-v1.glb",
+          "sha256": "fcb60467825025812549211662972fe40a4303496e361cd68ae474c2dc9dec7a"
         },
         {
           "bytes": 280508,
           "path": "assets/mclone/structure-previews/meshes/farmstead-rosehip-chicken-coop-v1.glb",
-          "sha256": "2f217c5c90d88517e867488931463e3944ed27cf08cd5eb23e49d753ecf15275"
+          "sha256": "12300c734a79b8b5b8d4cbf921e8b1c570da8468733c432b3a5e00f85fcfd759"
         },
         {
-          "bytes": 5869,
+          "bytes": 5880,
           "path": "assets/mclone/structure-previews/receipts/farmstead-barn-core-a-v2.preview.json",
-          "sha256": "25c4297427d89deebcede7862172466468143e18fd2f16b414ec7b75253c82b1"
+          "sha256": "16057f135bd71d8e09b18a36419b30544f1726d4a0b9554f8d088daa95807819"
         },
         {
-          "bytes": 5871,
+          "bytes": 5882,
           "path": "assets/mclone/structure-previews/receipts/farmstead-barn-core-long-v1.preview.json",
-          "sha256": "7eafb03f5ccfd83b84882062d31902a233dd535d8e228d923ce5bb3e6c1154e2"
+          "sha256": "21c7fd4e8ac92b1fc705281ebed3275ab5d820585ca93cdb5eaa17cbb51aaaf8"
         },
         {
-          "bytes": 5871,
+          "bytes": 5882,
           "path": "assets/mclone/structure-previews/receipts/farmstead-barn-core-short-v1.preview.json",
-          "sha256": "09c8d913fce31b3c451248c5f9af557478a3905b0f9234c4b90337aa45a6abf2"
+          "sha256": "e430aadfd780f694ee0a37370846cf65092b0c77d39056afdd25fc0a45a7ee36"
         },
         {
-          "bytes": 4566,
+          "bytes": 4577,
           "path": "assets/mclone/structure-previews/receipts/farmstead-barn-lean-to-a-v2.preview.json",
-          "sha256": "6cc1d2188186de89a720d297cf5171453c9cb66c46963df33c35faa8fa313b53"
+          "sha256": "57909e15648c8bfee2bd8c0e720f6ba2b0a9592623b239b51d223a92df3d2dbb"
         },
         {
-          "bytes": 4569,
+          "bytes": 4580,
           "path": "assets/mclone/structure-previews/receipts/farmstead-barn-lean-to-long-v1.preview.json",
-          "sha256": "8a3d37bd5403b1abd26b7bc552c3fbac43313701997e6667360c4b7022dfcb88"
+          "sha256": "11e692acf516e77c71c69fb3cecc18d1645e3c6888d60cb7e736cc8a030da453"
         },
         {
-          "bytes": 4562,
+          "bytes": 4573,
           "path": "assets/mclone/structure-previews/receipts/farmstead-barn-lean-to-short-v1.preview.json",
-          "sha256": "275a51a84b6f6788d69546625ee7d9a1d92f9a49e0e3f669508e8d3db5c3e9b9"
+          "sha256": "3e90de0c6eba0214572f67a80e8ac1ec4e980820c2fccac35a623c78eb9f5c60"
         },
         {
-          "bytes": 6180,
+          "bytes": 6191,
           "path": "assets/mclone/structure-previews/receipts/farmstead-cottage-a-v2.preview.json",
-          "sha256": "58e6cb3f0809f326d8814cd5f5ded727dc4573b3add144c5520c833ee0ee981f"
+          "sha256": "51c3c0949f9280f50d83c8cce722231918b427265a03021551b3251cf3c9fc84"
+        },
+        {
+          "bytes": 6232,
+          "path": "assets/mclone/structure-previews/receipts/farmstead-cottage-deep-canopy-porch-v1.preview.json",
+          "sha256": "f680f6aa090a432e34385ba8bdefb1f4223b8ebb489514ae3aac4222f50a1018"
+        },
+        {
+          "bytes": 6201,
+          "path": "assets/mclone/structure-previews/receipts/farmstead-cottage-deep-stoop-v1.preview.json",
+          "sha256": "0ae1e512e66bb348dd9f573347534147b9c20d53441694c7279ca5db809f7287"
         },
         {
           "bytes": 6221,
-          "path": "assets/mclone/structure-previews/receipts/farmstead-cottage-deep-canopy-porch-v1.preview.json",
-          "sha256": "e83d2af4ca38507cfcca9a25ef694e437c0703e59845794d06a6480982400e9a"
+          "path": "assets/mclone/structure-previews/receipts/farmstead-cottage-snug-canopy-porch-v1.preview.json",
+          "sha256": "a66135d1484a3ebc8b0718f284cea9513055da603b041a0a8a96a1f4882b2d2c"
         },
         {
           "bytes": 6190,
-          "path": "assets/mclone/structure-previews/receipts/farmstead-cottage-deep-stoop-v1.preview.json",
-          "sha256": "aee6d797467f40010c5ae1162826c0112dc32d5b2dabf9a8c9946de02dcf6df0"
-        },
-        {
-          "bytes": 6210,
-          "path": "assets/mclone/structure-previews/receipts/farmstead-cottage-snug-canopy-porch-v1.preview.json",
-          "sha256": "eb8c0bdcfc12f3e3ff11fc40b9b37b0bd9dd20c0ef22cac21cec8cdc922c0ed8"
-        },
-        {
-          "bytes": 6179,
           "path": "assets/mclone/structure-previews/receipts/farmstead-cottage-snug-stoop-v1.preview.json",
-          "sha256": "3585a8354bce50b76d671ffc9c84302b113fcb6e7e19aa7b286bab5d08e6cf5c"
+          "sha256": "6bf896ad136f62e26c1ccf842bef902e49efe265a08b29cd67f6ad021c32c587"
         },
         {
-          "bytes": 6196,
+          "bytes": 6207,
           "path": "assets/mclone/structure-previews/receipts/farmstead-cottage-standard-stoop-v1.preview.json",
-          "sha256": "2ba69265f1e0f8013b03c32854988849ba734f2998b11ee12e27ba3e8f0de0ea"
+          "sha256": "cd2833eed67252c263e70dfbd3d2a568ce705144bac9691ef3252213ab010cc1"
         },
         {
-          "bytes": 5978,
+          "bytes": 4699,
+          "path": "assets/mclone/structure-previews/receipts/farmstead-kitchen-garden-v1.preview.json",
+          "sha256": "d7549a8ad0cc5d2bbfc9f95300a11482d461fa595503584929198672dda2eaf4"
+        },
+        {
+          "bytes": 5989,
           "path": "assets/mclone/structure-previews/receipts/farmstead-rosehip-chicken-coop-v1.preview.json",
-          "sha256": "62b9d38c21f4564d019ffd5dc3e1c4c28c1e46734f3fa23d32d04d68706f859c"
+          "sha256": "b12d8ee1c7baa8104e2c0723ce0424bdd27eeac09dca639ac26f560a3c538404"
         },
         {
           "bytes": 149955,
           "path": "assets/mclone/structures/farmstead-barn-core-a-v2.structure.json",
-          "sha256": "a1a2d0e4fb798ce9af1d46c998ca9ba4943819d7d550550f0e02f2f98dea7072"
+          "sha256": "446a7029315c49ac2ebcf84f8fc7ad3e14055254523ebfdf4bd053ba97313803"
         },
         {
           "bytes": 189983,
           "path": "assets/mclone/structures/farmstead-barn-core-long-v1.structure.json",
-          "sha256": "fd5fc24a3c0b5c5ae4ac164be1708403ee4ebf62b3abd9459ff4190925ac3a11"
+          "sha256": "d563b1358a5deffcbc922f809c763f79fce1193bb5f9a6c47b32483a76ee607f"
         },
         {
           "bytes": 109921,
           "path": "assets/mclone/structures/farmstead-barn-core-short-v1.structure.json",
-          "sha256": "fe4dd2569f4dbca21edbdd7c14d703da3de923ca482fb9b2eaf574e314ac987e"
+          "sha256": "445a168578001357f9050bffb6192879b400b46bdb95a0ba34cb7ed7fae6c891"
         },
         {
           "bytes": 22376,
           "path": "assets/mclone/structures/farmstead-barn-lean-to-a-v2.structure.json",
-          "sha256": "24d41bb3014b35541380f8a4d8a01a8c9d150f45cafce5e963f0e2eab7c364dd"
+          "sha256": "4b6e2fbc4eaf9b46fa0ae7689af5111627ac0860c9509d364f25934072e73ce1"
         },
         {
           "bytes": 27482,
           "path": "assets/mclone/structures/farmstead-barn-lean-to-long-v1.structure.json",
-          "sha256": "0581cc3723930dc9b81b2df39ca5f031a41e3ef6e39e7de3b9a392c6045e1c0d"
+          "sha256": "ee872e24d8cab55db5d8d5302ad97a4d1b35c11e468c5e9393626e9cee4af449"
         },
         {
           "bytes": 17515,
           "path": "assets/mclone/structures/farmstead-barn-lean-to-short-v1.structure.json",
-          "sha256": "83a16133524b78c6f28463490bbb8318df595fd6f8c8cea69980b1df4590dd56"
+          "sha256": "fb5297c57bd4d6336f79ab08e0407a1059d04da9d4512783f1a7b35d9ba5a6f3"
         },
         {
           "bytes": 80684,
           "path": "assets/mclone/structures/farmstead-cottage-a-v2.structure.json",
-          "sha256": "dd9e32d337c6c482b0f4a1ee533994623c729e32a6ffb83c76d73a76d4a28616"
+          "sha256": "b9aa62cde36babb13ad7b7f3a0f43ea0094d63a78214b08a613442325deb5bad"
         },
         {
           "bytes": 92940,
           "path": "assets/mclone/structures/farmstead-cottage-deep-canopy-porch-v1.structure.json",
-          "sha256": "32654f88b2e68b42c9952ee69b9763cba1b06200f74107c9d27a596eab07abc6"
+          "sha256": "d90f700dfe0f37e6f2877294540c655b203f14e7bcc183b9786eb2339f76e9aa"
         },
         {
           "bytes": 91422,
           "path": "assets/mclone/structures/farmstead-cottage-deep-stoop-v1.structure.json",
-          "sha256": "491ec815384ce50c8a242b37e8e237bb3cb20572b2b20edfb91ec155f6104225"
+          "sha256": "5401182d37e9e9f48e37f0a8abfe924e5a481ab7f63b6f2a5f739a7cdc8d73fb"
         },
         {
           "bytes": 68477,
           "path": "assets/mclone/structures/farmstead-cottage-snug-canopy-porch-v1.structure.json",
-          "sha256": "1dd66c3e69eaee81583c6e11085107d7f821bf04cf739a843fb7d1d2cd76b1b8"
+          "sha256": "38aae9b132bf33f3d393705f5c641a5ca5a440ab42e7afb47ed3c78fce515502"
         },
         {
           "bytes": 66959,
           "path": "assets/mclone/structures/farmstead-cottage-snug-stoop-v1.structure.json",
-          "sha256": "2b9ad4c24089e87a343336dfd4790622308848e48352f5a588977f7fc70e483f"
+          "sha256": "0d370b1a76abdc07037d68e14db060ec0659c805817e2f5d93b039b938d7cb18"
         },
         {
           "bytes": 79193,
           "path": "assets/mclone/structures/farmstead-cottage-standard-stoop-v1.structure.json",
-          "sha256": "78db6ffdb6853a5f6822bb37cf873f3897d96b37cdfc5faf6d4fd7f75e2ff4b3"
+          "sha256": "c5f09fbfb0d1751a3b6d4fe2c4deef1c339c4ebd72862ee20af170ad9312eba0"
+        },
+        {
+          "bytes": 18234,
+          "path": "assets/mclone/structures/farmstead-kitchen-garden-v1.structure.json",
+          "sha256": "e8dd72a6a6096c1f9b8e74c12813e7eb22bd239ed6ccf4fd0ed93dec228d6755"
         },
         {
           "bytes": 28716,
           "path": "assets/mclone/structures/farmstead-rosehip-chicken-coop-v1.structure.json",
-          "sha256": "c26c07f62e84d5b29744cb723deebbb312cbc4e3b8092cfd3b94316589dc841c"
+          "sha256": "da22ab5f5c32e5d6dd916f62c8201a682c0948bf5f75a62591d01bf7a3e599af"
         },
         {
           "bytes": 3232,
@@ -35931,19 +35996,19 @@
     }
   },
   "source": {
-    "file_count": 7180,
+    "file_count": 7193,
     "fingerprints": {
       "payload_raw_v1": {
         "algorithm": "sha256",
-        "bytes": 15372707,
-        "file_count": 7180,
-        "sha256": "34f9e3b24a663d6930a03a946067bc6dcda040014556ce264bdfd532ad139f8c"
+        "bytes": 15791041,
+        "file_count": 7193,
+        "sha256": "2711d9d6a7a6b41db3dd7c4800d2306d6354ee99effd223f31f9263a5c64ef92"
       },
       "portable_json_text_v1": {
         "algorithm": "sha256",
-        "excluded_file_count": 3217,
-        "fingerprinted_file_count": 3963,
-        "sha256": "1b6de3477016666de9e78182af209512cbf5fa185bfd435f9916269d0ed2b5b2"
+        "excluded_file_count": 3218,
+        "fingerprinted_file_count": 3975,
+        "sha256": "bf1c310a33b2b661ed1a92ab009cf9f1743662382cb9787c86976f34f697acae"
       }
     },
     "root": "reference/minecraft-1.17.1/extracted",
