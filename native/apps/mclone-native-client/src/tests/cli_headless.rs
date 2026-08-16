@@ -271,6 +271,7 @@ fn cli_parses_headless_dual_view_scene_options() {
                         seed: 54321,
                         chunk_x: 2,
                         chunk_z: -1,
+                        local_entry_intent: mclone_app_runtime::local_session_launch::LocalSessionEntryIntent::ExplicitCoordinate,
                         ..Default::default()
                     },
                     ..SceneOptions::default()
@@ -836,6 +837,7 @@ fn cli_parses_screenshot_scene_options() {
                     seed: -9,
                     chunk_x: 2,
                     chunk_z: -3,
+                    local_entry_intent: mclone_app_runtime::local_session_launch::LocalSessionEntryIntent::ExplicitCoordinate,
                     ..Default::default()
                 },
                 ..SceneOptions::default()

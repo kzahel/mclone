@@ -54,6 +54,7 @@ fn cli_parses_xr_mclone_smoke_options() {
                         seed: 54321,
                         chunk_x: 2,
                         chunk_z: -1,
+                        local_entry_intent: mclone_app_runtime::local_session_launch::LocalSessionEntryIntent::ExplicitCoordinate,
                         render_distance: 3,
                         day_time_override: Some(6000),
                         freeze_time: true,
