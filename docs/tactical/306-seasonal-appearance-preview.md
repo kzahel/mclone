@@ -740,6 +740,16 @@ Post-completion control-isolation record:
   `day_time`. The same action produces only `SetSeasonPreview`, with no server
   command, gameplay protocol, persistence, scheduled tick, or light-engine
   mutation.
+- Native off, solar-only, appearance, synthetic-stereo, and shared-menu pixels
+  from implementation revision `38551df4` were captured and inspected under
+  `/tmp/mclone-seasonal-independent-controls-38551df4/`. The solar-only
+  fixture uses 07:00 twilight so the sun/sky/daylight difference is visible
+  while its configured full recent snow remains unapplied.
+- The headed WebGPU probe holds date, latitude, 07:00 solar time, camera,
+  exact mesh set, and render commands fixed. Off -> solar-only changes 892,451
+  of 921,600 pixels; solar-only -> ground-on changes 412,200 pixels; restoring
+  both toggles off is byte-exact. Mesh builds remain 118, command count 11,
+  block updates zero, and pending/accepted compile work zero throughout.
 
 ### Slice 4: Visual matrix, performance, and Human Review
 
