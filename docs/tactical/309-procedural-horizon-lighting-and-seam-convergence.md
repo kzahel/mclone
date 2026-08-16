@@ -1,8 +1,9 @@
 # Tactical 309: Procedural Horizon Lighting and Seam Convergence
 
-Status: Phase 0 and Phase 1 accepted; Phase 2 correction implemented and
-awaiting renewed Human Review 2 after the first review rejected an open
-voxel-to-smooth geometry crack.
+Status: Phase 0 and Phase 1 accepted; Human Review 2 rejected two Phase 2
+attempts, most recently because the endpoint-matched voxel-to-smooth connector
+is back-face culled from the camera-inside view. A winding correction is in
+progress.
 
 Topic: `procedural-horizon-clipmap`
 
@@ -448,8 +449,8 @@ Accepted by the user on 2026-08-16.
 
 ## Phase 2: Voxel-to-Smooth Procedural Convergence
 
-Status: Human Review 2 rejected the first implementation; correction
-implemented and awaiting renewed Human Review 2.
+Status: Human Review 2 rejected the first implementation and its first crack
+correction; an inward-facing connector correction is in progress.
 
 - Reconcile top-face and slope-derived geometric shade over a stable bounded
   transition without blending geometry owners.
@@ -652,13 +653,43 @@ Automated evidence passes:
   and
 - the 18-second headed traversal above.
 
+### Human Review 2 second rejection: connector back-face culling
+
+Human Review 2 rejected the replacement packet on 2026-08-16 after an
+interactive steep-snow, grazing-angle view still showed a large sky-blue wedge
+between the blocky shell and smooth parent. The prior acceptance statement was
+wrong: the fixed campaign's gentler or partly occluded boundaries did not make
+this orientation failure conspicuous.
+
+The first correction matched the two height profiles but preserved the
+ordinary cardinal riser's outward-facing counter-clockwise winding. The shared
+terrain pipeline culls back faces. Because the finest clipmap remains centered
+on the camera, the normal product view observes its outer boundary from the
+inside while looking outward. The endpoint-matched connector therefore exists
+geometrically but is rejected before rasterization on the side needed to cover
+the opening. The steep scene makes the missing vertical span large; this is
+exposed sky, not water color, environmental lighting, fog, or AO.
+
+The next correction must reverse only the outer parent-profile connector's
+horizontal endpoint order, producing inward-facing triangles while preserving
+the ordinary risers, exact-frontier curtain, parent endpoint heights, single
+horizontal owner, fixed vertex count, and global terrain back-face culling.
+The camera-inside clipmap invariant makes inward-facing winding the smallest
+complete product fix. A bounded two-sided connector remains the fallback if a
+supported view can observe the boundary from both sides.
+
+Replacement evidence must include a steep snow boundary at a grazing angle in
+all four cardinal directions, plus the existing gentle coast, water, corner,
+rebase, and motion cases. Human Review 2 remains rejected; Phase 3 stays
+blocked.
+
 Gate — Human Review 2: the procedural topology becomes smoother with distance
 without exposed sky or a stable square/annulus in land color, water tint,
 lighting, texture contrast, or vegetation brightness.
 
 ## Phase 3: Exact-to-Voxel Frontier Convergence
 
-Status: blocked on renewed Human Review 2.
+Status: blocked on renewed Human Review 2 after the inward-winding correction.
 
 - Compare controlled exact and voxel faces under equal atlas, biome, fog-off,
   transfer, full-sky, zero-block-light, and unoccluded inputs.
