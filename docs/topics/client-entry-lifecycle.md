@@ -174,6 +174,18 @@ As of 2026-07-24:
 The platform syntax differs, but all rows now resolve through the same shared
 entry policy rather than defining platform defaults.
 
+After that product-level request is accepted, Tactical
+[`310`](../tactical/310-shared-local-session-launch-semantics.md) supplies the
+shared local-session construction contract. A coordinate-free procedural
+start is `ProfilePreferred`; supplying chunk coordinates is
+`ExplicitCoordinate`; authored content and persisted-player preload fallbacks
+have separate typed intents. `mclone-scene` resolves one
+`LocalSessionLaunchPlan` before native threads, browser Workers, Android, or XR
+bind resources. Thus an in-game Create World action and an explicit launch
+without coordinates use the same profile entry on every local host, while an
+actually supplied coordinate remains exact. Remote entry stays
+server-authoritative.
+
 ## Idle And Frame-Demand Contract
 
 The shared product state exposes useful activity demand without trying to

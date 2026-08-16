@@ -34,13 +34,13 @@ changes no generated blocks or field/decor fingerprints; it may intentionally
 move the unsaved Wild-start spawn of internal worlds. The accepted
 `intro-homestead-v1` scout origin remains separate and unchanged, so the
 realized seed-`0` composition and checksum do not drift with this Wild-start
-policy correction. A 2026-08-16 audit found that Web's app-local runtime
-lowering still discards this selected Wild entry center and sends its inherited
-raw scene center to the Worker; native menu creation consumes the shared
-selection. Tactical
-[`310`](../tactical/310-shared-local-session-launch-semantics.md) owns the
-shared launch-plan correction and cross-host safeguards, so this entry
-guarantee is not yet claimed for Web. The selected terrain sequence is now at
+policy correction. Tactical
+[`310`](../tactical/310-shared-local-session-launch-semantics.md) now resolves
+one profile-aware local launch plan before native/Web binding and preserves
+the exact signed 64-bit seed selected by the browser catalog. Its untouched
+default-Mclone-Wild menu gate proves seed `553534047293117028` is requested
+and accepted at chunk `(-48, 20)` with a dry solid floor and empty feet/head
+blocks. The selected terrain sequence is now at
 rivers and wetlands: Tactical
 [`220`](../tactical/220-mclone-overworld-rivers-and-wetlands.md) has landed its
 bounded broad-river field, graded channels and banks, local water level, river

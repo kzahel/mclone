@@ -93,14 +93,14 @@ profile; the internal-unshipped project carries no compatibility policy for
 obsolete saves. The hidden topology probe is available only through explicit
 developer/test configuration and is not part of that cycle. Scene replacement,
 warm-world startup, managed previews, and all host adapters copy the selected
-descriptor. Native local startup also consumes the shared profile-aware entry
-selection. A 2026-08-16 audit found that Web's separate runner lowering
-discards that selected entry center and sends the inherited raw scene center;
-Tactical
-[`310`](../tactical/310-shared-local-session-launch-semantics.md) owns the
-shared launch plan and conformance gates. Native SQLite and browser IndexedDB
-reopen preserve the profile; the browser Worker applies stored metadata
-profiles before validating or scheduling the world.
+descriptor. Native and Web local startup now consume one shared
+profile-aware launch plan. Tactical
+[`310`](../tactical/310-shared-local-session-launch-semantics.md) removed the
+browser's inherited-center lowering, preserved signed 64-bit catalog seeds,
+and locked the untouched default-Mclone-Wild menu flow at the same requested
+and authority-accepted entry center as native. Native SQLite and browser
+IndexedDB reopen preserve the profile; the browser Worker applies stored
+metadata profiles before validating or scheduling the world.
 
 Scheduler and worker requests carry an immutable profile-plus-seed descriptor
 through native messages, WASM codecs, responses, and diagnostics. The closed

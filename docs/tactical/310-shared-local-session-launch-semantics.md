@@ -1,7 +1,8 @@
 # Tactical 310: Shared Local-Session Launch Semantics
 
-Status: proposed 2026-08-16; investigation and boundary audit complete,
-implementation not started
+Status: implementation complete 2026-08-16; parent topic remains reopened for
+the separately staffed independent fixpoint audit required by its closure
+protocol
 
 Topic: `platform-boundary-convergence`
 
@@ -96,7 +97,7 @@ Defaults are not evidence of propagation. A value was counted as applied only
 when a non-default sentinel could reach the final consumer or a final
 configuration/receipt exposed the value.
 
-## Audit Findings
+## Pre-Implementation Audit Findings
 
 ### A. Local entry intent is represented by a late boolean
 
@@ -164,7 +165,7 @@ must use an identical physical knob:
 | simulation cadence | configured and live-changeable | Worker starts at its own default; runtime setter rejects changes | add a typed Worker operation/config path or explicitly narrow the product capability |
 | adaptive chunk publication | applied to native runner | browser background progress has separate fixed mechanics | express one semantic budget request with platform-specific execution, or document and test a normalization |
 | render compiler workers/max pending/timing | applied by native compiler | browser uses its resident Worker topology and ignores these values | move physical knobs out of shared semantic launch or return an explicit applied-capacity receipt |
-| local player identity | native profile provider | production Web config falls back to `ClientIdentity::test_default()` | make identity provisioning explicit; track durable browser profile work separately if it expands persistence scope |
+| local player identity | native profile provider | durable browser profile existed, but identity was provisioned after the split rather than carried by the semantic plan | provision identity before the split, carry it whole, and retain the durable Worker fallback only as defense in depth |
 
 No row may close as “Web happens to use the same default.” It must become one
 of:
@@ -503,6 +504,124 @@ Before browser capture on Linux, run `pnpm host:check` and use the headed
 Wayland WebGPU path. Run GPU browser lanes sequentially. Store screenshots and
 reports under `/tmp`, inspect the images, and record the exact revision and
 launch receipt in this tactical's execution record.
+
+## Execution Record
+
+Implementation landed as the commit series beginning at `dd5a9e02` and ending
+at `e44759f4`. Two distinct host-boundary defects were corrected:
+
+1. Web lowered the inherited scene center instead of the shared
+   profile-preferred entry intent.
+2. Browser catalog creation rounded full-width `i64` seeds through JavaScript
+   `number`, so the authority could generate a different world than the seed
+   shown in the menu and receipt.
+
+The first fix resolves local-session meaning once in
+`mclone-app-runtime::local_session_launch`. The resulting
+`LocalSessionLaunchPlan` contains one nested
+`mclone-server::LocalAuthorityStartConfig`, one resolved initial `ChunkView`,
+and a typed entry receipt. Native threads and browser Workers receive that
+authority value whole. The app-local native helper is now only a forwarding
+compatibility entry into the shared scene projector, and the Web lowering no
+longer enumerates authority fields.
+
+The second fix keeps catalog seeds as exact signed 64-bit values in Rust and
+uses decimal text at the JavaScript observation boundary. The Worker startup
+frame is version 5 and round-trips the whole authority config, including the
+durable local player identity.
+
+### Final disposition ledger
+
+| Audited fact | Final owner and disposition |
+|---|---|
+| seed, generation profile, starter content, topology, behavior | fields of `LocalAuthorityStartConfig`; nested whole by native and Web configs and round-tripped by the Worker startup frame |
+| entry provenance and center | `LocalSessionEntryIntent` distinguishes profile-preferred, explicit, authored, and persisted-player fallback; `resolve_local_session_launch_plan` resolves and canonicalizes one view before platform binding |
+| render distance and initial tracking view | resolved once into `LocalSessionLaunchPlan::initial_view`; both runners start from that view |
+| authority lighting and light-status batch | carried whole and applied by `LocalAuthorityStartConfig::apply_runtime_policy`; the non-default Worker codec/mutation tests cover both |
+| day time, frozen time, scheduled-fluid freeze, passive showcase, auxiliary script | carried whole and applied by the authority config |
+| simulation cadence | carried whole at startup and supported by the typed live Worker cadence operation |
+| adaptive chunk publication | one semantic boolean resolves through `LocalAuthorityStartConfig::publication_budget` on both hosts |
+| local player identity and observer role | durable native/browser profile identity is provisioned before the split and carried in the authority config; the Worker repeats the durable browser lookup only if a caller omitted it; observer role is carried whole |
+| logical world/source identity | remains in the shared `SessionStartRequest` and typed `LobbyWorldSource` pending-session payload; it is reported as `storageSourceKind` and is not duplicated into authority policy |
+| physical storage | intentionally host-specific: filesystem/SQLite or transient native storage versus IndexedDB or transient browser storage |
+| render compiler capacity | classified as a platform mechanism; `RenderCompileMechanismReceipt` reports requested and applied values. Native applies its thread/queue request; Web explicitly normalizes to one resident Worker, one in-flight request, and no scene compile timing |
+| scene presentation/input fields | remain consumed by `mclone-scene`; they do not enter local-authority configuration |
+
+### Safeguards landed
+
+- Compile-time nesting replaces parallel field-by-field authority builders.
+- The startup ownership lock pins exactly one production resolver call and
+  rejects direct Web reads of the retired semantic boundary.
+- A table-driven mutation suite changes every authority field independently
+  and proves that the plan receipt, native config, and decoded Worker startup
+  frame all change together.
+- Entry tests cover profile-preferred, explicit, authored, persisted fallback,
+  and periodic-coordinate canonicalization. Native CLI tests lock explicit
+  coordinate provenance.
+- The browser catalog smoke creates untouched default Mclone Wild before any
+  profile cycling, preserves the exact seed as text, waits for settled terrain,
+  and checks the requested/accepted center plus solid floor and empty feet/head
+  blocks.
+- The IndexedDB interaction smoke aims at nearby terrain before requiring a
+  target, avoiding an assumption that every valid profile entry initially
+  faces a block.
+- Source-purity and thin-adapter gates reject new app/TypeScript semantic
+  projectors; platform resource binding remains explicit.
+
+### Reproduced-seed result
+
+The ordinary browser menu flow created seed `553534047293117028` as
+Mclone Wild. Its requested and authority-accepted center were both
+`(-48, 20)`. The settled camera was `(-760.5, 74.62, 327.5)`; the sampled
+floor at Y=72 was grass, and the feet/head blocks at Y=73/Y=74 were air. The
+inspected browser frame is
+[/tmp/mclone-native-web-catalog-default-mclone.png](/tmp/mclone-native-web-catalog-default-mclone.png).
+The inspected flat Android menu-created frame is
+[/tmp/mclone-android-avd-session.png](/tmp/mclone-android-avd-session.png) and
+also shows a dry forest entry.
+
+### Validation outcome
+
+Passed on 2026-08-16:
+
+- `cargo test -p mclone-server -p mclone-app-runtime -p mclone-scene`;
+- `cargo test -p mclone-native-client`;
+- `cargo test -p mclone-web-client`, including the launch mutation,
+  ownership, codec, and boundary-fixpoint locks;
+- `cargo check -p mclone-web-client --target wasm32-unknown-unknown`;
+- `pnpm native:thin-adapters:purity`, `pnpm native:web:typecheck`, and
+  `pnpm native:web:scene-host-adoption`;
+- `pnpm native:web:catalog-smoke` with report
+  [/tmp/mclone-native-web-catalog-ui-probe.json](/tmp/mclone-native-web-catalog-ui-probe.json);
+- `pnpm native:web:indexeddb-smoke` with report
+  [/tmp/mclone-native-web-indexeddb-reload-probe.json](/tmp/mclone-native-web-indexeddb-reload-probe.json);
+- `pnpm native:desktop-offscreen:smoke` with inspected frame
+  [/tmp/mclone-desktop-offscreen.png](/tmp/mclone-desktop-offscreen.png); and
+- `pnpm native:android:avd-session-smoke` with a real title-menu Create World
+  flow and inspected frame
+  [/tmp/mclone-android-avd-session.png](/tmp/mclone-android-avd-session.png).
+
+`pnpm native:android-xr:session-smoke` reached the public Quest testbed and
+reported that no attached, authorized headset was available. The shared XR
+consumer compiles and its semantic tests pass, but this execution record does
+not claim a new physical-headset result.
+
+### Scoreboard and remaining work
+
+Using Tactical 212's measurement method, pre-series `d8270666^` to
+implementation closeout changed authored Web TypeScript 4,061 -> 4,081, all
+TypeScript gate lines/modules 4,084/17 -> 4,104/17, Web-only Rust
+22,314 -> 22,638, shared scene Rust 32,231 -> 32,290, and shared app-runtime
+Rust 35,960 -> 36,297. The combined browser boundary grew 344 lines. The
+growth is the exact-seed/product-flow observer and Web consumption/codec tests;
+semantic ownership moved into the shared authority/launch types rather than
+new TypeScript policy. Product `WebSceneHost` exports remain 38, async mutable
+exports remain zero, and the one operation-identity family is unchanged.
+
+This tactical's implementation scope is complete. Per the parent topic's
+closure protocol, the only remaining platform-boundary work is a separately
+staffed independent fixpoint audit. Physical Quest execution remains a device
+evidence gap, not an alternate semantic implementation.
 
 ## Non-Goals
 

@@ -2,14 +2,14 @@
 
 Topic: `platform-boundary-convergence`
 
-Status: **reopened 2026-08-16 by concrete post-closure evidence**. Tactical
-[`310`](../tactical/310-shared-local-session-launch-semantics.md) reproduced a
-browser-only local-world entry defect and found a broader semantic-lowering
-gap: native and Web independently project shared local-session policy into
-runner configuration, so a value can reach `McloneSceneHostOptions` and still
-be ignored or defaulted by one host. The earlier Phase 9 audit remains valid
-for its coarse-operation/ABI scope, but it did not cover semantic consumption
-inside local runtime assembly.
+Status: **reopened 2026-08-16; Tactical 310 implementation complete,
+independent fixpoint audit pending**. Tactical
+[`310`](../tactical/310-shared-local-session-launch-semantics.md) reproduced
+and corrected the browser-only local-world entry defect and the broader
+semantic-lowering gap. Native and Web now consume one resolved nested launch
+plan; non-default mutation and real default-menu gates pass. The earlier Phase
+9 audit remains valid for its coarse-operation/ABI scope, but only a separately
+staffed audit may close this reopened semantic-consumption scope.
 
 Before this reopening, Tactical
 [`207`](../tactical/207-shared-scene-operation-coordinator.md) completed
@@ -52,7 +52,9 @@ The documents below it have narrower jobs:
   completed execution record for the Phase 8 remediation workstream.
 - Tactical [`213`](../tactical/213-platform-boundary-second-fixpoint-audit.md)
   is the completed independent Phase 9 audit and the authority for the current
-  closed status.
+  pre-reopening closure record.
+- Tactical [`310`](../tactical/310-shared-local-session-launch-semantics.md)
+  is the completed Phase 10 implementation record; it cannot close this parent.
 - The child topic documents own their durable subsystem contracts and evidence.
 - A standalone audit tactical, opened only after implementation stops, is the
   only document allowed to close this parent; Tactical 213 exercised that
@@ -159,6 +161,7 @@ row when it closes, including what it deliberately left open.
 | 212 audit-remediation closeout | 2026-07-21 | mandatory backlog complete: catalog policy moved shared, apply/timing paths converged, production/smoke ABI split, rim guards deleted, behavioral wasm fixpoint passed; combined boundary 24,121 → 23,229 | parent held open for independent Phase 9 audit; optional mechanical hygiene skipped; unchanged actor-ID/age lifecycle fixture remains separate baseline debt |
 | 213 independent second fixpoint audit | 2026-07-21 | closure protocol passed at clean revision `6b1881de`: behavioral fixpoint and widened ABI pins passed, one token family remained, headed active-world trace advanced frame/render/input +2/+2/+2, combined boundary remained 23,229 | nothing remains under the audited platform-boundary scope; optional physical storage lowering and the unrelated actor-ID/age lifecycle fixture remain separate concerns |
 | 310 local-session launch audit | 2026-08-16 | parent reopened from a production Web Worker reproduction; no implementation claim | Web ignores shared profile-preferred entry and inherits the raw scene center; Web lowering also drops a supported non-default light-status batch value; cadence, authority lighting, adaptive publication, render-capacity, and local-identity dispositions require explicit closure. Tactical 310 defines one shared resolved launch plan, cross-host receipts, and a later independent re-audit gate. |
+| 310 local-session launch implementation | 2026-08-16 | tactical complete: one nested native/Web authority plan, typed entry provenance, full-width browser seeds, explicit mechanism receipts, mutation/source locks, and untouched default-menu plus persistence/Android product gates pass | parent remains open for the separately staffed fixpoint audit; physical Quest execution was unavailable because no authorized headset was attached |
 
 ## Measured State (2026-07-21 Audit)
 
@@ -245,7 +248,7 @@ remaining-work note.
 | 7. Independent fixpoint audit | **complete 2026-07-21** ([Tactical 211](../tactical/211-platform-boundary-fixpoint-audit.md)) | Fresh code review by a reviewer/agent outside the implementation series | Outcome (b) of the protocol: precise remaining work appended (fixpoint-evidence gaps G1/G2, findings F1–F6, decision D1) and implementation reopened as Phase 8 |
 | 8. Audit-remediation backlog | **complete 2026-07-21** ([Tactical 212](../tactical/212-boundary-audit-cleanup-backlog.md)) | Land the trailing 207 cleanup, fix the audit findings (catalog-plan hoist, apply-loop dedup, timing convergence, smoke-ABI split, rim-guard collapse), and upgrade the fixpoint to a behavioral demonstration with widened export pins | Mandatory Slices 0–6 closed with their gates; scoreboard column appended; combined boundary 24,121 → 23,229 |
 | 9. Second fixpoint audit | **complete 2026-07-21; pass** ([Tactical 213](../tactical/213-platform-boundary-second-fixpoint-audit.md)) | Short re-audit against the closure protocol, first checking the behavioral fixpoint test and widened pins from 212 | Closure protocol passed at clean revision `6b1881de`; parent closed under the audited scope |
-| 10. Shared local-session launch semantics | **proposed 2026-08-16** ([Tactical 310](../tactical/310-shared-local-session-launch-semantics.md)) | Replace native/Web field-by-field local-session lowering with one resolved semantic launch plan; classify every neighboring policy value; add non-default conformance and real default-menu entry gates | Native and Web consume one nested plan, the reproduced Web seed accepts the profile-selected dry center, no audited value silently defaults, and an implementation-independent follow-up audit passes the reopened closure protocol |
+| 10. Shared local-session launch semantics | **implementation complete 2026-08-16; independent audit pending** ([Tactical 310](../tactical/310-shared-local-session-launch-semantics.md)) | Replace native/Web field-by-field local-session lowering with one resolved semantic launch plan; classify every neighboring policy value; add non-default conformance and real default-menu entry gates | Implementation gates pass: native and Web consume one nested plan, the reproduced Web seed accepts the profile-selected dry center, and every audited value has an applied or explicit mechanism disposition. The separately staffed follow-up audit remains required by the reopened closure protocol. |
 
 ### Phase Boundaries
 
@@ -268,20 +271,20 @@ all rows. The 2026-07-21 values are the immutable campaign baseline. Phase 0
 must also record a clean-revision start baseline because unrelated work may
 have changed the live counts since the audit.
 
-| Metric | Clean baseline | Phase 0 | Phase 1 | Phase 2 | Phase 3 | Closeout | Audit 211 | Remediation 212 | Audit 213 |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| authored web TypeScript lines | 3,757 | 3,759 | 3,685 | 3,686 | **3,574** | **3,599** | 3,555 | **3,593** | **3,593** |
-| TypeScript gate lines / modules | 3,780 / 16 | 3,782 / 16 | 3,708 / 16 | 3,709 / 16 | **3,597 / 16** | **3,622 / 16** | — | **3,616 / 16** | **3,616 / 16** |
-| `mclone-web-client/src` Rust lines | 20,577 | 20,577 | 20,702 | 20,695 | **20,574** | **20,574** | 20,566 | **19,636** | **19,636** |
-| combined both-language boundary total | 24,334 | 24,336 | 24,387 (+53 cumulative) | 24,381 (+47 cumulative; -6 phase-local) | **24,148 (-186 cumulative; -233 phase-local)** | **24,173 (-161 cumulative; +25 closeout)** | 24,121 | **23,229 (-1,105 campaign; -892 from audit)** | **23,229 (-1,105 campaign)** |
-| shared `mclone-scene` Rust lines | 24,632 | 24,632 | 24,632 | 24,726 | 24,731 | 24,731 | 24,731 | **24,730** | **24,730** |
-| shared `mclone-app-runtime` Rust lines | 33,877 | 33,877 | 33,877 | 33,877 | 33,877 | 33,877 | 33,877 | **35,111** | **35,111** |
-| `WebSceneHost` exported methods | 48 | 48 | 48 | 48 | **42** | **42** | 42 | **37** | **37** |
-| async mutable wasm exports | 4 | 4 | **0** | **0** | **0** | **0** | 0 | **0** | **0** |
-| boundary-operation identity/staleness systems | 4 | 4, classified | 4 | **1** | **1** | **1** | 1 (+2 rim in-flight guards noted) | **1; rim guards 0** | **1; rim guards 0** |
-| wasm cfg forks (`mclone-scene` / `mclone-app-runtime`) | 71 / 110 | 71 / 110 | 71 / 110 | 71 / 110 | 71 / 110 | 71 / 110 | 71 / 110 | **70 / 98** | **70 / 98** |
-| active world pauses during coarse web ops | yes | measured yes | **no borrow exclusion; measured progress** | no; progress traces retained | no; semantic probes retain progress | **no; headed Wayland traces pass** | no; 207 traces accepted | **no; replacement/rebuild traces pass** | **no; +2/+2/+2 headed trace** |
-| TS coordination residue | ~300–360 lines + ~20 guard sites | pinned | global borrow guard deleted; named dispatch remains | 259 lines inventoried; one drain is Phase 3 | one generic physical-Promise registry and drain; named state machines zero | same product shape; +25 query-gated smoke-capture lines | drain confirmed opaque; two TS-authored domain schema tables remain (skipped 5b) | **same opaque product drain; smoke observation query-gated; schema-table skip unchanged** | **unchanged; no product drift from 212** |
+| Metric | Clean baseline | Phase 0 | Phase 1 | Phase 2 | Phase 3 | Closeout | Audit 211 | Remediation 212 | Audit 213 | Implementation 310 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| authored web TypeScript lines | 3,757 | 3,759 | 3,685 | 3,686 | **3,574** | **3,599** | 3,555 | **3,593** | **3,593** | **4,081** (4,061 pre-series) |
+| TypeScript gate lines / modules | 3,780 / 16 | 3,782 / 16 | 3,708 / 16 | 3,709 / 16 | **3,597 / 16** | **3,622 / 16** | — | **3,616 / 16** | **3,616 / 16** | **4,104 / 17** (4,084 / 17 pre-series) |
+| `mclone-web-client/src` Rust lines | 20,577 | 20,577 | 20,702 | 20,695 | **20,574** | **20,574** | 20,566 | **19,636** | **19,636** | **22,638** (22,314 pre-series) |
+| combined both-language boundary total | 24,334 | 24,336 | 24,387 (+53 cumulative) | 24,381 (+47 cumulative; -6 phase-local) | **24,148 (-186 cumulative; -233 phase-local)** | **24,173 (-161 cumulative; +25 closeout)** | 24,121 | **23,229 (-1,105 campaign; -892 from audit)** | **23,229 (-1,105 campaign)** | **26,719** (26,375 pre-series; +344) |
+| shared `mclone-scene` Rust lines | 24,632 | 24,632 | 24,632 | 24,726 | 24,731 | 24,731 | 24,731 | **24,730** | **24,730** | **32,290** (32,231 pre-series) |
+| shared `mclone-app-runtime` Rust lines | 33,877 | 33,877 | 33,877 | 33,877 | 33,877 | 33,877 | 33,877 | **35,111** | **35,111** | **36,297** (35,960 pre-series) |
+| `WebSceneHost` exported methods | 48 | 48 | 48 | 48 | **42** | **42** | 42 | **37** | **37** | **38** (unchanged pre-series) |
+| async mutable wasm exports | 4 | 4 | **0** | **0** | **0** | **0** | 0 | **0** | **0** | **0** |
+| boundary-operation identity/staleness systems | 4 | 4, classified | 4 | **1** | **1** | **1** | 1 (+2 rim in-flight guards noted) | **1; rim guards 0** | **1; rim guards 0** | **1; rim guards 0** |
+| wasm cfg forks (`mclone-scene` / `mclone-app-runtime`) | 71 / 110 | 71 / 110 | 71 / 110 | 71 / 110 | 71 / 110 | 71 / 110 | 71 / 110 | **70 / 98** | **70 / 98** | **83 / 113** (82 / 113 pre-series) |
+| active world pauses during coarse web ops | yes | measured yes | **no borrow exclusion; measured progress** | no; progress traces retained | no; semantic probes retain progress | **no; headed Wayland traces pass** | no; 207 traces accepted | **no; replacement/rebuild traces pass** | **no; +2/+2/+2 headed trace** | **no; catalog transition progress trace passed** |
+| TS coordination residue | ~300–360 lines + ~20 guard sites | pinned | global borrow guard deleted; named dispatch remains | 259 lines inventoried; one drain is Phase 3 | one generic physical-Promise registry and drain; named state machines zero | same product shape; +25 query-gated smoke-capture lines | drain confirmed opaque; two TS-authored domain schema tables remain (skipped 5b) | **same opaque product drain; smoke observation query-gated; schema-table skip unchanged** | **unchanged; no product drift from 212** | **same opaque drain; +20 product-flow observation lines, zero semantic policy** |
 
 Audit-column notes: measured on a tree that included Tactical 207's
 then-uncommitted trailing cleanup (legacy IndexedDB migration deletion,
@@ -292,6 +295,16 @@ counts exactly `cfg(not(target_arch = "wasm32"))` occurrences; the full
 fork-site census including positive `wasm32` gates and `cfg_attr` is
 95 / 133. Measurement commands are recorded in
 [Tactical 212](../tactical/212-boundary-audit-cleanup-backlog.md).
+
+The Implementation 310 column was measured from pre-series `d8270666^` and
+the implementation closeout using the same commands. Its absolute values
+include unrelated repository growth since Audit 213; the parenthetical values
+are the comparable pre-series baseline. Phase-local browser-boundary growth is
+344 lines: 20 TypeScript observation lines and 324 Web Rust
+consumption/codec/test lines. Shared scene and app-runtime grew 59 and 337
+lines respectively for the typed plan, receipts, projection, and conformance
+tests. The production `WebSceneHost` export count was already 38 before this
+series and remains 38.
 
 ## Closure Protocol
 
@@ -325,18 +338,18 @@ fork-site census including positive `wasm32` gates and `cfg_attr` is
 
 ## Immediate Next Workstream
 
-Execute Tactical 310. Its investigation is the concrete later evidence
-required by the reopening protocol: the shared scene correctly records a
-profile-preferred local entry, while Web runtime lowering discards that intent
-and sends an inherited raw center. The same field-by-field seam drops another
-supported non-default value and leaves several neighboring values without an
-explicit cross-host disposition.
+Open a standalone, separately staffed fixpoint audit for Tactical 310's
+local-session semantic scope. It must freshly read the native, Web, scene, and
+authority assembly paths; rerun the mutation/source locks and untouched
+default-menu flow; and demonstrate that adding a test-only authority semantic
+expressible by existing host capabilities requires no app or TypeScript policy
+change. It must also verify that source/storage and render-capacity mechanisms
+remain explicit rather than becoming a new hidden semantic projector.
 
-Tactical 310 may close its implementation scope after one shared resolved
-launch plan, the disposition ledger, semantic receipts, source/API locks, and
-the default-menu product gates pass. It may not close this parent. A separately
-staffed independent audit must repeat the fixpoint protocol against the new
-local-session semantic scope.
+Tactical 310 has closed its own implementation scope and may not close this
+parent. The absence of an attached authorized Quest during its closeout is a
+physical evidence gap to record, not grounds for a self-audit or a platform
+fork.
 
 Tactical 212 resolved the `WORLD_DB_VERSION` orphan-store decision without a
 runtime migration because there are no web-world preservation consumers and
