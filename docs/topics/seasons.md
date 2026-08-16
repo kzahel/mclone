@@ -2,17 +2,21 @@
 
 Topic: `seasons`
 
-Status: **concept-stage design record created 2026-08-15. Tactical
-[`306`](../tactical/306-seasonal-appearance-preview.md) now owns the first
-visual-only exact-terrain proof: a continuous manual local-season phase, one bounded
-local recent-snow ground/canopy pulse, and shared desktop/XR Debug controls,
-while explicitly deferring procedural-horizon LOD. Tactical
-[`307`](../tactical/307-seasonal-solar-path-and-cyclical-latitude.md) owns the
-separate visible-sun/day-length proof and actual cyclical-latitude policy for
-the default unbounded Mclone plane, with the optional cylinder remaining
-secondary. No season clock, latitude model, authoritative weather event,
-seasonal surface system, migration producer, seasonal hydrology, wildlife
-tagging, or managed-habitat infrastructure is implemented.
+Status: **active design record created 2026-08-15. Tactical
+[`307`](../tactical/307-seasonal-solar-path-and-cyclical-latitude.md) is
+implemented as a client-local visual proof. The default unbounded Mclone plane
+now has a provisional 98,304-block cyclical latitude wavelength, a
+27-degree-tilt pure solar model, one visible-sun/sky/rendered-light sample, and
+shared desktop/XR Debug controls. Its automated matrix is complete; physical
+headset, Quest performance, full-game WebGPU, and Human Review acceptance
+remain pending. The optional cylinder stays secondary. Tactical
+[`306`](../tactical/306-seasonal-appearance-preview.md) remains planned for
+continuous exact-terrain material response and one bounded recent-snow pulse;
+it must extend Tactical 307's shared `Season Preview` state and continues to
+defer procedural-horizon LOD. No authoritative season clock, terrain or biome
+season generation, weather event, seasonal surface system, migration producer,
+seasonal hydrology, wildlife tagging, or managed-habitat infrastructure is
+implemented.
 The selected direction is that unloaded terrain and entities receive no ticks
 or elapsed-time catch-up. Climate and ambient seasonal opportunities may be
 derived when an active region asks for them, while durable animals freeze.
@@ -100,9 +104,12 @@ and content must not repeat with it.
 The first solar proof deliberately omits coordinate warp so the navigational
 rule and solar response remain legible. A later annual-climate/worldgen study
 may propose a broad shared warp, but it must not erase the rule that one
-direction mostly follows climate while the other crosses it. Wavelength and
-phase origin need human review against spawn climate, travel time, continent
-scale, migration geography, and year length before selection.
+direction mostly follows climate while the other crosses it. Tactical 307
+provisionally selects a 98,304-block wavelength and Z origin zero, putting each
+equator-to-pole interval at 24,576 blocks. Its map review rejected 49,152
+blocks as too frequent and 196,608 blocks as too diffuse. Human Review may
+still reject the provisional values after live travel, spawn, and headset
+inspection; they are not a shipped compatibility promise.
 
 This policy makes polar regions long belts rather than literal points. That is
 acceptable only if the product describes climate regions honestly instead of
@@ -185,8 +192,8 @@ Reversible foliage, ordinary snow/frost, blooms, forage, temporary ice, and
 seasonal activity belong to active seasonal response. Latitude should first
 bias rather than replace existing regional noise, while continents, mountains,
 and valleys remain mostly independent until map review supports stronger
-coupling. Tactical 307 defines and calibrates the shared latitude policy but
-does not change generation.
+coupling. Tactical 307 now defines and provisionally calibrates the shared
+latitude policy but does not change generation.
 
 ## No Unloaded-World Simulation
 
@@ -490,10 +497,10 @@ logic.
 
 ## Recommended Evidence Ladder
 
-1. Execute Tactical 307's pure orbital/solar sample and primary cyclical-plane
-   policy, retaining its secondary cylinder proof. Produce fixed-seed
-   latitude, temperature, moisture, daylight, and snow-target maps before
-   affecting gameplay or generation.
+1. Complete Tactical 307's remaining physical-headset, Quest-performance,
+   full-game WebGPU, and Human Review gates. Its pure orbital/solar sample,
+   primary cyclical-plane policy, secondary cylinder proof, fixed-seed maps,
+   and 39-case exact-revision capture receipt are implemented.
 2. Calibrate year length, climate wavelength/scale, continental size, and
    travel time together in Terrain Lab or another shared review surface.
 3. Add foliage/material response and a bounded derived snow/wetness surface.
@@ -518,8 +525,8 @@ gameplay milestone must prove bounded work with inactive regions held frozen.
 
 - What is a useful year length relative to sleep, ordinary travel, farming,
   breeding, and real play sessions?
-- What wavelength and phase origin give the selected cyclical plane latitude
-  useful spawn, travel, continental, and migration scales?
+- Does live travel and Human Review retain Tactical 307's provisional
+  98,304-block plane wavelength, Z origin zero, and 27-degree tilt?
 - Does the cylinder keep asymptotic polar tails, gain finite axial limits, or
   use another mapping?
 - How should day length affect actual skylight, spawning, crops, and player

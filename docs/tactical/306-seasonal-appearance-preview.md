@@ -4,6 +4,16 @@ Status: planned 2026-08-15
 
 Topic: `seasons`
 
+Dependency update 2026-08-16: Tactical
+[`307`](307-seasonal-solar-path-and-cyclical-latitude.md) landed the shared
+dependency-leaf `mclone-season` crate, unsaved `SeasonPreviewSettings`, one
+typed `SetSeasonPreview` UI action/effect, and the shared Debug `Season Preview`
+master. This tactical must extend that owner for local appearance phase and
+recent snow rather than create another master, action family, or phase type.
+Tactical 307's orbital phase remains global solar vocabulary; any local
+material-review landmark must derive from it or be explicitly typed as a
+temporary independent review input.
+
 ## Instruction Synthesis
 
 Prove the first useful part of seasons as a visual-only, exact-terrain slice.
@@ -49,8 +59,10 @@ small proof:
 - the XR pause/options panel uses the same `mclone-ui` screen and supports
   pointer/controller interaction in both per-eye and multiview rendering.
 
-No seasonal clock, appearance sample, local snowfall pulse, material response,
-UI value, render uniform, or screenshot fixture exists. Current biome tint is
+No authoritative seasonal clock, material appearance sample, local snowfall
+pulse, exact-terrain material response, appearance uniform, or appearance
+capture fixture exists. Tactical 307's shared master and solar-specific Debug
+values now exist, but do not affect terrain materials. Current biome tint is
 compiled into vertex color. The exact textured vertex does not carry a
 distinct seasonal material or upward/exposure flag, so the first slice must
 audit whether the existing facts can be packed without a costly general
@@ -147,8 +159,8 @@ pause/options path must make them interactive.
 
 ### Use one shared Debug-menu action family
 
-Add typed UI actions/effects through the same owners as the existing Debug
-settings:
+Extend Tactical 307's typed preview setting/action/effect through the same
+owners as the existing Debug settings:
 
 ```text
 mclone-ui checkbox/sliders

@@ -1,6 +1,7 @@
 # Tactical 307: Seasonal Solar Path And Cyclical Latitude
 
-Status: planned 2026-08-15
+Status: implementation complete 2026-08-16; physical-headset, full-game
+WebGPU, performance, and Human Review acceptance remain pending
 
 Topic: `seasons`
 
@@ -382,10 +383,10 @@ independent until separate map review supports a stronger coupling.
 
 ### Slice 0: Baselines, ownership audit, and Tactical 036 prerequisite
 
-Status: in progress 2026-08-16. Tactical 036's shared visible textured sun is
-complete in mono, per-eye, and multiview renderer paths, with inspected frozen
-noon pixels. The broader fixed-time baseline/cost matrix remains part of Slice
-4 capture automation.
+Status: complete 2026-08-16 for implementation and automated evidence.
+Tactical 036's shared visible textured sun is complete in mono, per-eye, and
+multiview renderer paths. Physical Quest cost measurement remains pending
+because no authorized headset was attached.
 
 - Confirm default Mclone creation and existing review worlds use the unbounded
   plane; pin an explicitly created cylinder only as secondary evidence.
@@ -404,7 +405,7 @@ profiles retain their existing path.
 
 ### Slice 1: Pure latitude, orbit, and solar model
 
-Status: planned.
+Status: complete 2026-08-16.
 
 - Add the shared coordinate-policy, orbital-phase, and solar-sample vocabulary.
 - Add pure cyclic-plane and secondary asymptotic-cylinder latitude queries.
@@ -433,7 +434,7 @@ without rendering, loading a world, or changing generation.
 
 ### Slice 2: Shared sky and rendered-light integration
 
-Status: planned.
+Status: complete 2026-08-16.
 
 - Resolve one observer-root latitude and `SolarSample` in shared scene/session
   ownership.
@@ -455,7 +456,8 @@ and stereo, with no world work and no regression to retained profiles.
 
 ### Slice 3: Shared interactive Debug controls
 
-Status: planned.
+Status: implemented and covered by shared tests 2026-08-16. Live desktop and
+physical XR interaction remain Human Review gates.
 
 - Add controller-friendly rows for orbital phase, latitude source/value, solar
   time source/value, including correct master/source disabled-row behavior.
@@ -474,7 +476,8 @@ drift.
 
 ### Slice 4: Spatial/temporal matrix, performance, and Human Review
 
-Status: planned.
+Status: automated matrix complete 2026-08-16. Full-game WebGPU, physical
+OpenXR/Quest, Quest performance, and Human Review remain pending.
 
 Add a focused capture runner, such as
 `pnpm native:seasons:solar-capture`, that records under `/tmp`:
@@ -507,6 +510,148 @@ Gate: Human Review accepts the wavelength/anchor/tilt, the sun makes the
 equator-to-pole loop legible, opposite hemispheres read correctly, XR is
 comfortable, and the result remains inside the bounded presentation-only
 contract.
+
+## Execution Record (2026-08-16)
+
+### Landed series and ownership
+
+The implementation landed as the following `Topic: seasons` series:
+
+- `895324a7` establishes the dependency-leaf `mclone-season` model;
+- `dede8faf` completes Tactical 036's baseline visible textured sun;
+- `5d36db18` integrates the observer-local seasonal sample and shared Debug
+  controls;
+- `bfdd01ec` makes the seasonal sun fade completely below the horizon;
+- `d285752c` adds the map and capture runner;
+- `bca1ffb6` expands the spatial, temporal, stereo, retained-profile, and
+  cylinder evidence; and
+- `39f19df5` closes the Web host's exhaustive diagnostic action label.
+
+`mclone-season` owns `OrbitalPhase`, latitude and solar-time source enums,
+the unsaved `SeasonPreviewSettings`, the profile/topology-selected coordinate
+policy, pure latitude queries, `SolarInput`, `SolarSample`, polar state, and
+stable frame diagnostics. The math uses finite `f64` world coordinates and a
+fixed-point ten-thousand-step orbital value before producing finite render
+values.
+
+`mclone-scene` resolves one sample from the shared observation root per frame.
+Both XR eyes consume it unchanged. `mclone-render::SkyRenderState` then drives
+the visible sun, directional glow, clear sky, terrain/actor/placed-world
+skylight darkening, and fog from that sample in mono, per-eye, and full-frame
+multiview paths. The baseline sun is a single textured additive draw in each
+active sky path; its multiview resources remain lazy until that path is used.
+
+The shared Debug screen and `ClientExperienceController` route one typed
+`SetSeasonPreview(SeasonPreviewSettings)` effect. It exposes the master,
+orbital phase, World/Manual latitude, World Clock/Manual solar time, and the
+two gated manual sliders. State resets to preview off and is absent from world
+records, preferences, protocol, and server state. The title screen retains
+visible disabled rows instead of pretending world-derived values exist.
+
+No server, persistence, block, biome, stored-light, mesh, world-generation,
+ecology, or `mclone-terrain-view`/LOD owner changed. A setting effect replaces
+only the small scene-owned preview value; solar evaluation is one
+allocation-free constant-time query independent of loaded chunks and world
+extent.
+
+### Selected coordinate constants
+
+The product-default `mclone-overworld-v1` plane uses:
+
+```text
+wavelength_blocks = 98,304
+phase_origin_z = 0
+equator_to_pole_blocks = 24,576
+axial_tilt_degrees = 27
+```
+
+The review compared three wavelengths over the same `98,304 x 98,304`-block
+map extent. `49,152` was rejected as too frequent: its 12,288-block
+equator-to-pole interval made latitude dominate continent-scale travel.
+`196,608` was rejected as too diffuse: its 49,152-block interval made the loop
+difficult to read during ordinary fast travel. `98,304` keeps several major
+terrain regions inside a temperate shoulder while leaving the full loop
+legible.
+
+Four seeds were sampled at 128-block spacing over 32,768-block spans. Their
+largest approximate connected-land components ranged from 296,321,024 to
+437,338,112 square blocks, with widths of 28,928 to 32,768 blocks and depths
+of 23,168 to 32,768 blocks. These are coarse map-review measurements, not a
+generator compatibility promise or proof that all continents have that size.
+
+The 23.44-degree reference tilt put the +75-degree summer-midnight and
+winter-noon samples at +8.44 and -8.44 degrees. The selected 27-degree tilt
+moves them to +12 and -12 degrees. This remains restrained while making polar
+day/night easier to read. Human Review may still reject the provisional
+wavelength, anchor, or tilt; changing them before release follows the
+internal-mutable Mclone profile policy.
+
+The optional `cylinder-x:384` proof uses a 12,288-block asymptotic climate
+scale. Samples at X 0 and X 6,144, Z 12,288 both resolve latitude
+68.543474 degrees and identical solar output. This remains secondary and does
+not alter the product-default plane.
+
+### Reproducible visual evidence
+
+The final exact-revision receipt is:
+
+```text
+/tmp/mclone-seasonal-solar-39f19df5d683-1786862553496/
+  capture-receipt.json
+  solar-review.json
+```
+
+It records revision `39f19df5d683` and 39 captures. The set contains 15
+world-derived plane sun cases with matched manual-latitude loaded-terrain
+frames, two matched synthetic-stereo terrain frames, the shared Debug menu,
+four retained fixed-path A/B frames, and two secondary cylinder seam frames.
+World-derived sun cases use their true distant Z coordinate. Matched terrain
+cases use the same effective latitude manually at the already loaded review
+terrain, avoiding fresh distant world generation while testing the identical
+solar/render sample.
+
+The receipt covers both equinoxes, both solstices, equator, signed temperate
+and polar latitudes, both polar crests, sunrise/sunset direction, polar day,
+and polar night. It also points to the three wavelength maps,
+`axial-tilt-comparison.png`, and `cylinder-latitude-secondary.png`. Inspected
+frames show the sun and directional glow following the sample, opposite
+hemispheres mirroring correctly, polar-day midnight retaining daylight,
+polar-night noon darkening terrain with no visible sun, stereo parallax, and
+readable shared Debug rows. The preview-off Mclone pair and the opted-out
+Overworld pair are byte-identical within the runner; cylinder seam solar
+directions are identical.
+
+### Validation and remaining gates
+
+Passed:
+
+- full `cargo test --manifest-path native/Cargo.toml`, including all workspace
+  and documentation tests;
+- `cargo fmt --manifest-path native/Cargo.toml --all -- --check`;
+- `pnpm native:thin-adapters:purity`;
+- native XR feature checks through `pnpm native:xr:check`;
+- Web/WASM check and compilation of Web test binaries for
+  `wasm32-unknown-unknown`;
+- inspected desktop offscreen and synthetic-stereo product frames;
+- the final 39-case seasonal capture matrix and its inspected representative
+  sun, polar, terrain, stereo, UI, fixed-path, map, and cylinder images;
+- `pnpm native:android:apk`; and
+- `pnpm native:android-xr:apk`.
+
+The minimal Chrome WebGPU probe passed with an opaque BGRA canvas pixel.
+`pnpm native:web:chunk-smoke`, however, lost the full-game WebGPU device while
+creating the world. The identical failure was reproduced in an isolated clone
+at `dede8faf^`, before the visible-sun and seasonal commits, so this record
+does not attribute that host/session failure to Tactical 307 and does not
+claim headed full-game Web pixel acceptance.
+
+The Quest provider reported that no attached, authorized Quest was available.
+Consequently physical Android XR pixels, desktop-headset interaction, Quest
+sky/total-frame GPU p95, comfort, and the final Human Review decision are not
+claimed. The implementation is complete, but the tactical remains open for
+those acceptance gates. The static cost boundary is one observer-local pure
+sample and existing small render-state writes; no physical performance number
+is fabricated.
 
 ## Acceptance
 
