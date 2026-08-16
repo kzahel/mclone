@@ -347,6 +347,18 @@ fn biome_visual(biome_id: i32) -> BiomeVisual {
     }
 }
 
+/// Compact climate inputs shared by mesh-time seasonal response keys and the
+/// observer's local seasonal evaluation. Temperature is centered around the
+/// temperate Minecraft biome range and clamped to the season model's -1..1
+/// domain; moisture preserves vanilla downfall on its native 0..1 domain.
+pub fn seasonal_climate_for_biome(biome_id: i32) -> (f32, f32) {
+    let visual = biome_visual(biome_id);
+    (
+        (visual.temperature - 0.5).clamp(-1.0, 1.0),
+        visual.downfall.clamp(0.0, 1.0),
+    )
+}
+
 fn grass_color(
     catalog: &TexturedMeshCatalog,
     visual: BiomeVisual,

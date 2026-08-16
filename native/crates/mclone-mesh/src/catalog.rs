@@ -8,6 +8,7 @@ use mclone_assets::{
     ResourceLocation, TextureAtlasPlan, TextureMaterial,
 };
 use mclone_core::BlockStateId;
+use mclone_season::SeasonalSurfaceFamily;
 
 use crate::render_facts::block_render_facts;
 
@@ -199,6 +200,7 @@ pub struct TexturedBlockModel {
     pub fluid: Option<TexturedFluidModel>,
     pub leaf_cards: Option<TexturedLeafCardModel>,
     pub grass_patch_surface: bool,
+    pub seasonal_surface_family: SeasonalSurfaceFamily,
     pub render_layer: TexturedTerrainRenderLayer,
     pub occludes: bool,
     pub ambient_occlusion: bool,
@@ -352,6 +354,7 @@ impl TexturedMeshCatalog {
                     fluid,
                     leaf_cards,
                     grass_patch_surface: record.block.path() == "grass_block",
+                    seasonal_surface_family: seasonal_surface_family(record.block.path()),
                     render_layer: textured_terrain_render_layer(
                         record.block.path(),
                         facts.solid_render,
@@ -465,6 +468,7 @@ impl TexturedMeshCatalog {
                     fluid,
                     leaf_cards,
                     grass_patch_surface: record.block.path() == "grass_block",
+                    seasonal_surface_family: seasonal_surface_family(record.block.path()),
                     render_layer,
                     occludes: facts.occludes,
                     ambient_occlusion,
@@ -1026,6 +1030,18 @@ fn textured_block_tint(block_path: &str, tintindex: i32) -> TexturedBlockTint {
     }
 }
 
+fn seasonal_surface_family(block_path: &str) -> SeasonalSurfaceFamily {
+    match block_path {
+        // Keep this deliberately narrow: seasonal cover is a presentation
+        // response for recognizably natural ground, not every upward-facing
+        // cube (which would turn player roofs white).
+        "dirt" | "coarse_dirt" | "grass_block" | "gravel" | "mycelium" | "podzol" => {
+            SeasonalSurfaceFamily::NaturalGround
+        }
+        _ => SeasonalSurfaceFamily::Inert,
+    }
+}
+
 fn textured_terrain_render_layer(path: &str, solid_render: bool) -> TexturedTerrainRenderLayer {
     if java_translucent_block(path) {
         TexturedTerrainRenderLayer::Translucent
@@ -1453,6 +1469,26 @@ mod tests {
         );
         assert_eq!(textured_block_tint("lily_pad", -1), TexturedBlockTint::None);
         assert_eq!(textured_block_tint("bamboo", 0), TexturedBlockTint::None);
+    }
+
+    #[test]
+    fn seasonal_surface_family_is_narrowly_natural() {
+        assert_eq!(
+            seasonal_surface_family("grass_block"),
+            SeasonalSurfaceFamily::NaturalGround
+        );
+        assert_eq!(
+            seasonal_surface_family("podzol"),
+            SeasonalSurfaceFamily::NaturalGround
+        );
+        assert_eq!(
+            seasonal_surface_family("stone"),
+            SeasonalSurfaceFamily::Inert
+        );
+        assert_eq!(
+            seasonal_surface_family("oak_planks"),
+            SeasonalSurfaceFamily::Inert
+        );
     }
 
     #[test]

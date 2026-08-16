@@ -61,6 +61,7 @@ use mclone_assets::{
 };
 use mclone_core::{AIR_BLOCK_STATE_ID, HorizontalTopology, PackedLightSection, chunk_block_index};
 use mclone_light::{DataLayer, FULL_BRIGHT, pack_light};
+use mclone_season::{SeasonalSurfaceFamily, StaticSeasonalResponse};
 use std::collections::BTreeSet;
 
 fn chunk_blocks(height: i32, filled: &[(i32, i32, i32, u8)]) -> Vec<u8> {
@@ -160,7 +161,44 @@ fn grass_patch_discovery_is_request_gated_and_surface_correct() {
     assert_eq!(patch[0].packed_light, FULL_BRIGHT);
     assert_ne!(patch[0].seed, 0);
     assert_eq!(patch[0].flags, 0);
-    assert_eq!(patch[0].reserved, 0);
+    let response = StaticSeasonalResponse::decode(patch[0].reserved as u8);
+    assert_eq!(response.family, SeasonalSurfaceFamily::Grass);
+    assert!(response.upward_exposed);
+}
+
+#[test]
+fn seasonal_mesh_keys_reuse_existing_storage_and_preserve_light_bits() {
+    assert_eq!(std::mem::size_of::<TexturedChunkVertex>(), 40);
+
+    let natural_catalog = cube_textured_catalog("dirt", true);
+    let blocks = textured_chunk_blocks(16, &[(8, 0, 8, BlockStateId(1))]);
+    let natural = build_textured_visible_chunk_mesh(
+        TexturedChunkMeshInput::new(0, 0, 0, 16, &blocks),
+        &natural_catalog,
+    )
+    .unwrap();
+    assert!(natural.vertices.iter().all(|vertex| {
+        vertex.packed_light & 0x00ff_ffff == FULL_BRIGHT
+            && StaticSeasonalResponse::unpack_from_light(vertex.packed_light).family
+                == SeasonalSurfaceFamily::NaturalGround
+    }));
+    assert!(natural.vertices.iter().any(|vertex| {
+        vertex.position[1] == 1.0
+            && StaticSeasonalResponse::unpack_from_light(vertex.packed_light).upward_exposed
+    }));
+
+    let inert_catalog = stone_textured_catalog();
+    let inert = build_textured_visible_chunk_mesh(
+        TexturedChunkMeshInput::new(0, 0, 0, 16, &blocks),
+        &inert_catalog,
+    )
+    .unwrap();
+    assert!(
+        inert
+            .vertices
+            .iter()
+            .all(|vertex| vertex.packed_light == FULL_BRIGHT)
+    );
 }
 
 #[test]

@@ -13,7 +13,7 @@ use crate::data::{
     TexturedRenderSectionBuildReport, TexturedRenderSectionMesh, TexturedVisibleChunkMesh,
     VisibilityGraphBuildStats, VisibleChunkMesh,
 };
-use crate::tint::{blended_liquid_color, block_tint};
+use crate::tint::{blended_liquid_color, block_tint, seasonal_climate_for_biome};
 use crate::visibility::{VisGraph, VisibilityGraphTimer, VisibilitySet};
 use crate::{AIR_BLOCK_ID, CAVE_AIR_BLOCK_ID, CAVE_AIR_BLOCK_STATE_ID};
 use mclone_assets::ModelFaceDirection;
@@ -27,6 +27,7 @@ use mclone_light::{
     FULL_BRIGHT, pack_light, packed_block_light, packed_light_at_local_block_or_fullbright,
     packed_sky_light,
 };
+use mclone_season::{SeasonalSurfaceFamily, StaticSeasonalResponse};
 
 const LCG_MULTIPLIER: i64 = 6364136223846793005;
 const LCG_INCREMENT: i64 = 1442695040888963407;
@@ -425,22 +426,29 @@ fn discover_grass_patches(
                     world_z,
                     |x, y, z| biome_id_at_world_or_default(area, x, y, z),
                 );
+                let packed_light =
+                    packed_light_at_world_or_fullbright(area, world_x, world_y + 1, world_z);
+                let (mean_temperature, moisture) = seasonal_climate_for_biome(
+                    biome_id_at_world_or_default(area, world_x, world_y, world_z),
+                );
+                let response = StaticSeasonalResponse::from_climate(
+                    SeasonalSurfaceFamily::Grass,
+                    packed_sky_light(packed_light) == 15,
+                    mean_temperature,
+                    moisture,
+                    world_y as f32,
+                );
                 patches.push(GrassPatch {
                     root: [world_x, world_y + 1, world_z],
                     packed_tint: pack_rgb8(tint),
-                    packed_light: packed_light_at_world_or_fullbright(
-                        area,
-                        world_x,
-                        world_y + 1,
-                        world_z,
-                    ),
+                    packed_light,
                     seed: fold_position_hash(stable_position_hash(
                         canonical.x,
                         canonical.y,
                         canonical.z,
                     )),
                     flags: 0,
-                    reserved: 0,
+                    reserved: u32::from(response.encode()),
                 });
             }
         }
@@ -609,8 +617,16 @@ fn add_textured_chunk_range_to_mesh(
                     match block_model.render_layer {
                         TexturedTerrainRenderLayer::Solid => {
                             add_textured_face(
-                                mesh, area, catalog, world_x, world_y, world_z, face, corners,
+                                mesh,
+                                area,
+                                catalog,
+                                world_x,
+                                world_y,
+                                world_z,
+                                face,
+                                corners,
                                 lighting,
+                                block_model.seasonal_surface_family,
                             );
                         }
                         TexturedTerrainRenderLayer::Cutout => {
@@ -624,6 +640,7 @@ fn add_textured_chunk_range_to_mesh(
                                 face,
                                 corners,
                                 lighting,
+                                block_model.seasonal_surface_family,
                             );
                         }
                         TexturedTerrainRenderLayer::Translucent => {
@@ -637,6 +654,7 @@ fn add_textured_chunk_range_to_mesh(
                                 face,
                                 corners,
                                 lighting,
+                                block_model.seasonal_surface_family,
                             );
                         }
                     }
@@ -831,12 +849,22 @@ fn add_textured_face(
     face: &TexturedBlockFace,
     corners: [[f32; 3]; 4],
     lighting: AmbientOcclusionFace,
+    block_family: SeasonalSurfaceFamily,
 ) {
     let base_index = mesh.vertices.len() as u32;
     let uvs = textured_face_uvs(face);
     let tint = block_tint(catalog, face.tint, world_x, world_y, world_z, |x, y, z| {
         biome_id_at_world_or_default(area, x, y, z)
     });
+    let family = seasonal_family_for_face(face.tint, block_family);
+    let response = if family == SeasonalSurfaceFamily::Inert {
+        None
+    } else {
+        let (mean_temperature, moisture) = seasonal_climate_for_biome(
+            biome_id_at_world_or_default(area, world_x, world_y, world_z),
+        );
+        Some((mean_temperature, moisture))
+    };
     for index in 0..4 {
         let corner = corners[index];
         let color = [
@@ -845,6 +873,17 @@ fn add_textured_face(
             tint[2] * lighting.brightness[index],
             1.0,
         ];
+        let packed_light = response.map_or(lighting.lightmap[index], |(temperature, moisture)| {
+            StaticSeasonalResponse::from_climate(
+                family,
+                face.direction == ModelFaceDirection::Up
+                    && packed_sky_light(lighting.lightmap[index]) == 15,
+                temperature,
+                moisture,
+                world_y as f32,
+            )
+            .pack_in_light(lighting.lightmap[index])
+        });
         mesh.vertices.push(TexturedChunkVertex {
             position: [
                 world_x as f32 + corner[0],
@@ -853,7 +892,7 @@ fn add_textured_face(
             ],
             uv: uvs[index],
             color,
-            packed_light: lighting.lightmap[index],
+            packed_light,
         });
     }
     mesh.indices.extend_from_slice(&[
@@ -864,6 +903,25 @@ fn add_textured_face(
         base_index + 2,
         base_index + 3,
     ]);
+}
+
+fn seasonal_family_for_face(
+    tint: crate::catalog::TexturedBlockTint,
+    block_family: SeasonalSurfaceFamily,
+) -> SeasonalSurfaceFamily {
+    match tint {
+        crate::catalog::TexturedBlockTint::Grass => SeasonalSurfaceFamily::Grass,
+        crate::catalog::TexturedBlockTint::Foliage
+        | crate::catalog::TexturedBlockTint::BirchFoliage => {
+            SeasonalSurfaceFamily::DeciduousFoliage
+        }
+        crate::catalog::TexturedBlockTint::EvergreenFoliage => {
+            SeasonalSurfaceFamily::EvergreenFoliage
+        }
+        crate::catalog::TexturedBlockTint::None | crate::catalog::TexturedBlockTint::LilyPad => {
+            block_family
+        }
+    }
 }
 
 fn leaf_is_fully_enclosed(
@@ -907,6 +965,16 @@ fn add_bushy_leaf_cards(
     });
     let color = [tint[0], tint[1], tint[2], 1.0];
     let packed_light = liquid_packed_light(area, world_x, world_y, world_z);
+    let family = seasonal_family_for_face(cards.tint, SeasonalSurfaceFamily::Inert);
+    let packed_light = if family == SeasonalSurfaceFamily::Inert {
+        packed_light
+    } else {
+        let (temperature, moisture) = seasonal_climate_for_biome(biome_id_at_world_or_default(
+            area, world_x, world_y, world_z,
+        ));
+        StaticSeasonalResponse::from_climate(family, false, temperature, moisture, world_y as f32)
+            .pack_in_light(packed_light)
+    };
     let uvs = [
         cards.sprite.map(0.0, 16.0),
         cards.sprite.map(0.0, 0.0),

@@ -46,6 +46,7 @@ pub use terrain_assets::{
     load_first_party_textured_terrain_assets_with_presentation, load_textured_terrain_assets,
     load_textured_terrain_assets_with_presentation,
 };
+pub use tint::seasonal_climate_for_biome;
 pub use visibility::{SectionFace, VisGraph, VisibilitySet};
 
 pub const QUAD_FACE_INDEX_COUNT: u32 = 6;

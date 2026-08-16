@@ -10,6 +10,7 @@ image.workspace = true
 mclone-assets.workspace = true
 mclone-core.workspace = true
 mclone-light.workspace = true
+mclone-season.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true
