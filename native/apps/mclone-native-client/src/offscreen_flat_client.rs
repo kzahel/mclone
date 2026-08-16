@@ -1544,6 +1544,7 @@ pub(crate) fn run_offscreen_flat_client_screenshot(
     let asset_source = mclone_assets::SharedAssetSource::new(load_asset_source()?);
     let scene = options.scene.clone();
     let render_options = options.render_options;
+    let season_preview = options.season_preview;
     let startup_wait = options.startup_wait;
     let startup_camera = screenshot_startup_camera(&scene, startup_wait);
     let mut frame_count = if options.frame_pipeline_overlay {
@@ -1580,6 +1581,9 @@ pub(crate) fn run_offscreen_flat_client_screenshot(
                 &asset_source,
                 startup_camera,
             )?;
+            host.driver
+                .host_mut()
+                .set_season_preview_settings(season_preview);
             if scene.asset_pack == crate::cli::AssetPackLaunchProfile::Saved {
                 let mut asset_packs_configured = false;
                 if let Some(registry) = mclone_app_runtime::prepared_assets::AssetPackSourceRegistry::discover_native_with_reference(asset_source.clone())? {

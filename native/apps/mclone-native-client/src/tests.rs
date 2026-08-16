@@ -30,6 +30,7 @@ fn screenshot_cli(
             terrain_horizon_diagnostic: Default::default(),
             eye: None,
             target: None,
+            season_preview: Default::default(),
         },
     }
 }

@@ -40,6 +40,7 @@ mclone-net.workspace = true
 mclone-protocol.workspace = true
 mclone-render = { workspace = true, features = ["native-surface"] }
 mclone-render-session.workspace = true
+mclone-season.workspace = true
 mclone-server.workspace = true
 mclone-ui.workspace = true
 mclone-worldgen.workspace = true

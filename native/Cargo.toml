@@ -33,6 +33,7 @@ members = [
   "apps/mclone-android-client",
   "apps/mclone-android-xr-client",
   "apps/mclone-native-client",
+  "apps/mclone-season-lab",
   "apps/mclone-structure-compiler",
   "apps/mclone-terrain-lab",
   "apps/mclone-web-client",

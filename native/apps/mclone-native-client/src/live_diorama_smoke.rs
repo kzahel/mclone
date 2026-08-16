@@ -321,6 +321,7 @@ pub(crate) fn run_live_diorama_smoke(
         held_keys: Vec::new(),
         input_frames: 1,
         pause_panel: true,
+        season_preview: Default::default(),
     })?;
     let stereo_preview = stereo
         .embedded_preview
@@ -1169,6 +1170,7 @@ fn screenshot_options(
         terrain_horizon_diagnostic: Default::default(),
         eye: Some(eye),
         target: Some(target),
+        season_preview: Default::default(),
     }
 }
 

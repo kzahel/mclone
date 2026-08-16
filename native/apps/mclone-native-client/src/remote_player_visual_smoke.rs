@@ -90,6 +90,7 @@ pub(crate) fn run_remote_player_visual_smoke(
         terrain_horizon_diagnostic: Default::default(),
         eye: None,
         target: None,
+        season_preview: Default::default(),
     });
 
     let remote_actor_stop_result = remote_actor.stop();

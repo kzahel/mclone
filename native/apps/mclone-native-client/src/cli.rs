@@ -17,6 +17,10 @@ use mclone_render::chunk::TexturedSectionRenderOptions;
 use mclone_render::placement::{EmbeddedChunkRegion, WorldPlacement};
 use mclone_render_session::EngineCameraViewMode;
 use mclone_scene::{TerrainHorizonDiagnostic, WorldgenLensLayer};
+use mclone_season::{
+    LatitudeSource, OrbitalPhase, PreviewLatitude, PreviewSolarTime, SeasonPreviewSettings,
+    SolarTimeSource,
+};
 use mclone_server::SimulationCadenceConfig;
 use mclone_ui::{
     GameDeathCause, GameHelpParent, GameOptionsCategory, GameOptionsParent, GameScreen,
@@ -115,6 +119,12 @@ pub(crate) const DESKTOP_LOCAL_ARG_FLAGS: &[&str] = &[
     "--screenshot-controller-focus",
     "--screenshot-debug-pane",
     "--screenshot-worldgen-lens",
+    "--season-latitude",
+    "--season-latitude-source",
+    "--season-orbital-phase",
+    "--season-preview",
+    "--season-solar-time",
+    "--season-solar-time-source",
     "--screenshot-frame-pipeline-overlay",
     "--screenshot-hud",
     "--screenshot-player-box",
@@ -323,6 +333,7 @@ pub(crate) struct HeadlessScreenshotOptions {
     pub(crate) terrain_horizon_diagnostic: TerrainHorizonDiagnostic,
     pub(crate) eye: Option<[f32; 3]>,
     pub(crate) target: Option<[f32; 3]>,
+    pub(crate) season_preview: SeasonPreviewSettings,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -390,6 +401,7 @@ pub(crate) struct XrEmulationScreenshotOptions {
     /// Opens the pause panel before capture. Disable this to review the
     /// ordinary stereo gameplay HUD.
     pub(crate) pause_panel: bool,
+    pub(crate) season_preview: SeasonPreviewSettings,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -936,6 +948,8 @@ impl Cli {
         let mut screenshot_settle_frames = 0;
         let mut screenshot_terrain_horizon_diagnostic = TerrainHorizonDiagnostic::Natural;
         let mut screenshot_camera_view = EngineCameraViewMode::FirstPerson;
+        let mut season_preview = SeasonPreviewSettings::default();
+        let mut season_preview_options_explicit = false;
         let mut actor_walk_review_video = None;
         let mut actor_walk_review_options_explicit = false;
         let mut actor_walk_review_frames = DEFAULT_ACTOR_WALK_REVIEW_FRAMES;
@@ -1498,6 +1512,34 @@ impl Cli {
                 "--screenshot-camera-view" => {
                     screenshot_camera_view = parse_camera_view_arg(&arg, args.next())?;
                 }
+                "--season-preview" => {
+                    season_preview_options_explicit = true;
+                    season_preview.enabled = parse_bool_arg(&arg, args.next())?;
+                }
+                "--season-orbital-phase" => {
+                    season_preview_options_explicit = true;
+                    season_preview.orbital_phase =
+                        parse_season_orbital_phase_arg(&arg, args.next())?;
+                }
+                "--season-latitude-source" => {
+                    season_preview_options_explicit = true;
+                    season_preview.latitude_source =
+                        parse_season_latitude_source_arg(&arg, args.next())?;
+                }
+                "--season-latitude" => {
+                    season_preview_options_explicit = true;
+                    season_preview.manual_latitude = parse_season_latitude_arg(&arg, args.next())?;
+                }
+                "--season-solar-time-source" => {
+                    season_preview_options_explicit = true;
+                    season_preview.solar_time_source =
+                        parse_season_solar_time_source_arg(&arg, args.next())?;
+                }
+                "--season-solar-time" => {
+                    season_preview_options_explicit = true;
+                    season_preview.manual_solar_time =
+                        parse_season_solar_time_arg(&arg, args.next())?;
+                }
                 "--first-person-player" => {
                     first_person_player_visible =
                         parse_bool_arg("--first-person-player", args.next())?;
@@ -1860,6 +1902,16 @@ impl Cli {
         {
             bail!("--xr-emulation-input-frames requires --xr-emulation-key");
         }
+        if season_preview_options_explicit
+            && !matches!(
+                mode,
+                Some(HeadlessMode::Screenshot(_) | HeadlessMode::XrEmulationScreenshot(_))
+            )
+        {
+            bail!(
+                "season preview capture options require --screenshot or --xr-emulation-screenshot"
+            );
+        }
         if startup_wait.is_some()
             && (perf_mode_count > 0
                 || xr_clear_smoke
@@ -2134,6 +2186,7 @@ impl Cli {
                     terrain_horizon_diagnostic: screenshot_terrain_horizon_diagnostic,
                     eye: startup_camera.eye,
                     target: startup_camera.target,
+                    season_preview,
                 },
             }),
             Some(HeadlessMode::LiveDioramaSmoke(directory)) => {
@@ -2223,6 +2276,7 @@ impl Cli {
                     held_keys: xr_emulation_keys,
                     input_frames: xr_emulation_input_frames,
                     pause_panel: xr_emulation_pause_panel,
+                    season_preview,
                 },
             }),
             Some(HeadlessMode::RendererRebuildSmoke(directory)) => Ok(Self::RendererRebuildSmoke {
@@ -2377,6 +2431,60 @@ fn set_headless_mode(mode: &mut Option<HeadlessMode>, next: HeadlessMode) -> Res
     }
     *mode = Some(next);
     Ok(())
+}
+
+fn parse_season_orbital_phase_arg(flag: &str, value: Option<String>) -> Result<OrbitalPhase> {
+    let raw = value.with_context(|| format!("{flag} requires a normalized phase from 0 to 1"))?;
+    let phase = raw
+        .parse::<f64>()
+        .with_context(|| format!("{flag} expects a normalized phase, got `{raw}`"))?;
+    if !phase.is_finite() || !(0.0..=1.0).contains(&phase) {
+        bail!("{flag} must be finite and between 0 and 1");
+    }
+    Ok(OrbitalPhase::from_turns_wrapped(phase)?)
+}
+
+fn parse_season_latitude_source_arg(flag: &str, value: Option<String>) -> Result<LatitudeSource> {
+    match value.as_deref() {
+        Some("world") => Ok(LatitudeSource::World),
+        Some("manual") => Ok(LatitudeSource::Manual),
+        Some(value) => bail!("{flag} expects world or manual, got `{value}`"),
+        None => bail!("{flag} requires world or manual"),
+    }
+}
+
+fn parse_season_latitude_arg(flag: &str, value: Option<String>) -> Result<PreviewLatitude> {
+    let raw = value.with_context(|| format!("{flag} requires degrees from -90 to 90"))?;
+    let degrees = raw
+        .parse::<f64>()
+        .with_context(|| format!("{flag} expects latitude degrees, got `{raw}`"))?;
+    if !degrees.is_finite() || !(-90.0..=90.0).contains(&degrees) {
+        bail!("{flag} must be finite and between -90 and 90 degrees");
+    }
+    Ok(PreviewLatitude::from_degrees_clamped(degrees))
+}
+
+fn parse_season_solar_time_source_arg(
+    flag: &str,
+    value: Option<String>,
+) -> Result<SolarTimeSource> {
+    match value.as_deref() {
+        Some("world") | Some("world-clock") => Ok(SolarTimeSource::WorldClock),
+        Some("manual") => Ok(SolarTimeSource::Manual),
+        Some(value) => bail!("{flag} expects world-clock or manual, got `{value}`"),
+        None => bail!("{flag} requires world-clock or manual"),
+    }
+}
+
+fn parse_season_solar_time_arg(flag: &str, value: Option<String>) -> Result<PreviewSolarTime> {
+    let raw = value.with_context(|| format!("{flag} requires hours from 0 up to 24"))?;
+    let hours = raw
+        .parse::<f64>()
+        .with_context(|| format!("{flag} expects solar hours, got `{raw}`"))?;
+    if !hours.is_finite() || !(0.0..24.0).contains(&hours) {
+        bail!("{flag} must be finite and in [0, 24)");
+    }
+    Ok(PreviewSolarTime::from_hours_wrapped(hours))
 }
 
 fn parse_window_platform_profile_arg(
@@ -2975,7 +3083,7 @@ fn print_help() {
            mclone-native-client --headless-clear /tmp/mclone-native-clear.png [--width 96] [--height 64]\n\
            mclone-native-client --actor-review-sheet /tmp/mclone-actor-review.png [--width 1152] [--height 512] [--fullbright true|false]\n\
            mclone-native-client --actor-walk-review /tmp/mclone-actor-walk-review.png [--actor-walk-review-video /tmp/mclone-actor-walk-review.mp4] [--width 360] [--height 360] [--walk-review-frames 24] [--walk-review-fps 12] [--walk-review-cycles 2] [--fullbright true|false]\n\
-          mclone-native-client --screenshot /tmp/mclone-frame.png [--asset-pack saved|original] [--width 1280] [--height 720] [--startup-wait none|progress|playable|view-settled|frames:N] [--warm-world-standby-seed -98765] [--screenshot-ui none|title|world-list|world-create|world-delete-confirm|new-world|join-remote|pause|death|help|controls|block-palette|options-title|options-pause|options-local-play|storage-profile-title|storage-factory-confirm|server-settings-pause|asset-packs-pause] [--screenshot-hud true|false] [--screenshot-frame-pipeline-overlay true|false] [--screenshot-debug-pane true|false] [--screenshot-worldgen-lens off|biome|landform|surface|hydrology] [--screenshot-player-box true|false] [--screenshot-blink-debug true|false] [--screenshot-controller-focus true|false] [--screenshot-scripted-interaction true|false] [--screenshot-settle-ms 0] [--screenshot-settle-frames 0] [--screenshot-terrain-horizon-diagnostic natural|ownership-level|topology|albedo|environmental-illumination|geometric-shade|local-occlusion|water|texture] [--screenshot-eye x,y,z] [--screenshot-target x,y,z] [--screenshot-camera-view first-person|third-person] [--first-person-player true|false] [--seed 12345] [--generation-profile mclone-overworld-v1] [--starter-content wild|intro-homestead-v1] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--movement-speed-multiplier 1.0] [--simulation-cadence 20/20/60] [--debug-passive-showcase true|false] [--section-occlusion true|false] [--lighting true|false] [--fullbright true|false]\n\
+          mclone-native-client --screenshot /tmp/mclone-frame.png [--asset-pack saved|original] [--width 1280] [--height 720] [--startup-wait none|progress|playable|view-settled|frames:N] [--warm-world-standby-seed -98765] [--screenshot-ui none|title|world-list|world-create|world-delete-confirm|new-world|join-remote|pause|death|help|controls|block-palette|options-title|options-pause|options-local-play|storage-profile-title|storage-factory-confirm|server-settings-pause|asset-packs-pause] [--screenshot-hud true|false] [--screenshot-frame-pipeline-overlay true|false] [--screenshot-debug-pane true|false] [--screenshot-worldgen-lens off|biome|landform|surface|hydrology] [--screenshot-player-box true|false] [--screenshot-blink-debug true|false] [--screenshot-controller-focus true|false] [--screenshot-scripted-interaction true|false] [--screenshot-settle-ms 0] [--screenshot-settle-frames 0] [--screenshot-terrain-horizon-diagnostic natural|ownership-level|topology|albedo|environmental-illumination|geometric-shade|local-occlusion|water|texture] [--screenshot-eye x,y,z] [--screenshot-target x,y,z] [--screenshot-camera-view first-person|third-person] [--season-preview true|false] [--season-orbital-phase 0..1] [--season-latitude-source world|manual] [--season-latitude -90..90] [--season-solar-time-source world-clock|manual] [--season-solar-time 0..<24] [--first-person-player true|false] [--seed 12345] [--generation-profile mclone-overworld-v1] [--starter-content wild|intro-homestead-v1] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--movement-speed-multiplier 1.0] [--simulation-cadence 20/20/60] [--debug-passive-showcase true|false] [--section-occlusion true|false] [--lighting true|false] [--fullbright true|false]\n\
            mclone-native-client --worldgen-showcase-card /tmp/mclone-worldgen-showcase [--width 640] [--height 400] [--generation-profile small-island-v1] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 16] [--day-time 6000] [--lighting true|false] [--fullbright true|false]\n\
            mclone-native-client --warm-world-swap-smoke /tmp/mclone-warm-world-swap --warm-world-standby-seed 67890 [--warm-world-standby-cadence 5/5/5] [--warm-world-cost-sample-ms 3000] [--width 1280] [--height 720] [scene/render options as --screenshot]\n\
            mclone-native-client --live-diorama-smoke /tmp/mclone-live-diorama --world-dir ./table-a --live-diorama-world-dir ./island-b [--live-diorama-scale 0.125] [--live-diorama-soak-seconds 600] [--width 960] [--height 640]\n\

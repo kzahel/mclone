@@ -1737,6 +1737,7 @@ dependencies = [
  "mclone-render",
  "mclone-render-session",
  "mclone-scene",
+ "mclone-season",
  "mclone-server",
  "mclone-ui",
  "mclone-worldgen",
@@ -1864,6 +1865,18 @@ name = "mclone-season"
 version = "0.0.0"
 dependencies = [
  "mclone-core",
+]
+
+[[package]]
+name = "mclone-season-lab"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "image",
+ "mclone-season",
+ "mclone-worldgen",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

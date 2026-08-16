@@ -332,6 +332,7 @@ fn cli_parses_xr_emulation_screenshot_and_keyboard_input() {
                 ],
                 input_frames: 12,
                 pause_panel: false,
+                season_preview: Default::default(),
             },
         }
     );
@@ -629,9 +630,48 @@ fn cli_parses_full_frame_screenshot_options() {
                     mclone_scene::TerrainHorizonDiagnostic::EnvironmentalIllumination,
                 eye: Some([1.5, 62.25, -3.0]),
                 target: Some([8.0, 64.0, 8.0]),
+                season_preview: Default::default(),
             },
         }
     );
+}
+
+#[test]
+fn cli_parses_typed_season_preview_capture_options() {
+    let cli = Cli::parse([
+        "--screenshot".to_owned(),
+        "/tmp/mclone-season.png".to_owned(),
+        "--season-preview".to_owned(),
+        "true".to_owned(),
+        "--season-orbital-phase".to_owned(),
+        "0.25".to_owned(),
+        "--season-latitude-source".to_owned(),
+        "manual".to_owned(),
+        "--season-latitude".to_owned(),
+        "75".to_owned(),
+        "--season-solar-time-source".to_owned(),
+        "manual".to_owned(),
+        "--season-solar-time".to_owned(),
+        "23.5".to_owned(),
+    ])
+    .unwrap();
+    let Cli::HeadlessScreenshot { options } = cli else {
+        panic!("expected screenshot mode")
+    };
+    assert_eq!(
+        options.season_preview,
+        mclone_season::SeasonPreviewSettings {
+            enabled: true,
+            orbital_phase: mclone_season::OrbitalPhase::NORTHERN_SOLSTICE,
+            latitude_source: mclone_season::LatitudeSource::Manual,
+            manual_latitude: mclone_season::PreviewLatitude::from_tenths_clamped(750),
+            solar_time_source: mclone_season::SolarTimeSource::Manual,
+            manual_solar_time: mclone_season::PreviewSolarTime::from_minutes_wrapped(1_410),
+        }
+    );
+
+    let error = Cli::parse(["--season-preview".to_owned(), "true".to_owned()]).unwrap_err();
+    assert!(error.to_string().contains("require --screenshot"));
 }
 
 #[test]
