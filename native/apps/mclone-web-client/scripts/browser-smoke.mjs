@@ -8627,9 +8627,13 @@ async function runCatalogUiProbe(page, canvas, homestead = false) {
     page,
     () => clickWorldCreateCreate(page),
   );
-  const firstSession = await waitForSessionWorldId(page, { notWorldId: null });
+  let firstSession = await waitForSessionWorldId(page, { notWorldId: null });
   const firstWorldId = String(firstSession.sessionWorldId);
   const firstHomesteadState = homestead ? await waitForHomesteadPlayable(page) : null;
+  if (!homestead) {
+    await waitForWebAppStreamingSettled(page, 60_000);
+    firstSession = await waitForSessionWorldId(page, { worldId: firstWorldId });
+  }
   const firstEntryBlocks = homestead ? null : await browserEntryBlockState(page);
   const firstEntryScreenshot = homestead
     ? null
