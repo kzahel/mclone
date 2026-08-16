@@ -48,6 +48,16 @@ fn vs_main(
     let north = cos_latitude * sin_dec - sin_latitude * cos_dec * cos_hour;
     let up_component = sin_latitude * sin_dec + cos_latitude * cos_dec * cos_hour;
     let direction = normalize(vec3<f32>(east, up_component, -north));
+    let horizon = smoothstep(-0.035, 0.02, direction.y);
+    let brightness = input.presentation.y;
+    let opacity = brightness * uniforms.visibility.x * horizon;
+    if opacity <= 0.001 {
+        var culled: VertexOutput;
+        culled.position = vec4<f32>(2.0, 2.0, 2.0, 1.0);
+        culled.color = vec3<f32>(0.0);
+        culled.opacity = 0.0;
+        return culled;
+    }
     var reference_up = vec3<f32>(0.0, 1.0, 0.0);
     if abs(direction.y) > 0.95 {
         reference_up = vec3<f32>(1.0, 0.0, 0.0);
@@ -64,8 +74,6 @@ fn vs_main(
     let half_size = input.presentation.x;
     let position = direction * 100.0
         + (right * rolled_corner.x + quad_up * rolled_corner.y) * half_size;
-    let horizon = smoothstep(-0.035, 0.02, direction.y);
-    let brightness = input.presentation.y;
     var color = vec3<f32>(0.84, 0.90, 1.0);
     if input.presentation.z < 0.5 {
         color = vec3<f32>(1.0, 0.91, 0.78);
@@ -75,7 +83,7 @@ fn vs_main(
     var output: VertexOutput;
     output.position = uniforms.view_projections[u32(view_index)] * vec4<f32>(position, 1.0);
     output.color = color;
-    output.opacity = brightness * uniforms.visibility.x * horizon;
+    output.opacity = opacity;
     return output;
 }
 
