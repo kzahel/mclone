@@ -196,6 +196,7 @@ impl TerrainViewEngine {
                 queue,
                 exact.coverage(),
                 exact.transition(),
+                exact.boundary(),
                 mode,
             )?;
         } else {

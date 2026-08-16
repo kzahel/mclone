@@ -12,6 +12,7 @@ log.workspace = true
 mclone-audio.workspace = true
 mclone-app-runtime.workspace = true
 mclone-assets.workspace = true
+mclone-blocks.workspace = true
 mclone-client.workspace = true
 mclone-core.workspace = true
 mclone-diagnostics.workspace = true

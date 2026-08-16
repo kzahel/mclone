@@ -136,6 +136,7 @@ pub struct TerrainPreparedExactFrame {
     source: TerrainViewSourceIdentity,
     coverage: ExactPaintedCoverageSnapshot,
     transition: super::TerrainExactTransitionField,
+    boundary: super::TerrainExactBoundaryProfile,
 }
 
 impl TerrainPreparedExactFrame {
@@ -149,10 +150,12 @@ impl TerrainPreparedExactFrame {
             );
         }
         let transition = super::TerrainExactTransitionField::from_coverage(&coverage)?;
+        let boundary = super::TerrainExactBoundaryProfile::empty(&coverage)?;
         Ok(Self {
             source,
             coverage,
             transition,
+            boundary,
         })
     }
 
@@ -166,6 +169,25 @@ impl TerrainPreparedExactFrame {
 
     pub const fn transition(&self) -> &super::TerrainExactTransitionField {
         &self.transition
+    }
+
+    pub fn with_boundary_profile(
+        mut self,
+        boundary: super::TerrainExactBoundaryProfile,
+    ) -> Result<Self, String> {
+        if boundary.source() != self.coverage.source()
+            || boundary.generation() != self.coverage.generation()
+        {
+            return Err(
+                "prepared exact boundary does not match its coverage generation".to_owned(),
+            );
+        }
+        self.boundary = boundary;
+        Ok(self)
+    }
+
+    pub const fn boundary(&self) -> &super::TerrainExactBoundaryProfile {
+        &self.boundary
     }
 }
 

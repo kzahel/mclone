@@ -137,6 +137,7 @@ fn main() -> Result<()> {
                         "coverageGeneration": terrain.coverage_generation,
                         "exactColumnCount": terrain.exact_column_count,
                         "exactCenterReady": terrain.exact_center_ready,
+                        "exactHandoffTopology": terrain.exact_handoff_topology.label(),
                         "lastFrameRevision": terrain.last_frame_revision,
                         "readySlots": terrain.ready_slots,
                         "drawnLevels": terrain.drawn_levels,

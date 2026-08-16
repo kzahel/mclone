@@ -290,7 +290,7 @@ pub(crate) const fn game_terrain_presentation(
 pub use comfort::*;
 pub use host_effects::*;
 pub use locomotion::*;
-pub use mclone_terrain_view::TerrainHorizonDiagnostic;
+pub use mclone_terrain_view::{TerrainExactHandoffTopology, TerrainHorizonDiagnostic};
 pub use mono::*;
 pub use options::*;
 pub use render_admission::*;
@@ -1354,6 +1354,7 @@ pub struct McloneSceneHost {
     screen_effects: ScreenEffectsRenderer,
     terrain_view: Option<terrain_view::SceneTerrainViewState>,
     terrain_horizon_diagnostic: mclone_terrain_view::TerrainHorizonDiagnostic,
+    terrain_exact_handoff_topology: mclone_terrain_view::TerrainExactHandoffTopology,
     terrain_vegetation_executor_factory:
         Option<terrain_view::SceneTerrainVegetationExecutorFactory>,
     underwater_effects: XrUnderwaterEffectStates,

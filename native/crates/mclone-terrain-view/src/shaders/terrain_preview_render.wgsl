@@ -99,6 +99,9 @@ var exact_transition_field: texture_2d<f32>;
 @group(2) @binding(3)
 var exact_transition_sampler: sampler;
 
+@group(2) @binding(4)
+var exact_boundary_profile: texture_2d<u32>;
+
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) color: vec3<f32>,
@@ -164,6 +167,36 @@ fn exact_transition_weight(world_xz: vec2<f32>) -> f32 {
         local_blocks / 4.0 / texture_size,
         0.0,
     ).x;
+}
+
+fn exact_boundary_column(block_xz: vec2<i32>) -> u32 {
+    if !direct_exact_handoff()
+        || exact_coverage.mode_count_generation.x == 0u
+        || exact_coverage.boundary_origin_size.z <= 0
+        || exact_coverage.boundary_origin_size.w <= 0 {
+        return 0u;
+    }
+    let local = block_xz - exact_coverage.boundary_origin_size.xy;
+    if any(local < vec2<i32>(0))
+        || local.x >= exact_coverage.boundary_origin_size.z
+        || local.y >= exact_coverage.boundary_origin_size.w {
+        return 0u;
+    }
+    return textureLoad(exact_boundary_profile, local, 0).x;
+}
+
+fn exact_boundary_valid(packed: u32) -> bool {
+    return (packed & 0x80000000u) != 0u;
+}
+
+fn exact_boundary_water(packed: u32) -> bool {
+    return (packed & 0x01000000u) != 0u;
+}
+
+fn exact_boundary_top_y(packed: u32) -> f32 {
+    let encoded = packed & 0xffffu;
+    let signed_height = select(i32(encoded), i32(encoded) - 65536, encoded >= 32768u);
+    return f32(signed_height);
 }
 
 fn grid_corner(vertex_in_cell: u32) -> vec2<u32> {
@@ -851,6 +884,7 @@ fn terrain_vertex(
     var vertex_world_y = stitched_height + 1.0;
     var world_uv = vec2<f32>(vertex_world_x, vertex_world_z);
     var surface_kind = 0u;
+    var vertex_material = terrain_material(sample);
     let voxel_smooth_transition_weight = select(
         0.0,
         terrain_horizon_near_material_weight(cell_x, cell_z, cells),
@@ -862,6 +896,52 @@ fn terrain_vertex(
             vertex_world_x,
             vertex_world_z,
         ));
+    }
+
+
+    if direct_exact_handoff()
+        && params.origin_spacing_cells.z == 1
+        && cell_stride == 1u
+        && vertex_material != 2u
+        && !exact_chunk_painted(vec2<f32>(
+            f32(cell_world_x) + 0.5,
+            f32(cell_world_z) + 0.5,
+        )) {
+        let boundary_profiles = array<u32, 4>(
+            exact_boundary_column(vec2<i32>(cell_world_x - 1, cell_world_z)),
+            exact_boundary_column(vec2<i32>(cell_world_x + 1, cell_world_z)),
+            exact_boundary_column(vec2<i32>(cell_world_x, cell_world_z - 1)),
+            exact_boundary_column(vec2<i32>(cell_world_x, cell_world_z + 1)),
+        );
+        let corner_touches_side = array<bool, 4>(
+            corner.x == 0u,
+            corner.x == 1u,
+            corner.y == 0u,
+            corner.y == 1u,
+        );
+        var connector_top_y = 0.0;
+        var connector_vertex = false;
+        for (var side = 0u; side < 4u; side += 1u) {
+            let packed = boundary_profiles[side];
+            if exact_boundary_valid(packed) && !exact_boundary_water(packed) {
+                if (packed & 0x02000000u) != 0u {
+                    vertex_material = (packed >> 16u) & 0xffu;
+                }
+                if corner_touches_side[side] {
+                    let top_y = exact_boundary_top_y(packed);
+                    connector_top_y = select(
+                        max(connector_top_y, top_y),
+                        top_y,
+                        !connector_vertex,
+                    );
+                    connector_vertex = true;
+                }
+            }
+        }
+        if connector_vertex {
+            vertex_world_y = connector_top_y;
+            surface_kind = 3u;
+        }
     }
 
     if voxel_shell {
@@ -1050,7 +1130,7 @@ fn terrain_vertex(
     out.color = sample_color(sample, reference, gpu, light);
     out.world_xz = vec2<f32>(vertex_world_x, vertex_world_z);
     out.light = light;
-    out.material = terrain_material(sample);
+    out.material = vertex_material;
     out.textured = select(
         0u,
         1u,
@@ -1260,7 +1340,7 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
         color = vec3<f32>(0.48, 0.49, 0.47) * input.light;
         albedo = vec3<f32>(0.48, 0.49, 0.47);
     }
-    let side_surface = input.near_shell != 0u && input.surface_kind != 0u;
+    let side_surface = input.surface_kind != 0u;
     let display_material = resolved_surface_material(input);
     if input.textured != 0u
         && (input.near_shell != 0u || direct_exact_handoff())
@@ -1446,6 +1526,9 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
             } else if input.surface_kind == 2u {
                 color = vec3<f32>(0.96, 0.06, 0.72);
             }
+        }
+        if input.surface_kind == 3u {
+            color = vec3<f32>(0.04, 0.94, 0.82);
         }
     } else if horizon_diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_ALBEDO {
         color = albedo;

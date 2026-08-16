@@ -514,6 +514,15 @@ impl SceneSessionRuntime {
     pub fn block_state_at_position(&self, position: Vec3) -> Option<BlockStateId> {
         self.core().block_state_at_position(position)
     }
+
+    pub fn block_state_at_world(
+        &self,
+        world_x: i32,
+        world_y: i32,
+        world_z: i32,
+    ) -> Option<BlockStateId> {
+        self.core().block_state_at_world(world_x, world_y, world_z)
+    }
 }
 
 fn client_session_status(

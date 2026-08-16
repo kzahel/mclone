@@ -20,6 +20,12 @@ pub const TERRAIN_EXACT_TRANSITION_MAX_TEXELS_PER_AXIS: u32 =
 pub const TERRAIN_EXACT_TRANSITION_MAX_BYTES: u64 = (TERRAIN_EXACT_TRANSITION_MAX_TEXELS_PER_AXIS
     as u64)
     * (TERRAIN_EXACT_TRANSITION_MAX_TEXELS_PER_AXIS as u64);
+pub const TERRAIN_EXACT_BOUNDARY_MAX_BLOCKS_PER_AXIS: u32 =
+    TERRAIN_EXACT_COVERAGE_MAX_CHUNKS_PER_AXIS * 16;
+pub const TERRAIN_EXACT_BOUNDARY_MAX_BYTES: u64 = (TERRAIN_EXACT_BOUNDARY_MAX_BLOCKS_PER_AXIS
+    as u64)
+    * (TERRAIN_EXACT_BOUNDARY_MAX_BLOCKS_PER_AXIS as u64)
+    * size_of::<u32>() as u64;
 /// Horizontal inset used when assigning whole procedural tree records to an
 /// exact-painted footprint.
 ///
@@ -663,6 +669,211 @@ fn relax_transition_distance<const N: usize>(
     distances[index] = distance;
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TerrainExactBoundaryColumn {
+    pub world_x: i32,
+    pub world_z: i32,
+    /// Top face Y of the highest exact solid block.
+    pub solid_top_y: i32,
+    /// Active-pack side material when it fits the procedural material table.
+    pub side_material: Option<u8>,
+    /// Whether exact water occupies this column above the solid profile.
+    pub water: bool,
+}
+
+/// Sparse exact perimeter facts packed into a block-addressed GPU texture.
+///
+/// Only exposed boundary columns are valid. Interior texels remain zero, so
+/// the direct smooth owner cannot accidentally acquire a second horizontal
+/// terrain footprint.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TerrainExactBoundaryProfile {
+    source: TerrainCompositionSourceIdentity,
+    generation: u64,
+    origin_block_x: i32,
+    origin_block_z: i32,
+    width: u32,
+    height: u32,
+    packed: Vec<u32>,
+}
+
+impl TerrainExactBoundaryProfile {
+    pub fn empty(coverage: &ExactPaintedCoverageSnapshot) -> Result<Self, String> {
+        Self::from_columns(coverage, [])
+    }
+
+    pub fn from_columns(
+        coverage: &ExactPaintedCoverageSnapshot,
+        columns: impl IntoIterator<Item = TerrainExactBoundaryColumn>,
+    ) -> Result<Self, String> {
+        let mask = coverage.packed_mask()?;
+        if mask.painted_chunks == 0 {
+            return Ok(Self {
+                source: coverage.source(),
+                generation: coverage.generation(),
+                origin_block_x: 0,
+                origin_block_z: 0,
+                width: 0,
+                height: 0,
+                packed: Vec::new(),
+            });
+        }
+        let origin_block_x = i64::from(mask.origin_chunk_x)
+            .checked_mul(16)
+            .and_then(|value| i32::try_from(value).ok())
+            .ok_or_else(|| "exact boundary X origin exceeds block coordinates".to_owned())?;
+        let origin_block_z = i64::from(mask.origin_chunk_z)
+            .checked_mul(16)
+            .and_then(|value| i32::try_from(value).ok())
+            .ok_or_else(|| "exact boundary Z origin exceeds block coordinates".to_owned())?;
+        let width = mask
+            .width
+            .checked_mul(16)
+            .ok_or_else(|| "exact boundary width overflowed".to_owned())?;
+        let height = mask
+            .height
+            .checked_mul(16)
+            .ok_or_else(|| "exact boundary height overflowed".to_owned())?;
+        if width > TERRAIN_EXACT_BOUNDARY_MAX_BLOCKS_PER_AXIS
+            || height > TERRAIN_EXACT_BOUNDARY_MAX_BLOCKS_PER_AXIS
+        {
+            return Err("exact boundary profile exceeds its fixed resident bound".to_owned());
+        }
+        let mut packed = vec![0; width as usize * height as usize];
+        for column in columns {
+            if !coverage.contains(ChunkPos::from_block_coords(column.world_x, column.world_z)) {
+                return Err(format!(
+                    "exact boundary column ({}, {}) is outside exact coverage",
+                    column.world_x, column.world_z
+                ));
+            }
+            let top_y = i16::try_from(column.solid_top_y).map_err(|_| {
+                format!(
+                    "exact boundary solid top {} exceeds the signed 16-bit profile",
+                    column.solid_top_y
+                )
+            })?;
+            let local_x = i64::from(column.world_x) - i64::from(origin_block_x);
+            let local_z = i64::from(column.world_z) - i64::from(origin_block_z);
+            if local_x < 0
+                || local_z < 0
+                || local_x >= i64::from(width)
+                || local_z >= i64::from(height)
+            {
+                return Err("exact boundary column exceeds the packed extent".to_owned());
+            }
+            let mut value = u32::from(top_y as u16) | (1 << 31);
+            if let Some(material) = column.side_material {
+                value |= u32::from(material) << 16;
+                value |= 1 << 25;
+            }
+            if column.water {
+                value |= 1 << 24;
+            }
+            packed[local_z as usize * width as usize + local_x as usize] = value;
+        }
+        Ok(Self {
+            source: coverage.source(),
+            generation: coverage.generation(),
+            origin_block_x,
+            origin_block_z,
+            width,
+            height,
+            packed,
+        })
+    }
+
+    pub const fn source(&self) -> TerrainCompositionSourceIdentity {
+        self.source
+    }
+
+    pub const fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    pub const fn origin_blocks(&self) -> [i32; 2] {
+        [self.origin_block_x, self.origin_block_z]
+    }
+
+    pub const fn dimensions(&self) -> [u32; 2] {
+        [self.width, self.height]
+    }
+
+    pub fn packed(&self) -> &[u32] {
+        &self.packed
+    }
+
+    pub fn packed_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(self.packed.len() * size_of::<u32>());
+        for value in &self.packed {
+            bytes.extend_from_slice(&value.to_ne_bytes());
+        }
+        bytes
+    }
+
+    pub fn column_at_world(
+        &self,
+        world_x: i32,
+        world_z: i32,
+    ) -> Option<TerrainExactBoundaryColumn> {
+        let local_x = i64::from(world_x) - i64::from(self.origin_block_x);
+        let local_z = i64::from(world_z) - i64::from(self.origin_block_z);
+        if local_x < 0
+            || local_z < 0
+            || local_x >= i64::from(self.width)
+            || local_z >= i64::from(self.height)
+        {
+            return None;
+        }
+        let value = self.packed[local_z as usize * self.width as usize + local_x as usize];
+        if value & (1 << 31) == 0 {
+            return None;
+        }
+        Some(TerrainExactBoundaryColumn {
+            world_x,
+            world_z,
+            solid_top_y: i32::from(value as u16 as i16),
+            side_material: (value & (1 << 25) != 0).then_some(((value >> 16) & 0xff) as u8),
+            water: value & (1 << 24) != 0,
+        })
+    }
+}
+
+pub fn terrain_exact_exposed_boundary_blocks(
+    coverage: &ExactPaintedCoverageSnapshot,
+    topology: HorizontalTopology,
+) -> Result<BTreeSet<[i32; 2]>, String> {
+    let mut blocks = BTreeSet::new();
+    for chunk in coverage.chunks() {
+        let origin_x = i64::from(chunk.x)
+            .checked_mul(16)
+            .and_then(|value| i32::try_from(value).ok())
+            .ok_or_else(|| "exact boundary chunk X exceeds block coordinates".to_owned())?;
+        let origin_z = i64::from(chunk.z)
+            .checked_mul(16)
+            .and_then(|value| i32::try_from(value).ok())
+            .ok_or_else(|| "exact boundary chunk Z exceeds block coordinates".to_owned())?;
+        for (dx, dz, local_x, local_z, advance_x, advance_z) in [
+            (-1, 0, 0, 0, 0, 1),
+            (1, 0, 15, 0, 0, 1),
+            (0, -1, 0, 0, 1, 0),
+            (0, 1, 0, 15, 1, 0),
+        ] {
+            let neighbor = topology.neighbor_chunk(*chunk, dx, dz);
+            if neighbor.is_some_and(|neighbor| coverage.contains(neighbor)) {
+                continue;
+            }
+            for offset in 0..16 {
+                blocks.insert([
+                    origin_x + local_x + advance_x * offset,
+                    origin_z + local_z + advance_z * offset,
+                ]);
+            }
+        }
+    }
+    Ok(blocks)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -963,5 +1174,93 @@ mod tests {
             TERRAIN_EXACT_TRANSITION_MAX_BYTES
         );
         assert!(TERRAIN_EXACT_TRANSITION_MAX_BYTES < 80 * 1024);
+    }
+
+    #[test]
+    fn exact_boundary_blocks_follow_an_l_footprint_without_internal_edges() {
+        let coverage = ExactPaintedCoverageSnapshot::new(
+            source(),
+            4,
+            [
+                ChunkPos::new(0, 0),
+                ChunkPos::new(1, 0),
+                ChunkPos::new(0, 1),
+            ],
+        )
+        .unwrap();
+        let blocks =
+            terrain_exact_exposed_boundary_blocks(&coverage, HorizontalTopology::UNBOUNDED)
+                .unwrap();
+        assert!(blocks.contains(&[0, 0]));
+        assert!(blocks.contains(&[31, 15]));
+        assert!(blocks.contains(&[15, 31]));
+        assert!(!blocks.contains(&[15, 8]));
+        assert!(!blocks.contains(&[8, 15]));
+        assert!(blocks.contains(&[16, 15]));
+        assert!(blocks.contains(&[15, 16]));
+    }
+
+    #[test]
+    fn exact_boundary_profile_round_trips_height_material_and_water() {
+        let coverage = ExactPaintedCoverageSnapshot::new(
+            source(),
+            11,
+            [ChunkPos::new(-2, -1), ChunkPos::new(-1, -1)],
+        )
+        .unwrap();
+        let profile = TerrainExactBoundaryProfile::from_columns(
+            &coverage,
+            [
+                TerrainExactBoundaryColumn {
+                    world_x: -32,
+                    world_z: -16,
+                    solid_top_y: -23,
+                    side_material: Some(14),
+                    water: false,
+                },
+                TerrainExactBoundaryColumn {
+                    world_x: -1,
+                    world_z: -1,
+                    solid_top_y: 61,
+                    side_material: None,
+                    water: true,
+                },
+            ],
+        )
+        .unwrap();
+        assert_eq!(profile.origin_blocks(), [-32, -16]);
+        assert_eq!(profile.dimensions(), [32, 16]);
+        assert_eq!(
+            profile.column_at_world(-32, -16),
+            Some(TerrainExactBoundaryColumn {
+                world_x: -32,
+                world_z: -16,
+                solid_top_y: -23,
+                side_material: Some(14),
+                water: false,
+            })
+        );
+        assert_eq!(profile.column_at_world(-1, -1).unwrap().water, true);
+        assert_eq!(profile.column_at_world(-16, -8), None);
+        assert_eq!(profile.packed_bytes().len(), 32 * 16 * 4);
+    }
+
+    #[test]
+    fn exact_boundary_profile_rejects_columns_outside_coverage() {
+        let coverage =
+            ExactPaintedCoverageSnapshot::new(source(), 1, [ChunkPos::new(0, 0)]).unwrap();
+        let error = TerrainExactBoundaryProfile::from_columns(
+            &coverage,
+            [TerrainExactBoundaryColumn {
+                world_x: 16,
+                world_z: 0,
+                solid_top_y: 64,
+                side_material: Some(4),
+                water: false,
+            }],
+        )
+        .unwrap_err();
+        assert!(error.contains("outside exact coverage"));
+        assert_eq!(TERRAIN_EXACT_BOUNDARY_MAX_BYTES, 4 * 1024 * 1024);
     }
 }

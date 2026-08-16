@@ -4,15 +4,18 @@ use anyhow::{Context, Result, bail};
 use mclone_app_runtime::frame_render::{TerrainBackdropRenderContext, TerrainBackdropRenderer};
 use mclone_app_runtime::host_mode::SingleViewHostMode;
 use mclone_app_runtime::render_asset_data::TexturedMeshAssets;
+use mclone_blocks::{BlockFluidKind, block_fluid_kind};
 use mclone_core::{ChunkPos, HorizontalTopology};
 use mclone_render::color_profile::RenderColorProfile;
 use mclone_terrain_view::{
     ExactPaintedCoverageSnapshot, TerrainClipmapConfig, TerrainCompositionSourceIdentity,
-    TerrainExactCoverageMode, TerrainHorizonDiagnostic, TerrainHorizonFrameStats,
+    TerrainExactBoundaryColumn, TerrainExactBoundaryProfile, TerrainExactCoverageMode,
+    TerrainExactHandoffTopology, TerrainHorizonDiagnostic, TerrainHorizonFrameStats,
     TerrainHorizonPresentation, TerrainHorizonRenderTarget, TerrainPreparedExactFrame,
     TerrainPreviewCamera, TerrainPreviewMaterialAtlas, TerrainPreviewMaterialTable,
     TerrainPreviewView, TerrainVegetationExecutor, TerrainViewEngine, TerrainViewEngineConfig,
-    TerrainViewSourceIdentity, terrain_exact_player_connected_chunks,
+    TerrainViewSourceIdentity, terrain_exact_exposed_boundary_blocks,
+    terrain_exact_player_connected_chunks,
 };
 use mclone_worldgen::terrain_preview::{TerrainPreviewContentStage, TerrainPreviewProfile};
 
@@ -45,6 +48,7 @@ pub struct SceneTerrainViewDiagnostics {
     pub coverage_generation: u64,
     pub exact_column_count: u32,
     pub exact_center_ready: bool,
+    pub exact_handoff_topology: TerrainExactHandoffTopology,
     pub last_frame_revision: u64,
     pub ready_slots: u32,
     pub drawn_levels: u32,
@@ -149,7 +153,7 @@ impl SceneTerrainViewState {
         topology: HorizontalTopology,
         focus: [f64; 3],
         ready_columns: BTreeSet<ChunkPos>,
-    ) -> Result<BTreeSet<ChunkPos>> {
+    ) -> Result<(BTreeSet<ChunkPos>, bool)> {
         let mut source_changed = false;
         if self.world != world
             || self
@@ -207,7 +211,27 @@ impl SceneTerrainViewState {
             u32::try_from(self.ready_columns.len()).unwrap_or(u32::MAX);
         self.diagnostics.exact_center_ready =
             terrain_exact_center_ready(&self.ready_columns, focus);
-        Ok(self.ready_columns.clone())
+        self.diagnostics.exact_handoff_topology = self.terrain_exact_handoff_topology();
+        Ok((
+            self.ready_columns.clone(),
+            source_changed || coverage_changed,
+        ))
+    }
+
+    pub(crate) fn exact_coverage(&self) -> &ExactPaintedCoverageSnapshot {
+        self.exact.coverage()
+    }
+
+    pub(crate) fn set_exact_boundary_profile(
+        &mut self,
+        boundary: TerrainExactBoundaryProfile,
+    ) -> Result<()> {
+        self.exact = self
+            .exact
+            .clone()
+            .with_boundary_profile(boundary)
+            .map_err(anyhow::Error::msg)?;
+        Ok(())
     }
 
     pub(crate) const fn diagnostics(&self) -> SceneTerrainViewDiagnostics {
@@ -216,6 +240,15 @@ impl SceneTerrainViewState {
 
     pub(crate) fn set_diagnostic(&mut self, diagnostic: TerrainHorizonDiagnostic) {
         self.diagnostic = diagnostic;
+    }
+
+    pub(crate) fn set_exact_handoff_topology(&mut self, topology: TerrainExactHandoffTopology) {
+        self.engine.set_exact_handoff_topology(topology);
+        self.diagnostics.exact_handoff_topology = topology;
+    }
+
+    fn terrain_exact_handoff_topology(&self) -> TerrainExactHandoffTopology {
+        self.diagnostics.exact_handoff_topology
     }
 
     pub(crate) fn shutdown(&mut self) {
@@ -385,11 +418,33 @@ impl McloneSceneHost {
             .as_mut()
             .expect("composed terrain view was initialized")
             .set_diagnostic(self.terrain_horizon_diagnostic);
-        let admitted_columns = self
+        self.terrain_view
+            .as_mut()
+            .expect("composed terrain view was initialized")
+            .set_exact_handoff_topology(self.terrain_exact_handoff_topology);
+        let (admitted_columns, coverage_changed) = self
             .terrain_view
             .as_mut()
             .expect("composed terrain view was initialized")
             .prepare(world, seed, topology, focus, ready_columns)?;
+        if coverage_changed {
+            let coverage = self
+                .terrain_view
+                .as_ref()
+                .expect("composed terrain view was initialized")
+                .exact_coverage()
+                .clone();
+            let boundary = live_exact_boundary_profile(
+                self.active_world.runtime.as_ref(),
+                &self.mesh_assets.catalog,
+                &coverage,
+                topology,
+            )?;
+            self.terrain_view
+                .as_mut()
+                .expect("composed terrain view was initialized")
+                .set_exact_boundary_profile(boundary)?;
+        }
         self.active_world
             .draw
             .set_traversal_ready_columns_with_context(&admitted_columns, false);
@@ -406,6 +461,14 @@ impl McloneSceneHost {
         self.terrain_horizon_diagnostic = diagnostic;
         if let Some(terrain_view) = self.terrain_view.as_mut() {
             terrain_view.set_diagnostic(diagnostic);
+        }
+    }
+
+    /// Select the temporary Tactical 313 A/B handoff topology.
+    pub fn set_terrain_exact_handoff_topology(&mut self, topology: TerrainExactHandoffTopology) {
+        self.terrain_exact_handoff_topology = topology;
+        if let Some(terrain_view) = self.terrain_view.as_mut() {
+            terrain_view.set_exact_handoff_topology(topology);
         }
     }
 
@@ -542,6 +605,75 @@ fn terrain_exact_center_ready(ready_columns: &BTreeSet<ChunkPos>, focus: [f64; 3
     let center =
         ChunkPos::from_block_coords(floor_f64_to_i32(focus[0]), floor_f64_to_i32(focus[2]));
     ready_columns.contains(&center)
+}
+
+fn live_exact_boundary_profile(
+    runtime: Option<&mclone_app_runtime::scene_session_runtime::SceneSessionRuntime>,
+    catalog: &mclone_mesh::TexturedMeshCatalog,
+    coverage: &ExactPaintedCoverageSnapshot,
+    topology: HorizontalTopology,
+) -> Result<TerrainExactBoundaryProfile> {
+    let Some(runtime) = runtime else {
+        return TerrainExactBoundaryProfile::empty(coverage).map_err(anyhow::Error::msg);
+    };
+    let mut columns = Vec::new();
+    for [world_x, world_z] in
+        terrain_exact_exposed_boundary_blocks(coverage, topology).map_err(anyhow::Error::msg)?
+    {
+        let Some(highest_y) = runtime.highest_non_air_block_y_at_world(world_x, world_z) else {
+            continue;
+        };
+        let mut water = false;
+        let minimum_y = highest_y.saturating_sub(1_024);
+        for world_y in (minimum_y..=highest_y).rev() {
+            let Some(state) = runtime.block_state_at_world(world_x, world_y, world_z) else {
+                continue;
+            };
+            if block_fluid_kind(state) == BlockFluidKind::Water {
+                water = true;
+                continue;
+            }
+            if !catalog.occludes(state) || exact_boundary_natural_feature_block(state.0) {
+                continue;
+            }
+            let side_material = u8::try_from(state.0)
+                .ok()
+                .filter(|_| catalog.terrain_surface_material(state).is_some());
+            columns.push(TerrainExactBoundaryColumn {
+                world_x,
+                world_z,
+                solid_top_y: world_y.saturating_add(1),
+                side_material,
+                water,
+            });
+            break;
+        }
+    }
+    TerrainExactBoundaryProfile::from_columns(coverage, columns).map_err(anyhow::Error::msg)
+}
+
+fn exact_boundary_natural_feature_block(raw: u32) -> bool {
+    use mclone_worldgen::block::{
+        ACACIA_LOG, BIRCH_LOG, BIRCH_LOG_X, BIRCH_LOG_Z, DARK_OAK_LOG, JUNGLE_LOG, MUSHROOM_STEM,
+        OAK_LOG, OAK_LOG_X, OAK_LOG_Z, SPRUCE_LOG, SPRUCE_LOG_X, SPRUCE_LOG_Z,
+    };
+    [
+        OAK_LOG,
+        BIRCH_LOG,
+        SPRUCE_LOG,
+        OAK_LOG_X,
+        OAK_LOG_Z,
+        BIRCH_LOG_X,
+        BIRCH_LOG_Z,
+        SPRUCE_LOG_X,
+        SPRUCE_LOG_Z,
+        DARK_OAK_LOG,
+        MUSHROOM_STEM,
+        ACACIA_LOG,
+        JUNGLE_LOG,
+    ]
+    .into_iter()
+    .any(|feature| raw == u32::from(feature))
 }
 
 #[cfg(test)]

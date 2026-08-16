@@ -2162,6 +2162,14 @@ fn configure_screenshot_scene(
     host.driver
         .host_mut()
         .set_terrain_horizon_diagnostic(options.terrain_horizon_diagnostic);
+    if std::env::var("MCLONE_TERRAIN_HANDOFF_REVIEW")
+        .ok()
+        .is_some_and(|value| value.eq_ignore_ascii_case("voxel"))
+    {
+        host.driver.host_mut().set_terrain_exact_handoff_topology(
+            mclone_scene::TerrainExactHandoffTopology::VoxelShell,
+        );
+    }
     if options.controller_focus {
         let (handled, action) = host
             .driver
