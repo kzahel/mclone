@@ -5,6 +5,31 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { basename, resolve } from "node:path";
 
+const CONTACT_SHEET_TITLES = new Map([
+  ["temperate-off", "Preview Off"],
+  ["temperate-off-configured", "Preview Off · Configured"],
+  ["north-spring", "Northern Spring"],
+  ["north-spring-summer", "Spring → Summer"],
+  ["north-summer", "Northern Summer"],
+  ["north-summer-autumn", "Summer → Autumn"],
+  ["north-autumn", "Northern Autumn"],
+  ["north-autumn-winter", "Autumn → Winter"],
+  ["north-winter", "Northern Winter"],
+  ["north-late-winter", "Northern Late Winter"],
+  ["south-at-north-summer", "Southern Hemisphere"],
+  ["south-at-north-winter", "Southern Hemisphere"],
+  ["equatorial-weak-cycle", "Equatorial Cycle"],
+  ["warm-dry-late-winter", "Warm/Dry Region"],
+  ["cool-wet-late-winter", "Cool/Wet Region"],
+  ["cold-high-late-winter", "Cold/High Region"],
+  ["recent-snow-half", "Recent Snow · Half"],
+  ["recent-snow-full", "Recent Snow · Full"],
+  ["recent-snow-falloff", "Recent Snow · Falloff"],
+  ["recent-snow-outside", "Recent Snow · Outside"],
+  ["recent-snow-stereo", "Recent Snow · Stereo"],
+  ["seasonal-debug-menu", "Seasonal Debug Menu"],
+]);
+
 const repo = resolve(import.meta.dirname, "..");
 const revision = run("git", ["rev-parse", "--short=12", "HEAD"], repo).trim();
 const output = resolve(
@@ -83,13 +108,32 @@ for (const [id, expected] of [
 
 const contactSheet = resolve(output, "seasonal-appearance-contact-sheet.png");
 const montageFont = run("fc-match", ["-f", "%{file}", "sans"], repo).trim();
+const contactSheetLegend = {
+  title: "Seasonal Appearance Matrix",
+  fields: [
+    "case",
+    "global preview day",
+    "evaluated local season",
+    "manual latitude",
+    "recent snow",
+    "render path",
+  ],
+};
 run(
   "magick",
   [
     "montage",
     "-font",
     montageFont,
-    ...captures.map((entry) => entry.path),
+    "-background",
+    "#10161f",
+    "-fill",
+    "#f2f5f7",
+    "-pointsize",
+    "13",
+    "-title",
+    `${contactSheetLegend.title}\nTile: global day · evaluated local season · latitude · recent snow · render path`,
+    ...captures.flatMap((entry) => ["-label", contactSheetLabel(entry), entry.path]),
     "-thumbnail",
     "320x200",
     "-tile",
@@ -118,6 +162,7 @@ const receipt = {
     renderDistance: 3,
   },
   contactSheet,
+  contactSheetLegend,
   captures,
 };
 writeFileSync(resolve(output, "capture-receipt.json"), `${JSON.stringify(receipt, null, 2)}\n`);
@@ -346,6 +391,22 @@ function parseReceipt(stdout) {
   const line = stdout.split(/\r?\n/).find((entry) => entry.startsWith(prefix));
   if (!line) throw new Error("capture did not emit a seasonal appearance receipt");
   return JSON.parse(line.slice(prefix.length));
+}
+
+function contactSheetLabel(entry) {
+  const title = CONTACT_SHEET_TITLES.get(entry.id) ?? entry.id;
+  const day = `Day ${entry.seasonal.global.calendarDay}/${entry.seasonal.global.calendarDays}`;
+  if (!entry.seasonal.enabled) {
+    return `${title}\n${day} · Preview disabled`;
+  }
+
+  const localSeason = entry.seasonal.evaluated?.localSeason.label ?? "Unavailable";
+  const latitude = Number(entry.seasonal.controls.manualLatitudeDegrees);
+  const latitudeLabel = `Lat ${latitude >= 0 ? "+" : ""}${latitude.toFixed(1)}°`;
+  const snow = entry.seasonal.recentSnow;
+  const snowLabel = snow ? `Snow ${Math.round(snow.intensity * 100)}%` : "Snow 0%";
+  const renderLabel = entry.renderPath === "synthetic-stereo" ? "Stereo" : "Mono";
+  return `${title}\n${day} · ${localSeason}\n${latitudeLabel} · ${snowLabel} · ${renderLabel}`;
 }
 
 function csv(values) {
