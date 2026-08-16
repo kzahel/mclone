@@ -4,6 +4,8 @@ struct Uniforms {
     camera_position: vec4<f32>,
     fog_color: vec4<f32>,
     fog_distances: vec4<f32>,
+    season_local: vec4<f32>,
+    snow_pulse: vec4<f32>,
     source_anchor_scale: vec4<f32>,
     composition_anchor: vec4<f32>,
 };
@@ -30,6 +32,8 @@ struct VertexOutput {
     @location(1) color: vec4<f32>,
     @location(2) light: vec3<f32>,
     @location(3) composition_position: vec3<f32>,
+    @location(4) source_position: vec3<f32>,
+    @location(5) @interpolate(flat) seasonal_response: u32,
 };
 
 fn dimension_brightness(light_level: f32) -> f32 {
@@ -67,6 +71,8 @@ fn lightmap_color(light_level: f32, sky_light_level: f32, sky_darken_value: f32)
     return clamp(color, vec3<f32>(0.0), vec3<f32>(1.0));
 }
 
+// __MCLONE_SEASONAL_APPEARANCE_WGSL__
+
 @vertex
 fn vs_main(input: VertexInput) -> VertexOutput {
     var output: VertexOutput;
@@ -77,6 +83,8 @@ fn vs_main(input: VertexInput) -> VertexOutput {
     output.uv = input.uv;
     output.color = input.color;
     output.composition_position = composition_position;
+    output.source_position = input.position;
+    output.seasonal_response = input.packed_light >> 24u;
     let block_light = f32((input.packed_light >> 4u) & 15u);
     let sky_light = f32((input.packed_light >> 20u) & 15u);
     let light = lightmap_color(block_light, sky_light, uniforms.render_options.y);
@@ -98,7 +106,15 @@ fn apply_fog(color: vec4<f32>, composition_position: vec3<f32>) -> vec4<f32> {
 }
 
 fn shade_texel(input: VertexOutput, texel: vec4<f32>) -> vec4<f32> {
-    let color = vec4<f32>(texel.rgb * input.color.rgb * input.light, texel.a * input.color.a);
+    let seasonal = mclone_seasonal_surface(
+        texel.rgb,
+        input.seasonal_response,
+        input.source_position,
+        uniforms.season_local,
+        uniforms.snow_pulse,
+        uniforms.fog_distances.zw,
+    );
+    let color = vec4<f32>(seasonal.rgb * input.color.rgb * input.light, texel.a * input.color.a);
     return apply_color_profile(apply_fog(color, input.composition_position));
 }
 

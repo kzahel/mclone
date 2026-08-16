@@ -10,6 +10,8 @@ pub use grass::{
     MAX_GRASS_INTERACTORS,
 };
 mod prepared_actor;
+mod seasonal_appearance;
+pub use seasonal_appearance::SeasonalAppearanceRenderState;
 
 pub mod actor_assets;
 pub mod actor_composition_fixture;

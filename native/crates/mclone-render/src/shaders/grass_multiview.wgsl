@@ -16,6 +16,8 @@ var<uniform> stereo_uniforms: StereoUniforms;
 struct GrassFrameUniforms {
     time_direction_shelter: vec4<f32>,
     shape: vec4<f32>,
+    season_local: vec4<f32>,
+    snow_pulse: vec4<f32>,
 };
 
 @group(2) @binding(0)
@@ -159,6 +161,8 @@ fn unpack_tint(packed: u32) -> vec3<f32> {
     ) / 255.0;
 }
 
+// __MCLONE_SEASONAL_APPEARANCE_WGSL__
+
 fn blade_vertex(input: GrassPatchInput, vertex_index: u32) -> vec3<f32> {
     let blade = vertex_index / 12u;
     let blade_vertex = vertex_index % 12u;
@@ -170,9 +174,14 @@ fn blade_vertex(input: GrassPatchInput, vertex_index: u32) -> vec3<f32> {
     let radial_angle = hash_unit(blade_hash ^ 0x02e5be93u) * 6.283185307;
     let center = vec2<f32>(cos(radial_angle), sin(radial_angle)) * radial;
     let axis = vec2<f32>(cos(angle), sin(angle));
-    let height = 0.38 + hash_unit(blade_hash ^ 0xa511e9b3u) * 0.34;
-    let width = 0.035 + hash_unit(blade_hash ^ 0x63d83595u) * 0.035;
     let root = vec3<f32>(input.root) + vec3<f32>(0.5, 0.0, 0.5);
+    let seasonal = mclone_seasonal_surface(
+        vec3<f32>(1.0), input.reserved, root, grass_frame.season_local,
+        grass_frame.snow_pulse, grass_interaction.topology_periods_strength.xy,
+    );
+    let visibility = max(seasonal.a, 0.02);
+    let height = (0.38 + hash_unit(blade_hash ^ 0xa511e9b3u) * 0.34) * visibility;
+    let width = (0.035 + hash_unit(blade_hash ^ 0x63d83595u) * 0.035) * sqrt(visibility);
     let segment_start = f32(segment) * 0.52;
     let segment_end = select(0.52, 1.0, segment == 1u);
     let top_corner = corner == 2u || corner == 4u || corner == 5u;
@@ -242,7 +251,13 @@ fn vs_main(
     let tip = mix(0.82, 1.0, f32((vertex_index % 12u) / 6u) * 0.52
         + select(0.0, 0.48, vertex_index % 6u >= 2u));
     output.position = uniforms.view_projection * vec4<f32>(world_position, 1.0);
-    output.color = unpack_tint(input.packed_tint) * variation * tip;
+    let seasonal = mclone_seasonal_surface(
+        unpack_tint(input.packed_tint), input.reserved,
+        vec3<f32>(input.root) + vec3<f32>(0.5, 0.0, 0.5),
+        grass_frame.season_local, grass_frame.snow_pulse,
+        grass_interaction.topology_periods_strength.xy,
+    );
+    output.color = seasonal.rgb * variation * tip;
     output.world_position = world_position;
     output.view_index = view_index;
     let block_light = f32((input.packed_light >> 4u) & 15u);

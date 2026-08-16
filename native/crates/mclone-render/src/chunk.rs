@@ -22,6 +22,7 @@ use mclone_mesh::{
 use rustc_hash::{FxHashMap, FxHashSet};
 use wgpu::util::DeviceExt;
 
+use crate::SeasonalAppearanceRenderState;
 use crate::color_profile::{RenderColorProfile, RenderConfig};
 use crate::fog::RenderFog;
 use crate::gpu_timestamps::GpuTimestampFrameEncoder;
@@ -82,12 +83,12 @@ const VERTEX_FLOAT_COUNT: usize = 7;
 const VERTEX_BYTE_SIZE: wgpu::BufferAddress =
     (VERTEX_FLOAT_COUNT * std::mem::size_of::<f32>()) as wgpu::BufferAddress;
 const TEXTURED_VERTEX_BYTE_SIZE: wgpu::BufferAddress = 40;
-const UNIFORM_BYTE_LEN: usize = 128;
+const UNIFORM_BYTE_LEN: usize = 160;
 const UNIFORM_BYTE_SIZE: wgpu::BufferAddress = UNIFORM_BYTE_LEN as wgpu::BufferAddress;
 const MULTIVIEW_UNIFORM_BYTE_LEN: usize = UNIFORM_BYTE_LEN * 2;
 const MULTIVIEW_UNIFORM_BYTE_SIZE: wgpu::BufferAddress =
     MULTIVIEW_UNIFORM_BYTE_LEN as wgpu::BufferAddress;
-const PLACED_UNIFORM_BYTE_LEN: usize = 160;
+const PLACED_UNIFORM_BYTE_LEN: usize = UNIFORM_BYTE_LEN + 32;
 const PLACED_UNIFORM_BYTE_SIZE: wgpu::BufferAddress =
     PLACED_UNIFORM_BYTE_LEN as wgpu::BufferAddress;
 const PLACED_MULTIVIEW_UNIFORM_BYTE_LEN: usize = PLACED_UNIFORM_BYTE_LEN * 2;
@@ -638,6 +639,9 @@ pub struct TexturedSectionRenderOptions {
     /// Active dimension topology used only for observer-local presentation.
     /// Canonical mesh/upload identity remains unchanged.
     pub topology: HorizontalTopology,
+    /// Observer-local appearance state. Stable response keys live in existing
+    /// mesh fields, so changing this never invalidates meshes.
+    pub seasonal_appearance: SeasonalAppearanceRenderState,
 }
 
 impl Default for TexturedSectionRenderOptions {
@@ -652,6 +656,7 @@ impl Default for TexturedSectionRenderOptions {
             grass_time_seconds: 0.0,
             grass_interactors: GrassInteractorSet::default(),
             topology: HorizontalTopology::UNBOUNDED,
+            seasonal_appearance: SeasonalAppearanceRenderState::default(),
         }
     }
 }
@@ -702,6 +707,14 @@ impl TexturedSectionRenderOptions {
 
     pub fn with_topology(mut self, topology: HorizontalTopology) -> Self {
         self.topology = topology;
+        self
+    }
+
+    pub fn with_seasonal_appearance(
+        mut self,
+        seasonal_appearance: SeasonalAppearanceRenderState,
+    ) -> Self {
+        self.seasonal_appearance = seasonal_appearance;
         self
     }
 }
@@ -3966,7 +3979,8 @@ impl SelectedPlacedMultiviewRenderer<'_> {
 }
 
 fn textured_shader_source(template: &str) -> String {
-    let template = crate::fog::inject_fog_wgsl(template);
+    let template = crate::seasonal_appearance::inject_seasonal_appearance_wgsl(template);
+    let template = crate::fog::inject_fog_wgsl(&template);
     mclone_render_color::inject_target_color_transfer_wgsl(&template)
         .expect("textured chunk WGSL has one target-color transfer marker")
 }
@@ -4571,6 +4585,7 @@ impl TexturedSectionDrawResources {
             observer_position,
             options.topology,
             options.grass_interactors,
+            options.seasonal_appearance,
         );
     }
 
@@ -7241,7 +7256,7 @@ fn uniform_bytes(
     render_view: ChunkRenderView,
     options: TexturedSectionRenderOptions,
     color_format: wgpu::TextureFormat,
-) -> [u8; 128] {
+) -> [u8; UNIFORM_BYTE_LEN] {
     let mut bytes = [0; UNIFORM_BYTE_LEN];
     bytes[..64].copy_from_slice(&matrix_bytes(render_view.uniform_matrix()));
     let color_transform = RenderConfig::for_color_target(options.color_profile, color_format)
@@ -7309,6 +7324,11 @@ fn uniform_bytes(
     .enumerate()
     {
         let start = 112 + index * 4;
+        bytes[start..start + 4].copy_from_slice(&value.to_ne_bytes());
+    }
+    let (season_local, snow_pulse) = options.seasonal_appearance.uniform_values();
+    for (index, value) in season_local.into_iter().chain(snow_pulse).enumerate() {
+        let start = 128 + index * 4;
         bytes[start..start + 4].copy_from_slice(&value.to_ne_bytes());
     }
     bytes
@@ -7466,7 +7486,7 @@ mod tests {
     }
 
     #[test]
-    fn terrain_uniform_serializes_periods_without_growing_the_direct_path() {
+    fn terrain_uniform_serializes_topology_periods() {
         let render_view = ChunkCamera::overview_for_chunk(0, 0).render_view(640, 480);
         let plane = uniform_bytes(
             render_view,
@@ -7490,9 +7510,44 @@ mod tests {
     }
 
     #[test]
+    fn terrain_uniform_serializes_shared_local_season_and_snow_pulse() {
+        let render_view = ChunkCamera::overview_for_chunk(0, 0).render_view(640, 480);
+        let pulse = mclone_season::LocalSnowPulse {
+            center_x: -24,
+            center_z: 48,
+            radius_blocks: 96,
+            intensity: mclone_season::UnitU16::FULL,
+        };
+        let appearance = SeasonalAppearanceRenderState {
+            enabled: true,
+            local_phase: 0.75,
+            response_strength: 0.8,
+            thermal_forcing: -0.5,
+            recent_snow: Some(pulse),
+        };
+        let bytes = uniform_bytes(
+            render_view,
+            TexturedSectionRenderOptions::default().with_seasonal_appearance(appearance),
+            wgpu::TextureFormat::Rgba8Unorm,
+        );
+        let values = bytes[128..]
+            .chunks_exact(4)
+            .map(|bytes| f32::from_ne_bytes(bytes.try_into().unwrap()))
+            .collect::<Vec<_>>();
+        assert_eq!(values, vec![1.0, 0.75, 0.8, -0.5, -24.0, 48.0, 96.0, 1.0]);
+
+        let disabled = uniform_bytes(
+            render_view,
+            TexturedSectionRenderOptions::default(),
+            wgpu::TextureFormat::Rgba8Unorm,
+        );
+        assert!(disabled[128..].iter().all(|byte| *byte == 0));
+    }
+
+    #[test]
     fn direct_terrain_uniforms_and_shaders_remain_unplaced() {
-        assert_eq!(UNIFORM_BYTE_LEN, 128);
-        assert_eq!(MULTIVIEW_UNIFORM_BYTE_LEN, 256);
+        assert_eq!(UNIFORM_BYTE_LEN, 160);
+        assert_eq!(MULTIVIEW_UNIFORM_BYTE_LEN, 320);
 
         let mono = include_str!("shaders/chunk_textured.wgsl");
         assert!(mono.contains("let world_position = observer_local_position(input.position);"));
@@ -7641,12 +7696,17 @@ mod tests {
         );
 
         assert_eq!(&placed[..UNIFORM_BYTE_LEN], &ordinary);
+        let scale_offset = UNIFORM_BYTE_LEN + 12;
         assert_eq!(
-            f32::from_ne_bytes(placed[140..144].try_into().unwrap()),
+            f32::from_ne_bytes(placed[scale_offset..scale_offset + 4].try_into().unwrap()),
             1.0
         );
-        assert!(placed[128..140].iter().all(|byte| *byte == 0));
-        assert!(placed[144..].iter().all(|byte| *byte == 0));
+        assert!(
+            placed[UNIFORM_BYTE_LEN..scale_offset]
+                .iter()
+                .all(|byte| *byte == 0)
+        );
+        assert!(placed[scale_offset + 4..].iter().all(|byte| *byte == 0));
     }
 
     #[test]

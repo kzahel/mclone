@@ -8,13 +8,14 @@ use anyhow::{Context, Result, bail};
 use mclone_core::{BlockPos, CHUNK_WIDTH, HorizontalTopology, Vec3d};
 use mclone_mesh::{GrassPatch, RenderSectionKey, TexturedRenderSectionMesh};
 
+use crate::SeasonalAppearanceRenderState;
 use crate::chunk::DEPTH_FORMAT;
 
 pub(crate) const STATIC_GRASS_BLADE_COUNT: u32 = 8;
 const GRASS_VERTICES_PER_BLADE: u32 = 12;
 const GRASS_PATCH_MIN_CAPACITY: u32 = 4_096;
 const GRASS_PIPELINE_VARIANT_COUNT: usize = 6;
-const GRASS_FRAME_UNIFORM_SIZE: u64 = 32;
+const GRASS_FRAME_UNIFORM_SIZE: u64 = 64;
 const GRASS_INTERACTION_UNIFORM_SIZE: u64 = 32;
 const GRASS_INTERACTION_FIELD_SIZE: u32 = 128;
 const GRASS_INTERACTION_CELL_SIZE: f64 = 0.5;
@@ -479,6 +480,7 @@ fn grass_shader_source(variant: GrassPipelineVariant) -> String {
             clipped_placed_multiview_grass_shader_source()
         }
     };
+    let template = crate::seasonal_appearance::inject_seasonal_appearance_wgsl(&template);
     let template = crate::fog::inject_fog_wgsl(&template);
     mclone_render_color::inject_target_color_transfer_wgsl(&template)
         .expect("grass WGSL has one target-color transfer marker")
@@ -1202,6 +1204,7 @@ impl GrassPatchDrawResources {
         observer_position: [f32; 3],
         topology: HorizontalTopology,
         interactors: GrassInteractorSet,
+        seasonal_appearance: SeasonalAppearanceRenderState,
     ) {
         let (Some(frame), Some(profile)) = (self.frame.as_ref(), quality.profile()) else {
             return;
@@ -1209,7 +1212,7 @@ impl GrassPatchDrawResources {
         queue.write_buffer(
             &frame.buffer,
             0,
-            &grass_frame_uniform_bytes(time_seconds, profile.wind_amplitude),
+            &grass_frame_uniform_bytes(time_seconds, profile.wind_amplitude, seasonal_appearance),
         );
         let mut fields = self.interaction_fields.borrow_mut();
         if !profile.interaction_enabled {
@@ -1339,7 +1342,12 @@ impl GrassPatchDrawResources {
     }
 }
 
-fn grass_frame_uniform_bytes(time_seconds: f32, amplitude: f32) -> [u8; 32] {
+fn grass_frame_uniform_bytes(
+    time_seconds: f32,
+    amplitude: f32,
+    seasonal_appearance: SeasonalAppearanceRenderState,
+) -> [u8; 64] {
+    let (season_local, snow_pulse) = seasonal_appearance.uniform_values();
     let values = [
         time_seconds.rem_euclid(4_096.0),
         0.819_231_9,
@@ -1349,8 +1357,11 @@ fn grass_frame_uniform_bytes(time_seconds: f32, amplitude: f32) -> [u8; 32] {
         0.035,
         0.72,
         0.035,
-    ];
-    let mut bytes = [0_u8; 32];
+    ]
+    .into_iter()
+    .chain(season_local)
+    .chain(snow_pulse);
+    let mut bytes = [0_u8; 64];
     for (index, value) in values.into_iter().enumerate() {
         bytes[index * 4..index * 4 + 4].copy_from_slice(&value.to_le_bytes());
     }
@@ -1510,10 +1521,12 @@ mod tests {
 
     #[test]
     fn grass_frame_uniforms_are_fixed_width_and_rebase_time() {
-        let bytes = grass_frame_uniform_bytes(4_097.5, 0.14);
+        let bytes =
+            grass_frame_uniform_bytes(4_097.5, 0.14, SeasonalAppearanceRenderState::default());
         assert_eq!(bytes.len(), GRASS_FRAME_UNIFORM_SIZE as usize);
         assert_eq!(f32::from_le_bytes(bytes[0..4].try_into().unwrap()), 1.5);
         assert_eq!(f32::from_le_bytes(bytes[16..20].try_into().unwrap()), 0.14);
+        assert!(bytes[32..].iter().all(|byte| *byte == 0));
     }
 
     #[test]
