@@ -26,11 +26,12 @@ use mclone_server::{
     PersistenceRecordKeyPart, PersistenceRecordMutation, PersistenceRecordNamespace,
     PersistenceRecordPayload, PersistenceRecordRequest, PersistenceRecordResponse,
     RecordExecutorWorldStore, ServerJobActor, ServerRunnerDiagnostics, ServerRunnerError,
-    ServerRunnerKind, ServerRunnerResult, ServerRunnerTickDiagnostics, ServerUpdateEnvelope,
-    WasmServerJobWorkerConfig, WorkerFrameMetrics, WorkerFrameTransportKind,
-    WorldGenerationProfile, WorldMetadata, WorldStore, WorldStoreRequest, WorldgenMailboxKind,
-    dimension_record_address, record_read_for_world_store_request, saved_data_record_address,
-    world_metadata_record_address, world_store_completion_from_record_read,
+    ServerRunnerKind, ServerRunnerResult, ServerRunnerTickDiagnostics, ServerSimulationTickReport,
+    ServerUpdateEnvelope, SimulationCadence, SimulationCadenceConfig, WasmServerJobWorkerConfig,
+    WorkerFrameMetrics, WorkerFrameTransportKind, WorldGenerationProfile, WorldMetadata,
+    WorldStore, WorldStoreRequest, WorldgenMailboxKind, dimension_record_address,
+    record_read_for_world_store_request, saved_data_record_address, world_metadata_record_address,
+    world_store_completion_from_record_read,
 };
 use wasm_bindgen::JsCast;
 use wasm_bindgen::closure::Closure;
@@ -41,8 +42,11 @@ use web_sys::{ErrorEvent, MessageEvent, Worker, WorkerOptions, WorkerType};
 use crate::web_catalog_execution::web_world_writer_lease_name;
 use crate::web_integrated_server_startup::WebIntegratedServerStartupConfig;
 
-const WEB_WORKER_TICK_INTERVAL_MS: u32 = 50;
 const WEB_WORKER_BACKGROUND_POLL_INTERVAL_MS: u32 = 8;
+
+fn web_worker_tick_interval_ms(cadence: SimulationCadenceConfig) -> f64 {
+    1_000.0 / f64::from(cadence.host_rate_hz)
+}
 // Server-worker SharedArrayBuffer ring ABI. This is the Rust copy of the control-word layout
 // authored once on the JS side in www/mclone-runner-shared-abi.js (imported by both the
 // integrated-server worker and the worldgen/light job worker). The host test
@@ -198,15 +202,7 @@ fn web_dimension_definition(
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct WebIntegratedServerRunnerConfig {
-    pub seed: i64,
-    pub world_generation_profile: WorldGenerationProfile,
-    pub starter_content: mclone_server::StarterContentDescriptor,
-    pub world_topology: HorizontalTopology,
-    pub world_behavior_profile: mclone_server::WorldBehaviorProfile,
-    pub freeze_scheduled_fluid_ticks: bool,
-    pub debug_passive_showcase: bool,
-    pub debug_auxiliary_player_script: bool,
-    pub light_status_batch_size: usize,
+    pub authority: mclone_server::LocalAuthorityStartConfig,
     pub worker_url: String,
     pub job_worker_url: String,
     pub bindgen_js_url: String,
@@ -214,12 +210,8 @@ pub struct WebIntegratedServerRunnerConfig {
     pub world_storage: WebIntegratedServerWorldStorage,
     pub transient_authored_fixture: Option<AuthoredWorldFixtureKind>,
     pub transient_playable_showcase: Option<mclone_server::PlayableShowcaseId>,
-    pub day_time: Option<u64>,
-    pub day_time_frozen: bool,
     pub runner_transport_kind: Option<WorkerFrameTransportKind>,
     pub runner_initial_inbound_bytes: u32,
-    pub local_player_identity: ClientIdentity,
-    pub observer_only: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -240,15 +232,7 @@ impl WebIntegratedServerRunnerConfig {
         bindgen_wasm_url: impl Into<String>,
     ) -> Self {
         Self {
-            seed,
-            world_generation_profile: WorldGenerationProfile::default(),
-            starter_content: mclone_server::StarterContentDescriptor::Wild,
-            world_topology: HorizontalTopology::UNBOUNDED,
-            world_behavior_profile: mclone_server::WorldBehaviorProfile::default(),
-            freeze_scheduled_fluid_ticks: false,
-            debug_passive_showcase: true,
-            debug_auxiliary_player_script: false,
-            light_status_batch_size: mclone_server::DEFAULT_LIGHT_STATUS_BATCH_SIZE,
+            authority: mclone_server::LocalAuthorityStartConfig::new(seed),
             worker_url: worker_url.into(),
             job_worker_url: job_worker_url.into(),
             bindgen_js_url: bindgen_js_url.into(),
@@ -256,17 +240,18 @@ impl WebIntegratedServerRunnerConfig {
             world_storage: WebIntegratedServerWorldStorage::Transient,
             transient_authored_fixture: None,
             transient_playable_showcase: None,
-            day_time: None,
-            day_time_frozen: false,
             runner_transport_kind: None,
             runner_initial_inbound_bytes: DEFAULT_RUNNER_SHARED_RESPONSE_BYTES,
-            local_player_identity: ClientIdentity::test_default(),
-            observer_only: false,
         }
     }
 
+    pub fn with_authority(mut self, authority: mclone_server::LocalAuthorityStartConfig) -> Self {
+        self.authority = authority;
+        self
+    }
+
     pub const fn with_observer_only(mut self, observer_only: bool) -> Self {
-        self.observer_only = observer_only;
+        self.authority.observer_only = observer_only;
         self
     }
 
@@ -299,17 +284,17 @@ impl WebIntegratedServerRunnerConfig {
     }
 
     pub const fn with_day_time(mut self, day_time: Option<u64>) -> Self {
-        self.day_time = day_time;
+        self.authority.day_time = day_time;
         self
     }
 
     pub const fn with_day_time_frozen(mut self, frozen: bool) -> Self {
-        self.day_time_frozen = frozen;
+        self.authority.day_time_frozen = frozen;
         self
     }
 
     pub const fn with_world_generation_profile(mut self, profile: WorldGenerationProfile) -> Self {
-        self.world_generation_profile = profile;
+        self.authority.world_generation_profile = profile;
         self
     }
 
@@ -317,12 +302,12 @@ impl WebIntegratedServerRunnerConfig {
         mut self,
         starter_content: mclone_server::StarterContentDescriptor,
     ) -> Self {
-        self.starter_content = starter_content;
+        self.authority.starter_content = starter_content;
         self
     }
 
     pub const fn with_world_topology(mut self, topology: HorizontalTopology) -> Self {
-        self.world_topology = topology;
+        self.authority.world_topology = topology;
         self
     }
 
@@ -330,27 +315,27 @@ impl WebIntegratedServerRunnerConfig {
         mut self,
         profile: mclone_server::WorldBehaviorProfile,
     ) -> Self {
-        self.world_behavior_profile = profile;
+        self.authority.world_behavior_profile = profile;
         self
     }
 
     pub const fn with_freeze_scheduled_fluid_ticks(mut self, freeze: bool) -> Self {
-        self.freeze_scheduled_fluid_ticks = freeze;
+        self.authority.scheduled_fluid_ticks_frozen = freeze;
         self
     }
 
     pub const fn with_debug_passive_showcase(mut self, enabled: bool) -> Self {
-        self.debug_passive_showcase = enabled;
+        self.authority.debug_passive_showcase = enabled;
         self
     }
 
     pub const fn with_debug_auxiliary_player_script(mut self, enabled: bool) -> Self {
-        self.debug_auxiliary_player_script = enabled;
+        self.authority.debug_auxiliary_player_script = enabled;
         self
     }
 
     pub const fn with_light_status_batch_size(mut self, batch_size: usize) -> Self {
-        self.light_status_batch_size = if batch_size == 0 { 1 } else { batch_size };
+        self.authority.light_status_batch_size = if batch_size == 0 { 1 } else { batch_size };
         self
     }
 
@@ -440,10 +425,13 @@ impl RunnerSharedSlot {
 impl WebIntegratedServerRunner {
     pub async fn new(config: WebIntegratedServerRunnerConfig) -> Result<Self, String> {
         let mut config = config;
-        config.local_player_identity =
-            mclone_app_runtime::local_profile::load_or_create_web_local_player_profile()
-                .map_err(|error| format!("load browser player profile: {error:#}"))?
-                .client_identity();
+        if config.authority.local_player_identity.is_none() {
+            config.authority.local_player_identity = Some(
+                mclone_app_runtime::local_profile::load_or_create_web_local_player_profile()
+                    .map_err(|error| format!("load browser player profile: {error:#}"))?
+                    .client_identity(),
+            );
+        }
         let startup_world_writer_lease_name = match &config.world_storage {
             WebIntegratedServerWorldStorage::Transient => None,
             WebIntegratedServerWorldStorage::IndexedDb { world_id, .. } => {
@@ -487,7 +475,7 @@ impl WebIntegratedServerRunner {
         let update_frames = Rc::new(RefCell::new(Vec::new()));
         let diagnostics = Rc::new(RefCell::new(ServerRunnerDiagnostics::initial(
             ServerRunnerKind::WebWorker,
-            config.seed,
+            config.authority.seed,
             INITIAL_DAY_TIME,
         )));
         let shutdown_outcome: RetiredWorkerOutcome = Rc::new(RefCell::new(None));
@@ -704,6 +692,49 @@ impl WebIntegratedServerRunner {
         diagnostics.awaiting_tick = false;
     }
 
+    pub fn set_simulation_cadence(
+        &mut self,
+        cadence: SimulationCadenceConfig,
+    ) -> Result<bool, String> {
+        if !cadence.is_valid() {
+            return Err("invalid browser server cadence config".to_owned());
+        }
+        if self.diagnostics.borrow().simulation_cadence == cadence {
+            return Ok(false);
+        }
+        let request_id = self.next_request_id();
+        let message = Object::new();
+        set_string(&message, "kind", "set-cadence")?;
+        set_number(&message, "requestId", f64::from(request_id))?;
+        set_number(&message, "hostRateHz", f64::from(cadence.host_rate_hz))?;
+        set_number(
+            &message,
+            "gameplayRateHz",
+            f64::from(cadence.gameplay_rate_hz),
+        )?;
+        set_number(
+            &message,
+            "physicsRateHz",
+            f64::from(cadence.physics_rate_hz),
+        )?;
+        set_number(
+            &message,
+            "maxCatchUpHostFrames",
+            f64::from(cadence.max_catch_up_host_frames),
+        )?;
+        set_number(
+            &message,
+            "tickIntervalMs",
+            web_worker_tick_interval_ms(cadence),
+        )?;
+        self.worker
+            .post_message(&message)
+            .map_err(|error| format!("failed to post cadence update: {error:?}"))?;
+        self.record_runner_request(request_id, 0);
+        self.diagnostics.borrow_mut().simulation_cadence = cadence;
+        Ok(true)
+    }
+
     fn next_request_id(&mut self) -> u32 {
         let request_id = self.next_request_id;
         self.next_request_id = self.next_request_id.wrapping_add(1).max(1);
@@ -716,21 +747,9 @@ impl WebIntegratedServerRunner {
         set_string(&message, "kind", "start")?;
         set_number(&message, "requestId", f64::from(request_id))?;
         let startup_frame = WebIntegratedServerStartupConfig {
-            seed: config.seed,
-            world_generation_profile: config.world_generation_profile,
-            starter_content: config.starter_content,
-            world_topology: config.world_topology,
-            world_behavior_profile: config.world_behavior_profile,
+            authority: config.authority.clone(),
             transient_authored_fixture: config.transient_authored_fixture,
             transient_playable_showcase: config.transient_playable_showcase,
-            day_time: config.day_time,
-            day_time_frozen: config.day_time_frozen,
-            freeze_scheduled_fluid_ticks: config.freeze_scheduled_fluid_ticks,
-            debug_passive_showcase: config.debug_passive_showcase,
-            debug_auxiliary_player_script: config.debug_auxiliary_player_script,
-            light_status_batch_size: config.light_status_batch_size,
-            local_player_identity: config.local_player_identity.clone(),
-            observer_only: config.observer_only,
         }
         .encode()?;
         let startup_frame = Uint8Array::from(startup_frame.as_slice());
@@ -757,7 +776,7 @@ impl WebIntegratedServerRunner {
         set_number(
             &message,
             "tickIntervalMs",
-            f64::from(WEB_WORKER_TICK_INTERVAL_MS),
+            web_worker_tick_interval_ms(config.authority.cadence),
         )?;
         set_number(
             &message,
@@ -2070,6 +2089,7 @@ fn ensure_worker_response_ok(value: &JsValue) -> Result<(), String> {
 #[wasm_bindgen]
 pub struct McloneWebIntegratedServerWorker {
     server: LocalRealmSession,
+    cadence: SimulationCadence,
     diagnostics: ServerRunnerDiagnostics,
     indexed_db_state: Option<Rc<RefCell<WebPersistenceRecordState>>>,
     pending_indexed_db_reads: BTreeMap<u64, WorldStoreRequest>,
@@ -2100,6 +2120,7 @@ pub struct WebIntegratedServerActor {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum WebIntegratedServerOperationKind {
     Command,
+    SetCadence,
     Tick,
     Poll,
     PersistenceCompletion,
@@ -2113,6 +2134,7 @@ impl WebIntegratedServerOperationKind {
     const fn response_kind(self) -> &'static str {
         match self {
             Self::Command => "command-result",
+            Self::SetCadence => "cadence-updated",
             Self::Tick | Self::Poll | Self::PersistenceCompletion => "updates",
             Self::FlushPersistence => "flush-complete",
             Self::PromoteObserver => "observer-promoted",
@@ -2377,9 +2399,11 @@ fn web_persistence_state_from_bootstrap(
 fn web_dimension_definition_from_startup(
     config: &WebIntegratedServerStartupConfig,
 ) -> mclone_server::DimensionDefinition {
-    let mut definition =
-        mclone_server::DimensionDefinition::overworld(config.seed, config.world_generation_profile);
-    definition.topology = config.world_topology;
+    let mut definition = mclone_server::DimensionDefinition::overworld(
+        config.authority.seed,
+        config.authority.world_generation_profile,
+    );
+    definition.topology = config.authority.world_topology;
     definition
 }
 
@@ -2473,7 +2497,11 @@ impl WebIntegratedServerStartup {
             Some(
                 mclone_server::playable_showcase_memory_store(
                     showcase,
-                    &self.config.local_player_identity,
+                    self.config
+                        .authority
+                        .local_player_identity
+                        .as_ref()
+                        .expect("validated Web startup requires a local player identity"),
                 )
                 .map_err(|error| JsValue::from_str(&error.to_string()))?
                 .1,
@@ -2518,7 +2546,12 @@ impl WebIntegratedServerStartup {
             }
         };
         self.finish_startup(
-            McloneWebIntegratedServerWorker::from_server(self.config.seed, server, None),
+            McloneWebIntegratedServerWorker::from_server(
+                self.config.authority.seed,
+                server,
+                None,
+                self.config.authority.cadence,
+            ),
             self.config.transient_authored_fixture.is_some()
                 || self.config.transient_playable_showcase.is_some(),
             false,
@@ -2567,7 +2600,12 @@ impl WebIntegratedServerStartup {
         apply_stored_world_metadata_profiles(&mut server, metadata.as_ref())
             .map_err(|error| JsValue::from_str(&error))?;
         self.finish_startup(
-            McloneWebIntegratedServerWorker::from_server(self.config.seed, server, Some(state)),
+            McloneWebIntegratedServerWorker::from_server(
+                self.config.authority.seed,
+                server,
+                Some(state),
+                self.config.authority.cadence,
+            ),
             true,
             stored_world_metadata_present,
         )
@@ -2585,14 +2623,14 @@ impl WebIntegratedServerStartup {
         if !stored_world_metadata_present {
             worker
                 .server
-                .set_world_generation_profile(self.config.world_generation_profile)
+                .set_world_generation_profile(self.config.authority.world_generation_profile)
                 .map_err(|error| error.to_string())?;
             worker
                 .server
-                .set_world_behavior_profile(self.config.world_behavior_profile);
+                .set_world_behavior_profile(self.config.authority.world_behavior_profile);
             worker
                 .server
-                .set_starter_content(self.config.starter_content);
+                .set_starter_content(self.config.authority.starter_content);
         }
         if initialize_world_metadata {
             worker
@@ -2600,14 +2638,7 @@ impl WebIntegratedServerStartup {
                 .initialize_world_metadata_blocking()
                 .map_err(|error| error.to_string())?;
         }
-        if let Some(day_time) = self.config.day_time {
-            worker.server.server_mut().set_day_time(day_time);
-        }
-        worker
-            .server
-            .server_mut()
-            .set_day_time_frozen(self.config.day_time_frozen);
-        if self.config.observer_only {
+        if self.config.authority.observer_only {
             worker
                 .server
                 .begin_observing(
@@ -2623,20 +2654,17 @@ impl WebIntegratedServerStartup {
         }
         worker
             .server
-            .configure_local_player_identity(self.config.local_player_identity.clone())
+            .configure_local_player_identity(
+                self.config
+                    .authority
+                    .local_player_identity
+                    .clone()
+                    .expect("browser runner startup installs one local player identity"),
+            )
             .map_err(|error| error.to_string())?;
-        worker
-            .server
-            .set_scheduled_fluid_ticks_frozen(self.config.freeze_scheduled_fluid_ticks);
-        worker
-            .server
-            .set_debug_passive_showcase_enabled(self.config.debug_passive_showcase);
-        worker
-            .server
-            .set_debug_auxiliary_player_script_enabled(self.config.debug_auxiliary_player_script);
-        worker
-            .server
-            .set_light_status_batch_size(self.config.light_status_batch_size);
+        self.config
+            .authority
+            .apply_runtime_policy(&mut worker.server);
         worker.refresh_diagnostics(None, false, None);
         Ok(WebIntegratedServerActor {
             server: worker,
@@ -2677,6 +2705,7 @@ impl WebIntegratedServerActor {
         let request_id = number_prop(&message, "requestId").unwrap_or(0.0) as u32;
         let operation_kind = match kind.as_str() {
             "command" => WebIntegratedServerOperationKind::Command,
+            "set-cadence" => WebIntegratedServerOperationKind::SetCadence,
             "flush-persistence" => WebIntegratedServerOperationKind::FlushPersistence,
             "promote-observer" => WebIntegratedServerOperationKind::PromoteObserver,
             "demote-player" => WebIntegratedServerOperationKind::DemotePlayer,
@@ -2691,6 +2720,9 @@ impl WebIntegratedServerActor {
             .map_err(|error| JsValue::from_str(&error))?;
         let result = match operation_kind {
             WebIntegratedServerOperationKind::Command => self.server.handle_command_frame(frame),
+            WebIntegratedServerOperationKind::SetCadence => cadence_config_from_message(&message)
+                .and_then(|cadence| self.server.set_simulation_cadence(cadence))
+                .map_err(|error| JsValue::from_str(&error)),
             WebIntegratedServerOperationKind::FlushPersistence => self.server.flush_persistence(),
             WebIntegratedServerOperationKind::PromoteObserver => {
                 self.server.promote_observer_to_player()
@@ -2868,7 +2900,7 @@ impl McloneWebIntegratedServerWorker {
     #[wasm_bindgen(constructor)]
     pub fn new(seed: i64) -> Self {
         let server = LocalRealmSession::local_integrated(seed);
-        Self::from_server(seed, server, None)
+        Self::from_server(seed, server, None, SimulationCadenceConfig::default())
     }
 
     #[wasm_bindgen(js_name = withDefinition)]
@@ -2880,7 +2912,12 @@ impl McloneWebIntegratedServerWorker {
         let definition = web_dimension_definition(seed, &generation_profile, &world_topology)
             .map_err(|error| JsValue::from_str(&error))?;
         let server = LocalRealmSession::local_integrated_with_dimension_definition(definition);
-        Ok(Self::from_server(seed, server, None))
+        Ok(Self::from_server(
+            seed,
+            server,
+            None,
+            SimulationCadenceConfig::default(),
+        ))
     }
 
     #[wasm_bindgen(js_name = withJobWorkers)]
@@ -2894,7 +2931,7 @@ impl McloneWebIntegratedServerWorker {
             seed,
             WasmServerJobWorkerConfig::new(job_worker_url, bindgen_js_url, bindgen_wasm_url),
         );
-        Self::from_server(seed, server, None)
+        Self::from_server(seed, server, None, SimulationCadenceConfig::default())
     }
 
     #[wasm_bindgen(js_name = withDefinitionAndJobWorkers)]
@@ -2913,7 +2950,12 @@ impl McloneWebIntegratedServerWorker {
                 definition,
                 WasmServerJobWorkerConfig::new(job_worker_url, bindgen_js_url, bindgen_wasm_url),
             );
-        Ok(Self::from_server(seed, server, None))
+        Ok(Self::from_server(
+            seed,
+            server,
+            None,
+            SimulationCadenceConfig::default(),
+        ))
     }
 
     #[wasm_bindgen(js_name = setLightStatusBatchSize)]
@@ -3132,17 +3174,70 @@ impl McloneWebIntegratedServerWorker {
         if !self.running {
             return self.worker_response(Vec::new()).map_err(JsValue::from);
         }
-        let wall_start = js_sys::Date::now();
-        match self.server.try_simulation_tick_report() {
-            Ok(report) => {
-                let wall_us = ((js_sys::Date::now() - wall_start).max(0.0) * 1000.0) as u128;
-                let updates = report.updates.clone();
-                let autosave_error = self.autosave_indexed_db_dirty_chunks().err();
-                self.refresh_diagnostics(
-                    Some(ServerRunnerTickDiagnostics::from_report(&report, wall_us)),
-                    false,
-                    autosave_error,
-                );
+        let frame = self.cadence.advance_host_frame();
+        let result = (|| -> Result<
+            (
+                Vec<ServerUpdate>,
+                Option<(ServerSimulationTickReport, u128)>,
+                Option<String>,
+            ),
+            String,
+        > {
+            let mut updates = Vec::new();
+            let mut last_gameplay_tick = None;
+            let mut autosave_error = None;
+            for _ in 0..frame.gameplay_ticks {
+                let wall_start = js_sys::Date::now();
+                let mut report = self
+                    .server
+                    .try_simulation_tick_report_with_physics_steps(0)
+                    .map_err(|error| error.to_string())?;
+                let wall_us = ((js_sys::Date::now() - wall_start).max(0.0) * 1_000.0) as u128;
+                updates.append(&mut report.updates);
+                if report
+                    .simulation_tick
+                    .is_multiple_of(INTEGRATED_SERVER_AUTOSAVE_INTERVAL_GAMEPLAY_TICKS)
+                {
+                    if let Err(error) = self.autosave_indexed_db_dirty_chunks() {
+                        autosave_error.get_or_insert(error);
+                    }
+                }
+                last_gameplay_tick = Some((report, wall_us));
+            }
+
+            if frame.physics_steps > 0 {
+                let wall_start = js_sys::Date::now();
+                let mut physics = self
+                    .server
+                    .try_physics_step_report_with_step_dt(
+                        frame.physics_steps,
+                        1.0 / f64::from(self.cadence.config().physics_rate_hz),
+                    )
+                    .map_err(|error| error.to_string())?;
+                let physics_wall_us =
+                    ((js_sys::Date::now() - wall_start).max(0.0) * 1_000.0) as u128;
+                updates.append(&mut physics.updates);
+                if let Some((report, wall_us)) = last_gameplay_tick.as_mut() {
+                    report.physics = physics.physics;
+                    report.timing.physics_tick_us = report
+                        .timing
+                        .physics_tick_us
+                        .saturating_add(physics.timing.physics_tick_us);
+                    report.timing.total_us = report
+                        .timing
+                        .total_us
+                        .saturating_add(physics.timing.total_us);
+                    *wall_us = wall_us.saturating_add(physics_wall_us);
+                }
+            }
+            Ok((updates, last_gameplay_tick, autosave_error))
+        })();
+        match result {
+            Ok((updates, last_gameplay_tick, autosave_error)) => {
+                let tick = last_gameplay_tick.map(|(report, wall_us)| {
+                    ServerRunnerTickDiagnostics::from_report(&report, wall_us)
+                });
+                self.refresh_diagnostics(tick, false, autosave_error);
                 self.worker_response(updates).map_err(JsValue::from)
             }
             Err(error) => {
@@ -3186,13 +3281,17 @@ impl McloneWebIntegratedServerWorker {
         seed: i64,
         server: LocalRealmSession,
         indexed_db_state: Option<Rc<RefCell<WebPersistenceRecordState>>>,
+        cadence_config: SimulationCadenceConfig,
     ) -> Self {
         let mut diagnostics =
             ServerRunnerDiagnostics::initial(ServerRunnerKind::WebWorker, seed, server.day_time());
         diagnostics.running = true;
+        diagnostics.simulation_cadence = cadence_config;
         diagnostics.runner_frame_metrics = WorkerFrameMetrics::message_transfer();
         let mut worker = Self {
             server,
+            cadence: SimulationCadence::new(cadence_config)
+                .expect("validated browser cadence config"),
             diagnostics,
             indexed_db_state,
             pending_indexed_db_reads: BTreeMap::new(),
@@ -3231,6 +3330,17 @@ impl McloneWebIntegratedServerWorker {
             attach_persistence_record_requests(&response, requests)?;
         }
         Ok(response)
+    }
+
+    fn set_simulation_cadence(
+        &mut self,
+        cadence_config: SimulationCadenceConfig,
+    ) -> Result<JsValue, String> {
+        self.cadence = SimulationCadence::new(cadence_config)
+            .ok_or_else(|| "invalid browser server cadence config".to_owned())?;
+        self.diagnostics.simulation_cadence = cadence_config;
+        self.refresh_diagnostics(None, false, None);
+        self.worker_response(Vec::new())
     }
 
     fn autosave_indexed_db_dirty_chunks(&mut self) -> Result<(), String> {
@@ -4054,6 +4164,32 @@ fn reflect_get(value: &JsValue, name: &str) -> Option<JsValue> {
 
 fn bool_prop(value: &JsValue, name: &str) -> Option<bool> {
     reflect_get(value, name).and_then(|value| value.as_bool())
+}
+
+fn cadence_config_from_message(value: &JsValue) -> Result<SimulationCadenceConfig, String> {
+    let config = SimulationCadenceConfig::new(
+        required_u32_prop(value, "hostRateHz")?,
+        required_u32_prop(value, "gameplayRateHz")?,
+        required_u32_prop(value, "physicsRateHz")?,
+    )
+    .with_max_catch_up_host_frames(required_u32_prop(value, "maxCatchUpHostFrames")?);
+    if config.is_valid() {
+        Ok(config)
+    } else {
+        Err("invalid browser server cadence config".to_owned())
+    }
+}
+
+fn required_u32_prop(value: &JsValue, name: &str) -> Result<u32, String> {
+    let number = number_prop(value, name)
+        .ok_or_else(|| format!("integrated-server message is missing numeric {name}"))?;
+    if !number.is_finite() || number < 0.0 || number > f64::from(u32::MAX) || number.fract() != 0.0
+    {
+        return Err(format!(
+            "integrated-server message has invalid u32 {name}={number}"
+        ));
+    }
+    Ok(number as u32)
 }
 
 fn number_prop(value: &JsValue, name: &str) -> Option<f64> {

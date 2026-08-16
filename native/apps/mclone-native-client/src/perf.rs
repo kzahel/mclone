@@ -4304,6 +4304,8 @@ pub(crate) fn run_frame_budget_probe(
     let mut runtime_scene = options.scene.clone();
     runtime_scene.chunk_x = initial_center.x;
     runtime_scene.chunk_z = initial_center.z;
+    runtime_scene.local_entry_intent =
+        mclone_app_runtime::local_session_launch::LocalSessionEntryIntent::ExplicitCoordinate;
     let assets = WindowSceneAssets::load()?;
     let asset_source = load_asset_source()?;
     let probe_options = options.clone();

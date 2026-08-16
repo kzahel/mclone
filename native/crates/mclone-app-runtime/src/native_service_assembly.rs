@@ -27,11 +27,10 @@ use mclone_protocol::{
 };
 use mclone_render_session::{RenderSectionCacheUpdate, RenderSectionCompileQueueHealth};
 use mclone_server::{
-    ChunkLoadingProgressStats, DEFAULT_LIGHT_STATUS_BATCH_SIZE, IntegratedServerRunner,
-    NativeIntegratedServerRunner, NativeIntegratedServerRunnerConfig,
-    NativeIntegratedServerWorldStorage, ServerRunnerDiagnostics, SimulationCadenceConfig,
-    WorldBehaviorProfile, WorldGenerationProfile, host_tick_interval_for_rate_hz,
-    initial_spawn_center_for_descriptor,
+    ChunkLoadingProgressStats, IntegratedServerRunner, NativeIntegratedServerRunner,
+    NativeIntegratedServerRunnerConfig, NativeIntegratedServerWorldStorage,
+    ServerRunnerDiagnostics, SimulationCadenceConfig, WorldBehaviorProfile, WorldGenerationProfile,
+    host_tick_interval_for_rate_hz,
 };
 use mclone_ui::LoadingProgressOverlay;
 
@@ -85,28 +84,13 @@ pub fn native_world_catalog_operations(root: PathBuf) -> WorldCatalogOperationSe
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LocalIntegratedSceneOptions {
-    pub seed: i64,
-    pub world_generation_profile: WorldGenerationProfile,
-    pub starter_content: mclone_server::StarterContentDescriptor,
-    pub world_topology: HorizontalTopology,
-    pub world_behavior_profile: WorldBehaviorProfile,
+    pub authority: mclone_server::LocalAuthorityStartConfig,
     pub center: ChunkPos,
     pub render_distance: u32,
-    pub cadence: SimulationCadenceConfig,
-    pub day_time_override: Option<u64>,
-    pub freeze_time: bool,
-    pub freeze_scheduled_fluid_ticks: bool,
-    pub debug_passive_showcase: bool,
-    pub debug_auxiliary_player_script: bool,
-    pub lighting_enabled: bool,
-    pub light_status_batch_size: usize,
-    pub adaptive_chunk_publication_budget: bool,
     pub world_storage: NativeIntegratedServerWorldStorage,
     pub render_compile_worker_count: usize,
     pub render_compile_max_pending_jobs: Option<usize>,
     pub render_compile_worker_timing_enabled: bool,
-    pub local_player_identity: Option<mclone_protocol::ClientIdentity>,
-    pub observer_only: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -157,40 +141,34 @@ impl IntegratedWorldSessionStorage {
 }
 
 impl LocalIntegratedSceneOptions {
-    pub const fn new(seed: i64, center: ChunkPos, render_distance: u32) -> Self {
+    pub fn new(seed: i64, center: ChunkPos, render_distance: u32) -> Self {
         Self {
-            seed,
-            world_generation_profile: WorldGenerationProfile::Overworld,
-            starter_content: mclone_server::StarterContentDescriptor::Wild,
-            world_topology: HorizontalTopology::UNBOUNDED,
-            world_behavior_profile: WorldBehaviorProfile::Mutable,
+            authority: {
+                let mut authority = mclone_server::LocalAuthorityStartConfig::new(seed);
+                authority.world_generation_profile = WorldGenerationProfile::Overworld;
+                authority
+            },
             center,
             render_distance,
-            cadence: SimulationCadenceConfig::new(60, 20, 60),
-            day_time_override: None,
-            freeze_time: false,
-            freeze_scheduled_fluid_ticks: false,
-            debug_passive_showcase: true,
-            debug_auxiliary_player_script: false,
-            lighting_enabled: true,
-            light_status_batch_size: DEFAULT_LIGHT_STATUS_BATCH_SIZE,
-            adaptive_chunk_publication_budget: false,
             world_storage: NativeIntegratedServerWorldStorage::Transient,
             render_compile_worker_count: DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
             render_compile_max_pending_jobs: Some(DEFAULT_RENDER_SECTION_COMPILE_MAX_PENDING_JOBS),
             render_compile_worker_timing_enabled: true,
-            local_player_identity: None,
-            observer_only: false,
         }
     }
 
+    pub fn with_authority(mut self, authority: mclone_server::LocalAuthorityStartConfig) -> Self {
+        self.authority = authority;
+        self
+    }
+
     pub const fn with_cadence(mut self, cadence: SimulationCadenceConfig) -> Self {
-        self.cadence = cadence;
+        self.authority.cadence = cadence;
         self
     }
 
     pub const fn with_world_generation_profile(mut self, profile: WorldGenerationProfile) -> Self {
-        self.world_generation_profile = profile;
+        self.authority.world_generation_profile = profile;
         self
     }
 
@@ -198,71 +176,62 @@ impl LocalIntegratedSceneOptions {
         mut self,
         starter_content: mclone_server::StarterContentDescriptor,
     ) -> Self {
-        self.starter_content = starter_content;
+        self.authority.starter_content = starter_content;
         self
     }
 
     pub const fn with_world_topology(mut self, topology: HorizontalTopology) -> Self {
-        self.world_topology = topology;
+        self.authority.world_topology = topology;
         self
     }
 
     pub const fn with_world_behavior_profile(mut self, profile: WorldBehaviorProfile) -> Self {
-        self.world_behavior_profile = profile;
+        self.authority.world_behavior_profile = profile;
         self
     }
 
     pub const fn with_day_time(mut self, day_time: Option<u64>) -> Self {
-        self.day_time_override = day_time;
+        self.authority.day_time = day_time;
         self
     }
 
     pub const fn with_freeze_time(mut self, freeze_time: bool) -> Self {
-        self.freeze_time = freeze_time;
+        self.authority.day_time_frozen = freeze_time;
         self
     }
 
     pub const fn with_freeze_scheduled_fluid_ticks(mut self, freeze: bool) -> Self {
-        self.freeze_scheduled_fluid_ticks = freeze;
+        self.authority.scheduled_fluid_ticks_frozen = freeze;
         self
     }
 
     pub const fn with_debug_passive_showcase(mut self, enabled: bool) -> Self {
-        self.debug_passive_showcase = enabled;
+        self.authority.debug_passive_showcase = enabled;
         self
     }
 
     pub const fn with_debug_auxiliary_player_script(mut self, enabled: bool) -> Self {
-        self.debug_auxiliary_player_script = enabled;
+        self.authority.debug_auxiliary_player_script = enabled;
         self
     }
 
     pub fn with_local_player_identity(mut self, identity: mclone_protocol::ClientIdentity) -> Self {
-        self.local_player_identity = Some(identity);
+        self.authority.local_player_identity = Some(identity);
         self
     }
 
     pub const fn with_observer_only(mut self, observer_only: bool) -> Self {
-        self.observer_only = observer_only;
-        self
-    }
-
-    pub fn with_initial_spawn_center(mut self) -> Self {
-        self.center = initial_spawn_center_for_descriptor(
-            self.seed,
-            self.world_generation_profile,
-            self.world_topology,
-        );
+        self.authority.observer_only = observer_only;
         self
     }
 
     pub const fn with_lighting_enabled(mut self, lighting_enabled: bool) -> Self {
-        self.lighting_enabled = lighting_enabled;
+        self.authority.lighting_enabled = lighting_enabled;
         self
     }
 
     pub const fn with_light_status_batch_size(mut self, light_status_batch_size: usize) -> Self {
-        self.light_status_batch_size = if light_status_batch_size == 0 {
+        self.authority.light_status_batch_size = if light_status_batch_size == 0 {
             1
         } else {
             light_status_batch_size
@@ -271,7 +240,7 @@ impl LocalIntegratedSceneOptions {
     }
 
     pub const fn with_adaptive_chunk_publication_budget(mut self, enabled: bool) -> Self {
-        self.adaptive_chunk_publication_budget = enabled;
+        self.authority.adaptive_chunk_publication_budget = enabled;
         self
     }
 
@@ -289,7 +258,8 @@ impl LocalIntegratedSceneOptions {
         mut self,
         storage: IntegratedWorldSessionStorage,
     ) -> Self {
-        self.adaptive_chunk_publication_budget = storage.adaptive_chunk_publication_budget;
+        self.authority.adaptive_chunk_publication_budget =
+            storage.adaptive_chunk_publication_budget;
         self.world_storage = storage
             .persistent_world_dir
             .map_or(NativeIntegratedServerWorldStorage::Transient, |dir| {
@@ -1101,7 +1071,7 @@ impl<R: IntegratedServerRunner> LocalIntegratedSceneRuntime<R> {
                 options.render_compile_worker_timing_enabled,
             )?;
         let core = SingleViewRuntime::local_integrated_with_seed(
-            options.seed,
+            options.authority.seed,
             options.center,
             options.render_distance,
             options.chunk_tracking_radius(),
@@ -1112,11 +1082,11 @@ impl<R: IntegratedServerRunner> LocalIntegratedSceneRuntime<R> {
             mesh_assets,
             render_compile_dispatcher,
             deferred_chunk_drops: Box::new(NativeDeferredDropService::new()?),
-            simulation_cadence: options.cadence,
+            simulation_cadence: options.authority.cadence,
             last_runner_diagnostics: None,
             last_runner_diagnostics_poll_at: None,
         };
-        if let Some(day_time) = options.day_time_override {
+        if let Some(day_time) = options.authority.day_time {
             scene.core.force_day_time(day_time);
         }
         scene.set_chunk_view(
@@ -2422,9 +2392,9 @@ where
     pub fn local(options: LocalIntegratedSceneOptions) -> Result<Self> {
         let request =
             SessionStartRequest::new_seed_local_world_with_generation_profile_and_starter_content(
-                options.seed,
-                options.world_generation_profile,
-                options.starter_content,
+                options.authority.seed,
+                options.authority.world_generation_profile,
+                options.authority.starter_content,
             );
         Self::start_with(request, || NativeSceneServices::local(options))
     }
@@ -2435,9 +2405,9 @@ where
     ) -> Result<Self> {
         let request =
             SessionStartRequest::new_seed_local_world_with_generation_profile_and_starter_content(
-                options.seed,
-                options.world_generation_profile,
-                options.starter_content,
+                options.authority.seed,
+                options.authority.world_generation_profile,
+                options.authority.starter_content,
             );
         Self::start_with(request, || {
             NativeSceneServices::local_with_mesh_assets(options, mesh_assets)
@@ -3172,14 +3142,14 @@ pub fn build_local_integrated_client_runtime(
 ) -> Result<ClientRuntime> {
     validate_local_integrated_scene_topology(&options)?;
     let mut runtime = SingleViewRuntime::local_integrated_with_seed(
-        options.seed,
+        options.authority.seed,
         options.center,
         options.render_distance,
         options.chunk_tracking_radius(),
     );
     let mut runner = NativeIntegratedServerRunner::new(native_runner_config(&options))
         .context("failed to start local integrated server runner")?;
-    if let Some(day_time) = options.day_time_override {
+    if let Some(day_time) = options.authority.day_time {
         runtime.force_day_time(day_time);
     }
     if let Some(command) = runtime.set_chunk_view_command(
@@ -3227,7 +3197,7 @@ pub fn drain_integrated_server_runner_until_idle(
 
 fn validate_local_integrated_scene_topology(options: &LocalIntegratedSceneOptions) -> Result<()> {
     mclone_server::validate_local_integrated_chunk_view_topology(
-        options.world_topology,
+        options.authority.world_topology,
         &ChunkView {
             center: options.center,
             render_distance: options.render_distance,
@@ -3240,27 +3210,11 @@ fn validate_local_integrated_scene_topology(options: &LocalIntegratedSceneOption
 fn native_runner_config(
     options: &LocalIntegratedSceneOptions,
 ) -> NativeIntegratedServerRunnerConfig {
-    let mut config = NativeIntegratedServerRunnerConfig::new(options.seed)
-        .with_world_generation_profile(options.world_generation_profile)
-        .with_starter_content(options.starter_content)
-        .with_world_topology(options.world_topology)
-        .with_world_behavior_profile(options.world_behavior_profile)
-        .with_lighting_enabled(options.lighting_enabled)
-        .with_light_status_batch_size(options.light_status_batch_size)
-        .with_debug_passive_showcase(options.debug_passive_showcase)
-        .with_debug_auxiliary_player_script(options.debug_auxiliary_player_script)
-        .with_day_time(options.day_time_override)
-        .with_day_time_frozen(options.freeze_time)
-        .with_scheduled_fluid_ticks_frozen(options.freeze_scheduled_fluid_ticks)
+    NativeIntegratedServerRunnerConfig::new(options.authority.seed)
+        .with_authority(options.authority.clone())
         .with_local_integrated_chunk_tracking()
-        .with_adaptive_chunk_publication_budget(options.adaptive_chunk_publication_budget)
         .with_world_storage(options.world_storage.clone())
-        .with_observer_only(options.observer_only)
-        .with_cadence_derived_tick_interval(options.cadence);
-    if let Some(identity) = options.local_player_identity.clone() {
-        config = config.with_local_player_identity(identity);
-    }
-    config
+        .with_cadence_derived_tick_interval(options.authority.cadence)
 }
 
 fn runner_idle(diagnostics: &ServerRunnerDiagnostics) -> bool {
@@ -3605,7 +3559,7 @@ mod tests {
             options.world_storage,
             NativeIntegratedServerWorldStorage::Transient
         );
-        assert!(!options.adaptive_chunk_publication_budget);
+        assert!(!options.authority.adaptive_chunk_publication_budget);
     }
 
     #[test]
@@ -3623,7 +3577,7 @@ mod tests {
             options.world_storage,
             NativeIntegratedServerWorldStorage::Persistent { dir: world_dir }
         );
-        assert!(options.adaptive_chunk_publication_budget);
+        assert!(options.authority.adaptive_chunk_publication_budget);
     }
 
     #[derive(Debug)]
@@ -3677,52 +3631,6 @@ mod tests {
     }
 
     #[test]
-    fn local_integrated_scene_options_can_use_java_initial_spawn_center() {
-        let options = LocalIntegratedSceneOptions::new(12345, ChunkPos::new(0, 0), 2)
-            .with_initial_spawn_center();
-
-        assert_eq!(
-            options.center,
-            initial_spawn_center_for_descriptor(
-                12345,
-                WorldGenerationProfile::Overworld,
-                HorizontalTopology::UNBOUNDED,
-            )
-        );
-    }
-
-    #[test]
-    fn local_integrated_scene_options_use_selected_profile_spawn_center() {
-        let options = LocalIntegratedSceneOptions::new(12345, ChunkPos::new(19, -20), 2)
-            .with_world_generation_profile(WorldGenerationProfile::SmallIslandV1)
-            .with_initial_spawn_center();
-
-        assert_eq!(options.center, ChunkPos::new(0, 0));
-    }
-
-    #[test]
-    fn local_integrated_scene_options_apply_topology_to_mclone_spawn() {
-        let topology = HorizontalTopology::cylinder_x(0, 384);
-        let options = LocalIntegratedSceneOptions::new(-98_765, ChunkPos::new(19, -20), 2)
-            .with_world_generation_profile(WorldGenerationProfile::McloneOverworldV1)
-            .with_world_topology(topology)
-            .with_initial_spawn_center();
-
-        assert_eq!(
-            options.center,
-            initial_spawn_center_for_descriptor(
-                -98_765,
-                WorldGenerationProfile::McloneOverworldV1,
-                topology,
-            )
-        );
-        assert_eq!(
-            topology.canonicalize_chunk(options.center),
-            Some(options.center)
-        );
-    }
-
-    #[test]
     fn native_runner_config_derives_tick_interval_from_cadence_host_rate() {
         let cadence = SimulationCadenceConfig::new(60, 20, 60);
         let options =
@@ -3730,7 +3638,7 @@ mod tests {
 
         let config = native_runner_config(&options);
 
-        assert_eq!(config.cadence, cadence);
+        assert_eq!(config.authority.cadence, cadence);
         assert_eq!(config.tick_interval, Duration::from_nanos(16_666_667));
     }
 
@@ -3741,7 +3649,7 @@ mod tests {
 
         let config = native_runner_config(&options);
 
-        assert_eq!(config.light_status_batch_size, 5);
+        assert_eq!(config.authority.light_status_batch_size, 5);
     }
 
     #[test]
@@ -3760,10 +3668,9 @@ mod tests {
     #[test]
     fn build_local_integrated_client_runtime_accepts_the_topology_probe_descriptor() {
         let topology = HorizontalTopology::cylinder_x(0, 32);
-        let options = LocalIntegratedSceneOptions::new(12_345, ChunkPos::new(4, -9), 0)
+        let options = LocalIntegratedSceneOptions::new(12_345, ChunkPos::new(0, 0), 0)
             .with_world_generation_profile(WorldGenerationProfile::TopologyProbeV1)
             .with_world_topology(topology)
-            .with_initial_spawn_center()
             .with_lighting_enabled(false);
 
         assert_eq!(options.center, ChunkPos::new(0, 0));
@@ -4274,7 +4181,6 @@ mod tests {
         let options = LocalIntegratedSceneOptions::new(12_345, ChunkPos::new(0, 0), 2)
             .with_world_generation_profile(WorldGenerationProfile::TopologyProbeV1)
             .with_world_topology(topology)
-            .with_initial_spawn_center()
             .with_debug_passive_showcase(false)
             .with_lighting_enabled(false);
         let center = options.center;
@@ -4317,7 +4223,6 @@ mod tests {
             LocalIntegratedSceneOptions::new(12_345, ChunkPos::new(0, 0), render_distance)
                 .with_world_generation_profile(WorldGenerationProfile::TopologyProbeV1)
                 .with_world_topology(topology)
-                .with_initial_spawn_center()
                 .with_debug_passive_showcase(false)
                 .with_lighting_enabled(true);
         let mut pump = NativeSessionStartupPump::<LocalOnlySession>::local_with_mesh_assets(

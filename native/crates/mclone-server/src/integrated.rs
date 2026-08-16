@@ -7193,8 +7193,9 @@ impl LocalRealmSession {
             .try_closed_wildlife_ecology_tick(entity_ticking_chunks)
     }
 
-    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
-    pub(crate) fn try_simulation_tick_report_with_physics_steps(
+    /// Advances one gameplay tick while allowing a host-owned cadence driver
+    /// to schedule physics independently.
+    pub fn try_simulation_tick_report_with_physics_steps(
         &mut self,
         physics_steps: u32,
     ) -> ChunkStoreResult<ServerSimulationTickReport> {
@@ -7204,8 +7205,9 @@ impl LocalRealmSession {
         )
     }
 
-    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
-    pub(crate) fn try_simulation_tick_report_with_physics_steps_and_step_dt(
+    /// Advances one gameplay tick with host-selected physics work and step
+    /// duration.
+    pub fn try_simulation_tick_report_with_physics_steps_and_step_dt(
         &mut self,
         physics_steps: u32,
         physics_step_dt_seconds: f64,
@@ -7240,7 +7242,8 @@ impl LocalRealmSession {
         self.try_physics_step_report_with_step_dt(physics_steps, DEFAULT_PHYSICS_STEP_DT_SECONDS)
     }
 
-    pub(crate) fn try_physics_step_report_with_step_dt(
+    /// Advances host-scheduled physics steps without advancing gameplay.
+    pub fn try_physics_step_report_with_step_dt(
         &mut self,
         physics_steps: u32,
         physics_step_dt_seconds: f64,

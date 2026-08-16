@@ -43,6 +43,10 @@ interface IntegratedServerWorkerMessage {
   clearWorldStorage?: boolean;
   runnerTransportKind?: string;
   tickIntervalMs?: number;
+  hostRateHz?: number;
+  gameplayRateHz?: number;
+  physicsRateHz?: number;
+  maxCatchUpHostFrames?: number;
   frame?: Uint8Array;
   transportKind?: "shared-memory" | "message-transfer";
   controlBuffer?: SharedArrayBuffer;
@@ -194,9 +198,7 @@ async function startServer(message: IntegratedServerWorkerMessage): Promise<void
     );
   }
   backgroundPollIntervalMs = Math.trunc(pollIntervalMs);
-  tickTimer = setInterval(() => {
-    void tickServer();
-  }, Math.trunc(intervalMs));
+  restartTickTimer(intervalMs);
   if (!server) {
     throw new Error("integrated server worker did not start");
   }
@@ -237,6 +239,9 @@ async function driveActorMessage(message: IntegratedServerWorkerMessage): Promis
         initial as Record<string, any>,
         message,
       );
+      if (message.kind === "set-cadence") {
+        restartTickTimerFromMessage(message);
+      }
     }
   } catch (error) {
     markRunnerSharedFailure(message);
@@ -247,6 +252,21 @@ async function driveActorMessage(message: IntegratedServerWorkerMessage): Promis
   }
   schedulePersistenceRequests(completion.persistenceRequests);
   if (completion.backgroundPollRequested) scheduleBackgroundPoll();
+}
+
+function restartTickTimerFromMessage(message: IntegratedServerWorkerMessage): void {
+  const intervalMs = Number(message.tickIntervalMs);
+  if (!Number.isFinite(intervalMs) || intervalMs < 1) {
+    throw new Error("integrated server cadence update has an invalid Rust-authored tick interval");
+  }
+  restartTickTimer(intervalMs);
+}
+
+function restartTickTimer(intervalMs: number): void {
+  if (tickTimer) clearInterval(tickTimer);
+  tickTimer = setInterval(() => {
+    void tickServer();
+  }, intervalMs);
 }
 
 async function tickServer(): Promise<void> {

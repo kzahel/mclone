@@ -267,8 +267,8 @@ impl WebRuntime {
         config: WebIntegratedServerRunnerConfig,
         initial_center: ChunkPos,
     ) -> Result<Self, String> {
-        let seed = config.seed;
-        let initial_day_time = config.day_time;
+        let seed = config.authority.seed;
+        let initial_day_time = config.authority.day_time;
         let runner = WebIntegratedServerRunner::new(config).await?;
         let diagnostics = runner.diagnostics();
         let mut core = SingleViewRuntime::local_integrated_with_seed(seed, initial_center, 0, 0);
@@ -485,6 +485,14 @@ impl WebRuntime {
     }
 
     #[cfg(target_arch = "wasm32")]
+    pub fn set_simulation_cadence(
+        &mut self,
+        cadence: mclone_server::SimulationCadenceConfig,
+    ) -> Result<bool, String> {
+        self.host.set_simulation_cadence(cadence)
+    }
+
+    #[cfg(target_arch = "wasm32")]
     pub fn request_shutdown(&mut self) {
         self.host.request_shutdown();
     }
@@ -581,6 +589,22 @@ impl WebRuntimeHost {
             Self::Worker(host) => host.diagnostics(),
             #[cfg(target_arch = "wasm32")]
             Self::RemoteWebSocket(host) => host.diagnostics(),
+        }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn set_simulation_cadence(
+        &mut self,
+        cadence: mclone_server::SimulationCadenceConfig,
+    ) -> Result<bool, String> {
+        match self {
+            Self::Worker(host) => host.set_simulation_cadence(cadence),
+            Self::Inline(_) => {
+                Err("inline browser runtime does not expose cadence changes".to_owned())
+            }
+            Self::RemoteWebSocket(_) => {
+                Err("remote browser runtime does not own server cadence".to_owned())
+            }
         }
     }
 

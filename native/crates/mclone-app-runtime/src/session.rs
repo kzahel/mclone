@@ -381,6 +381,7 @@ pub struct SessionStorageIntent {
     remote_addr: Option<String>,
     world_dir: Option<PathBuf>,
     suppress_adaptive_chunk_publication_budget: bool,
+    local_entry_intent: crate::local_session_launch::LocalSessionEntryIntent,
 }
 
 impl SessionStorageIntent {
@@ -392,6 +393,8 @@ impl SessionStorageIntent {
             remote_addr: None,
             world_dir: None,
             suppress_adaptive_chunk_publication_budget: false,
+            local_entry_intent:
+                crate::local_session_launch::LocalSessionEntryIntent::ProfilePreferred,
         }
     }
 
@@ -406,6 +409,8 @@ impl SessionStorageIntent {
             remote_addr: None,
             world_dir: None,
             suppress_adaptive_chunk_publication_budget: false,
+            local_entry_intent:
+                crate::local_session_launch::LocalSessionEntryIntent::ProfilePreferred,
         }
     }
 
@@ -421,6 +426,8 @@ impl SessionStorageIntent {
             remote_addr: None,
             world_dir: None,
             suppress_adaptive_chunk_publication_budget: false,
+            local_entry_intent:
+                crate::local_session_launch::LocalSessionEntryIntent::ProfilePreferred,
         }
     }
 
@@ -432,6 +439,8 @@ impl SessionStorageIntent {
             remote_addr: None,
             world_dir: Some(world_dir),
             suppress_adaptive_chunk_publication_budget: false,
+            local_entry_intent:
+                crate::local_session_launch::LocalSessionEntryIntent::PersistedPlayerOrProfilePreferred,
         }
     }
 
@@ -443,6 +452,8 @@ impl SessionStorageIntent {
             remote_addr: Some(remote_addr.into()),
             world_dir: None,
             suppress_adaptive_chunk_publication_budget: true,
+            local_entry_intent:
+                crate::local_session_launch::LocalSessionEntryIntent::ExplicitCoordinate,
         }
     }
 
@@ -468,6 +479,10 @@ impl SessionStorageIntent {
 
     pub fn suppress_adaptive_chunk_publication_budget(&self) -> bool {
         self.suppress_adaptive_chunk_publication_budget
+    }
+
+    pub const fn local_entry_intent(&self) -> crate::local_session_launch::LocalSessionEntryIntent {
+        self.local_entry_intent
     }
 }
 

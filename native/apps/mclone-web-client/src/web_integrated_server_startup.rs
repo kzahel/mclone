@@ -1,12 +1,12 @@
 use mclone_core::{AxisTopology, HorizontalTopology};
 use mclone_protocol::{ClientIdentity, PlayerProfileId};
 use mclone_server::{
-    AuthoredWorldFixtureKind, StarterContentDescriptor, WorldBehaviorProfile,
-    WorldGenerationProfile,
+    AuthoredWorldFixtureKind, LocalAuthorityStartConfig, SimulationCadenceConfig,
+    StarterContentDescriptor, WorldBehaviorProfile, WorldGenerationProfile,
 };
 
 const STARTUP_MAGIC: [u8; 4] = *b"MCSI";
-const STARTUP_VERSION: u16 = 4;
+const STARTUP_VERSION: u16 = 5;
 const TOPOLOGY_PLANE: u8 = 0;
 const TOPOLOGY_CYLINDER_X: u8 = 1;
 const FLAG_FREEZE_SCHEDULED_FLUID_TICKS: u8 = 1 << 0;
@@ -14,71 +14,88 @@ const FLAG_DEBUG_PASSIVE_SHOWCASE: u8 = 1 << 1;
 const FLAG_DEBUG_AUXILIARY_PLAYER_SCRIPT: u8 = 1 << 2;
 const FLAG_OBSERVER_ONLY: u8 = 1 << 3;
 const FLAG_DAY_TIME_FROZEN: u8 = 1 << 4;
+const FLAG_LIGHTING_ENABLED: u8 = 1 << 5;
+const FLAG_ADAPTIVE_CHUNK_PUBLICATION: u8 = 1 << 6;
 const KNOWN_FLAGS: u8 = FLAG_FREEZE_SCHEDULED_FLUID_TICKS
     | FLAG_DEBUG_PASSIVE_SHOWCASE
     | FLAG_DEBUG_AUXILIARY_PLAYER_SCRIPT
     | FLAG_OBSERVER_ONLY
-    | FLAG_DAY_TIME_FROZEN;
+    | FLAG_DAY_TIME_FROZEN
+    | FLAG_LIGHTING_ENABLED
+    | FLAG_ADAPTIVE_CHUNK_PUBLICATION;
 const MAX_DISPLAY_NAME_BYTES: usize = 1_024;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct WebIntegratedServerStartupConfig {
-    pub seed: i64,
-    pub world_generation_profile: WorldGenerationProfile,
-    pub starter_content: StarterContentDescriptor,
-    pub world_topology: HorizontalTopology,
-    pub world_behavior_profile: WorldBehaviorProfile,
+    pub authority: LocalAuthorityStartConfig,
     pub transient_authored_fixture: Option<AuthoredWorldFixtureKind>,
     pub transient_playable_showcase: Option<mclone_server::PlayableShowcaseId>,
-    pub day_time: Option<u64>,
-    pub day_time_frozen: bool,
-    pub freeze_scheduled_fluid_ticks: bool,
-    pub debug_passive_showcase: bool,
-    pub debug_auxiliary_player_script: bool,
-    pub light_status_batch_size: usize,
-    pub local_player_identity: ClientIdentity,
-    pub observer_only: bool,
 }
 
 impl WebIntegratedServerStartupConfig {
     pub(crate) fn encode(&self) -> Result<Vec<u8>, String> {
         self.validate()?;
-        let light_status_batch_size = u32::try_from(self.light_status_batch_size)
+        let light_status_batch_size = u32::try_from(self.authority.light_status_batch_size)
             .map_err(|_| "integrated-server light batch size exceeds u32".to_owned())?;
-        let display_name = self.local_player_identity.display_name.as_bytes();
+        let local_player_identity =
+            self.authority
+                .local_player_identity
+                .as_ref()
+                .ok_or_else(|| {
+                    "integrated-server startup requires a local player identity".to_owned()
+                })?;
+        let display_name = local_player_identity.display_name.as_bytes();
         let display_name_len = u32::try_from(display_name.len())
             .map_err(|_| "integrated-server display name exceeds u32".to_owned())?;
 
         let mut frame = Vec::with_capacity(48 + display_name.len());
         frame.extend_from_slice(&STARTUP_MAGIC);
         frame.extend_from_slice(&STARTUP_VERSION.to_le_bytes());
-        frame.push(generation_profile_tag(self.world_generation_profile));
-        frame.push(starter_content_tag(self.starter_content));
-        encode_topology(self.world_topology, &mut frame)?;
-        frame.push(behavior_profile_tag(self.world_behavior_profile));
+        frame.push(generation_profile_tag(
+            self.authority.world_generation_profile,
+        ));
+        frame.push(starter_content_tag(self.authority.starter_content));
+        encode_topology(self.authority.world_topology, &mut frame)?;
+        frame.push(behavior_profile_tag(self.authority.world_behavior_profile));
         frame.push(authored_fixture_tag(self.transient_authored_fixture));
         frame.push(playable_showcase_tag(self.transient_playable_showcase));
-        frame.extend_from_slice(&self.day_time.unwrap_or(u64::MAX).to_le_bytes());
+        frame.extend_from_slice(&self.authority.day_time.unwrap_or(u64::MAX).to_le_bytes());
         let mut flags = 0;
-        if self.freeze_scheduled_fluid_ticks {
+        if self.authority.scheduled_fluid_ticks_frozen {
             flags |= FLAG_FREEZE_SCHEDULED_FLUID_TICKS;
         }
-        if self.debug_passive_showcase {
+        if self.authority.debug_passive_showcase {
             flags |= FLAG_DEBUG_PASSIVE_SHOWCASE;
         }
-        if self.debug_auxiliary_player_script {
+        if self.authority.debug_auxiliary_player_script {
             flags |= FLAG_DEBUG_AUXILIARY_PLAYER_SCRIPT;
         }
-        if self.observer_only {
+        if self.authority.observer_only {
             flags |= FLAG_OBSERVER_ONLY;
         }
-        if self.day_time_frozen {
+        if self.authority.day_time_frozen {
             flags |= FLAG_DAY_TIME_FROZEN;
+        }
+        if self.authority.lighting_enabled {
+            flags |= FLAG_LIGHTING_ENABLED;
+        }
+        if self.authority.adaptive_chunk_publication_budget {
+            flags |= FLAG_ADAPTIVE_CHUNK_PUBLICATION;
         }
         frame.push(flags);
         frame.extend_from_slice(&light_status_batch_size.to_le_bytes());
-        frame.extend_from_slice(&self.seed.to_le_bytes());
-        frame.extend_from_slice(&self.local_player_identity.profile_id.bytes());
+        frame.extend_from_slice(&self.authority.cadence.host_rate_hz.to_le_bytes());
+        frame.extend_from_slice(&self.authority.cadence.gameplay_rate_hz.to_le_bytes());
+        frame.extend_from_slice(&self.authority.cadence.physics_rate_hz.to_le_bytes());
+        frame.extend_from_slice(
+            &self
+                .authority
+                .cadence
+                .max_catch_up_host_frames
+                .to_le_bytes(),
+        );
+        frame.extend_from_slice(&self.authority.seed.to_le_bytes());
+        frame.extend_from_slice(&local_player_identity.profile_id.bytes());
         frame.extend_from_slice(&display_name_len.to_le_bytes());
         frame.extend_from_slice(display_name);
         Ok(frame)
@@ -126,6 +143,12 @@ impl WebIntegratedServerStartupConfig {
         }
         let light_status_batch_size = usize::try_from(decoder.u32()?)
             .map_err(|_| "integrated-server light batch size exceeds usize".to_owned())?;
+        let cadence = if version >= 5 {
+            SimulationCadenceConfig::new(decoder.u32()?, decoder.u32()?, decoder.u32()?)
+                .with_max_catch_up_host_frames(decoder.u32()?)
+        } else {
+            SimulationCadenceConfig::default()
+        };
         let seed = decoder.i64()?;
         let profile_id: [u8; 16] = decoder
             .take(16)?
@@ -145,41 +168,45 @@ impl WebIntegratedServerStartupConfig {
         let local_player_identity =
             ClientIdentity::new(PlayerProfileId::new(profile_id), display_name)
                 .map_err(|error| format!("invalid integrated-server player identity: {error}"))?;
+        let mut authority = LocalAuthorityStartConfig::new(seed);
+        authority.world_generation_profile = world_generation_profile;
+        authority.starter_content = starter_content;
+        authority.world_topology = world_topology;
+        authority.world_behavior_profile = world_behavior_profile;
+        authority.day_time = day_time;
+        authority.day_time_frozen = flags & FLAG_DAY_TIME_FROZEN != 0;
+        authority.scheduled_fluid_ticks_frozen = flags & FLAG_FREEZE_SCHEDULED_FLUID_TICKS != 0;
+        authority.debug_passive_showcase = flags & FLAG_DEBUG_PASSIVE_SHOWCASE != 0;
+        authority.debug_auxiliary_player_script = flags & FLAG_DEBUG_AUXILIARY_PLAYER_SCRIPT != 0;
+        authority.light_status_batch_size = light_status_batch_size;
+        authority.local_player_identity = Some(local_player_identity);
+        authority.observer_only = flags & FLAG_OBSERVER_ONLY != 0;
+        authority.lighting_enabled = version < 5 || flags & FLAG_LIGHTING_ENABLED != 0;
+        authority.adaptive_chunk_publication_budget =
+            version >= 5 && flags & FLAG_ADAPTIVE_CHUNK_PUBLICATION != 0;
+        authority.cadence = cadence;
         let config = Self {
-            seed,
-            world_generation_profile,
-            starter_content,
-            world_topology,
-            world_behavior_profile,
+            authority,
             transient_authored_fixture,
             transient_playable_showcase,
-            day_time,
-            day_time_frozen: flags & FLAG_DAY_TIME_FROZEN != 0,
-            freeze_scheduled_fluid_ticks: flags & FLAG_FREEZE_SCHEDULED_FLUID_TICKS != 0,
-            debug_passive_showcase: flags & FLAG_DEBUG_PASSIVE_SHOWCASE != 0,
-            debug_auxiliary_player_script: flags & FLAG_DEBUG_AUXILIARY_PLAYER_SCRIPT != 0,
-            light_status_batch_size,
-            local_player_identity,
-            observer_only: flags & FLAG_OBSERVER_ONLY != 0,
         };
         config.validate()?;
         Ok(config)
     }
 
     fn validate(&self) -> Result<(), String> {
-        validate_browser_topology(self.world_topology)?;
-        self.world_generation_profile
-            .validate_topology(self.world_topology)?;
+        self.authority.validate()?;
+        validate_browser_topology(self.authority.world_topology)?;
         if let Some(fixture) = self.transient_authored_fixture {
-            if self.seed != fixture.seed() {
+            if self.authority.seed != fixture.seed() {
                 return Err(format!(
                     "authored fixture {} requires seed {}, got {}",
                     fixture.fixture_id(),
                     fixture.seed(),
-                    self.seed
+                    self.authority.seed
                 ));
             }
-            if self.world_generation_profile != WorldGenerationProfile::authored_only() {
+            if self.authority.world_generation_profile != WorldGenerationProfile::authored_only() {
                 return Err(format!(
                     "authored fixture {} requires the authored-only generation profile",
                     fixture.fixture_id()
@@ -192,23 +219,27 @@ impl WebIntegratedServerStartupConfig {
         if let Some(showcase) = self.transient_playable_showcase {
             let manifest = mclone_server::playable_showcase_manifest(showcase)
                 .map_err(|error| error.to_string())?;
-            if self.seed != manifest.seed
-                || self.world_generation_profile != manifest.world_generation_profile
+            if self.authority.seed != manifest.seed
+                || self.authority.world_generation_profile != manifest.world_generation_profile
             {
                 return Err(format!(
                     "playable showcase {} requires seed {} and profile {}, got seed {} and profile {}",
                     showcase.label(),
                     manifest.seed,
                     manifest.world_generation_profile.label(),
-                    self.seed,
-                    self.world_generation_profile.label(),
+                    self.authority.seed,
+                    self.authority.world_generation_profile.label(),
                 ));
             }
         }
-        if self.light_status_batch_size == 0 {
-            return Err("integrated-server light batch size must be positive".to_owned());
-        }
-        let display_name_len = self.local_player_identity.display_name.len();
+        let local_player_identity =
+            self.authority
+                .local_player_identity
+                .as_ref()
+                .ok_or_else(|| {
+                    "integrated-server startup requires a local player identity".to_owned()
+                })?;
+        let display_name_len = local_player_identity.display_name.len();
         if display_name_len > MAX_DISPLAY_NAME_BYTES {
             return Err(format!(
                 "integrated-server display name is {display_name_len} bytes; maximum is {MAX_DISPLAY_NAME_BYTES}"
@@ -457,26 +488,26 @@ mod tests {
     use super::*;
 
     fn config() -> WebIntegratedServerStartupConfig {
+        let mut authority = LocalAuthorityStartConfig::new(-42);
+        authority.world_generation_profile = WorldGenerationProfile::FlatGrassV1;
+        authority.starter_content = StarterContentDescriptor::IntroHomesteadV1;
+        authority.world_topology = HorizontalTopology::cylinder_x(0, 32);
+        authority.world_behavior_profile = WorldBehaviorProfile::ProtectedLobby;
+        authority.day_time = Some(6_000);
+        authority.day_time_frozen = true;
+        authority.scheduled_fluid_ticks_frozen = true;
+        authority.debug_auxiliary_player_script = true;
+        authority.light_status_batch_size = 17;
+        authority.cadence =
+            SimulationCadenceConfig::new(45, 15, 90).with_max_catch_up_host_frames(7);
+        authority.adaptive_chunk_publication_budget = true;
+        authority.local_player_identity =
+            Some(ClientIdentity::new(PlayerProfileId::new([7; 16]), "Startup Player").unwrap());
+        authority.observer_only = true;
         WebIntegratedServerStartupConfig {
-            seed: -42,
-            world_generation_profile: WorldGenerationProfile::FlatGrassV1,
-            starter_content: StarterContentDescriptor::IntroHomesteadV1,
-            world_topology: HorizontalTopology::cylinder_x(0, 32),
-            world_behavior_profile: WorldBehaviorProfile::ProtectedLobby,
+            authority,
             transient_authored_fixture: None,
             transient_playable_showcase: None,
-            day_time: Some(6_000),
-            day_time_frozen: true,
-            freeze_scheduled_fluid_ticks: true,
-            debug_passive_showcase: false,
-            debug_auxiliary_player_script: true,
-            light_status_batch_size: 17,
-            local_player_identity: ClientIdentity::new(
-                PlayerProfileId::new([7; 16]),
-                "Startup Player",
-            )
-            .unwrap(),
-            observer_only: true,
         }
     }
 
@@ -494,12 +525,17 @@ mod tests {
     fn version_three_startup_defaults_new_showcase_fields() {
         let mut expected = config();
         expected.transient_playable_showcase = None;
-        expected.day_time = None;
-        expected.day_time_frozen = false;
+        expected.authority.day_time = None;
+        expected.authority.day_time_frozen = false;
+        expected.authority.lighting_enabled = true;
+        expected.authority.adaptive_chunk_publication_budget = false;
+        expected.authority.cadence = SimulationCadenceConfig::default();
         let mut frame = expected.encode().unwrap();
         frame[4..6].copy_from_slice(&3_u16.to_le_bytes());
         let showcase_index = 4 + 2 + 1 + 1 + 1 + 4 + 1 + 1;
         frame.drain(showcase_index..showcase_index + 1 + 8);
+        let cadence_index = showcase_index + 1 + 4;
+        frame.drain(cadence_index..cadence_index + 4 * 4);
 
         assert_eq!(
             WebIntegratedServerStartupConfig::decode(&frame),
@@ -510,8 +546,8 @@ mod tests {
     #[test]
     fn startup_frame_roundtrips_transient_authored_fixture() {
         let mut expected = config();
-        expected.seed = AuthoredWorldFixtureKind::LobbyTableV2.seed();
-        expected.world_generation_profile = WorldGenerationProfile::authored_only();
+        expected.authority.seed = AuthoredWorldFixtureKind::LobbyTableV2.seed();
+        expected.authority.world_generation_profile = WorldGenerationProfile::authored_only();
         expected.transient_authored_fixture = Some(AuthoredWorldFixtureKind::LobbyTableV2);
         let frame = expected.encode().unwrap();
         assert_eq!(
@@ -527,8 +563,8 @@ mod tests {
             mclone_server::PlayableShowcaseId::MallardEcology,
         )
         .unwrap();
-        expected.seed = manifest.seed;
-        expected.world_generation_profile = manifest.world_generation_profile;
+        expected.authority.seed = manifest.seed;
+        expected.authority.world_generation_profile = manifest.world_generation_profile;
         expected.transient_playable_showcase = Some(manifest.id);
         let frame = expected.encode().unwrap();
         assert_eq!(
@@ -542,7 +578,7 @@ mod tests {
         let frame = config().encode().unwrap();
 
         let mut bad_version = frame.clone();
-        bad_version[4..6].copy_from_slice(&5_u16.to_le_bytes());
+        bad_version[4..6].copy_from_slice(&(STARTUP_VERSION + 1).to_le_bytes());
         assert!(WebIntegratedServerStartupConfig::decode(&bad_version).is_err());
 
         let mut bad_flags = frame.clone();
@@ -560,7 +596,7 @@ mod tests {
     #[test]
     fn startup_frame_rejects_unsupported_or_invalid_topology() {
         let mut unsupported = config();
-        unsupported.world_topology = HorizontalTopology::new(
+        unsupported.authority.world_topology = HorizontalTopology::new(
             AxisTopology::Finite {
                 minimum_chunk: 0,
                 maximum_chunk_exclusive: 16,
@@ -570,7 +606,7 @@ mod tests {
         assert!(unsupported.encode().is_err());
 
         let mut invalid = config();
-        invalid.world_topology = HorizontalTopology::cylinder_x(0, 0);
+        invalid.authority.world_topology = HorizontalTopology::cylinder_x(0, 0);
         assert!(invalid.encode().is_err());
     }
 }

@@ -241,7 +241,6 @@ pub(crate) fn scene_host_options_from_desktop(
         world_behavior_profile: mclone_server::WorldBehaviorProfile::Mutable,
         starter_content,
         first_person_player_visible: scene.first_person_player_visible,
-        use_initial_spawn_center: false,
         freeze_scheduled_fluid_ticks: false,
         adaptive_chunk_publication_budget: scene.adaptive_chunk_publication_budget,
         adaptive_render_admission_budget: scene.adaptive_render_admission_budget,
@@ -348,7 +347,7 @@ mod tests {
         assert_eq!(mono.day_time_override, scene.day_time_override);
         assert_eq!(mono.freeze_time, scene.freeze_time);
         assert_eq!(mono.debug_passive_showcase, scene.debug_passive_showcase);
-        assert!(!mono.use_initial_spawn_center);
+        assert_eq!(mono.local_entry_intent, scene.local_entry_intent);
         assert!(!mono.freeze_scheduled_fluid_ticks);
         assert_eq!(mono.lighting_enabled, scene.lighting_enabled);
         assert_eq!(mono.light_status_batch_size, scene.light_status_batch_size);

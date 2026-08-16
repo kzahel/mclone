@@ -6,7 +6,7 @@ use mclone_app_runtime::host_mode::SingleViewHostOptions;
 use mclone_app_runtime::local_profile::load_or_create_native_local_player_profile;
 use mclone_app_runtime::native_remote_session::NativeRemoteServerSession;
 use mclone_app_runtime::native_service_assembly::{
-    IntegratedWorldSessionStorage, LocalIntegratedSceneOptions, NativeSceneServices,
+    LocalIntegratedSceneOptions, NativeSceneServices,
 };
 pub(crate) use mclone_app_runtime::{chunk_tracking_radius_for_render_distance, square_count};
 use mclone_core::ChunkPos;
@@ -39,28 +39,8 @@ fn scene_render_distance(scene: &SceneOptions) -> Result<u32> {
 pub(crate) fn local_integrated_scene_options(
     scene: &SceneOptions,
 ) -> Result<LocalIntegratedSceneOptions> {
-    let profile = load_or_create_native_local_player_profile(scene.world_root.as_deref())?;
-    let storage = IntegratedWorldSessionStorage::from_world_dir(scene.world_dir.as_deref())
-        .with_adaptive_chunk_publication_budget(scene.adaptive_chunk_publication_budget);
-    let options = LocalIntegratedSceneOptions::new(
-        scene.seed,
-        ChunkPos::new(scene.chunk_x, scene.chunk_z),
-        scene_render_distance(scene)?,
-    )
-    .with_world_generation_profile(scene.world_generation_profile)
-    .with_world_topology(scene.world_topology)
-    .with_day_time(scene.day_time_override)
-    .with_freeze_time(scene.freeze_time)
-    .with_cadence(scene.simulation_cadence)
-    .with_debug_passive_showcase(scene.debug_passive_showcase)
-    .with_lighting_enabled(scene.lighting_enabled)
-    .with_light_status_batch_size(scene.light_status_batch_size)
-    .with_render_compile_worker_count(scene.render_compile_worker_count)
-    .with_render_compile_max_pending_jobs(scene.render_compile_max_pending_jobs)
-    .with_render_compile_worker_timing_enabled(scene.render_compile_worker_timing_enabled)
-    .with_integrated_world_session_storage(storage);
-    let options = options.with_local_player_identity(profile.client_identity());
-    Ok(options)
+    let host_scene = crate::desktop_scene_host::scene_host_options_from_desktop(scene)?;
+    Ok(mclone_scene::local_integrated_scene_options(&host_scene))
 }
 
 #[cfg_attr(not(feature = "xr"), allow(dead_code))]

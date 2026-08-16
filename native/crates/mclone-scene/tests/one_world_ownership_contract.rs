@@ -313,7 +313,7 @@ fn world_behavior_is_slot_scoped_and_both_input_paths_project_it() {
         !braced_item(&host, "pub struct McloneSceneHost {").contains("world_behavior_profile:")
     );
     assert!(session.contains("scene.world_behavior_profile = request.world_behavior_profile;"));
-    assert!(session.contains(".with_world_behavior_profile(scene.world_behavior_profile)"));
+    assert!(session.contains("authority.world_behavior_profile = scene.world_behavior_profile;"));
     assert!(mono.contains("behavior.allows_player_break()"));
     assert!(mono.contains("behavior.allows_player_place()"));
     assert!(xr.contains("edges.attack &= behavior.allows_player_break();"));
@@ -479,7 +479,8 @@ fn detached_standby_is_opt_in_and_gpu_admission_is_bounded() {
             "scenario_content::LobbyWorldSource::AppPrivate(key)",
             "native_app_private_world_dir(",
             "scene.world_generation_profile = request.world_generation_profile;",
-            "scene.use_initial_spawn_center =",
+            "scene.startup.local_entry_intent =",
+            "LocalSessionEntryIntent::AuthoredCoordinate;",
             "LocalIntegratedStartupPump::with_mesh_assets(",
             "self.install_prepared_warm_world_slot(",
         ],

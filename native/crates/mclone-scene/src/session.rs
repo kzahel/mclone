@@ -221,6 +221,7 @@ pub struct ExternalSceneSessionStart {
     pub request: SessionStartRequest,
     pub runtime_kind: SessionRuntimeKind,
     pub scene: McloneSceneHostOptions,
+    pub local_launch_plan: Option<mclone_app_runtime::local_session_launch::LocalSessionLaunchPlan>,
     pub descriptor: ActiveSessionDescriptor,
     pub destination: Option<PreparedEmbeddedWorldScenario>,
 }
@@ -347,7 +348,7 @@ impl McloneSceneHost {
         asset_source: &impl AssetSource,
         startup_view_pose: Option<XrStartupViewPose>,
     ) -> Result<Self> {
-        let scene = scene.validated()?;
+        let mut scene = scene.validated()?;
         let active_assets = PreparedSceneAssets::startup(
             0,
             mesh_assets.clone(),
@@ -366,7 +367,11 @@ impl McloneSceneHost {
             .world_root
             .clone()
             .map(native_world_catalog_operations);
-        let mut camera = SceneCameraConfig::from_scene(&scene).spawn_for_chunk(scene.center());
+        let local_options = local_integrated_scene_options(&scene);
+        scene.chunk_x = local_options.center.x;
+        scene.chunk_z = local_options.center.z;
+        let mut camera =
+            SceneCameraConfig::from_scene(&scene).spawn_for_chunk(local_options.center);
         if let Some(view_pose) = startup_view_pose {
             apply_xr_startup_view_pose(&mut camera, view_pose.position, view_pose.yaw_degrees)
                 .context("apply initial XR local startup view pose")?;
@@ -383,11 +388,8 @@ impl McloneSceneHost {
         world_gui_renderer
             .upload_texture_atlas(device, queue, mesh_assets.atlas.as_upload())
             .context("upload initial XR GUI atlas")?;
-        let pump = LocalIntegratedStartupPump::with_mesh_assets(
-            local_integrated_scene_options(&scene),
-            mesh_assets.clone(),
-        )
-        .context("create initial XR local world startup pump")?;
+        let pump = LocalIntegratedStartupPump::with_mesh_assets(local_options, mesh_assets.clone())
+            .context("create initial XR local world startup pump")?;
         let ui = xr_game_ui_for_session(None, scene.seed);
         let mut session = GameSessionCoordinator::new();
         session.begin_start(request.clone());
@@ -1206,6 +1208,7 @@ impl McloneSceneHost {
                     summary.starter_content,
                 );
                 scene.debug_passive_showcase = false;
+                scene.startup.local_entry_intent = mclone_app_runtime::local_session_launch::LocalSessionEntryIntent::PersistedPlayerOrProfilePreferred;
                 scene.world_dir = None;
                 scene.project_terrain_presentation_for_source(true);
                 Ok((
@@ -1251,6 +1254,8 @@ impl McloneSceneHost {
             storage_source: None,
             request: pending.request,
             runtime_kind: pending.payload.runtime_kind,
+            local_launch_plan: (pending.payload.runtime_kind == SessionRuntimeKind::Local)
+                .then(|| local_session_launch_plan(&pending.payload.options, false)),
             scene: pending.payload.options,
             descriptor: pending.payload.descriptor,
             destination: None,
@@ -1574,6 +1579,7 @@ impl McloneSceneHost {
                 intent.world_generation_profile(),
                 intent.starter_content(),
             );
+            scene.startup.local_entry_intent = intent.local_entry_intent();
         } else {
             scene.world_generation_profile = intent.world_generation_profile();
             scene.starter_content = intent.starter_content();
@@ -1857,15 +1863,18 @@ impl McloneSceneHost {
         if matches!(request, SessionStartRequest::OpenLocalWorld { .. }) {
             scene.debug_passive_showcase = false;
         }
-        let scene = scene.validated()?;
+        let mut scene = scene.validated()?;
         let mesh_assets = self.mesh_assets.clone();
         let mut options = local_integrated_scene_options(&scene);
         if let Some(world_storage) = world_storage {
             options = options.with_world_storage(world_storage);
         }
+        scene.chunk_x = options.center.x;
+        scene.chunk_z = options.center.z;
+        let initial_center = options.center;
         let pump = LocalIntegratedStartupPump::with_mesh_assets(options, mesh_assets)
             .context("create XR local world startup pump")?;
-        let camera = SceneCameraConfig::from_scene(&scene).spawn_for_chunk(scene.center());
+        let camera = SceneCameraConfig::from_scene(&scene).spawn_for_chunk(initial_center);
         self.active_world.local_startup = Some(SceneLocalStartup {
             request: request.clone(),
             descriptor,
@@ -1981,6 +1990,13 @@ impl McloneSceneHost {
             storage_source: Some(start.storage_source),
             request,
             runtime_kind: SessionRuntimeKind::Local,
+            local_launch_plan: Some(local_session_launch_plan(
+                &start.scene,
+                matches!(
+                    start.role,
+                    mclone_app_runtime::scenario_content::LobbyWorldRole::Destination
+                ),
+            )),
             scene: start.scene,
             descriptor: start.descriptor,
             destination: start.destination,
@@ -2014,7 +2030,8 @@ impl McloneSceneHost {
         primary.world_dir = None;
         primary.world_generation_profile = primary_fixture.world_generation_profile;
         primary.world_behavior_profile = mclone_server::WorldBehaviorProfile::ProtectedLobby;
-        primary.use_initial_spawn_center = false;
+        primary.startup.local_entry_intent =
+            mclone_app_runtime::local_session_launch::LocalSessionEntryIntent::AuthoredCoordinate;
         primary.freeze_scheduled_fluid_ticks = true;
         primary.debug_passive_showcase = false;
         primary.debug_auxiliary_player_script = false;
@@ -2360,10 +2377,8 @@ impl McloneSceneHost {
         scene.world_behavior_profile = destination.destination.world_behavior_profile;
         scene.world_generation_profile = destination.destination.world_generation_profile;
         scene.starter_content = destination.destination.starter_content;
-        scene.use_initial_spawn_center = scene
-            .world_generation_profile
-            .authored_missing_chunk()
-            .is_none();
+        scene.startup.local_entry_intent =
+            mclone_app_runtime::local_session_launch::LocalSessionEntryIntent::AuthoredCoordinate;
         scene.debug_passive_showcase = self.debug_lobby_auxiliary_player_script
             && storage_source.allows_runtime_actor_authoring();
         scene.debug_auxiliary_player_script = self.debug_lobby_auxiliary_player_script;
@@ -2678,10 +2693,8 @@ impl McloneSceneHost {
         scene.world_behavior_profile = request.world_behavior_profile;
         scene.world_generation_profile = request.world_generation_profile;
         scene.starter_content = request.starter_content;
-        scene.use_initial_spawn_center = scene
-            .world_generation_profile
-            .authored_missing_chunk()
-            .is_none();
+        scene.startup.local_entry_intent =
+            mclone_app_runtime::local_session_launch::LocalSessionEntryIntent::AuthoredCoordinate;
         scene.debug_passive_showcase = self.debug_lobby_auxiliary_player_script
             && native_world_dir.is_none()
             && request
@@ -6141,6 +6154,7 @@ impl McloneSceneHost {
                 summary.world_generation_profile,
                 summary.starter_content,
             );
+            scene.startup.local_entry_intent = mclone_app_runtime::local_session_launch::LocalSessionEntryIntent::PersistedPlayerOrProfilePreferred;
             scene.debug_passive_showcase = false;
             scene.world_dir = None;
             scene.project_terrain_presentation_for_source(true);
@@ -6842,7 +6856,12 @@ fn project_ordinary_local_world_identity(
     scene.world_generation_profile = world_generation_profile;
     scene.starter_content = starter_content;
     scene.world_behavior_profile = mclone_server::WorldBehaviorProfile::Mutable;
-    scene.use_initial_spawn_center = world_generation_profile.authored_missing_chunk().is_none();
+    scene.startup.local_entry_intent =
+        if world_generation_profile.authored_missing_chunk().is_none() {
+            mclone_app_runtime::local_session_launch::LocalSessionEntryIntent::ProfilePreferred
+        } else {
+            mclone_app_runtime::local_session_launch::LocalSessionEntryIntent::AuthoredCoordinate
+        };
     scene.remote_addr = None;
 }
 
@@ -6855,51 +6874,67 @@ fn transient_local_session_start_request(scene: &McloneSceneHostOptions) -> Sess
     )
 }
 
+pub fn local_session_launch_plan(
+    scene: &McloneSceneHostOptions,
+    observer_only: bool,
+) -> mclone_app_runtime::local_session_launch::LocalSessionLaunchPlan {
+    let mut authority = mclone_server::LocalAuthorityStartConfig::new(scene.seed);
+    authority.world_generation_profile = scene.world_generation_profile;
+    authority.starter_content = scene.starter_content;
+    authority.world_topology = scene.world_topology;
+    authority.world_behavior_profile = scene.world_behavior_profile;
+    authority.lighting_enabled = scene.lighting_enabled;
+    authority.light_status_batch_size = scene.light_status_batch_size;
+    authority.day_time = scene.day_time_override;
+    authority.day_time_frozen = scene.freeze_time;
+    authority.scheduled_fluid_ticks_frozen = scene.freeze_scheduled_fluid_ticks;
+    authority.debug_passive_showcase = scene.debug_passive_showcase;
+    authority.debug_auxiliary_player_script = scene.debug_auxiliary_player_script;
+    authority.cadence = scene.simulation_cadence;
+    authority.adaptive_chunk_publication_budget = scene.adaptive_chunk_publication_budget;
+    authority.observer_only = observer_only;
+    #[cfg(not(target_arch = "wasm32"))]
+    match mclone_app_runtime::local_profile::load_or_create_native_local_player_profile(
+        scene.world_root.as_deref(),
+    ) {
+        Ok(profile) => authority.local_player_identity = Some(profile.client_identity()),
+        Err(error) => {
+            log::warn!("local player profile is unavailable for this scene: {error:#}");
+        }
+    }
+    #[cfg(target_arch = "wasm32")]
+    match mclone_app_runtime::local_profile::load_or_create_web_local_player_profile() {
+        Ok(profile) => authority.local_player_identity = Some(profile.client_identity()),
+        Err(error) => {
+            log::warn!("browser local player profile is unavailable for this scene: {error:#}");
+        }
+    }
+    mclone_app_runtime::local_session_launch::resolve_local_session_launch_plan(
+        authority,
+        scene.center(),
+        scene.render_distance,
+        scene.startup.local_entry_intent,
+    )
+    .expect("validated scene options must resolve one local-session launch plan")
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 pub fn local_integrated_scene_options(
     scene: &McloneSceneHostOptions,
 ) -> LocalIntegratedSceneOptions {
+    let plan = local_session_launch_plan(scene, false);
     let storage = IntegratedWorldSessionStorage::from_world_dir(scene.world_dir.as_deref())
         .with_adaptive_chunk_publication_budget(scene.adaptive_chunk_publication_budget);
-    let mut options =
-        LocalIntegratedSceneOptions::new(scene.seed, scene.center(), scene.render_distance)
-            .with_world_generation_profile(scene.world_generation_profile)
-            .with_starter_content(scene.starter_content)
-            .with_world_topology(scene.world_topology);
-    // Procedural profiles own their preferred initial center. An authored
-    // world instead keeps its persistence-backed entry hint so the ordinary
-    // safe-surface correction can resolve the exact pose from stored chunks.
-    if scene.use_initial_spawn_center
-        && scene
-            .world_generation_profile
-            .authored_missing_chunk()
-            .is_none()
-    {
-        options = options.with_initial_spawn_center();
-    }
-    let options = options
-        .with_world_behavior_profile(scene.world_behavior_profile)
-        .with_freeze_scheduled_fluid_ticks(scene.freeze_scheduled_fluid_ticks)
-        .with_day_time(scene.day_time_override)
-        .with_freeze_time(scene.freeze_time)
-        .with_cadence(scene.simulation_cadence)
-        .with_debug_passive_showcase(scene.debug_passive_showcase)
-        .with_debug_auxiliary_player_script(scene.debug_auxiliary_player_script)
-        .with_lighting_enabled(scene.lighting_enabled)
-        .with_light_status_batch_size(scene.light_status_batch_size)
-        .with_render_compile_worker_count(scene.render_compile_worker_count)
-        .with_render_compile_max_pending_jobs(scene.render_compile_max_pending_jobs)
-        .with_render_compile_worker_timing_enabled(scene.render_compile_worker_timing_enabled)
-        .with_integrated_world_session_storage(storage);
-    match mclone_app_runtime::local_profile::load_or_create_native_local_player_profile(
-        scene.world_root.as_deref(),
-    ) {
-        Ok(profile) => options.with_local_player_identity(profile.client_identity()),
-        Err(error) => {
-            log::warn!("local player profile is unavailable for this scene: {error:#}");
-            options
-        }
-    }
+    LocalIntegratedSceneOptions::new(
+        plan.authority.seed,
+        plan.initial_view.center,
+        plan.initial_view.render_distance,
+    )
+    .with_authority(plan.authority)
+    .with_render_compile_worker_count(scene.render_compile_worker_count)
+    .with_render_compile_max_pending_jobs(scene.render_compile_max_pending_jobs)
+    .with_render_compile_worker_timing_enabled(scene.render_compile_worker_timing_enabled)
+    .with_integrated_world_session_storage(storage)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -7067,7 +7102,8 @@ mod camera_config_tests {
         scene.seed = 17_501;
         scene.chunk_x = 3;
         scene.chunk_z = -2;
-        scene.use_initial_spawn_center = true;
+        scene.startup.local_entry_intent =
+            mclone_app_runtime::local_session_launch::LocalSessionEntryIntent::AuthoredCoordinate;
         scene.world_generation_profile = WorldGenerationProfile::authored_only();
 
         let options = local_integrated_scene_options(&scene);
@@ -7098,11 +7134,15 @@ mod camera_config_tests {
         let island = McloneSceneHostOptions::default();
 
         assert_eq!(
-            local_integrated_scene_options(&lobby).world_behavior_profile,
+            local_integrated_scene_options(&lobby)
+                .authority
+                .world_behavior_profile,
             mclone_server::WorldBehaviorProfile::ProtectedLobby
         );
         assert_eq!(
-            local_integrated_scene_options(&island).world_behavior_profile,
+            local_integrated_scene_options(&island)
+                .authority
+                .world_behavior_profile,
             mclone_server::WorldBehaviorProfile::Mutable
         );
     }

@@ -94,23 +94,18 @@ fn shared_lobby_recipe_selects_storage_without_materializing_payloads() {
 #[test]
 fn browser_runtime_honors_the_shared_lobby_actor_policy() {
     assert!(SCENE_SESSION.contains("storage_source.allows_runtime_actor_authoring()"));
-    assert!(
-        WEB_SCENE_HOST
-            .contains(".with_debug_passive_showcase(pending.scene.debug_passive_showcase)")
-    );
-    assert!(WEB_SERVER_WORKER.contains("self.config.debug_passive_showcase"));
-    assert!(WEB_INTEGRATED_SERVER_STARTUP.contains("debug_passive_showcase: bool"));
+    assert!(WEB_SCENE_HOST.contains(".with_authority(launch_plan.authority.clone())"));
+    assert!(WEB_SERVER_WORKER.contains(".apply_runtime_policy(&mut worker.server);"));
+    assert!(WEB_INTEGRATED_SERVER_STARTUP.contains("authority: LocalAuthorityStartConfig"));
     assert!(!INTEGRATED_SERVER_WORKER.contains("debugPassiveShowcase"));
 }
 
 #[test]
 fn browser_auxiliary_player_control_only_enables_the_shared_rust_script() {
     assert!(SCENE_SESSION.contains("scene.debug_auxiliary_player_script ="));
-    assert!(WEB_SCENE_HOST.contains(
-        ".with_debug_auxiliary_player_script(pending.scene.debug_auxiliary_player_script)"
-    ));
-    assert!(WEB_SERVER_WORKER.contains("self.config.debug_auxiliary_player_script"));
-    assert!(WEB_INTEGRATED_SERVER_STARTUP.contains("debug_auxiliary_player_script: bool"));
+    assert!(WEB_SCENE_HOST.contains(".with_authority(launch_plan.authority.clone())"));
+    assert!(WEB_SERVER_WORKER.contains(".apply_runtime_policy(&mut worker.server);"));
+    assert!(WEB_INTEGRATED_SERVER_STARTUP.contains("authority: LocalAuthorityStartConfig"));
     assert!(!INTEGRATED_SERVER_WORKER.contains("debugAuxiliaryPlayerScript"));
     assert!(WEB_SMOKE_OBSERVER.contains("Object.assign(runtime.state, report)"));
     for forwarded_fact in [
@@ -217,16 +212,9 @@ fn integrated_server_startup_domain_is_an_opaque_rust_frame() {
         .split("#[wasm_bindgen(js_name = flushPersistence)]")
         .next()
         .expect("Web tick operation has a bounded source region");
-    let tick_success = tick_operation
-        .split("Ok(report) =>")
-        .nth(1)
-        .expect("Web tick success arm exists")
-        .split("Err(error) =>")
-        .next()
-        .expect("Web tick success arm is bounded by its failure arm");
-    assert!(tick_success.contains("autosave_indexed_db_dirty_chunks().err()"));
-    assert!(tick_success.contains("self.worker_response(updates)"));
-    assert!(!tick_success.contains("return Err(JsValue::from_str(&error))"));
+    assert!(tick_operation.contains("self.cadence.advance_host_frame()"));
+    assert!(tick_operation.contains("self.autosave_indexed_db_dirty_chunks()"));
+    assert!(tick_operation.contains("self.worker_response(updates)"));
 
     let ordinary_operation = INTEGRATED_SERVER_WORKER
         .split("function finishActorOperation(")

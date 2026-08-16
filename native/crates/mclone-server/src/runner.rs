@@ -19,8 +19,6 @@ use mclone_protocol::{
 };
 
 #[cfg(not(target_arch = "wasm32"))]
-use crate::ChunkPublicationBudgetConfig;
-#[cfg(not(target_arch = "wasm32"))]
 use crate::LocalRealmSession;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::SimulationCadence;
@@ -672,61 +670,37 @@ mod native {
 
     #[derive(Clone, Debug, Eq, PartialEq)]
     pub struct NativeIntegratedServerRunnerConfig {
-        pub seed: i64,
-        pub world_generation_profile: WorldGenerationProfile,
-        pub starter_content: crate::StarterContentDescriptor,
-        pub world_topology: HorizontalTopology,
-        pub world_behavior_profile: WorldBehaviorProfile,
-        pub lighting_enabled: bool,
-        pub light_status_batch_size: usize,
-        pub day_time: Option<u64>,
-        pub day_time_frozen: bool,
-        pub scheduled_fluid_ticks_frozen: bool,
-        pub debug_passive_showcase: bool,
-        pub debug_auxiliary_player_script: bool,
+        pub authority: crate::LocalAuthorityStartConfig,
         pub tick_interval: Duration,
-        pub cadence: SimulationCadenceConfig,
-        pub publication_budget: ChunkPublicationBudgetConfig,
         pub world_storage: NativeIntegratedServerWorldStorage,
-        pub local_player_identity: Option<mclone_protocol::ClientIdentity>,
-        pub observer_only: bool,
         player_chunk_tracking_policy: PlayerChunkTrackingPolicy,
     }
 
     impl NativeIntegratedServerRunnerConfig {
         pub fn new(seed: i64) -> Self {
             Self {
-                seed,
-                world_generation_profile: WorldGenerationProfile::McloneOverworldV1,
-                starter_content: crate::StarterContentDescriptor::Wild,
-                world_topology: HorizontalTopology::UNBOUNDED,
-                world_behavior_profile: WorldBehaviorProfile::default(),
-                lighting_enabled: true,
-                light_status_batch_size: crate::DEFAULT_LIGHT_STATUS_BATCH_SIZE,
-                day_time: None,
-                day_time_frozen: false,
-                scheduled_fluid_ticks_frozen: false,
-                debug_passive_showcase: true,
-                debug_auxiliary_player_script: false,
+                authority: crate::LocalAuthorityStartConfig::new(seed),
                 tick_interval: host_tick_interval_for_rate_hz(
                     SimulationCadenceConfig::default().host_rate_hz,
                 ),
-                cadence: SimulationCadenceConfig::default(),
-                publication_budget: ChunkPublicationBudgetConfig::disabled(),
                 world_storage: NativeIntegratedServerWorldStorage::Transient,
-                local_player_identity: None,
-                observer_only: false,
                 player_chunk_tracking_policy: PlayerChunkTrackingPolicy::dedicated_default(),
             }
         }
 
+        pub fn with_authority(mut self, authority: crate::LocalAuthorityStartConfig) -> Self {
+            self.tick_interval = host_tick_interval_for_rate_hz(authority.cadence.host_rate_hz);
+            self.authority = authority;
+            self
+        }
+
         pub fn with_lighting_enabled(mut self, enabled: bool) -> Self {
-            self.lighting_enabled = enabled;
+            self.authority.lighting_enabled = enabled;
             self
         }
 
         pub fn with_world_generation_profile(mut self, profile: WorldGenerationProfile) -> Self {
-            self.world_generation_profile = profile;
+            self.authority.world_generation_profile = profile;
             self
         }
 
@@ -734,47 +708,47 @@ mod native {
             mut self,
             starter_content: crate::StarterContentDescriptor,
         ) -> Self {
-            self.starter_content = starter_content;
+            self.authority.starter_content = starter_content;
             self
         }
 
         pub fn with_world_topology(mut self, topology: HorizontalTopology) -> Self {
-            self.world_topology = topology;
+            self.authority.world_topology = topology;
             self
         }
 
         pub fn with_world_behavior_profile(mut self, profile: WorldBehaviorProfile) -> Self {
-            self.world_behavior_profile = profile;
+            self.authority.world_behavior_profile = profile;
             self
         }
 
         pub fn with_light_status_batch_size(mut self, batch_size: usize) -> Self {
-            self.light_status_batch_size = batch_size.max(1);
+            self.authority.light_status_batch_size = batch_size.max(1);
             self
         }
 
         pub fn with_day_time(mut self, day_time: Option<u64>) -> Self {
-            self.day_time = day_time;
+            self.authority.day_time = day_time;
             self
         }
 
         pub fn with_day_time_frozen(mut self, frozen: bool) -> Self {
-            self.day_time_frozen = frozen;
+            self.authority.day_time_frozen = frozen;
             self
         }
 
         pub fn with_scheduled_fluid_ticks_frozen(mut self, frozen: bool) -> Self {
-            self.scheduled_fluid_ticks_frozen = frozen;
+            self.authority.scheduled_fluid_ticks_frozen = frozen;
             self
         }
 
         pub fn with_debug_passive_showcase(mut self, enabled: bool) -> Self {
-            self.debug_passive_showcase = enabled;
+            self.authority.debug_passive_showcase = enabled;
             self
         }
 
         pub fn with_debug_auxiliary_player_script(mut self, enabled: bool) -> Self {
-            self.debug_auxiliary_player_script = enabled;
+            self.authority.debug_auxiliary_player_script = enabled;
             self
         }
 
@@ -782,12 +756,12 @@ mod native {
             mut self,
             identity: mclone_protocol::ClientIdentity,
         ) -> Self {
-            self.local_player_identity = Some(identity);
+            self.authority.local_player_identity = Some(identity);
             self
         }
 
         pub const fn with_observer_only(mut self, observer_only: bool) -> Self {
-            self.observer_only = observer_only;
+            self.authority.observer_only = observer_only;
             self
         }
 
@@ -802,18 +776,12 @@ mod native {
         }
 
         pub fn with_cadence(mut self, cadence: SimulationCadenceConfig) -> Self {
-            self.cadence = cadence;
+            self.authority.cadence = cadence;
             self
         }
 
         pub fn with_adaptive_chunk_publication_budget(mut self, enabled: bool) -> Self {
-            self.publication_budget = if enabled {
-                ChunkPublicationBudgetConfig::adaptive_for_gameplay_rate_hz(
-                    self.cadence.gameplay_rate_hz,
-                )
-            } else {
-                ChunkPublicationBudgetConfig::disabled()
-            };
+            self.authority.adaptive_chunk_publication_budget = enabled;
             self
         }
 
@@ -834,19 +802,13 @@ mod native {
             mut self,
             cadence: SimulationCadenceConfig,
         ) -> Self {
-            self.cadence = cadence;
-            if self.publication_budget.enabled {
-                self.publication_budget =
-                    ChunkPublicationBudgetConfig::adaptive_for_gameplay_rate_hz(
-                        cadence.gameplay_rate_hz,
-                    );
-            }
+            self.authority.cadence = cadence;
             self.tick_interval = host_tick_interval_for_rate_hz(cadence.host_rate_hz);
             self
         }
 
         fn initial_day_time(&self) -> u64 {
-            match self.day_time {
+            match self.authority.day_time {
                 Some(day_time) => day_time,
                 None => INITIAL_DAY_TIME,
             }
@@ -952,10 +914,10 @@ mod native {
             let update_queue_bytes = Arc::new(AtomicUsize::new(0));
             let mut initial_diagnostics = ServerRunnerDiagnostics::initial(
                 ServerRunnerKind::NativeThread,
-                config.seed,
+                config.authority.seed,
                 config.initial_day_time(),
             );
-            initial_diagnostics.simulation_cadence = config.cadence;
+            initial_diagnostics.simulation_cadence = config.authority.cadence;
             initial_diagnostics.host_tick_interval = config.tick_interval;
             let diagnostics = Arc::new(Mutex::new(initial_diagnostics));
 
@@ -1216,21 +1178,22 @@ mod native {
         diagnostics: Arc<Mutex<ServerRunnerDiagnostics>>,
         ready_tx: mpsc::Sender<Result<(), String>>,
     ) -> ServerRunnerResult<()> {
-        let Some(timing_state) = NativeRunnerTimingState::new(config.tick_interval, config.cadence)
+        let authority = &config.authority;
+        let Some(timing_state) =
+            NativeRunnerTimingState::new(config.tick_interval, authority.cadence)
         else {
             let _ = ready_tx.send(Err("invalid native server cadence config".to_owned()));
             return Ok(());
         };
-        if let Err(error) = config
-            .world_generation_profile
-            .validate_topology(config.world_topology)
-        {
+        if let Err(error) = authority.validate() {
             let _ = ready_tx.send(Err(error));
             return Ok(());
         }
-        let mut definition =
-            crate::DimensionDefinition::overworld(config.seed, config.world_generation_profile);
-        definition.topology = config.world_topology;
+        let mut definition = crate::DimensionDefinition::overworld(
+            authority.seed,
+            authority.world_generation_profile,
+        );
+        definition.topology = authority.world_topology;
         let mut server = match &config.world_storage {
             NativeIntegratedServerWorldStorage::Transient => {
                 LocalRealmSession::with_player_chunk_tracking_policy_and_dimension_definition(
@@ -1272,22 +1235,23 @@ mod native {
                 }
             }
         };
-        if let Err(error) = server.set_world_generation_profile(config.world_generation_profile) {
+        if let Err(error) = server.set_world_generation_profile(authority.world_generation_profile)
+        {
             let _ = ready_tx.send(Err(error.to_string()));
             return Ok(());
         }
-        server.set_world_behavior_profile(config.world_behavior_profile);
-        server.set_starter_content(config.starter_content);
+        server.set_world_behavior_profile(authority.world_behavior_profile);
+        server.set_starter_content(authority.starter_content);
         if (!matches!(
             &config.world_storage,
             NativeIntegratedServerWorldStorage::Transient
-        ) || config.starter_content != crate::StarterContentDescriptor::Wild)
+        ) || authority.starter_content != crate::StarterContentDescriptor::Wild)
             && let Err(error) = server.initialize_world_metadata_blocking()
         {
             let _ = ready_tx.send(Err(error.to_string()));
             return Ok(());
         }
-        if config.observer_only
+        if authority.observer_only
             && let Err(error) = server.begin_observing(
                 DimensionKey::overworld(),
                 ChunkView {
@@ -1301,28 +1265,13 @@ mod native {
             let _ = ready_tx.send(Err(error.to_string()));
             return Ok(());
         }
-        if let Some(identity) = config.local_player_identity.clone()
+        if let Some(identity) = authority.local_player_identity.clone()
             && let Err(error) = server.configure_local_player_identity_blocking(identity)
         {
             let _ = ready_tx.send(Err(error.to_string()));
             return Ok(());
         }
-        server.set_lighting_enabled(config.lighting_enabled);
-        server.set_light_status_batch_size(config.light_status_batch_size);
-        server.set_publication_budget_config(if config.publication_budget.enabled {
-            ChunkPublicationBudgetConfig::adaptive_for_gameplay_rate_hz(
-                config.cadence.gameplay_rate_hz,
-            )
-        } else {
-            ChunkPublicationBudgetConfig::disabled()
-        });
-        server.set_day_time_frozen(config.day_time_frozen);
-        server.set_scheduled_fluid_ticks_frozen(config.scheduled_fluid_ticks_frozen);
-        server.set_debug_passive_showcase_enabled(config.debug_passive_showcase);
-        server.set_debug_auxiliary_player_script_enabled(config.debug_auxiliary_player_script);
-        if let Some(day_time) = config.day_time {
-            server.set_day_time(day_time);
-        }
+        authority.apply_runtime_policy(&mut server);
         let mut diagnostics_detail_sampler = DiagnosticsDetailSampler::default();
         refresh_diagnostics(
             &diagnostics,
@@ -1927,9 +1876,9 @@ mod native {
         fn native_runner_config_defaults_to_sixty_hz_host_cadence() {
             let config = NativeIntegratedServerRunnerConfig::new(0);
 
-            assert_eq!(config.cadence, SimulationCadenceConfig::default());
+            assert_eq!(config.authority.cadence, SimulationCadenceConfig::default());
             assert_eq!(
-                config.light_status_batch_size,
+                config.authority.light_status_batch_size,
                 crate::DEFAULT_LIGHT_STATUS_BATCH_SIZE
             );
             assert_eq!(
@@ -1937,7 +1886,7 @@ mod native {
                 Duration::from_nanos(16_666_667)
             );
             assert_eq!(
-                SimulationCadence::new(config.cadence)
+                SimulationCadence::new(config.authority.cadence)
                     .expect("default native cadence")
                     .advance_host_frame(),
                 crate::SimulationCadenceFrame {
@@ -1967,7 +1916,7 @@ mod native {
             let config = NativeIntegratedServerRunnerConfig::new(0)
                 .with_cadence_derived_tick_interval(cadence);
 
-            assert_eq!(config.cadence, cadence);
+            assert_eq!(config.authority.cadence, cadence);
             assert_eq!(config.tick_interval, Duration::from_nanos(16_666_667));
         }
 
@@ -1975,7 +1924,7 @@ mod native {
         fn native_runner_config_clamps_zero_light_status_batch_size() {
             let config = NativeIntegratedServerRunnerConfig::new(0).with_light_status_batch_size(0);
 
-            assert_eq!(config.light_status_batch_size, 1);
+            assert_eq!(config.authority.light_status_batch_size, 1);
         }
 
         #[test]
@@ -2078,11 +2027,11 @@ mod native {
                 .with_world_behavior_profile(WorldBehaviorProfile::ProtectedLobby);
 
             assert_eq!(
-                default.world_behavior_profile,
+                default.authority.world_behavior_profile,
                 WorldBehaviorProfile::Mutable
             );
             assert_eq!(
-                protected.world_behavior_profile,
+                protected.authority.world_behavior_profile,
                 WorldBehaviorProfile::ProtectedLobby
             );
         }

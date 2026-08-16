@@ -2158,12 +2158,9 @@ impl SceneRuntimeService for WebSceneRuntimeService {
     }
 
     fn set_simulation_cadence(&mut self, cadence: SimulationCadenceConfig) -> anyhow::Result<bool> {
-        if self.simulation_cadence() == Some(cadence) {
-            return Ok(false);
-        }
-        anyhow::bail!(
-            "browser simulation cadence changes require the typed worker operation adapter"
-        )
+        self.runtime
+            .set_simulation_cadence(cadence)
+            .map_err(anyhow::Error::msg)
     }
 
     fn loaded_chunk_count(&self) -> usize {
@@ -3149,6 +3146,8 @@ fn parse_playable_showcase_from_query(
     options.scene.world_topology = HorizontalTopology::UNBOUNDED;
     options.scene.chunk_x = block_to_chunk_coord(manifest.entry_feet[0].floor() as i32);
     options.scene.chunk_z = block_to_chunk_coord(manifest.entry_feet[2].floor() as i32);
+    options.scene.local_entry_intent =
+        mclone_app_runtime::local_session_launch::LocalSessionEntryIntent::AuthoredCoordinate;
     options.scene.day_time_override = Some(manifest.day_time);
     options.scene.freeze_time = manifest.freeze_time;
     options.scene.movement_mode = mclone_ui::GameMovementMode::Walk;

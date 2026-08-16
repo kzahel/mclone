@@ -2183,20 +2183,25 @@ fn lower_runtime_start(
     startup_showcase: Option<mclone_server::PlayableShowcaseId>,
 ) -> WebSceneOperationEffect {
     let (worker_url, job_worker_url, bindgen_js_url, bindgen_wasm_url) = resources;
-    let center = pending.scene.center();
-    let render_distance = pending.scene.render_distance;
+    let center = pending
+        .local_launch_plan
+        .as_ref()
+        .map(|plan| plan.initial_view.center)
+        .unwrap_or_else(|| pending.scene.center());
+    let render_distance = pending
+        .local_launch_plan
+        .as_ref()
+        .map(|plan| plan.initial_view.render_distance)
+        .unwrap_or(pending.scene.render_distance);
     let effect = match pending.descriptor.clone() {
         ActiveSessionDescriptor::Remote { endpoint } => {
             WebRuntimeStartEffect::Remote(endpoint.address)
         }
         ActiveSessionDescriptor::LocalWorld { seed, id, .. } => {
-            let observer_only = matches!(
-                &pending.target,
-                mclone_scene::ExternalSceneStartTarget::Lobby {
-                    role: mclone_app_runtime::scenario_content::LobbyWorldRole::Destination,
-                    ..
-                }
-            );
+            let launch_plan = pending
+                .local_launch_plan
+                .as_ref()
+                .expect("shared local session start must carry a resolved launch plan");
             let mut config = WebIntegratedServerRunnerConfig::new(
                 seed,
                 worker_url,
@@ -2204,16 +2209,7 @@ fn lower_runtime_start(
                 bindgen_js_url,
                 bindgen_wasm_url,
             )
-            .with_world_generation_profile(pending.scene.world_generation_profile)
-            .with_starter_content(pending.scene.starter_content)
-            .with_world_topology(pending.scene.world_topology)
-            .with_world_behavior_profile(pending.scene.world_behavior_profile)
-            .with_freeze_scheduled_fluid_ticks(pending.scene.freeze_scheduled_fluid_ticks)
-            .with_day_time(pending.scene.day_time_override)
-            .with_day_time_frozen(pending.scene.freeze_time)
-            .with_debug_passive_showcase(pending.scene.debug_passive_showcase)
-            .with_debug_auxiliary_player_script(pending.scene.debug_auxiliary_player_script)
-            .with_observer_only(observer_only);
+            .with_authority(launch_plan.authority.clone());
             config = if let Some(showcase) = startup_showcase {
                 config.with_transient_playable_showcase(showcase)
             } else {
@@ -2342,7 +2338,6 @@ pub async fn mclone_web_create_scene_host_with_startup(
     let scene = McloneSceneHostOptions {
         startup: scene_startup,
         starter_content,
-        use_initial_spawn_center: false,
         ..McloneSceneHostOptions::default()
     };
     create_scene_host(
