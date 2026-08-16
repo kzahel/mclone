@@ -416,8 +416,12 @@ function assertFixedReady(value, stage) {
       || value.vegetationCommittedLevels !== 3
       || value.pendingRefills !== 0
       || value.drawnLevels !== 10
-      || value.fixedResidentBytes !== 128_941_304
+      || value.fixedResidentBytes !== 133_209_640
       || value.vertexCount <= 0
+      || value.exactHandoffTopology !== "direct-smooth"
+      || value.exactConnectorVertexCount !== value.exactConnectorSegments * 6
+      || value.exactConnectorBytes % 12 !== 0
+      || value.exactConnectorSegments * 12 > value.exactConnectorBytes
       || value.pendingVegetationTiles !== 0
       || value.residentBytes <= 0) {
     throw new Error(`${stage} is not fixed and ready:\n${JSON.stringify(value, null, 2)}`);
