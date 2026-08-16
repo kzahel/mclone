@@ -281,6 +281,7 @@ function comparisonState(state) {
     exactConnectorSegments: _exactConnectorSegments,
     exactConnectorVertexCount: _exactConnectorVertexCount,
     exactConnectorBytes: _exactConnectorBytes,
+    exactTransitionPreparationMicros: _exactTransitionPreparationMicros,
     vegetationSubmittedJobs: _vegetationSubmittedJobs,
     vegetationCompletedJobs: _vegetationCompletedJobs,
     ...stable
