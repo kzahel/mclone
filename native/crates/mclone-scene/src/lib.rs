@@ -296,7 +296,7 @@ pub use options::*;
 pub use render_admission::*;
 pub use session::*;
 pub(crate) use teleport::*;
-pub use terrain_view::SceneTerrainViewDiagnostics;
+pub use terrain_view::{SceneTerrainViewDiagnostics, TerrainExactReviewFootprint};
 pub use timing::*;
 pub use tracking::*;
 pub use ui_panels::*;
@@ -1355,6 +1355,7 @@ pub struct McloneSceneHost {
     terrain_view: Option<terrain_view::SceneTerrainViewState>,
     terrain_horizon_diagnostic: mclone_terrain_view::TerrainHorizonDiagnostic,
     terrain_exact_handoff_topology: mclone_terrain_view::TerrainExactHandoffTopology,
+    terrain_exact_review_footprint: Option<terrain_view::TerrainExactReviewFootprint>,
     terrain_vegetation_executor_factory:
         Option<terrain_view::SceneTerrainVegetationExecutorFactory>,
     underwater_effects: XrUnderwaterEffectStates,

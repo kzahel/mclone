@@ -2170,6 +2170,21 @@ fn configure_screenshot_scene(
             mclone_scene::TerrainExactHandoffTopology::VoxelShell,
         );
     }
+    if let Ok(value) = std::env::var("MCLONE_TERRAIN_EXACT_REVIEW_SHAPE") {
+        let footprint = match value.to_ascii_lowercase().as_str() {
+            "l" | "l-shape" => mclone_scene::TerrainExactReviewFootprint::LShape,
+            "hole" => mclone_scene::TerrainExactReviewFootprint::Hole,
+            "island" | "disconnected-island" => {
+                mclone_scene::TerrainExactReviewFootprint::DisconnectedIsland
+            }
+            other => bail!(
+                "unsupported MCLONE_TERRAIN_EXACT_REVIEW_SHAPE {other:?}; expected l-shape, hole, or island"
+            ),
+        };
+        host.driver
+            .host_mut()
+            .set_terrain_exact_review_footprint(Some(footprint));
+    }
     if options.controller_focus {
         let (handled, action) = host
             .driver

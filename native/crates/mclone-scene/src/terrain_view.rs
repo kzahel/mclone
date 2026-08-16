@@ -69,6 +69,14 @@ pub struct SceneTerrainViewDiagnostics {
     pub vegetation_job_failures: u64,
 }
 
+/// Temporary Tactical 313 capture-only exact-footprint selector.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TerrainExactReviewFootprint {
+    LShape,
+    Hole,
+    DisconnectedIsland,
+}
+
 pub(crate) struct SceneTerrainViewState {
     engine: TerrainViewEngine,
     world: WorldInstanceId,
@@ -394,6 +402,8 @@ impl McloneSceneHost {
             .traversal_ready_sections
             .ready_columns()
             .clone();
+        let ready_columns =
+            terrain_exact_review_columns(ready_columns, focus, self.terrain_exact_review_footprint);
         if self.terrain_view.is_none() {
             let vegetation_executor = self
                 .terrain_vegetation_executor_factory
@@ -470,6 +480,13 @@ impl McloneSceneHost {
         if let Some(terrain_view) = self.terrain_view.as_mut() {
             terrain_view.set_exact_handoff_topology(topology);
         }
+    }
+
+    pub fn set_terrain_exact_review_footprint(
+        &mut self,
+        footprint: Option<TerrainExactReviewFootprint>,
+    ) {
+        self.terrain_exact_review_footprint = footprint;
     }
 
     pub(crate) fn reset_terrain_view(&mut self) {
@@ -607,6 +624,32 @@ fn terrain_exact_center_ready(ready_columns: &BTreeSet<ChunkPos>, focus: [f64; 3
     ready_columns.contains(&center)
 }
 
+fn terrain_exact_review_columns(
+    ready: BTreeSet<ChunkPos>,
+    focus: [f64; 3],
+    footprint: Option<TerrainExactReviewFootprint>,
+) -> BTreeSet<ChunkPos> {
+    let Some(footprint) = footprint else {
+        return ready;
+    };
+    let center =
+        ChunkPos::from_block_coords(floor_f64_to_i32(focus[0]), floor_f64_to_i32(focus[2]));
+    ready
+        .into_iter()
+        .filter(|chunk| {
+            let dx = chunk.x - center.x;
+            let dz = chunk.z - center.z;
+            match footprint {
+                TerrainExactReviewFootprint::LShape => dx <= 0 || dz <= 0,
+                TerrainExactReviewFootprint::Hole => !(dx == 1 && dz == 0),
+                TerrainExactReviewFootprint::DisconnectedIsland => {
+                    (dx.abs() <= 1 && dz.abs() <= 1) || (dx == 2 && dz == 2)
+                }
+            }
+        })
+        .collect()
+}
+
 fn live_exact_boundary_profile(
     runtime: Option<&mclone_app_runtime::scene_session_runtime::SceneSessionRuntime>,
     catalog: &mclone_mesh::TexturedMeshCatalog,
@@ -711,6 +754,39 @@ mod tests {
         let ready = BTreeSet::from([ChunkPos::new(-1, 2), ChunkPos::new(0, 2)]);
         assert!(terrain_exact_center_ready(&ready, [-0.01, 90.0, 47.99]));
         assert!(!terrain_exact_center_ready(&ready, [16.0, 90.0, 47.99]));
+    }
+
+    #[test]
+    fn review_footprints_cover_connected_irregular_and_island_cases() {
+        let ready = (-2..=2)
+            .flat_map(|z| (-2..=2).map(move |x| ChunkPos::new(x, z)))
+            .collect::<BTreeSet<_>>();
+        let l_shape = terrain_exact_review_columns(
+            ready.clone(),
+            [0.0, 0.0, 0.0],
+            Some(TerrainExactReviewFootprint::LShape),
+        );
+        let hole = terrain_exact_review_columns(
+            ready.clone(),
+            [0.0, 0.0, 0.0],
+            Some(TerrainExactReviewFootprint::Hole),
+        );
+        let island = terrain_exact_review_columns(
+            ready,
+            [0.0, 0.0, 0.0],
+            Some(TerrainExactReviewFootprint::DisconnectedIsland),
+        );
+        assert_eq!(l_shape.len(), 21);
+        assert_eq!(hole.len(), 24);
+        assert_eq!(island.len(), 10);
+        let admitted = terrain_exact_player_connected_chunks(
+            &island,
+            &BTreeSet::new(),
+            ChunkPos::new(0, 0),
+            HorizontalTopology::UNBOUNDED,
+        );
+        assert_eq!(admitted.len(), 9);
+        assert!(!admitted.contains(&ChunkPos::new(2, 2)));
     }
 
     #[test]

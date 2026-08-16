@@ -522,6 +522,7 @@ impl McloneSceneHost {
             terrain_horizon_diagnostic: Default::default(),
             terrain_exact_handoff_topology:
                 mclone_terrain_view::TerrainExactHandoffTopology::DirectSmooth,
+            terrain_exact_review_footprint: None,
             terrain_vegetation_executor_factory:
                 terrain_view::default_scene_terrain_vegetation_executor_factory(),
             underwater_effects: XrUnderwaterEffectStates::default(),
@@ -739,6 +740,7 @@ impl McloneSceneHost {
             terrain_horizon_diagnostic: Default::default(),
             terrain_exact_handoff_topology:
                 mclone_terrain_view::TerrainExactHandoffTopology::DirectSmooth,
+            terrain_exact_review_footprint: None,
             terrain_vegetation_executor_factory:
                 terrain_view::default_scene_terrain_vegetation_executor_factory(),
             underwater_effects: XrUnderwaterEffectStates::default(),
@@ -1034,6 +1036,7 @@ impl McloneSceneHost {
             terrain_horizon_diagnostic: Default::default(),
             terrain_exact_handoff_topology:
                 mclone_terrain_view::TerrainExactHandoffTopology::DirectSmooth,
+            terrain_exact_review_footprint: None,
             terrain_vegetation_executor_factory:
                 terrain_view::default_scene_terrain_vegetation_executor_factory(),
             underwater_effects: XrUnderwaterEffectStates::default(),
