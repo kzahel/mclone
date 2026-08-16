@@ -116,6 +116,9 @@ mod android {
         single_view_host_options, xr_frame_pipeline_accounting_config,
         xr_frame_pipeline_peer_threads,
     };
+    use mclone_season::{
+        CelestialDebugSettings, CelestialStarDensity, LunarPhase, MoonPhaseSource,
+    };
     use mclone_xr_host::{
         OpenXrControllerActions, OpenXrHostEvent, PRIMARY_STEREO_VIEW_TYPE,
         XrDisplayRefreshSnapshot, XrFrameStats, XrInputFrame,
@@ -325,6 +328,7 @@ mod android {
     struct AndroidXrStartupOptions {
         scene: McloneSceneHostOptions,
         render_options: TexturedSectionRenderOptions,
+        celestial_debug: CelestialDebugSettings,
         remote_addr: Option<String>,
         entry: ClientEntryResolution,
         default_world_root_enabled: bool,
@@ -364,6 +368,7 @@ mod android {
             Self {
                 scene: McloneSceneHostOptions::default(),
                 render_options: TexturedSectionRenderOptions::default(),
+                celestial_debug: CelestialDebugSettings::default(),
                 remote_addr: None,
                 entry: ClientEntryResolution::ordinary(),
                 default_world_root_enabled: true,
@@ -620,6 +625,54 @@ mod android {
                         "none" | "off" | "false" => None,
                         value => Some(XrDebugUiScreen::parse_label("--xr-debug-ui", value)?),
                     };
+                }
+                "--celestial-sun" => {
+                    options.celestial_debug.sun_body_enabled = parse_bool_arg(
+                        "--celestial-sun",
+                        Some(parse_next_string(&mut argv, "--celestial-sun")?),
+                    )?;
+                }
+                "--celestial-sun-halo" => {
+                    options.celestial_debug.sun_halo_enabled = parse_bool_arg(
+                        "--celestial-sun-halo",
+                        Some(parse_next_string(&mut argv, "--celestial-sun-halo")?),
+                    )?;
+                }
+                "--celestial-horizon-glow" => {
+                    options.celestial_debug.horizon_glow_enabled = parse_bool_arg(
+                        "--celestial-horizon-glow",
+                        Some(parse_next_string(&mut argv, "--celestial-horizon-glow")?),
+                    )?;
+                }
+                "--celestial-moon" => {
+                    options.celestial_debug.moon_body_enabled = parse_bool_arg(
+                        "--celestial-moon",
+                        Some(parse_next_string(&mut argv, "--celestial-moon")?),
+                    )?;
+                }
+                "--celestial-moonlight" => {
+                    options.celestial_debug.moonlight_enabled = parse_bool_arg(
+                        "--celestial-moonlight",
+                        Some(parse_next_string(&mut argv, "--celestial-moonlight")?),
+                    )?;
+                }
+                "--celestial-stars" => {
+                    options.celestial_debug.star_density = parse_celestial_star_density(
+                        "--celestial-stars",
+                        &parse_next_string(&mut argv, "--celestial-stars")?,
+                    )?;
+                }
+                "--moon-phase-source" => {
+                    options.celestial_debug.moon_phase_source = parse_moon_phase_source(
+                        "--moon-phase-source",
+                        &parse_next_string(&mut argv, "--moon-phase-source")?,
+                    )?;
+                }
+                "--moon-phase" => {
+                    options.celestial_debug.manual_lunar_phase = parse_moon_phase(
+                        "--moon-phase",
+                        &parse_next_string(&mut argv, "--moon-phase")?,
+                    )?;
                 }
                 "--perf-seconds" => {
                     let seconds = parse_next::<u64>(&mut argv, "--perf-seconds")?;
@@ -1101,6 +1154,35 @@ mod android {
         Ok(rate)
     }
 
+    fn parse_celestial_star_density(flag: &str, value: &str) -> Result<CelestialStarDensity> {
+        match value.trim() {
+            "off" | "0" => Ok(CelestialStarDensity::Off),
+            "quarter" | "25" | "25%" => Ok(CelestialStarDensity::Quarter),
+            "half" | "50" | "50%" => Ok(CelestialStarDensity::Half),
+            "full" | "100" | "100%" => Ok(CelestialStarDensity::Full),
+            value => bail!("{flag} expects off, quarter, half, or full, got `{value}`"),
+        }
+    }
+
+    fn parse_moon_phase_source(flag: &str, value: &str) -> Result<MoonPhaseSource> {
+        match value.trim() {
+            "world" | "world-clock" => Ok(MoonPhaseSource::WorldClock),
+            "manual" | "manual-preview" => Ok(MoonPhaseSource::ManualPreview),
+            value => bail!("{flag} expects world-clock or manual-preview, got `{value}`"),
+        }
+    }
+
+    fn parse_moon_phase(flag: &str, value: &str) -> Result<LunarPhase> {
+        let phase = value
+            .trim()
+            .parse::<f64>()
+            .with_context(|| format!("{flag} expects a normalized phase, got `{value}`"))?;
+        if !phase.is_finite() || !(0.0..=1.0).contains(&phase) {
+            bail!("{flag} must be finite and between 0 and 1");
+        }
+        LunarPhase::from_turns_wrapped(phase).map_err(Into::into)
+    }
+
     fn parse_session_smoke_arg(value: String) -> Result<AndroidXrSessionSmoke> {
         match value.trim() {
             "new-world" => Ok(AndroidXrSessionSmoke::NewWorld),
@@ -1507,6 +1589,17 @@ mod android {
             startup_options.render_options.force_fullbright,
             startup_options.render_options.color_profile.as_str()
         );
+        log::info!(
+            "Android XR celestial options: sun={} halo={} glow={} moon={} moonlight={} stars={} phase_source={} phase={:.6}",
+            startup_options.celestial_debug.sun_body_enabled,
+            startup_options.celestial_debug.sun_halo_enabled,
+            startup_options.celestial_debug.horizon_glow_enabled,
+            startup_options.celestial_debug.moon_body_enabled,
+            startup_options.celestial_debug.moonlight_enabled,
+            startup_options.celestial_debug.star_density.label(),
+            startup_options.celestial_debug.moon_phase_source.label(),
+            startup_options.celestial_debug.manual_lunar_phase.turns(),
+        );
 
         let runtime_assets = match load_android_xr_runtime_assets() {
             Ok(assets) => assets,
@@ -1522,6 +1615,7 @@ mod android {
             runtime_assets,
             scene_options,
             startup_options.render_options,
+            startup_options.celestial_debug,
             startup_view_pose,
             entry,
             startup_options.session_smoke,
@@ -1562,6 +1656,7 @@ mod android {
         runtime_assets: AndroidXrRuntimeAssets,
         scene_options: McloneSceneHostOptions,
         render_options: TexturedSectionRenderOptions,
+        celestial_debug: CelestialDebugSettings,
         startup_view_pose: Option<XrStartupViewPose>,
         client_entry: ClientEntryResolution,
         session_smoke: Option<AndroidXrSessionSmoke>,
@@ -1922,6 +2017,7 @@ mod android {
                 startup_view_pose,
                 scene_options.clone(),
                 render_options,
+                celestial_debug,
                 client_entry.clone(),
             )
             .context("initialize Android XR terrain multiview proof runtime")?;
@@ -1946,6 +2042,7 @@ mod android {
                 startup_view_pose,
                 scene_options.clone(),
                 render_options,
+                celestial_debug,
                 client_entry.clone(),
             )
             .context("initialize Android XR terrain multiview perf runtime")?;
@@ -2006,6 +2103,7 @@ mod android {
                 startup_view_pose,
                 scene_options.clone(),
                 render_options,
+                celestial_debug,
                 client_entry.clone(),
             )
             .context("initialize Android XR stereo-array terrain runtime")?;
@@ -2129,6 +2227,7 @@ mod android {
             startup_view_pose,
             scene_options.clone(),
             render_options,
+            celestial_debug,
             client_entry,
         )
         .context("initialize Android XR terrain runtime")?;
@@ -2215,6 +2314,7 @@ mod android {
         startup_view_pose: Option<XrStartupViewPose>,
         scene_options: McloneSceneHostOptions,
         render_options: TexturedSectionRenderOptions,
+        celestial_debug: CelestialDebugSettings,
         entry: ClientEntryResolution,
     ) -> Result<AndroidXrTerrainState> {
         let AndroidXrRuntimeAssets {
@@ -2246,6 +2346,7 @@ mod android {
             startup_view_pose,
         )
         .context("initialize Android XR session-free scene host")?;
+        terrain.set_celestial_debug_settings(celestial_debug);
         if let Some(registry) = mclone_app_runtime::prepared_assets::AssetPackSourceRegistry::discover_native_with_reference(
             mclone_assets::SharedAssetSource::new(
                 load_asset_source().context("reload Android XR reference source for asset-pack discovery")?,

@@ -1548,6 +1548,7 @@ dependencies = [
  "mclone-render",
  "mclone-render-session",
  "mclone-scene",
+ "mclone-season",
  "mclone-ui",
  "mclone-xr-graphics",
  "mclone-xr-host",
