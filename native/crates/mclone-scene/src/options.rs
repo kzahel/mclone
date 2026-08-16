@@ -30,6 +30,7 @@ pub enum XrDebugUiScreen {
     Pause,
     Controls,
     Graphics,
+    SeasonalDebug,
 }
 
 impl XrDebugUiScreen {
@@ -38,7 +39,10 @@ impl XrDebugUiScreen {
             "pause" => Ok(Self::Pause),
             "controls" | "help" => Ok(Self::Controls),
             "graphics" | "video" => Ok(Self::Graphics),
-            value => bail!("{flag} must be pause, controls, or graphics, got `{value}`"),
+            "seasonal" | "seasonal-debug" | "seasons" => Ok(Self::SeasonalDebug),
+            value => {
+                bail!("{flag} must be pause, controls, graphics, or seasonal-debug, got `{value}`")
+            }
         }
     }
 }
@@ -292,6 +296,14 @@ impl McloneSceneHost {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn xr_debug_ui_parses_the_shared_seasonal_screen() {
+        assert_eq!(
+            XrDebugUiScreen::parse_label("--xr-debug-ui", "seasonal-debug").unwrap(),
+            XrDebugUiScreen::SeasonalDebug,
+        );
+    }
 
     #[test]
     fn xr_scene_startup_projection_round_trips_shared_fields() {

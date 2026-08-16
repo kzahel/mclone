@@ -178,6 +178,26 @@ fn cli_parses_xr_graphics_debug_screen() {
 }
 
 #[test]
+fn cli_parses_xr_seasonal_debug_screen() {
+    let cli = Cli::parse([
+        "--xr-mclone-smoke".to_owned(),
+        "--xr-debug-ui".to_owned(),
+        "seasonal-debug".to_owned(),
+    ])
+    .unwrap();
+
+    assert!(matches!(
+        cli,
+        Cli::XrMcloneSmoke {
+            options: XrMcloneSmokeOptions {
+                debug_ui_screen: Some(XrDebugUiScreen::SeasonalDebug),
+                ..
+            },
+        }
+    ));
+}
+
+#[test]
 fn cli_parses_xr_forever_smoke_options() {
     let cli = Cli::parse([
         "--xr-mclone-smoke".to_owned(),

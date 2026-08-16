@@ -108,7 +108,7 @@ Options:
                      Set debug.mclone.xr_view_pose before launch.
   --xr-underwater-mode midpoint|per-eye
                      Add --xr-underwater-mode MODE to startup argv.
-  --xr-debug-ui none|pause|controls|graphics
+  --xr-debug-ui none|pause|controls|graphics|seasonal-debug
                      Hold an XR debug UI panel open after startup for headset
                      UI validation. Default: none.
   --xr-render-mode dual-per-eye|array-per-eye|array-multiview
@@ -781,10 +781,10 @@ case "$XR_UNDERWATER_MODE" in
         ;;
 esac
 case "$XR_DEBUG_UI" in
-    ""|none|pause|controls|graphics)
+    ""|none|pause|controls|graphics|seasonal|seasonal-debug|seasons)
         ;;
     *)
-        mclone_die "unsupported --xr-debug-ui '$XR_DEBUG_UI'; expected none, pause, controls, or graphics"
+        mclone_die "unsupported --xr-debug-ui '$XR_DEBUG_UI'; expected none, pause, controls, graphics, or seasonal-debug"
         ;;
 esac
 case "$XR_RENDER_MODE" in

@@ -5770,6 +5770,10 @@ impl McloneSceneHost {
                 parent: mclone_ui::GameOptionsParent::Pause,
                 category: mclone_ui::GameOptionsCategory::Graphics,
             },
+            XrDebugUiScreen::SeasonalDebug => GameScreen::OptionsCategory {
+                parent: mclone_ui::GameOptionsParent::Pause,
+                category: mclone_ui::GameOptionsCategory::SeasonalDebug,
+            },
         };
         if self.ui.screen() != Some(desired_screen) {
             self.ui.set_screen(Some(desired_screen));
