@@ -73,12 +73,20 @@ publication, holder unload, and lighting disable release it. The metadata is
 shared with native-thread and browser-Worker requests, so this does not add a
 second snapshot or replay gameplay tick admission.
 
-The next slice repairs inconsistent bare orphans, classifies every required
-holder during ordinary polling, and re-runs the native, headed Web, and
-physical phone routes without weakening the four-promotion or Light-memory
-bounds. The synthetic probe is a window-widening cross-platform state-machine
-control; the unchanged deployed phone build remains the proof that ordinary
-movement reaches this condition.
+Tactical 312 Slice 2 adds one shared required-Light classifier and invokes it
+from ordinary polling and ticket reconciliation. It distinguishes deferred,
+queued, mailbox-owned, publication-pending, ready, prerequisite, bare-
+scheduled, and token-without-owner states. Missing executor ownership is
+cancelled and replaced through the ordinary keyed demand path; defensive
+repair without canonical tick metadata does not overwrite the earlier cache
+record. Retry, repair, deferred, context-count, and context-byte metrics are
+incremental.
+
+The next slice converts the native and headed Web repros into convergence
+gates, then re-runs the physical phone route without weakening the four-
+promotion or Light-memory bounds. The synthetic probe is a window-widening
+cross-platform state-machine control; the unchanged deployed phone build
+remains the proof that ordinary movement reaches this condition.
 
 This incident is separate from Tactical
 [`311`](../tactical/311-cross-platform-worker-liveness-and-replay.md): Worker

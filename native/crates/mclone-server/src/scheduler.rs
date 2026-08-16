@@ -202,6 +202,7 @@ pub struct ChunkSchedulerMetrics {
     pub player_promotion_active_waiting_for_storage: usize,
     pub player_promotion_active_waiting_for_features: usize,
     pub player_promotion_active_waiting_for_light_prerequisite: usize,
+    pub player_promotion_active_light_deferred: usize,
     pub player_promotion_active_light_demand_queued: usize,
     pub player_promotion_active_light_mailbox_owned: usize,
     pub player_promotion_active_light_publication_pending: usize,
@@ -247,6 +248,9 @@ pub struct ChunkSchedulerMetrics {
     pub light_restartable_context_bytes: usize,
     pub light_deferred: usize,
     pub light_demands_cancelled: u64,
+    pub light_retries: u64,
+    pub light_repairs: u64,
+    pub light_repairs_without_persistence_metadata: u64,
     pub light_statuses_stale: u64,
     pub light_scheduled_without_token: usize,
     pub debug_light_admission_delay_ticks: u32,
@@ -313,12 +317,25 @@ struct PlayerPromotionBlockerCounts {
     waiting_for_storage: usize,
     waiting_for_features: usize,
     waiting_for_light_prerequisite: usize,
+    light_deferred: usize,
     light_demand_queued: usize,
     light_mailbox_owned: usize,
     light_publication_pending: usize,
     light_scheduled_without_token: usize,
     light_token_without_owner: usize,
     ready_awaiting_release: usize,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RequiredLightProgress {
+    Prerequisite,
+    Deferred,
+    DemandQueued,
+    MailboxOwned,
+    PublicationPending,
+    Ready,
+    ScheduledWithoutContext,
+    TokenWithoutOwner,
 }
 
 /// Canonical metadata required to restart initial Light for a published
@@ -331,6 +348,8 @@ struct RestartableLightContext {
     scheduled_block_ticks: Arc<[ScheduledTickRecord]>,
     scheduled_fluid_ticks: Arc<[ScheduledTickRecord]>,
     source_job: Option<ChunkJobId>,
+    persistence_metadata_complete: bool,
+    admission_count: u32,
 }
 
 impl RestartableLightContext {
@@ -345,6 +364,8 @@ impl RestartableLightContext {
             scheduled_block_ticks: scheduled_block_ticks.into(),
             scheduled_fluid_ticks: scheduled_fluid_ticks.into(),
             source_job,
+            persistence_metadata_complete: true,
+            admission_count: 0,
         }
     }
 
@@ -716,6 +737,9 @@ pub struct ChunkScheduler {
     light_tickets_released: u64,
     light_ticket_conservation_failures: u64,
     light_demands_cancelled: u64,
+    light_retries: u64,
+    light_repairs: u64,
+    light_repairs_without_persistence_metadata: u64,
     light_statuses_stale: u64,
     debug_light_admission_delay_ticks: u32,
     scheduler_poll_tick: u64,
@@ -1011,6 +1035,9 @@ impl ChunkScheduler {
             light_tickets_released: 0,
             light_ticket_conservation_failures: 0,
             light_demands_cancelled: 0,
+            light_retries: 0,
+            light_repairs: 0,
+            light_repairs_without_persistence_metadata: 0,
             light_statuses_stale: 0,
             debug_light_admission_delay_ticks: 0,
             scheduler_poll_tick: 0,
@@ -1098,6 +1125,9 @@ impl ChunkScheduler {
             light_tickets_released: 0,
             light_ticket_conservation_failures: 0,
             light_demands_cancelled: 0,
+            light_retries: 0,
+            light_repairs: 0,
+            light_repairs_without_persistence_metadata: 0,
             light_statuses_stale: 0,
             debug_light_admission_delay_ticks: 0,
             scheduler_poll_tick: 0,
@@ -1372,6 +1402,11 @@ impl ChunkScheduler {
         self.store.process_one_background_write();
         let mut events = self.poll_persistence()?;
         events.extend(self.publish_completed_worldgen_jobs(&mut publication, grants.feature)?);
+        let priority_centers = self
+            .distance_manager
+            .player_interest_priority_centers()
+            .to_vec();
+        self.reconcile_required_light_progress(&priority_centers);
         publication.light_status_batches_enqueued = publication
             .light_status_batches_enqueued
             .saturating_add(self.admit_pending_light_demands());
@@ -1991,6 +2026,7 @@ impl ChunkScheduler {
             .saturating_add(player_promotions.active)
             .saturating_add(pending_status_jobs)
             + pending_authored_misses
+            + self.deferred_light_contexts.len()
             + self.pending_light_demands.len()
             + self.light_mailbox.pending_count()
             + self.pending_light_publications.len()
@@ -2043,6 +2079,53 @@ impl ChunkScheduler {
         self.light_mailbox.mailbox_metrics()
     }
 
+    fn required_light_progress(&self, pos: ChunkPos) -> RequiredLightProgress {
+        let Some(holder) = self.holders.get(&pos) else {
+            return RequiredLightProgress::Prerequisite;
+        };
+        let Some(snapshot) = holder.published_snapshot.as_ref() else {
+            return RequiredLightProgress::Prerequisite;
+        };
+        if snapshot.status >= ChunkStatus::Light {
+            return RequiredLightProgress::Ready;
+        }
+        if snapshot.status < ChunkStatus::Features
+            || !holder
+                .status_slot(ChunkStatus::Light)
+                .is_some_and(|slot| slot.step == ChunkStatusStep::Scheduled)
+        {
+            return RequiredLightProgress::Prerequisite;
+        }
+        let Some(token) = holder.light_request_token() else {
+            return if self
+                .restartable_light_contexts
+                .get(&pos)
+                .is_some_and(|context| context.feature_revision == snapshot.revision)
+            {
+                RequiredLightProgress::Deferred
+            } else {
+                RequiredLightProgress::ScheduledWithoutContext
+            };
+        };
+        if self
+            .pending_light_demands
+            .get(&pos)
+            .is_some_and(|demand| demand.token == token)
+        {
+            RequiredLightProgress::DemandQueued
+        } else if self.light_mailbox.owns_token(token) {
+            RequiredLightProgress::MailboxOwned
+        } else if self
+            .pending_light_publications
+            .iter()
+            .any(|publication| publication.token == token)
+        {
+            RequiredLightProgress::PublicationPending
+        } else {
+            RequiredLightProgress::TokenWithoutOwner
+        }
+    }
+
     fn player_promotion_blocker_counts(&self) -> PlayerPromotionBlockerCounts {
         let mut counts = PlayerPromotionBlockerCounts::default();
         for pos in self
@@ -2079,38 +2162,35 @@ impl ChunkScheduler {
                 counts.ready_awaiting_release = counts.ready_awaiting_release.saturating_add(1);
                 continue;
             }
-            let Some(light_slot) = holder.status_slot(ChunkStatus::Light) else {
-                counts.waiting_for_light_prerequisite =
-                    counts.waiting_for_light_prerequisite.saturating_add(1);
-                continue;
-            };
-            if light_slot.step == ChunkStatusStep::Ready {
-                counts.ready_awaiting_release = counts.ready_awaiting_release.saturating_add(1);
-                continue;
-            }
-            let Some(token) = holder.light_request_token() else {
-                counts.light_scheduled_without_token =
-                    counts.light_scheduled_without_token.saturating_add(1);
-                continue;
-            };
-            if self
-                .pending_light_demands
-                .get(&pos)
-                .is_some_and(|demand| demand.token == token)
-            {
-                counts.light_demand_queued = counts.light_demand_queued.saturating_add(1);
-            } else if self.light_mailbox.owns_token(token) {
-                counts.light_mailbox_owned = counts.light_mailbox_owned.saturating_add(1);
-            } else if self
-                .pending_light_publications
-                .iter()
-                .any(|publication| publication.token == token)
-            {
-                counts.light_publication_pending =
-                    counts.light_publication_pending.saturating_add(1);
-            } else {
-                counts.light_token_without_owner =
-                    counts.light_token_without_owner.saturating_add(1);
+            match self.required_light_progress(pos) {
+                RequiredLightProgress::Prerequisite => {
+                    counts.waiting_for_light_prerequisite =
+                        counts.waiting_for_light_prerequisite.saturating_add(1);
+                }
+                RequiredLightProgress::Deferred => {
+                    counts.light_deferred = counts.light_deferred.saturating_add(1);
+                }
+                RequiredLightProgress::DemandQueued => {
+                    counts.light_demand_queued = counts.light_demand_queued.saturating_add(1);
+                }
+                RequiredLightProgress::MailboxOwned => {
+                    counts.light_mailbox_owned = counts.light_mailbox_owned.saturating_add(1);
+                }
+                RequiredLightProgress::PublicationPending => {
+                    counts.light_publication_pending =
+                        counts.light_publication_pending.saturating_add(1);
+                }
+                RequiredLightProgress::Ready => {
+                    counts.ready_awaiting_release = counts.ready_awaiting_release.saturating_add(1);
+                }
+                RequiredLightProgress::ScheduledWithoutContext => {
+                    counts.light_scheduled_without_token =
+                        counts.light_scheduled_without_token.saturating_add(1);
+                }
+                RequiredLightProgress::TokenWithoutOwner => {
+                    counts.light_token_without_owner =
+                        counts.light_token_without_owner.saturating_add(1);
+                }
             }
         }
         counts
@@ -2180,6 +2260,7 @@ impl ChunkScheduler {
             player_promotion_active_waiting_for_features: promotion_blockers.waiting_for_features,
             player_promotion_active_waiting_for_light_prerequisite: promotion_blockers
                 .waiting_for_light_prerequisite,
+            player_promotion_active_light_deferred: promotion_blockers.light_deferred,
             player_promotion_active_light_demand_queued: promotion_blockers.light_demand_queued,
             player_promotion_active_light_mailbox_owned: promotion_blockers.light_mailbox_owned,
             player_promotion_active_light_publication_pending: promotion_blockers
@@ -2277,6 +2358,10 @@ impl ChunkScheduler {
             light_restartable_context_bytes: self.restartable_light_context_bytes,
             light_deferred: self.deferred_light_contexts.len(),
             light_demands_cancelled: self.light_demands_cancelled,
+            light_retries: self.light_retries,
+            light_repairs: self.light_repairs,
+            light_repairs_without_persistence_metadata: self
+                .light_repairs_without_persistence_metadata,
             light_statuses_stale: self.light_statuses_stale,
             light_scheduled_without_token,
             debug_light_admission_delay_ticks: self.debug_light_admission_delay_ticks,
@@ -3393,7 +3478,7 @@ impl ChunkScheduler {
             {
                 self.cancel_initial_light_request(token);
             }
-            self.remove_restartable_light_context(pos, None);
+            let _ = self.remove_restartable_light_context(pos, None);
             self.holders.remove(&pos);
             self.store.release_cached_chunk(pos);
             self.store.release_cached_entity_chunk(pos);
@@ -3533,9 +3618,85 @@ impl ChunkScheduler {
             self.runtime_chunk_target_status(),
             &priority_centers,
         )?);
-        self.restart_required_deferred_light(&priority_centers);
+        self.reconcile_required_light_progress(&priority_centers);
         timing.runtime_enqueue_us = simulation_timing_elapsed_us(runtime_enqueue_start);
         Ok((events, timing))
+    }
+
+    fn reconcile_required_light_progress(&mut self, priority_centers: &[ChunkPos]) -> usize {
+        if !self.lighting_enabled {
+            return 0;
+        }
+        self.cancel_obsolete_initial_light_requests();
+        let required = self
+            .holders
+            .keys()
+            .copied()
+            .filter(|pos| self.initial_light_request_remains_required(*pos))
+            .collect::<Vec<_>>();
+        let mut repairs = 0_usize;
+        for pos in required {
+            match self.required_light_progress(pos) {
+                RequiredLightProgress::TokenWithoutOwner => {
+                    let token = self
+                        .holders
+                        .get(&pos)
+                        .and_then(ChunkHolder::light_request_token)
+                        .expect("token-without-owner classifier lost its token");
+                    if !self.cancel_initial_light_request(token) {
+                        if let Some(holder) = self.holders.get_mut(&pos) {
+                            holder.clear_light_request_token(token);
+                        }
+                        self.distance_manager.remove_ticket(
+                            ChunkTicketType::Light,
+                            pos,
+                            LIGHT_TICKET_LEVEL,
+                            ChunkTicketKey::LightRequest(token.id),
+                        );
+                        self.light_ticket_conservation_failures =
+                            self.light_ticket_conservation_failures.saturating_add(1);
+                    }
+                    self.light_repairs = self.light_repairs.saturating_add(1);
+                    repairs = repairs.saturating_add(1);
+                }
+                RequiredLightProgress::ScheduledWithoutContext => {
+                    let revision = self
+                        .holders
+                        .get(&pos)
+                        .and_then(|holder| holder.published_snapshot.as_ref())
+                        .map(|snapshot| snapshot.revision)
+                        .expect("scheduled Light repair lost its Features snapshot");
+                    self.retain_shared_restartable_light_context(
+                        pos,
+                        RestartableLightContext {
+                            feature_revision: revision,
+                            scheduled_block_ticks: Arc::from([]),
+                            scheduled_fluid_ticks: Arc::from([]),
+                            source_job: None,
+                            persistence_metadata_complete: false,
+                            admission_count: 0,
+                        },
+                    );
+                    self.light_repairs = self.light_repairs.saturating_add(1);
+                    self.light_repairs_without_persistence_metadata = self
+                        .light_repairs_without_persistence_metadata
+                        .saturating_add(1);
+                    repairs = repairs.saturating_add(1);
+                }
+                RequiredLightProgress::Deferred => {
+                    if self.deferred_light_contexts.insert(pos) {
+                        self.light_repairs = self.light_repairs.saturating_add(1);
+                        repairs = repairs.saturating_add(1);
+                    }
+                }
+                RequiredLightProgress::Prerequisite
+                | RequiredLightProgress::DemandQueued
+                | RequiredLightProgress::MailboxOwned
+                | RequiredLightProgress::PublicationPending
+                | RequiredLightProgress::Ready => {}
+            }
+        }
+        repairs.saturating_add(self.restart_required_deferred_light(priority_centers))
     }
 
     fn restart_required_deferred_light(&mut self, priority_centers: &[ChunkPos]) -> usize {
@@ -4164,7 +4325,7 @@ impl ChunkScheduler {
         &mut self,
         pos: ChunkPos,
         expected_revision: Option<ChunkRevision>,
-    ) -> bool {
+    ) -> Option<RestartableLightContext> {
         let should_remove = self
             .restartable_light_contexts
             .get(&pos)
@@ -4172,7 +4333,7 @@ impl ChunkScheduler {
                 expected_revision.is_none_or(|revision| context.feature_revision == revision)
             });
         if !should_remove {
-            return false;
+            return None;
         }
         let removed = self
             .restartable_light_contexts
@@ -4182,7 +4343,7 @@ impl ChunkScheduler {
             .restartable_light_context_bytes
             .saturating_sub(removed.owned_bytes_estimate());
         self.deferred_light_contexts.remove(&pos);
-        true
+        Some(removed)
     }
 
     fn queue_light_from_restartable_context(&mut self, pos: ChunkPos) -> bool {
@@ -4208,6 +4369,13 @@ impl ChunkScheduler {
         }
 
         let token = self.begin_initial_light_request(pos, context.feature_revision);
+        if context.admission_count > 0 {
+            self.light_retries = self.light_retries.saturating_add(1);
+        }
+        self.restartable_light_contexts
+            .get_mut(&pos)
+            .expect("validated restartable Light context disappeared")
+            .admission_count = context.admission_count.saturating_add(1);
         self.queue_light_demand(PendingLightDemand::from_shared_context(
             token,
             snapshot,
@@ -4609,6 +4777,8 @@ impl ChunkScheduler {
                 scheduled_block_ticks,
                 scheduled_fluid_ticks,
                 source_job,
+                persistence_metadata_complete: true,
+                admission_count: 0,
             },
         );
         self.queue_light_from_restartable_context(stale_token.pos)
@@ -4681,11 +4851,11 @@ impl ChunkScheduler {
                     diagnostics.light_statuses_skipped.saturating_add(1);
                 continue;
             }
-            let has_matching_restart_context = self.remove_restartable_light_context(
+            let restart_context = self.remove_restartable_light_context(
                 completed.pos,
                 Some(completed.token.feature_revision),
             );
-            debug_assert!(has_matching_restart_context);
+            debug_assert!(restart_context.is_some());
             self.release_initial_light_request(completed.token);
             diagnostics.light_statuses_published =
                 diagnostics.light_statuses_published.saturating_add(1);
@@ -4715,13 +4885,18 @@ impl ChunkScheduler {
                 .expect("holder must exist before saving lit structure data")
                 .structure_data()
                 .clone();
-            self.queue_record_save(
-                ChunkRecord::from_snapshot(snapshot.clone())
-                    .with_scheduled_block_ticks(completed.scheduled_block_ticks.to_vec())
-                    .with_scheduled_fluid_ticks(completed.scheduled_fluid_ticks.to_vec())
-                    .with_structure_data(structure_data),
-                SaveDurability::Cache,
-            );
+            if restart_context
+                .as_ref()
+                .is_some_and(|context| context.persistence_metadata_complete)
+            {
+                self.queue_record_save(
+                    ChunkRecord::from_snapshot(snapshot.clone())
+                        .with_scheduled_block_ticks(completed.scheduled_block_ticks.to_vec())
+                        .with_scheduled_fluid_ticks(completed.scheduled_fluid_ticks.to_vec())
+                        .with_structure_data(structure_data),
+                    SaveDurability::Cache,
+                );
+            }
             events.push(ChunkSchedulerEvent::StatusChanged {
                 pos,
                 status: ChunkStatus::Light,
@@ -6717,6 +6892,372 @@ mod tests {
         assert_eq!(metrics.light_ticket_count, 1);
         assert_eq!(scheduler.light_status_mailbox_pending_count(), 0);
         assert_eq!(scheduler.pending_publication_count(), 0);
+    }
+
+    #[test]
+    fn required_light_token_without_executor_owner_is_repaired() {
+        let mut scheduler = ChunkScheduler::new(12_345);
+        let pos = ChunkPos::new(0, 0);
+        let snapshot = test_feature_snapshot(pos);
+        let mut holder = ChunkHolder::new(pos);
+        holder.publish_snapshot(snapshot.clone(), ChunkResidency::Generated, false);
+        holder.mark_scheduled(ChunkStatus::Light);
+        scheduler.holders.insert(pos, holder);
+        scheduler.distance_manager.add_ticket(
+            ChunkTicketType::Forced,
+            pos,
+            CHUNK_LEVEL_FULL + 1,
+            ChunkTicketKey::Chunk(pos),
+        );
+        scheduler.retain_restartable_light_context(
+            pos,
+            snapshot.revision,
+            Vec::new(),
+            Vec::new(),
+            None,
+        );
+        assert!(scheduler.queue_light_from_restartable_context(pos));
+        let orphaned = scheduler.holders[&pos].light_request_token().unwrap();
+        scheduler.pending_light_demands.remove(&pos);
+        scheduler.pending_light_admission_ticks.remove(&orphaned);
+        assert_eq!(
+            scheduler.required_light_progress(pos),
+            RequiredLightProgress::TokenWithoutOwner
+        );
+
+        scheduler.reconcile_required_light_progress(&[pos]);
+
+        let replacement = scheduler.holders[&pos].light_request_token().unwrap();
+        assert_ne!(replacement, orphaned);
+        assert_eq!(
+            scheduler.required_light_progress(pos),
+            RequiredLightProgress::DemandQueued
+        );
+        assert_eq!(scheduler.metrics().light_repairs, 1);
+        assert_eq!(scheduler.metrics().light_retries, 1);
+        assert_eq!(scheduler.metrics().light_ticket_conservation_failures, 0);
+    }
+
+    #[test]
+    fn bare_scheduled_light_is_repaired_without_overwriting_tick_metadata() {
+        let mut scheduler = ChunkScheduler::new(12_345);
+        let pos = ChunkPos::new(0, 0);
+        let snapshot = test_feature_snapshot(pos);
+        let mut holder = ChunkHolder::new(pos);
+        holder.publish_snapshot(snapshot, ChunkResidency::Generated, false);
+        holder.mark_scheduled(ChunkStatus::Light);
+        scheduler.holders.insert(pos, holder);
+        scheduler.distance_manager.add_ticket(
+            ChunkTicketType::Forced,
+            pos,
+            CHUNK_LEVEL_FULL + 1,
+            ChunkTicketKey::Chunk(pos),
+        );
+        assert_eq!(
+            scheduler.required_light_progress(pos),
+            RequiredLightProgress::ScheduledWithoutContext
+        );
+
+        scheduler.reconcile_required_light_progress(&[pos]);
+
+        assert_eq!(
+            scheduler.required_light_progress(pos),
+            RequiredLightProgress::DemandQueued
+        );
+        let context = &scheduler.restartable_light_contexts[&pos];
+        assert!(!context.persistence_metadata_complete);
+        assert_eq!(scheduler.metrics().light_repairs, 1);
+        assert_eq!(
+            scheduler
+                .metrics()
+                .light_repairs_without_persistence_metadata,
+            1
+        );
+    }
+
+    #[test]
+    fn cancelled_completion_cannot_replace_reentered_light_request() {
+        let mut scheduler = ChunkScheduler::new(12_345);
+        let pos = ChunkPos::new(0, 0);
+        let snapshot = test_feature_snapshot(pos);
+        let mut holder = ChunkHolder::new(pos);
+        holder.publish_snapshot(snapshot.clone(), ChunkResidency::Generated, false);
+        holder.mark_scheduled(ChunkStatus::Light);
+        scheduler.holders.insert(pos, holder);
+        scheduler.distance_manager.add_ticket(
+            ChunkTicketType::Forced,
+            pos,
+            CHUNK_LEVEL_FULL + 1,
+            ChunkTicketKey::Chunk(pos),
+        );
+        scheduler.retain_restartable_light_context(
+            pos,
+            snapshot.revision,
+            Vec::new(),
+            Vec::new(),
+            None,
+        );
+        assert!(scheduler.queue_light_from_restartable_context(pos));
+        let cancelled = scheduler.holders[&pos].light_request_token().unwrap();
+        assert!(scheduler.cancel_initial_light_request(cancelled));
+        scheduler.reconcile_required_light_progress(&[pos]);
+        let replacement = scheduler.holders[&pos].light_request_token().unwrap();
+        assert_ne!(replacement, cancelled);
+
+        let mut late = test_completed_light_status(pos);
+        late.token = cancelled;
+        scheduler.pending_light_publications.push_back(late);
+        let mut diagnostics = ChunkSchedulerPublicationDiagnostics::default();
+        let events = scheduler
+            .publish_pending_light_statuses(&mut diagnostics, PublicationGrant::fixed(1))
+            .unwrap();
+
+        assert!(events.is_empty());
+        assert_eq!(diagnostics.light_statuses_skipped, 1);
+        assert_eq!(
+            scheduler.holders[&pos].light_request_token(),
+            Some(replacement)
+        );
+        assert_eq!(
+            scheduler.required_light_progress(pos),
+            RequiredLightProgress::DemandQueued
+        );
+    }
+
+    #[test]
+    fn in_flight_cancellation_reenters_with_fresh_mailbox_work() {
+        let mut scheduler = ChunkScheduler::new(12_345);
+        let pos = ChunkPos::new(0, 0);
+        let snapshot = test_feature_snapshot(pos);
+        let mut holder = ChunkHolder::new(pos);
+        holder.publish_snapshot(snapshot.clone(), ChunkResidency::Generated, false);
+        holder.mark_scheduled(ChunkStatus::Light);
+        scheduler.holders.insert(pos, holder);
+        scheduler.distance_manager.add_ticket(
+            ChunkTicketType::Forced,
+            pos,
+            CHUNK_LEVEL_FULL + 1,
+            ChunkTicketKey::Chunk(pos),
+        );
+        scheduler.retain_restartable_light_context(
+            pos,
+            snapshot.revision,
+            Vec::new(),
+            Vec::new(),
+            None,
+        );
+        assert!(scheduler.queue_light_from_restartable_context(pos));
+        let cancelled = scheduler.holders[&pos].light_request_token().unwrap();
+        assert_eq!(scheduler.admit_pending_light_demands(), 1);
+        assert!(scheduler.light_mailbox.owns_token(cancelled));
+
+        assert!(scheduler.cancel_initial_light_request(cancelled));
+        assert_eq!(scheduler.metrics().light_deferred, 1);
+        scheduler.reconcile_required_light_progress(&[pos]);
+
+        let replacement = scheduler.holders[&pos].light_request_token().unwrap();
+        assert_ne!(replacement, cancelled);
+        assert_eq!(
+            scheduler.required_light_progress(pos),
+            RequiredLightProgress::DemandQueued
+        );
+        assert_eq!(scheduler.metrics().light_retries, 1);
+        assert_eq!(scheduler.metrics().light_ticket_count, 1);
+    }
+
+    #[test]
+    fn four_ownerless_promotions_are_repaired_without_exhausting_admission() {
+        let mut scheduler = ChunkScheduler::new(12_345);
+        let positions = [
+            ChunkPos::new(0, 0),
+            ChunkPos::new(1, 0),
+            ChunkPos::new(0, 1),
+            ChunkPos::new(1, 1),
+        ];
+        let interest = positions.into_iter().collect::<BTreeSet<_>>();
+        scheduler
+            .distance_manager
+            .set_aggregate_interest_positions_with_priority(
+                interest.clone(),
+                interest,
+                vec![positions[0]],
+            );
+        for pos in positions {
+            let snapshot = test_feature_snapshot(pos);
+            let mut holder = ChunkHolder::new(pos);
+            holder.publish_snapshot(snapshot.clone(), ChunkResidency::Generated, false);
+            holder.mark_scheduled(ChunkStatus::Light);
+            scheduler.holders.insert(pos, holder);
+            scheduler.retain_restartable_light_context(
+                pos,
+                snapshot.revision,
+                Vec::new(),
+                Vec::new(),
+                None,
+            );
+            assert!(scheduler.queue_light_from_restartable_context(pos));
+            let orphaned = scheduler.holders[&pos].light_request_token().unwrap();
+            scheduler.pending_light_demands.remove(&pos);
+            scheduler.pending_light_admission_ticks.remove(&orphaned);
+        }
+        assert_eq!(scheduler.metrics().player_promotion_active, 4);
+        assert_eq!(
+            scheduler
+                .metrics()
+                .player_promotion_active_light_token_without_owner,
+            4
+        );
+
+        scheduler.reconcile_required_light_progress(&[positions[0]]);
+
+        let metrics = scheduler.metrics();
+        assert_eq!(metrics.player_promotion_active, 4);
+        assert_eq!(metrics.player_promotion_active_light_demand_queued, 4);
+        assert_eq!(metrics.player_promotion_active_light_token_without_owner, 0);
+        assert_eq!(
+            metrics.player_promotion_active_light_scheduled_without_token,
+            0
+        );
+        assert_eq!(metrics.light_repairs, 4);
+        assert_eq!(metrics.light_retries, 4);
+        assert_eq!(metrics.player_promotion_max_active, 4);
+    }
+
+    #[test]
+    fn authoritative_unload_releases_deferred_light_context() {
+        let mut scheduler = ChunkScheduler::new(12_345);
+        let pos = ChunkPos::new(0, 0);
+        let snapshot = test_feature_snapshot(pos);
+        let mut holder = ChunkHolder::new(pos);
+        holder.publish_snapshot(snapshot.clone(), ChunkResidency::Generated, false);
+        holder.mark_scheduled(ChunkStatus::Light);
+        scheduler.holders.insert(pos, holder);
+        scheduler.distance_manager.add_ticket(
+            ChunkTicketType::Forced,
+            pos,
+            CHUNK_LEVEL_FULL + 1,
+            ChunkTicketKey::Chunk(pos),
+        );
+        scheduler.retain_restartable_light_context(
+            pos,
+            snapshot.revision,
+            Vec::new(),
+            Vec::new(),
+            None,
+        );
+        assert!(scheduler.queue_light_from_restartable_context(pos));
+        scheduler.distance_manager.remove_ticket(
+            ChunkTicketType::Forced,
+            pos,
+            CHUNK_LEVEL_FULL + 1,
+            ChunkTicketKey::Chunk(pos),
+        );
+        scheduler.reconcile_ticketed_holders().unwrap();
+        assert_eq!(scheduler.metrics().light_deferred, 1);
+
+        assert_eq!(scheduler.process_pending_unloads(1).unwrap(), 1);
+        assert!(!scheduler.holders.contains_key(&pos));
+        assert_eq!(scheduler.metrics().light_restartable_contexts, 0);
+        assert_eq!(scheduler.metrics().light_restartable_context_bytes, 0);
+
+        scheduler.distance_manager.add_ticket(
+            ChunkTicketType::Forced,
+            pos,
+            CHUNK_LEVEL_FULL + 1,
+            ChunkTicketKey::Chunk(pos),
+        );
+        scheduler.reconcile_ticketed_holders().unwrap();
+        let replacement_snapshot = ChunkSnapshot::from_block_state_ids(
+            pos,
+            ChunkStatus::Features,
+            ChunkRevision(2),
+            0,
+            16,
+            &vec![BlockStateId(0); CHUNK_SECTION_VOLUME],
+        );
+        let holder = scheduler.holders.get_mut(&pos).unwrap();
+        holder.publish_snapshot(
+            replacement_snapshot.clone(),
+            ChunkResidency::Generated,
+            false,
+        );
+        holder.mark_scheduled(ChunkStatus::Light);
+        scheduler.retain_restartable_light_context(
+            pos,
+            replacement_snapshot.revision,
+            Vec::new(),
+            Vec::new(),
+            None,
+        );
+        scheduler.reconcile_required_light_progress(&[pos]);
+        assert_eq!(
+            scheduler.required_light_progress(pos),
+            RequiredLightProgress::DemandQueued
+        );
+        assert_eq!(
+            scheduler.holders[&pos]
+                .light_request_token()
+                .unwrap()
+                .feature_revision,
+            ChunkRevision(2)
+        );
+    }
+
+    #[test]
+    fn newer_feature_revision_replaces_light_context_and_token_once() {
+        let mut scheduler = ChunkScheduler::new(12_345);
+        let pos = ChunkPos::new(0, 0);
+        let first_snapshot = test_feature_snapshot(pos);
+        let mut holder = ChunkHolder::new(pos);
+        holder.publish_snapshot(first_snapshot.clone(), ChunkResidency::Generated, false);
+        holder.mark_scheduled(ChunkStatus::Light);
+        scheduler.holders.insert(pos, holder);
+        scheduler.distance_manager.add_ticket(
+            ChunkTicketType::Forced,
+            pos,
+            CHUNK_LEVEL_FULL + 1,
+            ChunkTicketKey::Chunk(pos),
+        );
+        scheduler.retain_restartable_light_context(
+            pos,
+            first_snapshot.revision,
+            Vec::new(),
+            Vec::new(),
+            None,
+        );
+        assert!(scheduler.queue_light_from_restartable_context(pos));
+        let first = scheduler.holders[&pos].light_request_token().unwrap();
+
+        let mut second_snapshot = first_snapshot;
+        second_snapshot.revision = ChunkRevision(2);
+        scheduler.holders.get_mut(&pos).unwrap().publish_snapshot(
+            second_snapshot.clone(),
+            ChunkResidency::Generated,
+            false,
+        );
+        let block_tick = ScheduledTickRecord::new(BlockPos::new(1, 2, 3), "stone", 4);
+        scheduler.retain_restartable_light_context(
+            pos,
+            second_snapshot.revision,
+            vec![block_tick.clone()],
+            Vec::new(),
+            None,
+        );
+        assert!(scheduler.queue_light_from_restartable_context(pos));
+
+        let second = scheduler.holders[&pos].light_request_token().unwrap();
+        assert_ne!(second, first);
+        assert_eq!(second.feature_revision, ChunkRevision(2));
+        assert_eq!(scheduler.pending_light_demands[&pos].token, second);
+        assert_eq!(
+            scheduler.pending_light_demands[&pos]
+                .scheduled_block_ticks
+                .as_ref(),
+            [block_tick]
+        );
+        assert_eq!(scheduler.metrics().light_restartable_contexts, 1);
+        assert_eq!(scheduler.metrics().light_ticket_count, 1);
+        assert_eq!(scheduler.metrics().light_ticket_conservation_failures, 0);
     }
 
     #[test]

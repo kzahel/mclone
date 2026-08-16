@@ -1,7 +1,7 @@
 # Tactical 312: Chunk Promotion Forward Progress Under View Churn
 
-Status: in progress 2026-08-16; Slices 0-1 reproduction and restartable
-Feature-to-Light ownership complete
+Status: in progress 2026-08-16; Slices 0-2 reproduction, restartable
+Feature-to-Light ownership, and shared forward-progress repair complete
 
 Topic: `chunk-lighting-admission-and-backpressure`
 
@@ -322,6 +322,37 @@ round trips the shared metadata on the browser boundary.
 Slice 2 remains responsible for repairing an inconsistent bare orphan that
 does not have a restart record, classifying every required holder on ordinary
 polls, and proving the complete four-slot forward-progress matrix.
+
+## Slice 2 Execution Evidence
+
+One shared classifier now distinguishes prerequisite, deferred, queued-demand,
+mailbox-owned, publication-pending, ready, scheduled-without-context, and
+token-without-owner states. Ordinary scheduler polls and ticket reconciliation
+audit every currently runtime-required holder. Deferred work is restarted in
+current-center priority order, while a token that has no demand, mailbox, or
+publication owner is cancelled and replaced through the same path.
+
+The defensive bare-scheduled repair deliberately marks persistence metadata
+incomplete. It may restore live Light progress, but successful publication
+does not overwrite the earlier canonical Features cache record with invented
+empty tick vectors. This preserves data rather than silently discarding tick
+metadata in an invariant-violation path. Normal Features publication always
+installs complete metadata before its first request.
+
+Incremental diagnostics now separate explicit deferred count, restart-context
+count/bytes, retries, repairs, and metadata-incomplete repairs from queued
+demands and physical executor ownership. The compatibility pending-job total
+includes deferred work, but repair never uses that aggregate as a Worker-health
+signal.
+
+Focused native tests cover cancellation before mailbox admission, cancellation
+after mailbox admission, late completion racing a replacement token, quick
+re-entry before unload, teardown plus re-entry after unload, newer Features
+revision replacement, missing-owner repair, bare-scheduled repair, and all four
+bounded Player-promotion slots becoming productive in one reconciliation.
+All 45 scheduler tests pass. Slice 3 converts the deterministic native and Web
+reproduction probes into bounded convergence gates and carries the normalized
+metrics through their reports.
 
 ## Why Existing Tests Passed
 
