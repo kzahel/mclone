@@ -54,8 +54,8 @@ function parseArguments(argv) {
       );
     } else if (argument === "--review-phase") {
       const reviewPhase = Number.parseInt(argv[++index] ?? "", 10);
-      if (reviewPhase !== 0 && reviewPhase !== 1) {
-        fail("--review-phase must be 0 or 1");
+      if (![0, 1, 2].includes(reviewPhase)) {
+        fail("--review-phase must be 0, 1, or 2");
       }
       options.reviewPhase = reviewPhase;
     } else if (argument === "--skip-build") {
@@ -65,7 +65,7 @@ function parseArguments(argv) {
         "Usage: node scripts/capture-terrain-seam-review.mjs "
         + "[--output /tmp/mclone-terrain-seam-review] [--width 1280] "
         + "[--height 720] [--settle-frames 180] "
-        + "[--review-phase 0|1] [--skip-build]\n",
+        + "[--review-phase 0|1|2] [--skip-build]\n",
       );
       process.exit(0);
     } else {
@@ -116,6 +116,27 @@ const views = {
     seed: 12345,
     chunk: [0, 0],
     eye: [8, 82, 8],
+    target: [8, 67, -180],
+  },
+  lowSubcell: {
+    label: "low view translated by less than one block",
+    seed: 12345,
+    chunk: [0, 0],
+    eye: [8.375, 82, 8.375],
+    target: [8.375, 67, -179.625],
+  },
+  lowRebase: {
+    label: "low view translated across one spacing-one tile",
+    seed: 12345,
+    chunk: [0, 0],
+    eye: [72, 82, 8],
+    target: [72, 67, -180],
+  },
+  lowOrbit: {
+    label: "low seam target from a second orbit angle",
+    seed: 12345,
+    chunk: [0, 0],
+    eye: [-36, 92, 6],
     target: [8, 67, -180],
   },
   coast: {
@@ -227,6 +248,32 @@ function buildCampaign(reviewPhase) {
       time,
       diagnostic,
     }));
+  }
+  if (reviewPhase >= 2) {
+    for (const [view, viewDiagnostics] of [
+      ["elevated", ["topology", "albedo", "geometric-shade", "water", "texture"]],
+      ["forest", ["topology", "albedo", "geometric-shade"]],
+      ["stone", ["topology", "albedo", "geometric-shade"]],
+      ["snow", ["topology", "albedo"]],
+    ]) {
+      for (const diagnostic of viewDiagnostics) {
+        captures.push(captureDefinition({
+          name: `diagnostic-${view}-${diagnostic}`,
+          group: `diagnostic-${view}-phase-2`,
+          view,
+          time: 6000,
+          diagnostic,
+        }));
+      }
+    }
+    for (const view of ["lowSubcell", "lowRebase", "lowOrbit"]) {
+      captures.push(captureDefinition({
+        name: `stability-${view}-noon`,
+        group: `stability-${view}`,
+        view,
+        time: 6000,
+      }));
+    }
   }
   return captures;
 }
@@ -436,7 +483,12 @@ const receipt = {
       "post-settle frames",
       "output extent",
     ],
-    variedAxes: ["frozen time", "terrain presentation", "diagnostic channel"],
+    variedAxes: [
+      "frozen time",
+      "terrain presentation",
+      "diagnostic channel",
+      ...(options.reviewPhase >= 2 ? ["camera pose for stability endpoints"] : []),
+    ],
     observedStateRule: "Every composed capture is target-ready with all 25 RD2 exact columns and drained, failure-free vegetation. Settled presentation state is identical within each comparison group; transient coverage-generation and cumulative submitted/completed job counters may differ between fresh processes, while submitted/completed must be equal within every capture. Exact Only reports the horizon disabled.",
   },
   sceneCoverage: {
@@ -447,6 +499,30 @@ const receipt = {
       .map(([timeLabel]) => `focus-stone-${timeLabel}`),
     snow: focusTimesForReviewPhase(options.reviewPhase)
       .map(([timeLabel]) => `focus-snow-${timeLabel}`),
+    ...(options.reviewPhase >= 2 ? {
+      voxelSmoothDiagnostics: [
+        "diagnostic-elevated-topology",
+        "diagnostic-elevated-albedo",
+        "diagnostic-elevated-geometric-shade",
+        "diagnostic-elevated-water",
+        "diagnostic-elevated-texture",
+        "diagnostic-forest-topology",
+        "diagnostic-forest-albedo",
+        "diagnostic-forest-geometric-shade",
+        "diagnostic-stone-topology",
+        "diagnostic-stone-albedo",
+        "diagnostic-stone-geometric-shade",
+        "diagnostic-snow-topology",
+        "diagnostic-snow-albedo",
+      ],
+      stabilityEndpoints: {
+        stationary: "baseline-low-noon",
+        subcellTranslation: "stability-lowSubcell-noon",
+        spacingOneTileRebase: "stability-lowRebase-noon",
+        secondOrbitAngle: "stability-lowOrbit-noon",
+        farTeleportEndpoint: "focus-forest-noon",
+      },
+    } : {}),
   },
   diagnosticLegend: {
     "ownership-level": "Exact pixels remain natural; procedural levels use a spacing palette from red (spacing one) through successively cooler rings.",
