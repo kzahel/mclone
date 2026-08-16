@@ -693,7 +693,7 @@ wait:
 
 - requested client coverage: `361 / 361` chunks;
 - exact drawable coverage: `289 / 289` columns, zero missing;
-- snapshot chain: `458` queued, drained, emitted, and applied;
+- snapshot chain: `460` queued, drained, emitted, and applied;
 - unload chain: `171` queued, drained, emitted, and applied;
 - accepted and requested center: `(-3, 6)` at render distance `8`;
 - runner error, command/update queues, jobs, and publications: empty; and
@@ -718,8 +718,13 @@ different-world admission, and typed quota failure. The inspected reload
 capture is
 [/tmp/mclone-native-web-indexeddb-reload-probe-canvas.png](/tmp/mclone-native-web-indexeddb-reload-probe-canvas.png).
 
-Focused validation passed all 737 `mclone-server` library tests, the ten Web
-ownership locks, the `wasm32-unknown-unknown` Web client check, and the browser
-smoke script typecheck. The persistent cardinal replay is now a load-bearing
-regression gate alongside the transient movement, dynamic-radius, and
-IndexedDB reload probes.
+Final validation passed all 738 `mclone-server` library tests, all 290
+`mclone-app-runtime` library tests, the ten Web ownership locks, the
+`wasm32-unknown-unknown` Web client check, browser TypeScript checking, the
+Worker ownership inventory, and the scene-host ownership gate. The persistent
+cardinal replay, IndexedDB close/reopen lane, and original transient
+movement/reversal replay all passed on the final revision. The transient lane
+also passed both shared-memory and message-transfer runner probes and shut
+their Workers down cleanly. The persistent cardinal replay is now a
+load-bearing regression gate alongside the transient movement, dynamic-radius,
+and IndexedDB reload probes.

@@ -798,8 +798,10 @@ setting from 3 to 8, moves north three chunks, west three, climbs 128 blocks,
 then moves north another three before a normal 30-second wait. Its corrected
 run reached all 361 requested client chunks and all 289 exact drawable
 columns. The 458 snapshots and 171 unloads matched at every server, runner,
-and client boundary, the runner error was empty, and the 1.5-second stability
-window retained the exact loaded-set hash. The inspected canvas at
+and client boundary in the first corrected run; the final revision rerun
+matched 460 snapshots and the same 171 unloads. Its runner error and pending
+save count were empty, and the 1.5-second stability window retained the exact
+loaded-set hash. The inspected canvas at
 [/tmp/mclone-native-web-cardinal-view-replay-canvas.png](/tmp/mclone-native-web-cardinal-view-replay-canvas.png)
 contains coherent terrain without rectangular holes.
 
