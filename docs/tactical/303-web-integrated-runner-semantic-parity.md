@@ -674,10 +674,11 @@ The correction makes the required local-realm bootstrap key set one shared
 server-owned constant and has Web request every address before constructing
 the realm. Tick autosave now queues external record work and returns
 immediately; it does not repeatedly call `try_poll` while IndexedDB
-completions can only arrive after the operation returns. Already-produced
-updates are returned even if background autosave records a failure. Explicit
-flush and shutdown still use the existing durable TypeScript continuation
-fence.
+completions can only arrive after the operation returns. Web and native use
+the same 6,000-gameplay-tick autosave interval, preventing a perpetual save
+tail from blocking readiness. Already-produced updates are returned even if
+background autosave records a failure. Explicit flush and shutdown still use
+the existing durable TypeScript continuation fence.
 
 Shared diagnostics now distinguish desired visible chunks from the ordered
 published shadow and count snapshot/unload updates at queue, drain, runner
@@ -704,6 +705,18 @@ previous rectangular voids:
 - [canvas capture](/tmp/mclone-native-web-cardinal-view-replay-canvas.png)
 - [page capture](/tmp/mclone-native-web-cardinal-view-replay.png)
 - [cardinal report](/tmp/mclone-native-web-cardinal-view-replay.json)
+
+The first post-correction `pnpm native:web:indexeddb-smoke` run then exposed
+the cadence mismatch: exact startup terrain and the complete delivery chain
+were ready, but Web continually retained one pending background save and
+could not satisfy its startup-idle latch. Native already autosaved every 6,000
+gameplay ticks. Moving that interval to a shared server constant removed the
+per-tick Web requeue. The immediate rerun passed close and reopen with exact
+placed block state `42`, successful-placement statistic `1`, 121 persisted
+chunk records, zero pending saves at readiness, same-world writer rejection,
+different-world admission, and typed quota failure. The inspected reload
+capture is
+[/tmp/mclone-native-web-indexeddb-reload-probe-canvas.png](/tmp/mclone-native-web-indexeddb-reload-probe-canvas.png).
 
 Focused validation passed all 737 `mclone-server` library tests, the ten Web
 ownership locks, the `wasm32-unknown-unknown` Web client check, and the browser

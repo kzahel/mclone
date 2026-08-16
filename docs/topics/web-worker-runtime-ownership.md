@@ -785,11 +785,13 @@ could not reproduce this failure.
 
 Web bootstrap now consumes the server-owned complete saved-data key list.
 Tick autosave only queues record work and never polls the server while the
-browser owes IndexedDB completions; explicit flush and shutdown remain the
-durable fences. A background autosave error is retained in runner diagnostics
-without sacrificing the already-produced ordered updates. Shared diagnostics
-also count queued, drained, runner-emitted, and client-applied chunk lifecycle
-updates so native and Web can expose the same delivery contract.
+browser owes IndexedDB completions, and it uses the same 6,000-gameplay-tick
+cadence as native instead of continually re-queuing dirty records; explicit
+flush and shutdown remain the durable fences. A background autosave error is
+retained in runner diagnostics without sacrificing the already-produced
+ordered updates. Shared diagnostics also count queued, drained,
+runner-emitted, and client-applied chunk lifecycle updates so native and Web
+can expose the same delivery contract.
 
 The load-bearing persistent cardinal replay raises the production Graphics
 setting from 3 to 8, moves north three chunks, west three, climbs 128 blocks,

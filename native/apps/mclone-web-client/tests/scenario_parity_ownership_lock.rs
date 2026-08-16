@@ -206,6 +206,7 @@ fn integrated_server_startup_domain_is_an_opaque_rust_frame() {
         .next()
         .expect("Web tick autosave has a bounded source region");
     assert!(tick_autosave.contains("queue_indexed_db_persistence"));
+    assert!(tick_autosave.contains("INTEGRATED_SERVER_AUTOSAVE_INTERVAL_GAMEPLAY_TICKS"));
     assert!(!tick_autosave.contains("self.server.try_poll()"));
     assert!(!tick_autosave.contains("pending_persistence_save_count"));
 

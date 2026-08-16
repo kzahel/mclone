@@ -19,14 +19,15 @@ use mclone_protocol::{
 use mclone_server::{
     AuthoredWorldFixtureKind, ChunkLoadingProgressCell, ChunkLoadingProgressSnapshot,
     ChunkLoadingProgressStats, ChunkStoreError, ChunkStoreResult, DimensionRecord,
-    INITIAL_DAY_TIME, IntegratedServerRunner, LOCAL_REALM_BOOTSTRAP_SAVED_DATA_KEYS,
-    LightStatusMailboxKind, LocalRealmSession, ObserverSimulationInterest, PersistenceErrorKind,
-    PersistenceExecutorFailureLatch, PersistenceRecordAddress, PersistenceRecordBatch,
-    PersistenceRecordExecutor, PersistenceRecordKeyPart, PersistenceRecordMutation,
-    PersistenceRecordNamespace, PersistenceRecordPayload, PersistenceRecordRequest,
-    PersistenceRecordResponse, RecordExecutorWorldStore, ServerJobActor, ServerRunnerDiagnostics,
-    ServerRunnerError, ServerRunnerKind, ServerRunnerResult, ServerRunnerTickDiagnostics,
-    ServerUpdateEnvelope, WasmServerJobWorkerConfig, WorkerFrameMetrics, WorkerFrameTransportKind,
+    INITIAL_DAY_TIME, INTEGRATED_SERVER_AUTOSAVE_INTERVAL_GAMEPLAY_TICKS, IntegratedServerRunner,
+    LOCAL_REALM_BOOTSTRAP_SAVED_DATA_KEYS, LightStatusMailboxKind, LocalRealmSession,
+    ObserverSimulationInterest, PersistenceErrorKind, PersistenceExecutorFailureLatch,
+    PersistenceRecordAddress, PersistenceRecordBatch, PersistenceRecordExecutor,
+    PersistenceRecordKeyPart, PersistenceRecordMutation, PersistenceRecordNamespace,
+    PersistenceRecordPayload, PersistenceRecordRequest, PersistenceRecordResponse,
+    RecordExecutorWorldStore, ServerJobActor, ServerRunnerDiagnostics, ServerRunnerError,
+    ServerRunnerKind, ServerRunnerResult, ServerRunnerTickDiagnostics, ServerUpdateEnvelope,
+    WasmServerJobWorkerConfig, WorkerFrameMetrics, WorkerFrameTransportKind,
     WorldGenerationProfile, WorldMetadata, WorldStore, WorldStoreRequest, WorldgenMailboxKind,
     dimension_record_address, record_read_for_world_store_request, saved_data_record_address,
     world_metadata_record_address, world_store_completion_from_record_read,
@@ -3233,7 +3234,14 @@ impl McloneWebIntegratedServerWorker {
     }
 
     fn autosave_indexed_db_dirty_chunks(&mut self) -> Result<(), String> {
-        self.queue_indexed_db_persistence(self.server.game_time().is_multiple_of(6_000))
+        if !self
+            .server
+            .game_time()
+            .is_multiple_of(INTEGRATED_SERVER_AUTOSAVE_INTERVAL_GAMEPLAY_TICKS)
+        {
+            return Ok(());
+        }
+        self.queue_indexed_db_persistence(true)
     }
 
     fn queue_indexed_db_persistence(&mut self, save_world_metadata: bool) -> Result<(), String> {

@@ -146,9 +146,10 @@ pub use player_chunk_tracking::{
 };
 pub use players::ServerPlayerId;
 pub use runner::{
-    IntegratedServerRunner, LightStatusMailboxMetrics, ServerRunnerDiagnostics, ServerRunnerError,
-    ServerRunnerKind, ServerRunnerResult, ServerRunnerTickDiagnostics, ServerUpdateEnvelope,
-    WorkerFrameMetrics, WorkerFrameTransportKind,
+    INTEGRATED_SERVER_AUTOSAVE_INTERVAL_GAMEPLAY_TICKS, IntegratedServerRunner,
+    LightStatusMailboxMetrics, ServerRunnerDiagnostics, ServerRunnerError, ServerRunnerKind,
+    ServerRunnerResult, ServerRunnerTickDiagnostics, ServerUpdateEnvelope, WorkerFrameMetrics,
+    WorkerFrameTransportKind,
 };
 pub(crate) use scheduler::FluidTickList;
 pub use scheduler::{

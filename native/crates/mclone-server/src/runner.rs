@@ -566,6 +566,8 @@ pub struct ServerUpdateEnvelope {
     pub queued_age: std::time::Duration,
 }
 
+pub const INTEGRATED_SERVER_AUTOSAVE_INTERVAL_GAMEPLAY_TICKS: u64 = 6_000;
+
 #[cfg(not(target_arch = "wasm32"))]
 mod native {
     use std::path::PathBuf;
@@ -579,8 +581,6 @@ mod native {
     use crate::player_chunk_tracking::PlayerChunkTrackingPolicy;
 
     const DIAGNOSTICS_DETAIL_REFRESH_INTERVAL: Duration = Duration::from_millis(500);
-    const AUTOSAVE_INTERVAL_GAMEPLAY_TICKS: u64 = 6_000;
-
     fn duration_ms(duration: Duration) -> f64 {
         duration.as_secs_f64() * 1000.0
     }
@@ -1427,7 +1427,7 @@ mod native {
                 let mut report = server.try_simulation_tick_report_with_physics_steps(0)?;
                 if report
                     .simulation_tick
-                    .is_multiple_of(AUTOSAVE_INTERVAL_GAMEPLAY_TICKS)
+                    .is_multiple_of(INTEGRATED_SERVER_AUTOSAVE_INTERVAL_GAMEPLAY_TICKS)
                 {
                     server.save_dirty_chunks()?;
                     server.save_all_player_records()?;
