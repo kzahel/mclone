@@ -36,6 +36,8 @@ pub struct CelestialRenderState {
     pub settings: CelestialDebugSettings,
     pub orbital_phase: OrbitalPhase,
     pub solar_time_fraction: f32,
+    pub solar_direction: [f32; 3],
+    pub solar_elevation_degrees: f32,
     pub lunar_phase: LunarPhase,
     pub lunar_sample: LunarSample,
     pub effective_latitude_degrees: f32,

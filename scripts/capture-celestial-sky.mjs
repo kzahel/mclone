@@ -2,7 +2,7 @@
 
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 const repo = resolve(import.meta.dirname, "..");
@@ -48,6 +48,27 @@ const matrix = [
   ["sky-only-restored", OFF],
 ];
 const captures = matrix.map(([id, settings]) => capture(id, settings));
+captures.push(captureCenteredBody("square-sun", "sun", 0, 12));
+for (const [index, label] of [
+  "new",
+  "new-wax-crescent-mid",
+  "wax-crescent",
+  "crescent-first-quarter-mid",
+  "first-quarter",
+  "quarter-wax-gibbous-mid",
+  "wax-gibbous",
+  "gibbous-full-mid",
+  "full",
+  "full-wane-gibbous-mid",
+  "wane-gibbous",
+  "gibbous-last-quarter-mid",
+  "last-quarter",
+  "quarter-wane-crescent-mid",
+  "wane-crescent",
+  "crescent-new-mid",
+].entries()) {
+  captures.push(captureCenteredBody(`phase-${String(index).padStart(2, "0")}-${label}`, "moon", index / 16, (12 + index * 1.5) % 24));
+}
 captures.push(captureMenu());
 captures.push(captureStereo("stereo-full", matrix[8][1]));
 captures.push(captureStereo("stereo-off", OFF));
@@ -101,6 +122,48 @@ function capture(id, settings) {
   const path = resolve(output, `${id}.png`);
   const args = ["--screenshot", path, ...commonArgs(), ...celestialArgs(settings)];
   return fileReceipt(id, "mono", path, args, run(executable, args, repo));
+}
+
+function captureCenteredBody(id, body, phase, solarTimeHours) {
+  const probePath = resolve(output, `.${id}-probe.png`);
+  const settings = {
+    sun: true,
+    halo: body === "sun",
+    glow: false,
+    moon: body === "moon",
+    moonlight: false,
+    stars: "off",
+  };
+  const probeArgs = [
+    "--screenshot",
+    probePath,
+    "--width",
+    "320",
+    "--height",
+    "200",
+    ...commonSceneArgs(String(solarTimeHours)),
+    ...celestialArgs(settings, phase),
+  ];
+  const probeStdout = run(executable, probeArgs, repo);
+  const probe = parseCelestial(id, probeStdout);
+  unlinkSync(probePath);
+  const direction = body === "sun"
+    ? probe.evaluated.solar.direction
+    : probe.evaluated.lunar.direction;
+  const eye = [0, 112, 0];
+  const target = eye.map((value, index) => value + direction[index] * 100);
+  const path = resolve(output, `${id}.png`);
+  const args = [
+    "--screenshot",
+    path,
+    "--width",
+    "960",
+    "--height",
+    "540",
+    ...commonSceneArgs(String(solarTimeHours), target.join(",")),
+    ...celestialArgs(settings, phase),
+  ];
+  return fileReceipt(id, `mono-${body}-centered`, path, args, run(executable, args, repo));
 }
 
 function captureStereo(id, settings) {
@@ -179,7 +242,7 @@ function commonArgs() {
   return ["--width", "800", "--height", "500", ...commonSceneArgs()];
 }
 
-function commonSceneArgs() {
+function commonSceneArgs(solarTimeHours = "18.5", target = "0,212,0") {
   return [
     "--transient",
     "--asset-pack",
@@ -210,15 +273,15 @@ function commonSceneArgs() {
     "--season-solar-time-source",
     "manual",
     "--season-solar-time",
-    "18.5",
+    solarTimeHours,
     "--screenshot-eye",
     "0,112,0",
     "--screenshot-target",
-    "0,212,0",
+    target,
   ];
 }
 
-function celestialArgs(settings) {
+function celestialArgs(settings, phase = 0.5) {
   return [
     "--celestial-sun",
     String(settings.sun),
@@ -235,15 +298,12 @@ function celestialArgs(settings) {
     "--moon-phase-source",
     "manual-preview",
     "--moon-phase",
-    "0.5",
+    String(phase),
   ];
 }
 
 function fileReceipt(id, renderPath, path, args, stdout) {
-  const celestialLine = stdout
-    .split(/\r?\n/)
-    .find((line) => line.startsWith("MCLONE_CELESTIAL_STATE "));
-  if (!celestialLine) throw new Error(`${id} omitted MCLONE_CELESTIAL_STATE`);
+  const celestial = parseCelestial(id, stdout);
   const seasonalLine = stdout
     .split(/\r?\n/)
     .find((line) => line.startsWith("MCLONE_SEASONAL_APPEARANCE_STATE "));
@@ -259,8 +319,16 @@ function fileReceipt(id, renderPath, path, args, stdout) {
       ? { sections: Number(summary[1]), drawnSections: Number(summary[2]), guiCommands: Number(summary[3]) }
       : null,
     seasonal: seasonalLine ? JSON.parse(seasonalLine.slice("MCLONE_SEASONAL_APPEARANCE_STATE ".length)) : null,
-    celestial: JSON.parse(celestialLine.slice("MCLONE_CELESTIAL_STATE ".length)),
+    celestial,
   };
+}
+
+function parseCelestial(id, stdout) {
+  const line = stdout
+    .split(/\r?\n/)
+    .find((entry) => entry.startsWith("MCLONE_CELESTIAL_STATE "));
+  if (!line) throw new Error(`${id} omitted MCLONE_CELESTIAL_STATE`);
+  return JSON.parse(line.slice("MCLONE_CELESTIAL_STATE ".length));
 }
 
 function valueAfter(flag) {

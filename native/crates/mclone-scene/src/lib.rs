@@ -5875,6 +5875,8 @@ impl McloneSceneHost {
             settings: self.celestial_debug,
             orbital_phase,
             solar_time_fraction: solar_time_fraction as f32,
+            solar_direction: solar.direction,
+            solar_elevation_degrees: solar.elevation_degrees,
             lunar_phase,
             lunar_sample,
             effective_latitude_degrees: effective_latitude_degrees as f32,

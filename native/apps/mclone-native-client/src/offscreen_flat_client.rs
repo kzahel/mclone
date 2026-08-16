@@ -2007,6 +2007,10 @@ pub(crate) fn celestial_receipt_json(
             "calendarDay": PreviewCalendarDate::from_orbital_phase(state.orbital_phase).day(),
             "orbitalPhase": state.orbital_phase.turns(),
             "solarTimeFraction": state.solar_time_fraction,
+            "solar": {
+                "direction": state.solar_direction,
+                "elevationDegrees": state.solar_elevation_degrees,
+            },
             "latitudeDegrees": state.effective_latitude_degrees,
             "siderealAngleDegrees": state.local_sidereal_angle_turns * 360.0,
             "lunar": {

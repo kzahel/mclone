@@ -2208,6 +2208,8 @@ mod tests {
             settings,
             orbital_phase: OrbitalPhase::NORTHWARD_EQUINOX,
             solar_time_fraction: 0.0,
+            solar_direction: [0.0, 1.0, 0.0],
+            solar_elevation_degrees: 90.0,
             lunar_phase: LunarPhase::FULL,
             lunar_sample,
             effective_latitude_degrees: 0.0,
