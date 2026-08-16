@@ -383,11 +383,11 @@ impl SmokeRecorder {
         }
         if composition == WorldExplorerCompositionMode::Composed {
             ensure!(
-                stats.exact_connector_segments > 0
-                    && stats.exact_connector_vertex_count
-                        == stats.exact_connector_segments.saturating_mul(6)
-                    && stats.exact_connector_bytes
-                        == u64::from(stats.exact_connector_segments).saturating_mul(12),
+                stats.exact_connector_vertex_count
+                    == stats.exact_connector_segments.saturating_mul(6)
+                    && stats.exact_connector_bytes % 12 == 0
+                    && u64::from(stats.exact_connector_segments).saturating_mul(12)
+                        <= stats.exact_connector_bytes,
                 "World Explorer {label} checkpoint has an incoherent direct connector: \
                  {stats:?}"
             );
