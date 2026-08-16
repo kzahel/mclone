@@ -31,7 +31,7 @@ Script options:
   --xr-underwater-mode midpoint|per-eye
                          Select XR underwater detection. Requires --smoke
                          mclone. Default: midpoint.
-  --xr-debug-ui none|pause|controls|graphics|seasonal-debug
+  --xr-debug-ui none|pause|controls|graphics|seasonal-debug|celestial-debug
                          Hold an XR debug UI panel open after startup for
                          headset UI validation. Requires --smoke mclone.
   --xr-render-mode dual-per-eye|array-per-eye|array-multiview
