@@ -169,6 +169,7 @@ fn main() -> Result<()> {
                 "MCLONE_SEASONAL_APPEARANCE_STATE {}",
                 report.seasonal_appearance_receipt_json
             );
+            println!("MCLONE_CELESTIAL_STATE {}", report.celestial_receipt_json);
             Ok(())
         }
         Cli::WorldgenShowcase { options } => {
@@ -298,6 +299,7 @@ fn main() -> Result<()> {
                 "MCLONE_SEASONAL_APPEARANCE_STATE {}",
                 report.seasonal_appearance_receipt_json
             );
+            println!("MCLONE_CELESTIAL_STATE {}", report.celestial_receipt_json);
             Ok(())
         }
         Cli::HeadlessActorReviewSheet { options } => {

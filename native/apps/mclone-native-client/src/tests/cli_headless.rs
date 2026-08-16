@@ -334,6 +334,7 @@ fn cli_parses_xr_emulation_screenshot_and_keyboard_input() {
                 input_frames: 12,
                 pause_panel: false,
                 season_preview: Default::default(),
+                celestial_debug: Default::default(),
             },
         }
     );
@@ -632,6 +633,7 @@ fn cli_parses_full_frame_screenshot_options() {
                 eye: Some([1.5, 62.25, -3.0]),
                 target: Some([8.0, 64.0, 8.0]),
                 season_preview: Default::default(),
+                celestial_debug: Default::default(),
             },
         }
     );
@@ -711,6 +713,50 @@ fn cli_parses_typed_season_preview_capture_options() {
     ])
     .unwrap_err();
     assert!(error.to_string().contains("requires --season-recent-snow"));
+}
+
+#[test]
+fn cli_parses_every_typed_celestial_capture_control() {
+    let cli = Cli::parse([
+        "--screenshot".to_owned(),
+        "/tmp/mclone-celestial.png".to_owned(),
+        "--celestial-sun".to_owned(),
+        "false".to_owned(),
+        "--celestial-sun-halo".to_owned(),
+        "false".to_owned(),
+        "--celestial-horizon-glow".to_owned(),
+        "false".to_owned(),
+        "--celestial-moon".to_owned(),
+        "false".to_owned(),
+        "--celestial-moonlight".to_owned(),
+        "false".to_owned(),
+        "--celestial-stars".to_owned(),
+        "quarter".to_owned(),
+        "--moon-phase-source".to_owned(),
+        "manual-preview".to_owned(),
+        "--moon-phase".to_owned(),
+        "0.25".to_owned(),
+    ])
+    .unwrap();
+    let Cli::HeadlessScreenshot { options } = cli else {
+        panic!("expected screenshot mode")
+    };
+    assert_eq!(
+        options.celestial_debug,
+        mclone_season::CelestialDebugSettings {
+            sun_body_enabled: false,
+            sun_halo_enabled: false,
+            horizon_glow_enabled: false,
+            moon_body_enabled: false,
+            moonlight_enabled: false,
+            moon_phase_source: mclone_season::MoonPhaseSource::ManualPreview,
+            manual_lunar_phase: mclone_season::LunarPhase::FIRST_QUARTER,
+            star_density: mclone_season::CelestialStarDensity::Quarter,
+        }
+    );
+
+    let error = Cli::parse(["--celestial-stars".to_owned(), "off".to_owned()]).unwrap_err();
+    assert!(error.to_string().contains("require --screenshot"));
 }
 
 #[test]
@@ -831,6 +877,14 @@ fn parse_screenshot_ui_accepts_named_screens() {
         parse_screenshot_ui_arg("--screenshot-ui", Some("options-seasonal-debug".to_owned()),)
             .unwrap(),
         HeadlessScreenshotUi::OptionsSeasonalDebugPause
+    );
+    assert_eq!(
+        parse_screenshot_ui_arg(
+            "--screenshot-ui",
+            Some("options-celestial-debug".to_owned()),
+        )
+        .unwrap(),
+        HeadlessScreenshotUi::OptionsCelestialDebugPause
     );
     assert_eq!(
         parse_screenshot_ui_arg("--screenshot-ui", Some("storage-profile-title".to_owned()))

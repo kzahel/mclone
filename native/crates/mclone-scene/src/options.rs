@@ -31,6 +31,7 @@ pub enum XrDebugUiScreen {
     Controls,
     Graphics,
     SeasonalDebug,
+    CelestialDebug,
 }
 
 impl XrDebugUiScreen {
@@ -40,8 +41,11 @@ impl XrDebugUiScreen {
             "controls" | "help" => Ok(Self::Controls),
             "graphics" | "video" => Ok(Self::Graphics),
             "seasonal" | "seasonal-debug" | "seasons" => Ok(Self::SeasonalDebug),
+            "celestial" | "celestial-debug" | "sky" => Ok(Self::CelestialDebug),
             value => {
-                bail!("{flag} must be pause, controls, graphics, or seasonal-debug, got `{value}`")
+                bail!(
+                    "{flag} must be pause, controls, graphics, seasonal-debug, or celestial-debug, got `{value}`"
+                )
             }
         }
     }
@@ -302,6 +306,10 @@ mod tests {
         assert_eq!(
             XrDebugUiScreen::parse_label("--xr-debug-ui", "seasonal-debug").unwrap(),
             XrDebugUiScreen::SeasonalDebug,
+        );
+        assert_eq!(
+            XrDebugUiScreen::parse_label("--xr-debug-ui", "celestial-debug").unwrap(),
+            XrDebugUiScreen::CelestialDebug,
         );
     }
 

@@ -1,9 +1,11 @@
 #![forbid(unsafe_code)]
 
 pub use mclone_season::{
-    LatitudeSource, LocalSeasonLabel, LocalSnowPulse, ORBITAL_PHASE_STEPS, OrbitalMilestone,
-    OrbitalPhase, PREVIEW_CALENDAR_DAYS, PREVIEW_SOLAR_TIME_MINUTES_PER_DAY, PreviewCalendarDate,
-    PreviewLatitude, PreviewSolarTime, SeasonPreviewSettings, SolarTimeSource, UnitU16,
+    CelestialDebugSettings, CelestialStarDensity, LUNAR_PHASE_STEPS, LatitudeSource,
+    LocalSeasonLabel, LocalSnowPulse, LunarPhase, LunarPhaseLabel, MoonPhaseSource,
+    ORBITAL_PHASE_STEPS, OrbitalMilestone, OrbitalPhase, PREVIEW_CALENDAR_DAYS,
+    PREVIEW_SOLAR_TIME_MINUTES_PER_DAY, PreviewCalendarDate, PreviewLatitude, PreviewSolarTime,
+    SeasonPreviewSettings, SolarTimeSource, UnitU16,
 };
 
 use mclone_input::{
@@ -1375,6 +1377,8 @@ pub enum GameOptionsCategory {
     /// Developer calendar, solar, local-climate, and appearance controls
     /// nested under Debug rather than listed on the top-level Options hub.
     SeasonalDebug,
+    /// Developer celestial appearance and isolated renderer-cost controls.
+    CelestialDebug,
     StorageProfile,
 }
 
@@ -1398,6 +1402,7 @@ impl GameOptionsCategory {
             Self::LocalPlay => "Local Play",
             Self::Debug => "Debug",
             Self::SeasonalDebug => "Seasonal Debug",
+            Self::CelestialDebug => "Celestial Debug",
             Self::StorageProfile => "Storage & Profile",
         }
     }
@@ -1412,6 +1417,7 @@ impl GameOptionsCategory {
             Self::LocalPlay => "LOCAL PLAY",
             Self::Debug => "DEBUG",
             Self::SeasonalDebug => "SEASONAL DEBUG",
+            Self::CelestialDebug => "CELESTIAL DEBUG",
             Self::StorageProfile => "STORAGE & PROFILE",
         }
     }
@@ -2042,6 +2048,7 @@ pub enum GameUiAction {
     SetTerrainPresentation(GameTerrainPresentation),
     SetFogSettings(GameFogSettings),
     SetSeasonPreview(SeasonPreviewSettings),
+    SetCelestialDebug(CelestialDebugSettings),
     ToggleFullbright,
     TogglePlayerCollisionBox,
     ToggleFirstPersonPlayer,
@@ -2615,6 +2622,21 @@ pub struct GameSeasonalDebugState {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GameCelestialDebugState {
+    pub calendar_day: u16,
+    pub solar_time_hours: f32,
+    pub named_phase: LunarPhaseLabel,
+    pub illuminated_fraction: f32,
+    pub moon_elevation_degrees: f32,
+    pub effective_latitude_degrees: f32,
+    pub sidereal_angle_degrees: f32,
+    pub submitted_star_count: u32,
+    pub optional_draw_count: u32,
+    pub feature_buffer_writes: u32,
+    pub resident_resource_bytes: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GameUiRenderState {
     pub lobby_scenario_available: bool,
     pub world_catalog: WorldCatalogUiState,
@@ -2631,6 +2653,8 @@ pub struct GameUiRenderState {
     pub fog: GameFogSettings,
     pub season_preview: SeasonPreviewSettings,
     pub seasonal_debug: Option<GameSeasonalDebugState>,
+    pub celestial_debug_settings: CelestialDebugSettings,
+    pub celestial_debug: Option<GameCelestialDebugState>,
     pub force_fullbright: bool,
     pub player_collision_box_visible: bool,
     pub first_person_player_visible: bool,
@@ -2683,6 +2707,8 @@ impl Default for GameUiRenderState {
             fog: GameFogSettings::default(),
             season_preview: SeasonPreviewSettings::default(),
             seasonal_debug: None,
+            celestial_debug_settings: CelestialDebugSettings::default(),
+            celestial_debug: None,
             force_fullbright: false,
             player_collision_box_visible: false,
             first_person_player_visible: false,

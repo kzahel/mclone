@@ -6,11 +6,11 @@
 //! sunrise/sunset glow `TRIANGLE_FAN` (`:1717`). Drawn before the chunk pass with
 //! depth writes off, into a rotation-only (camera-at-infinity) view-projection.
 //!
-//! The textured sun is the first Phase 3 celestial body. Moon phases and the
-//! star field remain follow-up work. Triangle fans are expanded to indexed
-//! triangle lists since wgpu has no fan topology.
+//! The pass also owns the original square sun/continuous moon, the retained
+//! Java sun/moon presentation, and bounded static star catalogs. Triangle fans
+//! are expanded to indexed triangle lists since wgpu has no fan topology.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::num::{NonZeroU32, NonZeroU64};
 use std::ops::Range;
 
@@ -54,7 +54,9 @@ const REFERENCE_MOON_MODE: f32 = 4.0;
 const MCLONE_SUN_HALO_ANGULAR_DIAMETER_DEGREES: f32 = 2.4;
 pub const MCLONE_STAR_COUNT: u32 = 2_048;
 pub const MCLONE_STAR_CATALOG_MAX_COUNT: u32 = 4_096;
-const STAR_INSTANCE_FLOAT_COUNT: usize = 5;
+pub const REFERENCE_STAR_CANDIDATE_COUNT: u32 = 1_500;
+pub const REFERENCE_STAR_COUNT: u32 = 780;
+const STAR_INSTANCE_FLOAT_COUNT: usize = 6;
 const STAR_INSTANCE_BYTE_SIZE: wgpu::BufferAddress =
     (STAR_INSTANCE_FLOAT_COUNT * std::mem::size_of::<f32>()) as wgpu::BufferAddress;
 
@@ -76,6 +78,29 @@ const GLOW_VERTEX_COUNT: usize = GLOW_RING_COUNT + 1;
 type SkyVertex = [f32; SKY_VERTEX_FLOAT_COUNT];
 type SunVertex = [f32; SUN_VERTEX_FLOAT_COUNT];
 type StarInstance = [f32; STAR_INSTANCE_FLOAT_COUNT];
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct CelestialRenderStats {
+    pub sun_body_draws: u32,
+    pub sun_halo_draws: u32,
+    pub horizon_glow_draws: u32,
+    pub moon_body_draws: u32,
+    pub star_draws: u32,
+    pub submitted_star_count: u32,
+    pub catalog_star_count: u32,
+    pub feature_buffer_writes: u32,
+    pub resident_resource_bytes: u64,
+}
+
+impl CelestialRenderStats {
+    pub const fn optional_draw_count(self) -> u32 {
+        self.sun_body_draws
+            + self.sun_halo_draws
+            + self.horizon_glow_draws
+            + self.moon_body_draws
+            + self.star_draws
+    }
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SunTextureAssets {
@@ -234,6 +259,10 @@ pub struct SkyRenderer {
     star_bind_group: wgpu::BindGroup,
     star_instance_buffer: wgpu::Buffer,
     star_count: u32,
+    reference_star_instance_buffer: wgpu::Buffer,
+    reference_star_count: u32,
+    celestial_resident_resource_bytes: u64,
+    last_celestial_stats: Cell<CelestialRenderStats>,
     color_transform: RenderTargetColorTransform,
     color_format: wgpu::TextureFormat,
     multiview: RefCell<Option<SkyMultiviewRenderer>>,
@@ -649,6 +678,20 @@ impl SkyRenderer {
             contents: &star_instance_bytes(&star_catalog),
             usage: wgpu::BufferUsages::VERTEX,
         });
+        let reference_star_catalog = reference_star_catalog();
+        debug_assert_eq!(reference_star_catalog.len() as u32, REFERENCE_STAR_COUNT);
+        let reference_star_count = reference_star_catalog.len() as u32;
+        let reference_star_instance_buffer =
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("mclone_reference_star_catalog"),
+                contents: &star_instance_bytes(&reference_star_catalog),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
+        let celestial_resident_resource_bytes = (star_count + reference_star_count) as u64
+            * STAR_INSTANCE_BYTE_SIZE
+            + celestial_vertex_slot_size() * u64::from(PER_VIEW_UNIFORM_SLOT_COUNT)
+            + sun_texture_assets.rgba.len() as u64
+            + moon_texture_assets.rgba.len() as u64;
 
         Self {
             disc_pipeline,
@@ -676,6 +719,10 @@ impl SkyRenderer {
             star_bind_group,
             star_instance_buffer,
             star_count,
+            reference_star_instance_buffer,
+            reference_star_count,
+            celestial_resident_resource_bytes,
+            last_celestial_stats: Cell::new(CelestialRenderStats::default()),
             color_transform: render_config.target_color_transform(),
             color_format: render_config.color_format,
             multiview: RefCell::new(None),
@@ -688,6 +735,21 @@ impl SkyRenderer {
 
     pub fn moon_texture_assets(&self) -> &MoonTextureAssets {
         &self.moon_texture_assets
+    }
+
+    pub fn celestial_stats(&self) -> CelestialRenderStats {
+        self.last_celestial_stats.get()
+    }
+
+    fn star_catalog(&self, reference_profile: bool) -> (&wgpu::Buffer, u32) {
+        if reference_profile {
+            (
+                &self.reference_star_instance_buffer,
+                self.reference_star_count,
+            )
+        } else {
+            (&self.star_instance_buffer, self.star_count)
+        }
     }
 
     /// Clears the color attachment to `clear_color` and draws the sky disc (tinted
@@ -871,12 +933,23 @@ impl SkyRenderer {
             );
             range
         });
+        let (star_instance_buffer, star_catalog_count) =
+            self.star_catalog(sky_state.is_reference_profile());
         let star_draw =
-            celestial_star_draw(sky_state, self.star_count).map(|(count, parameters)| {
+            celestial_star_draw(sky_state, star_catalog_count).map(|(count, parameters)| {
                 let bytes = star_uniform_bytes(sky_view_projection, parameters);
                 let offset = self.star_uniforms.write_slot(queue, view_slot, &bytes);
                 (count, offset)
             });
+        let celestial_stats = prepared_celestial_stats(
+            sun_range.is_some(),
+            halo_range.is_some(),
+            glow_range.is_some(),
+            moon_range.is_some(),
+            star_draw.map_or(0, |(count, _)| count),
+            star_catalog_count,
+            self.celestial_resident_resource_bytes,
+        );
 
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("mclone_sky_render_pass"),
@@ -927,9 +1000,10 @@ impl SkyRenderer {
         if let Some((star_count, star_uniform_offset)) = star_draw {
             pass.set_pipeline(&self.star_pipeline);
             pass.set_bind_group(0, &self.star_bind_group, &[star_uniform_offset]);
-            pass.set_vertex_buffer(0, self.star_instance_buffer.slice(..));
+            pass.set_vertex_buffer(0, star_instance_buffer.slice(..));
             pass.draw(0..6, 0..star_count);
         }
+        self.last_celestial_stats.set(celestial_stats);
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -995,10 +1069,21 @@ impl SkyRenderer {
             self.prepare_vertices(queue, clear_color, sky_state);
         let renderer = self.multiview_renderer(device)?;
         renderer.write_uniforms(queue, sky_view_projections);
-        let star_draw = celestial_star_draw(sky_state, self.star_count);
+        let (star_instance_buffer, star_catalog_count) =
+            self.star_catalog(sky_state.is_reference_profile());
+        let star_draw = celestial_star_draw(sky_state, star_catalog_count);
         if let Some((_, parameters)) = star_draw {
             renderer.write_star_uniforms(queue, sky_view_projections, parameters);
         }
+        let celestial_stats = prepared_celestial_stats(
+            sun_range.is_some(),
+            halo_range.is_some(),
+            glow_range.is_some(),
+            moon_range.is_some(),
+            star_draw.map_or(0, |(count, _)| count),
+            star_catalog_count,
+            self.celestial_resident_resource_bytes,
+        );
 
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("mclone_sky_multiview_render_pass"),
@@ -1049,9 +1134,10 @@ impl SkyRenderer {
         if let Some((star_count, _)) = star_draw {
             pass.set_pipeline(&renderer.star_pipeline);
             pass.set_bind_group(0, &renderer.star_bind_group, &[]);
-            pass.set_vertex_buffer(0, self.star_instance_buffer.slice(..));
+            pass.set_vertex_buffer(0, star_instance_buffer.slice(..));
             pass.draw(0..6, 0..star_count);
         }
+        self.last_celestial_stats.set(celestial_stats);
         Ok(())
     }
 
@@ -1537,7 +1623,7 @@ fn make_star_pipeline(
                     wgpu::VertexAttribute {
                         offset: 16,
                         shader_location: 1,
-                        format: wgpu::VertexFormat::Float32,
+                        format: wgpu::VertexFormat::Float32x2,
                     },
                 ],
             }],
@@ -1583,6 +1669,7 @@ fn mclone_star_catalog() -> Vec<StarInstance> {
             0.095,
             1.0,
             color_class,
+            0.0,
         ]);
     }
     let mut state = 0x6d2b_79f5_u32;
@@ -1593,10 +1680,96 @@ fn mclone_star_catalog() -> Vec<StarInstance> {
         let brightness = 0.28 + brightness_seed.powi(3) * 0.72;
         let size = 0.025 + brightness * 0.055;
         let color_class = (next_random(&mut state) % 3) as f32;
-        catalog.push([right_ascension, declination, size, brightness, color_class]);
+        let orientation = random_unit(&mut state) * std::f32::consts::TAU;
+        catalog.push([
+            right_ascension,
+            declination,
+            size,
+            brightness,
+            color_class,
+            orientation,
+        ]);
     }
     catalog.sort_by(|left, right| right[3].total_cmp(&left[3]));
     catalog
+}
+
+/// Exact accepted candidates from Java 1.17.1 `LevelRenderer.drawStars`.
+///
+/// Java builds four static vertices per accepted candidate. The shared GPU
+/// path stores the equivalent direction, angular half-size, and random roll,
+/// then expands the same square from one immutable instance on the GPU.
+fn reference_star_catalog() -> Vec<StarInstance> {
+    let mut random = JavaRandom::new(10_842);
+    let mut catalog = Vec::with_capacity(REFERENCE_STAR_CANDIDATE_COUNT as usize);
+    for _ in 0..REFERENCE_STAR_CANDIDATE_COUNT {
+        let mut x = f64::from(random.next_float() * 2.0 - 1.0);
+        let mut y = f64::from(random.next_float() * 2.0 - 1.0);
+        let mut z = f64::from(random.next_float() * 2.0 - 1.0);
+        let half_size = f64::from(0.15_f32 + random.next_float() * 0.1);
+        let radius_squared = x * x + y * y + z * z;
+        if !(0.01..1.0).contains(&radius_squared) {
+            continue;
+        }
+        let inverse_radius = radius_squared.sqrt().recip();
+        x *= inverse_radius;
+        y *= inverse_radius;
+        z *= inverse_radius;
+        let orientation = random.next_double() * std::f64::consts::TAU;
+
+        // Map the reference Y-up star sphere through its fixed -90° Y rig
+        // into Mclone's +X east, +Y up, +Z south horizon convention. At zero
+        // sidereal angle the star shader reconstructs this exact direction.
+        let right_ascension =
+            (-z).atan2(y).rem_euclid(std::f64::consts::TAU) / std::f64::consts::TAU;
+        let declination = (-x).asin();
+        let angular_size = 2.0 * (half_size / 100.0).atan().to_degrees();
+        catalog.push([
+            right_ascension as f32,
+            declination as f32,
+            angular_size as f32,
+            1.0,
+            1.0,
+            orientation as f32,
+        ]);
+    }
+    catalog
+}
+
+#[derive(Clone, Copy)]
+struct JavaRandom {
+    seed: u64,
+}
+
+impl JavaRandom {
+    const MULTIPLIER: u64 = 25_214_903_917;
+    const ADDEND: u64 = 11;
+    const MASK: u64 = (1_u64 << 48) - 1;
+
+    fn new(seed: i64) -> Self {
+        Self {
+            seed: (seed as u64 ^ Self::MULTIPLIER) & Self::MASK,
+        }
+    }
+
+    fn next_bits(&mut self, bits: u32) -> u32 {
+        self.seed = self
+            .seed
+            .wrapping_mul(Self::MULTIPLIER)
+            .wrapping_add(Self::ADDEND)
+            & Self::MASK;
+        (self.seed >> (48 - bits)) as u32
+    }
+
+    fn next_float(&mut self) -> f32 {
+        self.next_bits(24) as f32 / 16_777_216.0
+    }
+
+    fn next_double(&mut self) -> f64 {
+        let upper = u64::from(self.next_bits(26));
+        let lower = u64::from(self.next_bits(27));
+        ((upper << 27) + lower) as f64 / (1_u64 << 53) as f64
+    }
 }
 
 fn next_random(state: &mut u32) -> u32 {
@@ -1614,8 +1787,13 @@ fn celestial_star_draw(sky_state: SkyRenderState, full_count: u32) -> Option<(u3
     if count == 0 {
         return None;
     }
-    let moon_suppression = celestial.lunar_sample.moonlight_factor * 0.22;
-    let visibility = (celestial.star_visibility * (1.0 - moon_suppression)).clamp(0.0, 1.0);
+    let visibility = if let Some(reference_brightness) = sky_state.reference_star_brightness() {
+        reference_brightness
+    } else {
+        let moon_suppression = celestial.lunar_sample.moonlight_factor * 0.22;
+        celestial.star_visibility * (1.0 - moon_suppression)
+    }
+    .clamp(0.0, 1.0);
     if visibility <= 0.001 {
         return None;
     }
@@ -1628,6 +1806,33 @@ fn celestial_star_draw(sky_state: SkyRenderState, full_count: u32) -> Option<(u3
             0.0,
         ],
     ))
+}
+
+fn prepared_celestial_stats(
+    sun_body: bool,
+    sun_halo: bool,
+    horizon_glow: bool,
+    moon_body: bool,
+    submitted_star_count: u32,
+    catalog_star_count: u32,
+    resident_resource_bytes: u64,
+) -> CelestialRenderStats {
+    let feature_buffer_writes = u32::from(sun_body)
+        + u32::from(sun_halo)
+        + u32::from(horizon_glow)
+        + u32::from(moon_body)
+        + u32::from(submitted_star_count > 0);
+    CelestialRenderStats {
+        sun_body_draws: u32::from(sun_body),
+        sun_halo_draws: u32::from(sun_halo),
+        horizon_glow_draws: u32::from(horizon_glow),
+        moon_body_draws: u32::from(moon_body),
+        star_draws: u32::from(submitted_star_count > 0),
+        submitted_star_count,
+        catalog_star_count,
+        feature_buffer_writes,
+        resident_resource_bytes,
+    }
 }
 
 fn star_instance_bytes(instances: &[StarInstance]) -> Vec<u8> {
@@ -2001,6 +2206,8 @@ mod tests {
         .unwrap();
         CelestialRenderState {
             settings,
+            orbital_phase: OrbitalPhase::NORTHWARD_EQUINOX,
+            solar_time_fraction: 0.0,
             lunar_phase: LunarPhase::FULL,
             lunar_sample,
             effective_latitude_degrees: 0.0,
@@ -2191,6 +2398,57 @@ mod tests {
         off.star_density = mclone_season::CelestialStarDensity::Off;
         assert!(
             celestial_star_draw(base.with_celestial(celestial(off)), MCLONE_STAR_COUNT).is_none()
+        );
+    }
+
+    #[test]
+    fn retained_star_catalog_matches_java_10842_candidate_stream() {
+        let catalog = reference_star_catalog();
+        assert_eq!(catalog.len(), REFERENCE_STAR_COUNT as usize);
+        assert_eq!(catalog, reference_star_catalog());
+        assert_eq!(catalog[0][0].to_bits(), 0x3f67_9c06);
+        assert_eq!(catalog[0][1].to_bits(), 0x3f0f_bf68);
+        assert_eq!(catalog[0][2].to_bits(), 0x3e30_3a8d);
+        assert_eq!(catalog[0][5].to_bits(), 0x408e_eb9c);
+        assert!(
+            catalog
+                .iter()
+                .all(|star| (0.171..=0.287).contains(&star[2]))
+        );
+    }
+
+    #[test]
+    fn celestial_cost_receipt_reports_exact_optional_work() {
+        let resident = 48_000;
+        assert_eq!(
+            prepared_celestial_stats(false, false, false, false, 0, MCLONE_STAR_COUNT, resident),
+            CelestialRenderStats {
+                catalog_star_count: MCLONE_STAR_COUNT,
+                resident_resource_bytes: resident,
+                ..CelestialRenderStats::default()
+            }
+        );
+        assert_eq!(
+            prepared_celestial_stats(
+                true,
+                true,
+                true,
+                true,
+                MCLONE_STAR_COUNT,
+                MCLONE_STAR_COUNT,
+                resident,
+            ),
+            CelestialRenderStats {
+                sun_body_draws: 1,
+                sun_halo_draws: 1,
+                horizon_glow_draws: 1,
+                moon_body_draws: 1,
+                star_draws: 1,
+                submitted_star_count: MCLONE_STAR_COUNT,
+                catalog_star_count: MCLONE_STAR_COUNT,
+                feature_buffer_writes: 5,
+                resident_resource_bytes: resident,
+            }
         );
     }
 

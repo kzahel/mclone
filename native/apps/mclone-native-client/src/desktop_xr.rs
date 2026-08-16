@@ -1359,6 +1359,7 @@ fn xr_debug_ui_screen_from_desktop(screen: CliXrDebugUiScreen) -> SceneXrDebugUi
         CliXrDebugUiScreen::Controls => SceneXrDebugUiScreen::Controls,
         CliXrDebugUiScreen::Graphics => SceneXrDebugUiScreen::Graphics,
         CliXrDebugUiScreen::SeasonalDebug => SceneXrDebugUiScreen::SeasonalDebug,
+        CliXrDebugUiScreen::CelestialDebug => SceneXrDebugUiScreen::CelestialDebug,
     }
 }
 

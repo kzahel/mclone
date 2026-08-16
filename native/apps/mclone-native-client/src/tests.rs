@@ -31,6 +31,7 @@ fn screenshot_cli(
             eye: None,
             target: None,
             season_preview: Default::default(),
+            celestial_debug: Default::default(),
         },
     }
 }

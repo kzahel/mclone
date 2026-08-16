@@ -5786,6 +5786,10 @@ impl McloneSceneHost {
                 parent: mclone_ui::GameOptionsParent::Pause,
                 category: mclone_ui::GameOptionsCategory::SeasonalDebug,
             },
+            XrDebugUiScreen::CelestialDebug => GameScreen::OptionsCategory {
+                parent: mclone_ui::GameOptionsParent::Pause,
+                category: mclone_ui::GameOptionsCategory::CelestialDebug,
+            },
         };
         if self.ui.screen() != Some(desired_screen) {
             self.ui.set_screen(Some(desired_screen));
@@ -6446,6 +6450,11 @@ impl ClientExperienceSettingsHost for McloneSceneHost {
 
     fn set_season_preview(&mut self, settings: SeasonPreviewSettings) -> Result<()> {
         self.season_preview = settings;
+        Ok(())
+    }
+
+    fn set_celestial_debug(&mut self, settings: CelestialDebugSettings) -> Result<()> {
+        self.celestial_debug = settings;
         Ok(())
     }
 

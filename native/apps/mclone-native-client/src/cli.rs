@@ -18,8 +18,9 @@ use mclone_render::placement::{EmbeddedChunkRegion, WorldPlacement};
 use mclone_render_session::EngineCameraViewMode;
 use mclone_scene::{TerrainHorizonDiagnostic, WorldgenLensLayer};
 use mclone_season::{
-    LatitudeSource, LocalSnowPulse, OrbitalPhase, PreviewLatitude, PreviewSolarTime,
-    SeasonPreviewSettings, SolarTimeSource, UnitU16,
+    CelestialDebugSettings, CelestialStarDensity, LatitudeSource, LocalSnowPulse, LunarPhase,
+    MoonPhaseSource, OrbitalPhase, PreviewLatitude, PreviewSolarTime, SeasonPreviewSettings,
+    SolarTimeSource, UnitU16,
 };
 use mclone_server::SimulationCadenceConfig;
 use mclone_ui::{
@@ -77,6 +78,12 @@ pub(crate) const DESKTOP_LOCAL_ARG_FLAGS: &[&str] = &[
     "--adaptive-render-admission-budget",
     "--asset-pack",
     "--cadence",
+    "--celestial-horizon-glow",
+    "--celestial-moon",
+    "--celestial-moonlight",
+    "--celestial-stars",
+    "--celestial-sun",
+    "--celestial-sun-halo",
     "--desktop-xr",
     "--first-person-player",
     "--frame-accounting",
@@ -106,6 +113,8 @@ pub(crate) const DESKTOP_LOCAL_ARG_FLAGS: &[&str] = &[
     "--movement-frame-speed",
     "--movement-perf",
     "--movement-steps",
+    "--moon-phase",
+    "--moon-phase-source",
     "--no-window",
     "--path-radius",
     "--platform-profile",
@@ -337,6 +346,7 @@ pub(crate) struct HeadlessScreenshotOptions {
     pub(crate) eye: Option<[f32; 3]>,
     pub(crate) target: Option<[f32; 3]>,
     pub(crate) season_preview: SeasonPreviewSettings,
+    pub(crate) celestial_debug: CelestialDebugSettings,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -405,6 +415,7 @@ pub(crate) struct XrEmulationScreenshotOptions {
     /// ordinary stereo gameplay HUD.
     pub(crate) pause_panel: bool,
     pub(crate) season_preview: SeasonPreviewSettings,
+    pub(crate) celestial_debug: CelestialDebugSettings,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -483,6 +494,7 @@ pub(crate) enum XrDebugUiScreen {
     Controls,
     Graphics,
     SeasonalDebug,
+    CelestialDebug,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -536,6 +548,7 @@ pub(crate) enum HeadlessScreenshotUi {
     OptionsLocalPlayPause,
     OptionsDebugPause,
     OptionsSeasonalDebugPause,
+    OptionsCelestialDebugPause,
     StorageProfileTitle,
     StorageFactoryConfirm,
     ServerSettingsPause,
@@ -591,6 +604,10 @@ impl HeadlessScreenshotUi {
             Self::OptionsSeasonalDebugPause => Some(GameScreen::OptionsCategory {
                 parent: GameOptionsParent::Pause,
                 category: GameOptionsCategory::SeasonalDebug,
+            }),
+            Self::OptionsCelestialDebugPause => Some(GameScreen::OptionsCategory {
+                parent: GameOptionsParent::Pause,
+                category: GameOptionsCategory::CelestialDebug,
             }),
             Self::StorageProfileTitle => Some(GameScreen::OptionsCategory {
                 parent: GameOptionsParent::Title,
@@ -958,6 +975,8 @@ impl Cli {
         let mut screenshot_terrain_horizon_diagnostic = TerrainHorizonDiagnostic::Natural;
         let mut screenshot_camera_view = EngineCameraViewMode::FirstPerson;
         let mut season_preview = SeasonPreviewSettings::default();
+        let mut celestial_debug = CelestialDebugSettings::default();
+        let mut celestial_debug_options_explicit = false;
         let mut season_preview_options_explicit = false;
         let mut season_appearance_explicit = false;
         let mut season_recent_snow_intensity = None;
@@ -1574,6 +1593,38 @@ impl Cli {
                     season_recent_snow_center =
                         Some(parse_season_recent_snow_center_arg(&arg, args.next())?);
                 }
+                "--celestial-sun" => {
+                    celestial_debug_options_explicit = true;
+                    celestial_debug.sun_body_enabled = parse_bool_arg(&arg, args.next())?;
+                }
+                "--celestial-sun-halo" => {
+                    celestial_debug_options_explicit = true;
+                    celestial_debug.sun_halo_enabled = parse_bool_arg(&arg, args.next())?;
+                }
+                "--celestial-horizon-glow" => {
+                    celestial_debug_options_explicit = true;
+                    celestial_debug.horizon_glow_enabled = parse_bool_arg(&arg, args.next())?;
+                }
+                "--celestial-moon" => {
+                    celestial_debug_options_explicit = true;
+                    celestial_debug.moon_body_enabled = parse_bool_arg(&arg, args.next())?;
+                }
+                "--celestial-moonlight" => {
+                    celestial_debug_options_explicit = true;
+                    celestial_debug.moonlight_enabled = parse_bool_arg(&arg, args.next())?;
+                }
+                "--celestial-stars" => {
+                    celestial_debug_options_explicit = true;
+                    celestial_debug.star_density = parse_celestial_star_density(&arg, args.next())?;
+                }
+                "--moon-phase-source" => {
+                    celestial_debug_options_explicit = true;
+                    celestial_debug.moon_phase_source = parse_moon_phase_source(&arg, args.next())?;
+                }
+                "--moon-phase" => {
+                    celestial_debug_options_explicit = true;
+                    celestial_debug.manual_lunar_phase = parse_moon_phase(&arg, args.next())?;
+                }
                 "--first-person-player" => {
                     first_person_player_visible =
                         parse_bool_arg("--first-person-player", args.next())?;
@@ -1946,6 +1997,14 @@ impl Cli {
                 "season preview capture options require --screenshot or --xr-emulation-screenshot"
             );
         }
+        if celestial_debug_options_explicit
+            && !matches!(
+                mode,
+                Some(HeadlessMode::Screenshot(_) | HeadlessMode::XrEmulationScreenshot(_))
+            )
+        {
+            bail!("celestial capture options require --screenshot or --xr-emulation-screenshot");
+        }
         if startup_wait.is_some()
             && (perf_mode_count > 0
                 || xr_clear_smoke
@@ -2247,6 +2306,7 @@ impl Cli {
                     eye: startup_camera.eye,
                     target: startup_camera.target,
                     season_preview,
+                    celestial_debug,
                 },
             }),
             Some(HeadlessMode::LiveDioramaSmoke(directory)) => {
@@ -2337,6 +2397,7 @@ impl Cli {
                     input_frames: xr_emulation_input_frames,
                     pause_panel: xr_emulation_pause_panel,
                     season_preview,
+                    celestial_debug,
                 },
             }),
             Some(HeadlessMode::RendererRebuildSmoke(directory)) => Ok(Self::RendererRebuildSmoke {
@@ -2577,6 +2638,37 @@ fn parse_season_recent_snow_center_arg(flag: &str, value: Option<String>) -> Res
         bail!("{flag} expects exactly two integer coordinates x,z, got `{raw}`");
     }
     Ok([x, z])
+}
+
+fn parse_celestial_star_density(flag: &str, value: Option<String>) -> Result<CelestialStarDensity> {
+    match value.as_deref() {
+        Some("off") | Some("0") => Ok(CelestialStarDensity::Off),
+        Some("quarter") | Some("25") | Some("25%") => Ok(CelestialStarDensity::Quarter),
+        Some("half") | Some("50") | Some("50%") => Ok(CelestialStarDensity::Half),
+        Some("full") | Some("100") | Some("100%") => Ok(CelestialStarDensity::Full),
+        Some(value) => bail!("{flag} expects off, quarter, half, or full, got `{value}`"),
+        None => bail!("{flag} requires off, quarter, half, or full"),
+    }
+}
+
+fn parse_moon_phase_source(flag: &str, value: Option<String>) -> Result<MoonPhaseSource> {
+    match value.as_deref() {
+        Some("world") | Some("world-clock") => Ok(MoonPhaseSource::WorldClock),
+        Some("manual") | Some("manual-preview") => Ok(MoonPhaseSource::ManualPreview),
+        Some(value) => bail!("{flag} expects world-clock or manual-preview, got `{value}`"),
+        None => bail!("{flag} requires world-clock or manual-preview"),
+    }
+}
+
+fn parse_moon_phase(flag: &str, value: Option<String>) -> Result<LunarPhase> {
+    let raw = value.with_context(|| format!("{flag} requires a normalized phase from 0 to 1"))?;
+    let phase = raw
+        .parse::<f64>()
+        .with_context(|| format!("{flag} expects a normalized phase, got `{raw}`"))?;
+    if !phase.is_finite() || !(0.0..=1.0).contains(&phase) {
+        bail!("{flag} must be finite and between 0 and 1");
+    }
+    Ok(LunarPhase::from_turns_wrapped(phase)?)
 }
 
 fn parse_window_platform_profile_arg(
@@ -2874,7 +2966,9 @@ fn parse_xr_underwater_mode_arg(flag: &str, value: Option<String>) -> Result<XrU
 
 fn parse_xr_debug_ui_arg(flag: &str, value: Option<String>) -> Result<Option<XrDebugUiScreen>> {
     let value = value.with_context(|| {
-        format!("{flag} requires none, pause, controls, graphics, or seasonal-debug")
+        format!(
+            "{flag} requires none, pause, controls, graphics, seasonal-debug, or celestial-debug"
+        )
     })?;
     match value.trim() {
         "none" | "off" | "false" => Ok(None),
@@ -2882,8 +2976,9 @@ fn parse_xr_debug_ui_arg(flag: &str, value: Option<String>) -> Result<Option<XrD
         "controls" | "help" => Ok(Some(XrDebugUiScreen::Controls)),
         "graphics" | "video" => Ok(Some(XrDebugUiScreen::Graphics)),
         "seasonal" | "seasonal-debug" | "seasons" => Ok(Some(XrDebugUiScreen::SeasonalDebug)),
+        "celestial" | "celestial-debug" | "sky" => Ok(Some(XrDebugUiScreen::CelestialDebug)),
         value => bail!(
-            "{flag} must be none, pause, controls, graphics, or seasonal-debug, got `{value}`"
+            "{flag} must be none, pause, controls, graphics, seasonal-debug, or celestial-debug, got `{value}`"
         ),
     }
 }
@@ -3089,7 +3184,7 @@ pub(crate) fn parse_screenshot_ui_arg(
 ) -> Result<HeadlessScreenshotUi> {
     let value = value.with_context(|| {
         format!(
-            "{flag} requires none, title, world-list, world-create, world-delete-confirm, new-world, join-remote, pause, death, help/controls, block-palette, options-title, options-pause, options-seasonal-debug, storage-profile-title, storage-factory-confirm, server-settings-pause, or asset-packs-pause"
+            "{flag} requires none, title, world-list, world-create, world-delete-confirm, new-world, join-remote, pause, death, help/controls, block-palette, options-title, options-pause, options-seasonal-debug, options-celestial-debug, storage-profile-title, storage-factory-confirm, server-settings-pause, or asset-packs-pause"
         )
     })?;
     match value.as_str() {
@@ -3118,6 +3213,9 @@ pub(crate) fn parse_screenshot_ui_arg(
         "options-seasonal-debug" | "options_seasonal_debug" | "seasonal-debug" => {
             Ok(HeadlessScreenshotUi::OptionsSeasonalDebugPause)
         }
+        "options-celestial-debug" | "options_celestial_debug" | "celestial-debug" => {
+            Ok(HeadlessScreenshotUi::OptionsCelestialDebugPause)
+        }
         "storage-profile-title" | "storage_profile_title" | "storage-profile" => {
             Ok(HeadlessScreenshotUi::StorageProfileTitle)
         }
@@ -3131,7 +3229,7 @@ pub(crate) fn parse_screenshot_ui_arg(
             Ok(HeadlessScreenshotUi::AssetPacksPause)
         }
         _ => bail!(
-            "{flag} must be none, title, world-list, world-create, world-delete-confirm, new-world, join-remote, pause, death, help/controls, block-palette, options-title, options-pause, options-graphics, options-movement, options-display, options-local-play, options-debug, options-seasonal-debug, storage-profile-title, storage-factory-confirm, server-settings-pause, or asset-packs-pause, got `{value}`"
+            "{flag} must be none, title, world-list, world-create, world-delete-confirm, new-world, join-remote, pause, death, help/controls, block-palette, options-title, options-pause, options-graphics, options-movement, options-display, options-local-play, options-debug, options-seasonal-debug, options-celestial-debug, storage-profile-title, storage-factory-confirm, server-settings-pause, or asset-packs-pause, got `{value}`"
         ),
     }
 }
@@ -3182,7 +3280,7 @@ fn print_help() {
            mclone-native-client --headless-clear /tmp/mclone-native-clear.png [--width 96] [--height 64]\n\
            mclone-native-client --actor-review-sheet /tmp/mclone-actor-review.png [--width 1152] [--height 512] [--fullbright true|false]\n\
            mclone-native-client --actor-walk-review /tmp/mclone-actor-walk-review.png [--actor-walk-review-video /tmp/mclone-actor-walk-review.mp4] [--width 360] [--height 360] [--walk-review-frames 24] [--walk-review-fps 12] [--walk-review-cycles 2] [--fullbright true|false]\n\
-          mclone-native-client --screenshot /tmp/mclone-frame.png [--asset-pack saved|original] [--width 1280] [--height 720] [--startup-wait none|progress|playable|view-settled|frames:N] [--warm-world-standby-seed -98765] [--screenshot-ui none|title|world-list|world-create|world-delete-confirm|new-world|join-remote|pause|death|help|controls|block-palette|options-title|options-pause|options-local-play|options-seasonal-debug|storage-profile-title|storage-factory-confirm|server-settings-pause|asset-packs-pause] [--screenshot-hud true|false] [--screenshot-frame-pipeline-overlay true|false] [--screenshot-debug-pane true|false] [--screenshot-worldgen-lens off|biome|landform|surface|hydrology] [--screenshot-player-box true|false] [--screenshot-blink-debug true|false] [--screenshot-controller-focus true|false] [--screenshot-scripted-interaction true|false] [--screenshot-settle-ms 0] [--screenshot-settle-frames 0] [--screenshot-terrain-horizon-diagnostic natural|ownership-level|topology|albedo|environmental-illumination|geometric-shade|local-occlusion|water|texture] [--screenshot-eye x,y,z] [--screenshot-target x,y,z] [--screenshot-camera-view first-person|third-person] [--season-preview true|false] [--season-appearance true|false] [--season-orbital-phase 0..1] [--season-latitude-source world|manual] [--season-latitude -90..90] [--season-solar-time-source world-clock|manual] [--season-solar-time 0..<24] [--season-recent-snow 0..1] [--season-recent-snow-center x,z] [--first-person-player true|false] [--seed 12345] [--generation-profile mclone-overworld-v1] [--starter-content wild|intro-homestead-v1] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--movement-speed-multiplier 1.0] [--simulation-cadence 20/20/60] [--debug-passive-showcase true|false] [--section-occlusion true|false] [--lighting true|false] [--fullbright true|false]\n\
+          mclone-native-client --screenshot /tmp/mclone-frame.png [--asset-pack saved|original] [--width 1280] [--height 720] [--startup-wait none|progress|playable|view-settled|frames:N] [--warm-world-standby-seed -98765] [--screenshot-ui none|title|world-list|world-create|world-delete-confirm|new-world|join-remote|pause|death|help|controls|block-palette|options-title|options-pause|options-local-play|options-seasonal-debug|options-celestial-debug|storage-profile-title|storage-factory-confirm|server-settings-pause|asset-packs-pause] [--screenshot-hud true|false] [--screenshot-frame-pipeline-overlay true|false] [--screenshot-debug-pane true|false] [--screenshot-worldgen-lens off|biome|landform|surface|hydrology] [--screenshot-player-box true|false] [--screenshot-blink-debug true|false] [--screenshot-controller-focus true|false] [--screenshot-scripted-interaction true|false] [--screenshot-settle-ms 0] [--screenshot-settle-frames 0] [--screenshot-terrain-horizon-diagnostic natural|ownership-level|topology|albedo|environmental-illumination|geometric-shade|local-occlusion|water|texture] [--screenshot-eye x,y,z] [--screenshot-target x,y,z] [--screenshot-camera-view first-person|third-person] [--season-preview true|false] [--season-appearance true|false] [--season-orbital-phase 0..1] [--season-latitude-source world|manual] [--season-latitude -90..90] [--season-solar-time-source world-clock|manual] [--season-solar-time 0..<24] [--season-recent-snow 0..1] [--season-recent-snow-center x,z] [--celestial-sun true|false] [--celestial-sun-halo true|false] [--celestial-horizon-glow true|false] [--celestial-moon true|false] [--celestial-moonlight true|false] [--celestial-stars off|quarter|half|full] [--moon-phase-source world-clock|manual-preview] [--moon-phase 0..1] [--first-person-player true|false] [--seed 12345] [--generation-profile mclone-overworld-v1] [--starter-content wild|intro-homestead-v1] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--movement-speed-multiplier 1.0] [--simulation-cadence 20/20/60] [--debug-passive-showcase true|false] [--section-occlusion true|false] [--lighting true|false] [--fullbright true|false]\n\
            mclone-native-client --worldgen-showcase-card /tmp/mclone-worldgen-showcase [--width 640] [--height 400] [--generation-profile small-island-v1] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 16] [--day-time 6000] [--lighting true|false] [--fullbright true|false]\n\
            mclone-native-client --warm-world-swap-smoke /tmp/mclone-warm-world-swap --warm-world-standby-seed 67890 [--warm-world-standby-cadence 5/5/5] [--warm-world-cost-sample-ms 3000] [--width 1280] [--height 720] [scene/render options as --screenshot]\n\
            mclone-native-client --live-diorama-smoke /tmp/mclone-live-diorama --world-dir ./table-a --live-diorama-world-dir ./island-b [--live-diorama-scale 0.125] [--live-diorama-soak-seconds 600] [--width 960] [--height 640]\n\

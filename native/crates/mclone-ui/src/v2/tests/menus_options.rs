@@ -1275,6 +1275,155 @@ fn seasonal_debug_rows_share_typed_state_and_gate_manual_controls() {
 }
 
 #[test]
+fn celestial_debug_rows_route_typed_controls_and_live_costs() {
+    let mut surface = UiSurface::new();
+    surface.set_scale(GuiScale::from_pixels(960, 540));
+    surface.set_screen(Some(UiScreenId::OptionsCategory {
+        parent: GameOptionsParent::Pause,
+        category: GameOptionsCategory::Debug,
+    }));
+    surface.set_render_state(GameUiRenderState::default());
+
+    let navigation = surface
+        .layout()
+        .widget(UI_V2_OPTIONS_CELESTIAL_DEBUG)
+        .expect("celestial debug navigation")
+        .rect;
+    assert!(surface.pointer_down(point_in(navigation), surface.render_state));
+    assert_eq!(
+        surface
+            .pointer_up(point_in(navigation), surface.render_state)
+            .1,
+        Some(GameUiAction::OpenOptionsCategory(
+            GameOptionsParent::Pause,
+            GameOptionsCategory::CelestialDebug,
+        ))
+    );
+
+    surface.set_screen(Some(UiScreenId::OptionsCategory {
+        parent: GameOptionsParent::Pause,
+        category: GameOptionsCategory::CelestialDebug,
+    }));
+    let defaults = crate::CelestialDebugSettings::default();
+    assert!(
+        surface
+            .layout()
+            .widget(UI_V2_OPTIONS_CELESTIAL_MOONLIGHT)
+            .unwrap()
+            .enabled
+    );
+    assert!(
+        !surface
+            .layout()
+            .widget(UI_V2_OPTIONS_CELESTIAL_PHASE)
+            .unwrap()
+            .enabled
+    );
+
+    for (id, expected) in [
+        (
+            UI_V2_OPTIONS_CELESTIAL_SUN,
+            GameUiAction::SetCelestialDebug(crate::CelestialDebugSettings {
+                sun_body_enabled: false,
+                ..defaults
+            }),
+        ),
+        (
+            UI_V2_OPTIONS_CELESTIAL_PHASE_SOURCE,
+            GameUiAction::SetCelestialDebug(crate::CelestialDebugSettings {
+                moon_phase_source: crate::MoonPhaseSource::ManualPreview,
+                ..defaults
+            }),
+        ),
+        (
+            UI_V2_OPTIONS_CELESTIAL_STARS,
+            GameUiAction::SetCelestialDebug(crate::CelestialDebugSettings {
+                star_density: crate::CelestialStarDensity::Off,
+                ..defaults
+            }),
+        ),
+    ] {
+        let rect = surface.layout().widget(id).unwrap().rect;
+        assert!(surface.pointer_down(point_in(rect), surface.render_state));
+        assert_eq!(
+            surface.pointer_up(point_in(rect), surface.render_state).1,
+            Some(expected)
+        );
+    }
+
+    let manual = crate::CelestialDebugSettings {
+        moon_phase_source: crate::MoonPhaseSource::ManualPreview,
+        ..defaults
+    };
+    surface.set_render_state(GameUiRenderState {
+        celestial_debug_settings: manual,
+        celestial_debug: Some(crate::GameCelestialDebugState {
+            calendar_day: 17,
+            solar_time_hours: 23.5,
+            named_phase: crate::LunarPhaseLabel::WaxingGibbous,
+            illuminated_fraction: 0.72,
+            moon_elevation_degrees: 31.0,
+            effective_latitude_degrees: 45.0,
+            sidereal_angle_degrees: 127.5,
+            submitted_star_count: 1_024,
+            optional_draw_count: 5,
+            feature_buffer_writes: 5,
+            resident_resource_bytes: 65_536,
+        }),
+        ..GameUiRenderState::default()
+    });
+    assert!(
+        surface
+            .layout()
+            .widget(UI_V2_OPTIONS_CELESTIAL_PHASE)
+            .unwrap()
+            .enabled
+    );
+    assert_eq!(
+        surface
+            .layout()
+            .widget(UI_V2_OPTIONS_CELESTIAL_PHASE_READOUT)
+            .unwrap()
+            .value
+            .as_deref(),
+        Some("Wax Gibbous 72% +31d")
+    );
+    assert_eq!(
+        surface
+            .layout()
+            .widget(UI_V2_OPTIONS_CELESTIAL_COORDINATES)
+            .unwrap()
+            .value
+            .as_deref(),
+        Some("D17 23.5h Lat+45.0 Sid128")
+    );
+    assert_eq!(
+        surface
+            .layout()
+            .widget(UI_V2_OPTIONS_CELESTIAL_COST)
+            .unwrap()
+            .value
+            .as_deref(),
+        Some("1024 stars D5 W5 64K")
+    );
+
+    surface.set_render_state(GameUiRenderState {
+        celestial_debug_settings: crate::CelestialDebugSettings {
+            moon_body_enabled: false,
+            ..manual
+        },
+        ..surface.render_state
+    });
+    assert!(
+        !surface
+            .layout()
+            .widget(UI_V2_OPTIONS_CELESTIAL_MOONLIGHT)
+            .unwrap()
+            .enabled
+    );
+}
+
+#[test]
 fn server_settings_buttons_emit_expected_actions_from_committed_rects() {
     let mut surface = UiSurface::new();
     surface.set_screen(Some(UiScreenId::ServerSettings {

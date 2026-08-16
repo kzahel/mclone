@@ -5,7 +5,7 @@ use crate::client_session_policy::{
     ClientSessionActionContext, ClientSessionEffects, client_session_effects_for_action,
 };
 use mclone_input::TouchControlsMode;
-use mclone_season::SeasonPreviewSettings;
+use mclone_season::{CelestialDebugSettings, SeasonPreviewSettings};
 use mclone_ui::{
     DebugActorTool, GameAuxiliarySplitMode, GameCollisionMode, GameFogSettings,
     GameFramePacingMode, GameGrassDetail, GameLeafDetail, GameLocalPlayGuestInput,
@@ -162,6 +162,7 @@ impl ClientExperienceController {
             | GameUiAction::SetTerrainPresentation(_)
             | GameUiAction::SetFogSettings(_)
             | GameUiAction::SetSeasonPreview(_)
+            | GameUiAction::SetCelestialDebug(_)
             | GameUiAction::ToggleFullbright
             | GameUiAction::TogglePlayerCollisionBox
             | GameUiAction::ToggleFirstPersonPlayer
@@ -809,6 +810,12 @@ impl ClientExperienceSettingsController {
                     .setting_effects
                     .push(ClientExperienceSettingEffect::SetSeasonPreview(settings));
             }
+            GameUiAction::SetCelestialDebug(settings) => {
+                self.state.celestial_debug = settings;
+                effects
+                    .setting_effects
+                    .push(ClientExperienceSettingEffect::SetCelestialDebug(settings));
+            }
             GameUiAction::ToggleFullbright => {
                 self.state.force_fullbright = !self.state.force_fullbright;
                 effects
@@ -1304,6 +1311,7 @@ pub struct ClientExperienceSettingsState {
     pub terrain_presentation: GameTerrainPresentation,
     pub fog: GameFogSettings,
     pub season_preview: SeasonPreviewSettings,
+    pub celestial_debug: CelestialDebugSettings,
     pub force_fullbright: bool,
     pub player_collision_box_visible: bool,
     pub first_person_player_visible: bool,
@@ -1350,6 +1358,7 @@ impl From<GameUiRenderState> for ClientExperienceSettingsState {
             terrain_presentation: state.terrain_presentation,
             fog: state.fog.normalized(),
             season_preview: state.season_preview,
+            celestial_debug: state.celestial_debug_settings,
             force_fullbright: state.force_fullbright,
             player_collision_box_visible: state.player_collision_box_visible,
             first_person_player_visible: state.first_person_player_visible,
@@ -1397,6 +1406,7 @@ impl ClientExperienceSettingsState {
         state.terrain_presentation = self.terrain_presentation;
         state.fog = self.fog.normalized();
         state.season_preview = self.season_preview;
+        state.celestial_debug_settings = self.celestial_debug;
         state.force_fullbright = self.force_fullbright;
         state.player_collision_box_visible = self.player_collision_box_visible;
         state.first_person_player_visible = self.first_person_player_visible;
@@ -1607,6 +1617,7 @@ pub enum ClientExperienceSettingEffect {
     SetTerrainPresentation(GameTerrainPresentation),
     SetFogSettings(GameFogSettings),
     SetSeasonPreview(SeasonPreviewSettings),
+    SetCelestialDebug(CelestialDebugSettings),
     SetFullbright(bool),
     SetPlayerCollisionBoxVisible(bool),
     SetFirstPersonPlayerVisible(bool),
@@ -1702,6 +1713,7 @@ pub enum ClientExperienceActionKind {
     SetTerrainPresentation,
     SetFogSettings,
     SetSeasonPreview,
+    SetCelestialDebug,
     ToggleFullbright,
     TogglePlayerCollisionBox,
     ToggleFirstPersonPlayer,
@@ -1793,6 +1805,7 @@ pub fn client_experience_action_kind(action: GameUiAction) -> ClientExperienceAc
         }
         GameUiAction::SetFogSettings(_) => ClientExperienceActionKind::SetFogSettings,
         GameUiAction::SetSeasonPreview(_) => ClientExperienceActionKind::SetSeasonPreview,
+        GameUiAction::SetCelestialDebug(_) => ClientExperienceActionKind::SetCelestialDebug,
         GameUiAction::ToggleFullbright => ClientExperienceActionKind::ToggleFullbright,
         GameUiAction::TogglePlayerCollisionBox => {
             ClientExperienceActionKind::TogglePlayerCollisionBox
@@ -1873,6 +1886,7 @@ pub const fn classify_client_experience_action_kind(
         | ClientExperienceActionKind::SetTerrainPresentation
         | ClientExperienceActionKind::SetFogSettings
         | ClientExperienceActionKind::SetSeasonPreview
+        | ClientExperienceActionKind::SetCelestialDebug
         | ClientExperienceActionKind::ToggleFullbright
         | ClientExperienceActionKind::TogglePlayerCollisionBox
         | ClientExperienceActionKind::ToggleFirstPersonPlayer
@@ -2150,6 +2164,7 @@ mod tests {
             GameUiAction::ToggleSectionOcclusion,
             GameUiAction::SetLeafDetail(GameLeafDetail::Bushy),
             GameUiAction::SetSeasonPreview(SeasonPreviewSettings::default()),
+            GameUiAction::SetCelestialDebug(CelestialDebugSettings::default()),
             GameUiAction::ToggleFullbright,
             GameUiAction::TogglePlayerCollisionBox,
             GameUiAction::ToggleFirstPersonPlayer,
@@ -2175,7 +2190,7 @@ mod tests {
             GameUiAction::Quit,
         ];
 
-        assert_eq!(samples.len(), 65);
+        assert_eq!(samples.len(), 66);
         for sample in samples {
             let _ = classify_game_ui_action(sample);
         }
@@ -2459,6 +2474,25 @@ mod tests {
             effects.setting_effects,
             vec![ClientExperienceSettingEffect::SetSeasonPreview(
                 season_preview
+            )]
+        );
+
+        let celestial_debug = CelestialDebugSettings {
+            sun_halo_enabled: false,
+            moon_phase_source: mclone_season::MoonPhaseSource::ManualPreview,
+            manual_lunar_phase: mclone_season::LunarPhase::FIRST_QUARTER,
+            star_density: mclone_season::CelestialStarDensity::Quarter,
+            ..CelestialDebugSettings::default()
+        };
+        let effects = settings.apply_ui_action(
+            GameUiAction::SetCelestialDebug(celestial_debug),
+            ClientExperienceSettingsProfile::default(),
+        );
+        assert_eq!(settings.state().celestial_debug, celestial_debug);
+        assert_eq!(
+            effects.setting_effects,
+            vec![ClientExperienceSettingEffect::SetCelestialDebug(
+                celestial_debug
             )]
         );
 

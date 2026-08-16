@@ -69,6 +69,7 @@ pub(crate) struct HeadlessScreenshotReport {
     pub(crate) underwater: bool,
     pub(crate) terrain_view: Option<mclone_scene::SceneTerrainViewDiagnostics>,
     pub(crate) seasonal_appearance_receipt_json: String,
+    pub(crate) celestial_receipt_json: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1626,6 +1627,7 @@ pub(crate) fn run_headless_screenshot(
         underwater: report.underwater,
         terrain_view: report.terrain_view,
         seasonal_appearance_receipt_json: report.seasonal_appearance_receipt_json,
+        celestial_receipt_json: report.celestial_receipt_json,
     })
 }
 

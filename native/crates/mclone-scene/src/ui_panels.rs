@@ -843,6 +843,27 @@ impl McloneSceneHost {
                 ),
             }
         });
+        let original_mclone = self.active_world.scene.startup.world_generation_profile
+            == mclone_server::WorldGenerationProfile::McloneOverworldV1;
+        let celestial_stats = self.sky.celestial_stats();
+        let celestial_debug = self
+            .celestial_render_state(original_mclone)
+            .map(|celestial| mclone_ui::GameCelestialDebugState {
+                calendar_day: mclone_season::PreviewCalendarDate::from_orbital_phase(
+                    celestial.orbital_phase,
+                )
+                .day(),
+                solar_time_hours: celestial.solar_time_fraction * 24.0,
+                named_phase: celestial.lunar_sample.named_phase,
+                illuminated_fraction: celestial.lunar_sample.illuminated_fraction,
+                moon_elevation_degrees: celestial.lunar_sample.elevation_degrees,
+                effective_latitude_degrees: celestial.effective_latitude_degrees,
+                sidereal_angle_degrees: celestial.local_sidereal_angle_turns * 360.0,
+                submitted_star_count: celestial_stats.submitted_star_count,
+                optional_draw_count: celestial_stats.optional_draw_count(),
+                feature_buffer_writes: celestial_stats.feature_buffer_writes,
+                resident_resource_bytes: celestial_stats.resident_resource_bytes,
+            });
         GameUiRenderState {
             lobby_scenario_available: self
                 .client_experience
@@ -866,6 +887,8 @@ impl McloneSceneHost {
             fog: self.fog_settings,
             season_preview: self.season_preview,
             seasonal_debug,
+            celestial_debug_settings: self.celestial_debug,
+            celestial_debug,
             force_fullbright: self.render_options.force_fullbright,
             player_collision_box_visible: self.player_collision_box_visible,
             first_person_player_visible: self.active_world.camera.first_person_player_visible(),

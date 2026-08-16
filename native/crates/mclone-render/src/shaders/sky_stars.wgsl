@@ -8,7 +8,7 @@ var<uniform> uniforms: Uniforms;
 
 struct StarInstance {
     @location(0) equatorial_size_brightness: vec4<f32>,
-    @location(1) color_class: f32,
+    @location(1) color_orientation: vec2<f32>,
 };
 
 struct VertexOutput {
@@ -48,15 +48,22 @@ fn vs_main(input: StarInstance, @builtin(vertex_index) vertex_index: u32) -> Ver
     let right = normalize(cross(direction, reference_up));
     let quad_up = normalize(cross(right, direction));
     let corner = quad_corner(vertex_index);
+    let roll_sin = sin(input.color_orientation.y);
+    let roll_cos = cos(input.color_orientation.y);
+    let rolled_corner = vec2<f32>(
+        corner.x * roll_cos - corner.y * roll_sin,
+        corner.y * roll_cos + corner.x * roll_sin,
+    );
     let half_size = 100.0
         * tan(radians(input.equatorial_size_brightness.z) * 0.5);
-    let position = direction * 100.0 + (right * corner.x + quad_up * corner.y) * half_size;
+    let position = direction * 100.0
+        + (right * rolled_corner.x + quad_up * rolled_corner.y) * half_size;
     let horizon = smoothstep(-0.035, 0.02, direction.y);
     let brightness = input.equatorial_size_brightness.w;
     var color = vec3<f32>(0.84, 0.90, 1.0);
-    if input.color_class < 0.5 {
+    if input.color_orientation.x < 0.5 {
         color = vec3<f32>(1.0, 0.91, 0.78);
-    } else if input.color_class < 1.5 {
+    } else if input.color_orientation.x < 1.5 {
         color = vec3<f32>(0.92, 0.95, 1.0);
     }
     var output: VertexOutput;

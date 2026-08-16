@@ -48,6 +48,7 @@ pub(crate) struct OffscreenFlatClientScreenshotReport {
     pub(crate) warm_world_standby: Option<WarmWorldStandbySnapshot>,
     pub(crate) terrain_view: Option<mclone_scene::SceneTerrainViewDiagnostics>,
     pub(crate) seasonal_appearance_receipt_json: String,
+    pub(crate) celestial_receipt_json: String,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -1550,6 +1551,7 @@ pub(crate) fn run_offscreen_flat_client_screenshot(
     let scene = options.scene.clone();
     let render_options = options.render_options;
     let season_preview = options.season_preview;
+    let celestial_debug = options.celestial_debug;
     let startup_wait = options.startup_wait;
     let startup_camera = screenshot_startup_camera(&scene, startup_wait);
     let mut frame_count = if options.frame_pipeline_overlay {
@@ -1589,6 +1591,9 @@ pub(crate) fn run_offscreen_flat_client_screenshot(
             host.driver
                 .host_mut()
                 .set_season_preview_settings(season_preview);
+            host.driver
+                .host_mut()
+                .set_celestial_debug_settings(celestial_debug);
             if scene.asset_pack == crate::cli::AssetPackLaunchProfile::Saved {
                 let mut asset_packs_configured = false;
                 if let Some(registry) = mclone_app_runtime::prepared_assets::AssetPackSourceRegistry::discover_native_with_reference(asset_source.clone())? {
@@ -1964,6 +1969,11 @@ pub(crate) fn run_offscreen_flat_client_screenshot(
         options.scene.startup.world_generation_profile,
         host.driver.host().solar_frame_diagnostics(),
     )?;
+    let celestial_receipt_json = celestial_receipt_json(
+        options.celestial_debug,
+        options.scene.startup.world_generation_profile,
+        host.driver.host().celestial_frame_diagnostics(),
+    )?;
 
     Ok(OffscreenFlatClientScreenshotReport {
         path: options.path.clone(),
@@ -1980,7 +1990,69 @@ pub(crate) fn run_offscreen_flat_client_screenshot(
         warm_world_standby,
         terrain_view,
         seasonal_appearance_receipt_json,
+        celestial_receipt_json,
     })
+}
+
+pub(crate) fn celestial_receipt_json(
+    settings: mclone_season::CelestialDebugSettings,
+    profile: mclone_server::WorldGenerationProfile,
+    diagnostics: Option<(
+        mclone_render::sky::CelestialRenderState,
+        mclone_render::sky_render::CelestialRenderStats,
+    )>,
+) -> Result<String> {
+    let evaluated = diagnostics.map(|(state, stats)| {
+        serde_json::json!({
+            "calendarDay": PreviewCalendarDate::from_orbital_phase(state.orbital_phase).day(),
+            "orbitalPhase": state.orbital_phase.turns(),
+            "solarTimeFraction": state.solar_time_fraction,
+            "latitudeDegrees": state.effective_latitude_degrees,
+            "siderealAngleDegrees": state.local_sidereal_angle_turns * 360.0,
+            "lunar": {
+                "phaseRaw": state.lunar_phase.steps(),
+                "phase": state.lunar_phase.turns(),
+                "label": state.lunar_sample.named_phase.label(),
+                "direction": state.lunar_sample.direction,
+                "elevationDegrees": state.lunar_sample.elevation_degrees,
+                "elongationDegrees": state.lunar_sample.elongation_degrees,
+                "illuminatedFraction": state.lunar_sample.illuminated_fraction,
+                "waxing": state.lunar_sample.waxing,
+                "limbTangent": state.lunar_sample.lit_limb_tangent,
+                "moonlightFactor": state.lunar_sample.moonlight_factor,
+            },
+            "stars": {
+                "catalogCount": stats.catalog_star_count,
+                "submittedCount": stats.submitted_star_count,
+                "visibility": state.star_visibility,
+            },
+            "cost": {
+                "sunBodyDraws": stats.sun_body_draws,
+                "sunHaloDraws": stats.sun_halo_draws,
+                "horizonGlowDraws": stats.horizon_glow_draws,
+                "moonBodyDraws": stats.moon_body_draws,
+                "starDraws": stats.star_draws,
+                "optionalDraws": stats.optional_draw_count(),
+                "featureBufferWrites": stats.feature_buffer_writes,
+                "residentResourceBytes": stats.resident_resource_bytes,
+            },
+        })
+    });
+    Ok(serde_json::to_string(&serde_json::json!({
+        "schema": 1,
+        "profile": profile.label(),
+        "settings": {
+            "sunBody": settings.sun_body_enabled,
+            "sunHalo": settings.sun_halo_enabled,
+            "horizonGlow": settings.horizon_glow_enabled,
+            "moonBody": settings.moon_body_enabled,
+            "moonlight": settings.moonlight_enabled,
+            "moonPhaseSource": settings.moon_phase_source.label(),
+            "manualMoonPhaseRaw": settings.manual_lunar_phase.steps(),
+            "starDensity": settings.star_density.label(),
+        },
+        "evaluated": evaluated,
+    }))?)
 }
 
 pub(crate) fn seasonal_appearance_receipt_json(

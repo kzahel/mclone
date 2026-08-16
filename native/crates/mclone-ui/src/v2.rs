@@ -345,6 +345,7 @@ enum UiSliderAction {
     SeasonManualLatitude,
     SeasonManualSolarTime,
     SeasonRecentSnow,
+    CelestialMoonPhase,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -879,7 +880,8 @@ impl UiSurface {
             (
                 Some(UiScreenId::OptionsCategory {
                     parent,
-                    category: GameOptionsCategory::SeasonalDebug,
+                    category:
+                        GameOptionsCategory::SeasonalDebug | GameOptionsCategory::CelestialDebug,
                 }),
                 GuiKey::Escape,
             ) => (
@@ -2272,6 +2274,14 @@ impl UiSurface {
                         self.render_state.seasonal_debug,
                         value,
                     )?,
+                    UiSliderAction::CelestialMoonPhase => {
+                        let mut settings = self.render_state.celestial_debug_settings;
+                        settings.manual_lunar_phase = crate::LunarPhase::from_steps_wrapped(
+                            (value.clamp(0.0, 1.0) * f32::from(crate::LUNAR_PHASE_STEPS - 1))
+                                .round() as u16,
+                        );
+                        GameUiAction::SetCelestialDebug(settings)
+                    }
                 })
             }
         }
@@ -3002,6 +3012,7 @@ impl GameUiHost {
             | GameUiAction::SetTerrainPresentation(_)
             | GameUiAction::SetFogSettings(_)
             | GameUiAction::SetSeasonPreview(_)
+            | GameUiAction::SetCelestialDebug(_)
             | GameUiAction::ToggleAssetPack(_)
             | GameUiAction::CycleTexturePresentation
             | GameUiAction::ApplyAssetPacks
@@ -3272,6 +3283,18 @@ const UI_V2_OPTIONS_SEASON_DAYLIGHT: UiWidgetId = UiWidgetId(182);
 const UI_V2_OPTIONS_SEASON_RECENT_SNOW: UiWidgetId = UiWidgetId(183);
 const UI_V2_OPTIONS_SEASON_LOD: UiWidgetId = UiWidgetId(184);
 const UI_V2_OPTIONS_SEASON_APPEARANCE: UiWidgetId = UiWidgetId(185);
+const UI_V2_OPTIONS_CELESTIAL_DEBUG: UiWidgetId = UiWidgetId(186);
+const UI_V2_OPTIONS_CELESTIAL_SUN: UiWidgetId = UiWidgetId(187);
+const UI_V2_OPTIONS_CELESTIAL_HALO: UiWidgetId = UiWidgetId(188);
+const UI_V2_OPTIONS_CELESTIAL_GLOW: UiWidgetId = UiWidgetId(189);
+const UI_V2_OPTIONS_CELESTIAL_MOON: UiWidgetId = UiWidgetId(190);
+const UI_V2_OPTIONS_CELESTIAL_MOONLIGHT: UiWidgetId = UiWidgetId(191);
+const UI_V2_OPTIONS_CELESTIAL_PHASE_SOURCE: UiWidgetId = UiWidgetId(192);
+const UI_V2_OPTIONS_CELESTIAL_PHASE: UiWidgetId = UiWidgetId(193);
+const UI_V2_OPTIONS_CELESTIAL_STARS: UiWidgetId = UiWidgetId(194);
+const UI_V2_OPTIONS_CELESTIAL_PHASE_READOUT: UiWidgetId = UiWidgetId(195);
+const UI_V2_OPTIONS_CELESTIAL_COORDINATES: UiWidgetId = UiWidgetId(196);
+const UI_V2_OPTIONS_CELESTIAL_COST: UiWidgetId = UiWidgetId(197);
 const UI_V2_STORAGE_PROFILE_NAME: UiWidgetId = UiWidgetId(133);
 const UI_V2_STORAGE_PROFILE_ID: UiWidgetId = UiWidgetId(134);
 const UI_V2_STORAGE_BACKEND: UiWidgetId = UiWidgetId(135);
@@ -3928,6 +3951,7 @@ const fn options_category_widget_id(category: GameOptionsCategory) -> UiWidgetId
         GameOptionsCategory::LocalPlay => UI_V2_OPTIONS_CAT_LOCAL_PLAY,
         GameOptionsCategory::Debug => UI_V2_OPTIONS_CAT_DEBUG,
         GameOptionsCategory::SeasonalDebug => UI_V2_OPTIONS_SEASONAL_DEBUG,
+        GameOptionsCategory::CelestialDebug => UI_V2_OPTIONS_CELESTIAL_DEBUG,
         GameOptionsCategory::StorageProfile => UI_V2_OPTIONS_CAT_STORAGE,
     }
 }
@@ -3943,8 +3967,9 @@ const fn options_category_row_count(category: GameOptionsCategory) -> usize {
         GameOptionsCategory::Movement => 8,
         GameOptionsCategory::Display => 3,
         GameOptionsCategory::LocalPlay => 5,
-        GameOptionsCategory::Debug => 6,
+        GameOptionsCategory::Debug => 7,
         GameOptionsCategory::SeasonalDebug => 12,
+        GameOptionsCategory::CelestialDebug => 11,
         GameOptionsCategory::StorageProfile => 8,
     }
 }
@@ -4163,6 +4188,214 @@ fn seasonal_debug_rows(state: GameUiRenderState) -> Vec<(f32, UiWidget)> {
                 .enabled(false),
         ),
     ]
+}
+
+#[derive(Clone, Copy)]
+enum CelestialToggle {
+    Sun,
+    Halo,
+    Glow,
+    Moon,
+    Moonlight,
+}
+
+fn toggle_celestial(
+    mut settings: crate::CelestialDebugSettings,
+    toggle: CelestialToggle,
+) -> GameUiAction {
+    match toggle {
+        CelestialToggle::Sun => settings.sun_body_enabled = !settings.sun_body_enabled,
+        CelestialToggle::Halo => settings.sun_halo_enabled = !settings.sun_halo_enabled,
+        CelestialToggle::Glow => settings.horizon_glow_enabled = !settings.horizon_glow_enabled,
+        CelestialToggle::Moon => settings.moon_body_enabled = !settings.moon_body_enabled,
+        CelestialToggle::Moonlight => settings.moonlight_enabled = !settings.moonlight_enabled,
+    }
+    GameUiAction::SetCelestialDebug(settings)
+}
+
+fn cycle_moon_phase_source(mut settings: crate::CelestialDebugSettings) -> GameUiAction {
+    settings.moon_phase_source = settings.moon_phase_source.next();
+    GameUiAction::SetCelestialDebug(settings)
+}
+
+fn cycle_star_density(mut settings: crate::CelestialDebugSettings) -> GameUiAction {
+    settings.star_density = settings.star_density.next();
+    GameUiAction::SetCelestialDebug(settings)
+}
+
+fn celestial_debug_summary(state: GameUiRenderState) -> String {
+    let settings = state.celestial_debug_settings;
+    let phase = state
+        .celestial_debug
+        .map_or("Unavailable", |diagnostics| diagnostics.named_phase.label());
+    format!("{phase} / Stars {}", settings.star_density.label())
+}
+
+fn celestial_debug_rows(state: GameUiRenderState) -> Vec<(f32, UiWidget)> {
+    let ph = Rect::new(0.0, 0.0, 0.0, 0.0);
+    let settings = state.celestial_debug_settings;
+    let phase_readout = state.celestial_debug.map_or_else(
+        || "Unavailable".to_owned(),
+        |diagnostics| {
+            format!(
+                "{} {:.0}% {:+.0}d",
+                short_lunar_phase_label(diagnostics.named_phase),
+                diagnostics.illuminated_fraction * 100.0,
+                diagnostics.moon_elevation_degrees,
+            )
+        },
+    );
+    let coordinates = state.celestial_debug.map_or_else(
+        || "Unavailable".to_owned(),
+        |diagnostics| {
+            format!(
+                "D{} {:04.1}h Lat{:+.1} Sid{:.0}",
+                diagnostics.calendar_day,
+                diagnostics.solar_time_hours,
+                diagnostics.effective_latitude_degrees,
+                diagnostics.sidereal_angle_degrees,
+            )
+        },
+    );
+    let cost = state.celestial_debug.map_or_else(
+        || "Unavailable".to_owned(),
+        |diagnostics| {
+            format!(
+                "{} stars D{} W{} {}K",
+                diagnostics.submitted_star_count,
+                diagnostics.optional_draw_count,
+                diagnostics.feature_buffer_writes,
+                diagnostics.resident_resource_bytes.div_ceil(1_024),
+            )
+        },
+    );
+    vec![
+        (
+            18.0,
+            UiWidget::checkbox(
+                UI_V2_OPTIONS_CELESTIAL_SUN,
+                ph,
+                "Sun Body",
+                settings.sun_body_enabled,
+            )
+            .action(toggle_celestial(settings, CelestialToggle::Sun)),
+        ),
+        (
+            18.0,
+            UiWidget::checkbox(
+                UI_V2_OPTIONS_CELESTIAL_HALO,
+                ph,
+                "Sun Halo",
+                settings.sun_halo_enabled,
+            )
+            .action(toggle_celestial(settings, CelestialToggle::Halo)),
+        ),
+        (
+            18.0,
+            UiWidget::checkbox(
+                UI_V2_OPTIONS_CELESTIAL_GLOW,
+                ph,
+                "Horizon Glow",
+                settings.horizon_glow_enabled,
+            )
+            .action(toggle_celestial(settings, CelestialToggle::Glow)),
+        ),
+        (
+            18.0,
+            UiWidget::checkbox(
+                UI_V2_OPTIONS_CELESTIAL_MOON,
+                ph,
+                "Moon Body",
+                settings.moon_body_enabled,
+            )
+            .action(toggle_celestial(settings, CelestialToggle::Moon)),
+        ),
+        (
+            18.0,
+            UiWidget::checkbox(
+                UI_V2_OPTIONS_CELESTIAL_MOONLIGHT,
+                ph,
+                "Moonlight",
+                settings.moonlight_enabled,
+            )
+            .action(toggle_celestial(settings, CelestialToggle::Moonlight))
+            .enabled(settings.moon_body_enabled),
+        ),
+        (
+            20.0,
+            UiWidget::cycle(
+                UI_V2_OPTIONS_CELESTIAL_PHASE_SOURCE,
+                ph,
+                "Phase Source",
+                match settings.moon_phase_source {
+                    crate::MoonPhaseSource::WorldClock => "Clock",
+                    crate::MoonPhaseSource::ManualPreview => "Manual",
+                },
+            )
+            .action(cycle_moon_phase_source(settings)),
+        ),
+        (
+            20.0,
+            UiWidget::slider(
+                UI_V2_OPTIONS_CELESTIAL_PHASE,
+                ph,
+                format!(
+                    "Preview Phase: {}",
+                    settings.manual_lunar_phase.named_phase().label()
+                ),
+                settings.manual_lunar_phase.turns() as f32,
+            )
+            .enabled(settings.moon_phase_source == crate::MoonPhaseSource::ManualPreview)
+            .slider_action(UiSliderAction::CelestialMoonPhase),
+        ),
+        (
+            20.0,
+            UiWidget::cycle(
+                UI_V2_OPTIONS_CELESTIAL_STARS,
+                ph,
+                "Stars",
+                settings.star_density.label(),
+            )
+            .action(cycle_star_density(settings)),
+        ),
+        (
+            20.0,
+            UiWidget::cycle(
+                UI_V2_OPTIONS_CELESTIAL_PHASE_READOUT,
+                ph,
+                "Phase",
+                phase_readout,
+            )
+            .enabled(false),
+        ),
+        (
+            20.0,
+            UiWidget::cycle(
+                UI_V2_OPTIONS_CELESTIAL_COORDINATES,
+                ph,
+                "Coords",
+                coordinates,
+            )
+            .enabled(false),
+        ),
+        (
+            20.0,
+            UiWidget::cycle(UI_V2_OPTIONS_CELESTIAL_COST, ph, "Cost", cost).enabled(false),
+        ),
+    ]
+}
+
+const fn short_lunar_phase_label(phase: crate::LunarPhaseLabel) -> &'static str {
+    match phase {
+        crate::LunarPhaseLabel::NewMoon => "New",
+        crate::LunarPhaseLabel::WaxingCrescent => "Wax Crescent",
+        crate::LunarPhaseLabel::FirstQuarter => "First Quarter",
+        crate::LunarPhaseLabel::WaxingGibbous => "Wax Gibbous",
+        crate::LunarPhaseLabel::FullMoon => "Full",
+        crate::LunarPhaseLabel::WaningGibbous => "Wane Gibbous",
+        crate::LunarPhaseLabel::LastQuarter => "Last Quarter",
+        crate::LunarPhaseLabel::WaningCrescent => "Wane Crescent",
+    }
 }
 
 /// The Options hub: a short list of category buttons plus the shared
@@ -4812,6 +5045,19 @@ fn options_category_rows(
             ),
             (
                 20.0,
+                UiWidget::cycle(
+                    UI_V2_OPTIONS_CELESTIAL_DEBUG,
+                    ph,
+                    "Celestial Debug...",
+                    celestial_debug_summary(state),
+                )
+                .action(GameUiAction::OpenOptionsCategory(
+                    parent,
+                    GameOptionsCategory::CelestialDebug,
+                )),
+            ),
+            (
+                20.0,
                 optional_cycle(
                     UI_V2_OPTIONS_AUXILIARY_SPLIT,
                     "Auxiliary View",
@@ -4862,6 +5108,7 @@ fn options_category_rows(
             ),
         ],
         GameOptionsCategory::SeasonalDebug => seasonal_debug_rows(state),
+        GameOptionsCategory::CelestialDebug => celestial_debug_rows(state),
         GameOptionsCategory::StorageProfile => {
             let title_only = parent == GameOptionsParent::Title;
             let storage = state.storage_profile;
@@ -5059,7 +5306,7 @@ fn options_category_layout(
             GameOptionsCategory::Fog => {
                 GameUiAction::OpenOptionsCategory(parent, GameOptionsCategory::Graphics)
             }
-            GameOptionsCategory::SeasonalDebug => {
+            GameOptionsCategory::SeasonalDebug | GameOptionsCategory::CelestialDebug => {
                 GameUiAction::OpenOptionsCategory(parent, GameOptionsCategory::Debug)
             }
             _ => GameUiAction::OpenOptions(parent),

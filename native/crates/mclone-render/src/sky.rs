@@ -12,7 +12,7 @@
 
 use std::f32::consts::{PI, TAU};
 
-use mclone_season::{CelestialDebugSettings, LunarPhase, LunarSample, SolarSample};
+use mclone_season::{CelestialDebugSettings, LunarPhase, LunarSample, OrbitalPhase, SolarSample};
 
 /// Plains temperature, the biome whose sky color we use until biome data reaches
 /// the client renderer (`VanillaBiomes` passes `0.8` for plains).
@@ -34,6 +34,8 @@ pub const VANILLA_MOON_ANGULAR_DIAMETER_DEGREES: f32 = 22.619_865;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CelestialRenderState {
     pub settings: CelestialDebugSettings,
+    pub orbital_phase: OrbitalPhase,
+    pub solar_time_fraction: f32,
     pub lunar_phase: LunarPhase,
     pub lunar_sample: LunarSample,
     pub effective_latitude_degrees: f32,
@@ -184,6 +186,18 @@ impl SkyRenderState {
             self,
             Self::VanillaFixed { .. } | Self::VanillaCelestial { .. }
         )
+    }
+
+    /// Exact clear-weather Java 1.17.1 `ClientLevel.getStarBrightness` law.
+    pub fn reference_star_brightness(self) -> Option<f32> {
+        let time_of_day = match self {
+            Self::VanillaFixed { time_of_day, .. } | Self::VanillaCelestial { time_of_day, .. } => {
+                time_of_day
+            }
+            _ => return None,
+        };
+        let brightness = (1.0 - ((time_of_day * TAU).cos() * 2.0 + 0.25)).clamp(0.0, 1.0);
+        Some(brightness * brightness * 0.5)
     }
 
     pub fn clear_color(self) -> wgpu::Color {
@@ -458,6 +472,30 @@ mod tests {
         assert_eq!(
             seasonal(45.0, OrbitalPhase::NORTHERN_SOLSTICE, 12.0).sun_angular_diameter_degrees(),
             MCLONE_SUN_ANGULAR_DIAMETER_DEGREES
+        );
+    }
+
+    #[test]
+    fn retained_star_brightness_matches_java_clear_weather_law() {
+        assert_eq!(
+            SkyRenderState::vanilla(0.0, 0.0).reference_star_brightness(),
+            Some(0.0)
+        );
+        assert!(
+            (SkyRenderState::vanilla(0.25, 0.0)
+                .reference_star_brightness()
+                .unwrap()
+                - 0.28125)
+                .abs()
+                < 1.0e-6
+        );
+        assert_eq!(
+            SkyRenderState::vanilla(0.5, 0.0).reference_star_brightness(),
+            Some(0.5)
+        );
+        assert_eq!(
+            SkyRenderState::mclone_fixed(0.5, 0.0).reference_star_brightness(),
+            None
         );
     }
 

@@ -322,6 +322,7 @@ pub(crate) fn run_live_diorama_smoke(
         input_frames: 1,
         pause_panel: true,
         season_preview: Default::default(),
+        celestial_debug: Default::default(),
     })?;
     let stereo_preview = stereo
         .embedded_preview
@@ -1171,6 +1172,7 @@ fn screenshot_options(
         eye: Some(eye),
         target: Some(target),
         season_preview: Default::default(),
+        celestial_debug: Default::default(),
     }
 }
 

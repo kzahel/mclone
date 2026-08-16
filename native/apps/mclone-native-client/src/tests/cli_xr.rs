@@ -198,6 +198,26 @@ fn cli_parses_xr_seasonal_debug_screen() {
 }
 
 #[test]
+fn cli_parses_xr_celestial_debug_screen() {
+    let cli = Cli::parse([
+        "--xr-mclone-smoke".to_owned(),
+        "--xr-debug-ui".to_owned(),
+        "celestial-debug".to_owned(),
+    ])
+    .unwrap();
+
+    assert!(matches!(
+        cli,
+        Cli::XrMcloneSmoke {
+            options: XrMcloneSmokeOptions {
+                debug_ui_screen: Some(XrDebugUiScreen::CelestialDebug),
+                ..
+            },
+        }
+    ));
+}
+
+#[test]
 fn cli_parses_xr_forever_smoke_options() {
     let cli = Cli::parse([
         "--xr-mclone-smoke".to_owned(),

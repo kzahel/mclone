@@ -2747,6 +2747,7 @@ pub(super) fn ui_action_label(action: GameUiAction) -> &'static str {
         GameUiAction::SetTerrainPresentation(_) => "setTerrainPresentation",
         GameUiAction::SetFogSettings(_) => "setFogSettings",
         GameUiAction::SetSeasonPreview(_) => "setSeasonPreview",
+        GameUiAction::SetCelestialDebug(_) => "setCelestialDebug",
         GameUiAction::ToggleFullbright => "toggleFullbright",
         GameUiAction::TogglePlayerCollisionBox => "togglePlayerCollisionBox",
         GameUiAction::ToggleCrosshair => "toggleCrosshair",

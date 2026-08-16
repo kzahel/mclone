@@ -75,6 +75,7 @@
     "native:terrain-handoff-review:capture": "node ./scripts/capture-direct-terrain-handoff-review.mjs",
     "native:seasons:solar-capture": "node ./scripts/capture-seasonal-solar.mjs",
     "native:seasons:appearance-capture": "node ./scripts/capture-seasonal-appearance.mjs",
+    "native:seasons:celestial-capture": "node ./scripts/capture-celestial-sky.mjs",
     "native:worldgen:fields": "cargo run --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-overworld-review --",
     "native:worldgen:landform-study": "cargo run --release --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-landform-planner-study --",
     "native:worldgen:terrain-characteristics": "cargo run --release --manifest-path native/Cargo.toml -p mclone-worldgen --bin terrain_characteristics --",

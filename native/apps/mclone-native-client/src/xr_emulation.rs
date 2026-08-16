@@ -38,6 +38,7 @@ pub(crate) struct XrEmulationScreenshotReport {
     pub(crate) embedded_activation_reports: Vec<EmbeddedWorldActivationReport>,
     pub(crate) embedded_activation_switch_reports: Vec<mclone_scene::WarmWorldSwitchReport>,
     pub(crate) seasonal_appearance_receipt_json: String,
+    pub(crate) celestial_receipt_json: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -238,6 +239,7 @@ pub(crate) fn run_xr_emulation_screenshot(
     let scene = options.scene.clone();
     let render_options = options.render_options;
     let season_preview = options.season_preview;
+    let celestial_debug = options.celestial_debug;
     let input_frames = options.input_frames;
     let (
         capture,
@@ -247,6 +249,7 @@ pub(crate) fn run_xr_emulation_screenshot(
             embedded_activation_reports,
             embedded_activation_switch_reports,
             seasonal_diagnostics,
+            celestial_diagnostics,
         ),
     ) = write_headless_stereo_frame_png(
         HeadlessStereoFrameOptions {
@@ -268,6 +271,9 @@ pub(crate) fn run_xr_emulation_screenshot(
             driver
                 .host_mut()
                 .set_season_preview_settings(season_preview);
+            driver
+                .host_mut()
+                .set_celestial_debug_settings(celestial_debug);
             if let Some(registry) = mclone_app_runtime::prepared_assets::AssetPackSourceRegistry::discover_native_with_reference(asset_source.clone())? {
                 driver.host_mut().configure_asset_pack_sources(
                     registry,
@@ -365,6 +371,7 @@ pub(crate) fn run_xr_emulation_screenshot(
                 embedded_activation_reports,
                 embedded_activation_switch_reports,
                 driver.host().solar_frame_diagnostics(),
+                driver.host().celestial_frame_diagnostics(),
             ))
         },
     )?;
@@ -401,6 +408,11 @@ pub(crate) fn run_xr_emulation_screenshot(
             options.scene.startup.world_generation_profile,
             seasonal_diagnostics,
         )?;
+    let celestial_receipt_json = crate::offscreen_flat_client::celestial_receipt_json(
+        options.celestial_debug,
+        options.scene.startup.world_generation_profile,
+        celestial_diagnostics,
+    )?;
 
     Ok(XrEmulationScreenshotReport {
         path: capture.path,
@@ -418,6 +430,7 @@ pub(crate) fn run_xr_emulation_screenshot(
         embedded_activation_reports,
         embedded_activation_switch_reports,
         seasonal_appearance_receipt_json,
+        celestial_receipt_json,
     })
 }
 

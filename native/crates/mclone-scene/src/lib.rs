@@ -5873,12 +5873,26 @@ impl McloneSceneHost {
         .ok()? as f32;
         Some(CelestialRenderState {
             settings: self.celestial_debug,
+            orbital_phase,
+            solar_time_fraction: solar_time_fraction as f32,
             lunar_phase,
             lunar_sample,
             effective_latitude_degrees: effective_latitude_degrees as f32,
             local_sidereal_angle_turns,
             star_visibility: star_visibility_from_solar_elevation(solar.elevation_degrees),
         })
+    }
+
+    pub fn celestial_frame_diagnostics(
+        &self,
+    ) -> Option<(
+        CelestialRenderState,
+        mclone_render::sky_render::CelestialRenderStats,
+    )> {
+        let original_mclone = self.active_world.scene.startup.world_generation_profile
+            == mclone_server::WorldGenerationProfile::McloneOverworldV1;
+        self.celestial_render_state(original_mclone)
+            .map(|state| (state, self.sky.celestial_stats()))
     }
 
     pub fn solar_frame_diagnostics(&self) -> Option<SolarFrameDiagnostics> {

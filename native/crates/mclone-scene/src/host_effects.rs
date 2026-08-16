@@ -5,7 +5,7 @@ use mclone_app_runtime::client_experience::{
 };
 use mclone_app_runtime::client_session_policy::ClientSessionHostAction;
 use mclone_input::TouchControlsMode;
-use mclone_season::SeasonPreviewSettings;
+use mclone_season::{CelestialDebugSettings, SeasonPreviewSettings};
 use mclone_ui::{
     GameCollisionMode, GameFogSettings, GameGrassDetail, GameLeafDetail, GameMovementMode,
     GamePlayerModel, GameSimulationCadence, GameTerrainPresentation, GameTravelAssistMode,
@@ -36,6 +36,7 @@ pub trait ClientExperienceSettingsHost {
     fn set_terrain_presentation(&mut self, presentation: GameTerrainPresentation) -> Result<()>;
     fn set_fog_settings(&mut self, settings: GameFogSettings) -> Result<()>;
     fn set_season_preview(&mut self, settings: SeasonPreviewSettings) -> Result<()>;
+    fn set_celestial_debug(&mut self, settings: CelestialDebugSettings) -> Result<()>;
     fn set_fullbright(&mut self, enabled: bool) -> Result<()>;
     fn set_player_collision_box_visible(&mut self, visible: bool) -> Result<()>;
     fn set_first_person_player_visible(&mut self, visible: bool) -> Result<()>;
@@ -90,6 +91,9 @@ where
             }
             ClientExperienceSettingEffect::SetSeasonPreview(settings) => {
                 target.set_season_preview(settings)?;
+            }
+            ClientExperienceSettingEffect::SetCelestialDebug(settings) => {
+                target.set_celestial_debug(settings)?;
             }
             ClientExperienceSettingEffect::SetFullbright(enabled) => {
                 target.set_fullbright(enabled)?;
@@ -233,6 +237,7 @@ mod tests {
         record_method!(set_terrain_presentation(presentation: GameTerrainPresentation));
         record_method!(set_fog_settings(settings: GameFogSettings));
         record_method!(set_season_preview(settings: SeasonPreviewSettings));
+        record_method!(set_celestial_debug(settings: CelestialDebugSettings));
         record_method!(set_fullbright(enabled: bool));
         record_method!(set_player_collision_box_visible(visible: bool));
         record_method!(set_first_person_player_visible(visible: bool));
