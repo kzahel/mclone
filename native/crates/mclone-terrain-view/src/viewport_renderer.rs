@@ -4892,10 +4892,7 @@ mod tests {
         assert!(shader.contains("fn material_uses_grass_tint("));
         assert!(shader.contains("albedo = surface_tint(input, input.material, false);"));
         assert!(shader.contains("let resolved_exact_weight = clamp(exact_weight"));
-        assert_eq!(
-            shader.matches("input.world_position.w,").count(),
-            3
-        );
+        assert_eq!(shader.matches("input.world_position.w,").count(), 3);
         assert!(!shader.contains("input.near_shell != 0u,\n            );"));
     }
 
