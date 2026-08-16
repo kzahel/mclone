@@ -3,8 +3,9 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, ensure};
 use mclone_terrain_view::{
-    TerrainExactCoverageMode, TerrainHorizonFrameStats, TerrainHorizonVegetationServiceStats,
-    TerrainVegetationCoordinatorState, TerrainVegetationExecutorKind,
+    TerrainExactCoverageMode, TerrainExactHandoffTopology, TerrainHorizonFrameStats,
+    TerrainHorizonVegetationServiceStats, TerrainVegetationCoordinatorState,
+    TerrainVegetationExecutorKind,
 };
 use mclone_view_control::{
     ViewPoint, ViewportMetrics, WorldViewIntent, WorldViewMode, WorldViewState,
@@ -362,6 +363,7 @@ impl SmokeRecorder {
         if let Some(expected) = expected_coverage_mode {
             ensure!(
                 stats.exact_coverage_mode == expected
+                    && stats.exact_handoff_topology == TerrainExactHandoffTopology::DirectSmooth
                     && stats.exact_painted_chunks == exact.painted_chunks
                     && stats.exact_coverage_generation == exact.coverage_generation
                     && stats.tree_ownership_generation == exact.coverage_generation
@@ -377,6 +379,17 @@ impl SmokeRecorder {
                     && stats.tree_proxy_missing_proxy_records == 0,
                 "World Explorer {label} checkpoint mask does not match exact-painted coverage: \
                  horizon={stats:?} exact={exact:?}"
+            );
+        }
+        if composition == WorldExplorerCompositionMode::Composed {
+            ensure!(
+                stats.exact_connector_segments > 0
+                    && stats.exact_connector_vertex_count
+                        == stats.exact_connector_segments.saturating_mul(6)
+                    && stats.exact_connector_bytes
+                        == u64::from(stats.exact_connector_segments).saturating_mul(12),
+                "World Explorer {label} checkpoint has an incoherent direct connector: \
+                 {stats:?}"
             );
         }
         self.checkpoint_frame_ms
@@ -436,6 +449,22 @@ impl SmokeRecorder {
         fields.insert("drawn_tiles".to_owned(), json!(stats.drawn_tiles));
         fields.insert("vertex_count".to_owned(), json!(stats.vertex_count));
         fields.insert(
+            "exact_handoff_topology".to_owned(),
+            json!(stats.exact_handoff_topology.label()),
+        );
+        fields.insert(
+            "exact_connector_segments".to_owned(),
+            json!(stats.exact_connector_segments),
+        );
+        fields.insert(
+            "exact_connector_vertex_count".to_owned(),
+            json!(stats.exact_connector_vertex_count),
+        );
+        fields.insert(
+            "exact_connector_bytes".to_owned(),
+            json!(stats.exact_connector_bytes),
+        );
+        fields.insert(
             "tree_proxy_suppressed_instances".to_owned(),
             json!(stats.tree_proxy_suppressed_instances),
         );
@@ -491,7 +520,7 @@ impl SmokeRecorder {
             .last_stats()
             .context("World Explorer smoke completed without frame statistics")?;
         let path = self.root.join("receipt.json");
-        let receipt = json!({
+        let mut receipt = json!({
             "schema": "mclone-world-explorer-smoke-v3",
             "target": self.target,
             "adapter": {
@@ -549,6 +578,25 @@ impl SmokeRecorder {
                 "orbit",
             ],
         });
+        let fields = receipt
+            .as_object_mut()
+            .expect("a JSON object literal produces an object");
+        fields.insert(
+            "final_exact_handoff_topology".to_owned(),
+            json!(final_stats.exact_handoff_topology.label()),
+        );
+        fields.insert(
+            "final_exact_connector_segments".to_owned(),
+            json!(final_stats.exact_connector_segments),
+        );
+        fields.insert(
+            "final_exact_connector_vertex_count".to_owned(),
+            json!(final_stats.exact_connector_vertex_count),
+        );
+        fields.insert(
+            "final_exact_connector_bytes".to_owned(),
+            json!(final_stats.exact_connector_bytes),
+        );
         std::fs::write(
             &path,
             serde_json::to_vec_pretty(&receipt)
