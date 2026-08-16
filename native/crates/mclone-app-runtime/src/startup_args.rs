@@ -178,6 +178,7 @@ pub struct StartupSceneOptions {
     pub world_topology: HorizontalTopology,
     pub chunk_x: i32,
     pub chunk_z: i32,
+    pub local_entry_intent: crate::local_session_launch::LocalSessionEntryIntent,
     pub render_distance: u32,
     pub render_compile_worker_count: usize,
     pub render_compile_max_pending_jobs: Option<usize>,
@@ -204,6 +205,8 @@ impl Default for StartupSceneOptions {
             world_topology: HorizontalTopology::UNBOUNDED,
             chunk_x: DEFAULT_STARTUP_CHUNK_X,
             chunk_z: DEFAULT_STARTUP_CHUNK_Z,
+            local_entry_intent:
+                crate::local_session_launch::LocalSessionEntryIntent::ProfilePreferred,
             render_distance: DEFAULT_STARTUP_RENDER_DISTANCE,
             render_compile_worker_count: DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
             render_compile_max_pending_jobs: Some(DEFAULT_RENDER_SECTION_COMPILE_MAX_PENDING_JOBS),
@@ -419,9 +422,13 @@ impl StartupArgState {
             }
             ARG_CHUNK_X => {
                 self.scene.chunk_x = parse_i32_arg(ARG_CHUNK_X, args.next())?;
+                self.scene.local_entry_intent =
+                    crate::local_session_launch::LocalSessionEntryIntent::ExplicitCoordinate;
             }
             ARG_CHUNK_Z => {
                 self.scene.chunk_z = parse_i32_arg(ARG_CHUNK_Z, args.next())?;
+                self.scene.local_entry_intent =
+                    crate::local_session_launch::LocalSessionEntryIntent::ExplicitCoordinate;
             }
             ARG_RENDER_DISTANCE => {
                 self.scene.render_distance = parse_render_distance_arg(
@@ -571,9 +578,13 @@ impl StartupArgState {
             }
             QUERY_CHUNK_X => {
                 self.scene.chunk_x = parse_i32_arg(QUERY_CHUNK_X, value)?;
+                self.scene.local_entry_intent =
+                    crate::local_session_launch::LocalSessionEntryIntent::ExplicitCoordinate;
             }
             QUERY_CHUNK_Z => {
                 self.scene.chunk_z = parse_i32_arg(QUERY_CHUNK_Z, value)?;
+                self.scene.local_entry_intent =
+                    crate::local_session_launch::LocalSessionEntryIntent::ExplicitCoordinate;
             }
             QUERY_RENDER_DISTANCE => {
                 self.scene.render_distance = parse_render_distance_arg(
@@ -922,6 +933,8 @@ mod tests {
                 world_topology: HorizontalTopology::UNBOUNDED,
                 chunk_x: 0,
                 chunk_z: 0,
+                local_entry_intent:
+                    crate::local_session_launch::LocalSessionEntryIntent::ProfilePreferred,
                 render_distance: 5,
                 render_compile_worker_count: DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
                 render_compile_max_pending_jobs: Some(
@@ -1078,6 +1091,8 @@ mod tests {
                 ),
                 chunk_x: 4,
                 chunk_z: -3,
+                local_entry_intent:
+                    crate::local_session_launch::LocalSessionEntryIntent::ExplicitCoordinate,
                 render_distance: 5,
                 render_compile_worker_count: 2,
                 render_compile_max_pending_jobs: Some(6),
@@ -1410,6 +1425,8 @@ mod tests {
                 ),
                 chunk_x: 4,
                 chunk_z: -3,
+                local_entry_intent:
+                    crate::local_session_launch::LocalSessionEntryIntent::ExplicitCoordinate,
                 render_distance: 6,
                 render_compile_worker_count: 3,
                 render_compile_max_pending_jobs: Some(5),

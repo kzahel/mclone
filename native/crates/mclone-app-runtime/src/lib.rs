@@ -23,6 +23,7 @@ pub mod local_client_group;
 pub mod local_participant;
 pub mod local_participant_input;
 pub mod local_profile;
+pub mod local_session_launch;
 pub mod monotonic;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod native_remote_session;

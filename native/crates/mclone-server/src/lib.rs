@@ -29,6 +29,7 @@ mod light_status;
 mod light_world;
 mod lighting_seed;
 mod loading_progress;
+mod local_authority;
 mod persistence;
 #[cfg(feature = "physics-engine")]
 mod physics_runtime;
@@ -110,6 +111,7 @@ pub use loading_progress::{
     ChunkLoadingProgress, ChunkLoadingProgressCell, ChunkLoadingProgressSnapshot,
     ChunkLoadingProgressStats,
 };
+pub use local_authority::LocalAuthorityStartConfig;
 pub use mclone_protocol::EntityPersistentId;
 pub use persistence::{
     CHUNK_LIGHT_ALGORITHM_VERSION, ChunkRecord, ChunkSnapshotStore, ChunkSnapshotWorldStore,
