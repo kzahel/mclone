@@ -9,9 +9,9 @@ and urgent safety proof completed under Tactical
 [`296`](../tactical/296-rabbit-player-avoidance.md) on 2026-08-14. Rabbits now
 consume server-internal bounded place knowledge, explicit availability
 outcomes, stable decision schedules, deterministic work admission, spatially
-bounded refuge/neighbor queries, and fair budgeted open-ground escape. Deer
-and fox remain the intended contrasting consumers before this becomes a
-public generalized ecology API. Tactical
+bounded refuge/neighbor queries, and fair budgeted open-ground escape.
+Squirrels and later fox remain the intended contrasting consumers before this
+becomes a public generalized ecology API. Tactical
 [`298`](../tactical/298-deterministic-initial-wildlife-population.md) has now
 landed a separate seed-authored initial-population geography, shared with
 Terrain Lab;
@@ -65,6 +65,17 @@ individual and terrain-driven. A failed parented mallard nest is removed only
 after authoritative parent mortality, preventing it from permanently blocking
 later clutches without treating unloaded parents as dead. The exact revision-5
 120/200-day acceptance campaign remains open; Tactical 308 owns its evidence.
+
+Planned coordinating parent Tactical
+[`315`](../tactical/315-authoritative-seasonal-calendar-and-squirrel-ecology.md)
+selects squirrel as the next non-predator model pressure test. Its children
+first make the server civil calendar authoritative without advancing skipped
+simulation, then apply local seasonal climate to active resource
+accessibility/recovery.
+Squirrels consume ordinary seeds/soft mast and add bounded distributed cache
+knowledge, durable cache stock, carried-resource conservation, tree refuge,
+and compressed favorable-season reproductive opportunity. Fish and beaver
+remain later alternatives rather than parallel roster work.
 
 ## Scope
 
@@ -495,9 +506,9 @@ food, prey, shelter, or disturbance to make the behavior legible.
 | bobcat | solitary cover-dependent territory and prey caching | brush, rocks, wetlands and fallen timber |
 | horse | herd cohesion, grazing travel, water memory and panic cascades | broad grassland, trails and watering places |
 
-The current bounded sequence has migrated mallards and now uses the resulting
-resource histories to choose among fish, beaver, or squirrel as the next
-non-predator pressure test. This is not a commitment to implement all three.
+The current bounded sequence has migrated mallards and selected squirrel under
+Tactical 315 as the next non-predator pressure test. Fish and beaver remain
+later candidates rather than parallel implementation commitments.
 After bottom-up support and prey surplus are legible, fox remains the first
 predator candidate, followed by whichever of wild pig, crow, coyote, bear,
 owl, mountain lion, or eagle adds the most useful missing relationship.
@@ -519,8 +530,9 @@ scavengers consequential rather than decorative.
 3. Retain mallards as the landed contrasting amphibious lifecycle consumer,
    using the durable semantic nest and attended hatch rather than a universal
    home or abstract population birth.
-4. Choose one of fish, beaver, or squirrel only after the three-species
-   resource evidence identifies the most valuable missing spatial pattern.
+4. Execute Tactical 315's selected squirrel pressure test through ordinary
+   mast, carried stock, bounded durable caches, cavities/tree refuge, and
+   seasonal resource opportunity; retain fish and beaver for later evidence.
 5. Add fox pressure later through prey observations, interruptible pursuit,
    and life-stage-relevant den use rather than a universal permanent-home
    pointer.

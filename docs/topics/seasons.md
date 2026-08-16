@@ -47,6 +47,16 @@ latitude-aware stars, and requires independent live-off cost controls. It
 retains Java moon/star behavior for reference profiles and makes no gameplay
 calendar or light-engine claim.
 
+Planned coordinating parent Tactical
+[`315`](../tactical/315-authoritative-seasonal-calendar-and-squirrel-ecology.md)
+owns the first authoritative gameplay-calendar and seasonal-ecology sequence.
+It keeps monotonic executed `game_time` separate from mutable persisted civil
+`day_time`, derives one versioned orbital calendar from the latter, treats
+sleep/date changes as no-catch-up discontinuities, and lets local season affect
+loaded food accessibility and recovery before promoting squirrels through
+mast, bounded caches, tree refuge, and the ordinary durable lifecycle. It does
+not make calendar transitions directly add or remove food or animals.
+
 No authoritative season clock, terrain or biome season generation, active
 weather event, migration producer, seasonal hydrology, wildlife tagging, or
 managed-habitat infrastructure is implemented.
@@ -73,8 +83,8 @@ original Mclone world. It covers:
 - tagged wildlife, livestock, zoos, and supplied food; and
 - the macro-landscape scale needed to make seasonal movement legible.
 
-It does not establish a tactical, allocate a final crate/API, promise a
-complete ecosystem, or make seasons part of the legacy Java-shaped profiles.
+It does not allocate every final crate/API, promise a complete ecosystem, or
+make seasons part of the legacy Java-shaped profiles.
 Vanilla 1.17.1 has no season system; any Mclone implementation is an explicit
 original-product feature, not weather-parity work.
 
@@ -582,17 +592,21 @@ logic.
    performance. Tactical 307's coordinate/solar behavior and Earth-like sun
    size are already accepted; its focused full-game WebGPU sun-path gate also
    remains available if the combined Tactical 306 Web proof is insufficient.
-2. Calibrate year length, climate wavelength/scale, continental size, and
-   travel time together in Terrain Lab or another shared review surface.
+2. Execute Tactical 315's calendar Gate A: calibrate year length against
+   sleep, real play time, travel, farming, current wildlife cadence, and the
+   squirrel surplus-to-lean cache story. Continue to compare the accepted
+   duration with climate wavelength/scale and continental travel in Terrain
+   Lab or another shared review surface.
 3. After Tactical 304/305 settle the exact/LOD frontier, give the procedural
    horizon a filtered version of the accepted seasonal appearance. Do not copy
    the exact fragment implementation or weaken the explicit LOD ownership.
 4. Add a loaded active-weather producer for snowfall rise/hold/decay only after
    choosing whether visual coverage remains derived or gains sparse
    authoritative interactive snow.
-5. Let existing loaded habitat resources consume narrow seasonal modifiers;
-   prove exact full/accelerated active-domain equivalence and no inactive
-   catch-up.
+5. Complete Tactical 315's no-catch-up sleep/date operations, narrow seasonal
+   modifiers over the existing loaded habitat resources, and squirrel
+   mast/cache lifecycle. Prove exact full/accelerated active-domain
+   equivalence, conservation, and inactive freeze before migration.
 6. Prove one ambient waterfowl passage before interactive migration. Then
    resolve the anonymous-wildlife persistence contract before allowing
    gameplay animals to seasonally disappear or refill.

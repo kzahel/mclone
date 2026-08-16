@@ -62,6 +62,17 @@ natural attended mallard nests, one immutable-domain runner, and deterministic
 real-seed reports. The individual simulation remains authoritative; there is
 no estimator-driven cap, refill, immigration, or unloaded catch-up.
 
+Planned coordinating parent Tactical
+[`315`](../tactical/315-authoritative-seasonal-calendar-and-squirrel-ecology.md)
+is the selected fifth creature-life sequence. Its children make persisted
+civil time drive one authoritative orbital calendar while sleep/date changes
+execute no missed simulation, apply local seasonal climate to active food
+accessibility and recovery, and promote squirrels through woodland-edge mast,
+bounded distributed caches, tree refuge, compressed reproductive opportunity,
+and the same durable loaded lifecycle. Population change remains an outcome of
+actual food access, condition, reproduction, and mortality rather than a
+seasonal count multiplier.
+
 ## Scope
 
 This topic owns the continuing product and simulation contract that terrain
@@ -617,11 +628,11 @@ notes, and zero browser-world records. The temporary play link is
   estimate only if it clarifies the raw histories without becoming a second
   model; Tactical 301 deliberately omits one because the typed resource,
   condition, suppression, birth, and mortality curves are more legible.
-- Use the three-species histories to choose the next non-predator pressure
-  test. Fish could exercise bounded water volumes and aquatic resources;
-  beavers could connect woody/aquatic food to family construction and terrain
-  mutation; squirrels could exercise mast, caches, cavities, and canopy
-  connectivity. Do not implement all three merely to populate a food-web list.
+- Execute Tactical 315's selected squirrel pressure test through mast, bounded
+  caches, cavities/tree refuge, canopy connectivity, and seasonal food
+  opportunity. Retain fish as the later bounded-water candidate and beaver as
+  the later family-construction/terrain-mutation candidate; do not implement
+  all three merely to populate a food-web list.
 - Decide which concrete consumer actually needs the shared habitat-fitness or
   resource records outside `mclone-server` before making either a public
   cross-crate API. Avoid a generic ecology framework without a real query or
