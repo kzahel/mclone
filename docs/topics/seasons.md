@@ -39,13 +39,20 @@ ordinary world-clock sky. The original `--season-preview` capture switch stays
 a combined compatibility control; `--season-appearance` can override its
 ground half explicitly.
 
-Planned Tactical
-[`314`](../tactical/314-celestial-moon-stars-and-square-sun.md) is the next
-celestial-sky slice. It keeps the accepted Earth-sized solar core but makes the
-original Mclone sun square, adds a continuous square phased moon and stable
-latitude-aware stars, and requires independent live-off cost controls. It
-retains Java moon/star behavior for reference profiles and makes no gameplay
-calendar or light-engine claim.
+Tactical
+[`314`](../tactical/314-celestial-moon-stars-and-square-sun.md) is implemented
+through automated and physical-XR evidence. Original Mclone now has the
+accepted Earth-sized square solar core, a separate halo, a continuous square
+phased moon, and a stable 2,048-entry latitude-aware star catalog. Retained
+Java profiles preserve their moon atlas and seed-10842 star law. The shared
+`Celestial Debug` screen independently disables every optional layer and
+reports its exact submission/resource cost; all-off restores the deterministic
+sky hash exactly. Quest held 72 Hz with no dropped frames, but Full stars cost
+about `0.26` to `0.29 ms` app GPU, above Tactical 314's `0.20 ms` review
+trigger. Quarter density cost essentially the same, so full quality remains
+enabled and final Human Review must accept that fixed blended-draw exception
+or request a later sky-compositing slice. None of this creates a gameplay
+calendar or mutates the authoritative light engine.
 
 Planned coordinating parent Tactical
 [`315`](../tactical/315-authoritative-seasonal-calendar-and-squirrel-ecology.md)
@@ -589,8 +596,10 @@ logic.
 
 1. Review Tactical 306's final exact-terrain matrix and shared live menu, then
    complete current-revision physical Quest Seasonal Debug interaction and
-   performance. Tactical 307's coordinate/solar behavior and Earth-like sun
-   size are already accepted; its focused full-game WebGPU sun-path gate also
+   performance. Review Tactical 314's square sun, continuous moon phases,
+   latitude-aware stars, stereo stability, and explicit Quest star-cost
+   exception. Tactical 307's coordinate/solar behavior and Earth-like sun size
+   are already accepted; its focused full-game WebGPU sun-path gate also
    remains available if the combined Tactical 306 Web proof is insufficient.
 2. Execute Tactical 315's calendar Gate A: calibrate year length against
    sleep, real play time, travel, farming, current wildlife cadence, and the

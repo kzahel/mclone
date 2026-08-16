@@ -25,12 +25,12 @@ and (non-parity) god rays are tracked as follow-up, not part of this slice.
 
 ## Current native state
 
-- World pass clears to a fixed dark color, then draws chunks
-  (`native/apps/mclone-native-client/src/app.rs:123`). No sky geometry, no
-  celestial bodies, no time-of-day clock anywhere in `native/`.
-- `IntegratedServer` has `simulation_tick: u64` advancing per tick
-  (`integrated.rs:136`) but no world `dayTime`.
-- `ServerUpdate` (`mclone-protocol/src/lib.rs:31`) has no time packet.
+The server owns synced `game_time` and `day_time`; the shared scene evaluates
+the clock and optional client-local seasonal/celestial previews. The shared
+renderer now draws the sky disc, horizon glow, original or retained sun, moon,
+moonlight presentation, and bounded stars before terrain on mono, stereo, and
+multiview paths. Tactical [`314`](314-celestial-moon-stars-and-square-sun.md)
+owns the completed moon/star implementation and current evidence.
 
 ## Phasing
 
@@ -81,21 +81,20 @@ Original plan:
   reusable sky-geometry plumbing (vertex buffers, sky shader, ordering).
 - Validate: capture at dawn (orange band on the sun side).
 
-### Phase 3 — sun, moon, stars
+### Phase 3 — sun, moon, stars — DONE 2026-08-16
 - Visible textured sun quad — **DONE 2026-08-16**. The shared sky renderer
   resolves the selected pack's Mclone or Minecraft `sun.png`, with a generated
   proprietary-free fallback for packs that intentionally contain neither.
   The ordinary fixed celestial rig drives one quad implementation in mono,
   placed/per-eye, and full-frame multiview paths. The same CPU-side texture is
   retained across renderer-device rebuilds.
-- Moon and star completion now has a bounded execution owner in Tactical
+- Moon and star completion landed through Tactical
   [`314`](314-celestial-moon-stars-and-square-sun.md). It retains this
   tactical's Java 4×2 moon-atlas, seeded-star, brightness, and draw-order
   baseline while adding the explicit original-Mclone square moon,
   latitude-aware star law, per-feature cost controls, and cross-platform
-  evidence.
-- Validate moon/stars with captures across a full day cycle through Tactical
-  314 rather than growing this historical phase checklist in parallel.
+  evidence. Its automated implementation is complete; final human pixel and
+  Quest star-cost acceptance remains staged in that tactical.
 
 The first sun pixel gate used frozen `day_time=6000` captures. Looking straight
 up produced an inspected centered textured sun at

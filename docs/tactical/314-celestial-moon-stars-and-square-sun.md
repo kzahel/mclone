@@ -1,6 +1,8 @@
 # Tactical 314: Celestial Moon, Stars, And Square Sun
 
-Status: planned 2026-08-16; ready for implementation and staged Human Review
+Status: implemented 2026-08-16; automated and physical-XR evidence complete,
+with staged Human Review still open for final pixels and the measured Quest
+star-cost exception
 
 Topic: `seasons`
 
@@ -572,6 +574,57 @@ Human Review must accept:
 - comfortable stereo stability; and
 - no visible snap at phase, day, orbital-year, or cyclical-latitude wraps.
 
+## Execution Record
+
+Implemented on 2026-08-16 as the `Topic: seasons` series from `fdea647c`
+through `aae3dfe1`.
+
+- `mclone-season` now owns the fixed-point 29.5-day lunar cycle, eight labels,
+  continuous illumination, waxing/waning state, inclined orbit and limb
+  direction, local sidereal transform, and solar-elevation star visibility.
+- `mclone-render` now draws the original `0.53`-degree square sun plus a
+  separate halo, a continuous `0.52`-degree square moon, and one stable
+  2,048-star catalog. The retained Java profile keeps its oversized sun,
+  4-by-2 atlas phases, seed-10842 candidate stream, 780 accepted stars, and
+  Java brightness law.
+- Mono, per-eye, synthetic-stereo, and full-frame-multiview paths share the
+  implementation. Stars use one indexed instanced draw; invariant transforms
+  are precomputed, invisible stars are rejected before rasterization, and no
+  per-frame CPU star regeneration, allocation, sort, or upload exists.
+- The shared Debug navigation now exposes `Celestial Debug` on desktop, Web,
+  flat Android, desktop XR, and Android XR. It independently controls sun,
+  halo, glow, moon, moonlight, phase source, and nested star density, while
+  showing global date, evaluated latitude, solar time, lunar phase, sidereal
+  angle, and exact draw/write/resource receipts.
+- All-off performs zero optional celestial draws and feature writes. The final
+  deterministic matrix restored the sky-only SHA-256 exactly to
+  `eac7448a135a069fb1e9caa0f24639ef7025021e9eabf5d393c15354deffc8b8`.
+  Full density submits 2,048 stars in one draw. The original star buffer is
+  73,728 bytes; total resident celestial resources, including both profile
+  catalogs, textures, vertices, indices, and uniforms, are 143,304 bytes.
+- The final 31-capture matrix at revision `aae3dfe18dc5` covers the incremental
+  cost ladder, sixteen continuous-phase samples, retained Java, synthetic
+  stereo, and all-off restoration. Native renderer tests report 206 passed
+  and 11 hardware-only ignored tests. The headed WebGPU build and app-loop
+  smoke pass with inspected pixels, and final flat Android and Android-XR APKs
+  build through the repository scripts.
+- A physical Quest full-frame-multiview session exercised the direct Debug
+  screen and every launch override. The device held 72 Hz with no dropped
+  frames and roughly 6 ms of app headroom.
+
+The Quest star measurement crossed the tactical's review trigger. A paired
+final 2,048-star observation measured about `4.389 ms` app GPU versus
+`4.130 ms` all-off, or `+0.259 ms`. A longer five-sample attribution run at a
+temporary 1,536-star density measured `+0.286 ms` mean. Quarter density cost
+essentially the same as Full, identifying the remaining cost as the fixed
+blended multiview submission rather than catalog bandwidth or CPU star work.
+Indexed quads, invariant-transform precomputation, and pre-raster visibility
+culling did not reduce that fixed cost. Full 2,048-star quality was therefore
+restored instead of accepting a visual downgrade that did not buy performance.
+Human Review must explicitly accept this measured exception or request a later
+sky-compositing/batching slice; it is not concealed as a passed `0.20 ms`
+budget.
+
 ## Explicit Deferrals
 
 This tactical does not implement:
@@ -612,6 +665,11 @@ Tactical 314 is complete only when:
    pass, and available physical XR lanes complete visual/performance review.
 8. No server clock, gameplay light, block/entity state, persistence, terrain
    mesh, unloaded region, or procedural-horizon behavior changes.
+
+All engineering gates and available platform lanes are complete. Formal
+product acceptance remains staged because gates 1, 2, 3, 5, and 7 require the
+human pixel/stereo review, including the explicit Quest star-cost exception
+recorded above.
 
 ## Related
 

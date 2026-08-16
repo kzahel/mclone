@@ -11,6 +11,10 @@ the first concrete Rust slice is
 Presentation-side point lights and dynamic shadows are a separate concern in
 [`dynamic-point-lights.md`](dynamic-point-lights.md); they must not distort the
 authoritative stored-light contract.
+The optional moonlight added by Tactical
+[`314`](../tactical/314-celestial-moon-stars-and-square-sun.md) is likewise a
+presentation-only sky/material factor. It deliberately performs no propagated
+light update and does not enter stored sky or block light.
 The sustained-travel admission, cancellation, Light-ticket, and memory-bound
 campaign is now a focused sibling topic in
 [`chunk-lighting-admission-and-backpressure.md`](chunk-lighting-admission-and-backpressure.md);
