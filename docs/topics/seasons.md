@@ -16,11 +16,13 @@ remain pending. Retained Minecraft-reference profiles keep the Java 1.17.1
 oversized sun. The optional cylinder stays secondary. Tactical
 [`306`](../tactical/306-seasonal-appearance-preview.md) remains planned for
 continuous exact-terrain material response and one bounded recent-snow pulse;
-it must extend Tactical 307's shared `Season Preview` state and continues to
-defer procedural-horizon LOD. No authoritative season clock, terrain or biome
-season generation, weather event, seasonal surface system, migration producer,
-seasonal hydrology, wildlife tagging, or managed-habitat infrastructure is
-implemented.
+it now binds one synthetic global preview date to an evaluated local season and
+moves the combined solar/material controls into a dedicated shared `Seasonal
+Debug` screen. It must extend Tactical 307's shared `Season Preview` state and
+continues to defer procedural-horizon LOD. No authoritative season clock,
+terrain or biome season generation, weather event, seasonal surface system,
+migration producer, seasonal hydrology, wildlife tagging, or managed-habitat
+infrastructure is implemented.
 The selected direction is that unloaded terrain and entities receive no ticks
 or elapsed-time catch-up. Climate and ambient seasonal opportunities may be
 derived when an active region asks for them, while durable animals freeze.
@@ -79,6 +81,34 @@ Seasonal effects should remain understandable through landscape and animal
 behavior. A shifting snow line, wet creek bed, spring arrival of ducks, autumn
 departure call, or summer polar bloom is more valuable than a hidden numerical
 season meter.
+
+### Global calendar and evaluated local season
+
+The calendar is global; the season name is local. One orbital date must not be
+called Spring or Winter everywhere because opposite hemispheres disagree and
+tropical regions may have weak thermal seasons or later wet/dry vocabulary.
+The shared evaluation shape is:
+
+```text
+global calendar/orbital phase
+  + effective latitude
+  + local climate and altitude
+  -> local seasonal phase, response strength, snow tendency, and display label
+```
+
+Sun path and material appearance are sibling outputs of those inputs. Do not
+derive season from instantaneous sun elevation, and do not expose an
+independent local-phase slider that can disagree with the sky.
+
+Tactical 306 uses a provisional 112-day, four-by-28-day synthetic calendar as
+a readable Debug projection over continuous `OrbitalPhase`. It does not choose
+the authoritative year length, advance time, persist a year, or add gameplay.
+The shared Debug category links to one dedicated `Seasonal Debug` screen that
+shows `Global Preview Date`, global milestone, evaluated local season, and day
+length beside the preview, latitude, solar-time, and recent-snow controls.
+When a real calendar lands, that screen should offer `World Calendar | Manual
+Preview`; a compact player-facing date plus local-season display can reuse the
+same evaluation in a separate slice.
 
 ## Climate Coordinates And Topology
 
