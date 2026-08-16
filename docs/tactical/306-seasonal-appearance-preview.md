@@ -1,7 +1,8 @@
 # Tactical 306: Seasonal Appearance Preview
 
-Status: planned 2026-08-15; calendar/evaluated-local-season UI revised
-2026-08-16 after Tactical 307 Human Review
+Status: implementation and automated evidence complete 2026-08-16; Human
+Review plus current-revision physical Quest interaction/performance remain
+pending because no authorized headset is attached
 
 Topic: `seasons`
 
@@ -574,7 +575,7 @@ Execution record:
   canonical integer center, smooth radial falloff, and topology-aware shortest
   displacement. `evaluate_surface_appearance` composes continuous vegetation
   tint/dormancy with distinct seasonal and recent ground/canopy snow targets.
-- Twenty-three focused crate tests cover calendar anchors/wrap, solar day-length
+- Twenty-four focused crate tests cover calendar anchors/wrap, solar day-length
   agreement, hemispheres, equatorial weakness, regional climate and material
   matrices, deciduous/evergreen distinction, landmark continuity, packed-key
   round trips, recent-snow monotonicity/falloff/cylinder seam, warm retention,
@@ -582,7 +583,7 @@ Execution record:
 
 ### Slice 2: Exact terrain and lush-grass rendering
 
-Status: planned.
+Status: complete 2026-08-16.
 
 - Derive the selected static response key during ordinary exact mesh/grass
   preparation from existing biome, block/model, face, light/exposure, and
@@ -614,9 +615,34 @@ Gate: exact near-field terrain, canopy, and grass show useful gradual seasonal
 and local recent-snow distinction in mono and stereo without any slider-driven
 mesh or world churn.
 
+Execution record:
+
+- Ordinary exact mesh compilation classifies inert, natural-ground, grass,
+  deciduous, and evergreen surfaces and packs family, upward exposure,
+  temperature class, and moisture class into the unused high byte of
+  `packed_light`. Lush grass uses its existing reserved word. The measured
+  exact vertex remains 40 bytes and the grass patch remains 32 bytes.
+- One shared `seasonal_appearance.wgsl` evaluates continuous vegetation tint,
+  seasonal snow, bounded recent ground/canopy snow, deterministic world-space
+  breakup, and grass suppression. All mono, placed, clipped-placed, per-eye,
+  and full-frame multiview chunk and grass shaders include that owner.
+- The existing per-frame exact-terrain uniform grows from 128 to 160 bytes and
+  the grass frame uniform from 32 to 64 bytes. This is one constant-size write
+  per renderer/frame; there is no per-section seasonal buffer, mask, upload,
+  atlas replacement, or mesh mutation.
+- Preview-disabled uniforms encode exact zero seasonal state. Two separately
+  configured disabled captures at the final revision are byte-identical with
+  SHA-256
+  `8b3c0e5c27d7b83f3758d46d0df3f2d08c39b7bff2dc50d0581913dad1afd7a5`.
+- The final native matrix and headed WebGPU transition both show gradual
+  material response and texture-preserving ground/canopy snow. The Web probe
+  holds mesh builds, commands, block updates, pending compiles, and accepted
+  compile sections unchanged through preview off -> active -> off.
+
 ### Slice 3: Shared interactive Debug control
 
-Status: planned.
+Status: complete for implementation and automated interaction contracts
+2026-08-16; live Human Review is part of Slice 4.
 
 - Add one controller-friendly `Seasonal Debug...` navigation row to the shared
   Debug options category, with a compact disabled/date/local-result summary.
@@ -664,9 +690,36 @@ and watch sun/material response agree, scrub recent snow, inspect the anchored
 pulse boundary, and return to exact preview-off output without restart, world
 reload, or menu-state drift.
 
+Execution record:
+
+- The shared Debug category now has exactly one `Seasonal Debug...` entry. Its
+  shared nested screen owns `Season Preview`, `Date: Day N/112`, milestone,
+  evaluated local season/response/snow tendency, daylight/effective latitude,
+  latitude source/value, solar-time source/value, `Recent Snow`, and the
+  read-only `Seasonal LOD: Deferred` row.
+- Existing orbital, latitude, and solar-time actions plus the typed recent-snow
+  action flow through `ClientExperienceController` into one
+  `SeasonPreviewSettings` value owned by `McloneSceneHost`. The pulse anchors
+  once on the first zero-to-positive adjustment, remains fixed while scrubbed,
+  clears at zero, and may anchor again on a later positive adjustment.
+- Exact CLI controls and the structured
+  `MCLONE_SEASONAL_APPEARANCE_STATE` receipt expose phase/date, observer biome
+  and climate, effective latitude and solar sample, evaluated local result,
+  exact fixed-point pulse intensity/center/radius, exact-terrain scope, and LOD
+  deferral without menu text scraping.
+- Desktop OpenXR and Android XR accept `seasonal-debug` as a direct shared
+  validation target. The scene routes it to the same screen as flat UI; it is
+  not an XR-only menu implementation. Focus, key/controller, pointer,
+  capability, reducer/effect, CLI, and XR screen-routing tests cover the path.
+- New process/session defaults remain preview off, Day 1/northward equinox,
+  world latitude/time sources, and no pulse. No preference, world record,
+  protocol, server command, or authoritative state was added.
+
 ### Slice 4: Visual matrix, performance, and Human Review
 
-Status: planned.
+Status: automated native/WebGPU/XR-emulation/build evidence complete
+2026-08-16. Human Review, live desktop/OpenXR interaction, and
+current-revision physical Quest pixels/performance remain pending.
 
 Add one focused capture runner, such as
 `pnpm native:seasons:appearance-capture`, that saves under `/tmp`:
@@ -713,6 +766,54 @@ gradual local appearance change, regional late-Winter difference, and the
 temporary local ground/canopy snowfall response; desktop and XR interaction
 are comfortable; and the measured result stays inside the no-remesh/no-world-
 work contract.
+
+Execution record:
+
+- `pnpm native:seasons:appearance-capture` produced 22 exact-revision captures
+  at `67f91bd5d19b` under
+  `/tmp/mclone-seasonal-appearance-67f91bd5d19b-1786893846646/`, including the
+  four landmarks, four intermediate dates, opposite hemispheres, equatorial
+  weakness, warm/dry, cool/wet, cold/high, half/full/falloff/outside snowfall,
+  synthetic stereo, and the shared menu. The receipt is
+  `capture-receipt.json`; the inspected review image is
+  `seasonal-appearance-contact-sheet.png` in the same directory.
+- The runner gates exact typed labels and pulse data: northern phase `0.875`
+  / Day 99 is Winter, southern phase `0.375` is Winter, the equator reports
+  `Weak Thermal Cycle`, and recent snow retains raw intensity, explicit center,
+  and the fixed 96-block radius. It intentionally treats the Summer landmark
+  as the neutral material baseline while Spring, Autumn, Winter, and
+  intermediate dates prove continuous change.
+- Headed Chrome/WebGPU on macOS/Metal captured the same pinned temperate exact
+  scene at preview off, late Winter/manual 47.5 degrees/noon/full snow, and
+  restored off. Active state changed 412,895 of 921,600 pixels; restored off
+  changed zero. Off/restored SHA-256 is
+  `2cc0b3f6e67dd39a219c5193446cdc322c771b566cbc046285d91a32f122929a`;
+  active SHA-256 is
+  `9332ad2118e01585df938362de8eb55b664f22d907d003ef53bf51107b88fafb`.
+  Mesh builds stayed 120, commands 11, block updates zero, and pending/accepted
+  compile counts zero across all three explicit frames.
+- Repeating the preflight RD3 exact CPU mesh corpus after implementation built
+  the identical 1,296 sections / 521 non-empty sections, 1,671,148 vertices,
+  2,506,722 indices, and 417,787 faces in `570.405ms` versus `571.345ms`
+  before (`-0.16%`). Exact vertex bytes remain `66,845,920`; index bytes remain
+  `10,026,888`. Static vertex/payload growth is zero.
+- Focused suites pass: `mclone-season` 24 tests, `mclone-mesh` 106,
+  `mclone-render` 198 with 11 explicitly ignored GPU cases, `mclone-ui` 112,
+  `mclone-app-runtime` 297 unit tests plus its integration targets, and
+  `mclone-scene` 180 unit tests plus all integration/doc targets, including the
+  new Seasonal Debug/XR routing cases (one unrelated GPU characterization is
+  ignored). Explicit GPU validation covers every grass pipeline variant and
+  the headless static grass artifact path. Native XR-feature and WASM checks
+  plus Web TypeScript validation pass.
+- `pnpm native:xr-emulation:smoke` passes, and the seasonal matrix's stereo
+  case renders 480-by-480 per eye with exact terrain and recent snow. Current
+  Android XR release and flat Android debug APK builds both pass after the
+  final shared UI routing change.
+- `quest doctor --json` currently returns
+  `no attached, authorized Quest headset was found`. No current-revision
+  physical Quest interaction, pixels, or GPU delta is claimed. The documented
+  five-percent/0.25ms Quest stop gate therefore remains open for Human Review
+  rather than being waived.
 
 ## Acceptance
 

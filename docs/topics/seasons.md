@@ -2,27 +2,30 @@
 
 Topic: `seasons`
 
-Status: **active design record created 2026-08-15. Tactical
+Status: active design record created 2026-08-15. Tactical
 [`307`](../tactical/307-seasonal-solar-path-and-cyclical-latitude.md) is
-implemented as a client-local visual proof. The default unbounded Mclone plane
-now has a provisional 98,304-block cyclical latitude wavelength, a
-27-degree-tilt pure solar model, one visible-sun/sky/rendered-light sample, and
-shared desktop/XR Debug controls. Human Review accepts its coordinate/solar
-behavior after correcting the original-Mclone sun to an Earth-like
-`0.53`-degree apparent diameter in both fixed and seasonal modes. Its automated
-matrix and a physical Quest launch/populated-terrain smoke are complete;
-physical seasonal Debug interaction, Quest performance, and full-game WebGPU
-remain pending. Retained Minecraft-reference profiles keep the Java 1.17.1
-oversized sun. The optional cylinder stays secondary. Tactical
-[`306`](../tactical/306-seasonal-appearance-preview.md) remains planned for
-continuous exact-terrain material response and one bounded recent-snow pulse;
-it now binds one synthetic global preview date to an evaluated local season and
-moves the combined solar/material controls into a dedicated shared `Seasonal
-Debug` screen. It must extend Tactical 307's shared `Season Preview` state and
-continues to defer procedural-horizon LOD. No authoritative season clock,
-terrain or biome season generation, weather event, seasonal surface system,
-migration producer, seasonal hydrology, wildlife tagging, or managed-habitat
-infrastructure is implemented.
+implemented as a client-local solar proof. The default unbounded Mclone plane
+has a provisional 98,304-block cyclical latitude wavelength, a 27-degree-tilt
+pure solar model, one visible-sun/sky/rendered-light sample, and an accepted
+Earth-like `0.53`-degree original-Mclone sun. Retained Minecraft-reference
+profiles keep the Java 1.17.1 oversized sun; the optional cylinder stays
+secondary.
+
+Tactical [`306`](../tactical/306-seasonal-appearance-preview.md) is now
+implemented through automated evidence. One continuous global preview date
+drives observer-local exact-terrain, deciduous/evergreen, grass, seasonal-snow,
+and bounded recent-snow appearance with zero mesh-payload growth or seasonal
+remesh. The shared `Seasonal Debug` screen shows global date and evaluated
+local season beside the solar, latitude, and snow controls. Its 22-case native
+matrix, synthetic stereo capture, headed WebGPU off/active/exact-restoration
+probe, and Android/Android-XR builds pass. Human Review of the final material
+palette and live menu remains open. No authorized Quest is currently visible,
+so physical seasonal Debug interaction and current-revision Quest performance
+also remain open. Procedural-horizon LOD is still explicitly deferred.
+
+No authoritative season clock, terrain or biome season generation, active
+weather event, migration producer, seasonal hydrology, wildlife tagging, or
+managed-habitat infrastructure is implemented.
 The selected direction is that unloaded terrain and entities receive no ticks
 or elapsed-time catch-up. Climate and ambient seasonal opportunities may be
 derived when an active region asks for them, while durable animals freeze.
@@ -30,7 +33,7 @@ The proposed distinction between replaceable anonymous wildlife and
 tagged/managed animals conflicts with the current rule that every materialized
 Mclone animal becomes durable immediately; that lifecycle change requires an
 explicit later decision and coordinated revision of the existing ecology and
-persistence contracts.**
+persistence contracts.
 
 ## Scope
 
@@ -286,10 +289,10 @@ visual work. Foliage tint, dormant grass, blooms, falling leaves, ambience, and
 surface wetness can follow the same climate sample without sharing one
 all-purpose renderer.
 
-Tactical 306 deliberately proves a smaller representation before selecting
-that broader surface layer. Exact meshes carry only compact static material and
-exposure response; a continuous phase plus one bounded, topology-aware recent-
-snowfall pulse is evaluated during ordinary rendering. The pulse can raise
+Tactical 306 now proves a smaller representation before selecting that broader
+surface layer. Exact meshes carry only compact static material and exposure
+response; a continuous phase plus one bounded, topology-aware recent-snowfall
+pulse is evaluated during ordinary rendering. The pulse can raise
 texture-preserving coverage on eligible ground and exposed canopy locally,
 then return to zero without remeshing, per-chunk masks, persistence, or inactive
 work. A later active-world weather producer may drive its rise/hold/decay, but
@@ -531,27 +534,29 @@ logic.
 
 ## Recommended Evidence Ladder
 
-1. Complete Tactical 307's remaining physical seasonal-Debug interaction,
-   Quest-performance, and full-game WebGPU gates. Human Review accepts the
-   coordinate/solar behavior and Earth-like apparent sun size; its pure
-   orbital/solar sample, primary cyclical-plane policy, secondary cylinder
-   proof, fixed-seed maps, physical launch/render smoke, and replacement
-   39-case exact-revision capture receipt are implemented.
+1. Review Tactical 306's final exact-terrain matrix and shared live menu, then
+   complete current-revision physical Quest Seasonal Debug interaction and
+   performance. Tactical 307's coordinate/solar behavior and Earth-like sun
+   size are already accepted; its focused full-game WebGPU sun-path gate also
+   remains available if the combined Tactical 306 Web proof is insufficient.
 2. Calibrate year length, climate wavelength/scale, continental size, and
    travel time together in Terrain Lab or another shared review surface.
-3. Add foliage/material response and a bounded derived snow/wetness surface.
-   Capture and inspect native and Web pixels, then prove per-eye and multiview
-   behavior before claiming XR-visible completion.
-4. Let existing loaded habitat resources consume narrow seasonal modifiers;
+3. After Tactical 304/305 settle the exact/LOD frontier, give the procedural
+   horizon a filtered version of the accepted seasonal appearance. Do not copy
+   the exact fragment implementation or weaken the explicit LOD ownership.
+4. Add a loaded active-weather producer for snowfall rise/hold/decay only after
+   choosing whether visual coverage remains derived or gains sparse
+   authoritative interactive snow.
+5. Let existing loaded habitat resources consume narrow seasonal modifiers;
    prove exact full/accelerated active-domain equivalence and no inactive
    catch-up.
-5. Prove one ambient waterfowl passage before interactive migration. Then
+6. Prove one ambient waterfowl passage before interactive migration. Then
    resolve the anonymous-wildlife persistence contract before allowing
    gameplay animals to seasonally disappear or refill.
-6. Add tagging and one supplied-food husbandry loop independently of migration.
+7. Add tagging and one supplied-food husbandry loop independently of migration.
    Test unload/reload, active-only aging and consumption, dense enclosure
    performance, and native/browser persistence.
-7. Add seasonal creek/spring discharge only after shared drainage reach
+8. Add seasonal creek/spring discharge only after shared drainage reach
    identity can keep active chunk boundaries coherent.
 
 Every pixel-producing milestone requires capture and inspection. Every

@@ -49,15 +49,13 @@ series implements the same concern, normally reuse the document slug in its
   accepted terrain-and-creature co-design loop, immediate durability for
   materialized animals, explicit lazy population layers, mechanics-led
   Creature Lab promotion, and Tactical 277's first generated-habitat slice.
-- [`seasons.md`](seasons.md): concept-stage regional seasons and seasonal
-  ecology direction, including plane/cylinder latitude, derived snow and
-  water response, no unloaded-world simulation, encounter-shaped migration,
-  and the unresolved anonymous-wildlife versus tagged/managed lifecycle;
-  Tactical 306 plans the first continuous exact-terrain visual preview and
-  bounded local recent-snow ground/canopy pulse; Tactical 307 plans the
-  default plane's actual cyclical-latitude solar path and shared desktop/XR
-  orbital/latitude/time controls while terrain generation and
-  procedural-horizon LOD remain deferred.
+- [`seasons.md`](seasons.md): active regional-seasons and seasonal-ecology
+  direction, including implemented client-local cyclical-latitude solar and
+  continuous exact-terrain/recent-snow preview proofs, no unloaded-world
+  simulation, derived seasonal water, encounter-shaped migration, and the
+  unresolved anonymous-wildlife versus tagged/managed lifecycle; authoritative
+  calendar/weather/gameplay, terrain-generation climate, and procedural-
+  horizon seasonal response remain deferred.
 - [`playable-showcases.md`](playable-showcases.md): bounded data-driven tiny
   saves for matched screenshot and interactive review, with enforced
   live-instantiation evidence and strict anti-sprawl boundaries.
