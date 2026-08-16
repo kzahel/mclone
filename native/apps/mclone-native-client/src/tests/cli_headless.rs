@@ -668,6 +668,7 @@ fn cli_parses_typed_season_preview_capture_options() {
             manual_latitude: mclone_season::PreviewLatitude::from_tenths_clamped(750),
             solar_time_source: mclone_season::SolarTimeSource::Manual,
             manual_solar_time: mclone_season::PreviewSolarTime::from_minutes_wrapped(1_410),
+            recent_snow: None,
         }
     );
 

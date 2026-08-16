@@ -172,7 +172,10 @@ use mclone_render::uniform::{
     PresentationViewIndex, RIGHT_EYE_VIEW_SLOT, SINGLE_VIEW_SLOT,
 };
 use mclone_render::world_color_mesh::WorldColorMeshRenderer;
-use mclone_render::{GrassInteractor, GrassInteractorIdentity, GrassInteractorSet, GrassQuality};
+use mclone_render::{
+    GrassInteractor, GrassInteractorIdentity, GrassInteractorSet, GrassQuality,
+    SeasonalAppearanceRenderState,
+};
 use mclone_render_session::{
     ENGINE_CAMERA_MAX_FLY_SPEED_MULTIPLIER, ENGINE_CAMERA_MAX_MOVEMENT_SPEED_MULTIPLIER,
     ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER, ENGINE_CAMERA_MIN_MOVEMENT_SPEED_MULTIPLIER,
@@ -188,9 +191,9 @@ use mclone_render_session::{
     render_view_from_world_pose,
 };
 use mclone_season::{
-    LatitudeSource, MCLONE_AXIAL_TILT_DEGREES, SeasonPreviewSettings, SolarCoordinatePolicy,
-    SolarFrameDiagnostics, SolarInput, SolarSample, SolarTimeSource,
-    solar_time_fraction_from_day_time,
+    EvaluatedLocalSeason, LatitudeSource, LocalSeasonInput, MCLONE_AXIAL_TILT_DEGREES,
+    SeasonPreviewSettings, SolarCoordinatePolicy, SolarFrameDiagnostics, SolarInput, SolarSample,
+    SolarTimeSource, solar_time_fraction_from_day_time,
 };
 use mclone_server::{SimulationCadenceConfig, WorkerFrameMetrics};
 use mclone_ui::{
@@ -5840,15 +5843,36 @@ impl McloneSceneHost {
                 return None;
             }
         };
+        let observer_block = BlockPos::containing(eye);
+        let observer_biome_id = self
+            .active_world
+            .runtime
+            .as_ref()
+            .and_then(|runtime| runtime.client().biome_id_at_block_pos(observer_block))
+            .unwrap_or(mclone_core::DEFAULT_BIOME_ID);
+        let (mean_temperature, moisture) =
+            mclone_mesh::seasonal_climate_for_biome(observer_biome_id);
+        let local_season = EvaluatedLocalSeason::evaluate(LocalSeasonInput {
+            orbital_phase: self.season_preview.orbital_phase,
+            effective_latitude_degrees,
+            mean_temperature,
+            moisture,
+            altitude_blocks: eye.y as f32,
+        });
         Some(SolarFrameDiagnostics {
             settings: self.season_preview,
             policy,
             observer_world_x: eye.x,
             observer_world_z: eye.z,
+            observer_world_y: eye.y,
+            observer_biome_id,
+            mean_temperature,
+            moisture,
             world_latitude,
             effective_latitude_degrees,
             solar_time_fraction,
             sample,
+            local_season,
         })
     }
 
@@ -5883,6 +5907,16 @@ impl McloneSceneHost {
             .map_or(mclone_core::HorizontalTopology::UNBOUNDED, |runtime| {
                 runtime.client().topology()
             });
+        options.seasonal_appearance = self.solar_frame_diagnostics().map_or_else(
+            SeasonalAppearanceRenderState::default,
+            |diagnostics| {
+                SeasonalAppearanceRenderState::evaluated(
+                    true,
+                    diagnostics.local_season,
+                    self.season_preview.recent_snow,
+                )
+            },
+        );
         if self.camera_inside_occluding_block(camera_position) {
             options.section_occlusion_culling = false;
         }

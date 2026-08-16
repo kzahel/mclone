@@ -715,6 +715,7 @@ pub struct SeasonPreviewSettings {
     pub manual_latitude: PreviewLatitude,
     pub solar_time_source: SolarTimeSource,
     pub manual_solar_time: PreviewSolarTime,
+    pub recent_snow: Option<LocalSnowPulse>,
 }
 
 impl Default for SeasonPreviewSettings {
@@ -726,6 +727,7 @@ impl Default for SeasonPreviewSettings {
             manual_latitude: PreviewLatitude::EQUATOR,
             solar_time_source: SolarTimeSource::WorldClock,
             manual_solar_time: PreviewSolarTime::NOON,
+            recent_snow: None,
         }
     }
 }
@@ -875,10 +877,15 @@ pub struct SolarFrameDiagnostics {
     pub policy: SolarCoordinatePolicy,
     pub observer_world_x: f64,
     pub observer_world_z: f64,
+    pub observer_world_y: f64,
+    pub observer_biome_id: i32,
+    pub mean_temperature: f32,
+    pub moisture: f32,
     pub world_latitude: LatitudeSample,
     pub effective_latitude_degrees: f64,
     pub solar_time_fraction: f64,
     pub sample: SolarSample,
+    pub local_season: EvaluatedLocalSeason,
 }
 
 impl SolarSample {
@@ -1121,6 +1128,7 @@ mod tests {
                 manual_latitude: PreviewLatitude::EQUATOR,
                 solar_time_source: SolarTimeSource::WorldClock,
                 manual_solar_time: PreviewSolarTime::NOON,
+                recent_snow: None,
             }
         );
         assert_eq!(

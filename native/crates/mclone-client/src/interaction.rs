@@ -270,6 +270,11 @@ impl ClientInteractionController {
 }
 
 impl ClientRuntime {
+    pub fn biome_id_at_block_pos(&self, pos: BlockPos) -> Option<i32> {
+        self.chunk_snapshot(pos.chunk_pos())?
+            .biome_id_at_local_block(local_block_coord(pos.x), pos.y, local_block_coord(pos.z))
+    }
+
     pub fn block_state_at_block_pos(&self, pos: BlockPos) -> Option<BlockStateId> {
         let snapshot = self.chunk_snapshot(pos.chunk_pos())?;
         if pos.y < snapshot.min_y || pos.y >= snapshot.min_y + snapshot.height {
@@ -452,6 +457,29 @@ mod tests {
             client.block_state_at_block_pos(BlockPos::new(20, 2, 3)),
             None
         );
+    }
+
+    #[test]
+    fn client_runtime_reads_world_biome_from_loaded_snapshot() {
+        let blocks = vec![AIR_BLOCK_STATE_ID; CHUNK_SECTION_VOLUME];
+        let snapshot = ChunkSnapshot::from_block_state_ids(
+            ChunkPos::new(0, 0),
+            ChunkStatus::Full,
+            ChunkRevision(1),
+            0,
+            SECTION_HEIGHT,
+            &blocks,
+        )
+        .with_biomes(vec![5; 4 * 4 * (SECTION_HEIGHT as usize / 4)]);
+        let mut client = ClientRuntime::local_integrated();
+        client.apply_update(mclone_protocol::ServerUpdate::ChunkSnapshot(snapshot));
+
+        assert_eq!(
+            client.biome_id_at_block_pos(BlockPos::new(7, 8, 9)),
+            Some(5)
+        );
+        assert_eq!(client.biome_id_at_block_pos(BlockPos::new(7, 16, 9)), None);
+        assert_eq!(client.biome_id_at_block_pos(BlockPos::new(20, 8, 9)), None);
     }
 
     #[test]
