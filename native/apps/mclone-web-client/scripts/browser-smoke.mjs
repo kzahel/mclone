@@ -8059,6 +8059,12 @@ async function runIndexedDbReloadProbe(
 
   await canvas.evaluate((element) => element.focus());
   await canvas.click({ position: { x: 640, y: 360 } });
+  // Aim at the nearby ground before requiring a target. Profile-preferred
+  // entry may legitimately face open sky, so the initial gaze is not a
+  // portable precondition for the persistence interaction.
+  await page.mouse.down();
+  await page.mouse.move(640, 600);
+  await page.mouse.up();
   try {
     await page.waitForFunction(
       () => {
@@ -8084,12 +8090,9 @@ async function runIndexedDbReloadProbe(
     () => Number(globalThis.__mcloneWebApp?.state?.playerSuccessfulBlockPlacementStatistic) || 0,
   );
 
-  // Aim at the nearby ground before placing. The startup view can legitimately
-  // frame an interactive fence gate; using it would toggle the gate before held
-  // block placement, which proves interaction but not persistence of an edit.
-  await page.mouse.down();
-  await page.mouse.move(640, 600);
-  await page.mouse.up();
+  // The aimed target can legitimately be an interactive fence gate; using it
+  // would toggle the gate before held block placement, which proves interaction
+  // but not persistence of an edit.
   // Slot 6 has no ordinary survival item and therefore exercises the stable
   // debug-block placement path. Slot 2 now carries an oak fence and no longer
   // represents the legacy dirt-only debug hotbar used by this older probe.
