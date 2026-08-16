@@ -246,18 +246,10 @@ impl CatalogExecutionCore {
     ) -> Result<Self, String> {
         let flow = match request {
             WorldCatalogRequest::ListWorlds => CatalogFlow::List,
-            WorldCatalogRequest::CreateWorld { mut options } => {
-                // Preserve the pre-cutover browser creation contract. The UI's
-                // typed i64 was projected through a JavaScript Number before
-                // catalog policy consumed it, including IEEE-754 rounding for
-                // values outside the exact integer range. Descriptor reads and
-                // existing stored seeds remain full width.
-                options.seed = options.seed as f64 as i64;
-                CatalogFlow::Create {
-                    options,
-                    summary: None,
-                }
-            }
+            WorldCatalogRequest::CreateWorld { options } => CatalogFlow::Create {
+                options,
+                summary: None,
+            },
             WorldCatalogRequest::OpenWorld { id } => CatalogFlow::Open { id, summary: None },
             WorldCatalogRequest::RecordWorldPlayed { id } => CatalogFlow::RecordPlayed { id },
             WorldCatalogRequest::DeleteWorld { id } => CatalogFlow::Delete {
@@ -951,7 +943,7 @@ mod tests {
         let StorageActionKind::AddCatalogRecord(created) = only_action(&add) else {
             panic!("create must use add");
         };
-        assert_eq!(created.seed, (i64::MIN + 9) as f64 as i64);
+        assert_eq!(created.seed, i64::MIN + 9);
         assert_eq!(created.created_unix_millis, 9_007_199_254_740_993);
         assert_eq!(created.backend_label.as_deref(), Some(BACKEND_LABEL));
         execution.complete_step(add.id).unwrap();
@@ -976,6 +968,28 @@ mod tests {
             panic!("list response expected");
         };
         assert_eq!(worlds, &[stored]);
+    }
+
+    #[test]
+    fn newly_created_world_seed_remains_full_width() {
+        let seed = 553_534_047_293_117_028;
+        let options = LocalWorldCreateOptions::new("Mclone Wild", seed)
+            .unwrap()
+            .with_requested_id(id("mclone-wild"));
+        let mut execution = execution(WorldCatalogRequest::CreateWorld { options }, None).unwrap();
+        let read = execution.next_step().unwrap().unwrap();
+        accept(
+            &mut execution,
+            &read,
+            CatalogReadResult::All(Vec::new()),
+            Some(1),
+        );
+        execution.complete_step(read.id).unwrap();
+        let add = execution.next_step().unwrap().unwrap();
+        let StorageActionKind::AddCatalogRecord(created) = only_action(&add) else {
+            panic!("create must add a catalog record");
+        };
+        assert_eq!(created.seed, seed);
     }
 
     #[test]

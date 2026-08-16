@@ -55,6 +55,7 @@ fn ordinary_catalog_policy_is_rust_owned() {
     assert!(storage_plan.contains("WorldCatalogRequest::CreateWorld"));
     assert!(storage_plan.contains("enum DeleteManyStage"));
     assert!(storage_plan.contains("fn clear_world_transactions"));
+    assert!(!storage_plan.contains("options.seed as f64"));
 }
 
 #[test]
