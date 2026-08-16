@@ -153,7 +153,7 @@ function captureReference() {
     "500",
     "--transient",
     "--asset-pack",
-    "reference",
+    "saved",
     "--seed",
     "12345",
     "--generation-profile",
