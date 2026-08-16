@@ -821,6 +821,28 @@ impl McloneSceneHost {
                 )
             },
         );
+        let seasonal_debug = self.solar_frame_diagnostics().map(|diagnostics| {
+            let topology = self
+                .active_world
+                .runtime
+                .as_ref()
+                .map_or(self.active_world.scene.startup.world_topology, |runtime| {
+                    runtime.client().topology()
+                });
+            mclone_ui::GameSeasonalDebugState {
+                effective_latitude_degrees: diagnostics.effective_latitude_degrees,
+                local_season: diagnostics.local_season.label,
+                response_strength: diagnostics.local_season.response_strength,
+                snow_tendency: diagnostics.local_season.snow_tendency,
+                daylight_hours: diagnostics.local_season.day_length_fraction * 24.0,
+                recent_snow_anchor: mclone_season::LocalSnowPulse::anchored(
+                    topology,
+                    diagnostics.observer_world_x,
+                    diagnostics.observer_world_z,
+                    mclone_season::UnitU16::ZERO,
+                ),
+            }
+        });
         GameUiRenderState {
             lobby_scenario_available: self
                 .client_experience
@@ -843,6 +865,7 @@ impl McloneSceneHost {
             terrain_presentation_available: self.terrain_presentation_supported(),
             fog: self.fog_settings,
             season_preview: self.season_preview,
+            seasonal_debug,
             force_fullbright: self.render_options.force_fullbright,
             player_collision_box_visible: self.player_collision_box_visible,
             first_person_player_visible: self.active_world.camera.first_person_player_visible(),

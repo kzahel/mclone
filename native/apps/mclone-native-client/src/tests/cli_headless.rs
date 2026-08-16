@@ -791,6 +791,11 @@ fn parse_screenshot_ui_accepts_named_screens() {
         HeadlessScreenshotUi::OptionsLocalPlayPause
     );
     assert_eq!(
+        parse_screenshot_ui_arg("--screenshot-ui", Some("options-seasonal-debug".to_owned()),)
+            .unwrap(),
+        HeadlessScreenshotUi::OptionsSeasonalDebugPause
+    );
+    assert_eq!(
         parse_screenshot_ui_arg("--screenshot-ui", Some("storage-profile-title".to_owned()))
             .unwrap(),
         HeadlessScreenshotUi::StorageProfileTitle

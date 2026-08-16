@@ -1015,14 +1015,38 @@ fn options_debug_and_display_category_rows_emit_expected_actions() {
 
 #[test]
 fn seasonal_debug_rows_share_typed_state_and_gate_manual_controls() {
-    let screen = UiScreenId::OptionsCategory {
+    let debug_screen = UiScreenId::OptionsCategory {
         parent: GameOptionsParent::Pause,
         category: GameOptionsCategory::Debug,
     };
     let mut surface = UiSurface::new();
-    surface.set_screen(Some(screen));
+    surface.set_screen(Some(debug_screen));
     surface.set_scale(GuiScale::from_pixels(960, 540));
     surface.set_render_state(GameUiRenderState::default());
+    assert!(
+        surface
+            .layout()
+            .widget(UI_V2_OPTIONS_SEASON_PREVIEW)
+            .is_none()
+    );
+    let rect = surface
+        .layout()
+        .widget(UI_V2_OPTIONS_SEASONAL_DEBUG)
+        .unwrap()
+        .rect;
+    assert!(surface.pointer_down(point_in(rect), surface.render_state));
+    assert_eq!(
+        surface.pointer_up(point_in(rect), surface.render_state).1,
+        Some(GameUiAction::OpenOptionsCategory(
+            GameOptionsParent::Pause,
+            GameOptionsCategory::SeasonalDebug,
+        ))
+    );
+
+    surface.set_screen(Some(UiScreenId::OptionsCategory {
+        parent: GameOptionsParent::Pause,
+        category: GameOptionsCategory::SeasonalDebug,
+    }));
 
     assert!(
         surface
@@ -1037,6 +1061,7 @@ fn seasonal_debug_rows_share_typed_state_and_gate_manual_controls() {
         UI_V2_OPTIONS_SEASON_LATITUDE,
         UI_V2_OPTIONS_SEASON_SOLAR_TIME_SOURCE,
         UI_V2_OPTIONS_SEASON_SOLAR_TIME,
+        UI_V2_OPTIONS_SEASON_RECENT_SNOW,
     ] {
         assert!(!surface.layout().widget(id).unwrap().enabled);
     }
@@ -1045,8 +1070,23 @@ fn seasonal_debug_rows_share_typed_state_and_gate_manual_controls() {
         enabled: true,
         ..crate::SeasonPreviewSettings::default()
     };
+    let anchor = crate::LocalSnowPulse {
+        center_x: 12,
+        center_z: -34,
+        radius_blocks: 96,
+        intensity: crate::UnitU16::ZERO,
+    };
+    let diagnostics = crate::GameSeasonalDebugState {
+        effective_latitude_degrees: 45.0,
+        local_season: crate::LocalSeasonLabel::Spring,
+        response_strength: 0.8,
+        snow_tendency: 0.2,
+        daylight_hours: 13.5,
+        recent_snow_anchor: anchor,
+    };
     surface.set_render_state(GameUiRenderState {
         season_preview: settings,
+        seasonal_debug: Some(diagnostics),
         ..GameUiRenderState::default()
     });
     assert!(
@@ -1084,11 +1124,28 @@ fn seasonal_debug_rows_share_typed_state_and_gate_manual_controls() {
             .unwrap()
             .enabled
     );
+    assert!(
+        surface
+            .layout()
+            .widget(UI_V2_OPTIONS_SEASON_RECENT_SNOW)
+            .unwrap()
+            .enabled
+    );
+    assert_eq!(
+        surface
+            .layout()
+            .widget(UI_V2_OPTIONS_SEASON_LOCAL)
+            .unwrap()
+            .value
+            .as_deref(),
+        Some("Spring 80% / snow 20%")
+    );
 
     settings.latitude_source = crate::LatitudeSource::Manual;
     settings.solar_time_source = crate::SolarTimeSource::Manual;
     surface.set_render_state(GameUiRenderState {
         season_preview: settings,
+        seasonal_debug: Some(diagnostics),
         ..GameUiRenderState::default()
     });
     for (id, expected) in [
@@ -1110,6 +1167,16 @@ fn seasonal_debug_rows_share_typed_state_and_gate_manual_controls() {
             UI_V2_OPTIONS_SEASON_SOLAR_TIME,
             GameUiAction::SetSeasonPreview(crate::SeasonPreviewSettings {
                 manual_solar_time: crate::PreviewSolarTime::NOON,
+                ..settings
+            }),
+        ),
+        (
+            UI_V2_OPTIONS_SEASON_RECENT_SNOW,
+            GameUiAction::SetSeasonPreview(crate::SeasonPreviewSettings {
+                recent_snow: Some(crate::LocalSnowPulse {
+                    intensity: crate::UnitU16::from_unit_clamped(0.5),
+                    ..anchor
+                }),
                 ..settings
             }),
         ),

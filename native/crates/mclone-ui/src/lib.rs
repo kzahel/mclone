@@ -1,8 +1,9 @@
 #![forbid(unsafe_code)]
 
 pub use mclone_season::{
-    LatitudeSource, ORBITAL_PHASE_STEPS, OrbitalPhase, PREVIEW_SOLAR_TIME_MINUTES_PER_DAY,
-    PreviewLatitude, PreviewSolarTime, SeasonPreviewSettings, SolarTimeSource,
+    LatitudeSource, LocalSeasonLabel, LocalSnowPulse, ORBITAL_PHASE_STEPS, OrbitalMilestone,
+    OrbitalPhase, PREVIEW_CALENDAR_DAYS, PREVIEW_SOLAR_TIME_MINUTES_PER_DAY, PreviewCalendarDate,
+    PreviewLatitude, PreviewSolarTime, SeasonPreviewSettings, SolarTimeSource, UnitU16,
 };
 
 use mclone_input::{
@@ -1371,6 +1372,9 @@ pub enum GameOptionsCategory {
     Display,
     LocalPlay,
     Debug,
+    /// Developer calendar, solar, local-climate, and appearance controls
+    /// nested under Debug rather than listed on the top-level Options hub.
+    SeasonalDebug,
     StorageProfile,
 }
 
@@ -1393,6 +1397,7 @@ impl GameOptionsCategory {
             Self::Display => "Display",
             Self::LocalPlay => "Local Play",
             Self::Debug => "Debug",
+            Self::SeasonalDebug => "Seasonal Debug",
             Self::StorageProfile => "Storage & Profile",
         }
     }
@@ -1406,6 +1411,7 @@ impl GameOptionsCategory {
             Self::Display => "DISPLAY",
             Self::LocalPlay => "LOCAL PLAY",
             Self::Debug => "DEBUG",
+            Self::SeasonalDebug => "SEASONAL DEBUG",
             Self::StorageProfile => "STORAGE & PROFILE",
         }
     }
@@ -2597,6 +2603,18 @@ impl GameTouchSettings {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GameSeasonalDebugState {
+    pub effective_latitude_degrees: f64,
+    pub local_season: LocalSeasonLabel,
+    pub response_strength: f32,
+    pub snow_tendency: f32,
+    pub daylight_hours: f32,
+    /// Canonical observer-centered pulse template. The UI only supplies its
+    /// fixed-point intensity through the existing season settings action.
+    pub recent_snow_anchor: LocalSnowPulse,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GameUiRenderState {
     pub lobby_scenario_available: bool,
     pub world_catalog: WorldCatalogUiState,
@@ -2612,6 +2630,7 @@ pub struct GameUiRenderState {
     pub terrain_presentation_available: bool,
     pub fog: GameFogSettings,
     pub season_preview: SeasonPreviewSettings,
+    pub seasonal_debug: Option<GameSeasonalDebugState>,
     pub force_fullbright: bool,
     pub player_collision_box_visible: bool,
     pub first_person_player_visible: bool,
@@ -2663,6 +2682,7 @@ impl Default for GameUiRenderState {
             terrain_presentation_available: true,
             fog: GameFogSettings::default(),
             season_preview: SeasonPreviewSettings::default(),
+            seasonal_debug: None,
             force_fullbright: false,
             player_collision_box_visible: false,
             first_person_player_visible: false,

@@ -531,6 +531,7 @@ pub(crate) enum HeadlessScreenshotUi {
     OptionsDisplayPause,
     OptionsLocalPlayPause,
     OptionsDebugPause,
+    OptionsSeasonalDebugPause,
     StorageProfileTitle,
     StorageFactoryConfirm,
     ServerSettingsPause,
@@ -582,6 +583,10 @@ impl HeadlessScreenshotUi {
             Self::OptionsDebugPause => Some(GameScreen::OptionsCategory {
                 parent: GameOptionsParent::Pause,
                 category: GameOptionsCategory::Debug,
+            }),
+            Self::OptionsSeasonalDebugPause => Some(GameScreen::OptionsCategory {
+                parent: GameOptionsParent::Pause,
+                category: GameOptionsCategory::SeasonalDebug,
             }),
             Self::StorageProfileTitle => Some(GameScreen::OptionsCategory {
                 parent: GameOptionsParent::Title,
@@ -2993,7 +2998,7 @@ pub(crate) fn parse_screenshot_ui_arg(
 ) -> Result<HeadlessScreenshotUi> {
     let value = value.with_context(|| {
         format!(
-            "{flag} requires none, title, world-list, world-create, world-delete-confirm, new-world, join-remote, pause, death, help/controls, block-palette, options-title, options-pause, storage-profile-title, storage-factory-confirm, server-settings-pause, or asset-packs-pause"
+            "{flag} requires none, title, world-list, world-create, world-delete-confirm, new-world, join-remote, pause, death, help/controls, block-palette, options-title, options-pause, options-seasonal-debug, storage-profile-title, storage-factory-confirm, server-settings-pause, or asset-packs-pause"
         )
     })?;
     match value.as_str() {
@@ -3019,6 +3024,9 @@ pub(crate) fn parse_screenshot_ui_arg(
             Ok(HeadlessScreenshotUi::OptionsLocalPlayPause)
         }
         "options-debug" | "options_debug" => Ok(HeadlessScreenshotUi::OptionsDebugPause),
+        "options-seasonal-debug" | "options_seasonal_debug" | "seasonal-debug" => {
+            Ok(HeadlessScreenshotUi::OptionsSeasonalDebugPause)
+        }
         "storage-profile-title" | "storage_profile_title" | "storage-profile" => {
             Ok(HeadlessScreenshotUi::StorageProfileTitle)
         }
@@ -3032,7 +3040,7 @@ pub(crate) fn parse_screenshot_ui_arg(
             Ok(HeadlessScreenshotUi::AssetPacksPause)
         }
         _ => bail!(
-            "{flag} must be none, title, world-list, world-create, world-delete-confirm, new-world, join-remote, pause, death, help/controls, block-palette, options-title, options-pause, options-graphics, options-movement, options-display, options-local-play, options-debug, storage-profile-title, storage-factory-confirm, server-settings-pause, or asset-packs-pause, got `{value}`"
+            "{flag} must be none, title, world-list, world-create, world-delete-confirm, new-world, join-remote, pause, death, help/controls, block-palette, options-title, options-pause, options-graphics, options-movement, options-display, options-local-play, options-debug, options-seasonal-debug, storage-profile-title, storage-factory-confirm, server-settings-pause, or asset-packs-pause, got `{value}`"
         ),
     }
 }
