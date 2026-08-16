@@ -12,7 +12,7 @@
 
 use std::f32::consts::{PI, TAU};
 
-use mclone_season::SolarSample;
+use mclone_season::{CelestialDebugSettings, LunarPhase, LunarSample, SolarSample};
 
 /// Plains temperature, the biome whose sky color we use until biome data reaches
 /// the client renderer (`VanillaBiomes` passes `0.8` for plains).
@@ -24,6 +24,22 @@ pub const VANILLA_SUN_ANGULAR_DIAMETER_DEGREES: f32 = 33.398_49;
 
 /// Original Mclone worlds use an Earth-like apparent solar diameter.
 pub const MCLONE_SUN_ANGULAR_DIAMETER_DEGREES: f32 = 0.53;
+
+/// Original Mclone's square moon uses the Earth's approximate apparent size.
+pub const MCLONE_MOON_ANGULAR_DIAMETER_DEGREES: f32 = 0.52;
+
+/// Minecraft Java 1.17.1 renders a 40-unit-wide moon quad 100 units away.
+pub const VANILLA_MOON_ANGULAR_DIAMETER_DEGREES: f32 = 22.619_865;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CelestialRenderState {
+    pub settings: CelestialDebugSettings,
+    pub lunar_phase: LunarPhase,
+    pub lunar_sample: LunarSample,
+    pub effective_latitude_degrees: f32,
+    pub local_sidereal_angle_turns: f32,
+    pub star_visibility: f32,
+}
 
 /// Port of `Mth.hsvToRgb`, returning `[0, 1]` RGB components.
 fn hsv_to_rgb(hue: f32, saturation: f32, value: f32) -> [f32; 3] {
@@ -89,9 +105,29 @@ pub fn overworld_clear_color(time_of_day: f32) -> wgpu::Color {
 /// seasonal branch carries the one observer-root sample computed by the scene.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum SkyRenderState {
-    VanillaFixed { time_of_day: f32, sun_angle: f32 },
-    McloneFixed { time_of_day: f32, sun_angle: f32 },
+    VanillaFixed {
+        time_of_day: f32,
+        sun_angle: f32,
+    },
+    McloneFixed {
+        time_of_day: f32,
+        sun_angle: f32,
+    },
     SeasonalSolar(SolarSample),
+    VanillaCelestial {
+        time_of_day: f32,
+        sun_angle: f32,
+        celestial: CelestialRenderState,
+    },
+    McloneCelestial {
+        time_of_day: f32,
+        sun_angle: f32,
+        celestial: CelestialRenderState,
+    },
+    SeasonalCelestial {
+        solar: SolarSample,
+        celestial: CelestialRenderState,
+    },
 }
 
 impl SkyRenderState {
@@ -109,12 +145,54 @@ impl SkyRenderState {
         }
     }
 
+    pub const fn with_celestial(self, celestial: CelestialRenderState) -> Self {
+        match self {
+            Self::VanillaFixed {
+                time_of_day,
+                sun_angle,
+            } => Self::VanillaCelestial {
+                time_of_day,
+                sun_angle,
+                celestial,
+            },
+            Self::McloneFixed {
+                time_of_day,
+                sun_angle,
+            } => Self::McloneCelestial {
+                time_of_day,
+                sun_angle,
+                celestial,
+            },
+            Self::SeasonalSolar(solar) => Self::SeasonalCelestial { solar, celestial },
+            Self::VanillaCelestial { .. }
+            | Self::McloneCelestial { .. }
+            | Self::SeasonalCelestial { .. } => self,
+        }
+    }
+
+    pub const fn celestial(self) -> Option<CelestialRenderState> {
+        match self {
+            Self::VanillaCelestial { celestial, .. }
+            | Self::McloneCelestial { celestial, .. }
+            | Self::SeasonalCelestial { celestial, .. } => Some(celestial),
+            Self::VanillaFixed { .. } | Self::McloneFixed { .. } | Self::SeasonalSolar(_) => None,
+        }
+    }
+
+    pub const fn is_reference_profile(self) -> bool {
+        matches!(
+            self,
+            Self::VanillaFixed { .. } | Self::VanillaCelestial { .. }
+        )
+    }
+
     pub fn clear_color(self) -> wgpu::Color {
         match self {
-            Self::VanillaFixed { time_of_day, .. } | Self::McloneFixed { time_of_day, .. } => {
-                overworld_clear_color(time_of_day)
-            }
-            Self::SeasonalSolar(sample) => {
+            Self::VanillaFixed { time_of_day, .. }
+            | Self::McloneFixed { time_of_day, .. }
+            | Self::VanillaCelestial { time_of_day, .. }
+            | Self::McloneCelestial { time_of_day, .. } => overworld_clear_color(time_of_day),
+            Self::SeasonalSolar(sample) | Self::SeasonalCelestial { solar: sample, .. } => {
                 let base = calculate_sky_color(PLAINS_TEMPERATURE);
                 let factor =
                     (sample.daylight_factor + sample.twilight_factor * 0.14).clamp(0.0, 1.0);
@@ -129,29 +207,48 @@ impl SkyRenderState {
     }
 
     pub fn sky_darken(self) -> f32 {
-        match self {
-            Self::VanillaFixed { time_of_day, .. } | Self::McloneFixed { time_of_day, .. } => {
+        let base = match self {
+            Self::VanillaFixed { time_of_day, .. }
+            | Self::McloneFixed { time_of_day, .. }
+            | Self::VanillaCelestial { time_of_day, .. }
+            | Self::McloneCelestial { time_of_day, .. } => {
                 crate::light_texture::sky_darken(time_of_day)
             }
-            Self::SeasonalSolar(sample) => 0.2 + sample.daylight_factor * 0.8,
-        }
+            Self::SeasonalSolar(sample) | Self::SeasonalCelestial { solar: sample, .. } => {
+                0.2 + sample.daylight_factor * 0.8
+            }
+        };
+        let moonlight = self.celestial().map_or(0.0, |celestial| {
+            if celestial.settings.moonlight_enabled {
+                celestial.lunar_sample.moonlight_factor * 0.12
+            } else {
+                0.0
+            }
+        });
+        (base + moonlight * (1.0 - base)).clamp(0.0, 1.0)
     }
 
     pub fn sun_direction(self) -> [f32; 3] {
         match self {
-            Self::VanillaFixed { sun_angle, .. } | Self::McloneFixed { sun_angle, .. } => {
-                [-sun_angle.sin(), sun_angle.cos(), 0.0]
+            Self::VanillaFixed { sun_angle, .. }
+            | Self::McloneFixed { sun_angle, .. }
+            | Self::VanillaCelestial { sun_angle, .. }
+            | Self::McloneCelestial { sun_angle, .. } => [-sun_angle.sin(), sun_angle.cos(), 0.0],
+            Self::SeasonalSolar(sample) | Self::SeasonalCelestial { solar: sample, .. } => {
+                sample.direction
             }
-            Self::SeasonalSolar(sample) => sample.direction,
         }
     }
 
     pub const fn sun_angular_diameter_degrees(self) -> f32 {
         match self {
-            Self::VanillaFixed { .. } => VANILLA_SUN_ANGULAR_DIAMETER_DEGREES,
-            Self::McloneFixed { .. } | Self::SeasonalSolar(_) => {
-                MCLONE_SUN_ANGULAR_DIAMETER_DEGREES
+            Self::VanillaFixed { .. } | Self::VanillaCelestial { .. } => {
+                VANILLA_SUN_ANGULAR_DIAMETER_DEGREES
             }
+            Self::McloneFixed { .. }
+            | Self::SeasonalSolar(_)
+            | Self::McloneCelestial { .. }
+            | Self::SeasonalCelestial { .. } => MCLONE_SUN_ANGULAR_DIAMETER_DEGREES,
         }
     }
 
@@ -162,10 +259,31 @@ impl SkyRenderState {
     /// daylight, so polar night cannot leave a bright sun in a night sky.
     pub fn sun_opacity(self) -> f32 {
         match self {
-            Self::VanillaFixed { .. } | Self::McloneFixed { .. } => 1.0,
-            Self::SeasonalSolar(sample) => {
+            Self::VanillaFixed { .. }
+            | Self::McloneFixed { .. }
+            | Self::VanillaCelestial { .. }
+            | Self::McloneCelestial { .. } => 1.0,
+            Self::SeasonalSolar(sample) | Self::SeasonalCelestial { solar: sample, .. } => {
                 (sample.daylight_factor + sample.twilight_factor).clamp(0.0, 1.0)
             }
+        }
+    }
+
+    pub fn moon_direction(self) -> Option<[f32; 3]> {
+        let celestial = self.celestial()?;
+        Some(if self.is_reference_profile() {
+            let sun = self.sun_direction();
+            [-sun[0], -sun[1], -sun[2]]
+        } else {
+            celestial.lunar_sample.direction
+        })
+    }
+
+    pub const fn moon_angular_diameter_degrees(self) -> f32 {
+        if self.is_reference_profile() {
+            VANILLA_MOON_ANGULAR_DIAMETER_DEGREES
+        } else {
+            MCLONE_MOON_ANGULAR_DIAMETER_DEGREES
         }
     }
 
@@ -178,14 +296,26 @@ impl SkyRenderState {
             | Self::McloneFixed {
                 time_of_day,
                 sun_angle,
+            }
+            | Self::VanillaCelestial {
+                time_of_day,
+                sun_angle,
+                ..
+            }
+            | Self::McloneCelestial {
+                time_of_day,
+                sun_angle,
+                ..
             } => sunrise_color(time_of_day).map(|color| SkyGlow::Vanilla { color, sun_angle }),
-            Self::SeasonalSolar(sample) if sample.twilight_factor > 0.001 => {
+            Self::SeasonalSolar(sample) | Self::SeasonalCelestial { solar: sample, .. }
+                if sample.twilight_factor > 0.001 =>
+            {
                 Some(SkyGlow::Directional {
                     color: [0.92, 0.42, 0.18, sample.twilight_factor],
                     sun_direction: sample.direction,
                 })
             }
-            Self::SeasonalSolar(_) => None,
+            Self::SeasonalSolar(_) | Self::SeasonalCelestial { .. } => None,
         }
     }
 }

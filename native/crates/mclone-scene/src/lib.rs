@@ -164,7 +164,7 @@ use mclone_render::screen_effect::{
     UnderwaterOverlay,
 };
 use mclone_render::selection_outline::{SelectionOutline, SelectionOutlineRenderer};
-use mclone_render::sky::SkyRenderState;
+use mclone_render::sky::{CelestialRenderState, SkyRenderState};
 use mclone_render::sky_render::SkyRenderer;
 use mclone_render::target::{RenderFrameContext, RenderFrameTarget};
 use mclone_render::uniform::{
@@ -191,10 +191,12 @@ use mclone_render_session::{
     render_view_from_world_pose,
 };
 use mclone_season::{
-    EvaluatedLocalSeason, LatitudeSource, LocalSeasonInput, MCLONE_AXIAL_TILT_DEGREES,
-    OrbitalMilestone, PreviewCalendarDate, SeasonPreviewSettings, SolarCoordinatePolicy,
-    SolarFrameDiagnostics, SolarInput, SolarSample, SolarTimeSource,
-    solar_time_fraction_from_day_time,
+    CelestialDebugSettings, EvaluatedLocalSeason, LUNAR_PHASE_STEPS, LatitudeSource,
+    LocalSeasonInput, LunarInput, LunarPhase, MCLONE_AXIAL_TILT_DEGREES,
+    MCLONE_LUNAR_ORBIT_INCLINATION_DEGREES, MoonPhaseSource, OrbitalMilestone, OrbitalPhase,
+    PreviewCalendarDate, SeasonPreviewSettings, SolarCoordinatePolicy, SolarFrameDiagnostics,
+    SolarInput, SolarSample, SolarTimeSource, local_sidereal_angle_turns,
+    solar_time_fraction_from_day_time, star_visibility_from_solar_elevation,
 };
 use mclone_server::{SimulationCadenceConfig, WorkerFrameMetrics};
 use mclone_ui::{
@@ -1328,6 +1330,7 @@ pub struct McloneSceneHost {
     initial_alignment_mode: XrViewAlignmentMode,
     render_options: TexturedSectionRenderOptions,
     season_preview: SeasonPreviewSettings,
+    celestial_debug: CelestialDebugSettings,
     player_collision_box_visible: bool,
     crosshair_visible: bool,
     travel_assist_mode: GameTravelAssistMode,
@@ -5776,6 +5779,14 @@ impl McloneSceneHost {
         self.season_preview = settings;
     }
 
+    pub fn celestial_debug_settings(&self) -> CelestialDebugSettings {
+        self.celestial_debug
+    }
+
+    pub fn set_celestial_debug_settings(&mut self, settings: CelestialDebugSettings) {
+        self.celestial_debug = settings;
+    }
+
     fn day_time(&self) -> u64 {
         self.active_world.runtime.as_ref().map_or_else(
             || {
@@ -5790,18 +5801,83 @@ impl McloneSceneHost {
     }
 
     fn solar_render_state(&self) -> SkyRenderState {
-        let fixed = if self.active_world.scene.startup.world_generation_profile
-            == mclone_server::WorldGenerationProfile::McloneOverworldV1
-        {
+        let original_mclone = self.active_world.scene.startup.world_generation_profile
+            == mclone_server::WorldGenerationProfile::McloneOverworldV1;
+        let fixed = if original_mclone {
             SkyRenderState::mclone_fixed(self.time_of_day(), self.sun_angle())
         } else {
             SkyRenderState::vanilla(self.time_of_day(), self.sun_angle())
         };
-        if !self.season_preview.enabled {
-            return fixed;
-        }
-        self.solar_frame_diagnostics().map_or(fixed, |diagnostics| {
-            SkyRenderState::SeasonalSolar(diagnostics.sample)
+        let solar = if self.season_preview.enabled {
+            self.solar_frame_diagnostics().map_or(fixed, |diagnostics| {
+                SkyRenderState::SeasonalSolar(diagnostics.sample)
+            })
+        } else {
+            fixed
+        };
+        self.celestial_render_state(original_mclone)
+            .map_or(solar, |celestial| solar.with_celestial(celestial))
+    }
+
+    fn celestial_render_state(&self, original_mclone: bool) -> Option<CelestialRenderState> {
+        let day_time = self.day_time();
+        let seasonal = original_mclone
+            .then(|| self.solar_frame_diagnostics())
+            .flatten()
+            .filter(|_| self.season_preview.enabled);
+        let orbital_phase = seasonal.map_or(OrbitalPhase::NORTHWARD_EQUINOX, |diagnostics| {
+            diagnostics.settings.orbital_phase
+        });
+        let effective_latitude_degrees =
+            seasonal.map_or(0.0, |diagnostics| diagnostics.effective_latitude_degrees);
+        let solar_time_fraction = seasonal.map_or_else(
+            || solar_time_fraction_from_day_time(day_time),
+            |diagnostics| diagnostics.solar_time_fraction,
+        );
+        let solar = seasonal.map_or_else(
+            || {
+                SolarSample::compute(SolarInput {
+                    orbital_phase,
+                    effective_latitude_degrees,
+                    axial_tilt_degrees: MCLONE_AXIAL_TILT_DEGREES,
+                    solar_time_fraction,
+                })
+                .ok()
+            },
+            |diagnostics| Some(diagnostics.sample),
+        )?;
+        let lunar_phase = match self.celestial_debug.moon_phase_source {
+            MoonPhaseSource::ManualPreview => self.celestial_debug.manual_lunar_phase,
+            MoonPhaseSource::WorldClock if original_mclone => LunarPhase::from_day_time(day_time),
+            MoonPhaseSource::WorldClock => {
+                let java_phase = (day_time / mclone_core::time::DAY_LENGTH_TICKS) % 8;
+                let phase = ((java_phase + 4) % 8) as u16 * (LUNAR_PHASE_STEPS / 8);
+                LunarPhase::from_steps_wrapped(phase)
+            }
+        };
+        let lunar_sample = mclone_season::LunarSample::compute(LunarInput {
+            orbital_phase,
+            lunar_phase,
+            effective_latitude_degrees,
+            solar_time_fraction,
+            axial_tilt_degrees: MCLONE_AXIAL_TILT_DEGREES,
+            orbital_inclination_degrees: MCLONE_LUNAR_ORBIT_INCLINATION_DEGREES,
+            node_phase: 0.0,
+        })
+        .ok()?;
+        let local_sidereal_angle_turns = local_sidereal_angle_turns(
+            orbital_phase,
+            solar_time_fraction,
+            MCLONE_AXIAL_TILT_DEGREES,
+        )
+        .ok()? as f32;
+        Some(CelestialRenderState {
+            settings: self.celestial_debug,
+            lunar_phase,
+            lunar_sample,
+            effective_latitude_degrees: effective_latitude_degrees as f32,
+            local_sidereal_angle_turns,
+            star_visibility: star_visibility_from_solar_elevation(solar.elevation_degrees),
         })
     }
 

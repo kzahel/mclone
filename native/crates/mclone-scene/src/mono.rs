@@ -402,12 +402,14 @@ impl McloneSceneHost {
         self.diagnostic_panel
             .set_debug_diagnostics_visible(debug_diagnostics_visible);
         let sun_texture_assets = self.sky.sun_texture_assets().clone();
-        self.sky = SkyRenderer::new_with_color_profile_and_assets(
+        let moon_texture_assets = self.sky.moon_texture_assets().clone();
+        self.sky = SkyRenderer::new_with_color_profile_and_celestial_assets(
             device,
             queue,
             self.color_format,
             self.render_options.color_profile,
             sun_texture_assets,
+            moon_texture_assets,
         );
         self.screen_effects = ScreenEffectsRenderer::new_with_assets(
             device,
