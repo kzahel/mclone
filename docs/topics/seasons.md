@@ -18,10 +18,16 @@ and bounded recent-snow appearance with zero mesh-payload growth or seasonal
 remesh. The shared `Seasonal Debug` screen shows global date and evaluated
 local season beside the solar, latitude, and snow controls. Its 22-case native
 matrix, synthetic stereo capture, headed WebGPU off/active/exact-restoration
-probe, and Android/Android-XR builds pass. Human Review of the final material
-palette and live menu remains open. No authorized Quest is currently visible,
-so physical seasonal Debug interaction and current-revision Quest performance
-also remain open. Procedural-horizon LOD is still explicitly deferred.
+probe, and Android/Android-XR builds pass. The first palette review found
+autumn grass too green and snow breakup too finely speckled. Follow-up revision
+`741d5a74` gives mild/dry grass a stronger straw tint and dieback while wet or
+warm regions retain more growth, and replaces half-block snow dithering with a
+topology-aware broad field plus a smaller edge field. The refreshed native
+matrix and headed WebGPU exact-restoration probe pass; final Human Review of
+the adjusted palette and live menu remains open. No authorized Quest is
+currently visible, so physical seasonal Debug interaction and
+current-revision Quest performance also remain open. Procedural-horizon LOD
+is still explicitly deferred.
 
 No authoritative season clock, terrain or biome season generation, active
 weather event, migration producer, seasonal hydrology, wildlife tagging, or

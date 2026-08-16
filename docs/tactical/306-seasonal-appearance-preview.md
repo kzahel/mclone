@@ -718,7 +718,8 @@ Execution record:
 ### Slice 4: Visual matrix, performance, and Human Review
 
 Status: automated native/WebGPU/XR-emulation/build evidence complete
-2026-08-16. Human Review, live desktop/OpenXR interaction, and
+2026-08-16. The first autumn/snow palette-review correction is complete in
+`741d5a74`; final Human Review, live desktop/OpenXR interaction, and
 current-revision physical Quest pixels/performance remain pending.
 
 Add one focused capture runner, such as
@@ -792,13 +793,38 @@ Execution record:
   `9332ad2118e01585df938362de8eb55b664f22d907d003ef53bf51107b88fafb`.
   Mesh builds stayed 120, commands 11, block updates zero, and pending/accepted
   compile counts zero across all three explicit frames.
+- First Human Review found the autumn grass response too green and the
+  half-block snow breakup too finely speckled. Revision `741d5a74` strengthens
+  the autumn straw target and applies climate-sensitive lush-grass dormancy:
+  mild/dry grass reaches the strongest dieback while wetter or warm regions
+  retain more growth. Snow now uses a topology-aware 14-block interpolated
+  field with a smaller 3.5-block edge field. The edge hash is arithmetic, not
+  trigonometric, and the entire response remains fragment-only with no mesh,
+  chunk, world, or persistence work.
+- The refreshed 22-case exact matrix is under
+  `/tmp/mclone-seasonal-appearance-741d5a74c379-1786897744853/`. Its inspected
+  contact sheet shows a continuous green-to-straw-to-frost northern sequence,
+  connected rather than half-block-speckled snow, snow-free warm/dry terrain,
+  partial cool/wet retention, and strong alpine retention. Northern Autumn is
+  SHA-256
+  `bb8d377ed8e23349bedfa3a15b7a2f2460d91a3b227ffe778e0c2db4fb244487`;
+  full recent snow is
+  `39f2a859437a4ab8e332f71072aea917dc74d8d4b6457e8745546b3d450e027b`.
+- The refreshed headed Chrome/WebGPU probe changes 413,969 of 921,600 pixels
+  under full late-Winter recent snow, then restores Preview Off with zero
+  changed pixels. Off/restored SHA-256 is
+  `8e0e620fadd484750dd787d7157728feabc0c6ee9b685bb7bbbd67c568e68cd4`;
+  active SHA-256 is
+  `c134a70f5123471558cd3027f5730f10fedcb13fc38f42dec03e6d381773dd8e`.
+  Mesh builds stayed 117, commands 11, block updates zero, and
+  pending/accepted compile counts zero across all three frames.
 - Repeating the preflight RD3 exact CPU mesh corpus after implementation built
   the identical 1,296 sections / 521 non-empty sections, 1,671,148 vertices,
   2,506,722 indices, and 417,787 faces in `570.405ms` versus `571.345ms`
   before (`-0.16%`). Exact vertex bytes remain `66,845,920`; index bytes remain
   `10,026,888`. Static vertex/payload growth is zero.
-- Focused suites pass: `mclone-season` 24 tests, `mclone-mesh` 106,
-  `mclone-render` 198 with 11 explicitly ignored GPU cases, `mclone-ui` 112,
+- Focused suites pass: `mclone-season` 25 tests, `mclone-mesh` 106,
+  `mclone-render` 199 with 11 explicitly ignored GPU cases, `mclone-ui` 112,
   `mclone-app-runtime` 297 unit tests plus its integration targets, and
   `mclone-scene` 180 unit tests plus all integration/doc targets, including the
   new Seasonal Debug/XR routing cases (one unrelated GPU characterization is
