@@ -599,12 +599,13 @@ Passed on 2026-08-16:
   [/tmp/mclone-desktop-offscreen.png](/tmp/mclone-desktop-offscreen.png); and
 - `pnpm native:android:avd-session-smoke` with a real title-menu Create World
   flow and inspected frame
-  [/tmp/mclone-android-avd-session.png](/tmp/mclone-android-avd-session.png).
+  [/tmp/mclone-android-avd-session.png](/tmp/mclone-android-avd-session.png);
+- `pnpm native:android-xr:apk` for the release Quest target.
 
 `pnpm native:android-xr:session-smoke` reached the public Quest testbed and
 reported that no attached, authorized headset was available. The shared XR
-consumer compiles and its semantic tests pass, but this execution record does
-not claim a new physical-headset result.
+consumer and release APK build pass and its semantic tests are green, but this
+execution record does not claim a new physical-headset result.
 
 ### Scoreboard and remaining work
 
