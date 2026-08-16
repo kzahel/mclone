@@ -58,6 +58,11 @@ use mclone_scene::{
     McloneSceneHostOptions, MonoInputDisposition, MonoInteractiveInputRouter,
     MonoSceneFrameSummary, MonoUiContext, MonoUiPresentation, MonoWorldActionStatus,
 };
+use mclone_season::{
+    LatitudeSource, LocalSnowPulse, OrbitalMilestone, OrbitalPhase, PreviewCalendarDate,
+    PreviewLatitude, PreviewSolarTime, RECENT_SNOW_RADIUS_BLOCKS, SeasonPreviewSettings,
+    SolarTimeSource, UnitU16,
+};
 use mclone_ui::{
     GameHelpParent, GameOptionsParent, GameScreen, GameTouchSettings, GameUiAction, GuiScale,
     Point, StatusOverlay, TouchJoystickOverlay, TouchOverlay, touch_control_at,
@@ -1889,6 +1894,126 @@ impl WebSceneHost {
     pub fn set_debug_overlay_visible(&mut self, visible: bool) -> Result<JsValue, JsValue> {
         self.host_mut()?.set_mono_debug_diagnostics_visible(visible);
         self.ui_report(false, None).map_err(JsValue::from)
+    }
+
+    /// Exact typed seasonal state for the explicit browser smoke observer.
+    ///
+    /// The production browser adapter never calls this method. It lets the
+    /// test-only `smokeObserver=1` module drive the same shared scene setting
+    /// used by flat and XR Debug UI without scraping menu text or coordinates.
+    #[wasm_bindgen(js_name = setSeasonPreviewForSmoke)]
+    pub fn set_season_preview_for_smoke(
+        &mut self,
+        enabled: bool,
+        orbital_turns: f64,
+        latitude_degrees: f64,
+        solar_time_hours: f64,
+        recent_snow_intensity: f32,
+        recent_snow_center_x: i32,
+        recent_snow_center_z: i32,
+    ) -> Result<JsValue, JsValue> {
+        let orbital_phase = OrbitalPhase::from_turns_wrapped(orbital_turns)
+            .map_err(|error| JsValue::from_str(&error.to_string()))?;
+        let recent_snow_intensity = UnitU16::from_unit_clamped(recent_snow_intensity);
+        let recent_snow = (recent_snow_intensity != UnitU16::ZERO).then_some(LocalSnowPulse {
+            center_x: recent_snow_center_x,
+            center_z: recent_snow_center_z,
+            radius_blocks: RECENT_SNOW_RADIUS_BLOCKS,
+            intensity: recent_snow_intensity,
+        });
+        let settings = SeasonPreviewSettings {
+            enabled,
+            orbital_phase,
+            latitude_source: LatitudeSource::Manual,
+            manual_latitude: PreviewLatitude::from_degrees_clamped(latitude_degrees),
+            solar_time_source: SolarTimeSource::Manual,
+            manual_solar_time: PreviewSolarTime::from_hours_wrapped(solar_time_hours),
+            recent_snow,
+        };
+        self.host_mut()?.set_season_preview_settings(settings);
+
+        let object = js_sys::Object::new();
+        let date = PreviewCalendarDate::from_orbital_phase(orbital_phase);
+        report_set_bool(&object, "ok", true).map_err(JsValue::from)?;
+        report_set_bool(&object, "enabled", enabled).map_err(JsValue::from)?;
+        report_set_number(
+            &object,
+            "orbitalPhaseSteps",
+            f64::from(orbital_phase.steps()),
+        )
+        .map_err(JsValue::from)?;
+        report_set_number(&object, "calendarDay", f64::from(date.day())).map_err(JsValue::from)?;
+        report_set_string(
+            &object,
+            "globalMilestone",
+            OrbitalMilestone::nearest(orbital_phase).label(),
+        )
+        .map_err(JsValue::from)?;
+        report_set_number(
+            &object,
+            "manualLatitudeDegrees",
+            settings.manual_latitude.degrees(),
+        )
+        .map_err(JsValue::from)?;
+        report_set_number(
+            &object,
+            "manualSolarTimeMinutes",
+            f64::from(settings.manual_solar_time.minutes()),
+        )
+        .map_err(JsValue::from)?;
+        report_set_bool(&object, "recentSnowPresent", recent_snow.is_some())
+            .map_err(JsValue::from)?;
+        report_set_number(
+            &object,
+            "recentSnowIntensityRaw",
+            recent_snow.map_or(0.0, |pulse| f64::from(pulse.intensity.raw())),
+        )
+        .map_err(JsValue::from)?;
+        report_set_number(
+            &object,
+            "recentSnowRadiusBlocks",
+            recent_snow.map_or(0.0, |pulse| f64::from(pulse.radius_blocks)),
+        )
+        .map_err(JsValue::from)?;
+        report_set_number(
+            &object,
+            "recentSnowCenterX",
+            recent_snow.map_or(0.0, |pulse| f64::from(pulse.center_x)),
+        )
+        .map_err(JsValue::from)?;
+        report_set_number(
+            &object,
+            "recentSnowCenterZ",
+            recent_snow.map_or(0.0, |pulse| f64::from(pulse.center_z)),
+        )
+        .map_err(JsValue::from)?;
+        if let Some(diagnostics) = self.host_ref()?.solar_frame_diagnostics() {
+            report_set_string(
+                &object,
+                "localSeason",
+                diagnostics.local_season.label.label(),
+            )
+            .map_err(JsValue::from)?;
+            report_set_number(
+                &object,
+                "localPhase",
+                f64::from(diagnostics.local_season.local_phase),
+            )
+            .map_err(JsValue::from)?;
+            report_set_number(
+                &object,
+                "responseStrength",
+                f64::from(diagnostics.local_season.response_strength),
+            )
+            .map_err(JsValue::from)?;
+            report_set_number(
+                &object,
+                "snowTendency",
+                f64::from(diagnostics.local_season.snow_tendency),
+            )
+            .map_err(JsValue::from)?;
+        }
+        Ok(object.into())
     }
 
     #[wasm_bindgen(js_name = reportHostFailure)]

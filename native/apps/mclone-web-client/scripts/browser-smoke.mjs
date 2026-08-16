@@ -89,6 +89,8 @@ const terrainCompositionProbe = process.argv.includes("--terrain-composition-pro
   || process.env.MCLONE_NATIVE_WEB_TERRAIN_COMPOSITION_PROBE === "1";
 const terrainHorizonProbe = process.argv.includes("--terrain-horizon-probe")
   || process.env.MCLONE_NATIVE_WEB_TERRAIN_HORIZON_PROBE === "1";
+const seasonalAppearanceProbe = process.argv.includes("--seasonal-appearance-probe")
+  || process.env.MCLONE_NATIVE_WEB_SEASONAL_APPEARANCE_PROBE === "1";
 if (terrainCompositionProbe && terrainPresentation !== "composed") {
   throw new Error("--terrain-composition-probe requires --terrain-presentation composed");
 }
@@ -112,9 +114,18 @@ const screenshotTarget = screenshotTargetArgIndex >= 0
 if (Boolean(screenshotEye) !== Boolean(screenshotTarget)) {
   throw new Error("--screenshot-eye and --screenshot-target must be provided together");
 }
-if ((terrainCompositionProbe || terrainHorizonProbe) && !screenshotEye) {
+if ((terrainCompositionProbe || terrainHorizonProbe || seasonalAppearanceProbe) && !screenshotEye) {
   throw new Error(
-    "terrain composition probes require --screenshot-eye and --screenshot-target",
+    "terrain/seasonal appearance probes require --screenshot-eye and --screenshot-target",
+  );
+}
+if (
+  seasonalAppearanceProbe
+  && (generationProfile !== "mclone-overworld-v1" || terrainPresentation !== "exact-only")
+) {
+  throw new Error(
+    "--seasonal-appearance-probe requires --generation-profile mclone-overworld-v1 "
+      + "and --terrain-presentation exact-only",
   );
 }
 for (const [label, value] of [
@@ -275,6 +286,7 @@ const appLoop = movementPerf
   || halfSpaceTerrainProbe
   || actorCompositionProbe
   || terrainHorizonProbe
+  || seasonalAppearanceProbe
   || Boolean(showcase)
   || lobbyRuntimeProbe
   || lobbyScenarioProbe
@@ -330,6 +342,8 @@ const screenshotPath = process.env.MCLONE_NATIVE_WEB_SMOKE_SCREENSHOT
       : `/tmp/mclone-native-web-${mobileShowcase ? "mobile-" : ""}showcase-${showcase}.png`
     : actorCompositionProbe
     ? "/tmp/mclone-native-web-actor-composition-probe.png"
+    : seasonalAppearanceProbe
+    ? "/tmp/mclone-native-web-seasonal-appearance-winter-snow.png"
     : terrainHorizonProbe
     ? "/tmp/mclone-native-web-terrain-horizon-reload.png"
     : lobbyRuntimeProbe
@@ -372,6 +386,8 @@ const canvasScreenshotPath = process.env.MCLONE_NATIVE_WEB_CANVAS_SCREENSHOT
       : `/tmp/mclone-native-web-${mobileShowcase ? "mobile-" : ""}showcase-${showcase}-canvas.png`
     : actorCompositionProbe
     ? "/tmp/mclone-native-web-actor-composition-probe-canvas.png"
+    : seasonalAppearanceProbe
+    ? "/tmp/mclone-native-web-seasonal-appearance-winter-snow-canvas.png"
     : terrainHorizonProbe
     ? "/tmp/mclone-native-web-terrain-horizon-reload-canvas.png"
     : lobbyRuntimeProbe
@@ -817,7 +833,7 @@ async function run() {
       if (terrainPresentation) {
         startupParameters.set("terrainPresentation", terrainPresentation);
       }
-      if (terrainCompositionProbe || terrainHorizonProbe) {
+      if (terrainCompositionProbe || terrainHorizonProbe || seasonalAppearanceProbe) {
         startupParameters.set("qualityCapture", "1");
       }
       if (screenshotEye) startupParameters.set("screenshotEye", screenshotEye);
@@ -880,7 +896,7 @@ async function run() {
           },
           undefined,
           {
-            timeout: terrainCompositionProbe || terrainHorizonProbe
+            timeout: terrainCompositionProbe || terrainHorizonProbe || seasonalAppearanceProbe
               ? terrainCompositionProbeTimeoutMs
               : 60_000,
           },
@@ -3184,6 +3200,65 @@ async function run() {
           plantedCarrotScreenshotPath,
           harvestedCarrotScreenshotPath,
           result,
+        }, null, 2));
+        return;
+      }
+      if (seasonalAppearanceProbe) {
+        const eye = /** @type {[number, number, number]} */ (
+          screenshotEye.split(",").map(Number)
+        );
+        const target = /** @type {[number, number, number]} */ (
+          screenshotTarget.split(",").map(Number)
+        );
+        const offScreenshotPath = canvasScreenshotPath.replace(/\.png$/, "-off.png");
+        const restoredScreenshotPath = canvasScreenshotPath.replace(/\.png$/, "-restored.png");
+        const probe = await runSeasonalAppearanceProbe(
+          page,
+          canvas,
+          eye,
+          target,
+          offScreenshotPath,
+          canvasScreenshotPath,
+          restoredScreenshotPath,
+        );
+        const pageScreenshotCaptured = await page.screenshot({
+          path: screenshotPath,
+          fullPage: false,
+          timeout: 60_000,
+        }).then(() => true, () => false);
+        if (
+          pageErrors.length > 0
+          || probe.offPixels.distinctInteriorColorCount < 2
+          || probe.activePixels.distinctInteriorColorCount < 2
+          || probe.activeDifference.differentPixelCount <= 0
+          || probe.restoredDifference.differentPixelCount !== 0
+          || probe.activeState?.enabled !== true
+          || probe.activeState?.orbitalPhaseSteps !== 8750
+          || probe.activeState?.calendarDay !== 99
+          || probe.activeState?.localSeason !== "Winter"
+          || probe.activeState?.recentSnowIntensityRaw !== 65535
+          || probe.activeState?.recentSnowRadiusBlocks !== 96
+          || probe.restoredState?.enabled !== false
+          || probe.offResult?.meshBuildCount !== probe.activeResult?.meshBuildCount
+          || probe.activeResult?.meshBuildCount !== probe.restoredResult?.meshBuildCount
+          || probe.offResult?.commandCount !== probe.activeResult?.commandCount
+          || probe.activeResult?.commandCount !== probe.restoredResult?.commandCount
+          || probe.activeResult?.pendingCompileJobCount !== 0
+          || probe.activeResult?.acceptedCompileSectionCount !== 0
+        ) {
+          throw new Error(`browser seasonal-appearance probe failed:\n${JSON.stringify({
+            pageErrors,
+            probe,
+          }, null, 2)}`);
+        }
+        console.log(JSON.stringify({
+          url: appUrl,
+          screenshotPath,
+          pageScreenshotCaptured,
+          offScreenshotPath,
+          canvasScreenshotPath,
+          restoredScreenshotPath,
+          probe,
         }, null, 2));
         return;
       }
@@ -10907,6 +10982,132 @@ async function readNativeUiState(page) {
       menuHidden: menu?.hidden ?? null,
     };
   });
+}
+
+/**
+ * Prove the shared exact-terrain seasonal setting through headed WebGPU. The
+ * capture remains paused between explicit render calls so preview-off
+ * restoration can be compared byte-for-byte without simulation or grass-time
+ * drift.
+ *
+ * @param {Page} page
+ * @param {Locator} canvas
+ * @param {[number, number, number]} eye
+ * @param {[number, number, number]} target
+ * @param {string} offScreenshotPath
+ * @param {string} activeScreenshotPath
+ * @param {string} restoredScreenshotPath
+ */
+async function runSeasonalAppearanceProbe(
+  page,
+  canvas,
+  eye,
+  target,
+  offScreenshotPath,
+  activeScreenshotPath,
+  restoredScreenshotPath,
+) {
+  await page.waitForFunction(
+    () => {
+      const state = globalThis.__mcloneWebApp?.state;
+      return state?.streamingSettled === true && state.pendingCompileJobCount === 0;
+    },
+    undefined,
+    { timeout: terrainCompositionProbeTimeoutMs },
+  );
+  await page.evaluate(() => globalThis.__mcloneWebApp?.pauseRendering?.());
+  await page.waitForFunction(
+    () => globalThis.__mcloneWebApp?.state?.tickFrameBusy === false,
+    undefined,
+    { timeout: 10_000 },
+  );
+  await page.evaluate(
+    ({ eye, target }) => {
+      globalThis.__mcloneWebApp?.setDebugOverlay?.(false);
+      globalThis.__mcloneWebApp?.frameTerrainComposition?.(eye, target);
+    },
+    { eye, target },
+  );
+  await page.evaluate(() => globalThis.__mcloneWebApp?.resumeRendering?.());
+  await page.waitForFunction(
+    (eye) => {
+      const state = globalThis.__mcloneWebApp?.state;
+      return state?.streamingSettled === true
+        && state.pendingCompileJobCount === 0
+        && Math.abs(state.cameraX - eye[0]) < 0.01
+        && Math.abs(state.cameraY - eye[1]) < 0.01
+        && Math.abs(state.cameraZ - eye[2]) < 0.01;
+    },
+    eye,
+    { timeout: terrainCompositionProbeTimeoutMs },
+  );
+  await page.evaluate(() => globalThis.__mcloneWebApp?.pauseRendering?.());
+  await page.waitForFunction(
+    () => globalThis.__mcloneWebApp?.state?.tickFrameBusy === false,
+    undefined,
+    { timeout: 10_000 },
+  );
+
+  /** @param {boolean} enabled */
+  const setPreview = (enabled) => page.evaluate(
+    ({ enabled, centerX, centerZ }) => globalThis.__mcloneWebApp
+      ?.setSeasonPreviewForSmoke?.(
+        enabled,
+        0.875,
+        47.5,
+        12.0,
+        enabled ? 1.0 : 0.0,
+        centerX,
+        centerZ,
+      ) ?? null,
+    { enabled, centerX: Math.floor(eye[0]), centerZ: Math.floor(eye[2]) },
+  );
+  /** @param {string} path */
+  const renderAndCapture = async (path) => {
+    const result = await page.evaluate(
+      async () => await globalThis.__mcloneWebApp?.renderOneFrameForSmoke?.() ?? null,
+    );
+    const png = await canvas.screenshot({ path, timeout: 60_000 });
+    return { result, png, pixels: analyzePng(png) };
+  };
+
+  const offState = await setPreview(false);
+  const off = await renderAndCapture(offScreenshotPath);
+  const activeState = await setPreview(true);
+  const active = await renderAndCapture(activeScreenshotPath);
+  const restoredState = await setPreview(false);
+  const restored = await renderAndCapture(restoredScreenshotPath);
+
+  return {
+    offState,
+    activeState,
+    restoredState,
+    offResult: summarizeSeasonalAppearanceRenderResult(off.result),
+    activeResult: summarizeSeasonalAppearanceRenderResult(active.result),
+    restoredResult: summarizeSeasonalAppearanceRenderResult(restored.result),
+    offPixels: off.pixels,
+    activePixels: active.pixels,
+    restoredPixels: restored.pixels,
+    activeDifference: comparePngPixels(off.png, active.png),
+    restoredDifference: comparePngPixels(off.png, restored.png),
+  };
+}
+
+/** @param {Record<string, any> | null} result */
+function summarizeSeasonalAppearanceRenderResult(result) {
+  if (result == null) return null;
+  return {
+    renderCount: result.renderCount,
+    sectionCount: result.sectionCount,
+    drawnSectionCount: result.drawnSectionCount,
+    residentSectionCount: result.residentSectionCount,
+    meshBuildCount: result.meshBuildCount,
+    pendingCompileJobCount: result.pendingCompileJobCount,
+    acceptedCompileSectionCount: result.acceptedCompileSectionCount,
+    sectionBlockUpdateCount: result.sectionBlockUpdateCount,
+    commandCount: result.commandCount,
+    backgroundSaveCount: result.backgroundSaveCount,
+  };
 }
 
 /**

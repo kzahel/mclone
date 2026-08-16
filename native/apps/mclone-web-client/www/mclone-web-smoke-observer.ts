@@ -52,6 +52,15 @@ interface SmokeRuntime {
   resumeRendering?: () => void;
   renderOverviewFrame?: () => WasmReport | null;
   setDebugOverlay?: (visible: boolean) => WasmReport | null;
+  setSeasonPreviewForSmoke?: (
+    enabled: boolean,
+    orbitalTurns: number,
+    latitudeDegrees: number,
+    solarTimeHours: number,
+    recentSnowIntensity: number,
+    recentSnowCenterX: number,
+    recentSnowCenterZ: number,
+  ) => WasmReport | null;
   openNativeHelpUi?: () => WasmReport | null;
   closeNativeUi?: () => WasmReport | null;
   handleNativeUiKey?: (key: string) => WasmReport | null;
@@ -494,6 +503,26 @@ export function installWebSmokeObserver(
   runtime.setDebugOverlay = (visible) => apply(
     (session) => session.setDebugOverlayVisible(visible),
   );
+  runtime.setSeasonPreviewForSmoke = (
+    enabled,
+    orbitalTurns,
+    latitudeDegrees,
+    solarTimeHours,
+    recentSnowIntensity,
+    recentSnowCenterX,
+    recentSnowCenterZ,
+  ) => {
+    const session = app.sceneHostForObserver();
+    return session?.setSeasonPreviewForSmoke(
+      enabled,
+      orbitalTurns,
+      latitudeDegrees,
+      solarTimeHours,
+      recentSnowIntensity,
+      Math.trunc(recentSnowCenterX),
+      Math.trunc(recentSnowCenterZ),
+    ) ?? null;
+  };
   runtime.openNativeHelpUi = () => apply((session) => session.openHelpUi());
   runtime.closeNativeUi = () => apply((session) => session.closeUi());
   runtime.handleNativeUiKey = (key) => apply((session) => session.handleUiKey(key));

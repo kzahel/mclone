@@ -1992,6 +1992,7 @@ dependencies = [
  "mclone-render",
  "mclone-render-session",
  "mclone-scene",
+ "mclone-season",
  "mclone-server",
  "mclone-terrain-view",
  "mclone-ui",
