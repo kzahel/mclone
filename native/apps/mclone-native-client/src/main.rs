@@ -156,6 +156,10 @@ fn main() -> Result<()> {
                 },
             );
             println!("MCLONE_TERRAIN_SEAM_STATE {terrain_view}");
+            println!(
+                "MCLONE_SEASONAL_APPEARANCE_STATE {}",
+                report.seasonal_appearance_receipt_json
+            );
             Ok(())
         }
         Cli::WorldgenShowcase { options } => {
@@ -280,6 +284,10 @@ fn main() -> Result<()> {
                 report.drawn_section_count,
                 report.gui_command_count,
                 report.ui_panel_composite_count,
+            );
+            println!(
+                "MCLONE_SEASONAL_APPEARANCE_STATE {}",
+                report.seasonal_appearance_receipt_json
             );
             Ok(())
         }

@@ -654,6 +654,10 @@ fn cli_parses_typed_season_preview_capture_options() {
         "manual".to_owned(),
         "--season-solar-time".to_owned(),
         "23.5".to_owned(),
+        "--season-recent-snow".to_owned(),
+        "0.5".to_owned(),
+        "--season-recent-snow-center".to_owned(),
+        "1024,-2048".to_owned(),
     ])
     .unwrap();
     let Cli::HeadlessScreenshot { options } = cli else {
@@ -668,12 +672,26 @@ fn cli_parses_typed_season_preview_capture_options() {
             manual_latitude: mclone_season::PreviewLatitude::from_tenths_clamped(750),
             solar_time_source: mclone_season::SolarTimeSource::Manual,
             manual_solar_time: mclone_season::PreviewSolarTime::from_minutes_wrapped(1_410),
-            recent_snow: None,
+            recent_snow: Some(mclone_season::LocalSnowPulse {
+                center_x: 1024,
+                center_z: -2048,
+                radius_blocks: mclone_season::RECENT_SNOW_RADIUS_BLOCKS,
+                intensity: mclone_season::UnitU16::from_raw(32_768),
+            }),
         }
     );
 
     let error = Cli::parse(["--season-preview".to_owned(), "true".to_owned()]).unwrap_err();
     assert!(error.to_string().contains("require --screenshot"));
+
+    let error = Cli::parse([
+        "--screenshot".to_owned(),
+        "/tmp/mclone-season.png".to_owned(),
+        "--season-recent-snow-center".to_owned(),
+        "0,0".to_owned(),
+    ])
+    .unwrap_err();
+    assert!(error.to_string().contains("requires --season-recent-snow"));
 }
 
 #[test]

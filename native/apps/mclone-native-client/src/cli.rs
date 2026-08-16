@@ -18,8 +18,8 @@ use mclone_render::placement::{EmbeddedChunkRegion, WorldPlacement};
 use mclone_render_session::EngineCameraViewMode;
 use mclone_scene::{TerrainHorizonDiagnostic, WorldgenLensLayer};
 use mclone_season::{
-    LatitudeSource, OrbitalPhase, PreviewLatitude, PreviewSolarTime, SeasonPreviewSettings,
-    SolarTimeSource,
+    LatitudeSource, LocalSnowPulse, OrbitalPhase, PreviewLatitude, PreviewSolarTime,
+    SeasonPreviewSettings, SolarTimeSource, UnitU16,
 };
 use mclone_server::SimulationCadenceConfig;
 use mclone_ui::{
@@ -123,6 +123,8 @@ pub(crate) const DESKTOP_LOCAL_ARG_FLAGS: &[&str] = &[
     "--season-latitude-source",
     "--season-orbital-phase",
     "--season-preview",
+    "--season-recent-snow",
+    "--season-recent-snow-center",
     "--season-solar-time",
     "--season-solar-time-source",
     "--screenshot-frame-pipeline-overlay",
@@ -955,6 +957,8 @@ impl Cli {
         let mut screenshot_camera_view = EngineCameraViewMode::FirstPerson;
         let mut season_preview = SeasonPreviewSettings::default();
         let mut season_preview_options_explicit = false;
+        let mut season_recent_snow_intensity = None;
+        let mut season_recent_snow_center = None;
         let mut actor_walk_review_video = None;
         let mut actor_walk_review_options_explicit = false;
         let mut actor_walk_review_frames = DEFAULT_ACTOR_WALK_REVIEW_FRAMES;
@@ -1545,6 +1549,16 @@ impl Cli {
                     season_preview.manual_solar_time =
                         parse_season_solar_time_arg(&arg, args.next())?;
                 }
+                "--season-recent-snow" => {
+                    season_preview_options_explicit = true;
+                    season_recent_snow_intensity =
+                        Some(parse_season_recent_snow_arg(&arg, args.next())?);
+                }
+                "--season-recent-snow-center" => {
+                    season_preview_options_explicit = true;
+                    season_recent_snow_center =
+                        Some(parse_season_recent_snow_center_arg(&arg, args.next())?);
+                }
                 "--first-person-player" => {
                     first_person_player_visible =
                         parse_bool_arg("--first-person-player", args.next())?;
@@ -1967,6 +1981,32 @@ impl Cli {
         let startup_camera = startup_options.camera;
         let startup_storage = startup_options.storage;
         let mut scene = SceneOptions::with_startup(startup_options.scene);
+        if season_recent_snow_center.is_some() && season_recent_snow_intensity.is_none() {
+            bail!("--season-recent-snow-center requires --season-recent-snow");
+        }
+        if let Some(intensity) = season_recent_snow_intensity {
+            season_preview.recent_snow = if intensity == UnitU16::ZERO {
+                None
+            } else {
+                let [center_x, center_z] = season_recent_snow_center.unwrap_or_else(|| {
+                    startup_camera.eye.map_or_else(
+                        || {
+                            [
+                                scene.chunk_x.saturating_mul(16).saturating_add(8),
+                                scene.chunk_z.saturating_mul(16).saturating_add(8),
+                            ]
+                        },
+                        |eye| [eye[0].floor() as i32, eye[2].floor() as i32],
+                    )
+                });
+                Some(LocalSnowPulse::anchored(
+                    scene.world_topology,
+                    f64::from(center_x),
+                    f64::from(center_z),
+                    intensity,
+                ))
+            };
+        }
         scene.asset_pack = asset_pack;
         scene.first_person_player_visible = first_person_player_visible;
         scene.warm_world_standby_seed = warm_world_standby_seed;
@@ -2490,6 +2530,38 @@ fn parse_season_solar_time_arg(flag: &str, value: Option<String>) -> Result<Prev
         bail!("{flag} must be finite and in [0, 24)");
     }
     Ok(PreviewSolarTime::from_hours_wrapped(hours))
+}
+
+fn parse_season_recent_snow_arg(flag: &str, value: Option<String>) -> Result<UnitU16> {
+    let raw = value.with_context(|| format!("{flag} requires an intensity from 0 to 1"))?;
+    let intensity = raw
+        .parse::<f32>()
+        .with_context(|| format!("{flag} expects a normalized intensity, got `{raw}`"))?;
+    if !intensity.is_finite() || !(0.0..=1.0).contains(&intensity) {
+        bail!("{flag} must be finite and between 0 and 1");
+    }
+    Ok(UnitU16::from_unit_clamped(intensity))
+}
+
+fn parse_season_recent_snow_center_arg(flag: &str, value: Option<String>) -> Result<[i32; 2]> {
+    let raw = value.with_context(|| format!("{flag} requires block coordinates x,z"))?;
+    let mut values = raw.split(',');
+    let x = values
+        .next()
+        .context("missing x")?
+        .trim()
+        .parse::<i32>()
+        .with_context(|| format!("{flag} expects integer x,z coordinates, got `{raw}`"))?;
+    let z = values
+        .next()
+        .context("missing z")?
+        .trim()
+        .parse::<i32>()
+        .with_context(|| format!("{flag} expects integer x,z coordinates, got `{raw}`"))?;
+    if values.next().is_some() {
+        bail!("{flag} expects exactly two integer coordinates x,z, got `{raw}`");
+    }
+    Ok([x, z])
 }
 
 fn parse_window_platform_profile_arg(
@@ -3091,7 +3163,7 @@ fn print_help() {
            mclone-native-client --headless-clear /tmp/mclone-native-clear.png [--width 96] [--height 64]\n\
            mclone-native-client --actor-review-sheet /tmp/mclone-actor-review.png [--width 1152] [--height 512] [--fullbright true|false]\n\
            mclone-native-client --actor-walk-review /tmp/mclone-actor-walk-review.png [--actor-walk-review-video /tmp/mclone-actor-walk-review.mp4] [--width 360] [--height 360] [--walk-review-frames 24] [--walk-review-fps 12] [--walk-review-cycles 2] [--fullbright true|false]\n\
-          mclone-native-client --screenshot /tmp/mclone-frame.png [--asset-pack saved|original] [--width 1280] [--height 720] [--startup-wait none|progress|playable|view-settled|frames:N] [--warm-world-standby-seed -98765] [--screenshot-ui none|title|world-list|world-create|world-delete-confirm|new-world|join-remote|pause|death|help|controls|block-palette|options-title|options-pause|options-local-play|storage-profile-title|storage-factory-confirm|server-settings-pause|asset-packs-pause] [--screenshot-hud true|false] [--screenshot-frame-pipeline-overlay true|false] [--screenshot-debug-pane true|false] [--screenshot-worldgen-lens off|biome|landform|surface|hydrology] [--screenshot-player-box true|false] [--screenshot-blink-debug true|false] [--screenshot-controller-focus true|false] [--screenshot-scripted-interaction true|false] [--screenshot-settle-ms 0] [--screenshot-settle-frames 0] [--screenshot-terrain-horizon-diagnostic natural|ownership-level|topology|albedo|environmental-illumination|geometric-shade|local-occlusion|water|texture] [--screenshot-eye x,y,z] [--screenshot-target x,y,z] [--screenshot-camera-view first-person|third-person] [--season-preview true|false] [--season-orbital-phase 0..1] [--season-latitude-source world|manual] [--season-latitude -90..90] [--season-solar-time-source world-clock|manual] [--season-solar-time 0..<24] [--first-person-player true|false] [--seed 12345] [--generation-profile mclone-overworld-v1] [--starter-content wild|intro-homestead-v1] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--movement-speed-multiplier 1.0] [--simulation-cadence 20/20/60] [--debug-passive-showcase true|false] [--section-occlusion true|false] [--lighting true|false] [--fullbright true|false]\n\
+          mclone-native-client --screenshot /tmp/mclone-frame.png [--asset-pack saved|original] [--width 1280] [--height 720] [--startup-wait none|progress|playable|view-settled|frames:N] [--warm-world-standby-seed -98765] [--screenshot-ui none|title|world-list|world-create|world-delete-confirm|new-world|join-remote|pause|death|help|controls|block-palette|options-title|options-pause|options-local-play|options-seasonal-debug|storage-profile-title|storage-factory-confirm|server-settings-pause|asset-packs-pause] [--screenshot-hud true|false] [--screenshot-frame-pipeline-overlay true|false] [--screenshot-debug-pane true|false] [--screenshot-worldgen-lens off|biome|landform|surface|hydrology] [--screenshot-player-box true|false] [--screenshot-blink-debug true|false] [--screenshot-controller-focus true|false] [--screenshot-scripted-interaction true|false] [--screenshot-settle-ms 0] [--screenshot-settle-frames 0] [--screenshot-terrain-horizon-diagnostic natural|ownership-level|topology|albedo|environmental-illumination|geometric-shade|local-occlusion|water|texture] [--screenshot-eye x,y,z] [--screenshot-target x,y,z] [--screenshot-camera-view first-person|third-person] [--season-preview true|false] [--season-orbital-phase 0..1] [--season-latitude-source world|manual] [--season-latitude -90..90] [--season-solar-time-source world-clock|manual] [--season-solar-time 0..<24] [--season-recent-snow 0..1] [--season-recent-snow-center x,z] [--first-person-player true|false] [--seed 12345] [--generation-profile mclone-overworld-v1] [--starter-content wild|intro-homestead-v1] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--movement-speed-multiplier 1.0] [--simulation-cadence 20/20/60] [--debug-passive-showcase true|false] [--section-occlusion true|false] [--lighting true|false] [--fullbright true|false]\n\
            mclone-native-client --worldgen-showcase-card /tmp/mclone-worldgen-showcase [--width 640] [--height 400] [--generation-profile small-island-v1] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 16] [--day-time 6000] [--lighting true|false] [--fullbright true|false]\n\
            mclone-native-client --warm-world-swap-smoke /tmp/mclone-warm-world-swap --warm-world-standby-seed 67890 [--warm-world-standby-cadence 5/5/5] [--warm-world-cost-sample-ms 3000] [--width 1280] [--height 720] [scene/render options as --screenshot]\n\
            mclone-native-client --live-diorama-smoke /tmp/mclone-live-diorama --world-dir ./table-a --live-diorama-world-dir ./island-b [--live-diorama-scale 0.125] [--live-diorama-soak-seconds 600] [--width 960] [--height 640]\n\

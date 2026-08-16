@@ -1031,6 +1031,7 @@ impl McloneSceneHost {
             ),
         ];
         if let Some(solar) = self.solar_frame_diagnostics() {
+            let date = PreviewCalendarDate::from_orbital_phase(solar.settings.orbital_phase);
             lines.push(format!(
                 "SOLAR {} LAT {} W{:+.3} E{:+.3}",
                 solar.policy.label(),
@@ -1059,6 +1060,38 @@ impl McloneSceneHost {
                 solar.sample.twilight_factor,
                 solar.sample.polar_state.label(),
             ));
+            lines.push(format!(
+                "SEASON DATE {}/{} {}",
+                date.day(),
+                mclone_season::PREVIEW_CALENDAR_DAYS,
+                OrbitalMilestone::nearest(solar.settings.orbital_phase).label(),
+            ));
+            lines.push(format!(
+                "SEASON LOCAL {} R{:.3} T{:+.3} SNOW {:.3}",
+                solar.local_season.label.label(),
+                solar.local_season.response_strength,
+                solar.local_season.current_temperature,
+                solar.local_season.snow_tendency,
+            ));
+            lines.push(format!(
+                "SEASON BIOME {} MEAN {:+.3} MOIST {:.3} ALT {:.1}",
+                solar.observer_biome_id,
+                solar.mean_temperature,
+                solar.moisture,
+                solar.observer_world_y,
+            ));
+            lines.push(solar.settings.recent_snow.map_or_else(
+                || "SEASON PULSE OFF".to_owned(),
+                |pulse| {
+                    format!(
+                        "SEASON PULSE X{} Z{} R{} I{}",
+                        pulse.center_x,
+                        pulse.center_z,
+                        pulse.radius_blocks,
+                        pulse.intensity.raw(),
+                    )
+                },
+            ));
         } else {
             lines.push(format!(
                 "SOLAR PREVIEW {} PROFILE {}",
@@ -1070,6 +1103,7 @@ impl McloneSceneHost {
                 self.active_world.scene.world_generation_profile.label(),
             ));
         }
+        lines.push("SEASON LOD DEFERRED EXACT TERRAIN ONLY".to_owned());
         #[cfg(not(target_arch = "wasm32"))]
         if let Some(preview) = self.embedded_world_preview_snapshot() {
             let standby = self.warm_world_standby_snapshot();

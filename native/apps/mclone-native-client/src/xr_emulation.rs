@@ -37,6 +37,7 @@ pub(crate) struct XrEmulationScreenshotReport {
     pub(crate) embedded_preview: Option<EmbeddedWorldPreviewSnapshot>,
     pub(crate) embedded_activation_reports: Vec<EmbeddedWorldActivationReport>,
     pub(crate) embedded_activation_switch_reports: Vec<mclone_scene::WarmWorldSwitchReport>,
+    pub(crate) seasonal_appearance_receipt_json: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -245,6 +246,7 @@ pub(crate) fn run_xr_emulation_screenshot(
             embedded_preview,
             embedded_activation_reports,
             embedded_activation_switch_reports,
+            seasonal_diagnostics,
         ),
     ) = write_headless_stereo_frame_png(
         HeadlessStereoFrameOptions {
@@ -362,6 +364,7 @@ pub(crate) fn run_xr_emulation_screenshot(
                 driver.host().embedded_world_preview_snapshot(),
                 embedded_activation_reports,
                 embedded_activation_switch_reports,
+                driver.host().solar_frame_diagnostics(),
             ))
         },
     )?;
@@ -387,6 +390,12 @@ pub(crate) fn run_xr_emulation_screenshot(
             summary.ui_panel.composite_count
         );
     }
+    let seasonal_appearance_receipt_json =
+        crate::offscreen_flat_client::seasonal_appearance_receipt_json(
+            options.season_preview,
+            options.scene.startup.world_generation_profile,
+            seasonal_diagnostics,
+        )?;
 
     Ok(XrEmulationScreenshotReport {
         path: capture.path,
@@ -403,6 +412,7 @@ pub(crate) fn run_xr_emulation_screenshot(
         embedded_preview,
         embedded_activation_reports,
         embedded_activation_switch_reports,
+        seasonal_appearance_receipt_json,
     })
 }
 

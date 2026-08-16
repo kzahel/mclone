@@ -192,8 +192,9 @@ use mclone_render_session::{
 };
 use mclone_season::{
     EvaluatedLocalSeason, LatitudeSource, LocalSeasonInput, MCLONE_AXIAL_TILT_DEGREES,
-    SeasonPreviewSettings, SolarCoordinatePolicy, SolarFrameDiagnostics, SolarInput, SolarSample,
-    SolarTimeSource, solar_time_fraction_from_day_time,
+    OrbitalMilestone, PreviewCalendarDate, SeasonPreviewSettings, SolarCoordinatePolicy,
+    SolarFrameDiagnostics, SolarInput, SolarSample, SolarTimeSource,
+    solar_time_fraction_from_day_time,
 };
 use mclone_server::{SimulationCadenceConfig, WorkerFrameMetrics};
 use mclone_ui::{

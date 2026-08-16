@@ -14,6 +14,10 @@ use mclone_scene::{
     EmbeddedWorldPreviewSnapshot, MonoUiPresentation, MonoWorldActionStatus,
     WarmWorldStandbySnapshot,
 };
+use mclone_season::{
+    OrbitalMilestone, PREVIEW_CALENDAR_DAYS, PreviewCalendarDate, SeasonPreviewSettings,
+    SolarFrameDiagnostics,
+};
 use mclone_server::initial_spawn_center_for_seed;
 use mclone_ui::{GameTravelAssistMode, GuiNavigation, Point};
 
@@ -43,6 +47,7 @@ pub(crate) struct OffscreenFlatClientScreenshotReport {
     pub(crate) embedded_preview: Option<EmbeddedWorldPreviewSnapshot>,
     pub(crate) warm_world_standby: Option<WarmWorldStandbySnapshot>,
     pub(crate) terrain_view: Option<mclone_scene::SceneTerrainViewDiagnostics>,
+    pub(crate) seasonal_appearance_receipt_json: String,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -1954,6 +1959,11 @@ pub(crate) fn run_offscreen_flat_client_screenshot(
     let embedded_preview = host.driver.host().embedded_world_preview_snapshot();
     let warm_world_standby = host.driver.host().warm_world_standby_snapshot();
     let terrain_view = host.driver.host().terrain_view_diagnostics();
+    let seasonal_appearance_receipt_json = seasonal_appearance_receipt_json(
+        options.season_preview,
+        options.scene.startup.world_generation_profile,
+        host.driver.host().solar_frame_diagnostics(),
+    )?;
 
     Ok(OffscreenFlatClientScreenshotReport {
         path: options.path.clone(),
@@ -1969,7 +1979,83 @@ pub(crate) fn run_offscreen_flat_client_screenshot(
         embedded_preview,
         warm_world_standby,
         terrain_view,
+        seasonal_appearance_receipt_json,
     })
+}
+
+pub(crate) fn seasonal_appearance_receipt_json(
+    settings: SeasonPreviewSettings,
+    profile: mclone_server::WorldGenerationProfile,
+    diagnostics: Option<SolarFrameDiagnostics>,
+) -> Result<String> {
+    let date = PreviewCalendarDate::from_orbital_phase(settings.orbital_phase);
+    let recent_snow = settings.recent_snow.map(|pulse| {
+        serde_json::json!({
+            "centerX": pulse.center_x,
+            "centerZ": pulse.center_z,
+            "radiusBlocks": pulse.radius_blocks,
+            "intensityRaw": pulse.intensity.raw(),
+            "intensity": pulse.intensity.unit(),
+        })
+    });
+    let evaluated = diagnostics.map(|diagnostics| {
+        serde_json::json!({
+            "observer": {
+                "x": diagnostics.observer_world_x,
+                "y": diagnostics.observer_world_y,
+                "z": diagnostics.observer_world_z,
+                "biomeId": diagnostics.observer_biome_id,
+            },
+            "latitude": {
+                "worldDegrees": diagnostics.world_latitude.degrees,
+                "effectiveDegrees": diagnostics.effective_latitude_degrees,
+                "policy": diagnostics.policy.label(),
+            },
+            "climate": {
+                "meanTemperature": diagnostics.mean_temperature,
+                "moisture": diagnostics.moisture,
+            },
+            "solar": {
+                "timeFraction": diagnostics.solar_time_fraction,
+                "elevationDegrees": diagnostics.sample.elevation_degrees,
+                "declinationDegrees": diagnostics.sample.declination_degrees,
+                "daylightHours": diagnostics.sample.day_length_fraction * 24.0,
+                "polarState": diagnostics.sample.polar_state.label(),
+            },
+            "localSeason": {
+                "label": diagnostics.local_season.label.label(),
+                "localPhase": diagnostics.local_season.local_phase,
+                "responseStrength": diagnostics.local_season.response_strength,
+                "thermalForcing": diagnostics.local_season.thermal_forcing,
+                "currentTemperature": diagnostics.local_season.current_temperature,
+                "snowTendency": diagnostics.local_season.snow_tendency,
+            },
+        })
+    });
+    Ok(serde_json::to_string(&serde_json::json!({
+        "schema": 1,
+        "profile": profile.label(),
+        "supported": profile == mclone_server::WorldGenerationProfile::McloneOverworldV1,
+        "enabled": settings.enabled,
+        "global": {
+            "orbitalPhase": settings.orbital_phase.turns(),
+            "calendarDay": date.day(),
+            "calendarDays": PREVIEW_CALENDAR_DAYS,
+            "milestone": OrbitalMilestone::nearest(settings.orbital_phase).label(),
+        },
+        "controls": {
+            "latitudeSource": settings.latitude_source.label(),
+            "manualLatitudeDegrees": settings.manual_latitude.degrees(),
+            "solarTimeSource": settings.solar_time_source.label(),
+            "manualSolarTimeMinutes": settings.manual_solar_time.minutes(),
+        },
+        "recentSnow": recent_snow,
+        "evaluated": evaluated,
+        "renderScope": {
+            "exactTerrain": true,
+            "seasonalLodDeferred": true,
+        },
+    }))?)
 }
 
 fn asset_replacement_smoke_paths() -> Result<Option<(PathBuf, PathBuf)>> {

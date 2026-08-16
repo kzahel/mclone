@@ -68,6 +68,7 @@ pub(crate) struct HeadlessScreenshotReport {
     pub(crate) drawn_actor_count: usize,
     pub(crate) underwater: bool,
     pub(crate) terrain_view: Option<mclone_scene::SceneTerrainViewDiagnostics>,
+    pub(crate) seasonal_appearance_receipt_json: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1624,6 +1625,7 @@ pub(crate) fn run_headless_screenshot(
         drawn_actor_count: report.summary.drawn_actor_count,
         underwater: report.underwater,
         terrain_view: report.terrain_view,
+        seasonal_appearance_receipt_json: report.seasonal_appearance_receipt_json,
     })
 }
 
