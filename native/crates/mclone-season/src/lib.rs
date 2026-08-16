@@ -30,6 +30,15 @@ pub const MCLONE_AXIAL_TILT_DEGREES: f64 = 27.0;
 /// Fixed-point resolution for client-local Debug orbital state.
 pub const ORBITAL_PHASE_STEPS: u16 = 10_000;
 
+/// Fixed-point resolution for the client-local lunar presentation cycle.
+pub const LUNAR_PHASE_STEPS: u16 = 10_000;
+
+/// Provisional visual-only lunar cycle: 29.5 ordinary Minecraft days.
+pub const LUNAR_SYNODIC_PERIOD_TICKS: u64 = mclone_core::time::DAY_LENGTH_TICKS * 59 / 2;
+
+/// Restrained inclination keeps conjunctions from reading as monthly eclipses.
+pub const MCLONE_LUNAR_ORBIT_INCLINATION_DEGREES: f64 = 5.0;
+
 /// Synthetic Debug-only year length selected by Tactical 306.
 ///
 /// This is a display projection over [`OrbitalPhase`], not an authoritative
@@ -71,6 +80,177 @@ impl OrbitalPhase {
 
     pub fn turns(self) -> f64 {
         f64::from(self.0) / f64::from(ORBITAL_PHASE_STEPS)
+    }
+}
+
+/// A normalized synodic lunar turn stored without floating-point drift.
+///
+/// Zero is New Moon, one half turn is Full Moon, and the value wraps before
+/// one full turn. It is presentation vocabulary rather than saved world state.
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+pub struct LunarPhase(u16);
+
+impl LunarPhase {
+    pub const NEW: Self = Self(0);
+    pub const FIRST_QUARTER: Self = Self(LUNAR_PHASE_STEPS / 4);
+    pub const FULL: Self = Self(LUNAR_PHASE_STEPS / 2);
+    pub const LAST_QUARTER: Self = Self(LUNAR_PHASE_STEPS * 3 / 4);
+
+    pub const fn from_steps_wrapped(steps: u16) -> Self {
+        Self(steps % LUNAR_PHASE_STEPS)
+    }
+
+    pub fn from_turns_wrapped(turns: f64) -> Result<Self, SolarInputError> {
+        if !turns.is_finite() {
+            return Err(SolarInputError::NonFinite("lunar_phase"));
+        }
+        let steps = (turns.rem_euclid(1.0) * f64::from(LUNAR_PHASE_STEPS)).round() as u16;
+        Ok(Self::from_steps_wrapped(steps))
+    }
+
+    /// Derive the provisional visual cycle without ticking or persisting it.
+    pub fn from_day_time(day_time: u64) -> Self {
+        let tick = day_time % LUNAR_SYNODIC_PERIOD_TICKS;
+        let steps = tick * u64::from(LUNAR_PHASE_STEPS) / LUNAR_SYNODIC_PERIOD_TICKS;
+        Self::from_steps_wrapped(steps as u16)
+    }
+
+    pub const fn steps(self) -> u16 {
+        self.0
+    }
+
+    pub fn turns(self) -> f64 {
+        f64::from(self.0) / f64::from(LUNAR_PHASE_STEPS)
+    }
+
+    pub const fn named_phase(self) -> LunarPhaseLabel {
+        let eighth = LUNAR_PHASE_STEPS / 8;
+        match ((self.0 + eighth / 2) / eighth) % 8 {
+            0 => LunarPhaseLabel::NewMoon,
+            1 => LunarPhaseLabel::WaxingCrescent,
+            2 => LunarPhaseLabel::FirstQuarter,
+            3 => LunarPhaseLabel::WaxingGibbous,
+            4 => LunarPhaseLabel::FullMoon,
+            5 => LunarPhaseLabel::WaningGibbous,
+            6 => LunarPhaseLabel::LastQuarter,
+            _ => LunarPhaseLabel::WaningCrescent,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum LunarPhaseLabel {
+    NewMoon,
+    WaxingCrescent,
+    FirstQuarter,
+    WaxingGibbous,
+    FullMoon,
+    WaningGibbous,
+    LastQuarter,
+    WaningCrescent,
+}
+
+impl LunarPhaseLabel {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::NewMoon => "New Moon",
+            Self::WaxingCrescent => "Waxing Crescent",
+            Self::FirstQuarter => "First Quarter",
+            Self::WaxingGibbous => "Waxing Gibbous",
+            Self::FullMoon => "Full Moon",
+            Self::WaningGibbous => "Waning Gibbous",
+            Self::LastQuarter => "Last Quarter",
+            Self::WaningCrescent => "Waning Crescent",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+pub enum MoonPhaseSource {
+    #[default]
+    WorldClock,
+    ManualPreview,
+}
+
+impl MoonPhaseSource {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::WorldClock => "World Clock",
+            Self::ManualPreview => "Manual Preview",
+        }
+    }
+
+    pub const fn next(self) -> Self {
+        match self {
+            Self::WorldClock => Self::ManualPreview,
+            Self::ManualPreview => Self::WorldClock,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+pub enum CelestialStarDensity {
+    Off,
+    Quarter,
+    Half,
+    #[default]
+    Full,
+}
+
+impl CelestialStarDensity {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Off => "Off",
+            Self::Quarter => "Quarter",
+            Self::Half => "Half",
+            Self::Full => "Full",
+        }
+    }
+
+    pub const fn next(self) -> Self {
+        match self {
+            Self::Off => Self::Quarter,
+            Self::Quarter => Self::Half,
+            Self::Half => Self::Full,
+            Self::Full => Self::Off,
+        }
+    }
+
+    pub const fn selected_count(self, full_count: u32) -> u32 {
+        match self {
+            Self::Off => 0,
+            Self::Quarter => full_count.div_ceil(4),
+            Self::Half => full_count.div_ceil(2),
+            Self::Full => full_count,
+        }
+    }
+}
+
+/// Client-local celestial review and cost-isolation settings.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct CelestialDebugSettings {
+    pub sun_body_enabled: bool,
+    pub sun_halo_enabled: bool,
+    pub horizon_glow_enabled: bool,
+    pub moon_body_enabled: bool,
+    pub moonlight_enabled: bool,
+    pub moon_phase_source: MoonPhaseSource,
+    pub manual_lunar_phase: LunarPhase,
+    pub star_density: CelestialStarDensity,
+}
+
+impl Default for CelestialDebugSettings {
+    fn default() -> Self {
+        Self {
+            sun_body_enabled: true,
+            sun_halo_enabled: true,
+            horizon_glow_enabled: true,
+            moon_body_enabled: true,
+            moonlight_enabled: true,
+            moon_phase_source: MoonPhaseSource::WorldClock,
+            manual_lunar_phase: LunarPhase::NEW,
+            star_density: CelestialStarDensity::Full,
+        }
     }
 }
 
@@ -891,6 +1071,227 @@ pub struct SolarSample {
     pub polar_state: PolarState,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LunarInput {
+    pub orbital_phase: OrbitalPhase,
+    pub lunar_phase: LunarPhase,
+    pub effective_latitude_degrees: f64,
+    /// Conventional local solar time in turns: midnight=0, noon=0.5.
+    pub solar_time_fraction: f64,
+    pub axial_tilt_degrees: f64,
+    pub orbital_inclination_degrees: f64,
+    /// Ecliptic node in turns. This remains fixed in the first visual model.
+    pub node_phase: f64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LunarSample {
+    /// Observer-to-moon direction in world axes: +X east, +Y up, +Z south.
+    pub direction: [f32; 3],
+    pub elevation_degrees: f32,
+    pub elongation_degrees: f32,
+    pub illuminated_fraction: f32,
+    pub waxing: bool,
+    /// Unit tangent at the moon center pointing toward the illuminating sun.
+    pub lit_limb_tangent: [f32; 3],
+    pub named_phase: LunarPhaseLabel,
+    pub moonlight_factor: f32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EquatorialCoordinate {
+    /// Right ascension in wrapped turns.
+    pub right_ascension_turns: f64,
+    pub declination_degrees: f64,
+}
+
+impl LunarSample {
+    pub fn compute(input: LunarInput) -> Result<Self, SolarInputError> {
+        validate_finite(
+            "effective_latitude_degrees",
+            input.effective_latitude_degrees,
+        )?;
+        validate_finite("solar_time_fraction", input.solar_time_fraction)?;
+        validate_finite("axial_tilt_degrees", input.axial_tilt_degrees)?;
+        validate_finite(
+            "orbital_inclination_degrees",
+            input.orbital_inclination_degrees,
+        )?;
+        validate_finite("node_phase", input.node_phase)?;
+        if !(-90.0..=90.0).contains(&input.effective_latitude_degrees) {
+            return Err(SolarInputError::OutOfRange("effective_latitude_degrees"));
+        }
+        if !(0.0..90.0).contains(&input.axial_tilt_degrees) {
+            return Err(SolarInputError::OutOfRange("axial_tilt_degrees"));
+        }
+        if !(-45.0..=45.0).contains(&input.orbital_inclination_degrees) {
+            return Err(SolarInputError::OutOfRange("orbital_inclination_degrees"));
+        }
+
+        let solar = SolarSample::compute(SolarInput {
+            orbital_phase: input.orbital_phase,
+            effective_latitude_degrees: input.effective_latitude_degrees,
+            axial_tilt_degrees: input.axial_tilt_degrees,
+            solar_time_fraction: input.solar_time_fraction,
+        })?;
+        let obliquity = input.axial_tilt_degrees.to_radians();
+        let sun_longitude = TAU * input.orbital_phase.turns();
+        let moon_longitude = sun_longitude + TAU * input.lunar_phase.turns();
+        let inclination = input.orbital_inclination_degrees.to_radians();
+        let moon_latitude = inclination * (moon_longitude - TAU * input.node_phase).sin();
+        let moon_equatorial = ecliptic_to_equatorial(moon_longitude, moon_latitude, obliquity);
+        let sidereal_angle = local_sidereal_angle_turns(
+            input.orbital_phase,
+            input.solar_time_fraction,
+            input.axial_tilt_degrees,
+        )?;
+        let direction = equatorial_direction(
+            moon_equatorial,
+            input.effective_latitude_degrees,
+            sidereal_angle,
+        )?;
+        let moon = direction_f64(direction);
+        let sun = direction_f64(solar.direction);
+        let dot = dot3(moon, sun).clamp(-1.0, 1.0);
+        let elongation_degrees = dot.acos().to_degrees();
+        let tangent = subtract3(sun, scale3(moon, dot));
+        let lit_limb_tangent = normalize3(tangent).unwrap_or_else(|| {
+            let fallback = cross3(moon, [0.0, 1.0, 0.0]);
+            normalize3(fallback).unwrap_or([1.0, 0.0, 0.0])
+        });
+        let phase_angle = TAU * input.lunar_phase.turns();
+        let illuminated_fraction = ((1.0 - phase_angle.cos()) * 0.5) as f32;
+        let elevation_degrees = moon[1].clamp(-1.0, 1.0).asin().to_degrees() as f32;
+        let horizon_visibility = smoothstep(-2.0, 4.0, f64::from(elevation_degrees)) as f32;
+        let moonlight_factor =
+            (illuminated_fraction.powf(1.35) * horizon_visibility).clamp(0.0, 1.0);
+
+        Ok(Self {
+            direction,
+            elevation_degrees,
+            elongation_degrees: elongation_degrees as f32,
+            illuminated_fraction,
+            waxing: input.lunar_phase.steps() > 0
+                && input.lunar_phase.steps() < LUNAR_PHASE_STEPS / 2,
+            lit_limb_tangent: to_f32x3(lit_limb_tangent),
+            named_phase: input.lunar_phase.named_phase(),
+            moonlight_factor,
+        })
+    }
+}
+
+/// Local sidereal rotation coherent with the accepted solar clock.
+pub fn local_sidereal_angle_turns(
+    orbital_phase: OrbitalPhase,
+    solar_time_fraction: f64,
+    axial_tilt_degrees: f64,
+) -> Result<f64, SolarInputError> {
+    validate_finite("solar_time_fraction", solar_time_fraction)?;
+    validate_finite("axial_tilt_degrees", axial_tilt_degrees)?;
+    if !(0.0..90.0).contains(&axial_tilt_degrees) {
+        return Err(SolarInputError::OutOfRange("axial_tilt_degrees"));
+    }
+    let longitude = TAU * orbital_phase.turns();
+    let obliquity = axial_tilt_degrees.to_radians();
+    let sun_right_ascension = (longitude.sin() * obliquity.cos()).atan2(longitude.cos());
+    let sun_hour_angle = TAU * (solar_time_fraction.rem_euclid(1.0) - 0.5);
+    Ok(((sun_right_ascension + sun_hour_angle) / TAU).rem_euclid(1.0))
+}
+
+/// Transform one stable equatorial catalog direction into the local horizon.
+pub fn equatorial_direction(
+    coordinate: EquatorialCoordinate,
+    effective_latitude_degrees: f64,
+    local_sidereal_angle_turns: f64,
+) -> Result<[f32; 3], SolarInputError> {
+    validate_finite("right_ascension_turns", coordinate.right_ascension_turns)?;
+    validate_finite("declination_degrees", coordinate.declination_degrees)?;
+    validate_finite("effective_latitude_degrees", effective_latitude_degrees)?;
+    validate_finite("local_sidereal_angle", local_sidereal_angle_turns)?;
+    if !(-90.0..=90.0).contains(&coordinate.declination_degrees) {
+        return Err(SolarInputError::OutOfRange("declination_degrees"));
+    }
+    if !(-90.0..=90.0).contains(&effective_latitude_degrees) {
+        return Err(SolarInputError::OutOfRange("effective_latitude_degrees"));
+    }
+
+    let latitude = effective_latitude_degrees.to_radians();
+    let declination = coordinate.declination_degrees.to_radians();
+    let hour_angle =
+        TAU * (local_sidereal_angle_turns - coordinate.right_ascension_turns).rem_euclid(1.0);
+    let (sin_latitude, cos_latitude) = latitude.sin_cos();
+    let (sin_declination, cos_declination) = declination.sin_cos();
+    let (sin_hour, cos_hour) = hour_angle.sin_cos();
+    let east = -cos_declination * sin_hour;
+    let north = cos_latitude * sin_declination - sin_latitude * cos_declination * cos_hour;
+    let up = sin_latitude * sin_declination + cos_latitude * cos_declination * cos_hour;
+    let direction = [east, up, -north];
+    let direction = normalize3(direction).ok_or(SolarInputError::DegenerateDirection)?;
+    Ok(to_f32x3(direction))
+}
+
+/// Night visibility derived from solar elevation rather than a clock window.
+pub fn star_visibility_from_solar_elevation(elevation_degrees: f32) -> f32 {
+    if !elevation_degrees.is_finite() {
+        return 0.0;
+    }
+    (1.0 - smoothstep(-12.0, -4.0, f64::from(elevation_degrees))) as f32
+}
+
+fn ecliptic_to_equatorial(longitude: f64, latitude: f64, obliquity: f64) -> EquatorialCoordinate {
+    let (sin_longitude, cos_longitude) = longitude.sin_cos();
+    let (sin_latitude, cos_latitude) = latitude.sin_cos();
+    let (sin_obliquity, cos_obliquity) = obliquity.sin_cos();
+    let x = cos_latitude * cos_longitude;
+    let y = cos_latitude * sin_longitude * cos_obliquity - sin_latitude * sin_obliquity;
+    let z = cos_latitude * sin_longitude * sin_obliquity + sin_latitude * cos_obliquity;
+    EquatorialCoordinate {
+        right_ascension_turns: (y.atan2(x) / TAU).rem_euclid(1.0),
+        declination_degrees: z.clamp(-1.0, 1.0).asin().to_degrees(),
+    }
+}
+
+fn direction_f64(direction: [f32; 3]) -> [f64; 3] {
+    [
+        f64::from(direction[0]),
+        f64::from(direction[1]),
+        f64::from(direction[2]),
+    ]
+}
+
+fn to_f32x3(direction: [f64; 3]) -> [f32; 3] {
+    [
+        direction[0] as f32,
+        direction[1] as f32,
+        direction[2] as f32,
+    ]
+}
+
+fn dot3(left: [f64; 3], right: [f64; 3]) -> f64 {
+    left[0] * right[0] + left[1] * right[1] + left[2] * right[2]
+}
+
+fn subtract3(left: [f64; 3], right: [f64; 3]) -> [f64; 3] {
+    [left[0] - right[0], left[1] - right[1], left[2] - right[2]]
+}
+
+fn scale3(value: [f64; 3], scale: f64) -> [f64; 3] {
+    [value[0] * scale, value[1] * scale, value[2] * scale]
+}
+
+fn cross3(left: [f64; 3], right: [f64; 3]) -> [f64; 3] {
+    [
+        left[1] * right[2] - left[2] * right[1],
+        left[2] * right[0] - left[0] * right[2],
+        left[0] * right[1] - left[1] * right[0],
+    ]
+}
+
+fn normalize3(value: [f64; 3]) -> Option<[f64; 3]> {
+    let length = dot3(value, value).sqrt();
+    (length.is_finite() && length > f64::EPSILON).then(|| scale3(value, 1.0 / length))
+}
+
 /// Exact client-local inputs and output used to reproduce one seasonal frame.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SolarFrameDiagnostics {
@@ -1059,6 +1460,19 @@ mod tests {
             effective_latitude_degrees: latitude,
             axial_tilt_degrees: MCLONE_AXIAL_TILT_DEGREES,
             solar_time_fraction: solar_hours / 24.0,
+        })
+        .unwrap()
+    }
+
+    fn moon(latitude: f64, orbital: OrbitalPhase, lunar: LunarPhase, hour: f64) -> LunarSample {
+        LunarSample::compute(LunarInput {
+            orbital_phase: orbital,
+            lunar_phase: lunar,
+            effective_latitude_degrees: latitude,
+            solar_time_fraction: hour / 24.0,
+            axial_tilt_degrees: MCLONE_AXIAL_TILT_DEGREES,
+            orbital_inclination_degrees: MCLONE_LUNAR_ORBIT_INCLINATION_DEGREES,
+            node_phase: 0.0,
         })
         .unwrap()
     }
@@ -1791,6 +2205,137 @@ mod tests {
     }
 
     #[test]
+    fn lunar_phase_is_fixed_point_named_and_clock_derived() {
+        let labels = [
+            LunarPhaseLabel::NewMoon,
+            LunarPhaseLabel::WaxingCrescent,
+            LunarPhaseLabel::FirstQuarter,
+            LunarPhaseLabel::WaxingGibbous,
+            LunarPhaseLabel::FullMoon,
+            LunarPhaseLabel::WaningGibbous,
+            LunarPhaseLabel::LastQuarter,
+            LunarPhaseLabel::WaningCrescent,
+        ];
+        for (index, label) in labels.into_iter().enumerate() {
+            let steps = index * usize::from(LUNAR_PHASE_STEPS) / 8;
+            let phase = LunarPhase::from_steps_wrapped(steps as u16);
+            assert_eq!(phase.named_phase(), label);
+        }
+        assert_eq!(
+            LunarPhase::from_turns_wrapped(1.0).unwrap(),
+            LunarPhase::NEW
+        );
+        assert_eq!(LunarPhase::from_day_time(0), LunarPhase::NEW);
+        assert_eq!(
+            LunarPhase::from_day_time(LUNAR_SYNODIC_PERIOD_TICKS / 2),
+            LunarPhase::FULL
+        );
+        assert_eq!(
+            LunarPhase::from_day_time(LUNAR_SYNODIC_PERIOD_TICKS),
+            LunarPhase::NEW
+        );
+    }
+
+    #[test]
+    fn lunar_illumination_and_orbit_are_continuous_and_solar_coherent() {
+        let new = moon(35.0, OrbitalPhase::NORTHWARD_EQUINOX, LunarPhase::NEW, 12.0);
+        let first = moon(
+            35.0,
+            OrbitalPhase::NORTHWARD_EQUINOX,
+            LunarPhase::FIRST_QUARTER,
+            12.0,
+        );
+        let full = moon(
+            35.0,
+            OrbitalPhase::NORTHWARD_EQUINOX,
+            LunarPhase::FULL,
+            12.0,
+        );
+        assert!(new.illuminated_fraction < 1.0e-6);
+        assert!((first.illuminated_fraction - 0.5).abs() < 1.0e-6);
+        assert!((full.illuminated_fraction - 1.0).abs() < 1.0e-6);
+        assert!(new.elongation_degrees < 5.1);
+        assert!((first.elongation_degrees - 90.0).abs() < 5.1);
+        assert!(full.elongation_degrees > 174.9);
+        assert!(first.waxing);
+        assert!(!full.waxing);
+
+        for phase in (0..LUNAR_PHASE_STEPS).step_by(137) {
+            let sample = moon(
+                -48.0,
+                OrbitalPhase::from_steps_wrapped(3_100),
+                LunarPhase::from_steps_wrapped(phase),
+                21.25,
+            );
+            let direction = direction_f64(sample.direction);
+            let tangent = direction_f64(sample.lit_limb_tangent);
+            close(dot3(direction, direction), 1.0, 2.0e-6);
+            close(dot3(tangent, tangent), 1.0, 2.0e-6);
+            close(dot3(direction, tangent), 0.0, 2.0e-5);
+            assert!((0.0..=1.0).contains(&sample.illuminated_fraction));
+            assert!((0.0..=1.0).contains(&sample.moonlight_factor));
+        }
+    }
+
+    #[test]
+    fn equatorial_catalog_rotates_with_time_latitude_and_orbital_date() {
+        let star = EquatorialCoordinate {
+            right_ascension_turns: 0.0,
+            declination_degrees: 0.0,
+        };
+        let sidereal_noon = local_sidereal_angle_turns(
+            OrbitalPhase::NORTHWARD_EQUINOX,
+            0.5,
+            MCLONE_AXIAL_TILT_DEGREES,
+        )
+        .unwrap();
+        let sidereal_evening = local_sidereal_angle_turns(
+            OrbitalPhase::NORTHWARD_EQUINOX,
+            0.75,
+            MCLONE_AXIAL_TILT_DEGREES,
+        )
+        .unwrap();
+        let noon = equatorial_direction(star, 0.0, sidereal_noon).unwrap();
+        let evening = equatorial_direction(star, 0.0, sidereal_evening).unwrap();
+        assert!(dot3(direction_f64(noon), direction_f64(evening)).abs() < 1.0e-5);
+
+        let north_pole = EquatorialCoordinate {
+            right_ascension_turns: 0.0,
+            declination_degrees: 90.0,
+        };
+        let equator = equatorial_direction(north_pole, 0.0, 0.37).unwrap();
+        let pole = equatorial_direction(north_pole, 90.0, 0.81).unwrap();
+        assert!(equator[1].abs() < 1.0e-5);
+        assert!(pole[1] > 0.9999);
+
+        let later_date = local_sidereal_angle_turns(
+            OrbitalPhase::NORTHERN_SOLSTICE,
+            0.5,
+            MCLONE_AXIAL_TILT_DEGREES,
+        )
+        .unwrap();
+        assert!((later_date - sidereal_noon).rem_euclid(1.0) > 0.1);
+    }
+
+    #[test]
+    fn celestial_settings_and_visibility_have_exact_off_baselines() {
+        assert_eq!(CelestialStarDensity::Off.selected_count(2_048), 0);
+        assert_eq!(CelestialStarDensity::Quarter.selected_count(2_048), 512);
+        assert_eq!(CelestialStarDensity::Half.selected_count(2_048), 1_024);
+        assert_eq!(CelestialStarDensity::Full.selected_count(2_048), 2_048);
+        assert_eq!(star_visibility_from_solar_elevation(4.0), 0.0);
+        assert_eq!(star_visibility_from_solar_elevation(-14.0), 1.0);
+        let defaults = CelestialDebugSettings::default();
+        assert!(defaults.sun_body_enabled);
+        assert!(defaults.sun_halo_enabled);
+        assert!(defaults.horizon_glow_enabled);
+        assert!(defaults.moon_body_enabled);
+        assert!(defaults.moonlight_enabled);
+        assert_eq!(defaults.star_density, CelestialStarDensity::Full);
+        assert_eq!(defaults.moon_phase_source, MoonPhaseSource::WorldClock);
+    }
+
+    #[test]
     fn invalid_inputs_are_rejected_without_nan_outputs() {
         assert!(
             SolarCoordinatePolicy::McloneCyclicPlane {
@@ -1806,6 +2351,7 @@ mod tests {
                 .is_err()
         );
         assert!(OrbitalPhase::from_turns_wrapped(f64::INFINITY).is_err());
+        assert!(LunarPhase::from_turns_wrapped(f64::NAN).is_err());
         assert!(
             SolarSample::compute(SolarInput {
                 orbital_phase: OrbitalPhase::NORTHWARD_EQUINOX,
@@ -1813,6 +2359,29 @@ mod tests {
                 axial_tilt_degrees: MCLONE_AXIAL_TILT_DEGREES,
                 solar_time_fraction: 0.5,
             })
+            .is_err()
+        );
+        assert!(
+            LunarSample::compute(LunarInput {
+                orbital_phase: OrbitalPhase::NORTHWARD_EQUINOX,
+                lunar_phase: LunarPhase::NEW,
+                effective_latitude_degrees: 0.0,
+                solar_time_fraction: 0.5,
+                axial_tilt_degrees: MCLONE_AXIAL_TILT_DEGREES,
+                orbital_inclination_degrees: f64::INFINITY,
+                node_phase: 0.0,
+            })
+            .is_err()
+        );
+        assert!(
+            equatorial_direction(
+                EquatorialCoordinate {
+                    right_ascension_turns: 0.0,
+                    declination_degrees: 91.0,
+                },
+                0.0,
+                0.0,
+            )
             .is_err()
         );
     }
