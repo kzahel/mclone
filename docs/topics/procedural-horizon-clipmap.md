@@ -177,7 +177,9 @@ boundaries pass; subjective Human Review remains pending.
 Active Tactical
 [`309`](../tactical/309-procedural-horizon-lighting-and-seam-convergence.md)
 now inherits that unresolved visual gate. Human Review 0 accepted the fixed
-diagnostic packet, and Phase 1 is implemented and paused for Human Review 1.
+diagnostic packet, and Human Review 1 accepted Phase 1's shared environmental
+illumination on 2026-08-16. Phase 2 is in progress on the voxel-to-smooth
+transition.
 The exact renderer's full-sky/zero-block-light RGB now applies once to every
 procedural terrain level, sampled and analytic water, and proxy tree after
 albedo and geometric shade composition. A fixed 32-image, two-seed native

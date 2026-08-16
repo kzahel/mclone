@@ -29,10 +29,10 @@ pending.
 Active Tactical
 [`309`](../tactical/309-procedural-horizon-lighting-and-seam-convergence.md)
 owns the resulting appearance closeout as a phase-gated campaign. Human Review
-0 accepted the fixed diagnostic packet on 2026-08-15. Phase 1 is implemented
-and awaiting Human Review 1 with a 32-image, two-seed native packet covering
-all four frozen times in the low/elevated, coast, forest, exposed-stone, and
-snow scenes plus Exact Only and surface-decomposition controls.
+0 accepted the fixed diagnostic packet on 2026-08-15, and Human Review 1
+accepted the shared environmental-light result on 2026-08-16. Phase 2 is in
+progress on the voxel-to-smooth geometric, material, water, and vegetation
+transition.
 
 Every procedural land level, sampled and analytic water, and proxy tree now
 consumes the exact renderer's full-sky/zero-block-light environmental RGB once

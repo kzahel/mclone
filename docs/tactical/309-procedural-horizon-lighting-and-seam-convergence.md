@@ -1,7 +1,6 @@
 # Tactical 309: Procedural Horizon Lighting and Seam Convergence
 
-Status: Phase 0 accepted and Phase 1 implemented 2026-08-15; awaiting Human
-Review 1. Phase 2 has not begun.
+Status: Phase 0 and Phase 1 accepted; Phase 2 began 2026-08-16.
 
 Topic: `procedural-horizon-clipmap`
 
@@ -339,7 +338,7 @@ Accepted by the user on 2026-08-15.
 
 ## Phase 1: Shared Environmental Illumination
 
-Status: implemented; Human Review 1 pending.
+Status: implemented; Human Review 1 accepted 2026-08-16.
 
 - Establish one renderer-neutral full-sky/zero-block-light environmental term
   from the scene time-of-day input.
@@ -443,9 +442,11 @@ Gate — Human Review 1: exact, voxel, smooth, water, and tree presentations
 belong to the same time of day. Midnight contains no daytime-green horizon or
 bright-cyan procedural water, while noon is not globally over-darkened.
 
+Accepted by the user on 2026-08-16.
+
 ## Phase 2: Voxel-to-Smooth Procedural Convergence
 
-Status: blocked on Human Review 1.
+Status: in progress.
 
 - Reconcile top-face and slope-derived geometric shade over a stable bounded
   transition without blending geometry owners.
