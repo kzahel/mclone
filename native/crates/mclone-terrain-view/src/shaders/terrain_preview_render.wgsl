@@ -264,6 +264,25 @@ fn terrain_horizon_geometry_height(
     return original_height;
 }
 
+// The spacing-one voxel shell rounds its top independently of the smooth
+// parent. Re-evaluate the stitched fine-edge endpoint that lies on the parent
+// boundary so the reserved cardinal face terminates on the parent's actual
+// piecewise-linear profile instead of another rounded fine sample.
+fn terrain_horizon_parent_boundary_y(
+    sample_x: i32,
+    sample_z: i32,
+    cells: i32,
+    instance_index: u32,
+) -> f32 {
+    return terrain_horizon_geometry_height(
+        sample_x,
+        sample_z,
+        cells,
+        1,
+        instance_index,
+    ) + 1.0;
+}
+
 fn terrain_horizon_coarse_footprint_weight(
     sample_x: i32,
     sample_z: i32,
@@ -857,6 +876,8 @@ fn terrain_vertex(
             );
             var bottom_y = top_y;
             var upper_y = top_y;
+            var parent_boundary_y = top_y;
+            var use_parent_boundary = false;
             if !current_exact && neighbor_exact && terrain_material(sample) != 2u {
                 // The exact coverage contract currently supplies readiness but
                 // not a complete surface profile. Keep a bounded curtain on
@@ -865,8 +886,34 @@ fn terrain_vertex(
                 bottom_y = top_y - 32.0;
                 surface_kind = 2u;
             } else if !current_exact && outer_edge {
-                bottom_y = min(top_y, neighbor_y);
-                upper_y = max(top_y, neighbor_y);
+                // The top is block-rounded, but the adjacent spacing-two mesh
+                // consumes the continuous stitched parent profile. Connect to
+                // that profile at this segment endpoint. Taking endpoint
+                // envelopes preserves the cardinal face winding even where
+                // the two profiles cross inside one block-wide segment.
+                let endpoint = i32(corner.x);
+                var parent_sample_x = i32(cell_x);
+                var parent_sample_z = i32(cell_z);
+                if face_index == 1u {
+                    parent_sample_x = 0;
+                    parent_sample_z += 1 - endpoint;
+                } else if face_index == 2u {
+                    parent_sample_x = i32(cells);
+                    parent_sample_z += endpoint;
+                } else if face_index == 3u {
+                    parent_sample_x += endpoint;
+                    parent_sample_z = 0;
+                } else {
+                    parent_sample_x += 1 - endpoint;
+                    parent_sample_z = i32(cells);
+                }
+                parent_boundary_y = terrain_horizon_parent_boundary_y(
+                    parent_sample_x,
+                    parent_sample_z,
+                    i32(cells),
+                    instance_index,
+                );
+                use_parent_boundary = true;
                 surface_kind = 1u;
             } else if !current_exact && top_y > neighbor_y {
                 bottom_y = neighbor_y;
@@ -874,6 +921,10 @@ fn terrain_vertex(
             }
 
             let horizontal = f32(corner.x);
+            if use_parent_boundary {
+                bottom_y = min(top_y, parent_boundary_y);
+                upper_y = max(top_y, parent_boundary_y);
+            }
             vertex_world_y = mix(bottom_y, upper_y, f32(corner.y));
             if face_index == 1u {
                 vertex_world_x = f32(cell_world_x)

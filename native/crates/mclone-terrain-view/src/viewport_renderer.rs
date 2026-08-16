@@ -4913,11 +4913,16 @@ mod tests {
     fn horizon_shader_welds_fine_outer_edges_to_coarse_interpolation() {
         let shader = super::super::TERRAIN_PREVIEW_RENDER_WGSL;
         assert!(shader.contains("fn terrain_horizon_geometry_height("));
+        assert!(shader.contains("fn terrain_horizon_parent_boundary_y("));
         assert!(shader.contains("let rendered_x = sample_x / cell_stride;"));
         assert!(shader.contains("let rendered_z = sample_z / cell_stride;"));
         assert!(shader.contains("west_or_east && (rendered_z & 1) != 0"));
         assert!(shader.contains("north_or_south && (rendered_x & 1) != 0"));
         assert!(shader.contains("stitched_height + 1.0"));
+        assert!(shader.contains("parent_boundary_y = terrain_horizon_parent_boundary_y("));
+        assert!(shader.contains("bottom_y = min(top_y, parent_boundary_y);"));
+        assert!(shader.contains("upper_y = max(top_y, parent_boundary_y);"));
+        assert!(!shader.contains("bottom_y = min(top_y, neighbor_y);"));
         assert_eq!(
             shader
                 .matches("let left = terrain_horizon_geometry_height(")
