@@ -422,6 +422,9 @@ function assertFixedReady(value, stage) {
       || value.exactConnectorVertexCount !== value.exactConnectorSegments * 6
       || value.exactConnectorBytes % 12 !== 0
       || value.exactConnectorSegments * 12 > value.exactConnectorBytes
+      || value.exactTransitionPreparationMicros < 0
+      || value.exactTransitionPayloadBytes <= 0
+      || value.exactTransitionPayloadBytes > 80 * 1024
       || value.pendingVegetationTiles !== 0
       || value.residentBytes <= 0) {
     throw new Error(`${stage} is not fixed and ready:\n${JSON.stringify(value, null, 2)}`);

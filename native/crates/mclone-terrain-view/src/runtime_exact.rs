@@ -210,6 +210,7 @@ pub struct TerrainRuntimeExactRenderer {
     in_flight: bool,
     sections_by_chunk: BTreeMap<ChunkPos, BTreeSet<RenderSectionKey>>,
     surface_columns_by_chunk: BTreeMap<ChunkPos, Vec<CanonicalExactSurfaceColumn>>,
+    prepared_frame_cache: Option<TerrainPreparedExactFrame>,
     tree_occurrences: BTreeMap<McloneTreeOccurrenceId, McloneTreeOccurrence>,
     tree_sections:
         BTreeMap<McloneTreeOccurrenceId, BTreeMap<RenderSectionKey, TexturedRenderSectionMesh>>,
@@ -321,6 +322,7 @@ impl TerrainRuntimeExactRenderer {
             in_flight: false,
             sections_by_chunk: BTreeMap::new(),
             surface_columns_by_chunk: BTreeMap::new(),
+            prepared_frame_cache: None,
             tree_occurrences: BTreeMap::new(),
             tree_sections: BTreeMap::new(),
             tree_gpu_sections: BTreeSet::new(),
@@ -379,7 +381,12 @@ impl TerrainRuntimeExactRenderer {
         )
     }
 
-    pub fn prepared_frame(&self) -> Result<TerrainPreparedExactFrame, String> {
+    pub fn prepared_frame(&mut self) -> Result<TerrainPreparedExactFrame, String> {
+        if let Some(frame) = self.prepared_frame_cache.as_ref()
+            && frame.coverage().generation() == self.coverage_generation
+        {
+            return Ok(frame.clone());
+        }
         let source =
             TerrainViewSourceIdentity::detached(self.source, HorizontalTopology::UNBOUNDED, 1, 1)?;
         let coverage = self.coverage_snapshot()?;
@@ -403,7 +410,10 @@ impl TerrainRuntimeExactRenderer {
                     })
                 });
         let boundary = TerrainExactBoundaryProfile::from_columns(&coverage, columns)?;
-        TerrainPreparedExactFrame::new(source, coverage)?.with_boundary_profile(boundary)
+        let frame =
+            TerrainPreparedExactFrame::new(source, coverage)?.with_boundary_profile(boundary)?;
+        self.prepared_frame_cache = Some(frame.clone());
+        Ok(frame)
     }
 
     pub fn tree_ownership(

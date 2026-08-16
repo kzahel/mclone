@@ -246,6 +246,11 @@ function stateProblem(capture, state) {
   if (state.vertexCount <= 0 || state.fixedResidentBytes <= 0 || state.residentBytes <= 0) {
     return `${capture.name} did not report terrain vertex and memory diagnostics`;
   }
+  if (state.exactTransitionPreparationMicros <= 0
+      || state.exactTransitionPayloadBytes <= 0
+      || state.exactTransitionPayloadBytes > 80 * 1024) {
+    return `${capture.name} did not report a bounded prepared transition field`;
+  }
   if (capture.topology === "direct-smooth"
       && (state.exactConnectorSegments <= 0
         || state.exactConnectorVertexCount !== state.exactConnectorSegments * 6

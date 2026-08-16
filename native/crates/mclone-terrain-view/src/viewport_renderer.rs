@@ -299,6 +299,8 @@ pub struct TerrainHorizonFrameStats {
     pub exact_coverage_generation: u64,
     pub exact_painted_chunks: u32,
     pub exact_coverage_mask_bytes: u64,
+    pub exact_transition_preparation_micros: u64,
+    pub exact_transition_payload_bytes: u64,
     pub vegetation_service: TerrainHorizonVegetationServiceStats,
     pub finest_sample_spacing: u32,
     pub coarse_ready: bool,
@@ -594,6 +596,13 @@ impl TerrainExactCoverageResources {
         if boundary.source() != snapshot.source() || boundary.generation() != snapshot.generation()
         {
             return Err("exact boundary profile does not match its coverage generation".to_owned());
+        }
+        if self.transition.source() == transition.source()
+            && self.transition.generation() == transition.generation()
+            && self.boundary == *boundary
+            && self.mode == mode
+        {
+            return Ok(());
         }
         let mask = snapshot.packed_mask()?;
         queue.write_buffer(&self._mask_buffer, 0, &mask.word_bytes());
@@ -4412,6 +4421,12 @@ impl TerrainHorizonRenderer {
             exact_coverage_generation: self.renderer.exact_coverage.mask.generation,
             exact_painted_chunks: self.renderer.exact_coverage.mask.painted_chunks,
             exact_coverage_mask_bytes: TERRAIN_EXACT_COVERAGE_MASK_BYTES,
+            exact_transition_preparation_micros: self
+                .renderer
+                .exact_coverage
+                .transition
+                .preparation_micros(),
+            exact_transition_payload_bytes: self.renderer.exact_coverage.transition.payload_bytes(),
             vegetation_service,
             finest_sample_spacing: self.clipmap.config().base_sample_spacing,
             coarse_ready: drawn_levels > 0,

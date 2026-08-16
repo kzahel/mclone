@@ -481,6 +481,7 @@ impl TerrainExactCoverageMask {
 pub struct TerrainExactTransitionField {
     source: TerrainCompositionSourceIdentity,
     generation: u64,
+    preparation_micros: u64,
     origin_block_x: i32,
     origin_block_z: i32,
     width: u32,
@@ -490,11 +491,13 @@ pub struct TerrainExactTransitionField {
 
 impl TerrainExactTransitionField {
     pub fn from_coverage(snapshot: &ExactPaintedCoverageSnapshot) -> Result<Self, String> {
+        let started = transition_timing_now();
         let mask = snapshot.packed_mask()?;
         if mask.painted_chunks == 0 {
             return Ok(Self {
                 source: snapshot.source(),
                 generation: snapshot.generation(),
+                preparation_micros: transition_timing_elapsed_micros(started),
                 origin_block_x: 0,
                 origin_block_z: 0,
                 width: 0,
@@ -599,6 +602,7 @@ impl TerrainExactTransitionField {
         Ok(Self {
             source: snapshot.source(),
             generation: snapshot.generation(),
+            preparation_micros: transition_timing_elapsed_micros(started),
             origin_block_x,
             origin_block_z,
             width,
@@ -613,6 +617,14 @@ impl TerrainExactTransitionField {
 
     pub const fn generation(&self) -> u64 {
         self.generation
+    }
+
+    pub const fn preparation_micros(&self) -> u64 {
+        self.preparation_micros
+    }
+
+    pub fn payload_bytes(&self) -> u64 {
+        self.weights.len() as u64
     }
 
     pub const fn origin_blocks(&self) -> [i32; 2] {
@@ -643,6 +655,26 @@ impl TerrainExactTransitionField {
         }
         self.weights[texel_z as usize * self.width as usize + texel_x as usize]
     }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn transition_timing_now() -> f64 {
+    js_sys::Date::now()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn transition_timing_now() -> std::time::Instant {
+    std::time::Instant::now()
+}
+
+#[cfg(target_arch = "wasm32")]
+fn transition_timing_elapsed_micros(started: f64) -> u64 {
+    ((js_sys::Date::now() - started).max(0.0) * 1_000.0) as u64
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn transition_timing_elapsed_micros(started: std::time::Instant) -> u64 {
+    u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX)
 }
 
 fn relax_transition_distance<const N: usize>(

@@ -465,6 +465,14 @@ impl SmokeRecorder {
             json!(stats.exact_connector_bytes),
         );
         fields.insert(
+            "exact_transition_preparation_micros".to_owned(),
+            json!(stats.exact_transition_preparation_micros),
+        );
+        fields.insert(
+            "exact_transition_payload_bytes".to_owned(),
+            json!(stats.exact_transition_payload_bytes),
+        );
+        fields.insert(
             "tree_proxy_suppressed_instances".to_owned(),
             json!(stats.tree_proxy_suppressed_instances),
         );
@@ -596,6 +604,14 @@ impl SmokeRecorder {
         fields.insert(
             "final_exact_connector_bytes".to_owned(),
             json!(final_stats.exact_connector_bytes),
+        );
+        fields.insert(
+            "final_exact_transition_preparation_micros".to_owned(),
+            json!(final_stats.exact_transition_preparation_micros),
+        );
+        fields.insert(
+            "final_exact_transition_payload_bytes".to_owned(),
+            json!(final_stats.exact_transition_payload_bytes),
         );
         std::fs::write(
             &path,

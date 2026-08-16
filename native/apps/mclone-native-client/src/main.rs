@@ -148,6 +148,8 @@ fn main() -> Result<()> {
                         "exactConnectorSegments": terrain.exact_connector_segments,
                         "exactConnectorVertexCount": terrain.exact_connector_vertex_count,
                         "exactConnectorBytes": terrain.exact_connector_bytes,
+                        "exactTransitionPreparationMicros": terrain.exact_transition_preparation_micros,
+                        "exactTransitionPayloadBytes": terrain.exact_transition_payload_bytes,
                         "drawnTreeTiles": terrain.drawn_tree_tiles,
                         "drawnTreeInstances": terrain.drawn_tree_instances,
                         "targetReady": terrain.target_ready,

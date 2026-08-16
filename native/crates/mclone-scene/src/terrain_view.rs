@@ -59,6 +59,8 @@ pub struct SceneTerrainViewDiagnostics {
     pub exact_connector_segments: u32,
     pub exact_connector_vertex_count: u32,
     pub exact_connector_bytes: u64,
+    pub exact_transition_preparation_micros: u64,
+    pub exact_transition_payload_bytes: u64,
     pub inner_hole_culled_tiles: u32,
     pub frustum_culled_tiles: u32,
     pub far_culled_tiles: u32,
@@ -575,6 +577,9 @@ impl SceneTerrainViewState {
         self.diagnostics.exact_connector_segments = stats.exact_connector_segments;
         self.diagnostics.exact_connector_vertex_count = stats.exact_connector_vertex_count;
         self.diagnostics.exact_connector_bytes = stats.exact_connector_bytes;
+        self.diagnostics.exact_transition_preparation_micros =
+            stats.exact_transition_preparation_micros;
+        self.diagnostics.exact_transition_payload_bytes = stats.exact_transition_payload_bytes;
         self.diagnostics.inner_hole_culled_tiles = stats.inner_hole_culled_tiles;
         self.diagnostics.frustum_culled_tiles = stats.frustum_culled_tiles;
         self.diagnostics.far_culled_tiles = stats.far_culled_tiles;
