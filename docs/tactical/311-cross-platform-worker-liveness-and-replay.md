@@ -63,6 +63,25 @@ No conclusion below depends on a headless browser or a desktop mobile viewport.
 
 ## What Is Proven
 
+### Correction after the natural phone reproduction
+
+A later physical Pixel 7a run reproduced the ordinary patchy-terrain report
+without fault injection. After a fresh persistent world reached exact render-
+distance-8 coverage, multi-direction movement plateaued for more than 90
+seconds at `265 / 361` server-ready chunks and `197 / 289` exact drawable
+columns. Worldgen reported `134 / 134` request/responses, Light reported
+`194 / 194`, both job mailboxes were empty, no publication or render compile
+remained, all Worker targets stayed present, and the authority continued
+ticking without an error.
+
+That receipt disproves Worker loss as a necessary cause of the ordinary human
+report. The controlled failure cases below still prove independent lifecycle
+defects and remain valid Tactical 311 scope. Healthy-executor cancellation,
+re-entry, and Player-promotion forward progress now belong to Tactical
+[`312`](312-chunk-promotion-forward-progress-under-view-churn.md). Do not claim
+that implementing Worker reconstruction fixes the ordinary terrain plateau;
+both tacticals must pass the shared physical route for their own reasons.
+
 The following statements are direct observations, not proposed explanations:
 
 1. A clean physical-phone render-distance-8 run can produce all requested
@@ -89,8 +108,8 @@ The investigation did not capture an unforced spontaneous Worker death during
 its one clean baseline. Browser or Android memory pressure is a plausible
 initiator, but it is not established as the initiating cause. The controlled
 faults prove that once a Worker disappears or errors, the production lifecycle
-cannot recover and produces the same indefinitely patchy or hard-boundary
-terrain class reported by human review.
+cannot recover and can produce indefinitely patchy or hard-boundary terrain.
+They do not establish the initiating cause of the natural human-path failure.
 
 ## Live Baseline: The Phone Can Complete the Work
 

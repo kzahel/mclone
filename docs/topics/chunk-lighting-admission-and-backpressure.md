@@ -2,10 +2,12 @@
 
 Topic: `chunk-lighting-admission-and-backpressure`
 
-Status: implemented and physically memory-accepted 2026-07-28. Tactical
-[`279`](../tactical/279-chunk-lighting-admission-and-backpressure.md) records
-the execution, the post-closeout Quest frame-time attribution, and the
-remaining presentation-tail exception.
+Status: bounded-memory contract implemented and physically accepted
+2026-07-28; forward-progress incident reopened 2026-08-16 by Tactical
+[`312`](../tactical/312-chunk-promotion-forward-progress-under-view-churn.md).
+Tactical [`279`](../tactical/279-chunk-lighting-admission-and-backpressure.md)
+records the original execution, the post-closeout Quest frame-time
+attribution, and the remaining presentation-tail exception.
 
 ## Scope
 
@@ -29,6 +31,40 @@ but the faulty owner is the shared authoritative chunk scheduler and native
 light-status worker. The solution must apply to integrated native desktop,
 flat Android, Android XR, desktop XR, dedicated-server, test/headless, and
 browser authority paths through one host-neutral contract.
+
+## Reopened Forward-Progress Incident
+
+On 2026-08-16, the ordinary human path reproduced a permanent render-distance-
+8 plateau on a physical Pixel 7a in mobile Chrome. A fresh persistent world
+first reached exact `361 / 361` requested and `289 / 289` drawable coverage.
+After multi-direction flight, it remained at `265 / 361` server-ready chunks
+and `197 / 289` exact columns for more than 90 seconds.
+
+All submitted executor work had completed: worldgen reported `134 / 134`
+request/responses, Light reported `194 / 194`, both mailboxes were empty, no
+publication or render compile remained, Workers stayed alive, the authority
+kept ticking, and no runner error was present. The remaining aggregate 171
+jobs therefore cannot be described as failed Worker requests.
+
+Source inspection found a shared cancellation/re-entry forward-progress hole.
+Cancelling obsolete initial Light work clears the request token, queued demand,
+mailbox ownership, and Light ticket, but leaves the holder's Light status
+`Scheduled`. Runtime reconciliation treats the existing slot as already
+scheduled and has no repair path equivalent to its Features-without-job path.
+A quickly re-entered resident holder can therefore be not ready while owning no
+executable Light work. Four such holders can occupy the complete bounded Player-
+promotion allowance.
+
+The deployed diagnostics do not expose the four active promotion positions or
+their blockers, so Tactical 312 first adds that proof and a deterministic non-
+quiescing churn test. It then makes Feature-to-Light context restartable,
+repairs required deferred work in the shared scheduler, and re-runs the
+physical route without weakening the four-promotion or Light-memory bounds.
+
+This incident is separate from Tactical
+[`311`](../tactical/311-cross-platform-worker-liveness-and-replay.md): Worker
+loss and replay remain real independent defects, but no Worker failed in this
+natural reproduction.
 
 ## Implemented Contract
 
