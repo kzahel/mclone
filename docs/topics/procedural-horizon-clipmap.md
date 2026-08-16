@@ -178,8 +178,11 @@ Active Tactical
 [`309`](../tactical/309-procedural-horizon-lighting-and-seam-convergence.md)
 now inherits that unresolved visual gate. Human Review 0 accepted the fixed
 diagnostic packet, and Human Review 1 accepted Phase 1's shared environmental
-illumination on 2026-08-16. Phase 2 is implemented and awaiting Human Review 2
-on the voxel-to-smooth transition.
+illumination on 2026-08-16. Human Review 2 found the Phase 2 appearance
+transition substantially improved but rejected a blue exposed-sky crack where
+the rounded spacing-one voxel edge fails to terminate on the continuous
+spacing-two parent profile. A bounded endpoint-matched connector correction is
+in progress; Phase 3 remains blocked.
 The exact renderer's full-sky/zero-block-light RGB now applies once to every
 procedural terrain level, sampled and analytic water, and proxy tree after
 albedo and geometric shade composition. A fixed 32-image, two-seed native
@@ -197,7 +200,8 @@ spacing-one-to-smooth and exact-to-spacing-one borders as separately diagnosed,
 separately reviewed convergence phases. Tactical 304's ownership,
 bounded frontier curtain, voxel-shell topology, and fixed clipmap allocation
 remain the foundation rather than being replaced to hide the seams.
-Phase 2 is now implemented and awaiting Human Review 2. Voxel face shade
+The first Phase 2 review packet improved the appearance terms but was rejected
+for the geometric crack above. Voxel face shade
 approaches the smooth slope response over the existing committed presentation
 band, both procedural representations share active-pack grass tint, and
 analytic river texture strength uses that same continuous weight. A strict
@@ -205,7 +209,11 @@ analytic river texture strength uses that same continuous weight. A strict
 camera stability endpoints. A clean 18-second headed traversal crosses a
 spacing-one tile boundary with every frame presented and final view interest
 fully ready. No residency, ownership, geometry, sample-record, or fixed-byte
-contract changed.
+contract changed. The correction keeps those constraints: the reserved outer
+voxel cardinal face will span to the actual stitched parent profile at both
+segment endpoints, without horizontal overlap, a second geometry owner, or a
+crossfade. A dedicated zipper ring is retained only as the fallback if this
+bounded vertical connector reads as a wall in replacement evidence.
 Post-review Explorer evidence then showed that Slice 3B's viewer-forward
 anchor was useful for foreground diagnosis but confusing as the product
 default: it moves exact residency when yaw changes and can place exact terrain

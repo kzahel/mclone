@@ -1,7 +1,7 @@
 # Tactical 309: Procedural Horizon Lighting and Seam Convergence
 
-Status: Phase 0 and Phase 1 accepted; Phase 2 implemented and awaiting Human
-Review 2.
+Status: Phase 0 and Phase 1 accepted; Phase 2 correction in progress after
+Human Review 2 rejected an open voxel-to-smooth geometry crack.
 
 Topic: `procedural-horizon-clipmap`
 
@@ -447,7 +447,8 @@ Accepted by the user on 2026-08-16.
 
 ## Phase 2: Voxel-to-Smooth Procedural Convergence
 
-Status: implemented; blocked on Human Review 2.
+Status: Human Review 2 rejected the first implementation; correction in
+progress.
 
 - Reconcile top-face and slope-derived geometric shade over a stable bounded
   transition without blending geometry owners.
@@ -464,7 +465,7 @@ Status: implemented; blocked on Human Review 2.
 ### Phase 2 execution record
 
 Commits `f533c1e0`, `2b8e2812`, `281a2121`, `6db9677b`,
-`7de18bd5`, and `a519552b` implement and verify this phase. The
+`7de18bd5`, and `a519552b` implement and verify the first review packet. The
 spacing-one voxel shell keeps sole ownership of its flat tops and cardinal
 risers, but its fixed top/side shade now approaches the already-computed
 slope shade over the existing 32-cell committed outer-footprint band. The
@@ -547,9 +548,53 @@ selects with bounded scalar mixes. Automated evidence passes:
 - the 48-capture PNG/readiness/vegetation/group-identity campaign; and
 - the clean 18-second headed slow-traversal report above.
 
+### Human Review 2 rejection: open voxel-to-smooth crack
+
+The first packet substantially improved the lighting, material, water, and
+proxy transition, but Human Review 2 rejected it on 2026-08-16 because exposed
+sky remains visible as a blue line where the spacing-one voxel shell meets the
+spacing-two smooth mesh. This is a geometric/topological crack, not a water
+tint, environmental-light, fog, or ambient-occlusion mismatch.
+
+The topology change made Tactical 304's original weld incomplete. Smooth
+fine-level boundary vertices still interpolate the adjacent parent profile,
+but the voxel shell rounds each flat top to a block height. Its outer cardinal
+face currently joins that rounded top to another rounded fine-level neighbor
+sample rather than to the continuous parent boundary. The two sole horizontal
+owners therefore agree in plan view but can leave a sub-block vertical gap.
+
+The considered corrections are:
+
+1. **Selected: explicit parent-profile boundary curtain.** Keep the existing
+   single horizontal owner and reserved outer cardinal faces. At both endpoints
+   of each boundary segment, evaluate the same stitched parent profile consumed
+   by the spacing-two mesh, then span the bounded vertical difference from the
+   rounded voxel top. Preserve stable winding with endpoint lower/upper
+   envelopes, ordinary side material and lighting, and the existing water
+   owner. This adds no horizontal overlap or second terrain surface.
+2. **Dedicated zipper transition ring.** Introduce a narrow topology whose
+   inner edge exactly matches voxel steps and whose outer edge exactly matches
+   parent triangles. This offers the most control if the curtain reads as a
+   wall, but adds topology, vertex work, tests, and corner cases and is not the
+   first correction.
+3. **Morph the final voxel row.** Move its outer vertices onto the parent edge.
+   This is small and watertight but creates ramps or wedges exactly where the
+   blocky character is meant to remain, so it is rejected as the first choice.
+4. **Adaptive safety skirt.** Extend the voxel edge just far enough vertically
+   to cover numerical residuals. A tiny conservative skirt may remain a safety
+   net, but a blind downward wall is not the primary solution because it can
+   become conspicuous above water or on exposed ridges.
+
+Opaque overlap, geometry crossfade, depth bias, fog, a color strip, and a
+larger exact radius remain rejected: each hides the opening without making the
+two owning boundaries watertight. The selected connector must remove exposed
+sky at straight edges, corners, slopes, water, negative coordinates,
+stationary cameras, rebases, and teleports without z-fighting or a horizontal
+collar. Replacement evidence reopens Human Review 2; Phase 3 stays blocked.
+
 Gate — Human Review 2: the procedural topology becomes smoother with distance
-without a stable square/annulus in land color, water tint, lighting, texture
-contrast, or vegetation brightness.
+without exposed sky or a stable square/annulus in land color, water tint,
+lighting, texture contrast, or vegetation brightness.
 
 ## Phase 3: Exact-to-Voxel Frontier Convergence
 
@@ -596,8 +641,9 @@ types in still and moving evidence. Only then mark this tactical and Tactical
   `0` follows the exact lightmap response within the controlled fixture.
 - Procedural water and tree proxies no longer retain daytime brightness at
   midnight.
-- The voxel/smooth border does not form a stable color, light, water, texture,
-  or vegetation ring at stationary or moving cameras.
+- The voxel/smooth border exposes no sky-colored geometric crack and does not
+  form a stable color, light, water, texture, or vegetation ring at stationary
+  or moving cameras.
 - The exact/voxel border agrees under controlled equal inputs and remains
   coherent in representative natural scenes.
 - AO is either implemented from stable bounded neighborhood facts or retained

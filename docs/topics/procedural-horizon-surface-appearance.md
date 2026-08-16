@@ -30,9 +30,10 @@ Active Tactical
 [`309`](../tactical/309-procedural-horizon-lighting-and-seam-convergence.md)
 owns the resulting appearance closeout as a phase-gated campaign. Human Review
 0 accepted the fixed diagnostic packet on 2026-08-15, and Human Review 1
-accepted the shared environmental-light result on 2026-08-16. Phase 2 is
-implemented and awaiting Human Review 2 on the voxel-to-smooth geometric,
-material, water, and vegetation transition.
+accepted the shared environmental-light result on 2026-08-16. Human Review 2
+found the Phase 2 lighting, material, water, and vegetation transition
+substantially improved but rejected an exposed-sky crack at the
+voxel-to-smooth geometric boundary. Its bounded correction is in progress.
 
 Every procedural land level, sampled and analytic water, and proxy tree now
 consumes the exact renderer's full-sky/zero-block-light environmental RGB once
@@ -48,7 +49,14 @@ on both procedural representations uses one active-pack tint source, and
 analytic river texture response uses the same continuous near/far weight as
 land instead of a topology switch. The 48-image review packet shows no
 stable voxel/smooth annulus in land hue, shade, water tint, texture contrast,
-or proxy brightness; the intentional blocky-to-smooth silhouette remains.
+or proxy brightness; the intentional blocky-to-smooth silhouette remains. The
+first review nevertheless exposed that rounded voxel tops can terminate away
+from the continuous parent boundary profile, leaving a sub-block blue line.
+The selected correction reuses the voxel shell's reserved outer cardinal faces
+as an endpoint-matched vertical connector to the actual spacing-two profile.
+It preserves one horizontal owner and adds neither overlapping terrain nor a
+geometry crossfade. A zipper ring remains the fallback only if that bounded
+curtain proves visually wall-like.
 Procedural local occlusion remains identity-white, so it may matter at the
 later exact/model-AO frontier but cannot explain the resolved global night
 failure. Seasonal solar-path policy and independent water geometry remain
@@ -376,8 +384,9 @@ remain under `/tmp` by policy.
    heightfield overlay produces sloped rivers or ponds at grazing angles.
 4. Decide whether decoration lakes receive deterministic multiscale summaries
    or deliberately remain exact-range-only.
-5. Complete Tactical 309's Human Review 2 gate, then use its controlled terms
-   for the separately gated exact-to-voxel frontier comparison.
+5. Close Tactical 309's rejected voxel-to-smooth crack and complete Human
+   Review 2, then use its controlled terms for the separately gated
+   exact-to-voxel frontier comparison.
 6. Add renderer GPU timing before increasing atlas samples, biome blending, or
    water shading complexity.
 
