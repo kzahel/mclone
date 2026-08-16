@@ -7,20 +7,19 @@ use std::thread;
 use std::time::Duration;
 
 use crate::{
-    BoundedRepresentationOwnershipSnapshot, CanonicalMeshBatch, CanonicalMeshCoordinate,
-    CanonicalPackedAdmission, ExactPaintedCoverageSnapshot, McloneTreeOccurrenceId,
-    McloneTreeOwnershipCandidate, TERRAIN_EXACT_FRONTIER_TREE_INSET_BLOCKS,
-    TerrainCompositionSourceIdentity, TerrainPreparedExactFrame, TerrainViewSourceIdentity,
-    canonical_terrain_chunk_order, mclone_tree_ownership_snapshot,
+    BoundedRepresentationOwnershipSnapshot, CanonicalExactSurfaceColumn, CanonicalMeshBatch,
+    CanonicalMeshCoordinate, CanonicalPackedAdmission, ExactPaintedCoverageSnapshot,
+    McloneTreeOccurrenceId, McloneTreeOwnershipCandidate, TERRAIN_EXACT_FRONTIER_TREE_INSET_BLOCKS,
+    TerrainCompositionSourceIdentity, TerrainExactBoundaryColumn, TerrainExactBoundaryProfile,
+    TerrainPreparedExactFrame, TerrainViewSourceIdentity, canonical_terrain_chunk_order,
+    mclone_tree_ownership_snapshot, terrain_exact_exposed_boundary_blocks,
 };
 #[cfg(not(target_arch = "wasm32"))]
 use crate::{
     CanonicalMeshFrontier, CanonicalMeshSession, CanonicalNaturalTreePresentation,
     CanonicalTerrainStage, CanonicalTerrainVisibility,
 };
-#[cfg(not(target_arch = "wasm32"))]
-use anyhow::bail;
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use mclone_core::{ChunkPos, HorizontalTopology};
 #[cfg(not(target_arch = "wasm32"))]
 use mclone_mesh::TexturedMeshCatalog;
@@ -210,6 +209,7 @@ pub struct TerrainRuntimeExactRenderer {
     pending: VecDeque<PendingExactAdmission>,
     in_flight: bool,
     sections_by_chunk: BTreeMap<ChunkPos, BTreeSet<RenderSectionKey>>,
+    surface_columns_by_chunk: BTreeMap<ChunkPos, Vec<CanonicalExactSurfaceColumn>>,
     tree_occurrences: BTreeMap<McloneTreeOccurrenceId, McloneTreeOccurrence>,
     tree_sections:
         BTreeMap<McloneTreeOccurrenceId, BTreeMap<RenderSectionKey, TexturedRenderSectionMesh>>,
@@ -320,6 +320,7 @@ impl TerrainRuntimeExactRenderer {
             pending: VecDeque::new(),
             in_flight: false,
             sections_by_chunk: BTreeMap::new(),
+            surface_columns_by_chunk: BTreeMap::new(),
             tree_occurrences: BTreeMap::new(),
             tree_sections: BTreeMap::new(),
             tree_gpu_sections: BTreeSet::new(),
@@ -381,7 +382,28 @@ impl TerrainRuntimeExactRenderer {
     pub fn prepared_frame(&self) -> Result<TerrainPreparedExactFrame, String> {
         let source =
             TerrainViewSourceIdentity::detached(self.source, HorizontalTopology::UNBOUNDED, 1, 1)?;
-        TerrainPreparedExactFrame::new(source, self.coverage_snapshot()?)
+        let coverage = self.coverage_snapshot()?;
+        let columns =
+            terrain_exact_exposed_boundary_blocks(&coverage, HorizontalTopology::UNBOUNDED)?
+                .into_iter()
+                .filter_map(|[world_x, world_z]| {
+                    let chunk = ChunkPos::from_block_coords(world_x, world_z);
+                    let local_x = world_x.rem_euclid(16) as usize;
+                    let local_z = world_z.rem_euclid(16) as usize;
+                    let column = *self
+                        .surface_columns_by_chunk
+                        .get(&chunk)?
+                        .get(local_z * 16 + local_x)?;
+                    Some(TerrainExactBoundaryColumn {
+                        world_x,
+                        world_z,
+                        solid_top_y: i32::from(column.solid_top_y),
+                        side_material: column.side_material,
+                        water: column.water,
+                    })
+                });
+        let boundary = TerrainExactBoundaryProfile::from_columns(&coverage, columns)?;
+        TerrainPreparedExactFrame::new(source, coverage)?.with_boundary_profile(boundary)
     }
 
     pub fn tree_ownership(
@@ -529,6 +551,7 @@ impl TerrainRuntimeExactRenderer {
         let mut removed = BTreeSet::new();
         for chunk in &departed {
             self.painted.remove(chunk);
+            self.surface_columns_by_chunk.remove(chunk);
             if let Some(keys) = self.sections_by_chunk.remove(chunk) {
                 removed.extend(keys);
             }
@@ -621,6 +644,16 @@ impl TerrainRuntimeExactRenderer {
         self.draw
             .apply_section_updates(device, &sections, &removed)
             .context("failed to upload runtime canonical packed mesh")?;
+        if pending.admission.surface_columns.len() != 16 * 16 {
+            bail!(
+                "runtime canonical exact chunk ({}, {}) supplied {} surface columns; expected 256",
+                requested.x,
+                requested.z,
+                pending.admission.surface_columns.len(),
+            );
+        }
+        self.surface_columns_by_chunk
+            .insert(requested, pending.admission.surface_columns);
         for tree in pending.admission.natural_trees {
             let id = McloneTreeOccurrenceId::from(tree.occurrence);
             let sections = unpack_textured_render_sections(&tree.packed_sections)

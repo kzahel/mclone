@@ -211,6 +211,7 @@ pub fn canonical_mesh_batch_encoded_bytes(batch: CanonicalMeshBatch) -> Result<V
                     .retained_dependency_chunks
                     .min(u32::MAX as usize) as u32,
                 packed_sections: admission.packed_sections,
+                surface_columns: admission.surface_columns,
                 natural_trees: admission
                     .natural_trees
                     .into_iter()
@@ -236,6 +237,7 @@ fn decoded_batch(batch: CanonicalEncodedBatch) -> CanonicalMeshBatch {
                     retained_dependency_chunks: admission.retained_dependency_chunks as usize,
                 },
                 packed_sections: admission.packed_sections,
+                surface_columns: admission.surface_columns,
                 natural_trees: admission
                     .natural_trees
                     .into_iter()

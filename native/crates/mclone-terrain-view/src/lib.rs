@@ -51,9 +51,10 @@ pub use canonical_batch_codec::{
     decode_canonical_batch, encode_canonical_batch, patch_canonical_batch_transfer_ms,
 };
 pub use canonical_mesh::{
-    CanonicalMeshBatch, CanonicalMeshCoordinate, CanonicalMeshFrontier,
-    CanonicalMeshRequestReceipt, CanonicalMeshSession, CanonicalNaturalTreePresentation,
-    CanonicalPackedAdmission, CanonicalPackedNaturalTree, suppress_missing_footprint_walls,
+    CanonicalExactSurfaceColumn, CanonicalMeshBatch, CanonicalMeshCoordinate,
+    CanonicalMeshFrontier, CanonicalMeshRequestReceipt, CanonicalMeshSession,
+    CanonicalNaturalTreePresentation, CanonicalPackedAdmission, CanonicalPackedNaturalTree,
+    suppress_missing_footprint_walls,
 };
 pub use clipmap::{
     TERRAIN_CLIPMAP_DEFAULT_LEVEL_COUNT, TERRAIN_CLIPMAP_DEFAULT_TILES_PER_AXIS, TerrainClipmap,

@@ -14,7 +14,7 @@ pub use mclone_terrain_view::{
     TerrainRuntimeSession as WorldExplorerSession,
 };
 
-pub const WORLD_EXPLORER_TERRAIN_FRONTIER: &str = "single-owner-voxel-curtain";
+pub const WORLD_EXPLORER_TERRAIN_FRONTIER: &str = "single-owner-direct-smooth-stitch";
 pub use mclone_terrain_view::{
     TerrainRuntimeExactRenderer as ExplorerExactTerrain,
     TerrainRuntimeExactStats as ExplorerExactStats,

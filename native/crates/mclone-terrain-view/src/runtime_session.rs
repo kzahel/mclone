@@ -3,10 +3,11 @@ use std::time::Duration;
 use crate::{
     BoundedRepresentationOwnershipSnapshot, ExactPaintedCoverageSnapshot, McloneTreeOccurrenceId,
     TerrainClipmapConfig, TerrainCompositionSourceIdentity, TerrainExactCoverageMode,
-    TerrainHorizonFrameStats, TerrainHorizonPresentation, TerrainHorizonRenderTarget,
-    TerrainPreparedExactFrame, TerrainPreviewCamera, TerrainPreviewMaterialAtlas,
-    TerrainPreviewProjectionKind, TerrainPreviewView, TerrainVegetationExecutor, TerrainViewEngine,
-    TerrainViewEngineConfig, TerrainViewSourceIdentity, terrain_preview_focus_y_for_profile,
+    TerrainExactHandoffTopology, TerrainHorizonFrameStats, TerrainHorizonPresentation,
+    TerrainHorizonRenderTarget, TerrainPreparedExactFrame, TerrainPreviewCamera,
+    TerrainPreviewMaterialAtlas, TerrainPreviewProjectionKind, TerrainPreviewView,
+    TerrainVegetationExecutor, TerrainViewEngine, TerrainViewEngineConfig,
+    TerrainViewSourceIdentity, terrain_preview_focus_y_for_profile,
 };
 use mclone_core::HorizontalTopology;
 use mclone_render_color::{RenderColorProfile, RenderTargetColorTransform};
@@ -146,7 +147,7 @@ impl TerrainRuntimeSession {
             1,
             1,
         )?;
-        let engine = TerrainViewEngine::new(
+        let mut engine = TerrainViewEngine::new(
             device,
             queue,
             color_format,
@@ -162,6 +163,7 @@ impl TerrainRuntimeSession {
             material_atlas,
             vegetation_executor,
         )?;
+        engine.set_exact_handoff_topology(TerrainExactHandoffTopology::DirectSmooth);
         let mut session = Self {
             engine,
             config,
@@ -192,6 +194,10 @@ impl TerrainRuntimeSession {
             self.config.width = width;
             self.config.height = height;
         }
+    }
+
+    pub fn set_exact_handoff_topology(&mut self, topology: TerrainExactHandoffTopology) {
+        self.engine.set_exact_handoff_topology(topology);
     }
 
     pub const fn view_state(&self) -> WorldViewState {

@@ -7,7 +7,9 @@ use mclone_mesh::{
     pack_textured_render_sections,
 };
 use mclone_worldgen::block::{
-    ACACIA_LEAVES, ACACIA_LOG, AIR, OAK_LEAVES, OAK_LOG, RawBlockId, SPRUCE_LEAVES, SPRUCE_LOG,
+    ACACIA_LEAVES, ACACIA_LOG, AIR, BIRCH_LOG, BIRCH_LOG_X, BIRCH_LOG_Z, DARK_OAK_LOG, JUNGLE_LOG,
+    MUSHROOM_STEM, OAK_LEAVES, OAK_LOG, OAK_LOG_X, OAK_LOG_Z, RawBlockId, SPRUCE_LEAVES,
+    SPRUCE_LOG, SPRUCE_LOG_X, SPRUCE_LOG_Z, WATER, WATER_LEVEL_1, WATER_LEVEL_8,
 };
 use mclone_worldgen::levelgen::{
     McloneOverworldSamplingTopology, McloneOverworldVegetationPlanCache, McloneTreeFamily,
@@ -21,6 +23,73 @@ use super::{
 };
 
 const CANONICAL_WORKER_RAW_CACHE_MAX_CHUNKS: usize = 1_024;
+
+fn canonical_exact_surface_columns(
+    chunk: &CanonicalTerrainChunk,
+    catalog: &TexturedMeshCatalog,
+) -> Vec<CanonicalExactSurfaceColumn> {
+    canonical_exact_surface_columns_with_solid(chunk, catalog, |state| catalog.occludes(state))
+}
+
+fn canonical_exact_surface_columns_with_solid(
+    chunk: &CanonicalTerrainChunk,
+    catalog: &TexturedMeshCatalog,
+    solid: impl Fn(BlockStateId) -> bool,
+) -> Vec<CanonicalExactSurfaceColumn> {
+    let mut columns = Vec::with_capacity((CHUNK_WIDTH * CHUNK_WIDTH) as usize);
+    for local_z in 0..CHUNK_WIDTH {
+        for local_x in 0..CHUNK_WIDTH {
+            let mut water = false;
+            let mut column = None;
+            for local_y in (0..chunk.height).rev() {
+                let block = chunk.blocks[chunk_block_index(local_x, local_y, local_z)];
+                if block == WATER || (WATER_LEVEL_1..=WATER_LEVEL_8).contains(&block) {
+                    water = true;
+                    continue;
+                }
+                let state = BlockStateId(u32::from(block));
+                if !solid(state) || canonical_boundary_natural_feature_block(block) {
+                    continue;
+                }
+                let side_material = u8::try_from(block)
+                    .ok()
+                    .filter(|_| catalog.terrain_surface_material(state).is_some());
+                column = Some(CanonicalExactSurfaceColumn {
+                    solid_top_y: i16::try_from(chunk.min_y + local_y + 1)
+                        .expect("canonical exact surface height fits i16"),
+                    side_material,
+                    water,
+                });
+                break;
+            }
+            columns.push(column.unwrap_or(CanonicalExactSurfaceColumn {
+                solid_top_y: i16::try_from(chunk.min_y).unwrap_or(i16::MIN),
+                side_material: None,
+                water,
+            }));
+        }
+    }
+    columns
+}
+
+fn canonical_boundary_natural_feature_block(block: RawBlockId) -> bool {
+    matches!(
+        block,
+        OAK_LOG
+            | BIRCH_LOG
+            | SPRUCE_LOG
+            | OAK_LOG_X
+            | OAK_LOG_Z
+            | BIRCH_LOG_X
+            | BIRCH_LOG_Z
+            | SPRUCE_LOG_X
+            | SPRUCE_LOG_Z
+            | DARK_OAK_LOG
+            | MUSHROOM_STEM
+            | ACACIA_LOG
+            | JUNGLE_LOG
+    )
+}
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct CanonicalMeshCoordinate {
@@ -56,6 +125,14 @@ pub struct CanonicalPackedAdmission {
     pub requested: CanonicalMeshRequestReceipt,
     pub packed_sections: Vec<u8>,
     pub natural_trees: Vec<CanonicalPackedNaturalTree>,
+    pub surface_columns: Vec<CanonicalExactSurfaceColumn>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CanonicalExactSurfaceColumn {
+    pub solid_top_y: i16,
+    pub side_material: Option<u8>,
+    pub water: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -378,6 +455,12 @@ impl CanonicalMeshSession {
                         packed_sections: pack_textured_render_sections(&tree.sections),
                     })
                     .collect(),
+                surface_columns: canonical_exact_surface_columns(
+                    self.chunks
+                        .get(&coordinate)
+                        .expect("requested canonical surface chunk remains resident"),
+                    &self.catalog,
+                ),
             });
         }
         let pack_ms = timing_elapsed_ms(pack_started);
@@ -793,6 +876,41 @@ mod tests {
         assert_eq!(
             tree.chunks[&(0, 0)][spruce_log],
             BlockStateId(u32::from(AIR))
+        );
+    }
+
+    #[test]
+    fn exact_surface_columns_skip_trees_and_classify_water() {
+        let mut blocks = vec![AIR; 16 * 16 * 16];
+        blocks[chunk_block_index(0, 1, 0)] = mclone_worldgen::block::STONE;
+        blocks[chunk_block_index(0, 2, 0)] = WATER;
+        blocks[chunk_block_index(0, 3, 0)] = OAK_LOG;
+        let chunk = CanonicalTerrainChunk {
+            profile: TerrainPreviewProfile::McloneOverworldV1,
+            seed: 7,
+            stage: CanonicalTerrainStage::FinalFeatures,
+            chunk_x: 0,
+            chunk_z: 0,
+            min_y: 0,
+            height: 16,
+            blocks,
+            biomes: Vec::new(),
+            fingerprint: 1,
+            dependency_cache: CanonicalTerrainDependencyCacheReport::default(),
+        };
+        let columns = canonical_exact_surface_columns_with_solid(
+            &chunk,
+            &TexturedMeshCatalog::default(),
+            |state| state == BlockStateId(u32::from(mclone_worldgen::block::STONE)),
+        );
+        assert_eq!(columns.len(), 16 * 16);
+        assert_eq!(
+            columns[0],
+            CanonicalExactSurfaceColumn {
+                solid_top_y: 2,
+                side_material: None,
+                water: true,
+            }
         );
     }
 }

@@ -4,10 +4,13 @@ use mclone_worldgen::levelgen::{
 };
 use mclone_worldgen::placement::BlockPos;
 
+use crate::CanonicalExactSurfaceColumn;
+
 const CANONICAL_BATCH_MAGIC: [u8; 4] = *b"MCTB";
-const CANONICAL_BATCH_VERSION: u16 = 2;
+const CANONICAL_BATCH_VERSION: u16 = 3;
 const CANONICAL_BATCH_HEADER_BYTES: usize = 72;
-const CANONICAL_BATCH_ADMISSION_HEADER_BYTES: usize = 24;
+const CANONICAL_BATCH_ADMISSION_HEADER_BYTES: usize = 28;
+const CANONICAL_BATCH_SURFACE_COLUMN_BYTES: usize = 4;
 const CANONICAL_BATCH_NATURAL_TREE_HEADER_BYTES: usize = 101;
 const TRANSFER_MS_OFFSET: usize = 40;
 
@@ -25,6 +28,7 @@ pub struct CanonicalEncodedAdmission {
     pub retained_dependency_chunks: u32,
     pub packed_sections: Vec<u8>,
     pub natural_trees: Vec<CanonicalEncodedNaturalTree>,
+    pub surface_columns: Vec<CanonicalExactSurfaceColumn>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -71,9 +75,17 @@ pub fn encode_canonical_batch(batch: &CanonicalEncodedBatch) -> Result<Vec<u8>, 
                                     "canonical natural-tree byte length overflowed usize".to_owned()
                                 })
                         })?;
+                let surface_column_bytes = admission
+                    .surface_columns
+                    .len()
+                    .checked_mul(CANONICAL_BATCH_SURFACE_COLUMN_BYTES)
+                    .ok_or_else(|| {
+                        "canonical surface-column byte length overflowed usize".to_owned()
+                    })?;
                 bytes
                     .checked_add(CANONICAL_BATCH_ADMISSION_HEADER_BYTES)
                     .and_then(|bytes| bytes.checked_add(packed_bytes as usize))
+                    .and_then(|bytes| bytes.checked_add(surface_column_bytes))
                     .and_then(|bytes| bytes.checked_add(natural_tree_bytes))
                     .ok_or_else(|| "canonical batch byte length overflowed usize".to_owned())
             })?;
@@ -111,7 +123,20 @@ pub fn encode_canonical_batch(batch: &CanonicalEncodedBatch) -> Result<Vec<u8>, 
                 .try_into()
                 .map_err(|_| "canonical admission has more than u32 natural trees".to_owned())?,
         );
+        push_u32(
+            &mut encoded,
+            admission
+                .surface_columns
+                .len()
+                .try_into()
+                .map_err(|_| "canonical admission has more than u32 surface columns".to_owned())?,
+        );
         encoded.extend_from_slice(&admission.packed_sections);
+        for column in &admission.surface_columns {
+            push_i16(&mut encoded, column.solid_top_y);
+            encoded.push(column.side_material.unwrap_or_default());
+            encoded.push(u8::from(column.water) | (u8::from(column.side_material.is_some()) << 1));
+        }
         for tree in &admission.natural_trees {
             encode_tree_occurrence(&mut encoded, tree.occurrence);
             push_u32(
@@ -183,7 +208,24 @@ pub fn decode_canonical_batch(bytes: &[u8]) -> Result<CanonicalEncodedBatch, Str
         let retained_dependency_chunks = decoder.read_u32()?;
         let packed_byte_length = decoder.read_u32()? as usize;
         let natural_tree_count = decoder.read_u32()? as usize;
+        let surface_column_count = decoder.read_u32()? as usize;
         let packed_sections = decoder.read_exact(packed_byte_length)?.to_vec();
+        let mut surface_columns = Vec::with_capacity(surface_column_count);
+        for _ in 0..surface_column_count {
+            let solid_top_y = decoder.read_i16()?;
+            let material = decoder.read_u8()?;
+            let flags = decoder.read_u8()?;
+            if flags & !0b11 != 0 {
+                return Err(format!(
+                    "canonical surface-column flags {flags:#04x} contain unknown bits"
+                ));
+            }
+            surface_columns.push(CanonicalExactSurfaceColumn {
+                solid_top_y,
+                side_material: (flags & 0b10 != 0).then_some(material),
+                water: flags & 0b01 != 0,
+            });
+        }
         let mut natural_trees = Vec::with_capacity(natural_tree_count);
         for _ in 0..natural_tree_count {
             let occurrence = decoder.read_tree_occurrence()?;
@@ -201,6 +243,7 @@ pub fn decode_canonical_batch(bytes: &[u8]) -> Result<CanonicalEncodedBatch, Str
             retained_dependency_chunks,
             packed_sections,
             natural_trees,
+            surface_columns,
         });
     }
     if decoder.remaining() != 0 {
@@ -235,6 +278,10 @@ fn push_u16(bytes: &mut Vec<u8>, value: u16) {
 }
 
 fn push_u32(bytes: &mut Vec<u8>, value: u32) {
+    bytes.extend_from_slice(&value.to_le_bytes());
+}
+
+fn push_i16(bytes: &mut Vec<u8>, value: i16) {
     bytes.extend_from_slice(&value.to_le_bytes());
 }
 
@@ -340,6 +387,10 @@ impl<'a> Decoder<'a> {
 
     fn read_u32(&mut self) -> Result<u32, String> {
         Ok(u32::from_le_bytes(self.read_exact(4)?.try_into().unwrap()))
+    }
+
+    fn read_i16(&mut self) -> Result<i16, String> {
+        Ok(i16::from_le_bytes(self.read_exact(2)?.try_into().unwrap()))
     }
 
     fn read_i32(&mut self) -> Result<i32, String> {
@@ -484,6 +535,11 @@ mod tests {
                     retained_dependency_chunks: 9,
                     packed_sections: vec![1, 2, 3, 4],
                     natural_trees: vec![tree_fixture()],
+                    surface_columns: vec![CanonicalExactSurfaceColumn {
+                        solid_top_y: 63,
+                        side_material: Some(4),
+                        water: false,
+                    }],
                 },
                 CanonicalEncodedAdmission {
                     chunk_x: -18,
@@ -492,6 +548,11 @@ mod tests {
                     retained_dependency_chunks: 12,
                     packed_sections: vec![5; 257],
                     natural_trees: Vec::new(),
+                    surface_columns: vec![CanonicalExactSurfaceColumn {
+                        solid_top_y: -12,
+                        side_material: None,
+                        water: true,
+                    }],
                 },
             ],
         }
