@@ -7,11 +7,12 @@
 
 use std::collections::{BTreeMap, VecDeque};
 use std::fmt;
+use std::sync::Arc;
 use std::time::Duration;
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::{
-    sync::{Arc, Mutex, mpsc},
+    sync::{Mutex, mpsc},
     thread,
 };
 
@@ -48,8 +49,8 @@ pub(crate) struct CompletedLightStatus {
     pub(crate) token: LightRequestToken,
     pub(crate) pos: ChunkPos,
     pub(crate) feature_snapshot: ChunkSnapshot,
-    pub(crate) scheduled_block_ticks: Vec<ScheduledTickRecord>,
-    pub(crate) scheduled_fluid_ticks: Vec<ScheduledTickRecord>,
+    pub(crate) scheduled_block_ticks: Arc<[ScheduledTickRecord]>,
+    pub(crate) scheduled_fluid_ticks: Arc<[ScheduledTickRecord]>,
     pub(crate) light_sections: Vec<PackedLightSection>,
     pub(crate) batch_compute_leader: bool,
     pub(crate) compute_us: u128,

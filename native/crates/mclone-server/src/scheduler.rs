@@ -48,7 +48,7 @@ use crate::level_light_bridge::LevelLightComputationTiming;
 use crate::light_mailbox::{CompletedLightStatus, LightStatusMailbox};
 use crate::light_status::{
     LightRequestToken, PendingLightDemand, PendingLightStatus, PendingLightStatusBatch,
-    hydrate_loaded_light_snapshot,
+    hydrate_loaded_light_snapshot, ticks_heap_bytes_estimate,
 };
 use crate::light_world::RetainedInitialLightState;
 use crate::lighting_seed::provisional_light_neighbor_lift;
@@ -243,6 +243,9 @@ pub struct ChunkSchedulerMetrics {
     pub light_tickets_released: u64,
     pub light_ticket_conservation_failures: u64,
     pub light_demand_queued: usize,
+    pub light_restartable_contexts: usize,
+    pub light_restartable_context_bytes: usize,
+    pub light_deferred: usize,
     pub light_demands_cancelled: u64,
     pub light_statuses_stale: u64,
     pub light_scheduled_without_token: usize,
@@ -316,6 +319,40 @@ struct PlayerPromotionBlockerCounts {
     light_scheduled_without_token: usize,
     light_token_without_owner: usize,
     ready_awaiting_release: usize,
+}
+
+/// Canonical metadata required to restart initial Light for a published
+/// Features revision. The holder already owns the matching block snapshot;
+/// these shared tick records survive cancellation without duplicating gameplay
+/// tick admission or copying metadata into every executor handoff.
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct RestartableLightContext {
+    feature_revision: ChunkRevision,
+    scheduled_block_ticks: Arc<[ScheduledTickRecord]>,
+    scheduled_fluid_ticks: Arc<[ScheduledTickRecord]>,
+    source_job: Option<ChunkJobId>,
+}
+
+impl RestartableLightContext {
+    fn new(
+        feature_revision: ChunkRevision,
+        scheduled_block_ticks: Vec<ScheduledTickRecord>,
+        scheduled_fluid_ticks: Vec<ScheduledTickRecord>,
+        source_job: Option<ChunkJobId>,
+    ) -> Self {
+        Self {
+            feature_revision,
+            scheduled_block_ticks: scheduled_block_ticks.into(),
+            scheduled_fluid_ticks: scheduled_fluid_ticks.into(),
+            source_job,
+        }
+    }
+
+    fn owned_bytes_estimate(&self) -> usize {
+        std::mem::size_of_val(self)
+            .saturating_add(ticks_heap_bytes_estimate(&self.scheduled_block_ticks))
+            .saturating_add(ticks_heap_bytes_estimate(&self.scheduled_fluid_ticks))
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -668,6 +705,9 @@ pub struct ChunkScheduler {
     pending_worldgen_publications: VecDeque<PendingWorldgenPublication>,
     publication_budget: ChunkPublicationBudgetState,
     light_mailbox: LightStatusMailbox,
+    restartable_light_contexts: BTreeMap<ChunkPos, RestartableLightContext>,
+    restartable_light_context_bytes: usize,
+    deferred_light_contexts: BTreeSet<ChunkPos>,
     pending_light_demands: BTreeMap<ChunkPos, PendingLightDemand>,
     pending_light_admission_ticks: BTreeMap<LightRequestToken, u64>,
     pending_light_publications: VecDeque<CompletedLightStatus>,
@@ -960,6 +1000,9 @@ impl ChunkScheduler {
             pending_worldgen_publications: VecDeque::new(),
             publication_budget: ChunkPublicationBudgetState::default(),
             light_mailbox: LightStatusMailbox::new(),
+            restartable_light_contexts: BTreeMap::new(),
+            restartable_light_context_bytes: 0,
+            deferred_light_contexts: BTreeSet::new(),
             pending_light_demands: BTreeMap::new(),
             pending_light_admission_ticks: BTreeMap::new(),
             pending_light_publications: VecDeque::new(),
@@ -1044,6 +1087,9 @@ impl ChunkScheduler {
             pending_worldgen_publications: VecDeque::new(),
             publication_budget: ChunkPublicationBudgetState::default(),
             light_mailbox: LightStatusMailbox::with_wasm_job_worker(config),
+            restartable_light_contexts: BTreeMap::new(),
+            restartable_light_context_bytes: 0,
+            deferred_light_contexts: BTreeSet::new(),
             pending_light_demands: BTreeMap::new(),
             pending_light_admission_ticks: BTreeMap::new(),
             pending_light_publications: VecDeque::new(),
@@ -1148,6 +1194,7 @@ impl ChunkScheduler {
             || !self.stored_chunk_misses.is_empty()
             || !self.jobs.is_empty()
             || !self.pending_worldgen_publications.is_empty()
+            || !self.restartable_light_contexts.is_empty()
             || !self.pending_light_demands.is_empty()
             || self.worldgen_mailbox.pending_count() != 0
             || self.light_mailbox.pending_count() != 0
@@ -1208,6 +1255,7 @@ impl ChunkScheduler {
             || !self.stored_chunk_misses.is_empty()
             || !self.jobs.is_empty()
             || !self.pending_worldgen_publications.is_empty()
+            || !self.restartable_light_contexts.is_empty()
             || !self.pending_light_demands.is_empty()
             || self.worldgen_mailbox.pending_count() != 0
             || self.light_mailbox.pending_count() != 0
@@ -1231,6 +1279,9 @@ impl ChunkScheduler {
         }
         if !enabled {
             self.cancel_all_initial_light_requests();
+            self.restartable_light_contexts.clear();
+            self.restartable_light_context_bytes = 0;
+            self.deferred_light_contexts.clear();
         }
         self.lighting_enabled = enabled;
         self.release_ready_player_promotions();
@@ -2222,6 +2273,9 @@ impl ChunkScheduler {
             light_tickets_released: self.light_tickets_released,
             light_ticket_conservation_failures: self.light_ticket_conservation_failures,
             light_demand_queued: self.pending_light_demands.len(),
+            light_restartable_contexts: self.restartable_light_contexts.len(),
+            light_restartable_context_bytes: self.restartable_light_context_bytes,
+            light_deferred: self.deferred_light_contexts.len(),
             light_demands_cancelled: self.light_demands_cancelled,
             light_statuses_stale: self.light_statuses_stale,
             light_scheduled_without_token,
@@ -3339,6 +3393,7 @@ impl ChunkScheduler {
             {
                 self.cancel_initial_light_request(token);
             }
+            self.remove_restartable_light_context(pos, None);
             self.holders.remove(&pos);
             self.store.release_cached_chunk(pos);
             self.store.release_cached_entity_chunk(pos);
@@ -3478,8 +3533,38 @@ impl ChunkScheduler {
             self.runtime_chunk_target_status(),
             &priority_centers,
         )?);
+        self.restart_required_deferred_light(&priority_centers);
         timing.runtime_enqueue_us = simulation_timing_elapsed_us(runtime_enqueue_start);
         Ok((events, timing))
+    }
+
+    fn restart_required_deferred_light(&mut self, priority_centers: &[ChunkPos]) -> usize {
+        if !self.lighting_enabled || self.restartable_light_contexts.is_empty() {
+            return 0;
+        }
+        let deferred = self
+            .restartable_light_contexts
+            .iter()
+            .filter_map(|(&pos, context)| {
+                let holder = self.holders.get(&pos)?;
+                (self.initial_light_request_remains_required(pos)
+                    && holder.light_request_token().is_none()
+                    && holder
+                        .status_slot(ChunkStatus::Light)
+                        .is_some_and(|slot| slot.step == ChunkStatusStep::Scheduled)
+                    && holder.published_snapshot.as_ref().is_some_and(|snapshot| {
+                        snapshot.status == ChunkStatus::Features
+                            && snapshot.revision == context.feature_revision
+                    }))
+                .then_some(pos)
+            })
+            .collect::<BTreeSet<_>>();
+        let deferred =
+            sorted_chunk_positions_by_priority_in(self.topology, deferred, priority_centers);
+        deferred
+            .into_iter()
+            .filter(|pos| self.queue_light_from_restartable_context(*pos))
+            .count()
     }
 
     fn enqueue_runtime_chunks(
@@ -3739,14 +3824,15 @@ impl ChunkScheduler {
                     ChunkStatus::Light,
                     ChunkStatusStep::Scheduled,
                 ));
-                let token = self.begin_initial_light_request(pos, snapshot.revision);
-                self.queue_light_demand(PendingLightDemand::new(
-                    token,
-                    snapshot,
+                self.retain_restartable_light_context(
+                    pos,
+                    snapshot.revision,
                     Vec::new(),
                     Vec::new(),
                     None,
-                ));
+                );
+                let queued = self.queue_light_from_restartable_context(pos);
+                debug_assert!(queued);
             } else if self
                 .distance_manager
                 .player_interest_positions()
@@ -3953,14 +4039,15 @@ impl ChunkScheduler {
                     ChunkStatus::Light,
                     ChunkStatusStep::Scheduled,
                 ));
-                let token = self.begin_initial_light_request(pos, snapshot.revision);
-                self.queue_light_demand(PendingLightDemand::new(
-                    token,
-                    snapshot,
+                self.retain_restartable_light_context(
+                    pos,
+                    snapshot.revision,
                     scheduled_block_ticks,
                     scheduled_fluid_ticks,
                     Some(publication.completed.job_id),
-                ));
+                );
+                let queued = self.queue_light_from_restartable_context(pos);
+                debug_assert!(queued);
             } else if self
                 .distance_manager
                 .player_interest_positions()
@@ -4038,6 +4125,98 @@ impl ChunkScheduler {
                 .map_err(ChunkStoreError::InvalidData)?;
         }
         Ok(())
+    }
+
+    fn retain_restartable_light_context(
+        &mut self,
+        pos: ChunkPos,
+        feature_revision: ChunkRevision,
+        scheduled_block_ticks: Vec<ScheduledTickRecord>,
+        scheduled_fluid_ticks: Vec<ScheduledTickRecord>,
+        source_job: Option<ChunkJobId>,
+    ) {
+        let context = RestartableLightContext::new(
+            feature_revision,
+            scheduled_block_ticks,
+            scheduled_fluid_ticks,
+            source_job,
+        );
+        self.retain_shared_restartable_light_context(pos, context);
+    }
+
+    fn retain_shared_restartable_light_context(
+        &mut self,
+        pos: ChunkPos,
+        context: RestartableLightContext,
+    ) {
+        if let Some(previous) = self.restartable_light_contexts.insert(pos, context.clone()) {
+            self.restartable_light_context_bytes = self
+                .restartable_light_context_bytes
+                .saturating_sub(previous.owned_bytes_estimate());
+        }
+        self.restartable_light_context_bytes = self
+            .restartable_light_context_bytes
+            .saturating_add(context.owned_bytes_estimate());
+        self.deferred_light_contexts.insert(pos);
+    }
+
+    fn remove_restartable_light_context(
+        &mut self,
+        pos: ChunkPos,
+        expected_revision: Option<ChunkRevision>,
+    ) -> bool {
+        let should_remove = self
+            .restartable_light_contexts
+            .get(&pos)
+            .is_some_and(|context| {
+                expected_revision.is_none_or(|revision| context.feature_revision == revision)
+            });
+        if !should_remove {
+            return false;
+        }
+        let removed = self
+            .restartable_light_contexts
+            .remove(&pos)
+            .expect("checked restartable Light context disappeared");
+        self.restartable_light_context_bytes = self
+            .restartable_light_context_bytes
+            .saturating_sub(removed.owned_bytes_estimate());
+        self.deferred_light_contexts.remove(&pos);
+        true
+    }
+
+    fn queue_light_from_restartable_context(&mut self, pos: ChunkPos) -> bool {
+        let Some(snapshot) = self
+            .holders
+            .get(&pos)
+            .and_then(|holder| holder.published_snapshot.clone())
+        else {
+            return false;
+        };
+        let Some(context) = self.restartable_light_contexts.get(&pos).cloned() else {
+            return false;
+        };
+        if snapshot.status >= ChunkStatus::Light
+            || snapshot.revision != context.feature_revision
+            || !self
+                .holders
+                .get(&pos)
+                .and_then(|holder| holder.status_slot(ChunkStatus::Light))
+                .is_some_and(|slot| slot.step == ChunkStatusStep::Scheduled)
+        {
+            return false;
+        }
+
+        let token = self.begin_initial_light_request(pos, context.feature_revision);
+        self.queue_light_demand(PendingLightDemand::from_shared_context(
+            token,
+            snapshot,
+            Arc::clone(&context.scheduled_block_ticks),
+            Arc::clone(&context.scheduled_fluid_ticks),
+            context.source_job,
+        ));
+        self.deferred_light_contexts.remove(&pos);
+        true
     }
 
     fn structure_starts_owned_by(&self, pos: ChunkPos) -> Vec<crate::StructureStartRecord> {
@@ -4387,6 +4566,13 @@ impl ChunkScheduler {
         if !self.release_initial_light_request(token) {
             return false;
         }
+        if self
+            .restartable_light_contexts
+            .get(&token.pos)
+            .is_some_and(|context| context.feature_revision == token.feature_revision)
+        {
+            self.deferred_light_contexts.insert(token.pos);
+        }
         self.light_demands_cancelled = self.light_demands_cancelled.saturating_add(1);
         true
     }
@@ -4394,8 +4580,8 @@ impl ChunkScheduler {
     fn refresh_stale_light_demand(
         &mut self,
         stale_token: LightRequestToken,
-        scheduled_block_ticks: Vec<ScheduledTickRecord>,
-        scheduled_fluid_ticks: Vec<ScheduledTickRecord>,
+        scheduled_block_ticks: Arc<[ScheduledTickRecord]>,
+        scheduled_fluid_ticks: Arc<[ScheduledTickRecord]>,
         source_job: Option<ChunkJobId>,
     ) -> bool {
         if !self.initial_light_request_remains_required(stale_token.pos) {
@@ -4416,15 +4602,16 @@ impl ChunkScheduler {
         {
             return false;
         }
-        let token = self.begin_initial_light_request(stale_token.pos, snapshot.revision);
-        self.queue_light_demand(PendingLightDemand::new(
-            token,
-            snapshot,
-            scheduled_block_ticks,
-            scheduled_fluid_ticks,
-            source_job,
-        ));
-        true
+        self.retain_shared_restartable_light_context(
+            stale_token.pos,
+            RestartableLightContext {
+                feature_revision: snapshot.revision,
+                scheduled_block_ticks,
+                scheduled_fluid_ticks,
+                source_job,
+            },
+        );
+        self.queue_light_from_restartable_context(stale_token.pos)
     }
 
     fn check_light_ticket_conservation(&mut self) {
@@ -4494,6 +4681,11 @@ impl ChunkScheduler {
                     diagnostics.light_statuses_skipped.saturating_add(1);
                 continue;
             }
+            let has_matching_restart_context = self.remove_restartable_light_context(
+                completed.pos,
+                Some(completed.token.feature_revision),
+            );
+            debug_assert!(has_matching_restart_context);
             self.release_initial_light_request(completed.token);
             diagnostics.light_statuses_published =
                 diagnostics.light_statuses_published.saturating_add(1);
@@ -4525,8 +4717,8 @@ impl ChunkScheduler {
                 .clone();
             self.queue_record_save(
                 ChunkRecord::from_snapshot(snapshot.clone())
-                    .with_scheduled_block_ticks(completed.scheduled_block_ticks)
-                    .with_scheduled_fluid_ticks(completed.scheduled_fluid_ticks)
+                    .with_scheduled_block_ticks(completed.scheduled_block_ticks.to_vec())
+                    .with_scheduled_fluid_ticks(completed.scheduled_fluid_ticks.to_vec())
                     .with_structure_data(structure_data),
                 SaveDurability::Cache,
             );
@@ -5691,8 +5883,8 @@ mod tests {
             token: LightRequestToken::new(0, pos, feature_snapshot.revision),
             pos,
             feature_snapshot,
-            scheduled_block_ticks: Vec::new(),
-            scheduled_fluid_ticks: Vec::new(),
+            scheduled_block_ticks: Arc::from([]),
+            scheduled_fluid_ticks: Arc::from([]),
             light_sections: Vec::new(),
             batch_compute_leader: false,
             compute_us: 0,
@@ -6194,6 +6386,20 @@ mod tests {
         scheduler
             .holders
             .insert(far, test_scheduled_light_holder(far));
+        scheduler.retain_restartable_light_context(
+            center,
+            ChunkRevision(1),
+            Vec::new(),
+            Vec::new(),
+            None,
+        );
+        scheduler.retain_restartable_light_context(
+            far,
+            ChunkRevision(1),
+            Vec::new(),
+            Vec::new(),
+            None,
+        );
         scheduler
             .pending_light_publications
             .push_back(test_completed_light_status(far));
@@ -6277,9 +6483,20 @@ mod tests {
         holder.publish_snapshot(snapshot.clone(), ChunkResidency::Generated, false);
         holder.mark_scheduled(ChunkStatus::Light);
         scheduler.holders.insert(pos, holder);
+        let block_tick = ScheduledTickRecord::new(BlockPos::new(1, 2, 3), "stone", 4);
+        let fluid_tick = ScheduledTickRecord::new(BlockPos::new(5, 6, 7), "water", 8);
+        scheduler.retain_restartable_light_context(
+            pos,
+            snapshot.revision,
+            vec![block_tick.clone()],
+            vec![fluid_tick.clone()],
+            None,
+        );
         let token = scheduler.begin_initial_light_request(pos, snapshot.revision);
         let mut completed = test_completed_light_status(pos);
         completed.token = token;
+        completed.scheduled_block_ticks = Arc::from([block_tick.clone()]);
+        completed.scheduled_fluid_ticks = Arc::from([fluid_tick.clone()]);
         scheduler.pending_light_publications.push_back(completed);
 
         let mut diagnostics = ChunkSchedulerPublicationDiagnostics::default();
@@ -6300,6 +6517,16 @@ mod tests {
         assert_eq!(scheduler.metrics().light_tickets_added, 1);
         assert_eq!(scheduler.metrics().light_tickets_released, 1);
         assert_eq!(scheduler.metrics().light_ticket_conservation_failures, 0);
+        assert_eq!(scheduler.metrics().light_restartable_contexts, 0);
+        assert_eq!(scheduler.metrics().light_restartable_context_bytes, 0);
+        scheduler.flush_persistence().unwrap();
+        let stored = scheduler
+            .store
+            .load_chunk_blocking(pos)
+            .unwrap()
+            .expect("published Light snapshot must be cached");
+        assert_eq!(stored.scheduled_block_ticks, [block_tick]);
+        assert_eq!(stored.scheduled_fluid_ticks, [fluid_tick]);
     }
 
     #[test]
@@ -6406,7 +6633,7 @@ mod tests {
     }
 
     #[test]
-    fn delayed_light_cancellation_and_reentry_proves_active_orphan() {
+    fn delayed_light_cancellation_and_reentry_restarts_from_retained_context() {
         let mut scheduler = ChunkScheduler::new(12_345);
         scheduler.set_debug_light_admission_delay_ticks(40);
         let original = ChunkPos::new(0, 0);
@@ -6424,14 +6651,17 @@ mod tests {
         holder.publish_snapshot(snapshot.clone(), ChunkResidency::Generated, false);
         holder.mark_scheduled(ChunkStatus::Light);
         scheduler.holders.insert(original, holder);
-        let token = scheduler.begin_initial_light_request(original, snapshot.revision);
-        scheduler.queue_light_demand(PendingLightDemand::new(
-            token,
-            snapshot,
-            Vec::new(),
-            Vec::new(),
+        let block_tick = ScheduledTickRecord::new(BlockPos::new(1, 2, 3), "stone", 4);
+        let fluid_tick = ScheduledTickRecord::new(BlockPos::new(5, 6, 7), "water", 8);
+        scheduler.retain_restartable_light_context(
+            original,
+            snapshot.revision,
+            vec![block_tick.clone()],
+            vec![fluid_tick.clone()],
             None,
-        ));
+        );
+        let token = scheduler.begin_initial_light_request(original, snapshot.revision);
+        assert!(scheduler.queue_light_from_restartable_context(original));
         assert_eq!(scheduler.metrics().debug_light_admission_delayed_demands, 1);
 
         let departed_interest = BTreeSet::from([departed]);
@@ -6451,6 +6681,8 @@ mod tests {
                 .and_then(ChunkHolder::light_request_token),
             None
         );
+        assert_eq!(scheduler.metrics().light_deferred, 1);
+        assert_eq!(scheduler.restartable_light_contexts.len(), 1);
 
         scheduler
             .distance_manager
@@ -6461,15 +6693,28 @@ mod tests {
             );
         scheduler.reconcile_ticketed_holders().unwrap();
 
+        let replacement = scheduler
+            .holders
+            .get(&original)
+            .and_then(ChunkHolder::light_request_token)
+            .expect("re-entry must create a fresh Light token");
+        assert_ne!(replacement, token);
+        let demand = &scheduler.pending_light_demands[&original];
+        assert_eq!(demand.token, replacement);
+        assert_eq!(demand.scheduled_block_ticks.as_ref(), [block_tick]);
+        assert_eq!(demand.scheduled_fluid_ticks.as_ref(), [fluid_tick]);
+
         let metrics = scheduler.metrics();
         assert_eq!(metrics.player_promotion_active, 1);
+        assert_eq!(metrics.player_promotion_active_light_demand_queued, 1);
         assert_eq!(
             metrics.player_promotion_active_light_scheduled_without_token,
-            1
+            0
         );
-        assert_eq!(metrics.light_scheduled_without_token, 1);
-        assert_eq!(metrics.light_demand_queued, 0);
-        assert_eq!(metrics.light_ticket_count, 0);
+        assert_eq!(metrics.light_scheduled_without_token, 0);
+        assert_eq!(metrics.light_deferred, 0);
+        assert_eq!(metrics.light_demand_queued, 1);
+        assert_eq!(metrics.light_ticket_count, 1);
         assert_eq!(scheduler.light_status_mailbox_pending_count(), 0);
         assert_eq!(scheduler.pending_publication_count(), 0);
     }

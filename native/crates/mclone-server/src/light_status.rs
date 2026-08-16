@@ -49,8 +49,8 @@ impl LightRequestToken {
 pub(crate) struct PendingLightDemand {
     pub(crate) token: LightRequestToken,
     pub(crate) feature_snapshot: ChunkSnapshot,
-    pub(crate) scheduled_block_ticks: Vec<ScheduledTickRecord>,
-    pub(crate) scheduled_fluid_ticks: Vec<ScheduledTickRecord>,
+    pub(crate) scheduled_block_ticks: Arc<[ScheduledTickRecord]>,
+    pub(crate) scheduled_fluid_ticks: Arc<[ScheduledTickRecord]>,
     pub(crate) source_job: Option<ChunkJobId>,
 }
 
@@ -60,6 +60,24 @@ impl PendingLightDemand {
         feature_snapshot: ChunkSnapshot,
         scheduled_block_ticks: Vec<ScheduledTickRecord>,
         scheduled_fluid_ticks: Vec<ScheduledTickRecord>,
+        source_job: Option<ChunkJobId>,
+    ) -> Self {
+        debug_assert_eq!(token.pos, feature_snapshot.pos);
+        debug_assert_eq!(token.feature_revision, feature_snapshot.revision);
+        Self {
+            token,
+            feature_snapshot,
+            scheduled_block_ticks: scheduled_block_ticks.into(),
+            scheduled_fluid_ticks: scheduled_fluid_ticks.into(),
+            source_job,
+        }
+    }
+
+    pub(crate) fn from_shared_context(
+        token: LightRequestToken,
+        feature_snapshot: ChunkSnapshot,
+        scheduled_block_ticks: Arc<[ScheduledTickRecord]>,
+        scheduled_fluid_ticks: Arc<[ScheduledTickRecord]>,
         source_job: Option<ChunkJobId>,
     ) -> Self {
         debug_assert_eq!(token.pos, feature_snapshot.pos);
@@ -79,8 +97,8 @@ pub(crate) struct PendingLightStatus {
     pub(crate) token: LightRequestToken,
     pub(crate) pos: ChunkPos,
     pub(crate) feature_snapshot: ChunkSnapshot,
-    pub(crate) scheduled_block_ticks: Vec<ScheduledTickRecord>,
-    pub(crate) scheduled_fluid_ticks: Vec<ScheduledTickRecord>,
+    pub(crate) scheduled_block_ticks: Arc<[ScheduledTickRecord]>,
+    pub(crate) scheduled_fluid_ticks: Arc<[ScheduledTickRecord]>,
     raw_blocks: Arc<[RawBlockId]>,
     neighbor_blocks: Vec<(ChunkPos, Arc<[RawBlockId]>)>,
 }
@@ -129,8 +147,8 @@ impl PendingLightStatus {
             token,
             pos: token.pos,
             feature_snapshot,
-            scheduled_block_ticks: Vec::new(),
-            scheduled_fluid_ticks: Vec::new(),
+            scheduled_block_ticks: Arc::from([]),
+            scheduled_fluid_ticks: Arc::from([]),
             raw_blocks: raw_blocks.into(),
             neighbor_blocks: neighbor_blocks
                 .into_iter()
@@ -317,10 +335,10 @@ pub(crate) fn snapshot_heap_bytes_estimate(snapshot: &ChunkSnapshot) -> usize {
         .saturating_add(light_bytes)
 }
 
-pub(crate) fn ticks_heap_bytes_estimate(ticks: &Vec<ScheduledTickRecord>) -> usize {
+pub(crate) fn ticks_heap_bytes_estimate(ticks: &[ScheduledTickRecord]) -> usize {
     ticks.iter().fold(
         ticks
-            .capacity()
+            .len()
             .saturating_mul(std::mem::size_of::<ScheduledTickRecord>()),
         |bytes, tick| bytes.saturating_add(tick.target.capacity()),
     )

@@ -65,11 +65,20 @@ receipt remains at 172/361 server-ready chunks and 112/289 exact columns after
 30 stationary seconds, with 236 promotions queued and both job mailboxes
 empty. See Tactical 312's Slice 0 execution evidence and `/tmp` artifacts.
 
-The next slice makes Feature-to-Light context restartable, repairs required
-deferred work in the shared scheduler, and re-runs the physical route without
-weakening the four-promotion or Light-memory bounds. The synthetic probe is a
-window-widening cross-platform state-machine control; the unchanged deployed
-phone build remains the proof that ordinary movement reaches this condition.
+Tactical 312 Slice 1 now retains revision-keyed Feature-to-Light restart
+context in the shared scheduler. Cancellation releases the obsolete token but
+leaves scheduled-tick persistence metadata explicitly deferred; same-holder
+re-entry creates a fresh token and demand from that context, while matching
+publication, holder unload, and lighting disable release it. The metadata is
+shared with native-thread and browser-Worker requests, so this does not add a
+second snapshot or replay gameplay tick admission.
+
+The next slice repairs inconsistent bare orphans, classifies every required
+holder during ordinary polling, and re-runs the native, headed Web, and
+physical phone routes without weakening the four-promotion or Light-memory
+bounds. The synthetic probe is a window-widening cross-platform state-machine
+control; the unchanged deployed phone build remains the proof that ordinary
+movement reaches this condition.
 
 This incident is separate from Tactical
 [`311`](../tactical/311-cross-platform-worker-liveness-and-replay.md): Worker

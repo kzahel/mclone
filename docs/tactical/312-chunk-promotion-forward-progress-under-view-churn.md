@@ -1,7 +1,7 @@
 # Tactical 312: Chunk Promotion Forward Progress Under View Churn
 
-Status: in progress 2026-08-16; Slice 0 deterministic native/Web
-reproduction complete
+Status: in progress 2026-08-16; Slices 0-1 reproduction and restartable
+Feature-to-Light ownership complete
 
 Topic: `chunk-lighting-admission-and-backpressure`
 
@@ -295,6 +295,33 @@ with no token or executable mailbox work. Slice 1 may proceed against the
 source-correlated cancellation/re-entry blocker. The delay and smoke jump are
 window-widening controls, not explanations of the natural phone failure; the
 unchanged production build already supplied that ordinary-route evidence.
+
+## Slice 1 Execution Evidence
+
+The shared scheduler now owns one revision-keyed restart record from Features
+publication until matching Light publication or authoritative holder teardown.
+The holder remains the canonical owner of the Features snapshot; the restart
+record owns only shared block/fluid scheduled-tick metadata and source-job
+correlation. Queued, native-thread, and browser-Worker requests share that
+metadata rather than moving its only copy into a cancellable demand.
+
+Cancellation now releases the obsolete token and executor ownership while
+leaving the matching restart record explicitly deferred. Ordinary ticket
+reconciliation turns an eligible deferred record into a fresh revision-bound
+token and keyed Light demand. Matching publication consumes the record once;
+unload and deliberate lighting disable release it. A late result retains the
+existing token/revision checks and cannot satisfy a replacement request.
+
+Focused tests prove pre-mailbox cancellation and same-holder re-entry preserve
+the exact block/fluid tick vectors, allocate a different token, and no longer
+leave `Scheduled` without an owner. A matching publication test proves the
+context and its byte accounting return to zero and the cached Light record
+contains each scheduled-tick vector exactly once. The Light Worker frame codec
+round trips the shared metadata on the browser boundary.
+
+Slice 2 remains responsible for repairing an inconsistent bare orphan that
+does not have a restart record, classifying every required holder on ordinary
+polls, and proving the complete four-slot forward-progress matrix.
 
 ## Why Existing Tests Passed
 
