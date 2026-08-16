@@ -2749,6 +2749,7 @@ pub(super) fn ui_action_label(action: GameUiAction) -> &'static str {
         GameUiAction::SetGrassDetail(_) => "setGrassDetail",
         GameUiAction::SetTerrainPresentation(_) => "setTerrainPresentation",
         GameUiAction::SetFogSettings(_) => "setFogSettings",
+        GameUiAction::SetSeasonPreview(_) => "setSeasonPreview",
         GameUiAction::ToggleFullbright => "toggleFullbright",
         GameUiAction::TogglePlayerCollisionBox => "togglePlayerCollisionBox",
         GameUiAction::ToggleCrosshair => "toggleCrosshair",
@@ -3663,6 +3664,14 @@ fn debug_mesh_id_for_block_state(state_id: BlockStateId) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn seasonal_preview_action_has_a_web_diagnostic_label() {
+        assert_eq!(
+            ui_action_label(GameUiAction::SetSeasonPreview(Default::default())),
+            "setSeasonPreview"
+        );
+    }
 
     #[test]
     fn web_render_compile_delta_roundtrips_upserts_and_evictions() {
