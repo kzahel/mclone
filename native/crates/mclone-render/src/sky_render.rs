@@ -32,8 +32,8 @@ use crate::uniform::{
 
 const SKY_UNIFORM_BYTE_SIZE: wgpu::BufferAddress = 64;
 const SKY_MULTIVIEW_UNIFORM_BYTE_SIZE: wgpu::BufferAddress = SKY_UNIFORM_BYTE_SIZE * 2;
-const STAR_UNIFORM_BYTE_SIZE: wgpu::BufferAddress = 80;
-const STAR_MULTIVIEW_UNIFORM_BYTE_SIZE: wgpu::BufferAddress = SKY_MULTIVIEW_UNIFORM_BYTE_SIZE + 16;
+const STAR_UNIFORM_BYTE_SIZE: wgpu::BufferAddress = 96;
+const STAR_MULTIVIEW_UNIFORM_BYTE_SIZE: wgpu::BufferAddress = SKY_MULTIVIEW_UNIFORM_BYTE_SIZE + 32;
 const SKY_VERTEX_FLOAT_COUNT: usize = 7; // position(3) + color(4)
 const SKY_VERTEX_BYTE_SIZE: wgpu::BufferAddress =
     (SKY_VERTEX_FLOAT_COUNT * std::mem::size_of::<f32>()) as wgpu::BufferAddress;
@@ -56,7 +56,7 @@ pub const MCLONE_STAR_COUNT: u32 = 2_048;
 pub const MCLONE_STAR_CATALOG_MAX_COUNT: u32 = 4_096;
 pub const REFERENCE_STAR_CANDIDATE_COUNT: u32 = 1_500;
 pub const REFERENCE_STAR_COUNT: u32 = 780;
-const STAR_INSTANCE_FLOAT_COUNT: usize = 6;
+const STAR_INSTANCE_FLOAT_COUNT: usize = 9;
 const STAR_INSTANCE_BYTE_SIZE: wgpu::BufferAddress =
     (STAR_INSTANCE_FLOAT_COUNT * std::mem::size_of::<f32>()) as wgpu::BufferAddress;
 const STAR_INDEX_COUNT: u32 = 6;
@@ -81,6 +81,7 @@ const GLOW_VERTEX_COUNT: usize = GLOW_RING_COUNT + 1;
 type SkyVertex = [f32; SKY_VERTEX_FLOAT_COUNT];
 type SunVertex = [f32; SUN_VERTEX_FLOAT_COUNT];
 type StarInstance = [f32; STAR_INSTANCE_FLOAT_COUNT];
+type StarUniformParameters = [f32; 8];
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct CelestialRenderStats {
@@ -1509,7 +1510,7 @@ impl SkyMultiviewRenderer {
         &self,
         queue: &wgpu::Queue,
         sky_view_projections: [Mat4; 2],
-        parameters: [f32; 4],
+        parameters: StarUniformParameters,
     ) {
         let bytes = star_multiview_uniform_bytes(sky_view_projections, parameters);
         queue.write_buffer(&self.star_uniform_buffer, 0, &bytes);
@@ -1637,7 +1638,12 @@ fn make_star_pipeline(
                     wgpu::VertexAttribute {
                         offset: 16,
                         shader_location: 1,
-                        format: wgpu::VertexFormat::Float32x2,
+                        format: wgpu::VertexFormat::Float32x4,
+                    },
+                    wgpu::VertexAttribute {
+                        offset: 32,
+                        shader_location: 2,
+                        format: wgpu::VertexFormat::Float32,
                     },
                 ],
             }],
@@ -1677,14 +1683,14 @@ fn mclone_star_catalog() -> Vec<StarInstance> {
     ];
     let mut catalog = Vec::with_capacity(MCLONE_STAR_COUNT as usize);
     for &(right_ascension, declination, color_class) in anchors {
-        catalog.push([
+        catalog.push(star_instance(
             right_ascension,
             declination.to_radians(),
             0.095,
             1.0,
             color_class,
             0.0,
-        ]);
+        ));
     }
     let mut state = 0x6d2b_79f5_u32;
     while catalog.len() < MCLONE_STAR_COUNT as usize {
@@ -1695,17 +1701,48 @@ fn mclone_star_catalog() -> Vec<StarInstance> {
         let size = 0.025 + brightness * 0.055;
         let color_class = (next_random(&mut state) % 3) as f32;
         let orientation = random_unit(&mut state) * std::f32::consts::TAU;
-        catalog.push([
+        catalog.push(star_instance(
             right_ascension,
             declination,
             size,
             brightness,
             color_class,
             orientation,
-        ]);
+        ));
     }
-    catalog.sort_by(|left, right| right[3].total_cmp(&left[3]));
+    catalog.sort_by(|left, right| right[5].total_cmp(&left[5]));
     catalog
+}
+
+fn star_instance(
+    right_ascension_turns: f32,
+    declination_radians: f32,
+    angular_size_degrees: f32,
+    brightness: f32,
+    color_class: f32,
+    orientation_radians: f32,
+) -> StarInstance {
+    let right_ascension = right_ascension_turns * std::f32::consts::TAU;
+    let half_size = SUN_DISTANCE * (angular_size_degrees.to_radians() * 0.5).tan();
+    [
+        right_ascension.sin(),
+        right_ascension.cos(),
+        declination_radians.sin(),
+        declination_radians.cos(),
+        half_size,
+        brightness,
+        color_class,
+        orientation_radians.sin(),
+        orientation_radians.cos(),
+    ]
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct ReferenceStarSeedRecord {
+    right_ascension_turns: f32,
+    declination_radians: f32,
+    angular_size_degrees: f32,
+    orientation_radians: f32,
 }
 
 /// Exact accepted candidates from Java 1.17.1 `LevelRenderer.drawStars`.
@@ -1714,8 +1751,24 @@ fn mclone_star_catalog() -> Vec<StarInstance> {
 /// path stores the equivalent direction, angular half-size, and random roll,
 /// then expands the same square from one immutable instance on the GPU.
 fn reference_star_catalog() -> Vec<StarInstance> {
+    reference_star_seed_records()
+        .into_iter()
+        .map(|record| {
+            star_instance(
+                record.right_ascension_turns,
+                record.declination_radians,
+                record.angular_size_degrees,
+                1.0,
+                1.0,
+                record.orientation_radians,
+            )
+        })
+        .collect()
+}
+
+fn reference_star_seed_records() -> Vec<ReferenceStarSeedRecord> {
     let mut random = JavaRandom::new(10_842);
-    let mut catalog = Vec::with_capacity(REFERENCE_STAR_CANDIDATE_COUNT as usize);
+    let mut records = Vec::with_capacity(REFERENCE_STAR_CANDIDATE_COUNT as usize);
     for _ in 0..REFERENCE_STAR_CANDIDATE_COUNT {
         let mut x = f64::from(random.next_float() * 2.0 - 1.0);
         let mut y = f64::from(random.next_float() * 2.0 - 1.0);
@@ -1738,16 +1791,14 @@ fn reference_star_catalog() -> Vec<StarInstance> {
             (-z).atan2(y).rem_euclid(std::f64::consts::TAU) / std::f64::consts::TAU;
         let declination = (-x).asin();
         let angular_size = 2.0 * (half_size / 100.0).atan().to_degrees();
-        catalog.push([
-            right_ascension as f32,
-            declination as f32,
-            angular_size as f32,
-            1.0,
-            1.0,
-            orientation as f32,
-        ]);
+        records.push(ReferenceStarSeedRecord {
+            right_ascension_turns: right_ascension as f32,
+            declination_radians: declination as f32,
+            angular_size_degrees: angular_size as f32,
+            orientation_radians: orientation as f32,
+        });
     }
-    catalog
+    records
 }
 
 #[derive(Clone, Copy)]
@@ -1795,7 +1846,10 @@ fn random_unit(state: &mut u32) -> f32 {
     (next_random(state) >> 8) as f32 / 16_777_216.0
 }
 
-fn celestial_star_draw(sky_state: SkyRenderState, full_count: u32) -> Option<(u32, [f32; 4])> {
+fn celestial_star_draw(
+    sky_state: SkyRenderState,
+    full_count: u32,
+) -> Option<(u32, StarUniformParameters)> {
     let celestial = sky_state.celestial()?;
     let count = celestial.settings.star_density.selected_count(full_count);
     if count == 0 {
@@ -1811,12 +1865,18 @@ fn celestial_star_draw(sky_state: SkyRenderState, full_count: u32) -> Option<(u3
     if visibility <= 0.001 {
         return None;
     }
+    let latitude = celestial.effective_latitude_degrees.to_radians();
+    let sidereal = celestial.local_sidereal_angle_turns * std::f32::consts::TAU;
     Some((
         count,
         [
-            celestial.effective_latitude_degrees.to_radians(),
-            celestial.local_sidereal_angle_turns * std::f32::consts::TAU,
+            sidereal.cos(),
+            sidereal.sin(),
+            latitude.cos(),
+            latitude.sin(),
             visibility,
+            0.0,
+            0.0,
             0.0,
         ],
     ))
@@ -1859,7 +1919,10 @@ fn star_instance_bytes(instances: &[StarInstance]) -> Vec<u8> {
     bytes
 }
 
-fn star_uniform_bytes(view_projection: Mat4, parameters: [f32; 4]) -> [u8; 80] {
+fn star_uniform_bytes(
+    view_projection: Mat4,
+    parameters: StarUniformParameters,
+) -> [u8; STAR_UNIFORM_BYTE_SIZE as usize] {
     let mut bytes = [0; STAR_UNIFORM_BYTE_SIZE as usize];
     bytes[..SKY_UNIFORM_BYTE_SIZE as usize]
         .copy_from_slice(&matrix_bytes(view_projection.to_cols_array_2d()));
@@ -1872,7 +1935,7 @@ fn star_uniform_bytes(view_projection: Mat4, parameters: [f32; 4]) -> [u8; 80] {
 
 fn star_multiview_uniform_bytes(
     view_projections: [Mat4; 2],
-    parameters: [f32; 4],
+    parameters: StarUniformParameters,
 ) -> [u8; STAR_MULTIVIEW_UNIFORM_BYTE_SIZE as usize] {
     let mut bytes = [0; STAR_MULTIVIEW_UNIFORM_BYTE_SIZE as usize];
     bytes[..SKY_UNIFORM_BYTE_SIZE as usize]
@@ -2392,8 +2455,13 @@ mod tests {
         assert_eq!(first, second);
         assert_eq!(first.len(), MCLONE_STAR_COUNT as usize);
         assert!(first.len() as u32 <= MCLONE_STAR_CATALOG_MAX_COUNT);
-        assert!(first.windows(2).all(|pair| pair[0][3] >= pair[1][3]));
+        assert!(first.windows(2).all(|pair| pair[0][5] >= pair[1][5]));
         assert!(star_instance_bytes(&first).len() < 128 * 1_024);
+        assert!(first.iter().all(|star| {
+            (star[0].hypot(star[1]) - 1.0).abs() < 1.0e-5
+                && (star[2].hypot(star[3]) - 1.0).abs() < 1.0e-5
+                && (star[7].hypot(star[8]) - 1.0).abs() < 1.0e-5
+        }));
 
         let base = SkyRenderState::mclone_fixed(0.5, std::f32::consts::PI);
         for (density, expected) in [
@@ -2420,16 +2488,18 @@ mod tests {
     #[test]
     fn retained_star_catalog_matches_java_10842_candidate_stream() {
         let catalog = reference_star_catalog();
+        let records = reference_star_seed_records();
         assert_eq!(catalog.len(), REFERENCE_STAR_COUNT as usize);
         assert_eq!(catalog, reference_star_catalog());
-        assert_eq!(catalog[0][0].to_bits(), 0x3f67_9c06);
-        assert_eq!(catalog[0][1].to_bits(), 0x3f0f_bf68);
-        assert_eq!(catalog[0][2].to_bits(), 0x3e30_3a8d);
-        assert_eq!(catalog[0][5].to_bits(), 0x408e_eb9c);
+        assert_eq!(records.len(), REFERENCE_STAR_COUNT as usize);
+        assert_eq!(records[0].right_ascension_turns.to_bits(), 0x3f67_9c06);
+        assert_eq!(records[0].declination_radians.to_bits(), 0x3f0f_bf68);
+        assert_eq!(records[0].angular_size_degrees.to_bits(), 0x3e30_3a8d);
+        assert_eq!(records[0].orientation_radians.to_bits(), 0x408e_eb9c);
         assert!(
-            catalog
+            records
                 .iter()
-                .all(|star| (0.171..=0.287).contains(&star[2]))
+                .all(|star| (0.171..=0.287).contains(&star.angular_size_degrees))
         );
     }
 
