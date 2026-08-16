@@ -1,7 +1,8 @@
 # Tactical 309: Procedural Horizon Lighting and Seam Convergence
 
-Status: Phase 0 and Phase 1 accepted; Phase 2 correction in progress after
-Human Review 2 rejected an open voxel-to-smooth geometry crack.
+Status: Phase 0 and Phase 1 accepted; Phase 2 correction implemented and
+awaiting renewed Human Review 2 after the first review rejected an open
+voxel-to-smooth geometry crack.
 
 Topic: `procedural-horizon-clipmap`
 
@@ -447,8 +448,8 @@ Accepted by the user on 2026-08-16.
 
 ## Phase 2: Voxel-to-Smooth Procedural Convergence
 
-Status: Human Review 2 rejected the first implementation; correction in
-progress.
+Status: Human Review 2 rejected the first implementation; correction
+implemented and awaiting renewed Human Review 2.
 
 - Reconcile top-face and slope-derived geometric shade over a stable bounded
   transition without blending geometry owners.
@@ -592,13 +593,72 @@ sky at straight edges, corners, slopes, water, negative coordinates,
 stationary cameras, rebases, and teleports without z-fighting or a horizontal
 collar. Replacement evidence reopens Human Review 2; Phase 3 stays blocked.
 
+### Phase 2 correction execution record
+
+Commit `d2e81187` implements the selected connector. Every reserved outer
+voxel cardinal-face vertex now evaluates the same stitched fine-edge endpoint
+that defines the spacing-two parent's piecewise-linear boundary. The face
+spans the lower/upper envelope of that continuous endpoint and the rounded
+voxel top, so its existing counter-clockwise winding remains valid even when
+the profiles cross within a one-block segment. Interior risers and the
+exact-frontier fallback curtain remain unchanged.
+
+This changes only the position of the already-submitted outer cardinal faces.
+It adds no vertices, horizontal overlap, geometry owner, uniform bytes, sample
+fields, buffers, bind groups, fixed allocations, or per-view products. One
+additional stitched-height evaluation runs only for outer boundary-face
+vertices. Mono, generated multiview, and the ordinary per-eye path continue to
+consume the same WGSL source.
+
+The replacement command was:
+
+```bash
+pnpm native:terrain-seam-review:capture -- \
+  --output /tmp/mclone-terrain-seam-review-hr2-connector \
+  --review-phase 2 \
+  --settle-frames 300 \
+  --skip-build
+```
+
+The schema-one receipt is
+`/tmp/mclone-terrain-seam-review-hr2-connector/receipt.json` and records
+revision `d2e81187`. All 48 1280-by-720 captures passed on their first attempt.
+Every composed capture has 25 exact columns, 160 ready clipmap slots,
+target-ready terrain, and drained failure-free vegetation; Exact Only reports
+no horizon allocation. The full natural, topology, term, and stability sheets
+were inspected at full resolution. No stable exposed-sky line remains along
+the voxel/smooth boundary, including the coast and water crossings, and the
+topology diagnostic shows no horizontal collar or second surface. The bounded
+connector does not read as a persistent wall in these review cameras.
+
+A fresh headed traversal moved the low camera from X8 to X80 at four blocks
+per second over 18 seconds and crossed the spacing-one tile boundary. All
+2,145 frames presented. The final interest center was chunk X4 with 49/49
+target chunks ready and zero pending jobs, publications, unloads, or render
+compile jobs. Terrain GPU duration was 0.128 ms median, 0.189 ms P95, and
+0.983 ms P99. The report is
+`/tmp/mclone-terrain-seam-phase2-connector-traversal.json`; its dirty-worktree
+flag reflects pre-existing out-of-scope documentation edits, while the binary
+and review receipt identify committed implementation revision `d2e81187`.
+
+Automated evidence passes:
+
+- `cargo test --manifest-path native/Cargo.toml -p mclone-terrain-view --lib`
+  (`100` passed, `1` GPU-only test ignored), including generated mono and
+  multiview WGSL validation and the parent-boundary connector contract;
+- `cargo build --manifest-path native/Cargo.toml -p mclone-native-client
+  --bin mclone-native-client`;
+- the strict 48-capture readiness, PNG, vegetation, and group-identity gates;
+  and
+- the 18-second headed traversal above.
+
 Gate — Human Review 2: the procedural topology becomes smoother with distance
 without exposed sky or a stable square/annulus in land color, water tint,
 lighting, texture contrast, or vegetation brightness.
 
 ## Phase 3: Exact-to-Voxel Frontier Convergence
 
-Status: blocked on Human Review 2.
+Status: blocked on renewed Human Review 2.
 
 - Compare controlled exact and voxel faces under equal atlas, biome, fog-off,
   transfer, full-sky, zero-block-light, and unoccluded inputs.

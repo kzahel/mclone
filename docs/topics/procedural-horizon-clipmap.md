@@ -181,8 +181,8 @@ diagnostic packet, and Human Review 1 accepted Phase 1's shared environmental
 illumination on 2026-08-16. Human Review 2 found the Phase 2 appearance
 transition substantially improved but rejected a blue exposed-sky crack where
 the rounded spacing-one voxel edge fails to terminate on the continuous
-spacing-two parent profile. A bounded endpoint-matched connector correction is
-in progress; Phase 3 remains blocked.
+spacing-two parent profile. The bounded endpoint-matched connector correction
+is implemented and awaiting renewed Human Review 2; Phase 3 remains blocked.
 The exact renderer's full-sky/zero-block-light RGB now applies once to every
 procedural terrain level, sampled and analytic water, and proxy tree after
 albedo and geometric shade composition. A fixed 32-image, two-seed native
@@ -209,11 +209,13 @@ analytic river texture strength uses that same continuous weight. A strict
 camera stability endpoints. A clean 18-second headed traversal crosses a
 spacing-one tile boundary with every frame presented and final view interest
 fully ready. No residency, ownership, geometry, sample-record, or fixed-byte
-contract changed. The correction keeps those constraints: the reserved outer
-voxel cardinal face will span to the actual stitched parent profile at both
+contract changed. Commit `d2e81187` keeps those constraints: the reserved outer
+voxel cardinal face now spans to the actual stitched parent profile at both
 segment endpoints, without horizontal overlap, a second geometry owner, or a
-crossfade. A dedicated zipper ring is retained only as the fallback if this
-bounded vertical connector reads as a wall in replacement evidence.
+crossfade. The strict replacement packet and headed traversal pass, and
+inspected natural/topology pixels show neither the stable blue opening nor a
+persistent wall. A dedicated zipper ring is retained only as the fallback if
+Human Review rejects this bounded vertical connector.
 Post-review Explorer evidence then showed that Slice 3B's viewer-forward
 anchor was useful for foreground diagnosis but confusing as the product
 default: it moves exact residency when yaw changes and can place exact terrain

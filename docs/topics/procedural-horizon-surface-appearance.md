@@ -33,7 +33,8 @@ owns the resulting appearance closeout as a phase-gated campaign. Human Review
 accepted the shared environmental-light result on 2026-08-16. Human Review 2
 found the Phase 2 lighting, material, water, and vegetation transition
 substantially improved but rejected an exposed-sky crack at the
-voxel-to-smooth geometric boundary. Its bounded correction is in progress.
+voxel-to-smooth geometric boundary. The bounded correction is implemented and
+awaiting renewed Human Review 2.
 
 Every procedural land level, sampled and analytic water, and proxy tree now
 consumes the exact renderer's full-sky/zero-block-light environmental RGB once
@@ -55,8 +56,11 @@ from the continuous parent boundary profile, leaving a sub-block blue line.
 The selected correction reuses the voxel shell's reserved outer cardinal faces
 as an endpoint-matched vertical connector to the actual spacing-two profile.
 It preserves one horizontal owner and adds neither overlapping terrain nor a
-geometry crossfade. A zipper ring remains the fallback only if that bounded
-curtain proves visually wall-like.
+geometry crossfade. Replacement natural and topology evidence shows no stable
+blue opening, horizontal collar, or persistent wall across the accepted coast,
+forest, stone, snow, and stability views; Human Review remains the gate. A
+zipper ring remains the fallback only if that bounded curtain is rejected as
+visually wall-like.
 Procedural local occlusion remains identity-white, so it may matter at the
 later exact/model-AO frontier but cannot explain the resolved global night
 failure. Seasonal solar-path policy and independent water geometry remain
