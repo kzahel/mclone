@@ -375,20 +375,25 @@ pub(crate) fn run_xr_emulation_screenshot(
     if capture.eye_pixel_difference_count == 0 {
         bail!("XR emulation eyes are pixel-identical; stereo parallax was not preserved");
     }
-    let missing_requested_ui = if options.pause_panel {
-        !summary.ui_active || summary.gui_command_count == 0
-    } else {
-        summary.ui_active
-    };
-    if embedded_preview.is_none() && (missing_requested_ui || summary.ui_panel.composite_count < 2)
-    {
-        bail!(
-            "XR emulation capture did not composite the requested world UI into both eyes: pause_panel={} active={} commands={} composites={}",
-            options.pause_panel,
-            summary.ui_active,
-            summary.gui_command_count,
-            summary.ui_panel.composite_count
-        );
+    if embedded_preview.is_none() {
+        let ui_mismatch = if options.pause_panel {
+            !summary.ui_active
+                || summary.gui_command_count == 0
+                || summary.ui_panel.composite_count < 2
+        } else {
+            summary.ui_active
+                || summary.gui_command_count != 0
+                || summary.ui_panel.composite_count != 0
+        };
+        if ui_mismatch {
+            bail!(
+                "XR emulation capture did not preserve the requested world UI state: pause_panel={} active={} commands={} composites={}",
+                options.pause_panel,
+                summary.ui_active,
+                summary.gui_command_count,
+                summary.ui_panel.composite_count
+            );
+        }
     }
     let seasonal_appearance_receipt_json =
         crate::offscreen_flat_client::seasonal_appearance_receipt_json(
