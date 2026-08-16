@@ -505,11 +505,14 @@ impl McloneSceneHost {
             status_overlay: StatusOverlay::hidden(),
             xr_render_path_state: None,
             pending_xr_render_mode_request: None,
-            sky: SkyRenderer::new_with_color_profile(
+            sky: SkyRenderer::new_with_color_profile_and_source(
                 device,
+                queue,
                 color_format,
                 render_options.color_profile,
-            ),
+                asset_source,
+            )
+            .context("initialize XR sun texture assets")?,
             screen_effects: ScreenEffectsRenderer::new(device, queue, color_format, asset_source)
                 .context("initialize XR screen effects renderer")?,
             terrain_view: None,
@@ -716,11 +719,14 @@ impl McloneSceneHost {
             status_overlay: StatusOverlay::hidden(),
             xr_render_path_state: None,
             pending_xr_render_mode_request: None,
-            sky: SkyRenderer::new_with_color_profile(
+            sky: SkyRenderer::new_with_color_profile_and_source(
                 device,
+                queue,
                 color_format,
                 render_options.color_profile,
-            ),
+                asset_source,
+            )
+            .context("initialize XR sun texture assets")?,
             screen_effects: ScreenEffectsRenderer::new(device, queue, color_format, asset_source)
                 .context("initialize XR screen effects renderer")?,
             terrain_view: None,
@@ -1010,6 +1016,7 @@ impl McloneSceneHost {
             pending_xr_render_mode_request: None,
             sky: SkyRenderer::new_with_color_profile(
                 device,
+                queue,
                 color_format,
                 render_options.color_profile,
             ),

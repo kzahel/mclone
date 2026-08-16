@@ -82,10 +82,24 @@ Original plan:
 - Validate: capture at dawn (orange band on the sun side).
 
 ### Phase 3 — sun, moon, stars
-- Textured sun/moon quads — pull `sun.png` / `moon_phases.png` into the asset
-  path; moon uses the 4×2 phase atlas. Star field with `getStarBrightness` fade.
-- Direct port of the celestial rig math.
-- Validate: captures across a full day cycle (noon, dusk, midnight, dawn).
+- Visible textured sun quad — **DONE 2026-08-16**. The shared sky renderer
+  resolves the selected pack's Mclone or Minecraft `sun.png`, with a generated
+  proprietary-free fallback for packs that intentionally contain neither.
+  The ordinary fixed celestial rig drives one quad implementation in mono,
+  placed/per-eye, and full-frame multiview paths. The same CPU-side texture is
+  retained across renderer-device rebuilds.
+- Moon quad and 4×2 `moon_phases.png` atlas — still planned.
+- Star field with `getStarBrightness` fade — still planned.
+- Validate moon/stars with captures across a full day cycle after they land.
+
+The first sun pixel gate used frozen `day_time=6000` captures. Looking straight
+up produced an inspected centered textured sun at
+`/tmp/mclone-t307-baseline-sun-up.png`; the ordinary terrain view remained
+coherent in `/tmp/mclone-t307-baseline-sun-noon.png`. A synthetic-stereo frame
+also completed through the shared per-eye sky path at
+`/tmp/mclone-t307-baseline-sun-stereo.png`. These temporary paths are execution
+evidence, not repository artifacts. Moon and stars remain outside Tactical
+307's acceptance requirement.
 
 This phase remains the owner of the ordinary visible sun/moon/star baseline.
 Tactical

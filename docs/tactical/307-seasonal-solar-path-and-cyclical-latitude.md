@@ -382,7 +382,10 @@ independent until separate map review supports a stronger coupling.
 
 ### Slice 0: Baselines, ownership audit, and Tactical 036 prerequisite
 
-Status: planned.
+Status: in progress 2026-08-16. Tactical 036's shared visible textured sun is
+complete in mono, per-eye, and multiview renderer paths, with inspected frozen
+noon pixels. The broader fixed-time baseline/cost matrix remains part of Slice
+4 capture automation.
 
 - Confirm default Mclone creation and existing review worlds use the unbounded
   plane; pin an explicitly created cylinder only as secondary evidence.

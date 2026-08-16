@@ -375,7 +375,9 @@ impl FlatRenderResources {
             chunk_atlas,
         )
         .context("failed to initialize chunk draw resources")?;
-        let sky = SkyRenderer::new_with_config(device, render_config);
+        let sky =
+            SkyRenderer::new_with_config_and_source(device, queue, render_config, asset_source)
+                .context("failed to initialize sun texture assets")?;
         let actors = ActorDrawResources::new(
             device,
             queue,
