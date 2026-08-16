@@ -52,7 +52,7 @@ const SUN_HALO_MODE: f32 = 2.0;
 const SQUARE_MOON_MODE: f32 = 3.0;
 const REFERENCE_MOON_MODE: f32 = 4.0;
 const MCLONE_SUN_HALO_ANGULAR_DIAMETER_DEGREES: f32 = 2.4;
-pub const MCLONE_STAR_COUNT: u32 = 2_048;
+pub const MCLONE_STAR_COUNT: u32 = 1_536;
 pub const MCLONE_STAR_CATALOG_MAX_COUNT: u32 = 4_096;
 pub const REFERENCE_STAR_CANDIDATE_COUNT: u32 = 1_500;
 pub const REFERENCE_STAR_COUNT: u32 = 780;
@@ -2465,9 +2465,9 @@ mod tests {
 
         let base = SkyRenderState::mclone_fixed(0.5, std::f32::consts::PI);
         for (density, expected) in [
-            (mclone_season::CelestialStarDensity::Quarter, 512),
-            (mclone_season::CelestialStarDensity::Half, 1_024),
-            (mclone_season::CelestialStarDensity::Full, 2_048),
+            (mclone_season::CelestialStarDensity::Quarter, 384),
+            (mclone_season::CelestialStarDensity::Half, 768),
+            (mclone_season::CelestialStarDensity::Full, 1_536),
         ] {
             let mut settings = CelestialDebugSettings::default();
             settings.star_density = density;
