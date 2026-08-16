@@ -152,6 +152,10 @@ burn-down.
 > still lacks a procedural-horizon renderer.
 > When a slice closes a gap, update the affected cell **and** link the tactical.
 > If a cell and the code disagree, the code wins — fix the cell.
+> Refreshed on 2026-08-16 after Tactical 310 reproduced a Web-only local-world
+> entry defect below the shared scene host. Local-session parity is partial
+> until native and Web consume one resolved semantic launch plan and the
+> non-default conformance gates in that tactical pass.
 
 ## Platform Classes And Target State
 
@@ -243,11 +247,14 @@ Reading the matrix:
   `FlatInputFrame`, plus shared startup readiness CLI with desktop window mode,
   but still lacks a long-lived client loop, broader input stream, and frame
   sinks. Tactical 105 owns that cleanup.
-- **web** now uses the same shared scene-policy host as the other clients.
-  Product gaps include
-  connect-screen text/smoke, full persistence lifecycle/metadata beyond the
-  IndexedDB catalog plus chunk/entity records, audio, and the exact four
-  reason-bearing feature-axis exceptions tracked below.
+- **web** uses the same shared scene-policy host as the other clients, but its
+  local-runtime assembly below that host still re-lowers semantic fields. It
+  currently ignores profile-preferred entry and leaves neighboring settings
+  without an explicit disposition; Tactical 310 owns the convergence. Other
+  product gaps include connect-screen text/smoke, full persistence
+  lifecycle/metadata beyond the IndexedDB catalog plus chunk/entity records,
+  audio, and the exact four reason-bearing feature-axis exceptions tracked
+  below.
 - **desktop-XR** has render/locomotion parity and a shared pause/options
   world-panel menu with controller-ray pointer. User headset validation says the
   menu works mostly fine; automated menu/replacement smoke, comfort tuning, and
@@ -291,7 +298,7 @@ use (and should) · — n/a.
 | `app-runtime::frame_render` | ✅ | ✅ (via scene host) | ✅ | ✅ (via scene host) | `native:desktop-offscreen:smoke`; `native:web:smoke` |
 | `app-runtime::local_single_view` (native scene runtime) | ✅ (composed by the scene host) | — (wasm-gated) | ✅ (composed by the scene host) | ✅ (composed by the scene host) | `cargo test -p mclone-app-runtime`; `cargo test -p mclone-scene` |
 | `app-runtime::host_mode` (local vs remote) | ✅ | ✅ (one browser-Rust bootstrap selects local worker/IndexedDB or remote WebSocket; TS supplies only connection mechanics) | ✅ | ✅ (local/remote via scene host) | `cargo test -p mclone-app-runtime host_mode`; `pnpm native:web:build`; `pnpm native:web:remote-smoke`; Tactical 206 |
-| `app-runtime::session` (world-session coordinator) | ✅ (desktop flat dynamic; desktop XR dynamic via scene host, automated XR replacement-click smoke pending) | ✅ (initial local/remote plus menu New World restart; JoinRemote reconnect wired, connect-screen smoke pending) | ✅ (shared Mono host initial local/remote and New World / Join Remote replacement; AVD New World session smoke) | ✅ (initial local/remote plus shared scene replacement; Quest in-headset New World replacement smoke, automated controller replacement-click smoke pending) | `cargo test -p mclone-app-runtime`; `cargo test -p mclone-scene`; `pnpm native:web:app-smoke`; `pnpm native:web:remote-smoke`; `pnpm native:android:avd-session-smoke`; `pnpm native:android-xr:session-smoke` |
+| `app-runtime::session` (world-session coordinator) | ✅ (desktop flat dynamic; desktop XR dynamic via scene host, automated XR replacement-click smoke pending) | ◐ (shared initial local/remote and menu restart policy, but app-local runner lowering ignores profile-preferred entry and silently defaults other semantics; Tactical 310) | ✅ (shared Mono host initial local/remote and New World / Join Remote replacement; AVD New World session smoke) | ✅ (initial local/remote plus shared scene replacement; Quest in-headset New World replacement smoke, automated controller replacement-click smoke pending) | `cargo test -p mclone-app-runtime`; `cargo test -p mclone-scene`; `pnpm native:web:app-smoke`; `pnpm native:web:remote-smoke`; `pnpm native:android:avd-session-smoke`; `pnpm native:android-xr:session-smoke`; Tactical 310 |
 | `app-runtime::client_session_policy` (display-neutral session UI action policy) | ✅ (desktop flat/offscreen and desktop XR via `mclone-scene` execute shared seed/join/start/quit effects, status/restoration/startup projection, and teardown/quit-title transitions; native startup payloads remain host-local) | ✅ (web adapter executes shared seed/join/start/quit effects, status/restoration/startup projection, and teardown/quit-title transitions; JS async worker startup remains host-local) | ✅ (shared Mono host executes seed/join/start/quit effects and failed-start UI restoration; Android activity/surface remains local) | ✅ (scene host executes shared seed/join/start/quit effects, status/startup projection, failed-start UI restoration, and quit-title transitions; Android activity/session adapters remain host-local) | `cargo test -p mclone-app-runtime client_session_policy`; `cargo test -p mclone-native-client ui_action_routing`; `cargo test -p mclone-scene`; `pnpm native:desktop-offscreen:smoke`; `pnpm native:xr:mac:wivrn:smoke`; `pnpm native:android:avd-session-smoke`; `pnpm native:android-xr:session-smoke`; tactical 141 Slice 4d; tactical 143 Slice 4a; tactical 143 Slice 6; tactical 143 Slice 7 |
 | `app-runtime::client_catalog_policy` (world catalog UI/action policy) | ✅ (desktop adapter and desktop XR scene execute native catalog effects) | ✅ (IndexedDB promise adapter executes controller effects; TS storage executor delegates id validation, id generation, ordering, active-delete, and message text to Rust wasm policy helpers) | ✅ (shared Mono host executes native catalog effects against the Android app-private world root; AVD New World flow covered) | ✅ (scene host executes shared catalog effects with an Android app-private world root) | `cargo test -p mclone-app-runtime client_catalog_policy`; `cargo test -p mclone-scene`; `pnpm native:web:typecheck`; `pnpm native:web:catalog-smoke`; `pnpm native:android:avd-session-smoke`; `pnpm native:xr:mac:wivrn:mclone`; `pnpm native:android-xr:apk`; tactical 141 Slice 3; tactical 143 Slice 3; tactical 143 Slice 6; tactical 143 Slice 7; tactical 143 Slice 7a |
 | `app-runtime::client_experience` (catalog/session/settings facade) | ✅ (desktop/offscreen adapter and desktop XR scene execute facade effects; host window/runtime/pointer-lock/OpenXR work remains adapter-local) | ✅ (web adapter executes facade effects; IndexedDB promises, worker startup, and JS result writing remain adapter-local) | ✅ (shared Mono host executes facade effects; Android activity, raw touch translation, surface, and storage roots remain adapter-local) | ✅ (scene host executes facade catalog/session/settings/capability effects; Android activity/session adapters and app-private storage roots remain host-local) | `cargo test -p mclone-app-runtime`; `cargo test -p mclone-native-client ui_action_routing`; `cargo test -p mclone-native-client catalog_`; `cargo test -p mclone-scene`; `pnpm native:desktop-offscreen:smoke`; `pnpm native:web:typecheck`; `pnpm native:web:smoke`; `pnpm native:web:catalog-smoke`; `pnpm native:android:avd-smoke`; `pnpm native:android:avd-session-smoke`; `pnpm native:xr:mac:wivrn:smoke`; `pnpm native:android-xr:session-smoke`; tactical 143 Slice 2; tactical 143 Slice 4; tactical 143 Slice 6; tactical 143 Slice 7 |
@@ -304,8 +311,9 @@ use (and should) · — n/a.
 | `mclone-xr-{host,graphics}` | ✅ (desktop XR) | — | — | ✅ | `native:xr:*`; `native:android-xr:validate` |
 
 The reuse story in one line: **desktop flat, offscreen/screenshot/perf, flat
-Android, desktop XR, Android XR, and web now share `mclone-scene`; the old web
-runtime/render-policy fork is deleted, while browser mechanisms remain typed
+Android, desktop XR, Android XR, and web share `mclone-scene`, but native and
+Web still have separate last-mile local-session semantic projectors; Tactical
+310 owns removing that remaining fork while browser mechanisms stay typed
 services and offscreen still lacks an exposed long-lived source/sink mode.**
 Concretely:
 
@@ -545,6 +553,14 @@ lower-level render residency and explicit product/evidence gaps:
    with strict-equality version match (independently-deployed web/APK/desktop
    builds will skew). Real-time co-presence and mixed-build cross-play both
    depend on this. (tactical 009 deferred these)
+9. **Close shared local-session semantic lowering.** Native and Web currently
+   project shared scene/session intent into their runner configurations by
+   copying fields independently. That allowed Web to ignore the preferred
+   Mclone Overworld entry center and silently default another supported value.
+   Tactical 310 replaces those projections with one resolved launch plan,
+   requires an explicit applied/normalized/unsupported disposition for every
+   platform-sensitive value, and adds non-default receipt plus real menu-flow
+   gates before this boundary can return to full parity.
 
 ## Definition Of Done (the rule that prevents re-forking)
 

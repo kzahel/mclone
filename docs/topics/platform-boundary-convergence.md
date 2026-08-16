@@ -2,7 +2,16 @@
 
 Topic: `platform-boundary-convergence`
 
-Status: **closed as of 2026-07-21 under the Phase 9 scope**. Tactical
+Status: **reopened 2026-08-16 by concrete post-closure evidence**. Tactical
+[`310`](../tactical/310-shared-local-session-launch-semantics.md) reproduced a
+browser-only local-world entry defect and found a broader semantic-lowering
+gap: native and Web independently project shared local-session policy into
+runner configuration, so a value can reach `McloneSceneHostOptions` and still
+be ignored or defaulted by one host. The earlier Phase 9 audit remains valid
+for its coarse-operation/ABI scope, but it did not cover semantic consumption
+inside local runtime assembly.
+
+Before this reopening, Tactical
 [`207`](../tactical/207-shared-scene-operation-coordinator.md) completed
 Phases 0–6 on 2026-07-21. The Phase 7 independent fixpoint audit
 ([`211`](../tactical/211-platform-boundary-fixpoint-audit.md)) completed the
@@ -149,6 +158,7 @@ row when it closes, including what it deliberately left open.
 | 211 independent fixpoint audit | 2026-07-21 | 207 claims verified by fresh reading (same shared coordinator on native and web, opaque drain real, zero async-borrow exports, one token family); parent held open | fixpoint proof is compile/source-lock only, export pin covers only `WebSceneHost`, ~800-line catalog-storage policy in web Rust, duplicated catalog apply loop with drift, dead web frame timing, smoke exports on the production ABI, rim in-flight guards; backlog chartered → 212 |
 | 212 audit-remediation closeout | 2026-07-21 | mandatory backlog complete: catalog policy moved shared, apply/timing paths converged, production/smoke ABI split, rim guards deleted, behavioral wasm fixpoint passed; combined boundary 24,121 → 23,229 | parent held open for independent Phase 9 audit; optional mechanical hygiene skipped; unchanged actor-ID/age lifecycle fixture remains separate baseline debt |
 | 213 independent second fixpoint audit | 2026-07-21 | closure protocol passed at clean revision `6b1881de`: behavioral fixpoint and widened ABI pins passed, one token family remained, headed active-world trace advanced frame/render/input +2/+2/+2, combined boundary remained 23,229 | nothing remains under the audited platform-boundary scope; optional physical storage lowering and the unrelated actor-ID/age lifecycle fixture remain separate concerns |
+| 310 local-session launch audit | 2026-08-16 | parent reopened from a production Web Worker reproduction; no implementation claim | Web ignores shared profile-preferred entry and inherits the raw scene center; Web lowering also drops a supported non-default light-status batch value; cadence, authority lighting, adaptive publication, render-capacity, and local-identity dispositions require explicit closure. Tactical 310 defines one shared resolved launch plan, cross-host receipts, and a later independent re-audit gate. |
 
 ## Measured State (2026-07-21 Audit)
 
@@ -235,6 +245,7 @@ remaining-work note.
 | 7. Independent fixpoint audit | **complete 2026-07-21** ([Tactical 211](../tactical/211-platform-boundary-fixpoint-audit.md)) | Fresh code review by a reviewer/agent outside the implementation series | Outcome (b) of the protocol: precise remaining work appended (fixpoint-evidence gaps G1/G2, findings F1–F6, decision D1) and implementation reopened as Phase 8 |
 | 8. Audit-remediation backlog | **complete 2026-07-21** ([Tactical 212](../tactical/212-boundary-audit-cleanup-backlog.md)) | Land the trailing 207 cleanup, fix the audit findings (catalog-plan hoist, apply-loop dedup, timing convergence, smoke-ABI split, rim-guard collapse), and upgrade the fixpoint to a behavioral demonstration with widened export pins | Mandatory Slices 0–6 closed with their gates; scoreboard column appended; combined boundary 24,121 → 23,229 |
 | 9. Second fixpoint audit | **complete 2026-07-21; pass** ([Tactical 213](../tactical/213-platform-boundary-second-fixpoint-audit.md)) | Short re-audit against the closure protocol, first checking the behavioral fixpoint test and widened pins from 212 | Closure protocol passed at clean revision `6b1881de`; parent closed under the audited scope |
+| 10. Shared local-session launch semantics | **proposed 2026-08-16** ([Tactical 310](../tactical/310-shared-local-session-launch-semantics.md)) | Replace native/Web field-by-field local-session lowering with one resolved semantic launch plan; classify every neighboring policy value; add non-default conformance and real default-menu entry gates | Native and Web consume one nested plan, the reproduced Web seed accepts the profile-selected dry center, no audited value silently defaults, and an implementation-independent follow-up audit passes the reopened closure protocol |
 
 ### Phase Boundaries
 
@@ -314,10 +325,18 @@ fork-site census including positive `wasm32` gates and `cfg_attr` is
 
 ## Immediate Next Workstream
 
-None under this concern. Tactical 213 independently passed the closure
-protocol at clean revision `6b1881de`; normal regression maintenance applies.
-Reopen only when fresh evidence identifies a concrete boundary regression,
-then append that evidence and a bounded exit gate to the pass ledger.
+Execute Tactical 310. Its investigation is the concrete later evidence
+required by the reopening protocol: the shared scene correctly records a
+profile-preferred local entry, while Web runtime lowering discards that intent
+and sends an inherited raw center. The same field-by-field seam drops another
+supported non-default value and leaves several neighboring values without an
+explicit cross-host disposition.
+
+Tactical 310 may close its implementation scope after one shared resolved
+launch plan, the disposition ledger, semantic receipts, source/API locks, and
+the default-menu product gates pass. It may not close this parent. A separately
+staffed independent audit must repeat the fixpoint protocol against the new
+local-session semantic scope.
 
 Tactical 212 resolved the `WORLD_DB_VERSION` orphan-store decision without a
 runtime migration because there are no web-world preservation consumers and
