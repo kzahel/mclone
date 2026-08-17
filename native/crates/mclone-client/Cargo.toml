@@ -12,6 +12,7 @@ mclone-core.workspace = true
 mclone-light.workspace = true
 mclone-path.workspace = true
 mclone-protocol.workspace = true
+mclone-season.workspace = true
 
 [lib]
 name = "mclone_client"

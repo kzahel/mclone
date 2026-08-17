@@ -1320,6 +1320,7 @@ mod tests {
             target_minecraft_version: WORLD_METADATA_TARGET_MINECRAFT_VERSION.to_owned(),
             seed: 44,
             world_generation_profile: WorldGenerationProfile::FlatGrassV1,
+            season_calendar_policy: mclone_season::SeasonCalendarPolicy::Disabled,
             starter_content: crate::StarterContentDescriptor::IntroHomesteadV1,
             realized_starter_plan: Some(crate::RealizedStarterPlanIdentity::new(1, 2, [0x44; 32])),
             world_behavior_profile: WorldBehaviorProfile::Mutable,

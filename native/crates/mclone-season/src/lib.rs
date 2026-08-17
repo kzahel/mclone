@@ -30,6 +30,15 @@ pub const MCLONE_AXIAL_TILT_DEGREES: f64 = 27.0;
 /// Fixed-point resolution for client-local Debug orbital state.
 pub const ORBITAL_PHASE_STEPS: u16 = 10_000;
 
+/// First persisted original-Mclone calendar rule.
+pub const SEASON_CALENDAR_RULE_REVISION: u16 = 1;
+
+/// Accepted first product year length from Tactical 316.
+pub const MCLONE_CALENDAR_DAYS_PER_YEAR: u16 = 56;
+
+/// Civil day zero is the northward equinox.
+pub const MCLONE_CALENDAR_PHASE_ORIGIN_DAY: u16 = 0;
+
 /// Fixed-point resolution for the client-local lunar presentation cycle.
 pub const LUNAR_PHASE_STEPS: u16 = 10_000;
 
@@ -82,6 +91,187 @@ impl OrbitalPhase {
         f64::from(self.0) / f64::from(ORBITAL_PHASE_STEPS)
     }
 }
+
+/// Versioned global calendar selection. The advancing value remains the
+/// server-owned cumulative civil `day_time`; this policy is immutable world
+/// interpretation rather than a second clock.
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+pub enum SeasonCalendarPolicy {
+    #[default]
+    Disabled,
+    Orbital {
+        rule_revision: u16,
+        days_per_year: u16,
+        phase_origin_day: u16,
+    },
+}
+
+impl SeasonCalendarPolicy {
+    pub const MCLONE_OVERWORLD_V1: Self = Self::Orbital {
+        rule_revision: SEASON_CALENDAR_RULE_REVISION,
+        days_per_year: MCLONE_CALENDAR_DAYS_PER_YEAR,
+        phase_origin_day: MCLONE_CALENDAR_PHASE_ORIGIN_DAY,
+    };
+
+    pub const fn orbital(rule_revision: u16, days_per_year: u16, phase_origin_day: u16) -> Self {
+        Self::Orbital {
+            rule_revision,
+            days_per_year,
+            phase_origin_day,
+        }
+    }
+
+    pub const fn enabled(self) -> bool {
+        matches!(self, Self::Orbital { .. })
+    }
+
+    pub const fn rule_revision(self) -> Option<u16> {
+        match self {
+            Self::Disabled => None,
+            Self::Orbital { rule_revision, .. } => Some(rule_revision),
+        }
+    }
+
+    pub const fn days_per_year(self) -> Option<u16> {
+        match self {
+            Self::Disabled => None,
+            Self::Orbital { days_per_year, .. } => Some(days_per_year),
+        }
+    }
+
+    pub const fn phase_origin_day(self) -> Option<u16> {
+        match self {
+            Self::Disabled => None,
+            Self::Orbital {
+                phase_origin_day, ..
+            } => Some(phase_origin_day),
+        }
+    }
+
+    pub const fn validate(self) -> Result<(), SeasonCalendarError> {
+        match self {
+            Self::Disabled => Ok(()),
+            Self::Orbital {
+                rule_revision,
+                days_per_year,
+                phase_origin_day,
+            } => {
+                if rule_revision == 0 {
+                    return Err(SeasonCalendarError::ZeroRuleRevision);
+                }
+                if rule_revision != SEASON_CALENDAR_RULE_REVISION {
+                    return Err(SeasonCalendarError::UnknownRuleRevision {
+                        found: rule_revision,
+                        supported: SEASON_CALENDAR_RULE_REVISION,
+                    });
+                }
+                if days_per_year == 0 {
+                    return Err(SeasonCalendarError::ZeroDaysPerYear);
+                }
+                if phase_origin_day >= days_per_year {
+                    return Err(SeasonCalendarError::PhaseOriginOutsideYear {
+                        phase_origin_day,
+                        days_per_year,
+                    });
+                }
+                Ok(())
+            }
+        }
+    }
+
+    pub fn sample(
+        self,
+        civil_time_ticks: u64,
+    ) -> Result<Option<AuthoritativeCalendarSample>, SeasonCalendarError> {
+        self.validate()?;
+        let Self::Orbital {
+            days_per_year,
+            phase_origin_day,
+            ..
+        } = self
+        else {
+            return Ok(None);
+        };
+
+        let day_length = mclone_core::time::DAY_LENGTH_TICKS;
+        let absolute_day = civil_time_ticks / day_length;
+        let day_tick = (civil_time_ticks % day_length) as u32;
+        let days_per_year_u64 = u64::from(days_per_year);
+        let civil_day_of_year = absolute_day % days_per_year_u64;
+        let shifted_day = (civil_day_of_year + days_per_year_u64 - u64::from(phase_origin_day))
+            % days_per_year_u64;
+        let phase_ticks = shifted_day
+            .saturating_mul(day_length)
+            .saturating_add(u64::from(day_tick));
+        let year_ticks = days_per_year_u64.saturating_mul(day_length);
+        let phase_steps = (u128::from(phase_ticks) * u128::from(ORBITAL_PHASE_STEPS)
+            / u128::from(year_ticks)) as u16;
+
+        Ok(Some(AuthoritativeCalendarSample {
+            civil_time_ticks,
+            absolute_day,
+            day_tick,
+            year_index: absolute_day / days_per_year_u64,
+            days_per_year,
+            day_of_year: civil_day_of_year as u16 + 1,
+            orbital_phase: OrbitalPhase::from_steps_wrapped(phase_steps),
+        }))
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct AuthoritativeCalendarSample {
+    pub civil_time_ticks: u64,
+    pub absolute_day: u64,
+    pub day_tick: u32,
+    pub year_index: u64,
+    pub days_per_year: u16,
+    /// One-based display day in the selected civil year.
+    pub day_of_year: u16,
+    pub orbital_phase: OrbitalPhase,
+}
+
+impl AuthoritativeCalendarSample {
+    pub const fn days_per_year(self) -> u16 {
+        self.days_per_year
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SeasonCalendarError {
+    ZeroRuleRevision,
+    UnknownRuleRevision {
+        found: u16,
+        supported: u16,
+    },
+    ZeroDaysPerYear,
+    PhaseOriginOutsideYear {
+        phase_origin_day: u16,
+        days_per_year: u16,
+    },
+}
+
+impl std::fmt::Display for SeasonCalendarError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ZeroRuleRevision => formatter.write_str("season calendar rule revision is zero"),
+            Self::UnknownRuleRevision { found, supported } => write!(
+                formatter,
+                "unknown season calendar rule revision {found}; supported revision is {supported}"
+            ),
+            Self::ZeroDaysPerYear => formatter.write_str("season calendar year has zero days"),
+            Self::PhaseOriginOutsideYear {
+                phase_origin_day,
+                days_per_year,
+            } => write!(
+                formatter,
+                "season calendar phase origin day {phase_origin_day} is outside {days_per_year}-day year"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for SeasonCalendarError {}
 
 /// A normalized synodic lunar turn stored without floating-point drift.
 ///
@@ -902,6 +1092,8 @@ pub struct SeasonPreviewSettings {
     pub enabled: bool,
     /// Admits exact-terrain tint, vegetation dormancy, and derived snow.
     pub appearance_enabled: bool,
+    /// Chooses the authoritative world phase or the unsaved Debug slider.
+    pub phase_source: SeasonPhaseSource,
     pub orbital_phase: OrbitalPhase,
     pub latitude_source: LatitudeSource,
     pub manual_latitude: PreviewLatitude,
@@ -915,6 +1107,7 @@ impl Default for SeasonPreviewSettings {
         Self {
             enabled: false,
             appearance_enabled: false,
+            phase_source: SeasonPhaseSource::WorldCalendar,
             orbital_phase: OrbitalPhase::NORTHWARD_EQUINOX,
             latitude_source: LatitudeSource::World,
             manual_latitude: PreviewLatitude::EQUATOR,
@@ -925,12 +1118,62 @@ impl Default for SeasonPreviewSettings {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+pub enum SeasonPhaseSource {
+    #[default]
+    WorldCalendar,
+    ManualPreview,
+}
+
+impl SeasonPhaseSource {
+    pub const fn next(self) -> Self {
+        match self {
+            Self::WorldCalendar => Self::ManualPreview,
+            Self::ManualPreview => Self::WorldCalendar,
+        }
+    }
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::WorldCalendar => "World Calendar",
+            Self::ManualPreview => "Manual Preview",
+        }
+    }
+}
+
 impl SeasonPreviewSettings {
     /// Whether shared local climate evaluation is needed for either visual
     /// consumer. Neither flag mutates authoritative game or day time.
     pub const fn evaluation_enabled(self) -> bool {
         self.enabled || self.appearance_enabled
     }
+
+    /// Resolves the frame phase without allowing a manual preview value to
+    /// stand in for a missing authoritative calendar.
+    pub const fn resolve_phase(
+        self,
+        calendar: Option<AuthoritativeCalendarSample>,
+    ) -> Option<ResolvedSeasonPhase> {
+        match self.phase_source {
+            SeasonPhaseSource::WorldCalendar => match calendar {
+                Some(calendar) => Some(ResolvedSeasonPhase {
+                    orbital_phase: calendar.orbital_phase,
+                    calendar: Some(calendar),
+                }),
+                None => None,
+            },
+            SeasonPhaseSource::ManualPreview => Some(ResolvedSeasonPhase {
+                orbital_phase: self.orbital_phase,
+                calendar: None,
+            }),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ResolvedSeasonPhase {
+    pub orbital_phase: OrbitalPhase,
+    pub calendar: Option<AuthoritativeCalendarSample>,
 }
 
 /// Dimension-level selection for mapping world coordinates to solar latitude.
@@ -1296,6 +1539,11 @@ fn normalize3(value: [f64; 3]) -> Option<[f64; 3]> {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SolarFrameDiagnostics {
     pub settings: SeasonPreviewSettings,
+    /// Orbital phase actually consumed by this frame after resolving the
+    /// selected world-calendar or manual-preview source.
+    pub orbital_phase: OrbitalPhase,
+    /// Present only when the selected source is an authoritative calendar.
+    pub calendar: Option<AuthoritativeCalendarSample>,
     pub policy: SolarCoordinatePolicy,
     pub observer_world_x: f64,
     pub observer_world_z: f64,
@@ -1478,6 +1726,131 @@ mod tests {
     }
 
     #[test]
+    fn authoritative_calendar_hits_exact_56_day_landmarks() {
+        let day = mclone_core::time::DAY_LENGTH_TICKS;
+        let policy = SeasonCalendarPolicy::MCLONE_OVERWORLD_V1;
+        let expected = [
+            (0, 0, 1, 0),
+            (14, 0, 15, ORBITAL_PHASE_STEPS / 4),
+            (28, 0, 29, ORBITAL_PHASE_STEPS / 2),
+            (42, 0, 43, ORBITAL_PHASE_STEPS * 3 / 4),
+            (56, 1, 1, 0),
+        ];
+        for (absolute_day, year_index, day_of_year, phase_steps) in expected {
+            let sample = policy.sample(absolute_day * day).unwrap().unwrap();
+            assert_eq!(sample.absolute_day, absolute_day);
+            assert_eq!(sample.year_index, year_index);
+            assert_eq!(sample.day_of_year, day_of_year);
+            assert_eq!(sample.day_tick, 0);
+            assert_eq!(sample.orbital_phase.steps(), phase_steps);
+        }
+    }
+
+    #[test]
+    fn authoritative_calendar_uses_fractional_day_and_wraps_without_drift() {
+        let day = mclone_core::time::DAY_LENGTH_TICKS;
+        let policy = SeasonCalendarPolicy::MCLONE_OVERWORLD_V1;
+        let half_first_day = policy.sample(day / 2).unwrap().unwrap();
+        assert!(half_first_day.orbital_phase.steps() > 0);
+        assert!(half_first_day.orbital_phase.steps() < ORBITAL_PHASE_STEPS / 56);
+
+        let last = policy
+            .sample(u64::from(MCLONE_CALENDAR_DAYS_PER_YEAR) * day - 1)
+            .unwrap()
+            .unwrap();
+        let wrapped = policy
+            .sample(u64::from(MCLONE_CALENDAR_DAYS_PER_YEAR) * day)
+            .unwrap()
+            .unwrap();
+        assert_eq!(last.year_index, 0);
+        assert_eq!(last.day_of_year, MCLONE_CALENDAR_DAYS_PER_YEAR);
+        assert!(last.orbital_phase.steps() < ORBITAL_PHASE_STEPS);
+        assert_eq!(wrapped.year_index, 1);
+        assert_eq!(wrapped.day_of_year, 1);
+        assert_eq!(wrapped.orbital_phase, OrbitalPhase::NORTHWARD_EQUINOX);
+    }
+
+    #[test]
+    fn authoritative_calendar_is_bounded_at_maximum_civil_time() {
+        let sample = SeasonCalendarPolicy::MCLONE_OVERWORLD_V1
+            .sample(u64::MAX)
+            .unwrap()
+            .unwrap();
+        assert!((1..=MCLONE_CALENDAR_DAYS_PER_YEAR).contains(&sample.day_of_year));
+        assert!(sample.day_tick < mclone_core::time::DAY_LENGTH_TICKS as u32);
+        assert!(sample.orbital_phase.steps() < ORBITAL_PHASE_STEPS);
+    }
+
+    #[test]
+    fn authoritative_calendar_rejects_invalid_policies() {
+        assert_eq!(
+            SeasonCalendarPolicy::orbital(0, 56, 0).validate(),
+            Err(SeasonCalendarError::ZeroRuleRevision)
+        );
+        assert_eq!(
+            SeasonCalendarPolicy::orbital(1, 0, 0).validate(),
+            Err(SeasonCalendarError::ZeroDaysPerYear)
+        );
+        assert_eq!(
+            SeasonCalendarPolicy::orbital(2, 56, 0).validate(),
+            Err(SeasonCalendarError::UnknownRuleRevision {
+                found: 2,
+                supported: 1,
+            })
+        );
+        assert_eq!(
+            SeasonCalendarPolicy::orbital(1, 56, 56).validate(),
+            Err(SeasonCalendarError::PhaseOriginOutsideYear {
+                phase_origin_day: 56,
+                days_per_year: 56,
+            })
+        );
+        assert_eq!(SeasonCalendarPolicy::Disabled.sample(0).unwrap(), None);
+    }
+
+    #[test]
+    fn season_phase_source_defaults_to_world_and_cycles() {
+        assert_eq!(
+            SeasonPreviewSettings::default().phase_source,
+            SeasonPhaseSource::WorldCalendar
+        );
+        assert_eq!(
+            SeasonPhaseSource::WorldCalendar.next(),
+            SeasonPhaseSource::ManualPreview
+        );
+        assert_eq!(
+            SeasonPhaseSource::ManualPreview.next(),
+            SeasonPhaseSource::WorldCalendar
+        );
+
+        let calendar = SeasonCalendarPolicy::MCLONE_OVERWORLD_V1
+            .sample(14 * mclone_core::time::DAY_LENGTH_TICKS)
+            .unwrap()
+            .unwrap();
+        let mut settings = SeasonPreviewSettings {
+            orbital_phase: OrbitalPhase::SOUTHERN_SOLSTICE,
+            ..SeasonPreviewSettings::default()
+        };
+        assert_eq!(
+            settings.resolve_phase(Some(calendar)).unwrap(),
+            ResolvedSeasonPhase {
+                orbital_phase: OrbitalPhase::NORTHERN_SOLSTICE,
+                calendar: Some(calendar),
+            }
+        );
+        assert_eq!(settings.resolve_phase(None), None);
+
+        settings.phase_source = SeasonPhaseSource::ManualPreview;
+        assert_eq!(
+            settings.resolve_phase(Some(calendar)).unwrap(),
+            ResolvedSeasonPhase {
+                orbital_phase: OrbitalPhase::SOUTHERN_SOLSTICE,
+                calendar: None,
+            }
+        );
+    }
+
+    #[test]
     fn plane_landmarks_and_periodicity_match_the_selected_wave() {
         let policy = SolarCoordinatePolicy::MCLONE_PLANE;
         let wavelength = MCLONE_PLANE_LATITUDE_WAVELENGTH_BLOCKS;
@@ -1559,6 +1932,7 @@ mod tests {
             SeasonPreviewSettings {
                 enabled: false,
                 appearance_enabled: false,
+                phase_source: SeasonPhaseSource::WorldCalendar,
                 orbital_phase: OrbitalPhase::NORTHWARD_EQUINOX,
                 latitude_source: LatitudeSource::World,
                 manual_latitude: PreviewLatitude::EQUATOR,

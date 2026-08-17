@@ -15,6 +15,7 @@ use mclone_core::{
     HorizontalTopology, LIGHT_DATA_LAYER_BYTE_COUNT, MAX_ANIMATION_CLIP_ID_BYTES,
     PackedChunkSection, PackedLightSection, SECTION_HEIGHT, Vec3d,
 };
+use mclone_season::SeasonCalendarPolicy;
 
 pub use ecology::{
     BEE_FIELD_GUIDE_OBSERVATION_COUNT, BeeBehavior, BeeFieldGuideProgress, BeeObservationKind,
@@ -539,6 +540,7 @@ pub enum ServerUpdate {
         game_time: u64,
         day_time: u64,
         daylight_cycle_running: bool,
+        calendar_policy: SeasonCalendarPolicy,
     },
     PlayerPosition(PlayerPositionUpdate),
     RemotePlayerAdd(RemotePlayerUpdate),
@@ -1052,11 +1054,13 @@ pub fn encode_server_update(update: &ServerUpdate) -> ProtocolCodecResult<Vec<u8
             game_time,
             day_time,
             daylight_cycle_running,
+            calendar_policy,
         } => {
             writer.write_u8(SERVER_UPDATE_TIME);
             writer.write_u64(*game_time);
             writer.write_u64(*day_time);
             writer.write_bool(*daylight_cycle_running);
+            write_season_calendar_policy(&mut writer, *calendar_policy)?;
         }
         ServerUpdate::PlayerPosition(update) => {
             validate_player_position_update(update)?;
@@ -1232,6 +1236,51 @@ pub fn encode_server_update(update: &ServerUpdate) -> ProtocolCodecResult<Vec<u8
     Ok(writer.into_inner())
 }
 
+fn write_season_calendar_policy(
+    writer: &mut ByteWriter,
+    policy: SeasonCalendarPolicy,
+) -> ProtocolCodecResult<()> {
+    policy
+        .validate()
+        .map_err(|_| ProtocolCodecError::InvalidData("invalid season calendar policy"))?;
+    match policy {
+        SeasonCalendarPolicy::Disabled => writer.write_u8(0),
+        SeasonCalendarPolicy::Orbital {
+            rule_revision,
+            days_per_year,
+            phase_origin_day,
+        } => {
+            writer.write_u8(1);
+            writer.write_u16(rule_revision);
+            writer.write_u16(days_per_year);
+            writer.write_u16(phase_origin_day);
+        }
+    }
+    Ok(())
+}
+
+fn read_season_calendar_policy(
+    reader: &mut ByteReader<'_>,
+) -> ProtocolCodecResult<SeasonCalendarPolicy> {
+    let policy = match reader.read_u8()? {
+        0 => SeasonCalendarPolicy::Disabled,
+        1 => SeasonCalendarPolicy::orbital(
+            reader.read_u16()?,
+            reader.read_u16()?,
+            reader.read_u16()?,
+        ),
+        _ => {
+            return Err(ProtocolCodecError::InvalidData(
+                "unknown season calendar policy",
+            ));
+        }
+    };
+    policy
+        .validate()
+        .map_err(|_| ProtocolCodecError::InvalidData("invalid season calendar policy"))?;
+    Ok(policy)
+}
+
 pub fn decode_server_update(bytes: &[u8]) -> ProtocolCodecResult<ServerUpdate> {
     let mut reader = ByteReader::new(bytes);
     let tag = reader.read_u8()?;
@@ -1286,6 +1335,7 @@ pub fn decode_server_update(bytes: &[u8]) -> ProtocolCodecResult<ServerUpdate> {
             game_time: reader.read_u64()?,
             day_time: reader.read_u64()?,
             daylight_cycle_running: reader.read_bool()?,
+            calendar_policy: read_season_calendar_policy(&mut reader)?,
         },
         SERVER_UPDATE_PLAYER_POSITION => {
             ServerUpdate::PlayerPosition(reader.read_player_position_update()?)
@@ -1675,6 +1725,10 @@ impl ByteWriter {
     }
 
     fn write_i32(&mut self, value: i32) {
+        self.bytes.extend_from_slice(&value.to_le_bytes());
+    }
+
+    fn write_u16(&mut self, value: u16) {
         self.bytes.extend_from_slice(&value.to_le_bytes());
     }
 
@@ -2258,6 +2312,10 @@ impl<'a> ByteReader<'a> {
 
     fn read_i32(&mut self) -> ProtocolCodecResult<i32> {
         Ok(i32::from_le_bytes(self.read_exact::<4>()?))
+    }
+
+    fn read_u16(&mut self) -> ProtocolCodecResult<u16> {
+        Ok(u16::from_le_bytes(self.read_exact::<2>()?))
     }
 
     fn read_i64(&mut self) -> ProtocolCodecResult<i64> {
@@ -3824,11 +3882,23 @@ mod tests {
             game_time: 12_345,
             day_time: 1_000,
             daylight_cycle_running: false,
+            calendar_policy: SeasonCalendarPolicy::MCLONE_OVERWORLD_V1,
         };
 
         let bytes = encode_server_update(&update).unwrap();
 
         assert_eq!(decode_server_update(&bytes).unwrap(), update);
+
+        let disabled = ServerUpdate::TimeUpdate {
+            game_time: 1,
+            day_time: 2,
+            daylight_cycle_running: true,
+            calendar_policy: SeasonCalendarPolicy::Disabled,
+        };
+        assert_eq!(
+            decode_server_update(&encode_server_update(&disabled).unwrap()).unwrap(),
+            disabled
+        );
     }
 
     #[test]

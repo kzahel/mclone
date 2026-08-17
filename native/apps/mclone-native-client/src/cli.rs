@@ -19,8 +19,8 @@ use mclone_render_session::EngineCameraViewMode;
 use mclone_scene::{TerrainHorizonDiagnostic, WorldgenLensLayer};
 use mclone_season::{
     CelestialDebugSettings, CelestialStarDensity, LatitudeSource, LocalSnowPulse, LunarPhase,
-    MoonPhaseSource, OrbitalPhase, PreviewLatitude, PreviewSolarTime, SeasonPreviewSettings,
-    SolarTimeSource, UnitU16,
+    MoonPhaseSource, OrbitalPhase, PreviewLatitude, PreviewSolarTime, SeasonPhaseSource,
+    SeasonPreviewSettings, SolarTimeSource, UnitU16,
 };
 use mclone_server::SimulationCadenceConfig;
 use mclone_ui::{
@@ -1561,6 +1561,7 @@ impl Cli {
                 }
                 "--season-orbital-phase" => {
                     season_preview_options_explicit = true;
+                    season_preview.phase_source = SeasonPhaseSource::ManualPreview;
                     season_preview.orbital_phase =
                         parse_season_orbital_phase_arg(&arg, args.next())?;
                 }

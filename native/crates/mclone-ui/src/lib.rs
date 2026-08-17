@@ -1,11 +1,11 @@
 #![forbid(unsafe_code)]
 
 pub use mclone_season::{
-    CelestialDebugSettings, CelestialStarDensity, LUNAR_PHASE_STEPS, LatitudeSource,
-    LocalSeasonLabel, LocalSnowPulse, LunarPhase, LunarPhaseLabel, MoonPhaseSource,
+    AuthoritativeCalendarSample, CelestialDebugSettings, CelestialStarDensity, LUNAR_PHASE_STEPS,
+    LatitudeSource, LocalSeasonLabel, LocalSnowPulse, LunarPhase, LunarPhaseLabel, MoonPhaseSource,
     ORBITAL_PHASE_STEPS, OrbitalMilestone, OrbitalPhase, PREVIEW_CALENDAR_DAYS,
     PREVIEW_SOLAR_TIME_MINUTES_PER_DAY, PreviewCalendarDate, PreviewLatitude, PreviewSolarTime,
-    SeasonPreviewSettings, SolarTimeSource, UnitU16,
+    SeasonPhaseSource, SeasonPreviewSettings, SolarTimeSource, UnitU16,
 };
 
 use mclone_input::{
@@ -2611,6 +2611,8 @@ impl GameTouchSettings {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GameSeasonalDebugState {
+    pub effective_orbital_phase: OrbitalPhase,
+    pub calendar: Option<AuthoritativeCalendarSample>,
     pub effective_latitude_degrees: f64,
     pub local_season: LocalSeasonLabel,
     pub response_strength: f32,

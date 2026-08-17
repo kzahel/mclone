@@ -35,6 +35,7 @@ use mclone_protocol::{
     RemotePlayerId, RemotePlayerUpdate, SectionBlockUpdate, ServerEphemeralMessage, ServerUpdate,
     SessionConfiguration, validate_body_pose_sample,
 };
+use mclone_season::{AuthoritativeCalendarSample, SeasonCalendarError, SeasonCalendarPolicy};
 
 pub use actor::{
     ActorAppearance, ActorInterpolationConfig, ActorInterpolationState, ActorPresentation,
@@ -114,6 +115,7 @@ pub struct ClientRuntime {
     game_time: u64,
     day_time: u64,
     daylight_cycle_running: bool,
+    season_calendar_policy: SeasonCalendarPolicy,
     total_experience: u64,
     player_statistics: PlayerStatistics,
     player_inventory: [Option<ItemStackSnapshot>; mclone_protocol::HOTBAR_SLOT_COUNT_USIZE],
@@ -156,6 +158,7 @@ impl ClientRuntime {
             game_time: 0,
             day_time: 0,
             daylight_cycle_running: true,
+            season_calendar_policy: SeasonCalendarPolicy::Disabled,
             total_experience: 0,
             player_statistics: PlayerStatistics::default(),
             player_inventory: [None; mclone_protocol::HOTBAR_SLOT_COUNT_USIZE],
@@ -303,10 +306,12 @@ impl ClientRuntime {
                 game_time,
                 day_time,
                 daylight_cycle_running,
+                calendar_policy,
             } => {
                 self.game_time = game_time;
                 self.day_time = day_time;
                 self.daylight_cycle_running = daylight_cycle_running;
+                self.season_calendar_policy = calendar_policy;
             }
             ServerUpdate::PlayerPosition(update) => {
                 self.player_position_updates.push_back(update);
@@ -797,6 +802,16 @@ impl ClientRuntime {
 
     pub const fn daylight_cycle_running(&self) -> bool {
         self.daylight_cycle_running
+    }
+
+    pub const fn season_calendar_policy(&self) -> SeasonCalendarPolicy {
+        self.season_calendar_policy
+    }
+
+    pub fn season_calendar_sample(
+        &self,
+    ) -> Result<Option<AuthoritativeCalendarSample>, SeasonCalendarError> {
+        self.season_calendar_policy.sample(self.day_time)
     }
 
     /// Advance one vanilla client tick between authoritative clock samples.
@@ -1420,10 +1435,23 @@ mod tests {
             game_time: 12_000,
             day_time: 6_000,
             daylight_cycle_running: true,
+            calendar_policy: SeasonCalendarPolicy::MCLONE_OVERWORLD_V1,
         });
 
         assert_eq!(runtime.game_time(), 12_000);
         assert_eq!(runtime.day_time(), 6_000);
+        assert_eq!(
+            runtime.season_calendar_policy(),
+            SeasonCalendarPolicy::MCLONE_OVERWORLD_V1
+        );
+        assert_eq!(
+            runtime
+                .season_calendar_sample()
+                .unwrap()
+                .unwrap()
+                .day_of_year,
+            1
+        );
         // dayTime 6000 is noon, which the smoothed curve maps to phase ~0.0.
         assert!(runtime.time_of_day().abs() < 1e-4);
         assert!(runtime.sun_angle().abs() < 1e-3);
@@ -1436,6 +1464,7 @@ mod tests {
             game_time: 50,
             day_time: 600,
             daylight_cycle_running: false,
+            calendar_policy: SeasonCalendarPolicy::Disabled,
         });
 
         runtime.advance_time_tick();
@@ -1446,6 +1475,7 @@ mod tests {
             game_time: 80,
             day_time: 900,
             daylight_cycle_running: true,
+            calendar_policy: SeasonCalendarPolicy::MCLONE_OVERWORLD_V1,
         });
         runtime.advance_time_tick();
         assert_eq!(runtime.game_time(), 81);

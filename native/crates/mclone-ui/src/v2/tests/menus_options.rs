@@ -1029,6 +1029,15 @@ fn seasonal_debug_rows_share_typed_state_and_gate_manual_controls() {
             .widget(UI_V2_OPTIONS_SEASON_PREVIEW)
             .is_none()
     );
+    assert_eq!(
+        surface
+            .layout()
+            .widget(UI_V2_OPTIONS_SEASONAL_DEBUG)
+            .unwrap()
+            .value
+            .as_deref(),
+        Some("World Calendar / Off")
+    );
     let rect = surface
         .layout()
         .widget(UI_V2_OPTIONS_SEASONAL_DEBUG)
@@ -1062,6 +1071,30 @@ fn seasonal_debug_rows_share_typed_state_and_gate_manual_controls() {
             .unwrap()
             .enabled
     );
+    assert!(
+        surface
+            .layout()
+            .widget(UI_V2_OPTIONS_SEASON_PHASE_SOURCE)
+            .unwrap()
+            .enabled
+    );
+    let source_rect = surface
+        .layout()
+        .widget(UI_V2_OPTIONS_SEASON_PHASE_SOURCE)
+        .unwrap()
+        .rect;
+    assert!(surface.pointer_down(point_in(source_rect), surface.render_state));
+    assert_eq!(
+        surface
+            .pointer_up(point_in(source_rect), surface.render_state)
+            .1,
+        Some(GameUiAction::SetSeasonPreview(
+            crate::SeasonPreviewSettings {
+                phase_source: crate::SeasonPhaseSource::ManualPreview,
+                ..crate::SeasonPreviewSettings::default()
+            }
+        ))
+    );
     for id in [
         UI_V2_OPTIONS_SEASON_ORBITAL_PHASE,
         UI_V2_OPTIONS_SEASON_LATITUDE_SOURCE,
@@ -1084,6 +1117,16 @@ fn seasonal_debug_rows_share_typed_state_and_gate_manual_controls() {
         intensity: crate::UnitU16::ZERO,
     };
     let diagnostics = crate::GameSeasonalDebugState {
+        effective_orbital_phase: crate::OrbitalPhase::NORTHERN_SOLSTICE,
+        calendar: Some(crate::AuthoritativeCalendarSample {
+            civil_time_ticks: 70 * 24_000,
+            absolute_day: 70,
+            day_tick: 0,
+            year_index: 1,
+            days_per_year: 56,
+            day_of_year: 15,
+            orbital_phase: crate::OrbitalPhase::NORTHERN_SOLSTICE,
+        }),
         effective_latitude_degrees: 45.0,
         local_season: crate::LocalSeasonLabel::Spring,
         response_strength: 0.8,
@@ -1091,17 +1134,37 @@ fn seasonal_debug_rows_share_typed_state_and_gate_manual_controls() {
         daylight_hours: 13.5,
         recent_snow_anchor: anchor,
     };
-    surface.set_render_state(GameUiRenderState {
+    let world_state = GameUiRenderState {
         season_preview: settings,
         seasonal_debug: Some(diagnostics),
         ..GameUiRenderState::default()
-    });
-    assert!(
+    };
+    assert_eq!(
+        seasonal_debug_summary(world_state),
+        "World Calendar / Year 2 Day 15/56 / Spring / S+ G-"
+    );
+    assert_eq!(
+        seasonal_debug_summary(GameUiRenderState {
+            seasonal_debug: None,
+            ..world_state
+        }),
+        "World Calendar / Unavailable / Unavailable / S+ G-"
+    );
+    surface.set_render_state(world_state);
+    let world_date = surface
+        .layout()
+        .widget(UI_V2_OPTIONS_SEASON_ORBITAL_PHASE)
+        .unwrap();
+    assert!(!world_date.enabled);
+    assert_eq!(world_date.label, "Date: Year 2, Day 15/56");
+    assert_eq!(
         surface
             .layout()
-            .widget(UI_V2_OPTIONS_SEASON_ORBITAL_PHASE)
+            .widget(UI_V2_OPTIONS_SEASON_MILESTONE)
             .unwrap()
-            .enabled
+            .value
+            .as_deref(),
+        Some("Northern Solstice")
     );
     assert!(
         surface
@@ -1159,7 +1222,7 @@ fn seasonal_debug_rows_share_typed_state_and_gate_manual_controls() {
         ..GameUiRenderState::default()
     });
     assert!(
-        surface
+        !surface
             .layout()
             .widget(UI_V2_OPTIONS_SEASON_ORBITAL_PHASE)
             .unwrap()
@@ -1218,13 +1281,22 @@ fn seasonal_debug_rows_share_typed_state_and_gate_manual_controls() {
     );
 
     settings.appearance_enabled = true;
+    settings.phase_source = crate::SeasonPhaseSource::ManualPreview;
     settings.latitude_source = crate::LatitudeSource::Manual;
     settings.solar_time_source = crate::SolarTimeSource::Manual;
     surface.set_render_state(GameUiRenderState {
         season_preview: settings,
-        seasonal_debug: Some(diagnostics),
+        seasonal_debug: Some(crate::GameSeasonalDebugState {
+            calendar: None,
+            effective_orbital_phase: settings.orbital_phase,
+            ..diagnostics
+        }),
         ..GameUiRenderState::default()
     });
+    assert_eq!(
+        seasonal_debug_summary(surface.render_state),
+        "Manual Preview / Day 1/112 / Spring / S+ G+"
+    );
     assert!(
         surface
             .layout()

@@ -832,6 +832,7 @@ mod tests {
                 game_time: 12,
                 day_time: 34,
                 daylight_cycle_running: true,
+                calendar_policy: Default::default(),
             },
         ])
         .unwrap();
@@ -936,6 +937,7 @@ mod tests {
             game_time: 12,
             day_time: 34,
             daylight_cycle_running: true,
+            calendar_policy: Default::default(),
         }])
         .unwrap();
         actor.socket_frame(&frame, 0.0);

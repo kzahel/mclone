@@ -670,6 +670,7 @@ fn cli_parses_typed_season_preview_capture_options() {
         mclone_season::SeasonPreviewSettings {
             enabled: true,
             appearance_enabled: true,
+            phase_source: mclone_season::SeasonPhaseSource::ManualPreview,
             orbital_phase: mclone_season::OrbitalPhase::NORTHERN_SOLSTICE,
             latitude_source: mclone_season::LatitudeSource::Manual,
             manual_latitude: mclone_season::PreviewLatitude::from_tenths_clamped(750),

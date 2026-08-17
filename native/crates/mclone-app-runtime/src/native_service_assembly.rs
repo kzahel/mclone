@@ -3504,6 +3504,7 @@ mod tests {
             game_time: day_time.saturating_add(100),
             day_time,
             daylight_cycle_running: true,
+            calendar_policy: Default::default(),
         }
     }
 

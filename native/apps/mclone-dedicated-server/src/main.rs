@@ -1041,6 +1041,7 @@ mod tests {
                 game_time,
                 day_time,
                 daylight_cycle_running,
+                ..
             } => Some((*game_time, *day_time, *daylight_cycle_running)),
             _ => None,
         })

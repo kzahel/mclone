@@ -2064,7 +2064,11 @@ pub(crate) fn seasonal_appearance_receipt_json(
     profile: mclone_server::WorldGenerationProfile,
     diagnostics: Option<SolarFrameDiagnostics>,
 ) -> Result<String> {
-    let date = PreviewCalendarDate::from_orbital_phase(settings.orbital_phase);
+    let effective_phase = diagnostics.map_or(settings.orbital_phase, |diagnostics| {
+        diagnostics.orbital_phase
+    });
+    let date = PreviewCalendarDate::from_orbital_phase(effective_phase);
+    let calendar = diagnostics.and_then(|diagnostics| diagnostics.calendar);
     let recent_snow = settings.recent_snow.map(|pulse| {
         serde_json::json!({
             "centerX": pulse.center_x,
@@ -2116,10 +2120,12 @@ pub(crate) fn seasonal_appearance_receipt_json(
         "solarEnabled": settings.enabled,
         "appearanceEnabled": settings.appearance_enabled,
         "global": {
-            "orbitalPhase": settings.orbital_phase.turns(),
-            "calendarDay": date.day(),
-            "calendarDays": PREVIEW_CALENDAR_DAYS,
-            "milestone": OrbitalMilestone::nearest(settings.orbital_phase).label(),
+            "source": settings.phase_source.label(),
+            "orbitalPhase": effective_phase.turns(),
+            "calendarYear": calendar.map(|sample| sample.year_index.saturating_add(1)),
+            "calendarDay": calendar.map_or(date.day(), |sample| sample.day_of_year),
+            "calendarDays": calendar.map_or(PREVIEW_CALENDAR_DAYS, |sample| sample.days_per_year),
+            "milestone": OrbitalMilestone::nearest(effective_phase).label(),
         },
         "controls": {
             "latitudeSource": settings.latitude_source.label(),

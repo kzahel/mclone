@@ -191,8 +191,8 @@ use mclone_render_session::{
     render_view_from_world_pose,
 };
 use mclone_season::{
-    CelestialDebugSettings, EvaluatedLocalSeason, LUNAR_PHASE_STEPS, LatitudeSource,
-    LocalSeasonInput, LunarInput, LunarPhase, MCLONE_AXIAL_TILT_DEGREES,
+    AuthoritativeCalendarSample, CelestialDebugSettings, EvaluatedLocalSeason, LUNAR_PHASE_STEPS,
+    LatitudeSource, LocalSeasonInput, LunarInput, LunarPhase, MCLONE_AXIAL_TILT_DEGREES,
     MCLONE_LUNAR_ORBIT_INCLINATION_DEGREES, MoonPhaseSource, OrbitalMilestone, OrbitalPhase,
     PreviewCalendarDate, SeasonPreviewSettings, SolarCoordinatePolicy, SolarFrameDiagnostics,
     SolarInput, SolarSample, SolarTimeSource, local_sidereal_angle_turns,
@@ -5824,7 +5824,7 @@ impl McloneSceneHost {
             .flatten()
             .filter(|_| self.season_preview.enabled);
         let orbital_phase = seasonal.map_or(OrbitalPhase::NORTHWARD_EQUINOX, |diagnostics| {
-            diagnostics.settings.orbital_phase
+            diagnostics.orbital_phase
         });
         let effective_latitude_degrees =
             seasonal.map_or(0.0, |diagnostics| diagnostics.effective_latitude_degrees);
@@ -5903,6 +5903,12 @@ impl McloneSceneHost {
             return None;
         }
 
+        let resolved_phase = self
+            .season_preview
+            .resolve_phase(self.authoritative_calendar_sample())?;
+        let orbital_phase = resolved_phase.orbital_phase;
+        let calendar = resolved_phase.calendar;
+
         let topology = self
             .active_world
             .runtime
@@ -5928,7 +5934,7 @@ impl McloneSceneHost {
             SolarTimeSource::Manual => self.season_preview.manual_solar_time.fraction(),
         };
         let sample = match SolarSample::compute(SolarInput {
-            orbital_phase: self.season_preview.orbital_phase,
+            orbital_phase,
             effective_latitude_degrees,
             axial_tilt_degrees: MCLONE_AXIAL_TILT_DEGREES,
             solar_time_fraction,
@@ -5949,7 +5955,7 @@ impl McloneSceneHost {
         let (mean_temperature, moisture) =
             mclone_mesh::seasonal_climate_for_biome(observer_biome_id);
         let local_season = EvaluatedLocalSeason::evaluate(LocalSeasonInput {
-            orbital_phase: self.season_preview.orbital_phase,
+            orbital_phase,
             effective_latitude_degrees,
             mean_temperature,
             moisture,
@@ -5957,6 +5963,8 @@ impl McloneSceneHost {
         });
         Some(SolarFrameDiagnostics {
             settings: self.season_preview,
+            orbital_phase,
+            calendar,
             policy,
             observer_world_x: eye.x,
             observer_world_z: eye.z,
@@ -5970,6 +5978,22 @@ impl McloneSceneHost {
             sample,
             local_season,
         })
+    }
+
+    fn authoritative_calendar_sample(&self) -> Option<AuthoritativeCalendarSample> {
+        self.active_world.runtime.as_ref().map_or_else(
+            || {
+                self.active_world
+                    .scene
+                    .startup
+                    .world_generation_profile
+                    .season_calendar_policy()
+                    .sample(self.day_time())
+                    .ok()
+                    .flatten()
+            },
+            |runtime| runtime.client().season_calendar_sample().ok().flatten(),
+        )
     }
 
     fn time_of_day(&self) -> f32 {

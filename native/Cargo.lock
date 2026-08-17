@@ -1631,6 +1631,7 @@ dependencies = [
  "mclone-light",
  "mclone-path",
  "mclone-protocol",
+ "mclone-season",
 ]
 
 [[package]]
@@ -1785,6 +1786,7 @@ name = "mclone-protocol"
 version = "0.0.0"
 dependencies = [
  "mclone-core",
+ "mclone-season",
 ]
 
 [[package]]
@@ -1895,6 +1897,7 @@ dependencies = [
  "mclone-path",
  "mclone-physics",
  "mclone-protocol",
+ "mclone-season",
  "mclone-worldgen",
  "rusqlite",
  "serde",

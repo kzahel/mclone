@@ -1,4 +1,5 @@
 use mclone_core::{ChunkPos, ChunkStatus, HorizontalTopology, LiftedChunkPos};
+use mclone_season::SeasonCalendarPolicy;
 use mclone_worldgen::levelgen::{
     ChunkGenerationPlan, ChunkStatusRequirement, McloneOverworldSamplingTopology,
     MutableChunkBlockBuffer, validate_topology_probe_topology,
@@ -35,6 +36,19 @@ pub enum WorldGenerationProfile {
 }
 
 impl WorldGenerationProfile {
+    pub const fn season_calendar_policy(self) -> SeasonCalendarPolicy {
+        match self {
+            Self::McloneOverworldV1 => SeasonCalendarPolicy::MCLONE_OVERWORLD_V1,
+            Self::Overworld
+            | Self::FlatGrassV1
+            | Self::SmallIslandV1
+            | Self::TopologyProbeV1
+            | Self::AlphaV1 { .. }
+            | Self::BetaV1
+            | Self::AuthoredOnly { .. } => SeasonCalendarPolicy::Disabled,
+        }
+    }
+
     pub const fn authored_only() -> Self {
         Self::AuthoredOnly {
             missing_chunk: AuthoredMissingChunk::Void,
@@ -620,6 +634,30 @@ mod tests {
             WorldGenerationProfile::McloneOverworldV1
                 .validate_topology(HorizontalTopology::UNBOUNDED)
                 .is_ok()
+        );
+    }
+
+    #[test]
+    fn only_mclone_overworld_selects_the_authoritative_season_calendar() {
+        for profile in [
+            WorldGenerationProfile::Overworld,
+            WorldGenerationProfile::authored_only(),
+            WorldGenerationProfile::FlatGrassV1,
+            WorldGenerationProfile::SmallIslandV1,
+            WorldGenerationProfile::alpha_v1(false),
+            WorldGenerationProfile::alpha_v1(true),
+            WorldGenerationProfile::BetaV1,
+            WorldGenerationProfile::TopologyProbeV1,
+        ] {
+            assert_eq!(
+                profile.season_calendar_policy(),
+                mclone_season::SeasonCalendarPolicy::Disabled,
+                "{profile:?}"
+            );
+        }
+        assert_eq!(
+            WorldGenerationProfile::McloneOverworldV1.season_calendar_policy(),
+            mclone_season::SeasonCalendarPolicy::MCLONE_OVERWORLD_V1
         );
     }
 

@@ -278,6 +278,7 @@ fn engine_render_session_applies_server_updates_and_marks_render_dirty() {
             game_time: 2,
             day_time: 1,
             daylight_cycle_running: true,
+            calendar_policy: Default::default(),
         },
         ServerUpdate::SectionBlockUpdates {
             pos: chunk,

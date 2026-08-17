@@ -96,7 +96,7 @@ const BEE_FIELD_GUIDE_PLAYER_RECORD_VERSION: u32 = 6;
 const RABBIT_FIELD_GUIDE_PLAYER_RECORD_VERSION: u32 = 7;
 pub const PLAYER_RECORD_VERSION: u32 = 7;
 pub const DIMENSION_RECORD_VERSION: u32 = 2;
-pub const WORLD_METADATA_VERSION: u32 = 3;
+pub const WORLD_METADATA_VERSION: u32 = 4;
 pub const WORLD_METADATA_TARGET_MINECRAFT_VERSION: &str = "1.17.1";
 
 pub type PersistenceRequestId = u64;
@@ -827,6 +827,7 @@ pub struct WorldMetadata {
     pub target_minecraft_version: String,
     pub seed: i64,
     pub world_generation_profile: WorldGenerationProfile,
+    pub season_calendar_policy: mclone_season::SeasonCalendarPolicy,
     pub starter_content: StarterContentDescriptor,
     pub realized_starter_plan: Option<RealizedStarterPlanIdentity>,
     pub world_behavior_profile: WorldBehaviorProfile,
@@ -867,6 +868,7 @@ impl WorldMetadata {
             target_minecraft_version: WORLD_METADATA_TARGET_MINECRAFT_VERSION.to_owned(),
             seed,
             world_generation_profile,
+            season_calendar_policy: world_generation_profile.season_calendar_policy(),
             starter_content: StarterContentDescriptor::Wild,
             realized_starter_plan: None,
             world_behavior_profile,
@@ -5919,6 +5921,10 @@ fn write_world_metadata(writer: &mut impl Write, record: &WorldMetadata) -> Chun
             record.target_minecraft_version, WORLD_METADATA_TARGET_MINECRAFT_VERSION
         )));
     }
+    validate_world_season_calendar_policy(
+        record.world_generation_profile,
+        record.season_calendar_policy,
+    )?;
     writer.write_all(WORLD_METADATA_MAGIC)?;
     write_u32(writer, WORLD_METADATA_VERSION)?;
     writer.write_all(&record.realm_id.bytes())?;
@@ -5938,6 +5944,7 @@ fn write_world_metadata(writer: &mut impl Write, record: &WorldMetadata) -> Chun
     write_bool(writer, record.do_daylight_cycle)?;
     write_starter_content_descriptor(writer, record.starter_content)?;
     write_realized_starter_plan_identity(writer, record.realized_starter_plan)?;
+    write_season_calendar_policy(writer, record.season_calendar_policy)?;
     writer.flush()?;
     Ok(())
 }
@@ -6139,13 +6146,20 @@ fn read_world_metadata(reader: &mut impl Read) -> ChunkStoreResult<WorldMetadata
     } else {
         (StarterContentDescriptor::Wild, None)
     };
+    let season_calendar_policy = if codec_version >= 4 {
+        read_season_calendar_policy(reader)?
+    } else {
+        world_generation_profile.season_calendar_policy()
+    };
+    validate_world_season_calendar_policy(world_generation_profile, season_calendar_policy)?;
     let record = WorldMetadata {
-        codec_version,
+        codec_version: WORLD_METADATA_VERSION,
         realm_id,
         revision,
         target_minecraft_version,
         seed,
         world_generation_profile,
+        season_calendar_policy,
         starter_content,
         realized_starter_plan,
         world_behavior_profile,
@@ -6165,6 +6179,67 @@ fn read_world_metadata(reader: &mut impl Read) -> ChunkStoreResult<WorldMetadata
         ));
     }
     Ok(record)
+}
+
+fn write_season_calendar_policy(
+    writer: &mut impl Write,
+    policy: mclone_season::SeasonCalendarPolicy,
+) -> ChunkStoreResult<()> {
+    match policy {
+        mclone_season::SeasonCalendarPolicy::Disabled => write_u8(writer, 0),
+        mclone_season::SeasonCalendarPolicy::Orbital {
+            rule_revision,
+            days_per_year,
+            phase_origin_day,
+        } => {
+            write_u8(writer, 1)?;
+            write_u16(writer, rule_revision)?;
+            write_u16(writer, days_per_year)?;
+            write_u16(writer, phase_origin_day)
+        }
+    }
+}
+
+fn read_season_calendar_policy(
+    reader: &mut impl Read,
+) -> ChunkStoreResult<mclone_season::SeasonCalendarPolicy> {
+    let policy = match read_u8(reader)? {
+        0 => mclone_season::SeasonCalendarPolicy::Disabled,
+        1 => mclone_season::SeasonCalendarPolicy::orbital(
+            read_u16(reader)?,
+            read_u16(reader)?,
+            read_u16(reader)?,
+        ),
+        tag => {
+            return Err(ChunkStoreError::InvalidData(format!(
+                "unknown season calendar policy tag {tag}"
+            )));
+        }
+    };
+    policy.validate().map_err(|error| {
+        ChunkStoreError::InvalidData(format!("invalid season calendar policy: {error}"))
+    })?;
+    Ok(policy)
+}
+
+fn validate_world_season_calendar_policy(
+    profile: WorldGenerationProfile,
+    policy: mclone_season::SeasonCalendarPolicy,
+) -> ChunkStoreResult<()> {
+    policy.validate().map_err(|error| {
+        ChunkStoreError::InvalidData(format!("invalid season calendar policy: {error}"))
+    })?;
+    let expected = profile.season_calendar_policy();
+    if policy != expected {
+        return Err(ChunkStoreError::classified(
+            PersistenceErrorKind::Incompatible,
+            format!(
+                "season calendar policy {policy:?} does not match generation profile {} policy {expected:?}",
+                profile.label()
+            ),
+        ));
+    }
+    Ok(())
 }
 
 fn write_world_generation_profile(
@@ -8311,6 +8386,29 @@ mod tests {
     }
 
     #[test]
+    fn binary_world_metadata_rejects_noncanonical_calendar_policy() {
+        let mut record = test_world_metadata(44);
+        record.season_calendar_policy = mclone_season::SeasonCalendarPolicy::MCLONE_OVERWORLD_V1;
+        let error = encode_world_metadata(&record).unwrap_err();
+        assert_eq!(error.kind(), PersistenceErrorKind::Incompatible);
+        assert!(
+            error
+                .to_string()
+                .contains("does not match generation profile")
+        );
+
+        record.world_generation_profile = WorldGenerationProfile::McloneOverworldV1;
+        record.season_calendar_policy = mclone_season::SeasonCalendarPolicy::orbital(2, 56, 0);
+        let error = encode_world_metadata(&record).unwrap_err();
+        assert_eq!(error.kind(), PersistenceErrorKind::InvalidData);
+        assert!(
+            error
+                .to_string()
+                .contains("unknown season calendar rule revision 2")
+        );
+    }
+
+    #[test]
     fn binary_world_generation_profile_discriminants_are_stable() {
         let mut overworld = Vec::new();
         write_world_generation_profile(&mut overworld, WorldGenerationProfile::Overworld).unwrap();
@@ -8439,17 +8537,24 @@ mod tests {
         let current = encode_world_metadata(&test_world_metadata(45)).unwrap();
         let header_len = WORLD_METADATA_MAGIC.len() + std::mem::size_of::<u32>();
         let v3_tail_len = 1 + 1 + 4 + 4 + 32;
+        let v4_tail_len = 1;
         let mut legacy = current[..header_len].to_vec();
         legacy[WORLD_METADATA_MAGIC.len()..header_len].copy_from_slice(&1_u32.to_le_bytes());
-        legacy.extend_from_slice(&current[header_len + 16..current.len() - v3_tail_len]);
+        legacy.extend_from_slice(
+            &current[header_len + 16..current.len() - v3_tail_len - v4_tail_len],
+        );
 
         let decoded = decode_world_metadata(&legacy).unwrap();
 
-        assert_eq!(decoded.codec_version, 1);
+        assert_eq!(decoded.codec_version, WORLD_METADATA_VERSION);
         assert_eq!(decoded.realm_id, RealmId::LEGACY_SINGLE_REALM);
         assert_eq!(decoded.revision, 45);
         assert_eq!(decoded.starter_content, StarterContentDescriptor::Wild);
         assert_eq!(decoded.realized_starter_plan, None);
+        assert_eq!(
+            decoded.season_calendar_policy,
+            mclone_season::SeasonCalendarPolicy::Disabled
+        );
     }
 
     #[test]
@@ -8457,28 +8562,52 @@ mod tests {
         let current = encode_world_metadata(&test_world_metadata(46)).unwrap();
         let header_len = WORLD_METADATA_MAGIC.len() + std::mem::size_of::<u32>();
         let v3_tail_len = 1 + 1 + 4 + 4 + 32;
-        let mut legacy = current[..current.len() - v3_tail_len].to_vec();
+        let v4_tail_len = 1;
+        let mut legacy = current[..current.len() - v3_tail_len - v4_tail_len].to_vec();
         legacy[WORLD_METADATA_MAGIC.len()..header_len].copy_from_slice(&2_u32.to_le_bytes());
 
         let decoded = decode_world_metadata(&legacy).unwrap();
 
-        assert_eq!(decoded.codec_version, 2);
+        assert_eq!(decoded.codec_version, WORLD_METADATA_VERSION);
         assert_eq!(decoded.realm_id, RealmId::new([0x5a; 16]).unwrap());
         assert_eq!(decoded.revision, 46);
         assert_eq!(decoded.starter_content, StarterContentDescriptor::Wild);
         assert_eq!(decoded.realized_starter_plan, None);
+        assert_eq!(
+            decoded.season_calendar_policy,
+            mclone_season::SeasonCalendarPolicy::Disabled
+        );
+    }
+
+    #[test]
+    fn binary_world_metadata_v3_derives_and_upgrades_mclone_calendar_policy() {
+        let mut record = test_world_metadata(47);
+        record.world_generation_profile = WorldGenerationProfile::McloneOverworldV1;
+        record.season_calendar_policy = mclone_season::SeasonCalendarPolicy::MCLONE_OVERWORLD_V1;
+        let current = encode_world_metadata(&record).unwrap();
+        let header_len = WORLD_METADATA_MAGIC.len() + std::mem::size_of::<u32>();
+        let mut legacy = current[..current.len() - 7].to_vec();
+        legacy[WORLD_METADATA_MAGIC.len()..header_len].copy_from_slice(&3_u32.to_le_bytes());
+
+        let decoded = decode_world_metadata(&legacy).unwrap();
+
+        assert_eq!(decoded.codec_version, WORLD_METADATA_VERSION);
+        assert_eq!(
+            decoded.season_calendar_policy,
+            mclone_season::SeasonCalendarPolicy::MCLONE_OVERWORLD_V1
+        );
     }
 
     #[test]
     fn binary_world_metadata_rejects_unknown_versions_and_trailing_bytes() {
         let mut unknown_version = encode_world_metadata(&test_world_metadata(1)).unwrap();
-        unknown_version[WORLD_METADATA_MAGIC.len()] = 4;
+        unknown_version[WORLD_METADATA_MAGIC.len()] = 5;
         let error = decode_world_metadata(&unknown_version).unwrap_err();
         assert_eq!(error.kind(), PersistenceErrorKind::Incompatible);
         assert!(
             error
                 .to_string()
-                .contains("unsupported world metadata codec version 4")
+                .contains("unsupported world metadata codec version 5")
         );
 
         let mut trailing = encode_world_metadata(&test_world_metadata(1)).unwrap();
@@ -9869,6 +9998,7 @@ mod tests {
             target_minecraft_version: WORLD_METADATA_TARGET_MINECRAFT_VERSION.to_owned(),
             seed: -9_223_372_036_854_775,
             world_generation_profile: WorldGenerationProfile::authored_only(),
+            season_calendar_policy: mclone_season::SeasonCalendarPolicy::Disabled,
             starter_content: StarterContentDescriptor::IntroHomesteadV1,
             realized_starter_plan: Some(RealizedStarterPlanIdentity::new(3, 5, [0x6b; 32])),
             world_behavior_profile: WorldBehaviorProfile::ProtectedLobby,

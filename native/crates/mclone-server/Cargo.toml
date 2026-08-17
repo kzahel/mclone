@@ -13,6 +13,7 @@ mclone-light.workspace = true
 mclone-path.workspace = true
 mclone-physics = { workspace = true, optional = true }
 mclone-protocol.workspace = true
+mclone-season.workspace = true
 mclone-worldgen.workspace = true
 serde.workspace = true
 serde_json.workspace = true

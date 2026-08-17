@@ -2,7 +2,7 @@ use super::*;
 use mclone_protocol::{PlayerAppearance, PlayerModelKind};
 use std::collections::BTreeSet;
 
-use crate::ChunkHolder;
+use crate::{ChunkHolder, MemoryWorldStore};
 use mclone_core::{
     AxisTopology, BlockHitResult, BlockStateId, ChunkSnapshot, Direction, HorizontalTopology,
     PackedLightSection, Vec3d, block_to_section_coord, local_block_coord,
@@ -38,6 +38,36 @@ fn first_biome_zoom_seed(updates: &[ServerUpdate]) -> Option<i64> {
         } => Some(*biome_zoom_seed),
         _ => None,
     })
+}
+
+#[test]
+fn mclone_time_updates_publish_the_profile_selected_calendar() {
+    let definition =
+        crate::DimensionDefinition::overworld(7, WorldGenerationProfile::McloneOverworldV1);
+    let server = LocalRealmSession::local_integrated_with_world_store_and_dimension_definition(
+        definition,
+        Box::new(MemoryWorldStore::new()),
+    );
+
+    assert_eq!(
+        server.season_calendar_policy(),
+        mclone_season::SeasonCalendarPolicy::MCLONE_OVERWORLD_V1
+    );
+    assert_eq!(
+        server
+            .season_calendar_sample()
+            .unwrap()
+            .unwrap()
+            .day_of_year,
+        1
+    );
+    assert!(matches!(
+        server.time_update(),
+        ServerUpdate::TimeUpdate {
+            calendar_policy: mclone_season::SeasonCalendarPolicy::MCLONE_OVERWORLD_V1,
+            ..
+        }
+    ));
 }
 
 fn request_initial_chunk_view(server: &mut LocalRealmSession) {

@@ -1956,6 +1956,7 @@ impl WebSceneHost {
         let settings = SeasonPreviewSettings {
             enabled: solar_enabled,
             appearance_enabled,
+            phase_source: mclone_season::SeasonPhaseSource::ManualPreview,
             orbital_phase,
             latitude_source: LatitudeSource::Manual,
             manual_latitude: PreviewLatitude::from_degrees_clamped(latitude_degrees),

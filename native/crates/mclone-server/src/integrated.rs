@@ -343,6 +343,7 @@ pub struct RealmServer {
     inactive_dimensions: BTreeMap<DimensionKey, DimensionRuntime>,
     simulation_tick: u64,
     day_time: u64,
+    season_calendar_policy: mclone_season::SeasonCalendarPolicy,
     do_daylight_cycle: bool,
     day_time_frozen: bool,
     day_time_debug_override: bool,
@@ -959,6 +960,9 @@ impl RealmServer {
         policy: PlayerChunkTrackingPolicy,
     ) -> Self {
         let seed = overworld_definition.seed;
+        let season_calendar_policy = overworld_definition
+            .generation_profile
+            .season_calendar_policy();
         let overworld_key = DimensionKey::overworld();
         let active_dimension = DimensionRuntime::new(
             overworld_key,
@@ -974,6 +978,7 @@ impl RealmServer {
             inactive_dimensions: BTreeMap::new(),
             simulation_tick: 0,
             day_time: INITIAL_DAY_TIME,
+            season_calendar_policy,
             do_daylight_cycle: true,
             day_time_frozen: false,
             day_time_debug_override: false,
@@ -1253,6 +1258,19 @@ impl RealmServer {
         self.day_time
     }
 
+    pub const fn season_calendar_policy(&self) -> mclone_season::SeasonCalendarPolicy {
+        self.season_calendar_policy
+    }
+
+    pub fn season_calendar_sample(
+        &self,
+    ) -> Result<
+        Option<mclone_season::AuthoritativeCalendarSample>,
+        mclone_season::SeasonCalendarError,
+    > {
+        self.season_calendar_policy.sample(self.day_time)
+    }
+
     /// Set the authoritative day-time. Debug hook for forcing a starting time.
     pub fn set_day_time(&mut self, day_time: u64) {
         self.day_time = day_time;
@@ -1440,6 +1458,7 @@ impl RealmServer {
         self.initialize_intro_homestead_plan(&mut metadata)?;
         self.simulation_tick = metadata.game_time;
         self.day_time = metadata.day_time;
+        self.season_calendar_policy = metadata.season_calendar_policy;
         self.do_daylight_cycle = metadata.do_daylight_cycle;
         self.day_time_debug_override = false;
         self.world_metadata_dirty = false;
@@ -1621,6 +1640,7 @@ impl RealmServer {
         if !self.day_time_debug_override {
             metadata.day_time = self.day_time;
         }
+        metadata.season_calendar_policy = self.season_calendar_policy;
         metadata.do_daylight_cycle = self.do_daylight_cycle;
         match self
             .scheduler
@@ -3352,6 +3372,7 @@ impl RealmServer {
             game_time: self.game_time(),
             day_time: self.day_time,
             daylight_cycle_running: self.daylight_cycle_running(),
+            calendar_policy: self.season_calendar_policy,
         }
     }
 

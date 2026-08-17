@@ -2234,6 +2234,7 @@ mod native {
                 game_time: 81,
                 day_time: 42,
                 daylight_cycle_running: true,
+                calendar_policy: mclone_season::SeasonCalendarPolicy::Disabled,
             };
             let unload = ServerUpdate::ChunkUnload {
                 pos: ChunkPos::new(3, -4),

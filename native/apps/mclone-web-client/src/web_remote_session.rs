@@ -268,6 +268,7 @@ impl WebSocketServerSession {
                     game_time,
                     day_time,
                     daylight_cycle_running,
+                    calendar_policy,
                 } = update
                 {
                     *self.day_time.borrow_mut() = day_time;
@@ -276,6 +277,7 @@ impl WebSocketServerSession {
                             game_time,
                             day_time,
                             daylight_cycle_running,
+                            calendar_policy,
                         },
                         encoded_len,
                         queued_age,

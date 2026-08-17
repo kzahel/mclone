@@ -830,6 +830,8 @@ impl McloneSceneHost {
                     runtime.client().topology()
                 });
             mclone_ui::GameSeasonalDebugState {
+                effective_orbital_phase: diagnostics.orbital_phase,
+                calendar: diagnostics.calendar,
                 effective_latitude_degrees: diagnostics.effective_latitude_degrees,
                 local_season: diagnostics.local_season.label,
                 response_strength: diagnostics.local_season.response_strength,
@@ -1054,7 +1056,20 @@ impl McloneSceneHost {
             ),
         ];
         if let Some(solar) = self.solar_frame_diagnostics() {
-            let date = PreviewCalendarDate::from_orbital_phase(solar.settings.orbital_phase);
+            let date = solar.calendar.map_or_else(
+                || {
+                    let date = PreviewCalendarDate::from_orbital_phase(solar.orbital_phase);
+                    format!("{}/{}", date.day(), mclone_season::PREVIEW_CALENDAR_DAYS)
+                },
+                |calendar| {
+                    format!(
+                        "Y{} {}/{}",
+                        calendar.year_index.saturating_add(1),
+                        calendar.day_of_year,
+                        calendar.days_per_year
+                    )
+                },
+            );
             lines.push(format!(
                 "SOLAR {} GROUND {} {} LAT {} W{:+.3} E{:+.3}",
                 if solar.settings.enabled { "ON" } else { "OFF" },
@@ -1074,7 +1089,7 @@ impl McloneSceneHost {
                     .world_latitude
                     .phase
                     .map_or_else(|| "-".to_owned(), |phase| format!("{phase:.6}")),
-                solar.settings.orbital_phase.turns(),
+                solar.orbital_phase.turns(),
                 solar.sample.declination_degrees,
             ));
             lines.push(format!(
@@ -1090,10 +1105,10 @@ impl McloneSceneHost {
                 solar.sample.polar_state.label(),
             ));
             lines.push(format!(
-                "SEASON DATE {}/{} {}",
-                date.day(),
-                mclone_season::PREVIEW_CALENDAR_DAYS,
-                OrbitalMilestone::nearest(solar.settings.orbital_phase).label(),
+                "SEASON {} DATE {} {}",
+                solar.settings.phase_source.label(),
+                date,
+                OrbitalMilestone::nearest(solar.orbital_phase).label(),
             ));
             lines.push(format!(
                 "SEASON LOCAL {} R{:.3} T{:+.3} SNOW {:.3}",

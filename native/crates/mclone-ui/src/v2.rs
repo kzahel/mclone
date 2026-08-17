@@ -3295,6 +3295,7 @@ const UI_V2_OPTIONS_CELESTIAL_STARS: UiWidgetId = UiWidgetId(194);
 const UI_V2_OPTIONS_CELESTIAL_PHASE_READOUT: UiWidgetId = UiWidgetId(195);
 const UI_V2_OPTIONS_CELESTIAL_COORDINATES: UiWidgetId = UiWidgetId(196);
 const UI_V2_OPTIONS_CELESTIAL_COST: UiWidgetId = UiWidgetId(197);
+const UI_V2_OPTIONS_SEASON_PHASE_SOURCE: UiWidgetId = UiWidgetId(198);
 const UI_V2_STORAGE_PROFILE_NAME: UiWidgetId = UiWidgetId(133);
 const UI_V2_STORAGE_PROFILE_ID: UiWidgetId = UiWidgetId(134);
 const UI_V2_STORAGE_BACKEND: UiWidgetId = UiWidgetId(135);
@@ -3968,7 +3969,7 @@ const fn options_category_row_count(category: GameOptionsCategory) -> usize {
         GameOptionsCategory::Display => 3,
         GameOptionsCategory::LocalPlay => 5,
         GameOptionsCategory::Debug => 7,
-        GameOptionsCategory::SeasonalDebug => 12,
+        GameOptionsCategory::SeasonalDebug => 13,
         GameOptionsCategory::CelestialDebug => 11,
         GameOptionsCategory::StorageProfile => 8,
     }
@@ -3981,6 +3982,11 @@ fn toggle_season_preview(mut settings: crate::SeasonPreviewSettings) -> GameUiAc
 
 fn toggle_season_appearance(mut settings: crate::SeasonPreviewSettings) -> GameUiAction {
     settings.appearance_enabled = !settings.appearance_enabled;
+    GameUiAction::SetSeasonPreview(settings)
+}
+
+fn cycle_season_phase_source(mut settings: crate::SeasonPreviewSettings) -> GameUiAction {
+    settings.phase_source = settings.phase_source.next();
     GameUiAction::SetSeasonPreview(settings)
 }
 
@@ -4013,17 +4019,36 @@ fn season_recent_snow_action(
 }
 
 fn seasonal_debug_summary(state: GameUiRenderState) -> String {
+    let source = state.season_preview.phase_source.label();
     if !state.season_preview.evaluation_enabled() {
-        return "Off".to_owned();
+        return format!("{source} / Off");
     }
-    let date = crate::PreviewCalendarDate::from_orbital_phase(state.season_preview.orbital_phase);
     let local = state.seasonal_debug.map_or("Unavailable", |diagnostics| {
         diagnostics.local_season.label()
     });
+    let date = match state.season_preview.phase_source {
+        crate::SeasonPhaseSource::WorldCalendar => state
+            .seasonal_debug
+            .and_then(|diagnostics| diagnostics.calendar)
+            .map_or_else(
+                || "Unavailable".to_owned(),
+                |calendar| {
+                    format!(
+                        "Year {} Day {}/{}",
+                        calendar.year_index.saturating_add(1),
+                        calendar.day_of_year,
+                        calendar.days_per_year()
+                    )
+                },
+            ),
+        crate::SeasonPhaseSource::ManualPreview => {
+            let date =
+                crate::PreviewCalendarDate::from_orbital_phase(state.season_preview.orbital_phase);
+            format!("Day {}/{}", date.day(), crate::PREVIEW_CALENDAR_DAYS)
+        }
+    };
     format!(
-        "Day {}/{} / {local} / S{} G{}",
-        date.day(),
-        crate::PREVIEW_CALENDAR_DAYS,
+        "{source} / {date} / {local} / S{} G{}",
         if state.season_preview.enabled {
             "+"
         } else {
@@ -4040,8 +4065,41 @@ fn seasonal_debug_summary(state: GameUiRenderState) -> String {
 fn seasonal_debug_rows(state: GameUiRenderState) -> Vec<(f32, UiWidget)> {
     let ph = Rect::new(0.0, 0.0, 0.0, 0.0);
     let settings = state.season_preview;
-    let date = crate::PreviewCalendarDate::from_orbital_phase(settings.orbital_phase);
-    let milestone = crate::OrbitalMilestone::nearest(settings.orbital_phase);
+    let manual_date = crate::PreviewCalendarDate::from_orbital_phase(settings.orbital_phase);
+    let effective_phase = state
+        .seasonal_debug
+        .map_or(settings.orbital_phase, |diagnostics| {
+            diagnostics.effective_orbital_phase
+        });
+    let milestone = crate::OrbitalMilestone::nearest(effective_phase);
+    let milestone_label = if settings.phase_source == crate::SeasonPhaseSource::WorldCalendar
+        && state.seasonal_debug.is_none()
+    {
+        "Unavailable"
+    } else {
+        milestone.label()
+    };
+    let date_label = match settings.phase_source {
+        crate::SeasonPhaseSource::WorldCalendar => state
+            .seasonal_debug
+            .and_then(|diagnostics| diagnostics.calendar)
+            .map_or_else(
+                || "Date: Unavailable".to_owned(),
+                |calendar| {
+                    format!(
+                        "Date: Year {}, Day {}/{}",
+                        calendar.year_index.saturating_add(1),
+                        calendar.day_of_year,
+                        calendar.days_per_year()
+                    )
+                },
+            ),
+        crate::SeasonPhaseSource::ManualPreview => format!(
+            "Date: Day {}/{}",
+            manual_date.day(),
+            crate::PREVIEW_CALENDAR_DAYS
+        ),
+    };
     let local_label = state.seasonal_debug.map_or_else(
         || "Unavailable".to_owned(),
         |diagnostics| {
@@ -4088,13 +4146,26 @@ fn seasonal_debug_rows(state: GameUiRenderState) -> Vec<(f32, UiWidget)> {
         ),
         (
             20.0,
+            UiWidget::cycle(
+                UI_V2_OPTIONS_SEASON_PHASE_SOURCE,
+                ph,
+                "Season Source",
+                settings.phase_source.label(),
+            )
+            .action(cycle_season_phase_source(settings)),
+        ),
+        (
+            20.0,
             UiWidget::slider(
                 UI_V2_OPTIONS_SEASON_ORBITAL_PHASE,
                 ph,
-                format!("Date: Day {}/{}", date.day(), crate::PREVIEW_CALENDAR_DAYS),
-                settings.orbital_phase.turns() as f32,
+                date_label,
+                effective_phase.turns() as f32,
             )
-            .enabled(settings.evaluation_enabled())
+            .enabled(
+                settings.evaluation_enabled()
+                    && settings.phase_source == crate::SeasonPhaseSource::ManualPreview,
+            )
             .slider_action(UiSliderAction::SeasonOrbitalPhase),
         ),
         (
@@ -4103,7 +4174,7 @@ fn seasonal_debug_rows(state: GameUiRenderState) -> Vec<(f32, UiWidget)> {
                 UI_V2_OPTIONS_SEASON_MILESTONE,
                 ph,
                 "Milestone",
-                milestone.label(),
+                milestone_label,
             )
             .enabled(false),
         ),
