@@ -616,7 +616,7 @@ impl RealmServer {
             .season_calendar_policy
             .sample(self.day_time)
             .expect("validated realm calendar policy must remain sampleable");
-        let sampler = self.active_dimension.seasonal_resource_sampler;
+        let sampler = self.active_dimension.seasonal_resource_sampler.clone();
         let opportunity_cache =
             crate::wildlife_resources::SeasonalWildlifeOpportunityCache::new(sampler, calendar);
         self.active_dimension
@@ -663,7 +663,7 @@ impl RealmServer {
             .season_calendar_policy
             .sample(day_time)
             .expect("validated realm calendar policy must remain sampleable");
-        let seasonal_resource_sampler = self.active_dimension.seasonal_resource_sampler;
+        let seasonal_resource_sampler = self.active_dimension.seasonal_resource_sampler.clone();
         let seasonal_resource_opportunities =
             crate::wildlife_resources::SeasonalWildlifeOpportunityCache::new(
                 seasonal_resource_sampler,
@@ -3149,7 +3149,7 @@ impl RealmServer {
             .season_calendar_policy
             .sample(day_time)
             .expect("validated realm calendar policy must remain sampleable");
-        let seasonal_resource_sampler = self.active_dimension.seasonal_resource_sampler;
+        let seasonal_resource_sampler = self.active_dimension.seasonal_resource_sampler.clone();
         let seasonal_resource_opportunities =
             crate::wildlife_resources::SeasonalWildlifeOpportunityCache::new(
                 seasonal_resource_sampler,
