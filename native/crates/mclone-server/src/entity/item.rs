@@ -208,6 +208,7 @@ mod tests {
             mallard: None,
             mallard_nest: None,
             deer: None,
+            squirrel: None,
             animation: None,
             position: Vec3d::new(0.5, 64.0, 0.5),
             y_rot_degrees: 0.0,

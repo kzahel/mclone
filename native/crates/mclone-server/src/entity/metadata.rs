@@ -201,6 +201,7 @@ impl EntityMetadata {
             EntityKind::SleepingMat => Some(Self::SLEEPING_MAT),
             EntityKind::Mannequin => Some(Self::MANNEQUIN),
             EntityKind::Item => Some(Self::ITEM),
+            EntityKind::Squirrel => None,
             EntityKind::DebugCube => None,
         }
     }

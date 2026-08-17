@@ -734,6 +734,7 @@ pub(crate) fn persistent_passive_actor_identity_summary(
                     | EntityKind::Deer
                     | EntityKind::Bee
                     | EntityKind::Rabbit
+                    | EntityKind::Squirrel
                     | EntityKind::Mannequin
             )
         })
@@ -750,6 +751,7 @@ pub(crate) fn persistent_passive_actor_identity_summary(
                 EntityKind::Deer => 5,
                 EntityKind::Bee => 6,
                 EntityKind::Rabbit => 7,
+                EntityKind::Squirrel => 8,
                 EntityKind::DebugCube
                 | EntityKind::Item
                 | EntityKind::MallardNest

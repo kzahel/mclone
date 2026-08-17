@@ -70,6 +70,7 @@ pub struct ActorPresentation {
     pub in_water: bool,
     pub mallard_nest: Option<MallardNestSnapshotData>,
     pub deer: Option<mclone_protocol::DeerSnapshotData>,
+    pub squirrel: Option<mclone_protocol::SquirrelSnapshotData>,
 }
 
 impl ActorPresentation {
@@ -97,6 +98,7 @@ impl ActorPresentation {
             in_water: false,
             mallard_nest: None,
             deer: None,
+            squirrel: None,
         }
     }
 
@@ -125,6 +127,7 @@ impl ActorPresentation {
             in_water: snapshot.mallard.is_some_and(|data| data.in_water),
             mallard_nest: snapshot.mallard_nest,
             deer: snapshot.deer,
+            squirrel: snapshot.squirrel,
         }
     }
 }
@@ -370,6 +373,7 @@ const fn uses_movement_derived_travel_phase(kind: ActorPresentationKind) -> bool
                     | EntityKind::Mannequin
                     | EntityKind::Deer
                     | EntityKind::Rabbit
+                    | EntityKind::Squirrel
             )
     )
 }
@@ -504,6 +508,7 @@ mod tests {
             in_water: false,
             mallard_nest: None,
             deer: None,
+            squirrel: None,
             feet_position: Vec3d::new(x, 64.0, 2.0),
             y_rot_degrees,
             x_rot_degrees: 0.0,
@@ -531,6 +536,7 @@ mod tests {
             in_water: false,
             mallard_nest: None,
             deer: None,
+            squirrel: None,
             feet_position: Vec3d::new(0.0, y, 0.0),
             y_rot_degrees: 0.0,
             x_rot_degrees: 0.0,
@@ -558,6 +564,7 @@ mod tests {
             in_water: false,
             mallard_nest: None,
             deer: None,
+            squirrel: None,
             feet_position: Vec3d::new(x, 64.0, 0.0),
             y_rot_degrees: 0.0,
             x_rot_degrees: 0.0,
@@ -608,6 +615,7 @@ mod tests {
                 in_water: false,
                 mallard_nest: None,
                 deer: None,
+                squirrel: None,
                 feet_position: update.position,
                 y_rot_degrees: update.y_rot_degrees,
                 x_rot_degrees: update.x_rot_degrees,
@@ -636,6 +644,7 @@ mod tests {
             mallard: None,
             mallard_nest: None,
             deer: None,
+            squirrel: None,
             animation: Some(AnimationState::distance(
                 AnimationClipId::from_static("walk"),
                 0,
@@ -661,6 +670,7 @@ mod tests {
                 in_water: false,
                 mallard_nest: None,
                 deer: None,
+                squirrel: None,
                 feet_position: snapshot.position,
                 y_rot_degrees: snapshot.y_rot_degrees,
                 x_rot_degrees: snapshot.x_rot_degrees,

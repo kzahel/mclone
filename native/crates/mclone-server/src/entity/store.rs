@@ -4709,6 +4709,7 @@ impl ServerEntityStore {
                 pickup_delay: self.items.get(&entity.id)?.pickup_delay(),
             },
             EntityKind::DebugCube => return None,
+            EntityKind::Squirrel => return None,
         };
         Some(EntitySaveRecord {
             persistent_id,
@@ -4875,6 +4876,7 @@ fn entity_kind_code(kind: EntityKind) -> Option<&'static str> {
         EntityKind::Mannequin => Some("mclone:mannequin"),
         EntityKind::Item => Some("minecraft:item"),
         EntityKind::DebugCube => None,
+        EntityKind::Squirrel => None,
     }
 }
 

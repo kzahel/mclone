@@ -333,6 +333,15 @@ pub fn actor_instances_from_presentations_near_observer(
                     .with_dimensions(actor.width, actor.height)
                     .with_packed_light(packed_light)
                 }
+                ActorPresentationKind::Entity(EntityKind::Squirrel) => {
+                    ActorInstance::remote_player_with_figure(
+                        glam_vec3_from_vec3d(feet_position),
+                        actor.y_rot_degrees,
+                        mclone_assets::red_squirrel_figure_id(),
+                    )
+                    .with_dimensions(actor.width, actor.height)
+                    .with_packed_light(packed_light)
+                }
                 ActorPresentationKind::Entity(EntityKind::RabbitBurrow) => {
                     ActorInstance::semantic_prop(
                         glam_vec3_from_vec3d(feet_position),
@@ -552,6 +561,7 @@ pub fn actor_light_probe_height(actor: &ActorPresentation) -> f64 {
         ActorPresentationKind::Entity(EntityKind::BeeNest) => f64::from(actor.height) * 0.5,
         ActorPresentationKind::Entity(EntityKind::BeeHotel) => f64::from(actor.height) * 0.5,
         ActorPresentationKind::Entity(EntityKind::Rabbit) => f64::from(actor.height) * 0.78,
+        ActorPresentationKind::Entity(EntityKind::Squirrel) => f64::from(actor.height) * 0.78,
         ActorPresentationKind::Entity(EntityKind::RabbitBurrow) => f64::from(actor.height) * 0.5,
         ActorPresentationKind::Entity(EntityKind::WildlifeRemains) => f64::from(actor.height) * 0.5,
         ActorPresentationKind::Entity(EntityKind::SleepingMat) => f64::from(actor.height) * 0.5,

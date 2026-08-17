@@ -125,7 +125,8 @@ impl MobSpeciesState {
             | EntityKind::DeerBed
             | EntityKind::BeeNest
             | EntityKind::BeeHotel
-            | EntityKind::SleepingMat => {
+            | EntityKind::SleepingMat
+            | EntityKind::Squirrel => {
                 debug_assert!(false, "non-mob entities do not use mob species state");
                 Self::Cow
             }
@@ -204,7 +205,8 @@ impl MobSpeciesState {
             | EntityKind::DeerBed
             | EntityKind::BeeNest
             | EntityKind::BeeHotel
-            | EntityKind::SleepingMat => {
+            | EntityKind::SleepingMat
+            | EntityKind::Squirrel => {
                 debug_assert!(false, "non-mob entities do not use mob species state");
                 Self::Cow
             }

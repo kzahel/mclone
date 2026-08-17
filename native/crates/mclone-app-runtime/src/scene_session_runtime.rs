@@ -434,6 +434,13 @@ impl SceneSessionRuntime {
         self.core_mut().client_mut().drain_rabbit_sounds().collect()
     }
 
+    pub fn drain_squirrel_sounds(&mut self) -> Vec<mclone_protocol::SquirrelSoundCue> {
+        self.core_mut()
+            .client_mut()
+            .drain_squirrel_sounds()
+            .collect()
+    }
+
     pub fn drain_mallard_tracks(&mut self) -> Vec<mclone_protocol::MallardTrackCue> {
         self.core_mut()
             .client_mut()

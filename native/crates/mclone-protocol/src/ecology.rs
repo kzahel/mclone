@@ -1,4 +1,4 @@
-use mclone_core::Vec3d;
+use mclone_core::{BlockPos, Vec3d};
 
 use crate::{EntityId, EntityPersistentId};
 
@@ -446,4 +446,67 @@ pub struct DeerSoundCue {
     pub sequence: u64,
     pub audible_radius: f32,
     pub kind: DeerSoundKind,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SquirrelSex {
+    Female,
+    Male,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SquirrelLifeStage {
+    Kit,
+    Adult,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SquirrelBehavior {
+    Idle,
+    Bound,
+    Forage,
+    Alarm,
+    Flee,
+    TrunkApproach,
+    Climb,
+    RefugeEnter,
+    RefugeIdle,
+    RefugeExit,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SquirrelRetainedIntent {
+    GroundForage,
+    CoverEscape,
+    TreeRefuge,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SquirrelSnapshotData {
+    pub sex: SquirrelSex,
+    pub age_ticks: u32,
+    pub life_stage: SquirrelLifeStage,
+    pub condition: u16,
+    pub behavior: SquirrelBehavior,
+    pub behavior_epoch: u32,
+    pub retained_intent: Option<SquirrelRetainedIntent>,
+    pub refuge: Option<BlockPos>,
+}
+
+pub type SquirrelUpdateData = SquirrelSnapshotData;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SquirrelSoundKind {
+    Alarm,
+    Rustle,
+    Dig,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SquirrelSoundCue {
+    pub source: EntityId,
+    pub position: Vec3d,
+    pub sequence: u64,
+    pub audible_radius: f32,
+    pub kind: SquirrelSoundKind,
 }

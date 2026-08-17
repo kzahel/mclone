@@ -6206,6 +6206,7 @@ mod tests {
             mallard: None,
             mallard_nest: None,
             deer: None,
+            squirrel: None,
             position,
             y_rot_degrees: 0.0,
             x_rot_degrees: 0.0,

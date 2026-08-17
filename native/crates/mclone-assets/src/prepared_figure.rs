@@ -2154,6 +2154,8 @@ mod tests {
         include_str!("../../../../assets/mclone/figures/mallard_feather.figure.json");
     const RABBIT_FIGURE_JSON: &str =
         include_str!("../../../../assets/mclone/figures/rabbit.figure.json");
+    const RED_SQUIRREL_FIGURE_JSON: &str =
+        include_str!("../../../../assets/mclone/figures/red_squirrel.figure.json");
     const RABBIT_BURROW_FIGURE_JSON: &str =
         include_str!("../../../../assets/mclone/figures/rabbit_burrow.figure.json");
     const SLEEPING_MAT_FIGURE_JSON: &str =
@@ -3026,6 +3028,29 @@ mod tests {
         ] {
             assert!(
                 prepared_rabbit.clips.contains_key(required),
+                "missing {required}"
+            );
+        }
+
+        let squirrel: FigureAsset = serde_json::from_str(RED_SQUIRREL_FIGURE_JSON).unwrap();
+        let prepared_squirrel = prepare_figure_asset(&squirrel).unwrap();
+        assert_eq!(prepared_squirrel.parts.len(), 18);
+        for required in [
+            "idle",
+            "bound",
+            "flee",
+            "forage",
+            "alarm",
+            "climb",
+            "refuge_enter",
+            "refuge_idle",
+            "refuge_exit",
+            "carry",
+            "cache_deposit",
+            "cache_retrieve",
+        ] {
+            assert!(
+                prepared_squirrel.clips.contains_key(required),
                 "missing {required}"
             );
         }

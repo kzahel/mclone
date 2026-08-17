@@ -33,7 +33,7 @@ use mclone_protocol::{
     MallardNestSnapshotData, MallardSnapshotData, MallardTrackCue, PlayerLifeState,
     PlayerPositionUpdate, PlayerStatistics, RabbitFieldGuideProgress, RabbitSoundCue,
     RemotePlayerId, RemotePlayerUpdate, SectionBlockUpdate, ServerEphemeralMessage, ServerUpdate,
-    SessionConfiguration, SleepStateUpdate, validate_body_pose_sample,
+    SessionConfiguration, SleepStateUpdate, SquirrelSoundCue, validate_body_pose_sample,
 };
 use mclone_season::{AuthoritativeCalendarSample, SeasonCalendarError, SeasonCalendarPolicy};
 
@@ -128,6 +128,7 @@ pub struct ClientRuntime {
     deer_sounds: VecDeque<DeerSoundCue>,
     bee_sounds: VecDeque<BeeSoundCue>,
     rabbit_sounds: VecDeque<RabbitSoundCue>,
+    squirrel_sounds: VecDeque<SquirrelSoundCue>,
     mallard_tracks: VecDeque<MallardTrackCue>,
     player_life: PlayerLifeState,
     player_position_updates: VecDeque<PlayerPositionUpdate>,
@@ -172,6 +173,7 @@ impl ClientRuntime {
             deer_sounds: VecDeque::new(),
             bee_sounds: VecDeque::new(),
             rabbit_sounds: VecDeque::new(),
+            squirrel_sounds: VecDeque::new(),
             mallard_tracks: VecDeque::new(),
             player_life: PlayerLifeState::default(),
             player_position_updates: VecDeque::new(),
@@ -375,6 +377,7 @@ impl ClientRuntime {
             }
             ServerUpdate::BeeSound(cue) => self.bee_sounds.push_back(cue),
             ServerUpdate::RabbitSound(cue) => self.rabbit_sounds.push_back(cue),
+            ServerUpdate::SquirrelSound(cue) => self.squirrel_sounds.push_back(cue),
             ServerUpdate::DeerSound(cue) => self.deer_sounds.push_back(cue),
             ServerUpdate::MallardCall(cue) => self.mallard_calls.push_back(cue),
             ServerUpdate::MallardTrack(cue) => self.mallard_tracks.push_back(cue),
@@ -506,6 +509,10 @@ impl ClientRuntime {
 
     pub fn drain_rabbit_sounds(&mut self) -> impl Iterator<Item = RabbitSoundCue> + '_ {
         self.rabbit_sounds.drain(..)
+    }
+
+    pub fn drain_squirrel_sounds(&mut self) -> impl Iterator<Item = SquirrelSoundCue> + '_ {
+        self.squirrel_sounds.drain(..)
     }
 
     pub fn drain_mallard_tracks(&mut self) -> impl Iterator<Item = MallardTrackCue> + '_ {
@@ -918,6 +925,9 @@ impl ClientRuntime {
             }
             if let Some(deer) = update.deer {
                 snapshot.deer = Some(deer);
+            }
+            if let Some(squirrel) = update.squirrel {
+                snapshot.squirrel = Some(squirrel);
             }
             snapshot.animation = update.animation;
             snapshot.position = update.position;
@@ -1395,6 +1405,7 @@ mod tests {
             mallard: None,
             mallard_nest: None,
             deer: None,
+            squirrel: None,
             animation: None,
             position: mclone_core::Vec3d::new(4.0, 64.0, 5.0),
             y_rot_degrees: 0.0,
@@ -1795,6 +1806,7 @@ mod tests {
             mallard: None,
             mallard_nest: None,
             deer: None,
+            squirrel: None,
             animation: None,
             position: Vec3d::new(511.75, 64.0, 2.0),
             y_rot_degrees: 0.0,
@@ -1811,6 +1823,7 @@ mod tests {
             mallard: None,
             mallard_nest: None,
             deer: None,
+            squirrel: None,
             animation: None,
             position: Vec3d::new(0.25, 64.0, 2.0),
             y_rot_degrees: 0.0,
@@ -1836,6 +1849,7 @@ mod tests {
             mallard: None,
             mallard_nest: None,
             deer: None,
+            squirrel: None,
             animation: None,
             position: mclone_core::Vec3d::new(1.0, 64.0, 2.0),
             y_rot_degrees: 45.0,
@@ -1852,6 +1866,7 @@ mod tests {
             mallard: None,
             mallard_nest: None,
             deer: None,
+            squirrel: None,
             animation: None,
             position: mclone_core::Vec3d::new(17.0, 65.0, 4.0),
             y_rot_degrees: 90.0,
@@ -1921,6 +1936,7 @@ mod tests {
             }),
             mallard_nest: None,
             deer: None,
+            squirrel: None,
             animation: None,
             position: Vec3d::new(1.5, 64.0, 2.5),
             y_rot_degrees: 0.0,
@@ -1941,6 +1957,7 @@ mod tests {
             }),
             mallard_nest: None,
             deer: None,
+            squirrel: None,
             animation: None,
             position: Vec3d::new(1.75, 64.88, 2.5),
             y_rot_degrees: 12.0,
@@ -1978,6 +1995,7 @@ mod tests {
                 attended: false,
             }),
             deer: None,
+            squirrel: None,
             animation: None,
             position: Vec3d::new(2.5, 65.0, 3.5),
             y_rot_degrees: 0.0,
@@ -1998,6 +2016,7 @@ mod tests {
                 attended: true,
             }),
             deer: None,
+            squirrel: None,
             animation: None,
             position: Vec3d::new(2.5, 65.0, 3.5),
             y_rot_degrees: 0.0,
@@ -2046,6 +2065,7 @@ mod tests {
                 in_water: false,
                 mallard_nest: None,
                 deer: None,
+                squirrel: None,
                 feet_position: update.position,
                 y_rot_degrees: update.y_rot_degrees,
                 x_rot_degrees: update.x_rot_degrees,
@@ -2079,6 +2099,7 @@ mod tests {
             mallard: None,
             mallard_nest: None,
             deer: None,
+            squirrel: None,
             animation: None,
             position: mclone_core::Vec3d::new(10.0, 64.0, -4.0),
             y_rot_degrees: -90.0,
@@ -2103,6 +2124,7 @@ mod tests {
                 in_water: false,
                 mallard_nest: None,
                 deer: None,
+                squirrel: None,
                 feet_position: snapshot.position,
                 y_rot_degrees: snapshot.y_rot_degrees,
                 x_rot_degrees: snapshot.x_rot_degrees,
@@ -2133,6 +2155,7 @@ mod tests {
             mallard: None,
             mallard_nest: None,
             deer: None,
+            squirrel: None,
             animation: None,
             position: mclone_core::Vec3d::new(10.0, 64.0, -4.0),
             y_rot_degrees: 0.0,
@@ -2255,6 +2278,7 @@ mod tests {
             mallard: None,
             mallard_nest: None,
             deer: None,
+            squirrel: None,
             animation: None,
             position: mclone_core::Vec3d::new(1.0, 64.0, 2.0),
             y_rot_degrees: 0.0,
@@ -2275,6 +2299,7 @@ mod tests {
             mallard: None,
             mallard_nest: None,
             deer: None,
+            squirrel: None,
             animation: None,
             position: mclone_core::Vec3d::new(1.0, 64.0, 2.0),
             y_rot_degrees: 0.0,

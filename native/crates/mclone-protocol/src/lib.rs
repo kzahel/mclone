@@ -25,7 +25,9 @@ pub use ecology::{
     MallardFieldGuideProgress, MallardLifeStage, MallardNestSnapshotData, MallardNestUpdateData,
     MallardObservationKind, MallardSex, MallardSnapshotData, MallardTrackCue, MallardUpdateData,
     RABBIT_FIELD_GUIDE_OBSERVATION_COUNT, RabbitBehavior, RabbitFieldGuideProgress,
-    RabbitLifeStage, RabbitObservationKind, RabbitSoundCue, RabbitSoundKind,
+    RabbitLifeStage, RabbitObservationKind, RabbitSoundCue, RabbitSoundKind, SquirrelBehavior,
+    SquirrelLifeStage, SquirrelRetainedIntent, SquirrelSex, SquirrelSnapshotData, SquirrelSoundCue,
+    SquirrelSoundKind, SquirrelUpdateData,
 };
 pub use ephemeral::{
     ClientEphemeralMessage, EffectiveEphemeralTransport, MAX_EPHEMERAL_MESSAGE_BYTES,
@@ -49,7 +51,7 @@ pub use statistics::{
     SUCCESSFUL_BLOCK_PLACEMENT_STATISTIC_VALUE_KEY, StatisticKey, StatisticKeyError,
 };
 
-pub const PROTOCOL_VERSION: u32 = 42;
+pub const PROTOCOL_VERSION: u32 = 43;
 pub const HOTBAR_SLOT_COUNT: u8 = 9;
 pub const HOTBAR_SLOT_COUNT_USIZE: usize = HOTBAR_SLOT_COUNT as usize;
 pub const MAX_PLAYER_DISPLAY_NAME_BYTES: usize = 16;
@@ -114,6 +116,7 @@ const SERVER_UPDATE_BEE_SOUND: u8 = 29;
 const SERVER_UPDATE_RABBIT_FIELD_GUIDE: u8 = 30;
 const SERVER_UPDATE_RABBIT_SOUND: u8 = 31;
 const SERVER_UPDATE_SLEEP_STATE: u8 = 32;
+const SERVER_UPDATE_SQUIRREL_SOUND: u8 = 33;
 
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 pub struct SessionCapabilities(u64);
@@ -577,6 +580,7 @@ pub enum ServerUpdate {
     RabbitFieldGuide(RabbitFieldGuideProgress),
     BeeSound(BeeSoundCue),
     RabbitSound(RabbitSoundCue),
+    SquirrelSound(SquirrelSoundCue),
     DeerSound(DeerSoundCue),
     MallardCall(MallardCallCue),
     MallardTrack(MallardTrackCue),
@@ -654,6 +658,7 @@ pub enum EntityKind {
     RabbitBurrow,
     WildlifeRemains,
     SleepingMat,
+    Squirrel,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -715,6 +720,7 @@ pub struct EntitySnapshot {
     pub mallard: Option<MallardSnapshotData>,
     pub mallard_nest: Option<MallardNestSnapshotData>,
     pub deer: Option<DeerSnapshotData>,
+    pub squirrel: Option<SquirrelSnapshotData>,
     pub animation: Option<AnimationState>,
     pub position: Vec3d,
     pub y_rot_degrees: f32,
@@ -733,6 +739,7 @@ pub struct EntityUpdate {
     pub mallard: Option<MallardUpdateData>,
     pub mallard_nest: Option<MallardNestUpdateData>,
     pub deer: Option<DeerUpdateData>,
+    pub squirrel: Option<SquirrelUpdateData>,
     pub animation: Option<AnimationState>,
     pub position: Vec3d,
     pub y_rot_degrees: f32,
@@ -1195,6 +1202,26 @@ pub fn encode_server_update(update: &ServerUpdate) -> ProtocolCodecResult<Vec<u8
                 RabbitSoundKind::Rustle => 2,
             });
         }
+        ServerUpdate::SquirrelSound(cue) => {
+            if !cue.position.is_finite()
+                || !cue.audible_radius.is_finite()
+                || cue.audible_radius <= 0.0
+            {
+                return Err(ProtocolCodecError::InvalidData(
+                    "invalid squirrel sound cue",
+                ));
+            }
+            writer.write_u8(SERVER_UPDATE_SQUIRREL_SOUND);
+            writer.write_entity_id(cue.source);
+            writer.write_vec3d(cue.position);
+            writer.write_u64(cue.sequence);
+            writer.write_f32(cue.audible_radius);
+            writer.write_u8(match cue.kind {
+                SquirrelSoundKind::Alarm => 0,
+                SquirrelSoundKind::Rustle => 1,
+                SquirrelSoundKind::Dig => 2,
+            });
+        }
         ServerUpdate::DeerSound(cue) => {
             if !cue.position.is_finite()
                 || !cue.audible_radius.is_finite()
@@ -1459,6 +1486,22 @@ pub fn decode_server_update(bytes: &[u8]) -> ProtocolCodecResult<ServerUpdate> {
                 _ => return Err(ProtocolCodecError::InvalidData("unknown rabbit sound kind")),
             },
         }),
+        SERVER_UPDATE_SQUIRREL_SOUND => ServerUpdate::SquirrelSound(SquirrelSoundCue {
+            source: reader.read_entity_id()?,
+            position: reader.read_vec3d()?,
+            sequence: reader.read_u64()?,
+            audible_radius: reader.read_f32()?,
+            kind: match reader.read_u8()? {
+                0 => SquirrelSoundKind::Alarm,
+                1 => SquirrelSoundKind::Rustle,
+                2 => SquirrelSoundKind::Dig,
+                _ => {
+                    return Err(ProtocolCodecError::InvalidData(
+                        "unknown squirrel sound kind",
+                    ));
+                }
+            },
+        }),
         SERVER_UPDATE_DEER_SOUND => ServerUpdate::DeerSound(DeerSoundCue {
             source: reader.read_entity_id()?,
             position: reader.read_vec3d()?,
@@ -1618,6 +1661,7 @@ fn validate_entity_snapshot(snapshot: &EntitySnapshot) -> ProtocolCodecResult<()
             attended: data.attended,
         }),
         deer: snapshot.deer,
+        squirrel: snapshot.squirrel,
         animation: snapshot.animation,
         position: snapshot.position,
         y_rot_degrees: snapshot.y_rot_degrees,
@@ -1664,6 +1708,11 @@ fn validate_entity_snapshot(snapshot: &EntitySnapshot) -> ProtocolCodecResult<()
             "deer entity snapshot has inconsistent species data",
         ));
     }
+    if (snapshot.kind == EntityKind::Squirrel) != snapshot.squirrel.is_some() {
+        return Err(ProtocolCodecError::InvalidData(
+            "squirrel entity snapshot has inconsistent species data",
+        ));
+    }
     Ok(())
 }
 
@@ -1704,6 +1753,14 @@ fn validate_entity_update(update: &EntityUpdate) -> ProtocolCodecResult<()> {
     {
         return Err(ProtocolCodecError::InvalidData(
             "deer update has invalid biological state",
+        ));
+    }
+    if let Some(squirrel) = update.squirrel
+        && (squirrel.condition > 1_000
+            || (squirrel.behavior == SquirrelBehavior::RefugeIdle && squirrel.refuge.is_none()))
+    {
+        return Err(ProtocolCodecError::InvalidData(
+            "squirrel update has invalid biological or refuge state",
         ));
     }
     if let Some(animation) = update.animation {
@@ -1869,6 +1926,7 @@ impl ByteWriter {
             EntityKind::RabbitBurrow => 13,
             EntityKind::WildlifeRemains => 14,
             EntityKind::SleepingMat => 15,
+            EntityKind::Squirrel => 16,
         });
     }
 
@@ -2146,6 +2204,7 @@ impl ByteWriter {
         self.write_optional_mallard_snapshot_data(snapshot.mallard);
         self.write_optional_mallard_nest_snapshot_data(snapshot.mallard_nest);
         self.write_optional_deer_data(snapshot.deer);
+        self.write_optional_squirrel_data(snapshot.squirrel);
         self.write_optional_animation_state(snapshot.animation)
             .expect("validated entity animation");
         self.write_vec3d(snapshot.position);
@@ -2174,6 +2233,7 @@ impl ByteWriter {
         self.write_optional_mallard_update_data(update.mallard);
         self.write_optional_mallard_nest_update_data(update.mallard_nest);
         self.write_optional_deer_data(update.deer);
+        self.write_optional_squirrel_data(update.squirrel);
         self.write_optional_animation_state(update.animation)
             .expect("validated entity animation");
         self.write_vec3d(update.position);
@@ -2243,6 +2303,45 @@ impl ByteWriter {
             });
             self.write_u8(data.health);
             self.write_u8(data.max_health);
+        }
+    }
+
+    fn write_optional_squirrel_data(&mut self, data: Option<SquirrelSnapshotData>) {
+        self.write_bool(data.is_some());
+        if let Some(data) = data {
+            self.write_u8(match data.sex {
+                SquirrelSex::Female => 0,
+                SquirrelSex::Male => 1,
+            });
+            self.write_u32(data.age_ticks);
+            self.write_u8(match data.life_stage {
+                SquirrelLifeStage::Kit => 0,
+                SquirrelLifeStage::Adult => 1,
+            });
+            self.write_u16(data.condition);
+            self.write_u8(match data.behavior {
+                SquirrelBehavior::Idle => 0,
+                SquirrelBehavior::Bound => 1,
+                SquirrelBehavior::Forage => 2,
+                SquirrelBehavior::Alarm => 3,
+                SquirrelBehavior::Flee => 4,
+                SquirrelBehavior::TrunkApproach => 5,
+                SquirrelBehavior::Climb => 6,
+                SquirrelBehavior::RefugeEnter => 7,
+                SquirrelBehavior::RefugeIdle => 8,
+                SquirrelBehavior::RefugeExit => 9,
+            });
+            self.write_u32(data.behavior_epoch);
+            self.write_u8(match data.retained_intent {
+                None => 0,
+                Some(SquirrelRetainedIntent::GroundForage) => 1,
+                Some(SquirrelRetainedIntent::CoverEscape) => 2,
+                Some(SquirrelRetainedIntent::TreeRefuge) => 3,
+            });
+            self.write_bool(data.refuge.is_some());
+            if let Some(refuge) = data.refuge {
+                self.write_block_pos(refuge);
+            }
         }
     }
 
@@ -2468,6 +2567,7 @@ impl<'a> ByteReader<'a> {
             13 => Ok(EntityKind::RabbitBurrow),
             14 => Ok(EntityKind::WildlifeRemains),
             15 => Ok(EntityKind::SleepingMat),
+            16 => Ok(EntityKind::Squirrel),
             kind => Err(ProtocolCodecError::UnknownEntityKind(kind)),
         }
     }
@@ -2846,6 +2946,7 @@ impl<'a> ByteReader<'a> {
             mallard: self.read_optional_mallard_snapshot_data()?,
             mallard_nest: self.read_optional_mallard_nest_snapshot_data()?,
             deer: self.read_optional_deer_data()?,
+            squirrel: self.read_optional_squirrel_data()?,
             animation: self.read_optional_animation_state()?,
             position: self.read_vec3d()?,
             y_rot_degrees: self.read_f32()?,
@@ -2987,6 +3088,77 @@ impl<'a> ByteReader<'a> {
         Ok(Some(data))
     }
 
+    fn read_optional_squirrel_data(&mut self) -> ProtocolCodecResult<Option<SquirrelSnapshotData>> {
+        if !self.read_bool()? {
+            return Ok(None);
+        }
+        let sex = match self.read_u8()? {
+            0 => SquirrelSex::Female,
+            1 => SquirrelSex::Male,
+            _ => return Err(ProtocolCodecError::InvalidData("unknown squirrel sex")),
+        };
+        let age_ticks = self.read_u32()?;
+        let life_stage = match self.read_u8()? {
+            0 => SquirrelLifeStage::Kit,
+            1 => SquirrelLifeStage::Adult,
+            _ => {
+                return Err(ProtocolCodecError::InvalidData(
+                    "unknown squirrel life stage",
+                ));
+            }
+        };
+        let condition = self.read_u16()?;
+        let behavior = match self.read_u8()? {
+            0 => SquirrelBehavior::Idle,
+            1 => SquirrelBehavior::Bound,
+            2 => SquirrelBehavior::Forage,
+            3 => SquirrelBehavior::Alarm,
+            4 => SquirrelBehavior::Flee,
+            5 => SquirrelBehavior::TrunkApproach,
+            6 => SquirrelBehavior::Climb,
+            7 => SquirrelBehavior::RefugeEnter,
+            8 => SquirrelBehavior::RefugeIdle,
+            9 => SquirrelBehavior::RefugeExit,
+            _ => {
+                return Err(ProtocolCodecError::InvalidData("unknown squirrel behavior"));
+            }
+        };
+        let behavior_epoch = self.read_u32()?;
+        let retained_intent = match self.read_u8()? {
+            0 => None,
+            1 => Some(SquirrelRetainedIntent::GroundForage),
+            2 => Some(SquirrelRetainedIntent::CoverEscape),
+            3 => Some(SquirrelRetainedIntent::TreeRefuge),
+            _ => {
+                return Err(ProtocolCodecError::InvalidData(
+                    "unknown squirrel retained intent",
+                ));
+            }
+        };
+        let refuge = self
+            .read_bool()?
+            .then(|| self.read_block_pos())
+            .transpose()?;
+        let data = SquirrelSnapshotData {
+            sex,
+            age_ticks,
+            life_stage,
+            condition,
+            behavior,
+            behavior_epoch,
+            retained_intent,
+            refuge,
+        };
+        if data.condition > 1_000
+            || (data.behavior == SquirrelBehavior::RefugeIdle && data.refuge.is_none())
+        {
+            return Err(ProtocolCodecError::InvalidData(
+                "squirrel update has invalid biological or refuge state",
+            ));
+        }
+        Ok(Some(data))
+    }
+
     fn read_optional_animation_state(&mut self) -> ProtocolCodecResult<Option<AnimationState>> {
         if !self.read_bool()? {
             return Ok(None);
@@ -3024,6 +3196,7 @@ impl<'a> ByteReader<'a> {
             mallard: self.read_optional_mallard_update_data()?,
             mallard_nest: self.read_optional_mallard_nest_update_data()?,
             deer: self.read_optional_deer_data()?,
+            squirrel: self.read_optional_squirrel_data()?,
             animation: self.read_optional_animation_state()?,
             position: self.read_vec3d()?,
             y_rot_degrees: self.read_f32()?,
@@ -3634,6 +3807,7 @@ mod tests {
             }),
             mallard_nest: None,
             deer: None,
+            squirrel: None,
             animation: Some(AnimationState::elapsed(
                 AnimationClipId::from_static("alert"),
                 3,
@@ -3662,6 +3836,7 @@ mod tests {
             }),
             mallard_nest: None,
             deer: None,
+            squirrel: None,
             animation: Some(AnimationState::distance(
                 AnimationClipId::from_static("waddle"),
                 4,
@@ -3715,6 +3890,7 @@ mod tests {
             mallard: None,
             mallard_nest: None,
             deer: Some(deer),
+            squirrel: None,
             animation: Some(AnimationState::elapsed(
                 AnimationClipId::from_static("alert"),
                 2,
@@ -3749,6 +3925,70 @@ mod tests {
     }
 
     #[test]
+    fn squirrel_state_and_sound_round_trip_and_validate_refuge() {
+        let squirrel = SquirrelSnapshotData {
+            sex: SquirrelSex::Female,
+            age_ticks: 48_000,
+            life_stage: SquirrelLifeStage::Adult,
+            condition: 780,
+            behavior: SquirrelBehavior::RefugeIdle,
+            behavior_epoch: 12,
+            retained_intent: Some(SquirrelRetainedIntent::TreeRefuge),
+            refuge: Some(BlockPos::new(8, 69, -4)),
+        };
+        let snapshot = EntitySnapshot {
+            id: EntityId(23),
+            persistent_id: EntityPersistentId::new(0x1234, 0x567b),
+            kind: EntityKind::Squirrel,
+            item_stack: None,
+            mallard: None,
+            mallard_nest: None,
+            deer: None,
+            squirrel: Some(squirrel),
+            animation: Some(AnimationState::elapsed(
+                AnimationClipId::from_static("refuge_idle"),
+                12,
+                80,
+            )),
+            position: Vec3d::new(8.5, 69.0, -3.5),
+            y_rot_degrees: 180.0,
+            x_rot_degrees: 0.0,
+            rotation: None,
+            on_ground: false,
+            width: 0.42,
+            height: 0.62,
+            tick_count: 90,
+        };
+        let update = ServerUpdate::EntitySnapshot(snapshot);
+        let bytes = encode_server_update(&update).unwrap();
+        assert_eq!(decode_server_update(&bytes).unwrap(), update);
+
+        let cue = ServerUpdate::SquirrelSound(SquirrelSoundCue {
+            source: snapshot.id,
+            position: snapshot.position,
+            sequence: 7,
+            audible_radius: 14.0,
+            kind: SquirrelSoundKind::Alarm,
+        });
+        let bytes = encode_server_update(&cue).unwrap();
+        assert_eq!(decode_server_update(&bytes).unwrap(), cue);
+
+        let invalid = ServerUpdate::EntitySnapshot(EntitySnapshot {
+            squirrel: Some(SquirrelSnapshotData {
+                refuge: None,
+                ..squirrel
+            }),
+            ..snapshot
+        });
+        assert_eq!(
+            encode_server_update(&invalid),
+            Err(ProtocolCodecError::InvalidData(
+                "squirrel update has invalid biological or refuge state"
+            ))
+        );
+    }
+
+    #[test]
     fn server_update_codec_round_trips_item_entity_snapshot() {
         let snapshot = EntitySnapshot {
             id: EntityId(8),
@@ -3761,6 +4001,7 @@ mod tests {
             mallard: None,
             mallard_nest: None,
             deer: None,
+            squirrel: None,
             animation: None,
             position: Vec3d::new(12.5, 64.0, -3.25),
             y_rot_degrees: 0.0,
@@ -3785,6 +4026,7 @@ mod tests {
             mallard: None,
             mallard_nest: None,
             deer: None,
+            squirrel: None,
             animation: None,
             position: snapshot.position,
             y_rot_degrees: snapshot.y_rot_degrees,
@@ -3825,6 +4067,7 @@ mod tests {
             mallard: None,
             mallard_nest: None,
             deer: None,
+            squirrel: None,
             animation: None,
             position: Vec3d::new(f64::NAN, 70.0, -3.25),
             y_rot_degrees: 90.0,
@@ -3848,6 +4091,7 @@ mod tests {
             mallard: None,
             mallard_nest: None,
             deer: None,
+            squirrel: None,
             animation: None,
             position: Vec3d::new(1.0, 70.0, -3.25),
             y_rot_degrees: 90.0,
@@ -3873,6 +4117,7 @@ mod tests {
             mallard: None,
             mallard_nest: None,
             deer: None,
+            squirrel: None,
             animation: None,
             position: Vec3d::new(1.0, 70.0, -3.25),
             y_rot_degrees: 90.0,
@@ -3901,6 +4146,7 @@ mod tests {
             mallard: None,
             mallard_nest: None,
             deer: None,
+            squirrel: None,
             animation: None,
             position: Vec3d::new(1.0, 70.0, -3.25),
             y_rot_degrees: 90.0,
@@ -3924,6 +4170,7 @@ mod tests {
             mallard: None,
             mallard_nest: None,
             deer: None,
+            squirrel: None,
             animation: None,
             position: Vec3d::new(1.0, 70.0, -3.25),
             y_rot_degrees: 90.0,

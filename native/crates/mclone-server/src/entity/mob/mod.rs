@@ -329,7 +329,8 @@ impl MobRuntimeState {
             | EntityKind::BeeNest
             | EntityKind::BeeHotel
             | EntityKind::RabbitBurrow
-            | EntityKind::SleepingMat => {}
+            | EntityKind::SleepingMat
+            | EntityKind::Squirrel => {}
             EntityKind::WildlifeRemains => {}
         }
         let attributes = MobAttributes::from_metadata(metadata);
@@ -456,7 +457,8 @@ impl MobRuntimeState {
             | EntityKind::BeeNest
             | EntityKind::BeeHotel
             | EntityKind::RabbitBurrow
-            | EntityKind::SleepingMat => {}
+            | EntityKind::SleepingMat
+            | EntityKind::Squirrel => {}
             EntityKind::WildlifeRemains => {}
         }
         let attributes = MobAttributes::from_metadata(metadata);
@@ -4102,6 +4104,7 @@ fn mob_random_seed(id: EntityId, kind: EntityKind) -> i64 {
         EntityKind::RabbitBurrow => 0x00c0_000d_u64,
         EntityKind::WildlifeRemains => 0x00c0_000e_u64,
         EntityKind::SleepingMat => 0x00c0_000f_u64,
+        EntityKind::Squirrel => 0x00c0_0010_u64,
     };
     let mixed = id.0.wrapping_mul(0x9e37_79b9_7f4a_7c15).rotate_left(17) ^ kind_id;
     mixed as i64

@@ -2,7 +2,7 @@ use mclone_core::{AnimationClipId, AnimationState, BlockPos, ChunkPos, Vec3d};
 use mclone_protocol::{
     DeerSnapshotData, EntityId, EntityKind, EntityPersistentId, EntityRotation, EntitySnapshot,
     EntityUpdate, ItemStackSnapshot, MallardNestSnapshotData, MallardNestUpdateData,
-    MallardSnapshotData, MallardUpdateData,
+    MallardSnapshotData, MallardUpdateData, SquirrelSnapshotData,
 };
 
 use super::metadata::EntityMetadata;
@@ -16,6 +16,7 @@ pub(crate) struct ServerEntityState {
     pub(crate) mallard: Option<MallardSnapshotData>,
     pub(crate) mallard_nest: Option<MallardNestSnapshotData>,
     pub(crate) deer: Option<DeerSnapshotData>,
+    pub(crate) squirrel: Option<SquirrelSnapshotData>,
     pub(crate) animation: Option<AnimationState>,
     pub(crate) position: Vec3d,
     pub(crate) y_rot_degrees: f32,
@@ -48,6 +49,7 @@ impl ServerEntityState {
             mallard: None,
             mallard_nest: None,
             deer: None,
+            squirrel: None,
             animation: default_animation_for_kind(metadata.kind),
             position,
             y_rot_degrees,
@@ -79,6 +81,7 @@ impl ServerEntityState {
             mallard: self.mallard,
             mallard_nest: self.mallard_nest,
             deer: self.deer,
+            squirrel: self.squirrel,
             animation: self.animation,
             position: self.position,
             y_rot_degrees: self.y_rot_degrees,
@@ -105,6 +108,7 @@ impl ServerEntityState {
                 attended: data.attended,
             }),
             deer: self.deer,
+            squirrel: self.squirrel,
             animation: self.animation,
             position: self.position,
             y_rot_degrees: self.y_rot_degrees,
@@ -125,6 +129,7 @@ const fn default_animation_for_kind(kind: EntityKind) -> Option<AnimationState> 
         EntityKind::Deer => AnimationClipId::from_static("idle"),
         EntityKind::Bee => AnimationClipId::from_static("hover"),
         EntityKind::Rabbit => AnimationClipId::from_static("idle"),
+        EntityKind::Squirrel => AnimationClipId::from_static("idle"),
         EntityKind::MallardNest
         | EntityKind::DeerBed
         | EntityKind::BeeNest
