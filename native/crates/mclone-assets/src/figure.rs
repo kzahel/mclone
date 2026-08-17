@@ -31,6 +31,7 @@ pub const OAK_FENCE_GATE_ITEM_FIGURE_PATH: &str =
     "assets/mclone/figures/oak_fence_gate_item.figure.json";
 pub const RABBIT_BURROW_FIGURE_PATH: &str = "assets/mclone/figures/rabbit_burrow.figure.json";
 pub const WILDLIFE_REMAINS_FIGURE_PATH: &str = "assets/mclone/figures/wildlife_remains.figure.json";
+pub const SLEEPING_MAT_FIGURE_PATH: &str = "assets/mclone/figures/sleeping_mat.figure.json";
 pub const DEFAULT_PLAYER_FIGURE_ID: ActorFigureId = ActorFigureId::from_static("mclone:player");
 pub const UPRIGHT_BEAR_FIGURE_ID: ActorFigureId = ActorFigureId::from_static("mclone:upright_bear");
 pub const COW_FIGURE_ID: ActorFigureId = ActorFigureId::from_static("mclone:cow");
@@ -65,6 +66,7 @@ pub const RABBIT_BURROW_FIGURE_ID: ActorFigureId =
     ActorFigureId::from_static("mclone:rabbit_burrow");
 pub const WILDLIFE_REMAINS_FIGURE_ID: ActorFigureId =
     ActorFigureId::from_static("mclone:wildlife_remains");
+pub const SLEEPING_MAT_FIGURE_ID: ActorFigureId = ActorFigureId::from_static("mclone:sleeping_mat");
 pub const FIRST_PARTY_ACTOR_FIGURE_IDS: [ActorFigureId; 8] = [
     DEFAULT_PLAYER_FIGURE_ID,
     UPRIGHT_BEAR_FIGURE_ID,
@@ -75,7 +77,7 @@ pub const FIRST_PARTY_ACTOR_FIGURE_IDS: [ActorFigureId; 8] = [
     BEE_FIGURE_ID,
     RABBIT_FIGURE_ID,
 ];
-pub const FIRST_PARTY_SEMANTIC_PROP_FIGURE_IDS: [SemanticFigureId; 18] = [
+pub const FIRST_PARTY_SEMANTIC_PROP_FIGURE_IDS: [SemanticFigureId; 19] = [
     MALLARD_NEST_FIGURE_ID,
     MALLARD_FEATHER_FIGURE_ID,
     HUNTING_SPEAR_FIGURE_ID,
@@ -94,6 +96,7 @@ pub const FIRST_PARTY_SEMANTIC_PROP_FIGURE_IDS: [SemanticFigureId; 18] = [
     OAK_FENCE_GATE_ITEM_FIGURE_ID,
     RABBIT_BURROW_FIGURE_ID,
     WILDLIFE_REMAINS_FIGURE_ID,
+    SLEEPING_MAT_FIGURE_ID,
 ];
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -379,6 +382,10 @@ pub fn wildlife_remains_figure_path() -> AssetPath {
     AssetPath::new(WILDLIFE_REMAINS_FIGURE_PATH)
 }
 
+pub fn sleeping_mat_figure_path() -> AssetPath {
+    AssetPath::new(SLEEPING_MAT_FIGURE_PATH)
+}
+
 pub const fn default_player_figure_id() -> ActorFigureId {
     DEFAULT_PLAYER_FIGURE_ID
 }
@@ -483,6 +490,10 @@ pub const fn wildlife_remains_figure_id() -> SemanticFigureId {
     WILDLIFE_REMAINS_FIGURE_ID
 }
 
+pub const fn sleeping_mat_figure_id() -> SemanticFigureId {
+    SLEEPING_MAT_FIGURE_ID
+}
+
 fn actor_figure_path(id: ActorFigureId) -> Option<AssetPath> {
     match id.as_str() {
         "mclone:player" => Some(default_player_figure_path()),
@@ -517,6 +528,7 @@ pub fn semantic_figure_path(id: SemanticFigureId) -> Option<AssetPath> {
         "mclone:oak_fence_gate_item" => Some(oak_fence_gate_item_figure_path()),
         "mclone:rabbit_burrow" => Some(rabbit_burrow_figure_path()),
         "mclone:wildlife_remains" => Some(wildlife_remains_figure_path()),
+        "mclone:sleeping_mat" => Some(sleeping_mat_figure_path()),
         _ => None,
     })
 }

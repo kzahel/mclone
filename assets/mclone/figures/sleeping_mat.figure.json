@@ -1,0 +1,98 @@
+{
+  "schemaVersion": 1,
+  "name": "sleeping_mat",
+  "materials": {
+    "mat_dark": {
+      "color": "#405448"
+    },
+    "mat": {
+      "color": "#637761"
+    },
+    "stripe": {
+      "color": "#b97945"
+    },
+    "pillow": {
+      "color": "#d7c99f"
+    },
+    "binding": {
+      "color": "#493b31"
+    }
+  },
+  "textures": {},
+  "parts": [
+    {
+      "name": "mat_base",
+      "at": [0, 0.045, 0],
+      "material": "mat_dark",
+      "primitive": {
+        "kind": "box",
+        "size": [1.08, 0.09, 1.82]
+      }
+    },
+    {
+      "name": "mat_top",
+      "at": [0, 0.098, 0.05],
+      "material": "mat",
+      "primitive": {
+        "kind": "box",
+        "size": [0.98, 0.035, 1.66]
+      }
+    },
+    {
+      "name": "stripe_north",
+      "at": [0, 0.12, -0.33],
+      "material": "stripe",
+      "primitive": {
+        "kind": "box",
+        "size": [0.99, 0.02, 0.14]
+      }
+    },
+    {
+      "name": "stripe_south",
+      "at": [0, 0.12, 0.4],
+      "material": "stripe",
+      "primitive": {
+        "kind": "box",
+        "size": [0.99, 0.02, 0.14]
+      }
+    },
+    {
+      "name": "pillow",
+      "at": [0, 0.16, -0.7],
+      "material": "pillow",
+      "primitive": {
+        "kind": "box",
+        "size": [0.7, 0.12, 0.32]
+      }
+    },
+    {
+      "name": "binding_west",
+      "at": [-0.535, 0.09, 0],
+      "material": "binding",
+      "primitive": {
+        "kind": "box",
+        "size": [0.035, 0.11, 1.84]
+      }
+    },
+    {
+      "name": "binding_east",
+      "at": [0.535, 0.09, 0],
+      "material": "binding",
+      "primitive": {
+        "kind": "box",
+        "size": [0.035, 0.11, 1.84]
+      }
+    },
+    {
+      "name": "foot_fold",
+      "at": [0, 0.145, 0.82],
+      "rot": [-3, 0, 0],
+      "material": "mat_dark",
+      "primitive": {
+        "kind": "box",
+        "size": [1.02, 0.1, 0.18]
+      }
+    }
+  ],
+  "clips": {}
+}

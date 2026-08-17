@@ -1541,6 +1541,39 @@ impl ServerEntityStore {
         ))
     }
 
+    pub(crate) fn place_sleeping_mat<F>(
+        &mut self,
+        position: Vec3d,
+        y_rot_degrees: f32,
+        block_state_at: F,
+    ) -> Option<ServerEntityState>
+    where
+        F: Fn(BlockPos) -> Option<BlockStateId>,
+    {
+        let position = self.topology.canonicalize_position(position)?;
+        if !is_valid_sleeping_mat_site(position, &block_state_at)
+            || self.entities.values().any(|entity| {
+                entity.alive
+                    && entity.kind == EntityKind::SleepingMat
+                    && self
+                        .topology
+                        .nearest_position_lift(entity.position, position)
+                        .distance_to_sqr(position)
+                        < 1.0
+            })
+        {
+            return None;
+        }
+        let id = self.allocate_entity_id();
+        let persistent_id = self.allocate_persistent_id();
+        Some(self.insert_sleeping_mat_with_persistent_id(
+            id,
+            persistent_id,
+            position,
+            y_rot_degrees,
+        ))
+    }
+
     pub(crate) fn has_bee_colony_near(&self, position: Vec3d, radius: f64) -> bool {
         let radius_sqr = radius * radius;
         self.bee_colonies.keys().any(|id| {
@@ -2256,6 +2289,23 @@ impl ServerEntityStore {
 
     pub(crate) fn state(&self, id: EntityId) -> Option<ServerEntityState> {
         self.entities.get(&id).copied()
+    }
+
+    pub(crate) fn state_by_persistent_id(
+        &self,
+        persistent_id: EntityPersistentId,
+    ) -> Option<ServerEntityState> {
+        self.persistent_ids.iter().find_map(|(id, candidate)| {
+            (*candidate == persistent_id)
+                .then(|| self.entities.get(id).copied())
+                .flatten()
+        })
+    }
+
+    pub(crate) fn remove_sleeping_mat(&mut self, id: EntityId) -> Option<ServerEntityState> {
+        (self.entities.get(&id)?.kind == EntityKind::SleepingMat)
+            .then(|| self.remove_entity(id))
+            .flatten()
     }
 
     #[cfg(test)]
@@ -3889,6 +3939,28 @@ impl ServerEntityStore {
         state
     }
 
+    fn insert_sleeping_mat_with_persistent_id(
+        &mut self,
+        id: EntityId,
+        persistent_id: EntityPersistentId,
+        position: Vec3d,
+        y_rot_degrees: f32,
+    ) -> ServerEntityState {
+        let state = ServerEntityState::from_metadata(
+            id,
+            persistent_id,
+            EntityMetadata::SLEEPING_MAT,
+            position,
+            y_rot_degrees,
+            0.0,
+            None,
+            true,
+        );
+        self.entities.insert(id, state);
+        self.persistent_ids.insert(id, persistent_id);
+        state
+    }
+
     #[cfg(test)]
     pub(crate) fn remove_persistent_entity_for_test(
         &mut self,
@@ -4279,6 +4351,13 @@ impl ServerEntityStore {
                     decay_remainder: *decay_remainder,
                 },
             ),
+            ("mclone:sleeping_mat", EntitySavePayload::SleepingMat) => self
+                .insert_sleeping_mat_with_persistent_id(
+                    id,
+                    saved.persistent_id,
+                    canonical_position,
+                    saved.y_rot_degrees,
+                ),
             (
                 "mclone:mallard_nest",
                 EntitySavePayload::MallardNest {
@@ -4588,6 +4667,7 @@ impl ServerEntityStore {
                     decay_remainder: remains.decay_remainder,
                 }
             }
+            EntityKind::SleepingMat => EntitySavePayload::SleepingMat,
             EntityKind::Mannequin => EntitySavePayload::Mannequin,
             EntityKind::Item => EntitySavePayload::Item {
                 stack: entity.item_stack.map(ItemStackSaveRecord::from)?,
@@ -4757,6 +4837,7 @@ fn entity_kind_code(kind: EntityKind) -> Option<&'static str> {
         EntityKind::Rabbit => Some("mclone:rabbit"),
         EntityKind::RabbitBurrow => Some("mclone:rabbit_burrow"),
         EntityKind::WildlifeRemains => Some("mclone:wildlife_remains"),
+        EntityKind::SleepingMat => Some("mclone:sleeping_mat"),
         EntityKind::Mannequin => Some("mclone:mannequin"),
         EntityKind::Item => Some("minecraft:item"),
         EntityKind::DebugCube => None,
@@ -4782,6 +4863,7 @@ fn item_stack_snapshot_from_save(
         "minecraft:carrot" => ItemKind::Carrot,
         "minecraft:oak_fence" => ItemKind::OakFence,
         "minecraft:oak_fence_gate" => ItemKind::OakFenceGate,
+        "mclone:sleeping_mat" => ItemKind::SleepingMat,
         kind => {
             return Err(ChunkStoreError::InvalidData(format!(
                 "unsupported item stack kind {kind:?}"
@@ -4866,6 +4948,18 @@ fn is_valid_bee_colony_site(
             .is_some_and(|state| mclone_blocks::block_collision_aabb(state, pos).is_none())
     }) && block_state_at(support)
         .is_some_and(|state| mclone_blocks::block_collision_aabb(state, support).is_some())
+}
+
+fn is_valid_sleeping_mat_site(
+    position: Vec3d,
+    block_state_at: &impl Fn(BlockPos) -> Option<BlockStateId>,
+) -> bool {
+    let feet = BlockPos::containing(position);
+    let support = feet.offset(0, -1, 0);
+    block_state_at(feet)
+        .is_some_and(|state| mclone_blocks::block_collision_aabb(state, feet).is_none())
+        && block_state_at(support)
+            .is_some_and(|state| mclone_blocks::block_collision_aabb(state, support).is_some())
 }
 
 fn squared_distance_xz(left: Vec3d, right: Vec3d) -> f64 {
@@ -5920,6 +6014,39 @@ mod tests {
 
         assert_eq!(counts.get(MobCategory::Creature), 2);
         assert_eq!(counts.get(MobCategory::Misc), 0);
+    }
+
+    #[test]
+    fn sleeping_mat_is_static_persistent_content_with_stable_identity() {
+        let mut store = ServerEntityStore::default();
+        let mat = store
+            .place_sleeping_mat(Vec3d::new(4.5, 64.0, 4.5), 90.0, |pos| {
+                Some(if pos.y == 63 {
+                    BlockStateId(1)
+                } else {
+                    BlockStateId(0)
+                })
+            })
+            .unwrap();
+        assert_eq!(mat.kind, EntityKind::SleepingMat);
+        assert_eq!((mat.width, mat.height), (1.2, 0.16));
+        assert!(mat.animation.is_none());
+
+        let record = store.entity_chunk_record(ChunkPos::new(0, 0), 1);
+        assert!(record.entities.iter().any(|saved| {
+            saved.persistent_id == mat.persistent_id
+                && saved.kind == "mclone:sleeping_mat"
+                && saved.payload == EntitySavePayload::SleepingMat
+        }));
+
+        let mut loaded = ServerEntityStore::default();
+        loaded.hydrate_entity_chunk_record(&record).unwrap();
+        let restored = loaded
+            .state_by_persistent_id(mat.persistent_id)
+            .expect("restored sleeping mat");
+        assert_eq!(restored.kind, EntityKind::SleepingMat);
+        assert_eq!(restored.position, mat.position);
+        assert_eq!(restored.y_rot_degrees, 90.0);
     }
 
     #[test]

@@ -1,4 +1,5 @@
 use super::support::*;
+use mclone_protocol::SleepStateUpdate;
 
 #[test]
 fn scheduled_fluid_tick_survives_fully_unloaded_chunk_until_reload() {
@@ -163,10 +164,16 @@ fn duplicate_interest_does_not_regenerate_loaded_chunks() {
         handle_command_and_poll(&mut server, ClientCommand::SetChunkView(interest.clone()));
     assert!(snapshot_update_for(&first_updates, ChunkPos::new(0, 0)).is_some());
     assert_eq!(server.scheduler().job_count(), 1);
-    assert_eq!(
-        handle_command_and_poll(&mut server, ClientCommand::SetChunkView(interest)).len(),
-        0
-    );
+    let duplicate_updates =
+        handle_command_and_poll(&mut server, ClientCommand::SetChunkView(interest));
+    assert!(duplicate_updates.iter().all(|update| matches!(
+        update,
+        ServerUpdate::SleepState(SleepStateUpdate {
+            sleeping: false,
+            sleeping_players: 0,
+            eligible_players: 1,
+        })
+    )));
     assert_eq!(server.scheduler().job_count(), 1);
 }
 

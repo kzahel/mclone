@@ -62,6 +62,7 @@ impl EngineServerUpdateReport {
                 | ServerUpdate::Disconnect(_)
                 | ServerUpdate::WorldInfo { .. }
                 | ServerUpdate::TimeUpdate { .. }
+                | ServerUpdate::SleepState(_)
                 | ServerUpdate::PlayerExperience { .. }
                 | ServerUpdate::PlayerStatistics { .. }
                 | ServerUpdate::PlayerInventory { .. }
@@ -152,6 +153,7 @@ impl EngineServerUpdateDirtyBatch {
                 | ServerUpdate::WorldInfo { .. }
                 | ServerUpdate::DimensionChange { .. } => {}
                 ServerUpdate::TimeUpdate { .. } => {}
+                ServerUpdate::SleepState(_) => {}
                 ServerUpdate::PlayerExperience { .. } => {}
                 ServerUpdate::PlayerStatistics { .. } => {}
                 ServerUpdate::PlayerInventory { .. } => {}

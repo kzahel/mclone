@@ -361,6 +361,16 @@ pub fn actor_instances_from_presentations_near_observer(
                     )
                     .with_packed_light(packed_light)
                 }
+                ActorPresentationKind::Entity(EntityKind::SleepingMat) => {
+                    ActorInstance::semantic_prop(
+                        glam_vec3_from_vec3d(feet_position),
+                        actor.y_rot_degrees,
+                        mclone_assets::sleeping_mat_figure_id(),
+                        actor.width,
+                        actor.height,
+                    )
+                    .with_packed_light(packed_light)
+                }
                 ActorPresentationKind::Entity(EntityKind::BeeNest) => ActorInstance::semantic_prop(
                     glam_vec3_from_vec3d(feet_position),
                     actor.y_rot_degrees,
@@ -425,7 +435,8 @@ pub fn actor_instances_from_presentations_near_observer(
                             | ItemKind::Wheat
                             | ItemKind::Carrot
                             | ItemKind::OakFence
-                            | ItemKind::OakFenceGate),
+                            | ItemKind::OakFenceGate
+                            | ItemKind::SleepingMat),
                         ) => ActorInstance::semantic_prop(
                             glam_vec3_from_vec3d(feet_position),
                             actor.y_rot_degrees,
@@ -443,6 +454,7 @@ pub fn actor_instances_from_presentations_near_observer(
                                 ItemKind::OakFenceGate => {
                                     mclone_assets::oak_fence_gate_item_figure_id()
                                 }
+                                ItemKind::SleepingMat => mclone_assets::sleeping_mat_figure_id(),
                                 _ => unreachable!(),
                             },
                             actor.width,
@@ -542,6 +554,7 @@ pub fn actor_light_probe_height(actor: &ActorPresentation) -> f64 {
         ActorPresentationKind::Entity(EntityKind::Rabbit) => f64::from(actor.height) * 0.78,
         ActorPresentationKind::Entity(EntityKind::RabbitBurrow) => f64::from(actor.height) * 0.5,
         ActorPresentationKind::Entity(EntityKind::WildlifeRemains) => f64::from(actor.height) * 0.5,
+        ActorPresentationKind::Entity(EntityKind::SleepingMat) => f64::from(actor.height) * 0.5,
         ActorPresentationKind::Entity(EntityKind::Mannequin) => 1.62,
         ActorPresentationKind::Entity(EntityKind::DebugCube) => f64::from(actor.height) * 0.5,
         ActorPresentationKind::Entity(EntityKind::Item) => f64::from(actor.height) * 0.5,

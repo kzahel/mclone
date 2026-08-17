@@ -131,10 +131,12 @@ impl ClientInteractionController {
         client
             .entity_snapshots()
             .filter(|entity| {
-                entity.kind == EntityKind::RabbitBurrow
-                    || (hunting_spear
-                        && entity.kind == EntityKind::Deer
-                        && entity.deer.is_some_and(|deer| deer.health > 0))
+                matches!(
+                    entity.kind,
+                    EntityKind::RabbitBurrow | EntityKind::SleepingMat
+                ) || (hunting_spear
+                    && entity.kind == EntityKind::Deer
+                    && entity.deer.is_some_and(|deer| deer.health > 0))
             })
             .filter_map(|entity| {
                 let position = client
@@ -182,7 +184,10 @@ impl ClientInteractionController {
         self.target_entity_matching(client, eye_position, view_vector, |entity| {
             matches!(
                 entity.kind,
-                EntityKind::BeeNest | EntityKind::BeeHotel | EntityKind::Rabbit
+                EntityKind::BeeNest
+                    | EntityKind::BeeHotel
+                    | EntityKind::Rabbit
+                    | EntityKind::SleepingMat
             )
         })
     }

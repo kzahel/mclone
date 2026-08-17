@@ -2156,6 +2156,8 @@ mod tests {
         include_str!("../../../../assets/mclone/figures/rabbit.figure.json");
     const RABBIT_BURROW_FIGURE_JSON: &str =
         include_str!("../../../../assets/mclone/figures/rabbit_burrow.figure.json");
+    const SLEEPING_MAT_FIGURE_JSON: &str =
+        include_str!("../../../../assets/mclone/figures/sleeping_mat.figure.json");
 
     #[test]
     fn prepares_player_as_static_box_geometry() {
@@ -3045,6 +3047,7 @@ mod tests {
             (MALLARD_NEST_FIGURE_JSON, "mallard_nest", 15),
             (MALLARD_FEATHER_FIGURE_JSON, "mallard_feather", 7),
             (RABBIT_BURROW_FIGURE_JSON, "rabbit_burrow", 12),
+            (SLEEPING_MAT_FIGURE_JSON, "sleeping_mat", 8),
         ] {
             let asset: FigureAsset = serde_json::from_str(json).unwrap();
             let prepared = prepare_figure_asset(&asset).unwrap();

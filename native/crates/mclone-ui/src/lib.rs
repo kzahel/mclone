@@ -3145,6 +3145,23 @@ impl StatusOverlay {
     }
 }
 
+pub fn sleep_status_overlay(state: mclone_protocol::SleepStateUpdate) -> StatusOverlay {
+    if !state.sleeping {
+        return StatusOverlay::hidden();
+    }
+    if state.eligible_players <= 1 {
+        StatusOverlay::new("Resting - dawn is coming - move to wake", true)
+    } else {
+        StatusOverlay::new(
+            format!(
+                "Resting - {}/{} players - move to wake",
+                state.sleeping_players, state.eligible_players
+            ),
+            true,
+        )
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LoadingProgressCellStatus {
     None,
@@ -4741,6 +4758,7 @@ const fn item_kind_hotbar_label(kind: mclone_protocol::ItemKind) -> &'static str
         mclone_protocol::ItemKind::Carrot => "CRT",
         mclone_protocol::ItemKind::OakFence => "FNC",
         mclone_protocol::ItemKind::OakFenceGate => "GATE",
+        mclone_protocol::ItemKind::SleepingMat => "MAT",
     }
 }
 
@@ -4761,6 +4779,7 @@ const fn item_kind_display_name(kind: mclone_protocol::ItemKind) -> &'static str
         mclone_protocol::ItemKind::Carrot => "Carrot",
         mclone_protocol::ItemKind::OakFence => "Oak fence",
         mclone_protocol::ItemKind::OakFenceGate => "Oak fence gate",
+        mclone_protocol::ItemKind::SleepingMat => "Sleeping mat",
     }
 }
 

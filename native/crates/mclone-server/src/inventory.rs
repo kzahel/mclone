@@ -47,6 +47,10 @@ impl Default for ServerInventory {
             kind: mclone_protocol::ItemKind::BeeHotel,
             count: 1,
         });
+        item_stacks[5] = Some(ItemStackSnapshot {
+            kind: mclone_protocol::ItemKind::SleepingMat,
+            count: 1,
+        });
         item_stacks[7] = Some(ItemStackSnapshot {
             kind: mclone_protocol::ItemKind::WoodenHoe,
             count: 1,

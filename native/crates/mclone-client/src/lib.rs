@@ -33,7 +33,7 @@ use mclone_protocol::{
     MallardNestSnapshotData, MallardSnapshotData, MallardTrackCue, PlayerLifeState,
     PlayerPositionUpdate, PlayerStatistics, RabbitFieldGuideProgress, RabbitSoundCue,
     RemotePlayerId, RemotePlayerUpdate, SectionBlockUpdate, ServerEphemeralMessage, ServerUpdate,
-    SessionConfiguration, validate_body_pose_sample,
+    SessionConfiguration, SleepStateUpdate, validate_body_pose_sample,
 };
 use mclone_season::{AuthoritativeCalendarSample, SeasonCalendarError, SeasonCalendarPolicy};
 
@@ -116,6 +116,7 @@ pub struct ClientRuntime {
     day_time: u64,
     daylight_cycle_running: bool,
     season_calendar_policy: SeasonCalendarPolicy,
+    sleep_state: SleepStateUpdate,
     total_experience: u64,
     player_statistics: PlayerStatistics,
     player_inventory: [Option<ItemStackSnapshot>; mclone_protocol::HOTBAR_SLOT_COUNT_USIZE],
@@ -159,6 +160,7 @@ impl ClientRuntime {
             day_time: 0,
             daylight_cycle_running: true,
             season_calendar_policy: SeasonCalendarPolicy::Disabled,
+            sleep_state: SleepStateUpdate::default(),
             total_experience: 0,
             player_statistics: PlayerStatistics::default(),
             player_inventory: [None; mclone_protocol::HOTBAR_SLOT_COUNT_USIZE],
@@ -313,6 +315,7 @@ impl ClientRuntime {
                 self.daylight_cycle_running = daylight_cycle_running;
                 self.season_calendar_policy = calendar_policy;
             }
+            ServerUpdate::SleepState(state) => self.sleep_state = state,
             ServerUpdate::PlayerPosition(update) => {
                 self.player_position_updates.push_back(update);
             }
@@ -806,6 +809,14 @@ impl ClientRuntime {
 
     pub const fn season_calendar_policy(&self) -> SeasonCalendarPolicy {
         self.season_calendar_policy
+    }
+
+    pub const fn sleep_state(&self) -> SleepStateUpdate {
+        self.sleep_state
+    }
+
+    pub const fn cancel_sleep_command(&self) -> ClientCommand {
+        ClientCommand::CancelSleep
     }
 
     pub fn season_calendar_sample(
@@ -1455,6 +1466,28 @@ mod tests {
         // dayTime 6000 is noon, which the smoothed curve maps to phase ~0.0.
         assert!(runtime.time_of_day().abs() < 1e-4);
         assert!(runtime.sun_angle().abs() < 1e-3);
+    }
+
+    #[test]
+    fn client_runtime_tracks_ephemeral_owner_sleep_state() {
+        let mut runtime = ClientRuntime::local_integrated();
+        let state = mclone_protocol::SleepStateUpdate {
+            sleeping: true,
+            sleeping_players: 1,
+            eligible_players: 2,
+        };
+
+        runtime.apply_update(ServerUpdate::SleepState(state));
+
+        assert_eq!(runtime.sleep_state(), state);
+        assert_eq!(runtime.cancel_sleep_command(), ClientCommand::CancelSleep);
+        runtime.apply_update(ServerUpdate::SleepState(
+            mclone_protocol::SleepStateUpdate::default(),
+        ));
+        assert_eq!(
+            runtime.sleep_state(),
+            mclone_protocol::SleepStateUpdate::default()
+        );
     }
 
     #[test]

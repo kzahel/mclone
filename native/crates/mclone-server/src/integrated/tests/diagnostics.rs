@@ -39,9 +39,10 @@ fn chunk_tracking_diagnostics_reports_outbound_queue_depth() {
     assert_eq!(diagnostics.aggregate_player_ticket_chunks, 1);
     assert_eq!(diagnostics.total_player_visible_chunks, 2);
     // The local in-memory session has not drained the same ordered
-    // configuration/ready/world/time prelude remote sessions receive.
-    assert_eq!(diagnostics.total_outbound_queue_depth, 7);
-    assert_eq!(diagnostics.max_outbound_queue_depth, 5);
+    // configuration/ready/world/time prelude remote sessions receive. Each
+    // player join also republishes the changed sleep-eligible player count.
+    assert_eq!(diagnostics.total_outbound_queue_depth, 12);
+    assert_eq!(diagnostics.max_outbound_queue_depth, 10);
     assert_eq!(
         diagnostics
             .players
@@ -61,7 +62,7 @@ fn chunk_tracking_diagnostics_reports_outbound_queue_depth() {
         server
             .chunk_tracking_diagnostics()
             .total_outbound_queue_depth,
-        5
+        10
     );
 }
 

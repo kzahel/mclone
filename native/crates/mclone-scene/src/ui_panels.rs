@@ -1275,13 +1275,22 @@ impl McloneSceneHost {
     }
 
     pub(crate) fn session_projection(&self) -> ClientSessionStatusProjection {
+        let mut status_overlay = self.status_overlay.clone();
+        if !status_overlay.visible
+            && let Some(runtime) = self.active_world.runtime.as_ref()
+        {
+            let sleep = mclone_ui::sleep_status_overlay(runtime.client().sleep_state());
+            if sleep.visible {
+                status_overlay = sleep;
+            }
+        }
         client_session_status_projection(
             self.active_world
                 .runtime
                 .as_ref()
                 .and_then(|runtime| runtime.session_status())
                 .or_else(|| self.session.status()),
-            self.status_overlay.clone(),
+            status_overlay,
             self.startup_progress_overlay(),
         )
     }

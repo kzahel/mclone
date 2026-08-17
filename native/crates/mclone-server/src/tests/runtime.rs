@@ -1,4 +1,5 @@
 use super::support::*;
+use mclone_protocol::SleepStateUpdate;
 
 #[test]
 fn distinguishes_integrated_and_dedicated_modes() {
@@ -62,6 +63,14 @@ fn integrated_server_publishes_interested_chunks() {
     assert!(matches!(
         updates.get(4),
         Some(ServerUpdate::PlayerLife(life)) if !life.vitals().is_dead()
+    ));
+    assert!(matches!(
+        updates.get(5),
+        Some(ServerUpdate::SleepState(SleepStateUpdate {
+            sleeping: false,
+            sleeping_players: 0,
+            eligible_players: 0,
+        }))
     ));
 
     assert_eq!(
@@ -394,7 +403,7 @@ fn integrated_server_publishes_interested_chunks() {
         assert!(job.dependency_chunk_count <= 9 * 9);
     }
     assert_eq!(server.scheduler().full_job_record_count(), 0);
-    assert!(updates.iter().skip(5).all(|update| {
+    assert!(updates.iter().skip(6).all(|update| {
         matches!(
             update,
             ServerUpdate::ChunkSnapshot(_) | ServerUpdate::EntitySnapshot(_)
@@ -536,7 +545,14 @@ fn integrated_server_tick_report_exposes_protocol_updates_and_lanes() {
     );
     assert_eq!(report.entity_ticking_chunks, vec![ChunkPos::new(0, 0)]);
     assert_eq!(report.pending_unloads_processed, 0);
-    assert!(report.updates.is_empty());
+    assert_eq!(
+        report.updates,
+        vec![ServerUpdate::SleepState(SleepStateUpdate {
+            sleeping: false,
+            sleeping_players: 0,
+            eligible_players: 1,
+        })]
+    );
 }
 
 #[test]

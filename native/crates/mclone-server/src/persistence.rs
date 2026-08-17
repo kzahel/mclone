@@ -85,8 +85,9 @@ const WILDLIFE_LIFECYCLE_ENTITY_CHUNK_RECORD_VERSION: u32 = 12;
 const WILDLIFE_REMAINS_ENTITY_CHUNK_RECORD_VERSION: u32 = 13;
 const MALLARD_LIFECYCLE_ENTITY_CHUNK_RECORD_VERSION: u32 = 14;
 const MALLARD_NEST_INTENT_ENTITY_CHUNK_RECORD_VERSION: u32 = 15;
+const SLEEPING_MAT_ENTITY_CHUNK_RECORD_VERSION: u32 = 16;
 const DEER_ANTLER_SHED_LEGACY_REMAINING_TICKS: i32 = 36_000;
-pub const ENTITY_CHUNK_RECORD_VERSION: u32 = 15;
+pub const ENTITY_CHUNK_RECORD_VERSION: u32 = 16;
 const LEGACY_PLAYER_RECORD_VERSION: u32 = 1;
 const STATISTICS_PLAYER_RECORD_VERSION: u32 = 2;
 const PLAYER_LIFE_RECORD_VERSION: u32 = 3;
@@ -606,6 +607,7 @@ pub enum EntitySavePayload {
         creation_tick: u64,
         decay_remainder: u32,
     },
+    SleepingMat,
     Item {
         stack: ItemStackSaveRecord,
         age: u64,
@@ -659,6 +661,7 @@ impl From<ItemStackSnapshot> for ItemStackSaveRecord {
             mclone_protocol::ItemKind::Carrot => "minecraft:carrot",
             mclone_protocol::ItemKind::OakFence => "minecraft:oak_fence",
             mclone_protocol::ItemKind::OakFenceGate => "minecraft:oak_fence_gate",
+            mclone_protocol::ItemKind::SleepingMat => "mclone:sleeping_mat",
         };
         Self::new(kind, stack.count)
     }
@@ -6840,6 +6843,7 @@ fn write_entity_save_payload(
             write_u64(writer, *creation_tick)?;
             write_u32(writer, *decay_remainder)
         }
+        EntitySavePayload::SleepingMat => write_u8(writer, 13),
         EntitySavePayload::Item {
             stack,
             age,
@@ -7357,6 +7361,9 @@ fn read_entity_save_payload(
                 decay_remainder,
             })
         }
+        13 if codec_version >= SLEEPING_MAT_ENTITY_CHUNK_RECORD_VERSION => {
+            Ok(EntitySavePayload::SleepingMat)
+        }
         value => Err(ChunkStoreError::InvalidData(format!(
             "unknown entity save payload kind {value}"
         ))),
@@ -7459,6 +7466,7 @@ fn write_optional_item_stack_snapshot(
             mclone_protocol::ItemKind::Carrot => 12,
             mclone_protocol::ItemKind::OakFence => 13,
             mclone_protocol::ItemKind::OakFenceGate => 14,
+            mclone_protocol::ItemKind::SleepingMat => 15,
         };
         write_u8(writer, kind)?;
         write_u8(writer, stack.count)?;
@@ -7488,6 +7496,7 @@ fn read_optional_item_stack_snapshot(
         12 => mclone_protocol::ItemKind::Carrot,
         13 => mclone_protocol::ItemKind::OakFence,
         14 => mclone_protocol::ItemKind::OakFenceGate,
+        15 => mclone_protocol::ItemKind::SleepingMat,
         value => {
             return Err(ChunkStoreError::InvalidData(format!(
                 "unknown player inventory item kind {value}"

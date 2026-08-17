@@ -25,8 +25,8 @@ use mclone_protocol::{
     PlayerActionCommand, PlayerActionKind, PlayerAppearance, PlayerDamageCause, PlayerLifeState,
     PlayerModelKind, PlayerProfileId, PlayerStatistics, RealmId, SequencedMovePlayerCommand,
     ServerUpdate, SessionCapabilities, SessionConfiguration, SetCarriedItemCommand,
-    SetDebugHotbarSlotCommand, SetPlayerAppearanceCommand, StatisticKey, UseItemOnCommand,
-    sequence_is_newer, validate_body_pose_sample,
+    SetDebugHotbarSlotCommand, SetPlayerAppearanceCommand, SleepStateUpdate, StatisticKey,
+    UseItemOnCommand, sequence_is_newer, validate_body_pose_sample,
 };
 use mclone_worldgen::biome::{OverworldBiomeSource, get_layered_biome_by_id};
 use mclone_worldgen::block::{
@@ -150,6 +150,7 @@ const DEER_HUNTING_SPEAR_DAMAGE: u8 = 8;
 const DEER_HUNTING_SPEAR_COOLDOWN_TICKS: u64 = 12;
 const BEE_COLONY_INTERACTION_REACH: f64 = 4.5;
 const ENTITY_INTERACTION_REACH_SQR: f64 = 6.0 * 6.0;
+pub const SLEEP_START_DAY_TICK: u32 = 12_500;
 const NATURAL_SPAWN_TICK_SEED_MULTIPLIER: i64 = 6_364_136_223_846_793_005;
 
 fn session_configuration(
@@ -360,7 +361,68 @@ pub struct RealmServer {
     next_observer_id: u64,
     pending_dimension_transfers: BTreeMap<ServerPlayerId, PendingDimensionTransfer>,
     pending_player_respawns: BTreeMap<ServerPlayerId, PendingPlayerRespawn>,
+    sleep_rule: SleepRule,
+    sleeping_players: BTreeMap<ServerPlayerId, PlayerSleepState>,
     debug_auxiliary_player_script: Option<DebugAuxiliaryPlayerScript>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SleepRule {
+    required_percent: u8,
+}
+
+impl SleepRule {
+    pub const ALL_ELIGIBLE: Self = Self {
+        required_percent: 100,
+    };
+
+    pub const fn new(required_percent: u8) -> Result<Self, SleepRuleError> {
+        if required_percent == 0 || required_percent > 100 {
+            return Err(SleepRuleError::RequiredPercentOutOfRange { required_percent });
+        }
+        Ok(Self { required_percent })
+    }
+
+    pub const fn required_percent(self) -> u8 {
+        self.required_percent
+    }
+
+    pub const fn required_sleepers(self, eligible_players: u32) -> u32 {
+        ((eligible_players as u64 * self.required_percent as u64 + 99) / 100) as u32
+    }
+}
+
+impl Default for SleepRule {
+    fn default() -> Self {
+        Self::ALL_ELIGIBLE
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SleepRuleError {
+    RequiredPercentOutOfRange { required_percent: u8 },
+}
+
+impl std::fmt::Display for SleepRuleError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::RequiredPercentOutOfRange { required_percent } => write!(
+                formatter,
+                "sleep quorum percent {required_percent} is outside 1..=100"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for SleepRuleError {}
+
+#[derive(Clone, Debug, PartialEq)]
+struct PlayerSleepState {
+    site: mclone_protocol::EntityPersistentId,
+    dimension: DimensionKey,
+    site_position: Vec3d,
+    player_position: Vec3d,
+    admitted_simulation_tick: u64,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1039,6 +1101,8 @@ impl RealmServer {
             next_observer_id: 0,
             pending_dimension_transfers: BTreeMap::new(),
             pending_player_respawns: BTreeMap::new(),
+            sleep_rule: SleepRule::default(),
+            sleeping_players: BTreeMap::new(),
             debug_auxiliary_player_script: None,
         }
     }
@@ -1333,7 +1397,7 @@ impl RealmServer {
         let civil_time = day_start
             .checked_add(u64::from(day_tick))
             .ok_or(CivilTimeMutationError::ArithmeticOverflow)?;
-        self.apply_durable_civil_time(civil_time);
+        self.apply_durable_civil_time(civil_time, true);
         Ok(civil_time)
     }
 
@@ -1368,28 +1432,197 @@ impl RealmServer {
             .checked_mul(mclone_core::time::DAY_LENGTH_TICKS)
             .and_then(|day_start| day_start.checked_add(u64::from(day_tick)))
             .ok_or(CivilTimeMutationError::ArithmeticOverflow)?;
-        self.apply_durable_civil_time(civil_time);
+        self.apply_durable_civil_time(civil_time, true);
         Ok(civil_time)
     }
 
     /// Durably advances to day tick zero of the following absolute day.
     pub fn advance_to_next_morning(&mut self) -> Result<u64, CivilTimeMutationError> {
-        let day_length = mclone_core::time::DAY_LENGTH_TICKS;
-        let day_start = self.day_time - self.day_time % day_length;
-        let civil_time = day_start
-            .checked_add(day_length)
-            .ok_or(CivilTimeMutationError::ArithmeticOverflow)?;
-        self.apply_durable_civil_time(civil_time);
+        let civil_time = next_morning_civil_time(self.day_time)?;
+        self.apply_durable_civil_time(civil_time, true);
         Ok(civil_time)
     }
 
-    fn apply_durable_civil_time(&mut self, civil_time: u64) {
+    fn apply_durable_civil_time(&mut self, civil_time: u64, publish: bool) {
         self.day_time = civil_time;
         self.day_time_debug_override = false;
         if self.world_metadata.is_some() {
             self.world_metadata_dirty = true;
         }
-        self.queue_time_update_for_all_interest_sources(self.time_update());
+        if publish {
+            self.queue_time_update_for_all_interest_sources(self.time_update());
+            if !self.sleeping_players.is_empty() {
+                self.sleeping_players.clear();
+                self.queue_sleep_state_updates_for_all_players();
+            }
+        }
+    }
+
+    pub const fn sleep_rule(&self) -> SleepRule {
+        self.sleep_rule
+    }
+
+    pub fn set_sleep_rule(&mut self, rule: SleepRule) {
+        if self.sleep_rule == rule {
+            return;
+        }
+        self.sleep_rule = rule;
+        self.queue_sleep_state_updates_for_all_players();
+    }
+
+    pub fn sleeping_player_count(&self) -> usize {
+        self.sleeping_players.len()
+    }
+
+    pub fn player_is_sleeping(&self, player_id: ServerPlayerId) -> bool {
+        self.sleeping_players.contains_key(&player_id)
+    }
+
+    fn sleep_counts(&self) -> (u32, u32) {
+        let eligible_players = self
+            .players
+            .iter()
+            .filter(|(player_id, player)| self.player_is_sleep_eligible(*player_id, player))
+            .count();
+        let sleeping_players = self
+            .sleeping_players
+            .keys()
+            .filter(|player_id| {
+                self.players
+                    .get(**player_id)
+                    .is_some_and(|player| self.player_is_sleep_eligible(**player_id, player))
+            })
+            .count();
+        (
+            u32::try_from(sleeping_players).unwrap_or(u32::MAX),
+            u32::try_from(eligible_players).unwrap_or(u32::MAX),
+        )
+    }
+
+    fn player_is_sleep_eligible(
+        &self,
+        player_id: ServerPlayerId,
+        player: &crate::players::ServerPlayerEntry,
+    ) -> bool {
+        !player.vitals.is_dead()
+            && player.state.has_accepted_position()
+            && !self.pending_dimension_transfers.contains_key(&player_id)
+            && !self.pending_player_respawns.contains_key(&player_id)
+    }
+
+    fn sleep_state_update_for_player(&self, player_id: ServerPlayerId) -> SleepStateUpdate {
+        let (sleeping_players, eligible_players) = self.sleep_counts();
+        SleepStateUpdate {
+            sleeping: self.sleeping_players.contains_key(&player_id),
+            sleeping_players,
+            eligible_players,
+        }
+    }
+
+    fn queue_sleep_state_updates_for_all_players(&mut self) {
+        let player_ids = self
+            .players
+            .iter()
+            .map(|(player_id, _)| player_id)
+            .collect::<Vec<_>>();
+        for player_id in player_ids {
+            let update = ServerUpdate::SleepState(self.sleep_state_update_for_player(player_id));
+            self.queue_update_for_player_in_current_dimension(player_id, update);
+        }
+    }
+
+    fn sleep_state_update_after_target_change(
+        &mut self,
+        player_id: ServerPlayerId,
+    ) -> ServerUpdate {
+        let player_ids = self
+            .players
+            .iter()
+            .map(|(candidate, _)| candidate)
+            .collect::<Vec<_>>();
+        for candidate in player_ids {
+            if candidate != player_id {
+                let update =
+                    ServerUpdate::SleepState(self.sleep_state_update_for_player(candidate));
+                self.queue_update_for_player_in_current_dimension(candidate, update);
+            }
+        }
+        ServerUpdate::SleepState(self.sleep_state_update_for_player(player_id))
+    }
+
+    fn cancel_sleep_for_player(&mut self, player_id: ServerPlayerId) -> Option<ServerUpdate> {
+        self.sleeping_players.remove(&player_id)?;
+        Some(self.sleep_state_update_after_target_change(player_id))
+    }
+
+    fn cancel_sleepers_using_site(&mut self, site: mclone_protocol::EntityPersistentId) {
+        let before = self.sleeping_players.len();
+        self.sleeping_players
+            .retain(|_, sleeping| sleeping.site != site);
+        if self.sleeping_players.len() != before {
+            self.queue_sleep_state_updates_for_all_players();
+        }
+    }
+
+    fn invalidate_stale_sleep_states(&mut self) -> bool {
+        let invalid = self
+            .sleeping_players
+            .iter()
+            .filter_map(|(player_id, sleeping)| {
+                (!self.sleep_state_is_valid(*player_id, sleeping)).then_some(*player_id)
+            })
+            .collect::<Vec<_>>();
+        for player_id in &invalid {
+            self.sleeping_players.remove(player_id);
+        }
+        if !invalid.is_empty() {
+            self.queue_sleep_state_updates_for_all_players();
+        }
+        !invalid.is_empty()
+    }
+
+    fn sleep_state_is_valid(&self, player_id: ServerPlayerId, sleeping: &PlayerSleepState) -> bool {
+        let Some(player) = self.players.get(player_id) else {
+            return false;
+        };
+        if !self.player_is_sleep_eligible(player_id, player)
+            || player.dimension != sleeping.dimension
+            || player
+                .state
+                .position()
+                .distance_to_sqr(sleeping.player_position)
+                > 1.0e-8
+            || sleeping.admitted_simulation_tick > self.simulation_tick
+        {
+            return false;
+        }
+        let Some(runtime) = self.dimension_runtime(&sleeping.dimension) else {
+            return false;
+        };
+        let Some(site) = runtime.entities.state_by_persistent_id(sleeping.site) else {
+            return false;
+        };
+        site.alive
+            && site.kind == EntityKind::SleepingMat
+            && site.position.distance_to_sqr(sleeping.site_position) <= 1.0e-8
+            && player.state.position().distance_to_sqr(site.position) < ENTITY_INTERACTION_REACH_SQR
+    }
+
+    fn resolve_sleep_quorum_at_tick_boundary(&mut self) -> Result<bool, CivilTimeMutationError> {
+        self.invalidate_stale_sleep_states();
+        if self.sleeping_players.is_empty() {
+            return Ok(false);
+        }
+        let (sleeping_players, eligible_players) = self.sleep_counts();
+        let required = self.sleep_rule.required_sleepers(eligible_players);
+        if eligible_players == 0 || sleeping_players < required {
+            return Ok(false);
+        }
+
+        let morning = next_morning_civil_time(self.day_time)?;
+        self.sleeping_players.clear();
+        self.apply_durable_civil_time(morning, false);
+        Ok(true)
     }
 
     /// Durable daylight gamerule. Debug `--freeze-time` is layered separately
@@ -2160,6 +2393,8 @@ impl RealmServer {
                 phase: PlayerDimensionTransferPhase::LoadingDestination,
             },
         );
+        self.sleeping_players.remove(&player_id);
+        self.queue_sleep_state_updates_for_all_players();
 
         let biome_zoom_seed = obfuscate_biome_zoom_seed(self.active_dimension.definition.seed);
         let topology = self.active_dimension.definition.topology;
@@ -2242,6 +2477,7 @@ impl RealmServer {
         self.chunk_tracking
             .queue_update_for_player(player_id, ServerUpdate::PlayerLife(life));
         self.remote_players.add_player(player_id);
+        self.queue_sleep_state_updates_for_all_players();
         Ok(player_id)
     }
 
@@ -2427,6 +2663,7 @@ impl RealmServer {
         if self.activate_player_dimension(player_id).is_err() {
             return false;
         }
+        self.sleeping_players.remove(&player_id);
         if self.players.remove(player_id).is_none() {
             return false;
         }
@@ -2437,6 +2674,7 @@ impl RealmServer {
         self.entity_tracking
             .remove_observer(DimensionInterestSource::Player(player_id));
         self.remove_player_chunk_tracking(player_id);
+        self.queue_sleep_state_updates_for_all_players();
         true
     }
 
@@ -2591,6 +2829,7 @@ impl RealmServer {
             ClientCommand::UseItemOn(command) => {
                 self.handle_use_item_on_for_target(target, command)
             }
+            ClientCommand::CancelSleep => self.handle_cancel_sleep_for_target(target),
             ClientCommand::ShootDebugPhysicsCube => {
                 self.handle_shoot_debug_physics_cube_for_target(target)
             }
@@ -2767,8 +3006,17 @@ impl RealmServer {
         physics_step_dt_seconds: f64,
     ) -> ChunkStoreResult<ServerSimulationTickReport> {
         let selected = self.active_dimension.key.clone();
+        let sleep_jump = self
+            .resolve_sleep_quorum_at_tick_boundary()
+            .map_err(|error| {
+                ChunkStoreError::InvalidData(format!("failed to resolve sleep quorum: {error}"))
+            })?;
         let simulation_tick = self.simulation_tick.saturating_add(1);
         self.simulation_tick = simulation_tick;
+        if sleep_jump {
+            self.queue_time_update_for_all_interest_sources(self.time_update());
+            self.queue_sleep_state_updates_for_all_players();
+        }
         self.mark_player_tick_boundaries();
         if let Some(player_id) = self
             .debug_auxiliary_player_script
@@ -2778,8 +3026,11 @@ impl RealmServer {
             self.advance_debug_auxiliary_player_script()?;
         }
 
-        if self.daylight_cycle_running() {
-            self.day_time = self.day_time.wrapping_add(1);
+        if self.daylight_cycle_running() && !sleep_jump {
+            self.day_time = self.day_time.saturating_add(1);
+        }
+        if !sleep_jump && (simulation_tick == 1 || simulation_tick.is_multiple_of(20)) {
+            self.queue_time_update_for_all_interest_sources(self.time_update());
         }
         if self.world_metadata.is_some() {
             self.world_metadata_dirty = true;
@@ -3040,9 +3291,6 @@ impl RealmServer {
         self.mark_entity_chunk_index_changes(entity_chunks_before_tick, entity_chunks_after_tick);
         self.mark_entity_updates_dirty(&entity_updates);
 
-        if simulation_tick == 1 || simulation_tick.is_multiple_of(20) {
-            self.queue_time_update_for_all_interest_sources(self.time_update());
-        }
         let fluid_event_apply_start = simulation_timing_start();
         self.route_scheduler_events(fluid_events)?;
         self.reconcile_entity_subjects(entity_updates, true);
@@ -3698,7 +3946,7 @@ impl RealmServer {
             };
             command.movement = move_player_command_with_position(command.movement, canonical);
         }
-        let (result, recognized_jump, pending_correction) = {
+        let (result, recognized_jump, moved, pending_correction) = {
             let player = self.player_mut_for_target(target)?;
             let before_position = player.position();
             let before_on_ground = player.on_ground();
@@ -3711,10 +3959,13 @@ impl RealmServer {
                 && movement.has_position()
                 && !player.on_ground()
                 && player.position().y > before_position.y;
+            let moved = result == MovePlayerApplyResult::Accepted
+                && before_position_accepted
+                && player.position().distance_to_sqr(before_position) > 1.0e-8;
             let pending_correction = (result == MovePlayerApplyResult::AwaitingTeleport)
                 .then(|| player.resend_pending_correction_update(simulation_tick))
                 .flatten();
-            (result, recognized_jump, pending_correction)
+            (result, recognized_jump, moved, pending_correction)
         };
         let mut updates = pending_correction
             .map(ServerUpdate::PlayerPosition)
@@ -3724,6 +3975,9 @@ impl RealmServer {
             updates.push(self.increment_player_statistic(target, StatisticKey::jump())?);
         }
         if result == MovePlayerApplyResult::Accepted {
+            if moved && let Some(update) = self.cancel_sleep_for_player(target.player_id()) {
+                updates.push(update);
+            }
             let player = self
                 .players
                 .get_mut(target.player_id())
@@ -3965,6 +4219,7 @@ impl RealmServer {
             }
             let updates = self.kill_player_if_touching_lava(target)?;
             self.reconcile_remote_player_subject(player_id, true);
+            self.queue_sleep_state_updates_for_all_players();
             return Ok(updates);
         }
         Ok(Vec::new())
@@ -4232,6 +4487,29 @@ impl RealmServer {
             self.reconcile_entity_subjects(result.updates, true);
             return self.drain_chunk_updates_for_target(target);
         }
+        if let Some(targeted) =
+            self.active_dimension
+                .entities
+                .state(command.target)
+                .filter(|entity| {
+                    entity.kind == EntityKind::SleepingMat
+                        && feet.distance_to_sqr(entity.position) < ENTITY_INTERACTION_REACH_SQR
+                })
+        {
+            let chunk = targeted.chunk_pos();
+            let persistent_id = targeted.persistent_id;
+            let Some(removed) = self
+                .active_dimension
+                .entities
+                .remove_sleeping_mat(command.target)
+            else {
+                return Ok(Vec::new());
+            };
+            self.dirty_entity_chunks.insert(chunk);
+            self.reconcile_entity_subjects(std::iter::once(removed), true);
+            self.cancel_sleepers_using_site(persistent_id);
+            return self.drain_chunk_updates_for_target(target);
+        }
 
         let eye = feet.add(Vec3d::new(0.0, 1.62, 0.0));
         let direction = look_direction_from_rot(y_rot_degrees, x_rot_degrees);
@@ -4292,6 +4570,53 @@ impl RealmServer {
         let eye = player_position.add(Vec3d::new(0.0, 1.62, 0.0));
         let direction = look_direction_from_rot(player.y_rot_degrees(), player.x_rot_degrees());
         let to = eye.add(direction.scale(BEE_COLONY_INTERACTION_REACH));
+        if let Some(site) = self
+            .active_dimension
+            .entities
+            .state(command.target)
+            .filter(|site| {
+                site.alive
+                    && site.kind == EntityKind::SleepingMat
+                    && player_position.distance_to_sqr(site.position) < ENTITY_INTERACTION_REACH_SQR
+            })
+        {
+            if self
+                .sleeping_players
+                .get(&player_id)
+                .is_some_and(|sleeping| sleeping.site == site.persistent_id)
+            {
+                return Ok(self
+                    .cancel_sleep_for_player(player_id)
+                    .into_iter()
+                    .collect());
+            }
+            if self
+                .sleeping_players
+                .values()
+                .any(|sleeping| sleeping.site == site.persistent_id)
+            {
+                return Ok(Vec::new());
+            }
+            let Some(player_entry) = self.players.get(player_id) else {
+                return Err(unknown_player_error(player_id));
+            };
+            if !self.player_is_sleep_eligible(player_id, player_entry)
+                || !is_sleep_window(self.day_time)
+            {
+                return Ok(Vec::new());
+            }
+            self.sleeping_players.insert(
+                player_id,
+                PlayerSleepState {
+                    site: site.persistent_id,
+                    dimension: self.active_dimension.key.clone(),
+                    site_position: site.position,
+                    player_position,
+                    admitted_simulation_tick: self.simulation_tick,
+                },
+            );
+            return Ok(vec![self.sleep_state_update_after_target_change(player_id)]);
+        }
         if self
             .inventory_for_target(target)?
             .selected_item_stack()
@@ -4346,6 +4671,16 @@ impl RealmServer {
             mclone_protocol::BeeObservationKind::CollectedBeeswax,
         );
         self.drain_chunk_updates_for_target(target)
+    }
+
+    fn handle_cancel_sleep_for_target(
+        &mut self,
+        target: CommandTarget,
+    ) -> ChunkStoreResult<Vec<ServerUpdate>> {
+        Ok(self
+            .cancel_sleep_for_player(target.player_id())
+            .into_iter()
+            .collect())
     }
 
     fn handle_use_item_on_for_target(
@@ -4415,6 +4750,14 @@ impl RealmServer {
                 command,
                 ItemKind::WheatSeeds,
             );
+        }
+        if command.hand == InteractionHand::MainHand
+            && self
+                .inventory_for_target(target)?
+                .selected_item_stack()
+                .is_some_and(|stack| stack.kind == ItemKind::SleepingMat)
+        {
+            return self.handle_sleeping_mat_use_item_on_for_target(target, command);
         }
         if command.hand == InteractionHand::MainHand
             && self
@@ -4742,6 +5085,63 @@ impl RealmServer {
         debug_assert!(consumed, "validated bee hotel disappeared before placement");
         self.reconcile_entity_subjects(std::iter::once(hotel), true);
         self.mark_entity_updates_dirty(&[hotel]);
+        let hotbar = self.inventory_for_target(target)?.hotbar_item_stacks();
+        let mut updates = self.drain_chunk_updates_for_target(target)?;
+        updates.push(ServerUpdate::PlayerInventory { hotbar });
+        Ok(updates)
+    }
+
+    fn handle_sleeping_mat_use_item_on_for_target(
+        &mut self,
+        target: CommandTarget,
+        command: UseItemOnCommand,
+    ) -> ChunkStoreResult<Vec<ServerUpdate>> {
+        if !self.world_behavior_profile.allows_player_place()
+            || command.hit.direction != mclone_core::Direction::Up
+        {
+            return Ok(Vec::new());
+        }
+        let (player_position, y_rot_degrees) = {
+            let player = self.player_for_target(target)?;
+            (player.position(), player.y_rot_degrees())
+        };
+        let context = ServerInteractionContext::debug_creative_in(
+            player_position,
+            self.active_dimension.definition.topology,
+        );
+        if !context.may_use_item_on(command.hit) {
+            return Ok(Vec::new());
+        }
+        let feet_block = command.hit.block_pos.relative(mclone_core::Direction::Up);
+        if !context.may_place_at(feet_block) {
+            return Ok(Vec::new());
+        }
+        let position = Vec3d::new(
+            f64::from(feet_block.x) + 0.5,
+            f64::from(feet_block.y),
+            f64::from(feet_block.z) + 0.5,
+        );
+        let scheduler = &self.active_dimension.scheduler;
+        let Some(mat) = self.active_dimension.entities.place_sleeping_mat(
+            position,
+            snap_sleeping_mat_yaw(y_rot_degrees),
+            |pos| {
+                scheduler
+                    .block_at_world(pos)
+                    .map(|block| BlockStateId(u32::from(block)))
+            },
+        ) else {
+            return Ok(Vec::new());
+        };
+        let consumed = self
+            .inventory_mut_for_target(target)?
+            .consume_selected_item(ItemKind::SleepingMat);
+        debug_assert!(
+            consumed,
+            "validated sleeping mat disappeared before placement"
+        );
+        self.reconcile_entity_subjects(std::iter::once(mat), true);
+        self.mark_entity_updates_dirty(&[mat]);
         let hotbar = self.inventory_for_target(target)?.hotbar_item_stacks();
         let mut updates = self.drain_chunk_updates_for_target(target)?;
         updates.push(ServerUpdate::PlayerInventory { hotbar });
@@ -6016,20 +6416,47 @@ impl RealmServer {
     }
 
     fn queue_time_update_for_all_interest_sources(&mut self, update: ServerUpdate) {
-        let sources = self
+        let players = self
             .players
             .iter()
-            .map(|(player_id, _)| DimensionInterestSource::Player(player_id))
-            .chain(
-                self.observers
-                    .keys()
-                    .copied()
-                    .map(DimensionInterestSource::Observer),
-            )
+            .map(|(player_id, _)| player_id)
             .collect::<Vec<_>>();
-        for source in sources {
-            self.chunk_tracking
-                .queue_update_for_source(source, update.clone());
+        for player_id in players {
+            self.queue_update_for_player_in_current_dimension(player_id, update.clone());
+        }
+        let observers = self.observers.keys().copied().collect::<Vec<_>>();
+        for observer_id in observers {
+            let Some(dimension) = self.observers.get(&observer_id).cloned() else {
+                continue;
+            };
+            if dimension == self.active_dimension.key {
+                self.active_dimension
+                    .chunk_tracking
+                    .queue_update_for_observer(observer_id, update.clone());
+            } else if let Some(runtime) = self.inactive_dimensions.get_mut(&dimension) {
+                runtime
+                    .chunk_tracking
+                    .queue_update_for_observer(observer_id, update.clone());
+            }
+        }
+    }
+
+    fn queue_update_for_player_in_current_dimension(
+        &mut self,
+        player_id: ServerPlayerId,
+        update: ServerUpdate,
+    ) {
+        let Some(dimension) = self.players.dimension(player_id).cloned() else {
+            return;
+        };
+        if dimension == self.active_dimension.key {
+            self.active_dimension
+                .chunk_tracking
+                .queue_update_for_player(player_id, update);
+        } else if let Some(runtime) = self.inactive_dimensions.get_mut(&dimension) {
+            runtime
+                .chunk_tracking
+                .queue_update_for_player(player_id, update);
         }
     }
 
@@ -6688,6 +7115,7 @@ impl RealmServer {
         cause: PlayerDamageCause,
     ) -> ChunkStoreResult<Vec<ServerUpdate>> {
         let player_id = target.player_id();
+        self.sleeping_players.remove(&player_id);
         let (life, statistics) = {
             let player = self
                 .players
@@ -6709,7 +7137,9 @@ impl RealmServer {
         self.pending_player_respawns.remove(&player_id);
         self.reconcile_remote_player_subject(player_id, true);
         self.save_player_record(player_id)?;
+        let sleep = self.sleep_state_update_after_target_change(player_id);
         Ok(vec![
+            sleep,
             ServerUpdate::PlayerLife(life),
             ServerUpdate::PlayerStatistics { statistics },
         ])
@@ -7957,6 +8387,23 @@ fn validate_civil_day_tick(day_tick: u32) -> Result<(), CivilTimeMutationError> 
         return Err(CivilTimeMutationError::DayTickOutOfRange { day_tick });
     }
     Ok(())
+}
+
+fn next_morning_civil_time(day_time: u64) -> Result<u64, CivilTimeMutationError> {
+    let day_length = mclone_core::time::DAY_LENGTH_TICKS;
+    let day_start = day_time - day_time % day_length;
+    day_start
+        .checked_add(day_length)
+        .ok_or(CivilTimeMutationError::ArithmeticOverflow)
+}
+
+fn is_sleep_window(day_time: u64) -> bool {
+    let day_tick = (day_time % mclone_core::time::DAY_LENGTH_TICKS) as u32;
+    day_tick >= SLEEP_START_DAY_TICK
+}
+
+fn snap_sleeping_mat_yaw(y_rot_degrees: f32) -> f32 {
+    (y_rot_degrees / 90.0).round() * 90.0
 }
 
 fn run_noop_simulation_phase(chunks: &[ChunkPos]) -> usize {

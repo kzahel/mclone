@@ -112,6 +112,76 @@ fn typed_calendar_mutation_rejects_disabled_policy_and_clock_overflow() {
 }
 
 #[test]
+fn civil_time_discontinuities_do_not_replay_simulation_work() {
+    let mut server = mclone_calendar_session(764);
+    server
+        .initialize_world_metadata_at_unix_millis(1_000)
+        .unwrap();
+    server.set_natural_spawning_enabled(false);
+    server.set_debug_passive_showcase_enabled(false);
+    load_center_chunk(&mut server);
+
+    let crop = BlockPos::new(8, 65, 8);
+    server
+        .scheduler_mut()
+        .set_block_at_world(crop, mclone_worldgen::block::CARROTS_AGE_4);
+    let fluid = BlockPos::new(10, 70, 10);
+    server.scheduler_mut().set_block_at_world(fluid, WATER);
+    server
+        .scheduler_mut()
+        .set_block_at_world(fluid.below(), AIR);
+    server.schedule_fluid_tick(fluid, FluidKind::Water, 200);
+
+    let rabbit = server.entities.insert_passive_mob_for_test(
+        EntityKind::Rabbit,
+        Vec3d::new(8.5, 66.0, 8.5),
+        0.0,
+    );
+    let forage_feet = BlockPos::new(12, 65, 12);
+    server
+        .scheduler_mut()
+        .set_block_at_world(forage_feet.below(), GRASS_BLOCK);
+    let resource_sample_tick = server.simulation_tick;
+    {
+        let runtime = &mut server.active_dimension;
+        let scheduler = &runtime.scheduler;
+        let intake = runtime.wildlife_resources.consume_diet_at(
+            crate::wildlife_resources::WildlifeForageConsumer::Mallard,
+            &crate::wildlife_resources::MALLARD_DIET,
+            forage_feet,
+            0,
+            0,
+            100,
+            resource_sample_tick,
+            &|pos| {
+                scheduler
+                    .block_at_world(pos)
+                    .map(|block| BlockStateId(u32::from(block)))
+            },
+        );
+        assert!(intake.units > 0);
+    }
+
+    let simulation_tick = server.simulation_tick();
+    let crop_state = server.scheduler().block_at_world(crop);
+    let fluid_ticks = server.scheduled_fluid_tick_count();
+    let rabbit_state = server.entities.state(rabbit).unwrap();
+    let life = server.wildlife_life_diagnostics();
+    let resources = server.wildlife_forage_cells();
+    assert!(!resources.is_empty());
+
+    server.set_calendar_date(20, 40, Some(23_999)).unwrap();
+    server.set_calendar_date(0, 1, Some(0)).unwrap();
+
+    assert_eq!(server.simulation_tick(), simulation_tick);
+    assert_eq!(server.scheduler().block_at_world(crop), crop_state);
+    assert_eq!(server.scheduled_fluid_tick_count(), fluid_ticks);
+    assert_eq!(server.entities.state(rabbit), Some(rabbit_state));
+    assert_eq!(server.wildlife_life_diagnostics(), life);
+    assert_eq!(server.wildlife_forage_cells(), resources);
+}
+
+#[test]
 fn new_world_metadata_starts_at_vanilla_zero_and_tracks_both_clocks() {
     let mut server = LocalRealmSession::with_world_store(77, Box::new(MemoryWorldStore::new()));
     let initialized = server
@@ -528,6 +598,102 @@ fn sqlite_restart_resumes_exact_game_and_day_time() {
         reopened.try_simulation_tick_report().unwrap();
         assert_eq!(reopened.game_time(), expected.0 + 1);
         assert_eq!(reopened.day_time(), expected.1);
+        reopened.shutdown_persistence().unwrap();
+    }
+
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn sqlite_restart_restores_sleep_jump_and_mat_but_not_sleep_state() {
+    let root = world_time_temp_dir("sqlite-sleep-mat-restart");
+    let seed = 102;
+    let identity = ClientIdentity::new(PlayerProfileId::new([0x75; 16]), "Sleeper").unwrap();
+    let expected_clock;
+    let mat_persistent_id;
+    {
+        let mut server =
+            LocalRealmSession::try_with_threaded_sqlite_world_dir(seed, &root).unwrap();
+        server
+            .set_world_generation_profile(WorldGenerationProfile::McloneOverworldV1)
+            .unwrap();
+        server
+            .initialize_world_metadata_at_unix_millis(1_000)
+            .unwrap();
+        server
+            .configure_local_player_identity_blocking(identity.clone())
+            .unwrap();
+        load_center_chunk(&mut server);
+        sync_player(&mut server, Vec3d::new(8.5, 65.0, 10.5));
+        let floor = BlockPos::new(8, 64, 8);
+        server.scheduler_mut().set_block_at_world(floor, STONE);
+        server
+            .scheduler_mut()
+            .set_block_at_world(floor.offset(0, 1, 0), AIR);
+        server.scheduler_mut().drain_pending_block_delta_events();
+
+        sync_carried_slot(&mut server, 5);
+        let placed = server
+            .try_handle_command(use_held_item_on(BlockHitResult::new(
+                Vec3d::new(8.5, 65.0, 8.5),
+                Direction::Up,
+                floor,
+                false,
+            )))
+            .unwrap();
+        let mat = placed
+            .iter()
+            .find_map(|update| match update {
+                ServerUpdate::EntitySnapshot(snapshot)
+                    if snapshot.kind == EntityKind::SleepingMat =>
+                {
+                    Some(*snapshot)
+                }
+                _ => None,
+            })
+            .unwrap();
+        mat_persistent_id = server.entities.state(mat.id).unwrap().persistent_id;
+
+        server.set_day_time(u64::from(SLEEP_START_DAY_TICK));
+        let _ = server.try_poll().unwrap();
+        server
+            .try_handle_command(ClientCommand::InteractEntity(InteractEntityCommand {
+                target: mat.id,
+                hand: InteractionHand::MainHand,
+            }))
+            .unwrap();
+        assert!(server.player_is_sleeping(server.player_id()));
+        server.try_simulation_tick_report().unwrap();
+        expected_clock = (server.game_time(), server.day_time());
+        assert_eq!(expected_clock.1, mclone_core::time::DAY_LENGTH_TICKS);
+        assert_eq!(server.sleeping_player_count(), 0);
+        server.save_world_metadata_at_unix_millis(2_000).unwrap();
+        server.shutdown_persistence().unwrap();
+    }
+
+    {
+        let mut reopened =
+            LocalRealmSession::try_with_threaded_sqlite_world_dir(seed, &root).unwrap();
+        reopened
+            .set_world_generation_profile(WorldGenerationProfile::McloneOverworldV1)
+            .unwrap();
+        let metadata = reopened
+            .initialize_world_metadata_at_unix_millis(3_000)
+            .unwrap();
+        reopened
+            .configure_local_player_identity_blocking(identity)
+            .unwrap();
+        assert_eq!((metadata.game_time, metadata.day_time), expected_clock);
+        assert_eq!(reopened.sleeping_player_count(), 0);
+        load_center_chunk(&mut reopened);
+        assert!(
+            reopened
+                .entities
+                .state_by_persistent_id(mat_persistent_id)
+                .is_some_and(|entity| entity.kind == EntityKind::SleepingMat)
+        );
+        assert_eq!(reopened.inventory().item_count(ItemKind::SleepingMat), 0);
         reopened.shutdown_persistence().unwrap();
     }
 

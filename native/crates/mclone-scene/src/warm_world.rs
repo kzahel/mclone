@@ -759,7 +759,8 @@ pub(crate) fn persistent_passive_actor_identity_summary(
                 EntityKind::BeeNest
                 | EntityKind::BeeHotel
                 | EntityKind::RabbitBurrow
-                | EntityKind::WildlifeRemains => {
+                | EntityKind::WildlifeRemains
+                | EntityKind::SleepingMat => {
                     unreachable!("filtered above")
                 }
             };

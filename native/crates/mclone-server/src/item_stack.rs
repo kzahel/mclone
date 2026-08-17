@@ -8,7 +8,7 @@ pub(crate) const fn item_max_stack_size(kind: ItemKind) -> u8 {
         ItemKind::Egg | ItemKind::MallardEgg => EGG_MAX_STACK_SIZE,
         ItemKind::MallardFeather => FEATHER_MAX_STACK_SIZE,
         ItemKind::HuntingSpear => 1,
-        ItemKind::BeeHotel => 1,
+        ItemKind::BeeHotel | ItemKind::SleepingMat => 1,
         ItemKind::WoodenHoe => 1,
         ItemKind::Venison
         | ItemKind::DeerHide

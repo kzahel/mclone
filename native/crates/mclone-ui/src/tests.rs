@@ -476,6 +476,26 @@ fn status_overlay_visibility_controls_rendering() {
 }
 
 #[test]
+fn sleep_status_overlay_reports_quorum_and_hides_after_wake() {
+    let waiting = sleep_status_overlay(mclone_protocol::SleepStateUpdate {
+        sleeping: true,
+        sleeping_players: 1,
+        eligible_players: 2,
+    });
+    assert!(waiting.visible);
+    assert_eq!(waiting.message, "Resting - 1/2 players - move to wake");
+
+    let solo = sleep_status_overlay(mclone_protocol::SleepStateUpdate {
+        sleeping: true,
+        sleeping_players: 1,
+        eligible_players: 1,
+    });
+    assert_eq!(solo.message, "Resting - dawn is coming - move to wake");
+
+    assert!(!sleep_status_overlay(mclone_protocol::SleepStateUpdate::default()).visible);
+}
+
+#[test]
 fn crosshair_renders_center_marks() {
     let mut draw = GuiDrawList::new();
 

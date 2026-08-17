@@ -92,9 +92,125 @@ fn dedicated_join_orders_negotiated_configuration_before_world_state() {
             ServerUpdate::WorldInfo { .. },
             ServerUpdate::TimeUpdate { .. },
             ServerUpdate::PlayerLife(life),
+            ServerUpdate::SleepState(SleepStateUpdate {
+                sleeping: false,
+                sleeping_players: 0,
+                eligible_players: 0,
+            }),
         ]
         if !life.vitals().is_dead()
     ));
+}
+
+#[test]
+fn two_player_sleep_waits_for_all_and_wakes_both_at_exact_morning() {
+    let mut server = LocalRealmSession::new(812);
+    server.set_lighting_enabled(false);
+    let player_a = server.player_id();
+    let player_b = server.add_player();
+    set_dedicated_chunk_view_and_poll(&mut server, player_a, ChunkPos::new(0, 0), 0);
+    set_dedicated_chunk_view_and_poll(&mut server, player_b, ChunkPos::new(0, 0), 0);
+    for (player_id, position) in [
+        (player_a, Vec3d::new(8.5, 65.0, 10.5)),
+        (player_b, Vec3d::new(10.5, 65.0, 10.5)),
+    ] {
+        server
+            .try_handle_command_for_player(
+                player_id,
+                ClientCommand::move_player(MovePlayerCommand::PosRot {
+                    position,
+                    y_rot_degrees: 0.0,
+                    x_rot_degrees: 0.0,
+                    on_ground: true,
+                }),
+            )
+            .unwrap();
+    }
+    for floor in [BlockPos::new(8, 64, 8), BlockPos::new(10, 64, 8)] {
+        server.scheduler_mut().set_block_at_world(floor, STONE);
+        server
+            .scheduler_mut()
+            .set_block_at_world(floor.offset(0, 1, 0), AIR);
+        assert_eq!(server.scheduler().block_at_world(floor), Some(STONE));
+    }
+    let mats = {
+        let runtime = &mut server.active_dimension;
+        let scheduler = &runtime.scheduler;
+        [Vec3d::new(8.5, 65.0, 8.5), Vec3d::new(10.5, 65.0, 8.5)].map(|position| {
+            runtime
+                .entities
+                .place_sleeping_mat(position, 0.0, |pos| {
+                    scheduler
+                        .block_at_world(pos)
+                        .map(|block| BlockStateId(u32::from(block)))
+                })
+                .unwrap()
+        })
+    };
+    server.set_day_time(u64::from(SLEEP_START_DAY_TICK));
+    let _ = server.try_drain_updates_for_player(player_a).unwrap();
+    let _ = server.try_drain_updates_for_player(player_b).unwrap();
+
+    let first = server
+        .try_handle_command_for_player(
+            player_a,
+            ClientCommand::InteractEntity(InteractEntityCommand {
+                target: mats[0].id,
+                hand: InteractionHand::MainHand,
+            }),
+        )
+        .unwrap();
+    assert!(first.iter().any(|update| matches!(
+        update,
+        ServerUpdate::SleepState(SleepStateUpdate {
+            sleeping: true,
+            sleeping_players: 1,
+            eligible_players: 2,
+        })
+    )));
+    assert_eq!(server.day_time(), u64::from(SLEEP_START_DAY_TICK));
+
+    let second = server
+        .try_handle_command_for_player(
+            player_b,
+            ClientCommand::InteractEntity(InteractEntityCommand {
+                target: mats[1].id,
+                hand: InteractionHand::MainHand,
+            }),
+        )
+        .unwrap();
+    assert!(second.iter().any(|update| matches!(
+        update,
+        ServerUpdate::SleepState(SleepStateUpdate {
+            sleeping: true,
+            sleeping_players: 2,
+            eligible_players: 2,
+        })
+    )));
+
+    let game_time_before = server.game_time();
+    server.try_simulation_tick_report_global().unwrap();
+    assert_eq!(server.game_time(), game_time_before + 1);
+    assert_eq!(server.day_time(), mclone_core::time::DAY_LENGTH_TICKS);
+    for player_id in [player_a, player_b] {
+        let updates = server.try_drain_updates_for_player(player_id).unwrap();
+        assert!(updates.iter().any(|update| matches!(
+            update,
+            ServerUpdate::TimeUpdate {
+                game_time,
+                day_time: 24_000,
+                ..
+            } if *game_time == game_time_before + 1
+        )));
+        assert!(updates.iter().any(|update| matches!(
+            update,
+            ServerUpdate::SleepState(SleepStateUpdate {
+                sleeping: false,
+                sleeping_players: 0,
+                eligible_players: 2,
+            })
+        )));
+    }
 }
 
 fn time_update(updates: &[ServerUpdate]) -> Option<u64> {

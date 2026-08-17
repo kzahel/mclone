@@ -81,6 +81,7 @@ const CLIENT_COMMAND_RESPAWN: u8 = 12;
 const CLIENT_COMMAND_EPHEMERAL_FALLBACK: u8 = 13;
 const CLIENT_COMMAND_ATTACK_ENTITY: u8 = 14;
 const CLIENT_COMMAND_INTERACT_ENTITY: u8 = 15;
+const CLIENT_COMMAND_CANCEL_SLEEP: u8 = 16;
 const SERVER_UPDATE_CHUNK_SNAPSHOT: u8 = 1;
 const SERVER_UPDATE_CHUNK_UNLOAD: u8 = 2;
 const SERVER_UPDATE_SECTION_BLOCK_UPDATES: u8 = 3;
@@ -112,6 +113,7 @@ const SERVER_UPDATE_BEE_FIELD_GUIDE: u8 = 28;
 const SERVER_UPDATE_BEE_SOUND: u8 = 29;
 const SERVER_UPDATE_RABBIT_FIELD_GUIDE: u8 = 30;
 const SERVER_UPDATE_RABBIT_SOUND: u8 = 31;
+const SERVER_UPDATE_SLEEP_STATE: u8 = 32;
 
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 pub struct SessionCapabilities(u64);
@@ -326,6 +328,7 @@ pub enum ClientCommand {
     AttackEntity(AttackEntityCommand),
     InteractEntity(InteractEntityCommand),
     UseItemOn(UseItemOnCommand),
+    CancelSleep,
     ShootDebugPhysicsCube,
     KeepAlive { id: u64 },
     Respawn,
@@ -542,6 +545,8 @@ pub enum ServerUpdate {
         daylight_cycle_running: bool,
         calendar_policy: SeasonCalendarPolicy,
     },
+    /// Owner-specific ephemeral sleep state plus realm quorum progress.
+    SleepState(SleepStateUpdate),
     PlayerPosition(PlayerPositionUpdate),
     RemotePlayerAdd(RemotePlayerUpdate),
     RemotePlayerUpdate(RemotePlayerUpdate),
@@ -648,6 +653,7 @@ pub enum EntityKind {
     Rabbit,
     RabbitBurrow,
     WildlifeRemains,
+    SleepingMat,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -667,6 +673,14 @@ pub enum ItemKind {
     Carrot,
     OakFence,
     OakFenceGate,
+    SleepingMat,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct SleepStateUpdate {
+    pub sleeping: bool,
+    pub sleeping_players: u32,
+    pub eligible_players: u32,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -911,6 +925,7 @@ pub fn encode_client_command(command: &ClientCommand) -> ProtocolCodecResult<Vec
             writer.write_u8(CLIENT_COMMAND_USE_ITEM_ON);
             writer.write_use_item_on(command);
         }
+        ClientCommand::CancelSleep => writer.write_u8(CLIENT_COMMAND_CANCEL_SLEEP),
         ClientCommand::ShootDebugPhysicsCube => {
             writer.write_u8(CLIENT_COMMAND_SHOOT_DEBUG_PHYSICS_CUBE);
         }
@@ -971,6 +986,7 @@ pub fn decode_client_command(bytes: &[u8]) -> ProtocolCodecResult<ClientCommand>
             },
         }),
         CLIENT_COMMAND_USE_ITEM_ON => ClientCommand::UseItemOn(reader.read_use_item_on()?),
+        CLIENT_COMMAND_CANCEL_SLEEP => ClientCommand::CancelSleep,
         CLIENT_COMMAND_SHOOT_DEBUG_PHYSICS_CUBE => ClientCommand::ShootDebugPhysicsCube,
         CLIENT_COMMAND_KEEP_ALIVE => ClientCommand::KeepAlive {
             id: reader.read_u64()?,
@@ -1061,6 +1077,19 @@ pub fn encode_server_update(update: &ServerUpdate) -> ProtocolCodecResult<Vec<u8
             writer.write_u64(*day_time);
             writer.write_bool(*daylight_cycle_running);
             write_season_calendar_policy(&mut writer, *calendar_policy)?;
+        }
+        ServerUpdate::SleepState(state) => {
+            if state.sleeping_players > state.eligible_players
+                || (state.sleeping && state.sleeping_players == 0)
+            {
+                return Err(ProtocolCodecError::InvalidData(
+                    "invalid player sleep state",
+                ));
+            }
+            writer.write_u8(SERVER_UPDATE_SLEEP_STATE);
+            writer.write_bool(state.sleeping);
+            writer.write_u32(state.sleeping_players);
+            writer.write_u32(state.eligible_players);
         }
         ServerUpdate::PlayerPosition(update) => {
             validate_player_position_update(update)?;
@@ -1337,6 +1366,21 @@ pub fn decode_server_update(bytes: &[u8]) -> ProtocolCodecResult<ServerUpdate> {
             daylight_cycle_running: reader.read_bool()?,
             calendar_policy: read_season_calendar_policy(&mut reader)?,
         },
+        SERVER_UPDATE_SLEEP_STATE => {
+            let state = SleepStateUpdate {
+                sleeping: reader.read_bool()?,
+                sleeping_players: reader.read_u32()?,
+                eligible_players: reader.read_u32()?,
+            };
+            if state.sleeping_players > state.eligible_players
+                || (state.sleeping && state.sleeping_players == 0)
+            {
+                return Err(ProtocolCodecError::InvalidData(
+                    "invalid player sleep state",
+                ));
+            }
+            ServerUpdate::SleepState(state)
+        }
         SERVER_UPDATE_PLAYER_POSITION => {
             ServerUpdate::PlayerPosition(reader.read_player_position_update()?)
         }
@@ -1824,6 +1868,7 @@ impl ByteWriter {
             EntityKind::Rabbit => 12,
             EntityKind::RabbitBurrow => 13,
             EntityKind::WildlifeRemains => 14,
+            EntityKind::SleepingMat => 15,
         });
     }
 
@@ -1844,6 +1889,7 @@ impl ByteWriter {
             ItemKind::Carrot => 12,
             ItemKind::OakFence => 13,
             ItemKind::OakFenceGate => 14,
+            ItemKind::SleepingMat => 15,
         });
     }
 
@@ -2421,6 +2467,7 @@ impl<'a> ByteReader<'a> {
             12 => Ok(EntityKind::Rabbit),
             13 => Ok(EntityKind::RabbitBurrow),
             14 => Ok(EntityKind::WildlifeRemains),
+            15 => Ok(EntityKind::SleepingMat),
             kind => Err(ProtocolCodecError::UnknownEntityKind(kind)),
         }
     }
@@ -2443,6 +2490,7 @@ impl<'a> ByteReader<'a> {
             12 => Ok(ItemKind::Carrot),
             13 => Ok(ItemKind::OakFence),
             14 => Ok(ItemKind::OakFenceGate),
+            15 => Ok(ItemKind::SleepingMat),
             kind => Err(ProtocolCodecError::UnknownItemKind(kind)),
         }
     }
@@ -3256,6 +3304,45 @@ mod tests {
         });
         let bytes = encode_client_command(&command).unwrap();
         assert_eq!(decode_client_command(&bytes).unwrap(), command);
+    }
+
+    #[test]
+    fn sleep_protocol_round_trips_and_rejects_invalid_counts() {
+        let cancel = ClientCommand::CancelSleep;
+        assert_eq!(
+            decode_client_command(&encode_client_command(&cancel).unwrap()).unwrap(),
+            cancel
+        );
+
+        let update = ServerUpdate::SleepState(SleepStateUpdate {
+            sleeping: true,
+            sleeping_players: 1,
+            eligible_players: 2,
+        });
+        assert_eq!(
+            decode_server_update(&encode_server_update(&update).unwrap()).unwrap(),
+            update
+        );
+        assert_eq!(
+            encode_server_update(&ServerUpdate::SleepState(SleepStateUpdate {
+                sleeping: true,
+                sleeping_players: 0,
+                eligible_players: 1,
+            })),
+            Err(ProtocolCodecError::InvalidData(
+                "invalid player sleep state"
+            ))
+        );
+        assert_eq!(
+            encode_server_update(&ServerUpdate::SleepState(SleepStateUpdate {
+                sleeping: false,
+                sleeping_players: 2,
+                eligible_players: 1,
+            })),
+            Err(ProtocolCodecError::InvalidData(
+                "invalid player sleep state"
+            ))
+        );
     }
 
     #[test]

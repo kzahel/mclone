@@ -234,6 +234,11 @@ fn direct_asset_requirements() -> Vec<CanonicalAssetRequirement> {
             Required,
         ),
         (
+            "assets/mclone/figures/sleeping_mat.figure.json",
+            SemanticProp,
+            Required,
+        ),
+        (
             "assets/minecraft/textures/misc/underwater.png",
             ScreenEffect,
             Required,
@@ -446,6 +451,7 @@ mod tests {
             "assets/mclone/figures/oak_fence_item.figure.json",
             "assets/mclone/figures/oak_fence_gate_item.figure.json",
             "assets/mclone/figures/rabbit_burrow.figure.json",
+            "assets/mclone/figures/sleeping_mat.figure.json",
             "assets/minecraft/textures/misc/underwater.png",
             "assets/minecraft/sounds/damage/fallsmall.ogg",
         ] {

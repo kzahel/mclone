@@ -1,6 +1,178 @@
 use super::*;
 
 #[test]
+fn sleep_rule_validates_percent_and_uses_ceiling_quorum() {
+    assert_eq!(
+        SleepRule::new(0),
+        Err(SleepRuleError::RequiredPercentOutOfRange {
+            required_percent: 0,
+        })
+    );
+    assert_eq!(
+        SleepRule::new(101),
+        Err(SleepRuleError::RequiredPercentOutOfRange {
+            required_percent: 101,
+        })
+    );
+    let half = SleepRule::new(50).unwrap();
+    assert_eq!(half.required_sleepers(0), 0);
+    assert_eq!(half.required_sleepers(1), 1);
+    assert_eq!(half.required_sleepers(3), 2);
+    assert_eq!(half.required_sleepers(u32::MAX), 2_147_483_648);
+    assert_eq!(
+        SleepRule::ALL_ELIGIBLE.required_sleepers(u32::MAX),
+        u32::MAX
+    );
+}
+
+#[test]
+fn sleeping_mat_places_and_drives_exact_one_tick_night_skip() {
+    let definition =
+        crate::DimensionDefinition::overworld(81, WorldGenerationProfile::McloneOverworldV1);
+    let mut server = LocalRealmSession::local_integrated_with_world_store_and_dimension_definition(
+        definition,
+        Box::new(MemoryWorldStore::new()),
+    );
+    server
+        .initialize_world_metadata_at_unix_millis(1_000)
+        .unwrap();
+    load_center_chunk(&mut server);
+    sync_player(&mut server, Vec3d::new(8.5, 65.0, 10.5));
+    let floor = BlockPos::new(8, 64, 8);
+    assert!(server.scheduler_mut().set_block_at_world(floor, STONE));
+    server
+        .scheduler_mut()
+        .set_block_at_world(floor.offset(0, 1, 0), AIR);
+    server.scheduler_mut().drain_pending_block_delta_events();
+
+    sync_carried_slot(&mut server, 5);
+    let placed = server
+        .try_handle_command(use_held_item_on(BlockHitResult::new(
+            Vec3d::new(8.5, 65.0, 8.5),
+            Direction::Up,
+            floor,
+            false,
+        )))
+        .expect("place sleeping mat");
+    let mat = placed
+        .iter()
+        .find_map(|update| match update {
+            ServerUpdate::EntitySnapshot(snapshot) if snapshot.kind == EntityKind::SleepingMat => {
+                Some(*snapshot)
+            }
+            _ => None,
+        })
+        .expect("sleeping mat snapshot");
+    assert_eq!(server.inventory().item_count(ItemKind::SleepingMat), 0);
+    assert_eq!((mat.width, mat.height), (1.2, 0.16));
+
+    server.set_day_time(100);
+    let _ = server.try_poll().unwrap();
+    assert!(
+        server
+            .try_handle_command(ClientCommand::InteractEntity(InteractEntityCommand {
+                target: mat.id,
+                hand: InteractionHand::MainHand,
+            }))
+            .unwrap()
+            .is_empty()
+    );
+    assert!(!server.player_is_sleeping(server.player_id()));
+
+    server.set_day_time(u64::from(SLEEP_START_DAY_TICK));
+    let _ = server.try_poll().unwrap();
+    let admitted = server
+        .try_handle_command(ClientCommand::InteractEntity(InteractEntityCommand {
+            target: mat.id,
+            hand: InteractionHand::MainHand,
+        }))
+        .unwrap();
+    assert!(admitted.iter().any(|update| matches!(
+        update,
+        ServerUpdate::SleepState(SleepStateUpdate {
+            sleeping: true,
+            sleeping_players: 1,
+            eligible_players: 1,
+        })
+    )));
+
+    let cancelled = server
+        .try_handle_command(ClientCommand::CancelSleep)
+        .unwrap();
+    assert!(cancelled.iter().any(|update| matches!(
+        update,
+        ServerUpdate::SleepState(SleepStateUpdate {
+            sleeping: false,
+            sleeping_players: 0,
+            eligible_players: 1,
+        })
+    )));
+    server
+        .try_handle_command(ClientCommand::InteractEntity(InteractEntityCommand {
+            target: mat.id,
+            hand: InteractionHand::MainHand,
+        }))
+        .unwrap();
+    assert!(server.player_is_sleeping(server.player_id()));
+    let moved = server
+        .try_handle_command(ClientCommand::move_player(MovePlayerCommand::PosRot {
+            position: Vec3d::new(8.75, 65.0, 10.5),
+            y_rot_degrees: 0.0,
+            x_rot_degrees: 0.0,
+            on_ground: true,
+        }))
+        .unwrap();
+    assert!(moved.iter().any(|update| matches!(
+        update,
+        ServerUpdate::SleepState(SleepStateUpdate {
+            sleeping: false,
+            sleeping_players: 0,
+            eligible_players: 1,
+        })
+    )));
+    assert!(!server.player_is_sleeping(server.player_id()));
+    server
+        .try_handle_command(ClientCommand::InteractEntity(InteractEntityCommand {
+            target: mat.id,
+            hand: InteractionHand::MainHand,
+        }))
+        .unwrap();
+    assert!(server.player_is_sleeping(server.player_id()));
+
+    server.set_do_daylight_cycle(false);
+    let game_time_before = server.game_time();
+    let report = server.try_simulation_tick_report().unwrap();
+    assert!(!server.do_daylight_cycle());
+    assert_eq!(server.game_time(), game_time_before + 1);
+    assert_eq!(server.day_time(), mclone_core::time::DAY_LENGTH_TICKS);
+    assert_eq!(
+        report
+            .updates
+            .iter()
+            .filter(|update| matches!(update, ServerUpdate::TimeUpdate { .. }))
+            .count(),
+        1
+    );
+    assert!(report.updates.iter().any(|update| matches!(
+        update,
+        ServerUpdate::TimeUpdate {
+            game_time,
+            day_time: 24_000,
+            ..
+        } if *game_time == game_time_before + 1
+    )));
+    assert!(report.updates.iter().any(|update| matches!(
+        update,
+        ServerUpdate::SleepState(SleepStateUpdate {
+            sleeping: false,
+            sleeping_players: 0,
+            eligible_players: 1,
+        })
+    )));
+    assert_eq!(server.sleeping_player_count(), 0);
+}
+
+#[test]
 fn wooden_hoe_seed_and_harvest_form_an_authoritative_inventory_loop() {
     let mut server = LocalRealmSession::new(0);
     load_center_chunk(&mut server);
