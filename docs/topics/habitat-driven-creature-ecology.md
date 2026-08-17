@@ -62,7 +62,7 @@ natural attended mallard nests, one immutable-domain runner, and deterministic
 real-seed reports. The individual simulation remains authoritative; there is
 no estimator-driven cap, refill, immigration, or unloaded catch-up.
 
-Planned coordinating parent Tactical
+Active coordinating parent Tactical
 [`315`](../tactical/315-authoritative-seasonal-calendar-and-squirrel-ecology.md)
 is the selected fifth creature-life sequence. Its children make persisted
 civil time drive one authoritative orbital calendar while sleep/date changes
@@ -72,6 +72,9 @@ bounded distributed caches, tree refuge, compressed reproductive opportunity,
 and the same durable loaded lifecycle. Population change remains an outcome of
 actual food access, condition, reproduction, and mortality rather than a
 seasonal count multiplier.
+Its Phase C child
+[`318`](../tactical/318-seasonal-resource-opportunity.md) now binds the
+five-stratum active-resource implementation and Review Gate C.
 
 ## Scope
 

@@ -2,7 +2,8 @@
 
 Status: active coordinating parent 2026-08-17; Phase A implemented by
 [`316`](316-authoritative-season-calendar-foundation.md), Phase B implemented by
-[`317`](317-civil-time-discontinuity-and-sleep.md)
+[`317`](317-civil-time-discontinuity-and-sleep.md), Phase C planned by
+[`318`](318-seasonal-resource-opportunity.md)
 
 Topic: `seasons`
 
@@ -726,6 +727,9 @@ reason native pixel capture stages the already-tested transient update are in
 Tactical 317.
 
 ### Phase C: seasonal resource opportunity
+
+Status: planned 2026-08-17 by Tactical
+[`318`](318-seasonal-resource-opportunity.md).
 
 1. Add pure local seasonal response for the five current resource strata.
 2. Preserve static terrain potential and standing stock separately from

@@ -66,7 +66,7 @@ after authoritative parent mortality, preventing it from permanently blocking
 later clutches without treating unloaded parents as dead. The exact revision-5
 120/200-day acceptance campaign remains open; Tactical 308 owns its evidence.
 
-Planned coordinating parent Tactical
+Active coordinating parent Tactical
 [`315`](../tactical/315-authoritative-seasonal-calendar-and-squirrel-ecology.md)
 selects squirrel as the next non-predator model pressure test. Its children
 first make the server civil calendar authoritative without advancing skipped
@@ -76,6 +76,10 @@ Squirrels consume ordinary seeds/soft mast and add bounded distributed cache
 knowledge, durable cache stock, carried-resource conservation, tree refuge,
 and compressed favorable-season reproductive opportunity. Fish and beaver
 remain later alternatives rather than parallel roster work.
+Phase C is bounded by Tactical
+[`318`](../tactical/318-seasonal-resource-opportunity.md): current climate may
+change derived access and future loaded recovery, but never directly replace
+standing stock or advance an inactive animal/resource record.
 
 ## Scope
 
