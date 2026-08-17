@@ -1,6 +1,116 @@
 use super::*;
 use crate::{ChunkResidency, MemoryWorldStore};
 
+fn mclone_calendar_session(seed: i64) -> LocalRealmSession {
+    let definition =
+        crate::DimensionDefinition::overworld(seed, WorldGenerationProfile::McloneOverworldV1);
+    LocalRealmSession::local_integrated_with_world_store_and_dimension_definition(
+        definition,
+        Box::new(MemoryWorldStore::new()),
+    )
+}
+
+fn time_update_count(updates: &[ServerUpdate]) -> usize {
+    updates
+        .iter()
+        .filter(|update| matches!(update, ServerUpdate::TimeUpdate { .. }))
+        .count()
+}
+
+#[test]
+fn typed_civil_time_mutations_are_checked_durable_and_publish_once() {
+    let mut server = mclone_calendar_session(761);
+    server
+        .initialize_world_metadata_at_unix_millis(1_000)
+        .unwrap();
+    let _ = server.try_poll().unwrap();
+    server.set_day_time(2 * mclone_core::time::DAY_LENGTH_TICKS + 500);
+    let _ = server.try_poll().unwrap();
+
+    let changed = server.set_time_of_day_preserving_date(1_250).unwrap();
+    assert_eq!(changed, 2 * mclone_core::time::DAY_LENGTH_TICKS + 1_250);
+    assert_eq!(server.day_time(), changed);
+    assert_eq!(time_update_count(&server.try_poll().unwrap()), 1);
+    assert_eq!(
+        server.set_time_of_day_preserving_date(24_000),
+        Err(CivilTimeMutationError::DayTickOutOfRange { day_tick: 24_000 })
+    );
+    assert_eq!(server.day_time(), changed);
+    assert_eq!(time_update_count(&server.try_poll().unwrap()), 0);
+
+    let last_day = server.set_calendar_date(1, 56, None).unwrap();
+    assert_eq!(
+        last_day,
+        (56 + 55) * mclone_core::time::DAY_LENGTH_TICKS + 1_250
+    );
+    let sample = server.season_calendar_sample().unwrap().unwrap();
+    assert_eq!(
+        (sample.year_index, sample.day_of_year, sample.day_tick),
+        (1, 56, 1_250)
+    );
+    assert_eq!(time_update_count(&server.try_poll().unwrap()), 1);
+
+    let wrapped = server.set_calendar_date(2, 1, Some(0)).unwrap();
+    assert_eq!(wrapped, 112 * mclone_core::time::DAY_LENGTH_TICKS);
+    assert_eq!(time_update_count(&server.try_poll().unwrap()), 1);
+    assert_eq!(
+        server.set_calendar_date(0, 0, None),
+        Err(CivilTimeMutationError::DayOfYearOutOfRange {
+            day_of_year: 0,
+            days_per_year: 56,
+        })
+    );
+    assert_eq!(
+        server.set_calendar_date(0, 57, None),
+        Err(CivilTimeMutationError::DayOfYearOutOfRange {
+            day_of_year: 57,
+            days_per_year: 56,
+        })
+    );
+    assert_eq!(
+        server.set_calendar_date(u64::MAX, 1, Some(0)),
+        Err(CivilTimeMutationError::ArithmeticOverflow)
+    );
+    assert_eq!(server.day_time(), wrapped);
+    assert_eq!(time_update_count(&server.try_poll().unwrap()), 0);
+
+    let morning = server.advance_to_next_morning().unwrap();
+    assert_eq!(morning, 113 * mclone_core::time::DAY_LENGTH_TICKS);
+    assert_eq!(time_update_count(&server.try_poll().unwrap()), 1);
+    assert_eq!(server.game_time(), 0);
+
+    assert_eq!(server.save_world_metadata_at_unix_millis(2_000).unwrap(), 1);
+    let saved = server.world_metadata().unwrap();
+    assert_eq!(saved.day_time, morning);
+    assert_eq!(saved.game_time, 0);
+}
+
+#[test]
+fn typed_calendar_mutation_rejects_disabled_policy_and_clock_overflow() {
+    let mut disabled = LocalRealmSession::with_world_store(762, Box::new(MemoryWorldStore::new()));
+    disabled
+        .initialize_world_metadata_at_unix_millis(1_000)
+        .unwrap();
+    assert_eq!(
+        disabled.set_calendar_date(0, 1, Some(0)),
+        Err(CivilTimeMutationError::CalendarDisabled)
+    );
+    assert_eq!(disabled.day_time(), 0);
+
+    let mut server = mclone_calendar_session(763);
+    server.set_day_time(u64::MAX);
+    assert_eq!(
+        server.advance_to_next_morning(),
+        Err(CivilTimeMutationError::ArithmeticOverflow)
+    );
+    assert_eq!(server.day_time(), u64::MAX);
+    assert_eq!(
+        server.set_time_of_day_preserving_date(23_999),
+        Err(CivilTimeMutationError::ArithmeticOverflow)
+    );
+    assert_eq!(server.day_time(), u64::MAX);
+}
+
 #[test]
 fn new_world_metadata_starts_at_vanilla_zero_and_tracks_both_clocks() {
     let mut server = LocalRealmSession::with_world_store(77, Box::new(MemoryWorldStore::new()));

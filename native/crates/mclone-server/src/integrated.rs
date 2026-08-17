@@ -363,6 +363,50 @@ pub struct RealmServer {
     debug_auxiliary_player_script: Option<DebugAuxiliaryPlayerScript>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CivilTimeMutationError {
+    DayTickOutOfRange {
+        day_tick: u32,
+    },
+    CalendarDisabled,
+    InvalidCalendarPolicy(mclone_season::SeasonCalendarError),
+    DayOfYearOutOfRange {
+        day_of_year: u16,
+        days_per_year: u16,
+    },
+    ArithmeticOverflow,
+}
+
+impl std::fmt::Display for CivilTimeMutationError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::DayTickOutOfRange { day_tick } => write!(
+                formatter,
+                "civil day tick {day_tick} is outside 0..{}",
+                mclone_core::time::DAY_LENGTH_TICKS
+            ),
+            Self::CalendarDisabled => {
+                formatter.write_str("the active world profile has no calendar")
+            }
+            Self::InvalidCalendarPolicy(error) => {
+                write!(formatter, "invalid active calendar policy: {error}")
+            }
+            Self::DayOfYearOutOfRange {
+                day_of_year,
+                days_per_year,
+            } => write!(
+                formatter,
+                "calendar day {day_of_year} is outside the one-based 1..={days_per_year} range"
+            ),
+            Self::ArithmeticOverflow => {
+                formatter.write_str("civil-time mutation exceeds the supported clock range")
+            }
+        }
+    }
+}
+
+impl std::error::Error for CivilTimeMutationError {}
+
 impl Deref for RealmServer {
     type Target = DimensionRuntime;
 
@@ -1275,6 +1319,76 @@ impl RealmServer {
     pub fn set_day_time(&mut self, day_time: u64) {
         self.day_time = day_time;
         self.day_time_debug_override = true;
+        self.queue_time_update_for_all_interest_sources(self.time_update());
+    }
+
+    /// Durably changes only the time within the current civil day.
+    pub fn set_time_of_day_preserving_date(
+        &mut self,
+        day_tick: u32,
+    ) -> Result<u64, CivilTimeMutationError> {
+        validate_civil_day_tick(day_tick)?;
+        let day_length = mclone_core::time::DAY_LENGTH_TICKS;
+        let day_start = self.day_time - self.day_time % day_length;
+        let civil_time = day_start
+            .checked_add(u64::from(day_tick))
+            .ok_or(CivilTimeMutationError::ArithmeticOverflow)?;
+        self.apply_durable_civil_time(civil_time);
+        Ok(civil_time)
+    }
+
+    /// Durably selects a zero-based calendar year and one-based day in it.
+    pub fn set_calendar_date(
+        &mut self,
+        year_index: u64,
+        day_of_year: u16,
+        day_tick: Option<u32>,
+    ) -> Result<u64, CivilTimeMutationError> {
+        self.season_calendar_policy
+            .validate()
+            .map_err(CivilTimeMutationError::InvalidCalendarPolicy)?;
+        let Some(days_per_year) = self.season_calendar_policy.days_per_year() else {
+            return Err(CivilTimeMutationError::CalendarDisabled);
+        };
+        if day_of_year == 0 || day_of_year > days_per_year {
+            return Err(CivilTimeMutationError::DayOfYearOutOfRange {
+                day_of_year,
+                days_per_year,
+            });
+        }
+        let day_tick =
+            day_tick.unwrap_or((self.day_time % mclone_core::time::DAY_LENGTH_TICKS) as u32);
+        validate_civil_day_tick(day_tick)?;
+
+        let absolute_day = year_index
+            .checked_mul(u64::from(days_per_year))
+            .and_then(|year_start| year_start.checked_add(u64::from(day_of_year - 1)))
+            .ok_or(CivilTimeMutationError::ArithmeticOverflow)?;
+        let civil_time = absolute_day
+            .checked_mul(mclone_core::time::DAY_LENGTH_TICKS)
+            .and_then(|day_start| day_start.checked_add(u64::from(day_tick)))
+            .ok_or(CivilTimeMutationError::ArithmeticOverflow)?;
+        self.apply_durable_civil_time(civil_time);
+        Ok(civil_time)
+    }
+
+    /// Durably advances to day tick zero of the following absolute day.
+    pub fn advance_to_next_morning(&mut self) -> Result<u64, CivilTimeMutationError> {
+        let day_length = mclone_core::time::DAY_LENGTH_TICKS;
+        let day_start = self.day_time - self.day_time % day_length;
+        let civil_time = day_start
+            .checked_add(day_length)
+            .ok_or(CivilTimeMutationError::ArithmeticOverflow)?;
+        self.apply_durable_civil_time(civil_time);
+        Ok(civil_time)
+    }
+
+    fn apply_durable_civil_time(&mut self, civil_time: u64) {
+        self.day_time = civil_time;
+        self.day_time_debug_override = false;
+        if self.world_metadata.is_some() {
+            self.world_metadata_dirty = true;
+        }
         self.queue_time_update_for_all_interest_sources(self.time_update());
     }
 
@@ -7834,6 +7948,13 @@ fn validate_world_metadata(
             metadata.world_behavior_profile.label(),
             requested_behavior.label()
         )));
+    }
+    Ok(())
+}
+
+fn validate_civil_day_tick(day_tick: u32) -> Result<(), CivilTimeMutationError> {
+    if u64::from(day_tick) >= mclone_core::time::DAY_LENGTH_TICKS {
+        return Err(CivilTimeMutationError::DayTickOutOfRange { day_tick });
     }
     Ok(())
 }
