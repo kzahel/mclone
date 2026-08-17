@@ -16,7 +16,7 @@ test("browses hash-checked figures with animation and camera controls", async ({
   await expect(page).toHaveURL(/figure=king_cobra/);
   await expect(page.locator(".catalogRow.selected")).toHaveAttribute("data-catalog-name", "king_cobra");
   await expect(page.locator(".summaryItem").first()).toContainText("202");
-  await expect(page.locator(".summaryItem").filter({ hasText: "runtime" })).toContainText("6");
+  await expect(page.locator(".summaryItem").filter({ hasText: "runtime" })).toContainText("9");
   await expect(page.locator(".promotionStatus")).toContainText("Asset Lab only");
 
   const firstTime = Number(await canvas.getAttribute("data-time"));
@@ -46,13 +46,16 @@ test("browses hash-checked figures with animation and camera controls", async ({
 
   const promotionFilter = page.getByRole("combobox", { name: "Runtime status" });
   await promotionFilter.selectOption("runtime");
-  await expect(page.locator(".resultCount")).toHaveText("6 figures");
+  await expect(page.locator(".resultCount")).toHaveText("9 figures");
+  await expect(page.locator("[data-catalog-name='bee']")).toBeVisible();
   await expect(page.locator("[data-catalog-name='player']")).toBeVisible();
   await expect(page.locator("[data-catalog-name='cow']")).toBeVisible();
   await expect(page.locator("[data-catalog-name='chicken']")).toBeVisible();
   await expect(page.locator("[data-catalog-name='mallard_duck']")).toBeVisible();
   await expect(page.locator("[data-catalog-name='upright_bear']")).toBeVisible();
   await expect(page.locator("[data-catalog-name='deer']")).toBeVisible();
+  await expect(page.locator("[data-catalog-name='rabbit']")).toBeVisible();
+  await expect(page.locator("[data-catalog-name='red_squirrel']")).toBeVisible();
   await expect(page.locator("[data-runtime-promoted='false']")).toHaveCount(0);
   await page.locator("[data-catalog-name='chicken']").click();
   await expect(page.locator(".promotionStatus")).toContainText("Live gameplay asset");
@@ -72,6 +75,15 @@ test("browses hash-checked figures with animation and camera controls", async ({
   await expect(page).toHaveURL(/figure=owl/);
   await expect(page.locator("canvas[data-figure='owl']")).toBeVisible();
   await expect(page.locator("canvas")).toHaveCount(1);
+
+  await search.fill("red squirrel");
+  await page.locator("[data-catalog-name='red_squirrel']").click();
+  await expect(page.locator("canvas[data-figure='red_squirrel']")).toBeVisible();
+  await expect(page.locator(".promotionStatus")).toContainText("Live gameplay asset");
+  await expect(page.locator(".promotionStatus")).toContainText("mclone:red_squirrel");
+  await expect(page.locator(".promotionStatus")).toContainText(
+    "assets/mclone/figures/red_squirrel.figure.json",
+  );
 
   await page.getByRole("button", { name: "Dark" }).click();
   await expect(page.locator(".appShell")).toHaveAttribute("data-theme", "dark");
@@ -127,9 +139,12 @@ test("keeps the complete catalogue usable at a mobile viewport", async ({ page }
   });
   page.on("pageerror", (error) => browserErrors.push(error.stack ?? error.message));
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto("/animals/?figure=bee&clip=hover");
-  await expect(page.locator("canvas[data-figure='bee']")).toBeVisible();
-  await expect(page.locator(".catalogRow.selected")).toHaveAttribute("data-catalog-name", "bee");
+  await page.goto("/animals/?figure=red_squirrel&clip=bound");
+  await expect(page.locator("canvas[data-figure='red_squirrel']")).toBeVisible();
+  await expect(page.locator(".catalogRow.selected")).toHaveAttribute(
+    "data-catalog-name",
+    "red_squirrel",
+  );
   const dimensions = await page.evaluate(() => ({
     clientWidth: document.documentElement.clientWidth,
     scrollWidth: document.documentElement.scrollWidth,
