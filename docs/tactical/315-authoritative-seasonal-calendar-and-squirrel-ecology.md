@@ -1,8 +1,8 @@
 # Tactical 315: Authoritative Seasonal Calendar And Squirrel Ecology
 
 Status: active coordinating parent 2026-08-17; Phase A implemented by
-[`316`](316-authoritative-season-calendar-foundation.md), Phase B ready for a
-bounded child tactical
+[`316`](316-authoritative-season-calendar-foundation.md), Phase B planned by
+[`317`](317-civil-time-discontinuity-and-sleep.md)
 
 Topic: `seasons`
 
