@@ -747,6 +747,10 @@ three-species behavior remain intact. No population-target tuning is allowed.
 
 ### Phase D: squirrel asset, habitat, and initial population
 
+Status: drafted 2026-08-17 by Tactical
+[`319`](319-squirrel-asset-habitat-and-refuge.md); implementation remains
+blocked on Review Gate C.
+
 1. Author and validate the semantic figure, animation roles, prepared render,
    catalogue entry, and bounded sound family.
 2. Add shared protocol/entity/lifecycle/render vocabulary.
