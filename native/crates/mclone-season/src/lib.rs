@@ -715,6 +715,14 @@ pub fn evaluate_seasonal_resource_opportunity(
             0.05 + 0.95 * warmth * (0.24 + moisture * 0.76) * (1.0 - snow * 0.45),
         ),
     };
+    // Terrain potential already encodes annual productivity. Seasonal
+    // opportunity is a modifier over that calibrated baseline, so regions
+    // with a weak thermal cycle must converge to exact neutral rather than
+    // paying the same annual-climate penalty twice. Snow remains an active
+    // suppressor at cold high elevations even where latitude response is weak.
+    let activation = response.max(snow).clamp(0.0, 1.0);
+    let accessibility = 1.0 - (1.0 - accessibility) * activation;
+    let recovery = 1.0 - (1.0 - recovery) * activation;
 
     SeasonalResourceOpportunity {
         accessibility: SeasonalResourceFactor::from_unit_clamped(accessibility),
@@ -2220,6 +2228,7 @@ mod tests {
             0.7,
         );
         assert_eq!(tropical_a, tropical_b);
+        assert_eq!(tropical_a, SeasonalResourceOpportunity::NEUTRAL);
 
         let low_wet = resource_opportunity(
             SeasonalResourceKind::AquaticVegetation,
