@@ -4,7 +4,8 @@ Topic: `playable-showcases`
 
 Status: implemented with four accepted public creature showcases, one accepted
 public field showcase, and one accepted public working-garden showcase as of
-2026-08-14.
+2026-08-14, plus one locally accepted squirrel behavior review as of
+2026-08-17.
 `mallard-ecology` proves a wetland motion/hatching/discovery loop;
 `deer-forest-edge` proves a contrasting multi-chunk habitat, authoritative
 named actions, durable sign, field notes, and an ordinary hunting tool. Bees
@@ -209,6 +210,13 @@ pnpm native:web:rabbit-showcase-smoke
 pnpm native:web:rabbit-showcase-mobile-smoke
 pnpm native:web:rabbit-showcase-deployed-smoke
 pnpm native:web:rabbit-showcase-mobile-deployed-smoke
+```
+
+The local squirrel commands are:
+
+```bash
+pnpm native:squirrel-woodland:capture
+pnpm native:web:squirrel-showcase-smoke
 ```
 
 Captures belong under `/tmp`. The deployed smoke must confirm the recipe ID and
@@ -655,6 +663,21 @@ digests are
 and
 `866cbed8a4be978c199df3aaf6abe2149e92412d2b9ea23ed165ee00718a564c`.
 
+Tactical
+[`319`](../tactical/319-squirrel-asset-habitat-and-refuge.md) adds the local
+`squirrel-woodland` revision-1 behavior review with seed `17504` and three
+ordinary saved squirrels. Its typed evidence names the normal generated-world
+founder producer, and the authored tree is accepted only because the ordinary
+support-valid refuge query accepts its route. No showcase branch exists in
+squirrel AI, habitat, sound, protocol, or rendering.
+
+Native flat and synthetic-stereo captures were inspected. The headed WebGPU
+gate observed `Idle`, `Bound`, `Forage`, `Alarm`, `Flee`, `TrunkApproach`,
+`Climb`, `RefugeEnter`, and `RefugeIdle` across 424 ordinary replicated
+samples, with one squirrel climbing from height 65 to 68. Every IndexedDB
+world-record store remained empty. This local review has not been deployed;
+it does not add a public link or claim pushed-revision acceptance.
+
 ## Code and Documentation Map
 
 - `assets/mclone/showcases/`: readable showcase recipes
@@ -685,6 +708,8 @@ and
 - `scripts/kitchen-garden-capture.mjs`: working-garden native receipt and
   capture
 - `scripts/rabbit-burrow-capture.mjs`: rabbit habitat native flat/stereo
+  receipt and capture
+- `scripts/squirrel-woodland-capture.mjs`: squirrel habitat native flat/stereo
   receipt and capture
 - [`habitat-driven-creature-ecology.md`](habitat-driven-creature-ecology.md):
   ordinary creature habitat and gameplay contract

@@ -85,7 +85,14 @@ change derived access and future loaded recovery, but never directly replace
 standing stock or advance an inactive animal/resource record. That contract
 and automated Review Gate C are now implemented and accepted, unblocking the
 bounded squirrel actor/habitat/refuge phase in Tactical
-[`319`](../tactical/319-squirrel-asset-habitat-and-refuge.md).
+[`319`](../tactical/319-squirrel-asset-habitat-and-refuge.md). That phase now
+persists the squirrel biology/intent/refuge record, uses revision-2
+coordinate-pure founder planning, searches bounded live woodland evidence, and
+admits support-checked refuge queries through the shared fair work budget.
+Ground forage and the complete alarm-to-refuge sequence pass conservation,
+persistence, unavailable-evidence, support-loss, behavior, and thousand-animal
+tests. Its final capable-device multiview pixel gate remains open, so durable
+cache state has not begun.
 
 ## Scope
 
@@ -540,9 +547,10 @@ scavengers consequential rather than decorative.
 3. Retain mallards as the landed contrasting amphibious lifecycle consumer,
    using the durable semantic nest and attended hatch rather than a universal
    home or abstract population birth.
-4. Execute Tactical 315's selected squirrel pressure test through ordinary
-   mast, carried stock, bounded durable caches, cavities/tree refuge, and
-   seasonal resource opportunity; retain fish and beaver for later evidence.
+4. Retain Tactical 319's landed ordinary mast forage and support-checked
+   cavities/tree refuge. Close its capable-device multiview gate, then execute
+   Tactical 315's carried stock, bounded durable caches, and seasonal
+   reproductive opportunity; retain fish and beaver for later evidence.
 5. Add fox pressure later through prey observations, interruptible pursuit,
    and life-stage-relevant den use rather than a universal permanent-home
    pointer.

@@ -78,9 +78,14 @@ five-stratum active-resource implementation. Review Gate C is accepted at
 resource rule revision 3: seven climate/terrain sites visibly diverge, sharp
 calendar changes do no stock work, inactive cells freeze, and the exact
 five-window 120/200-day rabbit/deer/mallard campaign passes without refill or
-population targeting. Squirrel asset, woodland habitat, durable initial
-population, ground forage, and tree refuge are now unblocked under Tactical
-[`319`](../tactical/319-squirrel-asset-habitat-and-refuge.md).
+population targeting. Tactical
+[`319`](../tactical/319-squirrel-asset-habitat-and-refuge.md) now implements
+the squirrel asset, woodland habitat, durable initial population, ground
+forage, spatial sound, and support-checked tree refuge. Its ordinary native,
+headed-WebGPU, synthetic-stereo, persistence, conservation, behavior, and
+overload evidence passes. Cache work remains gated on one capable-device
+full-frame multiview pixel run; the current Mac does not expose `MULTIVIEW`
+and no Quest was attached for the 2026-08-17 review.
 
 ## Scope
 
@@ -637,11 +642,12 @@ notes, and zero browser-world records. The temporary play link is
   estimate only if it clarifies the raw histories without becoming a second
   model; Tactical 301 deliberately omits one because the typed resource,
   condition, suppression, birth, and mortality curves are more legible.
-- Execute Tactical 315's selected squirrel pressure test through mast, bounded
-  caches, cavities/tree refuge, canopy connectivity, and seasonal food
-  opportunity. Retain fish as the later bounded-water candidate and beaver as
-  the later family-construction/terrain-mutation candidate; do not implement
-  all three merely to populate a food-web list.
+- Close Tactical 319 Review Gate D with one physical-XR or exact full-frame
+  multiview squirrel capture. Then continue Tactical 315 through carried mast,
+  bounded durable caches, cache knowledge, and compressed seasonal lifecycle.
+  Retain fish as the later bounded-water candidate and beaver as the later
+  family-construction/terrain-mutation candidate; do not implement all three
+  merely to populate a food-web list.
 - Decide which concrete consumer actually needs the shared habitat-fitness or
   resource records outside `mclone-server` before making either a public
   cross-crate API. Avoid a generic ecology framework without a real query or

@@ -3,7 +3,9 @@
 Status: active coordinating parent 2026-08-17; Phase A implemented by
 [`316`](316-authoritative-season-calendar-foundation.md), Phase B implemented by
 [`317`](317-civil-time-discontinuity-and-sleep.md), and Phase C implemented and
-accepted by [`318`](318-seasonal-resource-opportunity.md); Phase D is unblocked
+accepted by [`318`](318-seasonal-resource-opportunity.md); Phase D code is
+complete under [`319`](319-squirrel-asset-habitat-and-refuge.md), and Review
+Gate D awaits one capable-device multiview pixel run
 
 Topic: `seasons`
 
@@ -757,8 +759,12 @@ the report hash, matrix checksum, and daily receipts.
 
 ### Phase D: squirrel asset, habitat, and initial population
 
-Status: ready for implementation 2026-08-17 by Tactical
-[`319`](319-squirrel-asset-habitat-and-refuge.md); Review Gate C is accepted.
+Status: implementation complete 2026-08-17 by Tactical
+[`319`](319-squirrel-asset-habitat-and-refuge.md). Native flat, synthetic
+stereo, headed WebGPU, catalogue, ordinary behavior, persistence, habitat,
+conservation, sound, and overload evidence pass. Review Gate D remains open
+only for one physical-XR or exact full-frame multiview pixel execution because
+the current Mac lacks `wgpu::Features::MULTIVIEW` and no Quest is attached.
 
 1. Author and validate the semantic figure, animation roles, prepared render,
    catalogue entry, and bounded sound family.
@@ -957,9 +963,9 @@ Do not add season, sleep, squirrel, resource, cache, or breeding policy to
 - [x] Preserve inactive resource and animal freeze plus exact population
       conservation.
 - [x] Re-accept rabbit/deer/mallard resource and population evidence.
-- [ ] Author and catalogue the first-party squirrel figure, clips, and bounded
+- [x] Author and catalogue the first-party squirrel figure, clips, and bounded
       sound family.
-- [ ] Add squirrel habitat planning, durable realization, diet, lifecycle,
+- [x] Add squirrel habitat planning, durable realization, diet, lifecycle,
       tree-refuge behavior, and shared rendering.
 - [ ] Add bounded durable caches, individual knowledge, carried mast, and
       atomic gather/deposit/retrieve/consume transfers.

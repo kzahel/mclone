@@ -1,6 +1,7 @@
 # Tactical 319: Squirrel Asset, Habitat, and Refuge
 
-Status: active 2026-08-17; Tactical 318 Review Gate C accepted
+Status: implementation complete 2026-08-17; Review Gate D awaits one capable
+physical-XR or exact full-frame multiview pixel run
 
 Parent: [`315`](315-authoritative-seasonal-calendar-and-squirrel-ecology.md)
 Phase D
@@ -189,13 +190,80 @@ recorded.
 
 ## Completion Checklist
 
-- [ ] Refine and visually accept the canonical Red Squirrel asset and clips.
-- [ ] Promote exact generated JSON through the shared first-party actor path.
-- [ ] Add shared protocol, lifecycle, persistence, client, and render mapping.
-- [ ] Add bounded woodland/mast/cavity habitat sampling.
-- [ ] Add coordinate-pure initial population planning and ordinary spawning.
-- [ ] Add conserved reached ground forage.
-- [ ] Add alarm, cover escape, and honest tree refuge entry/exit.
-- [ ] Add and validate the restrained first-party sound family.
+- [x] Refine and visually accept the canonical Red Squirrel asset and clips.
+- [x] Promote exact generated JSON through the shared first-party actor path.
+- [x] Add shared protocol, lifecycle, persistence, client, and render mapping.
+- [x] Add bounded woodland/mast/cavity habitat sampling.
+- [x] Add coordinate-pure initial population planning and ordinary spawning.
+- [x] Add conserved reached ground forage.
+- [x] Add alarm, cover escape, and honest tree refuge entry/exit.
+- [x] Add and validate the restrained first-party sound family.
 - [ ] Pass overload, native/WebGPU/stereo/multiview, and behavior gates.
 - [ ] Record Review Gate D and hand Phase E the accepted actor vocabulary.
+
+## Implementation And Review Record
+
+Commits `f0b31a1a`, `1cbf9aff`, `f074970a`, and `4ded90b0` implement the
+Phase D owner path. Commit `8e79ba41` adds the focused catalogue acceptance.
+The promoted `mclone:red_squirrel` record is generated from the one canonical
+Red Squirrel source and contains 18 parts, 7 materials, 3 textures, and 12
+clips. Its SHA-256 is
+`56ff729ce4ef312c4b70e0293bfb533437cea80244adf020f57b5bd5797fd92e`.
+
+The server now persists and replicates squirrel sex, age, life stage,
+condition, behavior, behavior epoch, retained intent, and refuge state. The
+revision-2 initial-wildlife planner selects bounded woodland groups, and the
+live realization path searches only the owner chunk for a real mast site and
+a support-valid route sized to the 0.62-block animal. Realization defers while
+its bounded 3-by-3 loaded evidence is unavailable. The pinned planner receipt
+remains `(1,500,4,279,[750,254,151,186,159],1,536,547)`. A production-seed
+fixture at seed `-98765`, center chunk `-45,-43`, radius 2 realizes four
+squirrels.
+
+Reached ground feeding conserves `SeedsAndSoftMast` through the shared
+resource ledger. Threatened squirrels select cover, approach a real trunk,
+climb through gradual support-checked displacement, enter only a validated
+refuge threshold, rest, and reverse the route on exit. Losing support falls
+back to an honest ground behavior. The expensive refuge query uses the shared
+ecology-work admission class: one thousand continuously threatened squirrels
+perform no more than 32 refuge queries per tick and every identity progresses
+within 64 ticks. Spatial alarm, escape/rustle, and digging/refuge cues use the
+bounded first-party sound path.
+
+The data-only `squirrel-woodland` revision-1 showcase uses seed `17504` and
+ordinary saved squirrel state. Its typed evidence names the production founder
+path, and its authored tree passes the same support-valid refuge query as live
+gameplay. Native flat and synthetic-stereo captures were inspected at
+`/tmp/mclone-squirrel-woodland.png` and
+`/tmp/mclone-squirrel-woodland-stereo.png`; the stereo layers contain 318,952
+different pixels. Headed WebGPU observed all of `Idle`, `Bound`, `Forage`,
+`Alarm`, `Flee`, `TrunkApproach`, `Climb`, `RefugeEnter`, and `RefugeIdle`
+over 424 samples, including a squirrel moving from height 65 to 68. All
+IndexedDB world-record stores remained empty. The inspected browser canvas is
+`/tmp/mclone-native-web-showcase-squirrel-woodland-canvas.png`.
+
+All 12 clean Asset Lab sheets were regenerated under
+`/tmp/mclone-squirrel-gate-d/` and inspected together in `montage.png`.
+Haunches, tufted ears, and the plume tail read clearly; action endpoints retain
+ground/surface stability. The focused production-built Animal Catalogue tests
+pass for desktop and 390-pixel mobile views. The inspected captures are
+`/tmp/mclone-animal-catalogue-desktop.png` and
+`/tmp/mclone-animal-catalogue-mobile.png`.
+
+Focused server, protocol, client, asset, audio, render, world-generation, and
+showcase tests pass. The server library run passed 777 tests; one unrelated
+native-runner queue-depth case was flaky in the aggregate and passed on its
+isolated rerun. `mclone-render` passed 206 tests with 11 ignored. The ignored
+actor-composition GPU fixture exercised the actual squirrel and `bound` clip,
+with 2,238 actor-pixel and 1,778 eye-pixel differences in mono/per-eye output.
+The current Mac adapter does not expose `wgpu::Features::MULTIVIEW`, so the
+same fixture truthfully reported its capable-device branch unavailable.
+
+Review Gate D therefore remains open on exactly one external-device item. No
+authorized Quest was attached on 2026-08-17. A Windows testbed booted but its
+administration channel was unavailable; the ready Linux testbed had neither
+the project toolchain nor a shared checkout. Both were parked after diagnosis.
+Do not infer a multiview pixel pass from the compiled pipeline or from
+synthetic per-eye stereo. Run the ordinary squirrel actor on a Quest or another
+adapter exposing `MULTIVIEW`, inspect both layers, then record Gate D before
+Phase E cache code begins.

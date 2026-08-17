@@ -7,9 +7,8 @@ Status: complete and live-accepted 2026-07-21, then extended locally on
 fantasy/monster waves, a first living-growth wave, binary and fractional alpha
 proofs, fixed planar cards, a two-figure fantasy-fauna follow-up, and a gentler
 recognizable-folklore wave followed by four anatomy-led trios. The current
-local inventory contains 202 canonical figures and 290 clips. The
-read-only,
-production-built Asset Lab
+local inventory contains 202 canonical figures, 319 clips, and 4,385 parts.
+The read-only, production-built Asset Lab
 catalogue is available at
 `https://mclone.kzahel.com/animals/`, delivered by the existing native-web
 bundle and after-main-push deployment path.
@@ -29,6 +28,18 @@ Its refined `hover`, `fly`, and `forage` clips are required by ordinary
 flowering-habitat colonies and remain visible through the creature-focused
 Runtime-only catalogue; four accompanying colony/item props stay in the
 separate props view.
+
+Runtime promotion extended locally again through the rabbit and Tactical 319
+Red Squirrel work, bringing the Runtime-only filter to nine actors. The
+Squirrel is the exact `mclone:red_squirrel` asset at
+`assets/mclone/figures/red_squirrel.figure.json`, with 18 parts, 7 materials,
+3 textures, and 12 reviewed clips. Focused production-build acceptance selects
+it on desktop, verifies its live-gameplay provenance, deep-links its `bound`
+clip at a 390-pixel mobile viewport, and keeps all nine promoted animals in the
+Runtime-only result. The inspected local captures are
+`/tmp/mclone-animal-catalogue-desktop.png` and
+`/tmp/mclone-animal-catalogue-mobile.png`. This local catalogue state has not
+been published and is not evidence about the older public inventory.
 
 ## Scope
 
