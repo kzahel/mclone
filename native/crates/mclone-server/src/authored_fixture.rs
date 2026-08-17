@@ -629,6 +629,15 @@ fn author_deer_forest_edge_chunk(chunk: &mut MutableChunkBlockBuffer) {
                     if dx.abs() + dz.abs() > 3 {
                         continue;
                     }
+                    // Preserve one support-checked south-side threshold under
+                    // each crown. It remains ordinary authored tree geometry
+                    // and gives small woodland actors a real loaded refuge
+                    // route instead of a solid leaf wall.
+                    if (y == 68 && dx == 0 && dz == 0)
+                        || ((68..=69).contains(&y) && dx == 0 && dz == 1)
+                    {
+                        continue;
+                    }
                     let leaf_x = x + dx;
                     let leaf_z = z + dz;
                     if block_to_chunk_coord(leaf_x) == chunk.chunk_x

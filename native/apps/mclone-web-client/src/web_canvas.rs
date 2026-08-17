@@ -329,6 +329,13 @@ impl WebStartupConfig {
             .and_then(|showcase| playable_showcase_manifest(showcase).ok())
             .map(|manifest| manifest.rabbit_field_guide_bits)
     }
+
+    #[wasm_bindgen(getter, js_name = showcaseSquirrelCount)]
+    pub fn showcase_squirrel_count(&self) -> Option<u32> {
+        self.showcase
+            .and_then(|showcase| playable_showcase_manifest(showcase).ok())
+            .and_then(|manifest| u32::try_from(manifest.squirrel_count).ok())
+    }
 }
 
 fn format_coordinates(value: [f64; 3]) -> String {

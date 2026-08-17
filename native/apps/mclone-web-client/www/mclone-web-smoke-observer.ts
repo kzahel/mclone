@@ -247,6 +247,9 @@ export function installWebSmokeObserver(
       runtime.state.showcaseRabbitFieldGuideBits = startup.showcaseRabbitFieldGuideBits == null
         ? null
         : Number(startup.showcaseRabbitFieldGuideBits);
+      runtime.state.showcaseSquirrelCount = startup.showcaseSquirrelCount == null
+        ? null
+        : Number(startup.showcaseSquirrelCount);
     },
     observeReport(report): void {
       if (!report?.ok) {
@@ -260,6 +263,21 @@ export function installWebSmokeObserver(
       const wasStartupReady = runtime.state.startupReady === true;
       const previouslyRenderedSky = runtime.state.skyRendered === true;
       Object.assign(runtime.state, report);
+      if (
+        runtime.state.showcaseId === "squirrel-woodland"
+        && typeof report.squirrelBehaviors === "string"
+      ) {
+        const history = Array.isArray(runtime.state.squirrelBehaviorHistory)
+          ? runtime.state.squirrelBehaviorHistory
+          : [];
+        history.push({
+          behaviors: String(report.squirrelBehaviors),
+          clips: String(report.squirrelAnimationClips ?? ""),
+          positions: String(report.squirrelPositions ?? ""),
+          tickCounts: String(report.squirrelTickCounts ?? ""),
+        });
+        runtime.state.squirrelBehaviorHistory = history.slice(-512);
+      }
       if (report.rendered === false && previouslyRenderedSky) {
         runtime.state.skyRendered = true;
       }

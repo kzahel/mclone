@@ -10,6 +10,7 @@ use mclone_protocol::{
     DeerFieldGuideProgress, DeerLifeStage, DeerObservationKind, DeerSex, DimensionKey,
     EntityRotation, ItemKind, ItemStackSnapshot, MallardFieldGuideProgress, MallardObservationKind,
     RabbitBehavior, RabbitFieldGuideProgress, RabbitLifeStage, RabbitObservationKind,
+    SquirrelBehavior, SquirrelLifeStage, SquirrelRetainedIntent, SquirrelSex,
 };
 use mclone_worldgen::block::{
     FARMLAND_MOISTURE_0, FARMLAND_MOISTURE_7, LILY_PAD, generated_block_state_id, wheat_for_age,
@@ -58,6 +59,10 @@ const RABBIT_BURROW_RECIPE: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../../assets/mclone/showcases/rabbit-burrow.showcase.json"
 ));
+const SQUIRREL_WOODLAND_RECIPE: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../../assets/mclone/showcases/squirrel-woodland.showcase.json"
+));
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum PlayableShowcaseId {
@@ -67,16 +72,18 @@ pub enum PlayableShowcaseId {
     WheatFarming,
     KitchenGarden,
     RabbitBurrow,
+    SquirrelWoodland,
 }
 
 impl PlayableShowcaseId {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::MallardEcology,
         Self::DeerForestEdge,
         Self::BeePollination,
         Self::WheatFarming,
         Self::KitchenGarden,
         Self::RabbitBurrow,
+        Self::SquirrelWoodland,
     ];
 
     pub const fn label(self) -> &'static str {
@@ -87,6 +94,7 @@ impl PlayableShowcaseId {
             Self::WheatFarming => "wheat-farming",
             Self::KitchenGarden => "kitchen-garden",
             Self::RabbitBurrow => "rabbit-burrow",
+            Self::SquirrelWoodland => "squirrel-woodland",
         }
     }
 
@@ -98,8 +106,9 @@ impl PlayableShowcaseId {
             "wheat-farming" => Ok(Self::WheatFarming),
             "kitchen-garden" => Ok(Self::KitchenGarden),
             "rabbit-burrow" => Ok(Self::RabbitBurrow),
+            "squirrel-woodland" => Ok(Self::SquirrelWoodland),
             _ => Err(PlayableShowcaseError::invalid(format!(
-                "unknown playable showcase `{value}`; expected mallard-ecology, deer-forest-edge, bee-pollination, wheat-farming, kitchen-garden, or rabbit-burrow"
+                "unknown playable showcase `{value}`; expected mallard-ecology, deer-forest-edge, bee-pollination, wheat-farming, kitchen-garden, rabbit-burrow, or squirrel-woodland"
             ))),
         }
     }
@@ -112,6 +121,7 @@ impl PlayableShowcaseId {
             Self::WheatFarming => WHEAT_FARMING_RECIPE,
             Self::KitchenGarden => KITCHEN_GARDEN_RECIPE,
             Self::RabbitBurrow => RABBIT_BURROW_RECIPE,
+            Self::SquirrelWoodland => SQUIRREL_WOODLAND_RECIPE,
         }
     }
 }
@@ -143,6 +153,7 @@ pub struct PlayableShowcaseManifest {
     pub rabbit_count: usize,
     pub rabbit_burrow_count: usize,
     pub rabbit_field_guide_bits: u32,
+    pub squirrel_count: usize,
 }
 
 #[derive(Debug)]
@@ -204,6 +215,7 @@ enum LiveInstantiationSubject {
     Rabbit,
     RabbitBurrow,
     RabbitObservation,
+    Squirrel,
     WildlifeRemains,
 }
 
@@ -408,6 +420,12 @@ pub const LIVE_INSTANTIATION_EVIDENCE: &[LiveInstantiationEvidence] = &[
         contract: "mclone-server::integrated::route_rabbit_ecology_cues",
         subject: LiveInstantiationSubject::RabbitObservation,
     },
+    LiveInstantiationEvidence {
+        id: "mclone-squirrel-woodland-founder",
+        ordinary_producer: "woodland-edge, reached-mast, and live-refuge-qualified initial population",
+        contract: "mclone-server::entity::spawning::initial::tests::squirrel_placement_requires_live_mast_refuge_and_quiet_edge",
+        subject: LiveInstantiationSubject::Squirrel,
+    },
 ];
 
 pub fn playable_showcase_manifest(
@@ -582,6 +600,7 @@ fn validate_recipe(
             ShowcaseEntityState::BeeHotel { .. } => LiveInstantiationSubject::BeeHotel,
             ShowcaseEntityState::Rabbit { .. } => LiveInstantiationSubject::Rabbit,
             ShowcaseEntityState::RabbitBurrow { .. } => LiveInstantiationSubject::RabbitBurrow,
+            ShowcaseEntityState::Squirrel { .. } => LiveInstantiationSubject::Squirrel,
             ShowcaseEntityState::WildlifeRemains { .. } => {
                 LiveInstantiationSubject::WildlifeRemains
             }
@@ -737,6 +756,34 @@ fn validate_recipe(
                     "showcase rabbit burrow `{}` has invalid capacity or condition",
                     entity.id
                 )));
+            }
+        }
+        if let ShowcaseEntityState::Squirrel {
+            life_stage,
+            age_ticks,
+            energy,
+            reproductive_condition,
+            refuge,
+            ..
+        } = &entity.state
+        {
+            if (*life_stage == ShowcaseSquirrelLifeStage::Kit
+                && *age_ticks
+                    >= crate::ecology::WildlifeLifecycleTuning::default().squirrel_maturation_ticks)
+                || (*life_stage == ShowcaseSquirrelLifeStage::Adult
+                    && *age_ticks
+                        < crate::ecology::WildlifeLifecycleTuning::default()
+                            .squirrel_maturation_ticks)
+                || *energy > 1_000
+                || *reproductive_condition > 1_000
+            {
+                return Err(PlayableShowcaseError::invalid(format!(
+                    "showcase squirrel `{}` has impossible biological state",
+                    entity.id
+                )));
+            }
+            if let Some(refuge) = refuge {
+                validate_block_position(*refuge)?;
             }
         }
         if let ShowcaseEntityState::WildlifeRemains { biomass, .. } = &entity.state
@@ -1160,6 +1207,34 @@ fn write_entities(
                 creation_tick: *creation_tick,
                 decay_remainder: 0,
             },
+            ShowcaseEntityState::Squirrel {
+                sex,
+                life_stage,
+                age_ticks,
+                behavior,
+                behavior_ticks,
+                behavior_epoch,
+                retained_intent,
+                refuge,
+                energy,
+                reproductive_condition,
+                reproduction_cooldown,
+            } => EntitySavePayload::Squirrel {
+                sex: sex.protocol(),
+                life_stage: life_stage.protocol(),
+                behavior: behavior.protocol(),
+                behavior_ticks: *behavior_ticks,
+                behavior_epoch: *behavior_epoch,
+                retained_intent: retained_intent.map(ShowcaseSquirrelRetainedIntent::protocol),
+                refuge: refuge.map(|value| BlockPos::new(value[0], value[1], value[2])),
+                age_ticks: *age_ticks,
+                lifespan_ticks: 0,
+                energy: *energy,
+                deficit_ticks: 0,
+                recent_intake: 0,
+                reproductive_condition: *reproductive_condition,
+                reproduction_cooldown: *reproduction_cooldown,
+            },
         };
         let kind = match &recipe.state {
             ShowcaseEntityState::Mallard { .. } => "mclone:mallard",
@@ -1172,6 +1247,7 @@ fn write_entities(
             ShowcaseEntityState::Rabbit { .. } => "mclone:rabbit",
             ShowcaseEntityState::RabbitBurrow { .. } => "mclone:rabbit_burrow",
             ShowcaseEntityState::WildlifeRemains { .. } => "mclone:wildlife_remains",
+            ShowcaseEntityState::Squirrel { .. } => "mclone:red_squirrel",
         };
         let position = Vec3d::new(recipe.position[0], recipe.position[1], recipe.position[2]);
         chunks
@@ -1378,6 +1454,11 @@ fn manifest_from_recipe(
             .filter(|entity| matches!(&entity.state, ShowcaseEntityState::RabbitBurrow { .. }))
             .count(),
         rabbit_field_guide_bits: rabbit_guide.bits(),
+        squirrel_count: recipe
+            .entities
+            .iter()
+            .filter(|entity| matches!(&entity.state, ShowcaseEntityState::Squirrel { .. }))
+            .count(),
     }
 }
 
@@ -1554,6 +1635,108 @@ enum ShowcaseEntityState {
         #[serde(rename = "creationTick")]
         creation_tick: u64,
     },
+    Squirrel {
+        sex: ShowcaseSquirrelSex,
+        #[serde(rename = "lifeStage")]
+        life_stage: ShowcaseSquirrelLifeStage,
+        #[serde(rename = "ageTicks")]
+        age_ticks: u32,
+        behavior: ShowcaseSquirrelBehavior,
+        #[serde(rename = "behaviorTicks")]
+        behavior_ticks: u32,
+        #[serde(rename = "behaviorEpoch")]
+        behavior_epoch: u32,
+        #[serde(rename = "retainedIntent")]
+        retained_intent: Option<ShowcaseSquirrelRetainedIntent>,
+        refuge: Option<[i32; 3]>,
+        energy: u16,
+        #[serde(rename = "reproductiveCondition")]
+        reproductive_condition: u16,
+        #[serde(rename = "reproductionCooldown")]
+        reproduction_cooldown: u32,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+enum ShowcaseSquirrelSex {
+    Female,
+    Male,
+}
+
+impl ShowcaseSquirrelSex {
+    const fn protocol(self) -> SquirrelSex {
+        match self {
+            Self::Female => SquirrelSex::Female,
+            Self::Male => SquirrelSex::Male,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+enum ShowcaseSquirrelLifeStage {
+    Kit,
+    Adult,
+}
+
+impl ShowcaseSquirrelLifeStage {
+    const fn protocol(self) -> SquirrelLifeStage {
+        match self {
+            Self::Kit => SquirrelLifeStage::Kit,
+            Self::Adult => SquirrelLifeStage::Adult,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+enum ShowcaseSquirrelBehavior {
+    Idle,
+    Bound,
+    Forage,
+    Alarm,
+    Flee,
+    TrunkApproach,
+    Climb,
+    RefugeEnter,
+    RefugeIdle,
+    RefugeExit,
+}
+
+impl ShowcaseSquirrelBehavior {
+    const fn protocol(self) -> SquirrelBehavior {
+        match self {
+            Self::Idle => SquirrelBehavior::Idle,
+            Self::Bound => SquirrelBehavior::Bound,
+            Self::Forage => SquirrelBehavior::Forage,
+            Self::Alarm => SquirrelBehavior::Alarm,
+            Self::Flee => SquirrelBehavior::Flee,
+            Self::TrunkApproach => SquirrelBehavior::TrunkApproach,
+            Self::Climb => SquirrelBehavior::Climb,
+            Self::RefugeEnter => SquirrelBehavior::RefugeEnter,
+            Self::RefugeIdle => SquirrelBehavior::RefugeIdle,
+            Self::RefugeExit => SquirrelBehavior::RefugeExit,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+enum ShowcaseSquirrelRetainedIntent {
+    GroundForage,
+    CoverEscape,
+    TreeRefuge,
+}
+
+impl ShowcaseSquirrelRetainedIntent {
+    const fn protocol(self) -> SquirrelRetainedIntent {
+        match self {
+            Self::GroundForage => SquirrelRetainedIntent::GroundForage,
+            Self::CoverEscape => SquirrelRetainedIntent::CoverEscape,
+            Self::TreeRefuge => SquirrelRetainedIntent::TreeRefuge,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
@@ -1736,6 +1919,7 @@ impl ShowcaseEntityState {
             | Self::BeeNest { .. }
             | Self::BeeHotel { .. }
             | Self::RabbitBurrow { .. }
+            | Self::Squirrel { .. }
             | Self::WildlifeRemains { .. } => return [None, None],
             Self::Rabbit { parents, .. } => parents,
         };
@@ -1967,6 +2151,86 @@ mod tests {
         assert_eq!(
             player.deer_field_guide.bits(),
             manifest.deer_field_guide_bits
+        );
+    }
+
+    #[test]
+    fn squirrel_woodland_recipe_uses_only_live_founder_state() {
+        let identity = ClientIdentity::test_default();
+        let (first_manifest, first) =
+            playable_showcase_memory_store(PlayableShowcaseId::SquirrelWoodland, &identity)
+                .unwrap();
+        let (second_manifest, second) =
+            playable_showcase_memory_store(PlayableShowcaseId::SquirrelWoodland, &identity)
+                .unwrap();
+        assert_eq!(first_manifest, second_manifest);
+        assert_eq!(first_manifest.revision, 1);
+        assert_eq!(first_manifest.seed, 17_504);
+        assert_eq!(first_manifest.entity_count, 3);
+        assert_eq!(first_manifest.squirrel_count, 3);
+
+        let first_entities = [
+            ChunkPos::new(-1, 0),
+            ChunkPos::new(0, 0),
+            ChunkPos::new(1, 0),
+        ]
+        .into_iter()
+        .flat_map(|chunk| first.entity_chunk(chunk).unwrap().entities.iter())
+        .collect::<Vec<_>>();
+        let second_entities = [
+            ChunkPos::new(-1, 0),
+            ChunkPos::new(0, 0),
+            ChunkPos::new(1, 0),
+        ]
+        .into_iter()
+        .flat_map(|chunk| second.entity_chunk(chunk).unwrap().entities.iter())
+        .collect::<Vec<_>>();
+        assert_eq!(first_entities, second_entities);
+        assert_eq!(first_entities.len(), 3);
+        assert!(first_entities.iter().all(|entity| {
+            entity.kind == "mclone:red_squirrel"
+                && matches!(
+                    entity.payload,
+                    EntitySavePayload::Squirrel {
+                        life_stage: SquirrelLifeStage::Adult,
+                        refuge: None,
+                        ..
+                    }
+                )
+        }));
+        assert!(first_entities.iter().any(|entity| {
+            matches!(
+                entity.payload,
+                EntitySavePayload::Squirrel {
+                    behavior: SquirrelBehavior::Forage,
+                    retained_intent: Some(SquirrelRetainedIntent::GroundForage),
+                    ..
+                }
+            )
+        }));
+
+        let block_at = |pos: BlockPos| {
+            let chunk = first.chunk(pos.chunk_pos())?;
+            let section = chunk
+                .snapshot
+                .sections
+                .iter()
+                .find(|section| section.section_y == block_to_section_coord(pos.y));
+            Some(section.map_or(mclone_core::AIR_BLOCK_STATE_ID, |section| {
+                section.block_state_id_at(mclone_core::chunk_section_index(
+                    pos.x.rem_euclid(16),
+                    pos.y.rem_euclid(16),
+                    pos.z.rem_euclid(16),
+                ))
+            }))
+        };
+        let route = crate::entity::spawning::habitat::find_squirrel_refuge_candidate(
+            BlockPos::new(18, 65, 10),
+            &block_at,
+        )
+        .expect("authored woodland tree should expose one honest refuge route");
+        assert!(
+            crate::entity::spawning::habitat::squirrel_refuge_support_is_valid(route, &block_at)
         );
     }
 

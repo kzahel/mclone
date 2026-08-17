@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 1,
+  "id": "squirrel-woodland",
+  "title": "Red Squirrels at the Woodland Edge",
+  "revision": 1,
+  "baseTerrain": "deer-forest-edge-v1",
+  "seed": 17504,
+  "dayTime": 6000,
+  "freezeTime": true,
+  "entry": {
+    "feet": [18.5, 65.0, 15.5],
+    "lookAt": [18.5, 65.7, 10.5]
+  },
+  "blockPatches": [],
+  "entities": [
+    {
+      "id": "edge-female",
+      "position": [18.5, 65.0, 10.5],
+      "yRotDegrees": 180.0,
+      "onGround": true,
+      "liveInstantiation": "mclone-squirrel-woodland-founder",
+      "state": {
+        "kind": "squirrel",
+        "sex": "female",
+        "lifeStage": "adult",
+        "ageTicks": 96000,
+        "behavior": "idle",
+        "behaviorTicks": 0,
+        "behaviorEpoch": 0,
+        "retainedIntent": null,
+        "refuge": null,
+        "energy": 760,
+        "reproductiveCondition": 650,
+        "reproductionCooldown": 0
+      }
+    },
+    {
+      "id": "foraging-male",
+      "position": [-4.5, 65.0, 8.5],
+      "yRotDegrees": -90.0,
+      "onGround": true,
+      "liveInstantiation": "mclone-squirrel-woodland-founder",
+      "state": {
+        "kind": "squirrel",
+        "sex": "male",
+        "lifeStage": "adult",
+        "ageTicks": 120000,
+        "behavior": "forage",
+        "behaviorTicks": 0,
+        "behaviorEpoch": 0,
+        "retainedIntent": "ground-forage",
+        "refuge": null,
+        "energy": 680,
+        "reproductiveCondition": 620,
+        "reproductionCooldown": 0
+      }
+    },
+    {
+      "id": "meadow-male",
+      "position": [8.5, 65.0, 1.5],
+      "yRotDegrees": 15.0,
+      "onGround": true,
+      "liveInstantiation": "mclone-squirrel-woodland-founder",
+      "state": {
+        "kind": "squirrel",
+        "sex": "male",
+        "lifeStage": "adult",
+        "ageTicks": 72000,
+        "behavior": "bound",
+        "behaviorTicks": 0,
+        "behaviorEpoch": 0,
+        "retainedIntent": "ground-forage",
+        "refuge": null,
+        "energy": 720,
+        "reproductiveCondition": 630,
+        "reproductionCooldown": 0
+      }
+    }
+  ],
+  "player": {
+    "selectedHotbarSlot": 0,
+    "inventory": [],
+    "observations": []
+  }
+}

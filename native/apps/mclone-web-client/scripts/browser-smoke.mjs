@@ -209,9 +209,10 @@ if (showcase && ![
   "wheat-farming",
   "kitchen-garden",
   "rabbit-burrow",
+  "squirrel-woodland",
 ].includes(showcase)) {
   throw new Error(
-    `--showcase requires mallard-ecology, deer-forest-edge, bee-pollination, wheat-farming, kitchen-garden, or rabbit-burrow; got ${showcase}`,
+    `--showcase requires mallard-ecology, deer-forest-edge, bee-pollination, wheat-farming, kitchen-garden, rabbit-burrow, or squirrel-woodland; got ${showcase}`,
   );
 }
 const deployedBaseUrlArgIndex = process.argv.indexOf("--deployed-base-url");
@@ -966,16 +967,19 @@ async function run() {
         const wheatShowcase = showcase === "wheat-farming";
         const gardenShowcase = showcase === "kitchen-garden";
         const rabbitShowcase = showcase === "rabbit-burrow";
+        const squirrelShowcase = showcase === "squirrel-woodland";
         const cropShowcase = wheatShowcase || gardenShowcase;
         try {
           await page.waitForFunction(
-            ({ deerShowcase, beeShowcase, wheatShowcase, gardenShowcase, rabbitShowcase, cropShowcase }) => {
+            ({ deerShowcase, beeShowcase, wheatShowcase, gardenShowcase, rabbitShowcase, squirrelShowcase, cropShowcase }) => {
               const state = globalThis.__mcloneWebApp?.state;
               return state?.startupReady === true
                 && state.streamingSettled === true
                 && state.pendingCompileJobCount === 0
                 && state.entityCount >= state.showcaseEntityCount
-                && (gardenShowcase
+                && (squirrelShowcase
+                  ? state.squirrelCount >= state.showcaseSquirrelCount
+                  : gardenShowcase
                   ? state.carrotHotbarCount === 8
                     && state.oakFenceHotbarCount === 32
                     && state.oakFenceGateHotbarCount === 4
@@ -1006,16 +1010,15 @@ async function run() {
                     && (state.mallardFieldGuideBits & state.showcaseFieldGuideBits)
                       === state.showcaseFieldGuideBits)
                 && state.dayTime === (rabbitShowcase ? 12000 : 6000)
-                && (cropShowcase || deerShowcase || beeShowcase || rabbitShowcase || (
+                && (cropShowcase || deerShowcase || beeShowcase || rabbitShowcase || squirrelShowcase || (
                   state.mallardEggHotbarCount === 0
                   && state.mallardFeatherHotbarCount === 0
                 ))
-                && (cropShowcase || (
-                  state.actorCount >= 4
-                  && state.drawnActorCount >= 4
-                ));
+                && (cropShowcase || (squirrelShowcase
+                  ? state.actorCount >= 3 && state.drawnActorCount >= 1
+                  : state.actorCount >= 4 && state.drawnActorCount >= 4));
             },
-            { deerShowcase, beeShowcase, wheatShowcase, gardenShowcase, rabbitShowcase, cropShowcase },
+            { deerShowcase, beeShowcase, wheatShowcase, gardenShowcase, rabbitShowcase, squirrelShowcase, cropShowcase },
             { timeout: 60_000 },
           );
         } catch (error) {
@@ -1105,6 +1108,58 @@ async function run() {
             automaticTransitionCount: initialCropStates.filter(
               (state, index) => state !== finalCropStates[index],
             ).length,
+          };
+        } else if (squirrelShowcase) {
+          const required = [
+            "Forage",
+            "Alarm",
+            "Flee",
+            "TrunkApproach",
+            "Climb",
+            "RefugeEnter",
+            "RefugeIdle",
+          ];
+          try {
+            await page.waitForFunction(
+              (requiredBehaviors) => {
+                const history = /** @type {Array<Record<string, unknown>>} */ (
+                  globalThis.__mcloneWebApp?.state?.squirrelBehaviorHistory ?? []
+                );
+                const observed = new Set(
+                  history.flatMap((sample) => String(sample.behaviors ?? "").split(",")),
+                );
+                return requiredBehaviors.every((behavior) => observed.has(behavior));
+              },
+              required,
+              { timeout: 35_000 },
+            );
+          } catch (error) {
+            const history = await page.evaluate(
+              () => globalThis.__mcloneWebApp?.state?.squirrelBehaviorHistory ?? [],
+            );
+            throw new Error(`squirrel refuge window did not complete: ${error instanceof Error ? error.message : String(error)}\nhistory=${JSON.stringify(history)}`);
+          }
+          const history = /** @type {Array<Record<string, unknown>>} */ (await page.evaluate(
+            () => globalThis.__mcloneWebApp?.state?.squirrelBehaviorHistory ?? [],
+          ));
+          const observedBehaviors = Array.from(new Set(
+            history.flatMap((sample) => String(sample.behaviors ?? "").split(",")),
+          ));
+          const heights = history.flatMap(
+            (sample) => String(sample.positions ?? "")
+              .split(";")
+              .filter(Boolean)
+              .map((position) => Number(position.split(",")[1])),
+          ).filter(Number.isFinite);
+          behaviorEnd = await page.evaluate(
+            () => globalThis.__mcloneWebApp?.state?.lastReport ?? null,
+          );
+          behaviorProbe = {
+            sampleCount: history.length,
+            observedBehaviors,
+            minimumHeight: Math.min(...heights),
+            maximumHeight: Math.max(...heights),
+            completedRefuge: observedBehaviors.includes("RefugeIdle"),
           };
         } else if (rabbitShowcase) {
           const matureCarrots = [
@@ -3180,11 +3235,15 @@ async function run() {
           pageErrors.length > 0
           || canvasPixels.distinctInteriorColorCount < 2
           || result?.showcaseId !== showcase
-          || result?.showcaseRevision !== (rabbitShowcase ? 4 : gardenShowcase ? 1 : wheatShowcase ? 3 : beeShowcase ? 2 : deerShowcase ? 1 : 3)
-          || result?.activeWorldSeedText !== (rabbitShowcase ? "17507" : cropShowcase ? "17506" : beeShowcase ? "17505" : deerShowcase ? "17504" : "17503")
+          || result?.showcaseRevision !== (rabbitShowcase ? 4 : gardenShowcase ? 1 : wheatShowcase ? 3 : beeShowcase ? 2 : deerShowcase || squirrelShowcase ? 1 : 3)
+          || result?.activeWorldSeedText !== (rabbitShowcase ? "17507" : cropShowcase ? "17506" : beeShowcase ? "17505" : deerShowcase || squirrelShowcase ? "17504" : "17503")
           || result?.generationProfile !== "authored-only"
           || result?.dayTime !== (rabbitShowcase ? 12000 : 6000)
-          || (rabbitShowcase
+          || (squirrelShowcase
+            ? result?.squirrelCount < 3
+              || behaviorProbe.completedRefuge !== true
+              || behaviorProbe.maximumHeight - behaviorProbe.minimumHeight < 2
+            : rabbitShowcase
             ? result?.rabbitCount < 3
               || result?.rabbitBurrowCount < 1
               || (result?.rabbitFieldGuideBits & result?.showcaseRabbitFieldGuideBits)
@@ -3206,7 +3265,7 @@ async function run() {
               || result?.mallardNestCount !== 0
               || result?.wildlifeRemainsCount !== 1
               || result?.mallardFieldGuideBits === 1)
-          || (!cropShowcase && !rabbitShowcase
+          || (!cropShowcase && !rabbitShowcase && !squirrelShowcase
             && String(result?.showcaseEntryEye) !== `${result.cameraX},${result.cameraY},${result.cameraZ}`)
           || (mobileShowcase && result?.touchControlsVisible !== true)
           || (mobileShowcase && beeShowcase && mobileBeeUseProbe?.ok !== true)

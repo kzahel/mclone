@@ -4252,6 +4252,71 @@ impl WebSceneHost {
                     "rabbitFieldGuideCount",
                     f64::from(client.rabbit_field_guide().discovered_count()),
                 )?;
+                let squirrels = client
+                    .entity_snapshots()
+                    .filter(|entity| entity.kind == mclone_protocol::EntityKind::Squirrel)
+                    .collect::<Vec<_>>();
+                report_set_number(&object, "squirrelCount", squirrels.len() as f64)?;
+                report_set_string(
+                    &object,
+                    "squirrelEntityIds",
+                    &squirrels
+                        .iter()
+                        .map(|entity| entity.id.0.to_string())
+                        .collect::<Vec<_>>()
+                        .join(","),
+                )?;
+                report_set_string(
+                    &object,
+                    "squirrelPositions",
+                    &squirrels
+                        .iter()
+                        .map(|entity| {
+                            format!(
+                                "{:.4},{:.4},{:.4}",
+                                entity.position.x, entity.position.y, entity.position.z
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join(";"),
+                )?;
+                report_set_string(
+                    &object,
+                    "squirrelTickCounts",
+                    &squirrels
+                        .iter()
+                        .map(|entity| entity.tick_count.to_string())
+                        .collect::<Vec<_>>()
+                        .join(","),
+                )?;
+                report_set_string(
+                    &object,
+                    "squirrelBehaviors",
+                    &squirrels
+                        .iter()
+                        .map(|entity| {
+                            entity.squirrel.map_or_else(
+                                || "none".to_owned(),
+                                |squirrel| format!("{:?}", squirrel.behavior),
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join(","),
+                )?;
+                report_set_string(
+                    &object,
+                    "squirrelAnimationClips",
+                    &squirrels
+                        .iter()
+                        .map(|entity| {
+                            entity.animation.map_or_else(
+                                || "none".to_owned(),
+                                |animation| animation.clip.to_string(),
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join(","),
+                )?;
                 report_set_number(
                     &object,
                     "mallardEggHotbarCount",
@@ -4706,6 +4771,7 @@ impl WebSceneHost {
                             mclone_protocol::EntityKind::BeeHotel => "beeHotel",
                             mclone_protocol::EntityKind::Rabbit => "rabbit",
                             mclone_protocol::EntityKind::RabbitBurrow => "rabbitBurrow",
+                            mclone_protocol::EntityKind::Squirrel => "squirrel",
                             mclone_protocol::EntityKind::WildlifeRemains => "wildlifeRemains",
                             mclone_protocol::EntityKind::SleepingMat => "sleepingMat",
                             mclone_protocol::EntityKind::Mannequin => "mannequin",
@@ -4802,6 +4868,7 @@ impl WebSceneHost {
                             mclone_protocol::EntityKind::BeeHotel => "beeHotel",
                             mclone_protocol::EntityKind::Rabbit => "rabbit",
                             mclone_protocol::EntityKind::RabbitBurrow => "rabbitBurrow",
+                            mclone_protocol::EntityKind::Squirrel => "squirrel",
                             mclone_protocol::EntityKind::WildlifeRemains => "wildlifeRemains",
                             mclone_protocol::EntityKind::SleepingMat => "sleepingMat",
                             mclone_protocol::EntityKind::Mannequin => "mannequin",

@@ -364,6 +364,7 @@ const fn playable_showcase_tag(showcase: Option<mclone_server::PlayableShowcaseI
         Some(mclone_server::PlayableShowcaseId::WheatFarming) => 4,
         Some(mclone_server::PlayableShowcaseId::KitchenGarden) => 5,
         Some(mclone_server::PlayableShowcaseId::RabbitBurrow) => 6,
+        Some(mclone_server::PlayableShowcaseId::SquirrelWoodland) => 7,
     }
 }
 
@@ -378,6 +379,7 @@ fn playable_showcase_from_tag(
         4 => Ok(Some(mclone_server::PlayableShowcaseId::WheatFarming)),
         5 => Ok(Some(mclone_server::PlayableShowcaseId::KitchenGarden)),
         6 => Ok(Some(mclone_server::PlayableShowcaseId::RabbitBurrow)),
+        7 => Ok(Some(mclone_server::PlayableShowcaseId::SquirrelWoodland)),
         _ => Err(format!(
             "integrated-server startup frame has unknown playable showcase {tag}"
         )),
