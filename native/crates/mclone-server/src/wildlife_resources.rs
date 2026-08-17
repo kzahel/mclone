@@ -1,5 +1,6 @@
 //! Persisted, bounded loaded resource accounting for materialized wildlife.
 
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 
 use mclone_blocks::{BlockFluidKind, block_fluid_kind};
@@ -51,7 +52,7 @@ impl WildlifeResourceKind {
         Self::AquaticInvertebrates,
     ];
 
-    const fn index(self) -> usize {
+    pub(crate) const fn index(self) -> usize {
         self as usize
     }
 
@@ -216,6 +217,61 @@ pub(crate) struct SeasonalWildlifeResourceSampler {
     coordinate_policy: SolarCoordinatePolicy,
 }
 
+#[derive(Clone, Copy, Debug)]
+struct SeasonalWildlifeResourceContext {
+    world_x: i32,
+    world_z: i32,
+    surface_y: i32,
+    latitude_degrees: f64,
+    mean_temperature: f32,
+    moisture: f32,
+    calendar: AuthoritativeCalendarSample,
+    local_season: EvaluatedLocalSeason,
+}
+
+#[derive(Debug)]
+pub(crate) struct SeasonalWildlifeOpportunityCache {
+    sampler: SeasonalWildlifeResourceSampler,
+    calendar: Option<AuthoritativeCalendarSample>,
+    by_cell: RefCell<
+        BTreeMap<
+            WildlifeForageCellPos,
+            [SeasonalResourceOpportunity; WILDLIFE_RESOURCE_KIND_COUNT],
+        >,
+    >,
+}
+
+impl SeasonalWildlifeOpportunityCache {
+    pub(crate) fn new(
+        sampler: SeasonalWildlifeResourceSampler,
+        calendar: Option<AuthoritativeCalendarSample>,
+    ) -> Self {
+        Self {
+            sampler,
+            calendar,
+            by_cell: RefCell::new(BTreeMap::new()),
+        }
+    }
+
+    pub(crate) fn opportunity(
+        &self,
+        position: WildlifeForageCellPos,
+        kind: WildlifeResourceKind,
+    ) -> SeasonalResourceOpportunity {
+        if let Some(opportunities) = self.by_cell.borrow().get(&position) {
+            return opportunities[kind.index()];
+        }
+        let opportunities = self.sampler.opportunities(position, self.calendar);
+        self.by_cell.borrow_mut().insert(position, opportunities);
+        opportunities[kind.index()]
+    }
+
+    #[cfg(test)]
+    fn sampled_cell_count(&self) -> usize {
+        self.by_cell.borrow().len()
+    }
+}
+
 impl SeasonalWildlifeResourceSampler {
     pub(crate) fn new(definition: &DimensionDefinition) -> Self {
         if definition.generation_profile != WorldGenerationProfile::McloneOverworldV1 {
@@ -242,17 +298,25 @@ impl SeasonalWildlifeResourceSampler {
         kind: WildlifeResourceKind,
         calendar: Option<AuthoritativeCalendarSample>,
     ) -> SeasonalResourceOpportunity {
-        self.sample(position, kind, calendar).map_or(
-            SeasonalResourceOpportunity::NEUTRAL,
-            |sample| SeasonalResourceOpportunity {
-                accessibility: mclone_season::SeasonalResourceFactor::from_basis_points_clamped(
-                    sample.accessibility_basis_points,
-                ),
-                recovery: mclone_season::SeasonalResourceFactor::from_basis_points_clamped(
-                    sample.recovery_factor_basis_points,
-                ),
-            },
-        )
+        self.opportunities(position, calendar)[kind.index()]
+    }
+
+    fn opportunities(
+        self,
+        position: WildlifeForageCellPos,
+        calendar: Option<AuthoritativeCalendarSample>,
+    ) -> [SeasonalResourceOpportunity; WILDLIFE_RESOURCE_KIND_COUNT] {
+        let Some(context) = self.context(position, calendar) else {
+            return [SeasonalResourceOpportunity::NEUTRAL; WILDLIFE_RESOURCE_KIND_COUNT];
+        };
+        std::array::from_fn(|index| {
+            evaluate_seasonal_resource_opportunity(SeasonalResourceInput {
+                enabled: true,
+                resource: WildlifeResourceKind::ALL[index].seasonal_kind(),
+                local_season: context.local_season,
+                moisture: context.moisture,
+            })
+        })
     }
 
     pub(crate) fn sample(
@@ -261,6 +325,42 @@ impl SeasonalWildlifeResourceSampler {
         kind: WildlifeResourceKind,
         calendar: Option<AuthoritativeCalendarSample>,
     ) -> Option<SeasonalWildlifeResourceSample> {
+        let context = self.context(position, calendar)?;
+        let opportunity = evaluate_seasonal_resource_opportunity(SeasonalResourceInput {
+            enabled: true,
+            resource: kind.seasonal_kind(),
+            local_season: context.local_season,
+            moisture: context.moisture,
+        });
+        Some(SeasonalWildlifeResourceSample {
+            position,
+            resource: kind,
+            world_x: context.world_x,
+            world_z: context.world_z,
+            surface_y: context.surface_y,
+            latitude_millidegrees: (context.latitude_degrees * 1_000.0).round() as i32,
+            mean_temperature_basis_points: unit_signed_basis_points(context.mean_temperature),
+            moisture_basis_points: unit_basis_points(context.moisture),
+            orbital_phase_steps: context.calendar.orbital_phase.steps(),
+            local_phase_steps: (context.local_season.local_phase * 10_000.0).round() as u16
+                % 10_000,
+            response_strength_basis_points: unit_basis_points(
+                context.local_season.response_strength,
+            ),
+            current_temperature_basis_points: unit_signed_basis_points(
+                context.local_season.current_temperature,
+            ),
+            snow_tendency_basis_points: unit_basis_points(context.local_season.snow_tendency),
+            accessibility_basis_points: opportunity.accessibility.basis_points(),
+            recovery_factor_basis_points: opportunity.recovery.basis_points(),
+        })
+    }
+
+    fn context(
+        self,
+        position: WildlifeForageCellPos,
+        calendar: Option<AuthoritativeCalendarSample>,
+    ) -> Option<SeasonalWildlifeResourceContext> {
         let (Some(terrain), Some(calendar)) = (self.terrain, calendar) else {
             return None;
         };
@@ -287,32 +387,15 @@ impl SeasonalWildlifeResourceSampler {
             moisture,
             altitude_blocks: terrain.surface_y as f32,
         });
-        let opportunity = evaluate_seasonal_resource_opportunity(SeasonalResourceInput {
-            enabled: true,
-            resource: kind.seasonal_kind(),
-            local_season,
-            moisture,
-        });
-        Some(SeasonalWildlifeResourceSample {
-            position,
-            resource: kind,
+        Some(SeasonalWildlifeResourceContext {
             world_x,
             world_z,
             surface_y: terrain.surface_y,
-            latitude_millidegrees: (latitude.degrees * 1_000.0).round() as i32,
-            mean_temperature_basis_points: unit_signed_basis_points(
-                terrain.climate.temperature as f32,
-            ),
-            moisture_basis_points: unit_basis_points(moisture),
-            orbital_phase_steps: calendar.orbital_phase.steps(),
-            local_phase_steps: (local_season.local_phase * 10_000.0).round() as u16 % 10_000,
-            response_strength_basis_points: unit_basis_points(local_season.response_strength),
-            current_temperature_basis_points: unit_signed_basis_points(
-                local_season.current_temperature,
-            ),
-            snow_tendency_basis_points: unit_basis_points(local_season.snow_tendency),
-            accessibility_basis_points: opportunity.accessibility.basis_points(),
-            recovery_factor_basis_points: opportunity.recovery.basis_points(),
+            latitude_degrees: latitude.degrees,
+            mean_temperature: terrain.climate.temperature as f32,
+            local_season,
+            moisture,
+            calendar,
         })
     }
 }
@@ -1122,6 +1205,29 @@ mod tests {
             ),
             SeasonalResourceOpportunity::NEUTRAL
         );
+    }
+
+    #[test]
+    fn opportunity_cache_samples_each_active_cell_once_for_all_strata() {
+        let definition =
+            DimensionDefinition::overworld(12_345, WorldGenerationProfile::McloneOverworldV1);
+        let sampler = SeasonalWildlifeResourceSampler::new(&definition);
+        let calendar = SeasonCalendarPolicy::MCLONE_OVERWORLD_V1
+            .sample(14 * mclone_core::time::DAY_LENGTH_TICKS)
+            .unwrap();
+        let cache = SeasonalWildlifeOpportunityCache::new(sampler, calendar);
+        let first = WildlifeForageCellPos { x: 0, z: 128 };
+        for kind in WildlifeResourceKind::ALL {
+            assert_eq!(
+                cache.opportunity(first, kind),
+                sampler.opportunity(first, kind, calendar)
+            );
+        }
+        assert_eq!(cache.sampled_cell_count(), 1);
+
+        let second = WildlifeForageCellPos { x: 1, z: 128 };
+        let _ = cache.opportunity(second, WildlifeResourceKind::SeedsAndSoftMast);
+        assert_eq!(cache.sampled_cell_count(), 2);
     }
 
     #[test]

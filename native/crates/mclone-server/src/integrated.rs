@@ -617,10 +617,12 @@ impl RealmServer {
             .sample(self.day_time)
             .expect("validated realm calendar policy must remain sampleable");
         let sampler = self.active_dimension.seasonal_resource_sampler;
+        let opportunity_cache =
+            crate::wildlife_resources::SeasonalWildlifeOpportunityCache::new(sampler, calendar);
         self.active_dimension
             .wildlife_resources
             .snapshots_with_opportunity(&|position, kind| {
-                sampler.opportunity(position, kind, calendar)
+                opportunity_cache.opportunity(position, kind)
             })
     }
 
@@ -662,6 +664,11 @@ impl RealmServer {
             .sample(day_time)
             .expect("validated realm calendar policy must remain sampleable");
         let seasonal_resource_sampler = self.active_dimension.seasonal_resource_sampler;
+        let seasonal_resource_opportunities =
+            crate::wildlife_resources::SeasonalWildlifeOpportunityCache::new(
+                seasonal_resource_sampler,
+                calendar,
+            );
         let runtime = &mut self.active_dimension;
         let scheduler = &runtime.scheduler;
         let mut entity_updates =
@@ -680,7 +687,7 @@ impl RealmServer {
             simulation_tick,
             entity_ticking_chunks,
             &mut runtime.wildlife_resources,
-            &|position, kind| seasonal_resource_sampler.opportunity(position, kind, calendar),
+            &|position, kind| seasonal_resource_opportunities.opportunity(position, kind),
             &|pos| {
                 entity_ticking_set
                     .contains(&pos.chunk_pos())
@@ -3143,6 +3150,11 @@ impl RealmServer {
             .sample(day_time)
             .expect("validated realm calendar policy must remain sampleable");
         let seasonal_resource_sampler = self.active_dimension.seasonal_resource_sampler;
+        let seasonal_resource_opportunities =
+            crate::wildlife_resources::SeasonalWildlifeOpportunityCache::new(
+                seasonal_resource_sampler,
+                calendar,
+            );
         let runtime = &mut self.active_dimension;
         let scheduler = &runtime.scheduler;
         let mut entity_updates = natural_spawning_tick.spawned_entities;
@@ -3178,7 +3190,7 @@ impl RealmServer {
             simulation_tick,
             &tick_report.entity_ticking_chunks,
             &mut runtime.wildlife_resources,
-            &|position, kind| seasonal_resource_sampler.opportunity(position, kind, calendar),
+            &|position, kind| seasonal_resource_opportunities.opportunity(position, kind),
             &|pos| {
                 entity_ticking_set
                     .contains(&pos.chunk_pos())
