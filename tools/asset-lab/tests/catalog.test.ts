@@ -194,6 +194,7 @@ test("discovers canonical examples without the legacy rounded archive", async ()
       "mallard_duck",
       "player",
       "rabbit",
+      "red_squirrel",
       "upright_bear",
     ],
   );
