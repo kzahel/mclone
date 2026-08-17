@@ -15,6 +15,17 @@ calendar as unavailable. The former 112-day date remains an explicit unsaved
 disposable-world regeneration decision.
 
 Tactical
+[`317`](../tactical/317-civil-time-discontinuity-and-sleep.md) now supplies the
+first ordinary civil-time discontinuity. Checked server operations change
+time of day, calendar date, or exact next morning while monotonic executed
+simulation time advances only for real ticks. An original persistent sleeping
+mat, ephemeral player sleep state, cancellation rules, and a typed
+100-percent realm quorum are shared across hosts. Server sentinels prove no
+skipped crop, scheduled-tick, resource, or wildlife work is replayed; the
+headed browser lane proves ordinary placement/use, waiting at civil tick
+`12_500`, and wake at exact tick `24_000`.
+
+Tactical
 [`307`](../tactical/307-seasonal-solar-path-and-cyclical-latitude.md) is
 implemented as a client-local solar proof. The default unbounded Mclone plane
 has a provisional 98,304-block cyclical latitude wavelength, a 27-degree-tilt
@@ -66,7 +77,7 @@ enabled and final Human Review must accept that fixed blended-draw exception
 or request a later sky-compositing slice. None of this creates a gameplay
 calendar or mutates the authoritative light engine.
 
-Planned coordinating parent Tactical
+Active coordinating parent Tactical
 [`315`](../tactical/315-authoritative-seasonal-calendar-and-squirrel-ecology.md)
 owns the first authoritative gameplay-calendar and seasonal-ecology sequence.
 It keeps monotonic executed `game_time` separate from mutable persisted civil
@@ -76,9 +87,10 @@ loaded food accessibility and recovery before promoting squirrels through
 mast, bounded caches, tree refuge, and the ordinary durable lifecycle. It does
 not make calendar transitions directly add or remove food or animals.
 
-No authoritative season clock, terrain or biome season generation, active
-weather event, migration producer, seasonal hydrology, wildlife tagging, or
-managed-habitat infrastructure is implemented.
+No terrain or biome season generation, active weather event, migration
+producer, seasonal hydrology, wildlife tagging, or managed-habitat
+infrastructure is implemented. Seasonal resource opportunity and squirrel
+ecology remain the next bounded phases.
 The selected direction is that unloaded terrain and entities receive no ticks
 or elapsed-time catch-up. Climate and ambient seasonal opportunities may be
 derived when an active region asks for them, while durable animals freeze.

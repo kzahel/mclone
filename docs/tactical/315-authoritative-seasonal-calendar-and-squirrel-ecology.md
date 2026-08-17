@@ -1,7 +1,7 @@
 # Tactical 315: Authoritative Seasonal Calendar And Squirrel Ecology
 
 Status: active coordinating parent 2026-08-17; Phase A implemented by
-[`316`](316-authoritative-season-calendar-foundation.md), Phase B planned by
+[`316`](316-authoritative-season-calendar-foundation.md), Phase B implemented by
 [`317`](317-civil-time-discontinuity-and-sleep.md)
 
 Topic: `seasons`
@@ -696,6 +696,13 @@ first authoritative year length and phase origin before Phase C tuning.
 
 ### Phase B: discontinuity and sleep foundation
 
+Status: implemented 2026-08-17 by Tactical
+[`317`](317-civil-time-discontinuity-and-sleep.md). Checked durable civil-time
+operations, ordinary persistent sleeping-mat content, ephemeral multiplayer
+sleep state, a typed 100-percent realm quorum, exact next-morning publication,
+and shared client feedback now pass native, server, persistence, Wasm, and
+headed-WebGPU gates.
+
 1. Add typed time-of-day, date, and next-morning mutations.
 2. Prove forward and backward mutations preserve simulation history.
 3. Add an ordinary functional sleep site and shared interaction command.
@@ -709,6 +716,14 @@ first authoritative year length and phase origin before Phase C tuning.
 sleep, crosses dawn, wakes at the exact accepted time, preserves nearby crop
 and animal tick counts, and restores after save/reopen. Do not begin seasonal
 resource tuning if sleep can duplicate or catch up world work.
+
+Accepted 2026-08-17. The continuous browser run supplies the ordinary
+place/use/wait/exact-dawn receipt; native separately proves ordinary shared
+input and the transient presentation. Shared server tests prove exact
+one-tick execution, unchanged scheduled/crop/resource/wildlife sentinels,
+multiplayer cancellation, and exact save/reopen. The detailed receipt and the
+reason native pixel capture stages the already-tested transient update are in
+Tactical 317.
 
 ### Phase C: seasonal resource opportunity
 
@@ -916,10 +931,10 @@ Do not add season, sleep, squirrel, resource, cache, or breeding policy to
 - [x] Persist/recover one versioned calendar policy and derive orbital phase
       from civil `day_time` without a second ticking clock.
 - [x] Show `World Calendar` and observer-local season through shared UI.
-- [ ] Land typed time-of-day, date, and next-morning authority operations.
-- [ ] Land ordinary functional sleep content, player state, cancellation,
+- [x] Land typed time-of-day, date, and next-morning authority operations.
+- [x] Land ordinary functional sleep content, player state, cancellation,
       realm quorum, wake, and cross-client clock publication.
-- [ ] Prove sleep and date jumps execute no skipped simulation work.
+- [x] Prove sleep and date jumps execute no skipped simulation work.
 - [ ] Add continuous local seasonal accessibility/recovery for all five
       resource strata without direct stock replacement.
 - [ ] Preserve inactive resource and animal freeze plus exact population

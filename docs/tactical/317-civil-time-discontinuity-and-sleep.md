@@ -1,6 +1,6 @@
 # Tactical 317: Civil-Time Discontinuity And Sleep
 
-Status: planned 2026-08-17; ready for implementation
+Status: implemented 2026-08-17; automated Review Gate B accepted
 
 Parent: [`315`](315-authoritative-seasonal-calendar-and-squirrel-ecology.md)
 Phase B
@@ -160,10 +160,51 @@ render paths. No new renderer or platform-owned sleep behavior is permitted.
 
 ## Completion Checklist
 
-- [ ] Add and test checked typed civil-time operations.
-- [ ] Add ordinary placeable and persistent sleeping-mat content.
-- [ ] Add sleep commands, state, cancellation, rule, quorum, and wake updates.
-- [ ] Add client storage and shared UI feedback.
-- [ ] Prove exactly one executed tick and no skipped-work replay.
-- [ ] Pass focused native, Wasm, persistence, multiplayer, and pixel gates.
-- [ ] Update Tactical 315 and the seasons topic with final evidence.
+Implementation landed in commits `5fa34fb1`, `92712f1d`, and `8fe84f08`.
+The server now owns checked durable time-of-day, calendar-date, and
+next-morning operations. The sleeping mat is ordinary item/entity content,
+persists through the shared entity record, and enters sleep through normal
+world interaction. Sleep uses ephemeral per-player state, the typed
+100-percent realm rule, exact next-morning civil assignment, one ordinary
+simulation tick, and no elapsed-time replay.
+
+Automated evidence:
+
+- the complete `mclone-server` suite passed with 763 tests, including direct
+  date/time persistence, forward/backward no-catch-up sentinels, one- and
+  two-player quorum, observer exclusion, cancellation causes, exact dawn,
+  paused daylight, save/reopen, and sleeping-mat persistence;
+- `cargo test -p mclone-native-client --bin mclone-native-client
+  --no-fail-fast` passed 182 tests;
+- `cargo check --workspace`, `pnpm native:web:typecheck`, and
+  `pnpm native:thin-adapters:purity` passed;
+- `pnpm native:web:sleep-smoke` placed and targeted entity `3` through
+  ordinary browser input, observed the stable waiting state at civil tick
+  `12_500` with quorum `1/1`, and then observed exact civil tick `24_000`
+  with sleep cleared and the mat retained;
+- the browser waiting and morning captures are
+  `/tmp/mclone-native-web-sleep-waiting-canvas.png` and
+  `/tmp/mclone-native-web-sleep-morning-canvas.png`; both were inspected and
+  show the ordinary mat scene, with the waiting overlay present only before
+  dawn;
+- the native offscreen command lane placed and used the mat through ordinary
+  shared input, while `/tmp/mclone-native-sleep-waiting.png` was inspected as
+  the native transient-UI pixel receipt; the offscreen runner stages the
+  already protocol-tested waiting update because its single final frame does
+  not retain the short authority interval; and
+- the first-party sleeping-mat figure was inspected independently in the
+  prepared figure-review captures under
+  `/tmp/mclone-figure-review/sleeping-mat/`.
+
+The continuous browser run is the full ordinary waiting-to-dawn behavioral
+receipt. Native supplies an ordinary command-path receipt plus deterministic
+presentation evidence; exact one-tick and no-catch-up semantics remain owned
+by the shared server tests rather than inferred from pixels.
+
+- [x] Add and test checked typed civil-time operations.
+- [x] Add ordinary placeable and persistent sleeping-mat content.
+- [x] Add sleep commands, state, cancellation, rule, quorum, and wake updates.
+- [x] Add client storage and shared UI feedback.
+- [x] Prove exactly one executed tick and no skipped-work replay.
+- [x] Pass focused native, Wasm, persistence, multiplayer, and pixel gates.
+- [x] Update Tactical 315 and the seasons topic with final evidence.
