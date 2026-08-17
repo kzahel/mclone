@@ -1,7 +1,8 @@
 # Tactical 315: Authoritative Seasonal Calendar And Squirrel Ecology
 
-Status: planned coordinating parent 2026-08-16; Phase A ready for a bounded
-child tactical and staged Human Review
+Status: active coordinating parent 2026-08-17; Phase A implemented by
+[`316`](316-authoritative-season-calendar-foundation.md), Phase B ready for a
+bounded child tactical
 
 Topic: `seasons`
 
@@ -670,6 +671,14 @@ and cache/refuge demand before extracting any more general ecology API.
 
 ### Phase A: authoritative calendar foundation
 
+Status: implemented 2026-08-17 by Tactical
+[`316`](316-authoritative-season-calendar-foundation.md). The first internal
+rule is a revision-1 56-day year beginning at the northward equinox. Metadata
+codec 4 persists it, time updates replicate it, clients derive it from current
+civil time, and shared Seasonal Debug defaults to read-only World Calendar.
+Automated native/Wasm and exact preview-off pixel restoration pass; live pace
+review remains open.
+
 1. Add versioned calendar-policy and pure civil-time-to-orbital sampling in
    `mclone-season`.
 2. Select it from the shared profile/dimension contract.
@@ -903,10 +912,10 @@ Do not add season, sleep, squirrel, resource, cache, or breeding policy to
 
 ## Completion Checklist
 
-- [ ] Bind a reviewed authoritative year length and phase origin.
-- [ ] Persist/recover one versioned calendar policy and derive orbital phase
+- [x] Bind a reviewed authoritative year length and phase origin.
+- [x] Persist/recover one versioned calendar policy and derive orbital phase
       from civil `day_time` without a second ticking clock.
-- [ ] Show `World Calendar` and observer-local season through shared UI.
+- [x] Show `World Calendar` and observer-local season through shared UI.
 - [ ] Land typed time-of-day, date, and next-morning authority operations.
 - [ ] Land ordinary functional sleep content, player state, cancellation,
       realm quorum, wake, and cross-client clock publication.

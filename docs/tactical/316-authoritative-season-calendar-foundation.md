@@ -1,6 +1,7 @@
 # Tactical 316: Authoritative Season Calendar Foundation
 
-Status: planned 2026-08-17; implementation authorized
+Status: implemented 2026-08-17; automated native/Wasm and pixel-restoration
+evidence complete, live pace review remains open
 
 Parent: [`315`](315-authoritative-seasonal-calendar-and-squirrel-ecology.md)
 Phase A
@@ -139,17 +140,56 @@ chunks on day/year wrap, or let Manual Preview mutate authority.
 
 ## Completion Checklist
 
-- [ ] Bind constants and pure calendar policy/sample.
-- [ ] Persist and upgrade the exact policy.
-- [ ] Replicate policy with authoritative clocks.
-- [ ] Store and expose the client sample.
-- [ ] Add World Calendar/Manual Preview source selection.
-- [ ] Make existing season evaluation consume the selected phase.
-- [ ] Pass focused native and Wasm tests.
-- [ ] Update Tactical 315 and `docs/topics/seasons.md` with evidence.
+- [x] Bind constants and pure calendar policy/sample.
+- [x] Persist and upgrade the exact policy.
+- [x] Replicate policy with authoritative clocks.
+- [x] Store and expose the client sample.
+- [x] Add World Calendar/Manual Preview source selection.
+- [x] Make existing season evaluation consume the selected phase.
+- [x] Pass focused native and Wasm tests.
+- [x] Update Tactical 315 and `docs/topics/seasons.md` with evidence.
 
 ## Final Report
 
-Do not fill this section until implementation is complete. Record exact rule,
-schema, protocol, test, and visual-restoration evidence plus any remaining live
-Human Review of the selected 56-day pace.
+Implemented on 2026-08-17. `mclone-season` now owns revision-1 calendar policy,
+a 56-day year beginning at the northward equinox, overflow-safe fixed-point
+sampling, and explicit World Calendar versus Manual Preview resolution. The
+sample carries cumulative civil ticks, absolute day, day tick, year, one-based
+day of year, year length, and effective orbital phase. Unknown rule revisions,
+zero-length years, and invalid phase origins fail closed.
+
+World metadata codec 4 persists the exact policy. Versions 1 through 3 derive
+it once from their saved generation profile and return an upgraded record;
+noncanonical profile-policy combinations are incompatible. Only
+`mclone-overworld-v1` opts in. The authoritative time update now publishes the
+policy beside both clocks, and native, dedicated, Web-worker, and client
+runtime paths preserve it exactly. Clients continue to interpolate only
+`game_time` and running `day_time`.
+
+The shared scene resolves the existing solar, celestial, local-season, and
+exact-ground consumers from current replicated civil time by default. Seasonal
+Debug always names its source, shows read-only `Year N, Day N/56` and the
+effective milestone in World Calendar mode, reports `Unavailable` for disabled
+profiles, and enables the old 112-day date scrubber only in unsaved Manual
+Preview. Both visual toggles remain off by default.
+
+Validation completed:
+
+- `cargo test -p mclone-season -p mclone-protocol -p mclone-client -p
+  mclone-ui -p mclone-server` passed: 34, 59, 146, 113, and 755 library tests,
+  including calendar extrema, v3-to-v4 migration, policy publication, client
+  interpolation, source selection, and world/manual/unavailable UI states.
+- `cargo test -p mclone-scene --lib` passed all 180 unit tests. The broader
+  scene contract run retains a pre-existing unrelated stale assertion that
+  expects 101 host fields after successfully matching the 99-field canonical
+  list; this slice did not change scene-host fields.
+- `cargo check --target wasm32-unknown-unknown -p mclone-web-client` passed.
+- `pnpm native:seasons:appearance-capture` passed its 22-case mono/stereo/menu
+  matrix and exact preview-off restoration. The inspected contact sheet and
+  receipts are under
+  `/tmp/mclone-seasonal-appearance-9352701aa346-1786942565999/`.
+
+The 56-day pace is now the implemented internal rule. Its live experiential
+Human Review remains open; changing it later requires an explicit metadata
+migration or disposable-world regeneration decision, not a silent constant
+edit.

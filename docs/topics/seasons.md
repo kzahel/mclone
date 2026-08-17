@@ -2,7 +2,19 @@
 
 Topic: `seasons`
 
-Status: active design record created 2026-08-15. Tactical
+Status: active implementation record updated 2026-08-17. Tactical
+[`316`](../tactical/316-authoritative-season-calendar-foundation.md) now gives
+`mclone-overworld-v1` an authoritative revision-1 56-day calendar derived from
+persisted cumulative civil `day_time`. Metadata codec 4 preserves the exact
+policy, time updates replicate it, clients derive the same fixed-point phase,
+and shared Seasonal Debug defaults to read-only `World Calendar` with year,
+day, milestone, and observer-local season. Retained profiles report the
+calendar as unavailable. The former 112-day date remains an explicit unsaved
+`Manual Preview`; both visual consumers still default off. Live review of the
+56-day pace remains open, but later changes require an explicit migration or
+disposable-world regeneration decision.
+
+Tactical
 [`307`](../tactical/307-seasonal-solar-path-and-cyclical-latitude.md) is
 implemented as a client-local solar proof. The default unbounded Mclone plane
 has a provisional 98,304-block cyclical latitude wavelength, a 27-degree-tilt
@@ -144,15 +156,14 @@ Sun path and material appearance are sibling outputs of those inputs. Do not
 derive season from instantaneous sun elevation, and do not expose an
 independent local-phase slider that can disagree with the sky.
 
-Tactical 306 uses a provisional 112-day, four-by-28-day synthetic calendar as
-a readable Debug projection over continuous `OrbitalPhase`. It does not choose
-the authoritative year length, advance time, persist a year, or add gameplay.
-The shared Debug category links to one dedicated `Seasonal Debug` screen that
-shows `Global Preview Date`, global milestone, evaluated local season, and day
-length beside the preview, latitude, solar-time, and recent-snow controls.
-When a real calendar lands, that screen should offer `World Calendar | Manual
-Preview`; a compact player-facing date plus local-season display can reuse the
-same evaluation in a separate slice.
+Tactical 306's 112-day, four-by-28-day synthetic calendar remains only the
+readable Manual Preview projection over continuous `OrbitalPhase`. Tactical
+316's authoritative calendar is instead a 56-day year derived from civil time,
+with day zero at the northward equinox. The dedicated Seasonal Debug screen
+now selects `World Calendar | Manual Preview`: world mode shows its read-only
+year/day and evaluated local result, while manual mode retains the scrubber.
+A compact player-facing date plus local-season display remains a separate
+slice.
 
 ### Debug time and simulation isolation
 
@@ -601,11 +612,11 @@ logic.
    exception. Tactical 307's coordinate/solar behavior and Earth-like sun size
    are already accepted; its focused full-game WebGPU sun-path gate also
    remains available if the combined Tactical 306 Web proof is insufficient.
-2. Execute Tactical 315's calendar Gate A: calibrate year length against
-   sleep, real play time, travel, farming, current wildlife cadence, and the
-   squirrel surplus-to-lean cache story. Continue to compare the accepted
-   duration with climate wavelength/scale and continental travel in Terrain
-   Lab or another shared review surface.
+2. Review Tactical 316's implemented 56-day calendar pace against sleep, real
+   play time, travel, farming, current wildlife cadence, and the squirrel
+   surplus-to-lean cache story. Continue to compare it with climate
+   wavelength/scale and continental travel in Terrain Lab or another shared
+   review surface before declaring the timing shipped.
 3. After Tactical 304/305 settle the exact/LOD frontier, give the procedural
    horizon a filtered version of the accepted seasonal appearance. Do not copy
    the exact fragment implementation or weaken the explicit LOD ownership.
@@ -630,8 +641,8 @@ gameplay milestone must prove bounded work with inactive regions held frozen.
 
 ## Open Decisions
 
-- What is a useful year length relative to sleep, ordinary travel, farming,
-  breeding, and real play sessions?
+- Does live play retain the implemented 56-day year after sleep, ordinary
+  travel, farming, breeding, and cache-surplus-to-lean review?
 - Does live travel and Human Review retain Tactical 307's provisional
   98,304-block plane wavelength, Z origin zero, and 27-degree tilt?
 - Does the cylinder keep asymptotic polar tails, gain finite axial limits, or
