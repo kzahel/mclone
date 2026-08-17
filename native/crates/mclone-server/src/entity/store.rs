@@ -2291,6 +2291,14 @@ impl ServerEntityStore {
         self.entities.get(&id).copied()
     }
 
+    pub(crate) fn sleeping_mat_at(&self, position: Vec3d) -> Option<ServerEntityState> {
+        self.entities.values().copied().find(|entity| {
+            entity.alive
+                && entity.kind == EntityKind::SleepingMat
+                && entity.position.distance_to_sqr(position) <= 1.0e-8
+        })
+    }
+
     pub(crate) fn state_by_persistent_id(
         &self,
         persistent_id: EntityPersistentId,

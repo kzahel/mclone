@@ -25,6 +25,7 @@ fn screenshot_cli(
             blink_debug: false,
             controller_focus: false,
             scripted_interaction: false,
+            scripted_sleep: false,
             remote_settle_ms: 0,
             settle_frames: 0,
             terrain_horizon_diagnostic: Default::default(),

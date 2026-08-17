@@ -626,6 +626,7 @@ fn cli_parses_full_frame_screenshot_options() {
                 blink_debug: true,
                 controller_focus: true,
                 scripted_interaction: true,
+                scripted_sleep: false,
                 remote_settle_ms: 750,
                 settle_frames: 90,
                 terrain_horizon_diagnostic:
@@ -637,6 +638,39 @@ fn cli_parses_full_frame_screenshot_options() {
             },
         }
     );
+}
+
+#[test]
+fn cli_parses_scripted_sleep_capture() {
+    let cli = Cli::parse([
+        "--screenshot".to_owned(),
+        "/tmp/mclone-sleep.png".to_owned(),
+        "--screenshot-scripted-sleep".to_owned(),
+        "true".to_owned(),
+    ])
+    .unwrap();
+
+    let Cli::HeadlessScreenshot { options } = cli else {
+        panic!("expected headless screenshot mode");
+    };
+    assert!(options.scripted_sleep);
+    assert!(options.hud);
+}
+
+#[test]
+fn cli_rejects_overlapping_scripted_interactions() {
+    let error = Cli::parse([
+        "--screenshot".to_owned(),
+        "/tmp/mclone-sleep.png".to_owned(),
+        "--screenshot-scripted-interaction".to_owned(),
+        "true".to_owned(),
+        "--screenshot-scripted-sleep".to_owned(),
+        "true".to_owned(),
+    ])
+    .unwrap_err()
+    .to_string();
+
+    assert!(error.contains("mutually exclusive"), "{error}");
 }
 
 #[test]

@@ -201,6 +201,7 @@
     "native:web:cardinal-view-replay": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --cardinal-view-replay-probe",
     "native:web:promotion-churn": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --promotion-churn-probe",
     "native:web:block-edit-probe": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --block-edit-probe",
+    "native:web:sleep-smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --sleep-probe --skip-threading",
     "native:web:death-ui-smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --death-ui-probe",
     "native:web:auxiliary-split-smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --auxiliary-split-probe",
     "native:web:indexeddb-smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --indexeddb-reload-probe",

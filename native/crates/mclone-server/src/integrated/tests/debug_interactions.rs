@@ -82,10 +82,12 @@ fn sleeping_mat_places_and_drives_exact_one_tick_night_skip() {
     server.set_day_time(u64::from(SLEEP_START_DAY_TICK));
     let _ = server.try_poll().unwrap();
     let admitted = server
-        .try_handle_command(ClientCommand::InteractEntity(InteractEntityCommand {
-            target: mat.id,
-            hand: InteractionHand::MainHand,
-        }))
+        .try_handle_command(use_held_item_on(BlockHitResult::new(
+            Vec3d::new(8.5, 65.0, 8.5),
+            Direction::Up,
+            floor,
+            false,
+        )))
         .unwrap();
     assert!(admitted.iter().any(|update| matches!(
         update,

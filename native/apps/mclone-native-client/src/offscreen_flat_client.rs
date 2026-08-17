@@ -773,6 +773,68 @@ impl OffscreenFlatClientHost {
         Ok(())
     }
 
+    fn apply_scripted_sleep(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) -> Result<()> {
+        let target = self.scripted_interaction_target()?;
+        let placement = self.run_script(&scripted_sleep_placement_script(target), device, queue)?;
+        if placement.input_frame_count != 2 || placement.world_action_count != 1 {
+            bail!(
+                "scripted sleep placement expected 2 input frames and 1 world action, got {} input frames and {} world actions",
+                placement.input_frame_count,
+                placement.world_action_count
+            );
+        }
+        self.wait_for_scripted_sleep_state("authoritative mat consumption", |client| {
+            client.player_inventory()[5].is_none()
+        })?;
+        let use_statuses = self
+            .driver
+            .apply_input_frame(action_input_frame(FlatInputAction::Use))?;
+        require_world_action_submitted(
+            &use_statuses,
+            FlatInputAction::Use,
+            "scripted sleeping-mat use",
+        )?;
+        if !self
+            .driver
+            .host_mut()
+            .apply_mono_sleep_state_for_diagnostics(mclone_protocol::SleepStateUpdate {
+                sleeping: true,
+                sleeping_players: 1,
+                eligible_players: 1,
+            })
+        {
+            bail!("scripted sleep could not stage its transient visual receipt");
+        }
+        let sleep = self
+            .driver
+            .host()
+            .mono_client()
+            .context("scripted sleep requires an active runtime")?
+            .sleep_state();
+        if !sleep.sleeping || sleep.sleeping_players != 1 || sleep.eligible_players != 1 {
+            bail!("scripted sleep did not enter the one-of-one sleep quorum: {sleep:?}");
+        }
+        Ok(())
+    }
+
+    fn wait_for_scripted_sleep_state(
+        &mut self,
+        label: &str,
+        mut predicate: impl FnMut(&ClientRuntime) -> bool,
+    ) -> Result<()> {
+        let deadline = std::time::Instant::now() + Duration::from_millis(2_500);
+        loop {
+            self.driver.host_mut().poll_mono_runtime_for_diagnostics()?;
+            if self.driver.host().mono_client().is_some_and(&mut predicate) {
+                return Ok(());
+            }
+            if std::time::Instant::now() >= deadline {
+                bail!("scripted sleep timed out waiting for {label}");
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
     fn scripted_interaction_target(&self) -> Result<ScriptedInteractionTarget> {
         self.driver
             .host()
@@ -2258,6 +2320,8 @@ fn configure_screenshot_scene(
     }
     if options.scripted_interaction {
         host.apply_scripted_interaction(device, queue)?;
+    } else if options.scripted_sleep {
+        host.apply_scripted_sleep(device, queue)?;
     } else {
         host.frame_first_actor();
     }
@@ -2422,6 +2486,33 @@ fn scripted_interaction_script(target: ScriptedInteractionTarget) -> OffscreenSc
         OffscreenScriptStep::SetCameraLookAt {
             eye: final_position,
             target: final_target,
+        },
+    ])
+}
+
+fn scripted_sleep_placement_script(target: ScriptedInteractionTarget) -> OffscreenScript {
+    let interaction_eye = Vec3::new(
+        target.x as f32 + 0.5,
+        target.y as f32 + 3.0,
+        target.z as f32 - 1.5,
+    );
+    let interaction_target = Vec3::new(
+        target.x as f32 + 0.5,
+        target.y as f32 + 0.5,
+        target.z as f32 + 0.5,
+    );
+    OffscreenScript::from_steps([
+        OffscreenScriptStep::SetCameraLookAt {
+            eye: interaction_eye,
+            target: interaction_target,
+        },
+        OffscreenScriptStep::InputFrame {
+            frame: hotbar_input_frame(5),
+            require_submitted_action: None,
+        },
+        OffscreenScriptStep::InputFrame {
+            frame: action_input_frame(FlatInputAction::Use),
+            require_submitted_action: Some(FlatInputAction::Use),
         },
     ])
 }
@@ -3489,6 +3580,35 @@ mod tests {
         assert!(matches!(
             script.steps()[3],
             OffscreenScriptStep::SetCameraLookAt { .. }
+        ));
+    }
+
+    #[test]
+    fn scripted_sleep_placement_uses_the_mat_slot() {
+        let placement =
+            scripted_sleep_placement_script(ScriptedInteractionTarget { x: 1, y: 64, z: 2 });
+
+        assert_eq!(placement.steps().len(), 3);
+        assert!(matches!(
+            placement.steps()[0],
+            OffscreenScriptStep::SetCameraLookAt { .. }
+        ));
+        assert!(matches!(
+            placement.steps()[1],
+            OffscreenScriptStep::InputFrame {
+                frame: FlatInputFrame {
+                    selected_hotbar_slot: Some(5),
+                    ..
+                },
+                require_submitted_action: None,
+            }
+        ));
+        assert!(matches!(
+            placement.steps()[2],
+            OffscreenScriptStep::InputFrame {
+                require_submitted_action: Some(FlatInputAction::Use),
+                ..
+            }
         ));
     }
 

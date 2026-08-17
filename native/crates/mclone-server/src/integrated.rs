@@ -4760,6 +4760,25 @@ impl RealmServer {
             return self.handle_sleeping_mat_use_item_on_for_target(target, command);
         }
         if command.hand == InteractionHand::MainHand
+            && command.hit.direction == mclone_core::Direction::Up
+        {
+            let feet_block = command.hit.block_pos.relative(mclone_core::Direction::Up);
+            let position = Vec3d::new(
+                f64::from(feet_block.x) + 0.5,
+                f64::from(feet_block.y),
+                f64::from(feet_block.z) + 0.5,
+            );
+            if let Some(mat) = self.active_dimension.entities.sleeping_mat_at(position) {
+                return self.handle_interact_entity_for_target(
+                    target,
+                    InteractEntityCommand {
+                        target: mat.id,
+                        hand: InteractionHand::MainHand,
+                    },
+                );
+            }
+        }
+        if command.hand == InteractionHand::MainHand
             && self
                 .inventory_for_target(target)?
                 .selected_item_stack()

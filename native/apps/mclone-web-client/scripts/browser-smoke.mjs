@@ -173,6 +173,8 @@ const cardinalViewReplayProbe = process.argv.includes("--cardinal-view-replay-pr
 const renderDistanceReplayTarget = renderDistance ?? (cardinalViewReplayProbe ? 8 : 10);
 const blockEditProbe = process.argv.includes("--block-edit-probe")
   || process.env.MCLONE_NATIVE_WEB_BLOCK_EDIT_PROBE === "1";
+const sleepProbe = process.argv.includes("--sleep-probe")
+  || process.env.MCLONE_NATIVE_WEB_SLEEP_PROBE === "1";
 const deathUiProbe = process.argv.includes("--death-ui-probe")
   || process.env.MCLONE_NATIVE_WEB_DEATH_UI_PROBE === "1";
 const auxiliarySplitProbe = process.argv.includes("--auxiliary-split-probe")
@@ -283,6 +285,7 @@ const appLoop = movementPerf
   || renderDistanceReplayProbe
   || cardinalViewReplayProbe
   || blockEditProbe
+  || sleepProbe
   || deathUiProbe
   || auxiliarySplitProbe
   || indexedDbReloadProbe
@@ -330,6 +333,8 @@ const screenshotPath = process.env.MCLONE_NATIVE_WEB_SMOKE_SCREENSHOT
     ? "/tmp/mclone-native-web-cardinal-view-replay.png"
     : blockEditProbe
     ? "/tmp/mclone-native-web-block-edit-probe.png"
+    : sleepProbe
+    ? "/tmp/mclone-native-web-sleep-morning.png"
     : deathUiProbe
     ? "/tmp/mclone-native-web-death-screen.png"
     : indexedDbReloadProbe
@@ -376,6 +381,8 @@ const canvasScreenshotPath = process.env.MCLONE_NATIVE_WEB_CANVAS_SCREENSHOT
     ? "/tmp/mclone-native-web-cardinal-view-replay-canvas.png"
     : blockEditProbe
     ? "/tmp/mclone-native-web-block-edit-probe-canvas.png"
+    : sleepProbe
+    ? "/tmp/mclone-native-web-sleep-morning-canvas.png"
     : deathUiProbe
     ? "/tmp/mclone-native-web-death-screen-canvas.png"
     : indexedDbReloadProbe
@@ -449,6 +456,11 @@ const cardinalViewReplayStabilityWindowMs = Number.parseInt(
 );
 const blockEditProbeReportPath = process.env.MCLONE_NATIVE_WEB_BLOCK_EDIT_PROBE_REPORT
   ?? "/tmp/mclone-native-web-block-edit-probe.json";
+const sleepProbeReportPath = process.env.MCLONE_NATIVE_WEB_SLEEP_PROBE_REPORT
+  ?? "/tmp/mclone-native-web-sleep-probe.json";
+const sleepWaitingCanvasScreenshotPath =
+  process.env.MCLONE_NATIVE_WEB_SLEEP_WAITING_CANVAS_SCREENSHOT
+    ?? "/tmp/mclone-native-web-sleep-waiting-canvas.png";
 const deathUiProbeReportPath = process.env.MCLONE_NATIVE_WEB_DEATH_UI_PROBE_REPORT
   ?? "/tmp/mclone-native-web-death-screen.json";
 const auxiliarySplitHorizontalCanvasScreenshotPath =
@@ -870,6 +882,14 @@ async function run() {
         startupParameters.set("debugLightAdmissionDelayTicks", "80");
       }
       if (showcase) startupParameters.set("showcase", showcase);
+      if (sleepProbe) {
+        if (!generationProfile) {
+          startupParameters.set("generationProfile", "mclone-overworld-v1");
+        }
+        if (renderDistance === null) startupParameters.set("renderDistance", "1");
+        startupParameters.set("dayTime", "12500");
+        startupParameters.set("freezeTime", "1");
+      }
       const appUrl = startupParameters.size > 0
         ? `${baseAppUrl}${baseAppUrl.includes("?") ? "&" : "?"}${startupParameters}`
         : baseAppUrl;
@@ -4201,6 +4221,30 @@ async function run() {
         };
         await writeFile(blockEditProbeReportPath, `${JSON.stringify(report, null, 2)}\n`);
         assertBlockEditProbeResult(report, pageErrors, canvasPixels);
+        console.log(JSON.stringify(report, null, 2));
+        return;
+      }
+      if (sleepProbe) {
+        const sleepProbeResult = await runSleepProbe(
+          page,
+          canvas,
+          sleepWaitingCanvasScreenshotPath,
+          canvasScreenshotPath,
+        );
+        const result = await page.evaluate(() => globalThis.__mcloneWebApp.state);
+        const report = {
+          url: appUrl,
+          sleepProbe,
+          sleepProbeReportPath,
+          sleepWaitingCanvasScreenshotPath,
+          canvasScreenshotPath,
+          sleepProbeResult,
+          result,
+        };
+        await writeFile(sleepProbeReportPath, `${JSON.stringify(report, null, 2)}\n`);
+        if (!sleepProbeResult.ok || pageErrors.length > 0) {
+          throw new Error(`sleep probe failed:\n${JSON.stringify(report, null, 2)}`);
+        }
         console.log(JSON.stringify(report, null, 2));
         return;
       }
@@ -8180,6 +8224,164 @@ async function setViewReplayProbePhase(page, phase) {
     probe.phase = nextPhase;
     probe.record("phase-start", true);
   }, phase);
+}
+
+/**
+ * Place and use a sleeping mat through the ordinary browser input and shared
+ * world-action routes, then capture the transient quorum state and exact dawn.
+ *
+ * @param {Page} page
+ * @param {Locator} canvas
+ * @param {string} waitingScreenshotPath
+ * @param {string} morningScreenshotPath
+ * @returns {Promise<any>}
+ */
+async function runSleepProbe(page, canvas, waitingScreenshotPath, morningScreenshotPath) {
+  await canvas.evaluate((element) => element.focus());
+  await canvas.click({ position: { x: 640, y: 360 } });
+  await page.waitForFunction(
+    () => {
+      const state = globalThis.__mcloneWebApp?.state;
+      return state?.ok === true
+        && state.ready === true
+        && state.streamingSettled === true
+        && state.pendingCompileJobCount === 0
+        && Number(state.dayTime) === 12500;
+    },
+    undefined,
+    { timeout: 60_000 },
+  );
+
+  const cadence = await page.evaluate(
+    () => globalThis.__mcloneWebApp?.setSimulationCadenceForSmoke?.(1, 1, 1) ?? null,
+  );
+  if (!cadence?.ok) {
+    throw new Error(`sleep probe could not slow the integrated server: ${JSON.stringify(cadence)}`);
+  }
+  await page.waitForTimeout(100);
+  await page.evaluate(() => globalThis.__mcloneWebApp?.setDebugOverlay?.(false));
+  await page.evaluate(() => globalThis.__mcloneWebApp?.frameInteractionSurface?.());
+  await page.waitForFunction(
+    () => {
+      const target = globalThis.__mcloneWebApp?.state?.currentTarget;
+      return target?.ok === true && target.hit === true && target.direction === "up";
+    },
+    undefined,
+    { timeout: 10_000 },
+  );
+
+  await page.keyboard.press("6");
+  await page.waitForFunction(
+    () => globalThis.__mcloneWebApp?.state?.selectedHotbarSlot === 5,
+    undefined,
+    { timeout: 10_000 },
+  );
+  const before = await page.evaluate(() => {
+    const state = globalThis.__mcloneWebApp.state;
+    return {
+      dayTime: Number(state.dayTime),
+      gameTime: Number(state.gameTime),
+      entityCount: Number(state.entityCount),
+      sleepingMatCount: Number(state.sleepingMatCount),
+      selectedHotbarSlot: Number(state.selectedHotbarSlot),
+      target: state.currentTarget,
+    };
+  });
+  const placement = await page.evaluate(
+    () => globalThis.__mcloneWebApp?.interactBlock?.("place") ?? null,
+  );
+  if (placement?.commandSent !== true || placement?.targetKind === "entity") {
+    throw new Error(`sleep probe mat placement was not submitted: ${JSON.stringify(placement)}`);
+  }
+  await page.waitForFunction(
+    ({ beforeCount }) => Number(globalThis.__mcloneWebApp?.state?.sleepingMatCount) > beforeCount,
+    { beforeCount: before.sleepingMatCount },
+    { timeout: 10_000 },
+  );
+
+  const matEntityId = await page.evaluate(() => {
+    const ids = String(globalThis.__mcloneWebApp?.state?.sleepingMatEntityIds ?? "")
+      .split(",")
+      .filter(Boolean)
+      .map(Number);
+    return ids.at(-1) ?? null;
+  });
+  if (matEntityId === null || !Number.isFinite(matEntityId)) {
+    throw new Error("sleep probe placed a mat without a replicated entity id");
+  }
+  await page.evaluate(
+    (entityId) => globalThis.__mcloneWebApp?.frameEntity?.(entityId, false) ?? null,
+    matEntityId,
+  );
+  const use = await page.evaluate(
+    () => globalThis.__mcloneWebApp?.interactBlock?.("place") ?? null,
+  );
+  if (use?.commandSent !== true || use?.targetKind !== "entity") {
+    throw new Error(`sleep probe mat use was not submitted: ${JSON.stringify(use)}`);
+  }
+  await page.waitForFunction(
+    () => {
+      const state = globalThis.__mcloneWebApp?.state;
+      return state?.sleeping === true
+        && Number(state.sleepingPlayers) === 1
+        && Number(state.eligiblePlayers) === 1
+        && Number(state.dayTime) === 12500;
+    },
+    undefined,
+    { timeout: 10_000, polling: 16 },
+  );
+  const waiting = await page.evaluate(() => ({
+    dayTime: Number(globalThis.__mcloneWebApp.state.dayTime),
+    gameTime: Number(globalThis.__mcloneWebApp.state.gameTime),
+    sleeping: globalThis.__mcloneWebApp.state.sleeping === true,
+    sleepingPlayers: Number(globalThis.__mcloneWebApp.state.sleepingPlayers),
+    eligiblePlayers: Number(globalThis.__mcloneWebApp.state.eligiblePlayers),
+    sleepingMatCount: Number(globalThis.__mcloneWebApp.state.sleepingMatCount),
+  }));
+  const waitingPng = await canvas.screenshot({ path: waitingScreenshotPath, timeout: 60_000 });
+  const waitingPixels = analyzePng(waitingPng);
+
+  await page.waitForFunction(
+    () => {
+      const state = globalThis.__mcloneWebApp?.state;
+      return state?.sleeping === false
+        && Number(state.dayTime) === 24000;
+    },
+    undefined,
+    { timeout: 10_000, polling: 16 },
+  );
+  const morning = await page.evaluate(() => ({
+    dayTime: Number(globalThis.__mcloneWebApp.state.dayTime),
+    gameTime: Number(globalThis.__mcloneWebApp.state.gameTime),
+    sleeping: globalThis.__mcloneWebApp.state.sleeping === true,
+    sleepingPlayers: Number(globalThis.__mcloneWebApp.state.sleepingPlayers),
+    eligiblePlayers: Number(globalThis.__mcloneWebApp.state.eligiblePlayers),
+    sleepingMatCount: Number(globalThis.__mcloneWebApp.state.sleepingMatCount),
+  }));
+  const morningPng = await canvas.screenshot({ path: morningScreenshotPath, timeout: 60_000 });
+  const morningPixels = analyzePng(morningPng);
+  return {
+    ok: before.dayTime === 12500
+      && before.selectedHotbarSlot === 5
+      && waiting.sleeping
+      && waiting.sleepingPlayers === 1
+      && waiting.eligiblePlayers === 1
+      && waiting.sleepingMatCount === before.sleepingMatCount + 1
+      && morning.sleeping === false
+      && morning.dayTime === 24000
+      && morning.gameTime > waiting.gameTime
+      && waitingPixels.nonClearInteriorPixelCount > 128
+      && morningPixels.nonClearInteriorPixelCount > 128,
+    cadence,
+    before,
+    placement,
+    matEntityId,
+    use,
+    waiting,
+    waitingPixels,
+    morning,
+    morningPixels,
+  };
 }
 
 /**

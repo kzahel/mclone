@@ -484,6 +484,17 @@ impl McloneSceneHost {
             .map(|runtime| runtime.last_poll_diagnostics())
     }
 
+    /// Pump only replicated runtime state for deterministic offscreen probes
+    /// that must observe a transient state between full render frames.
+    pub fn poll_mono_runtime_for_diagnostics(&mut self) -> Result<bool> {
+        self.active_world
+            .runtime
+            .as_mut()
+            .map(|runtime| runtime.poll())
+            .transpose()
+            .map(|polled| polled.unwrap_or(false))
+    }
+
     pub fn mono_client(&self) -> Option<&mclone_client::ClientRuntime> {
         self.active_world
             .runtime
@@ -612,6 +623,22 @@ impl McloneSceneHost {
             self.sync_player_lifecycle_ui();
         }
         applied
+    }
+
+    /// Inject an already-authoritative sleep update for deterministic visual
+    /// diagnostics. Interactive clients receive this only through their
+    /// ordered server stream.
+    pub fn apply_mono_sleep_state_for_diagnostics(
+        &mut self,
+        sleep: mclone_protocol::SleepStateUpdate,
+    ) -> bool {
+        let Some(runtime) = self.active_world.runtime.as_mut() else {
+            return false;
+        };
+        runtime
+            .core_mut()
+            .apply_server_updates(vec![mclone_protocol::ServerUpdate::SleepState(sleep)]);
+        true
     }
 
     pub fn set_mono_new_world_seed(&mut self, seed: i64) {

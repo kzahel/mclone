@@ -54,8 +54,8 @@ use mclone_render::prepared_figure::{PreparedFigureDrawResources, clear_prepared
 use mclone_render::target::{RenderFrameContext, RenderFrameTarget};
 use mclone_render::uniform::SINGLE_VIEW_SLOT;
 use mclone_scene::{
-    AssetReplacementStatus, ExternalSceneSessionStart, HostEffects, McloneSceneHost,
-    McloneSceneHostOptions, MonoInputDisposition, MonoInteractiveInputRouter,
+    AssetReplacementStatus, ClientExperienceSettingsHost, ExternalSceneSessionStart, HostEffects,
+    McloneSceneHost, McloneSceneHostOptions, MonoInputDisposition, MonoInteractiveInputRouter,
     MonoSceneFrameSummary, MonoUiContext, MonoUiPresentation, MonoWorldActionStatus,
 };
 use mclone_season::{
@@ -64,9 +64,9 @@ use mclone_season::{
     SolarTimeSource, UnitU16,
 };
 use mclone_ui::{
-    GameHelpParent, GameOptionsParent, GameScreen, GameTouchSettings, GameUiAction, GuiScale,
-    Point, StatusOverlay, TouchJoystickOverlay, TouchOverlay, touch_control_at,
-    touch_menu_button_rect,
+    GameHelpParent, GameOptionsParent, GameScreen, GameSimulationCadence, GameTouchSettings,
+    GameUiAction, GuiScale, Point, StatusOverlay, TouchJoystickOverlay, TouchOverlay,
+    touch_control_at, touch_menu_button_rect,
 };
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
@@ -1927,6 +1927,25 @@ impl WebSceneHost {
         self.ui_report(false, None).map_err(JsValue::from)
     }
 
+    /// Slow the ordinary integrated server so browser acceptance can capture
+    /// transient simulation states without changing their production rules.
+    #[wasm_bindgen(js_name = setSimulationCadenceForSmoke)]
+    pub fn set_simulation_cadence_for_smoke(
+        &mut self,
+        host_rate_hz: u32,
+        gameplay_rate_hz: u32,
+        physics_rate_hz: u32,
+    ) -> Result<JsValue, JsValue> {
+        let cadence = GameSimulationCadence::new(host_rate_hz, gameplay_rate_hz, physics_rate_hz);
+        if !cadence.is_valid() {
+            return Err(JsValue::from_str("smoke simulation cadence is invalid"));
+        }
+        ClientExperienceSettingsHost::set_server_simulation_cadence(self.host_mut()?, cadence)
+            .map_err(js_error)?;
+        self.diagnostic_report(None, false, 0.0, false)
+            .map_err(JsValue::from)
+    }
+
     /// Exact typed seasonal state for the explicit browser smoke observer.
     ///
     /// The production browser adapter never calls this method. It lets the
@@ -3683,7 +3702,38 @@ impl WebSceneHost {
                     &loaded_chunk_set_hash(client),
                 )?;
                 let statistics = client.player_statistics();
+                let sleep = client.sleep_state();
+                report_set_number(&object, "gameTime", client.game_time() as f64)?;
+                report_set_bool(&object, "sleeping", sleep.sleeping)?;
+                report_set_number(
+                    &object,
+                    "sleepingPlayers",
+                    f64::from(sleep.sleeping_players),
+                )?;
+                report_set_number(
+                    &object,
+                    "eligiblePlayers",
+                    f64::from(sleep.eligible_players),
+                )?;
                 report_set_number(&object, "entityCount", client.entity_count() as f64)?;
+                report_set_number(
+                    &object,
+                    "sleepingMatCount",
+                    client
+                        .entity_snapshots()
+                        .filter(|entity| entity.kind == mclone_protocol::EntityKind::SleepingMat)
+                        .count() as f64,
+                )?;
+                report_set_string(
+                    &object,
+                    "sleepingMatEntityIds",
+                    &client
+                        .entity_snapshots()
+                        .filter(|entity| entity.kind == mclone_protocol::EntityKind::SleepingMat)
+                        .map(|entity| entity.id.0.to_string())
+                        .collect::<Vec<_>>()
+                        .join(","),
+                )?;
                 report_set_number(
                     &object,
                     "mallardCount",

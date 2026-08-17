@@ -53,6 +53,11 @@ interface SmokeRuntime {
   resumeRendering?: () => void;
   renderOverviewFrame?: () => WasmReport | null;
   setDebugOverlay?: (visible: boolean) => WasmReport | null;
+  setSimulationCadenceForSmoke?: (
+    hostRateHz: number,
+    gameplayRateHz: number,
+    physicsRateHz: number,
+  ) => WasmReport | null;
   setSeasonPreviewForSmoke?: (
     solarEnabled: boolean,
     appearanceEnabled: boolean,
@@ -507,6 +512,13 @@ export function installWebSmokeObserver(
   };
   runtime.setDebugOverlay = (visible) => apply(
     (session) => session.setDebugOverlayVisible(visible),
+  );
+  runtime.setSimulationCadenceForSmoke = (hostRateHz, gameplayRateHz, physicsRateHz) => apply(
+    (session) => session.setSimulationCadenceForSmoke(
+      Math.trunc(hostRateHz),
+      Math.trunc(gameplayRateHz),
+      Math.trunc(physicsRateHz),
+    ),
   );
   runtime.setSeasonPreviewForSmoke = (
     solarEnabled,
