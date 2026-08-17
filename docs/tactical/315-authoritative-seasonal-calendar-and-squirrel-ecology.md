@@ -2,8 +2,8 @@
 
 Status: active coordinating parent 2026-08-17; Phase A implemented by
 [`316`](316-authoritative-season-calendar-foundation.md), Phase B implemented by
-[`317`](317-civil-time-discontinuity-and-sleep.md), Phase C planned by
-[`318`](318-seasonal-resource-opportunity.md)
+[`317`](317-civil-time-discontinuity-and-sleep.md), and Phase C implemented and
+accepted by [`318`](318-seasonal-resource-opportunity.md); Phase D is unblocked
 
 Topic: `seasons`
 
@@ -728,8 +728,8 @@ Tactical 317.
 
 ### Phase C: seasonal resource opportunity
 
-Status: planned 2026-08-17 by Tactical
-[`318`](318-seasonal-resource-opportunity.md).
+Status: implemented 2026-08-17 by Tactical
+[`318`](318-seasonal-resource-opportunity.md); automated Review Gate C accepted.
 
 1. Add pure local seasonal response for the five current resource strata.
 2. Preserve static terrain potential and standing stock separately from
@@ -745,11 +745,20 @@ Status: planned 2026-08-17 by Tactical
 terrain reasons while exact conservation, inactive freeze, and current
 three-species behavior remain intact. No population-target tuning is allowed.
 
+Accepted 2026-08-17 at
+`f27ccd3841f6f29a11ceb02766c8897b03c3c07c`. The deterministic seven-site,
+four-date opportunity report separates potential, standing stock, access, and
+recovery; sharp jump, inactive freeze, save/reopen, and exact
+full/accelerated receipts pass. The revision-pinned five-case campaign passes
+four 120-day windows plus a 200-day negative-seed stress window with exact
+conservation and honest local extinctions rather than target correction.
+Workspace, browser/Wasm, and thin-adapter gates are green. Tactical 318 owns
+the report hash, matrix checksum, and daily receipts.
+
 ### Phase D: squirrel asset, habitat, and initial population
 
-Status: drafted 2026-08-17 by Tactical
-[`319`](319-squirrel-asset-habitat-and-refuge.md); implementation remains
-blocked on Review Gate C.
+Status: ready for implementation 2026-08-17 by Tactical
+[`319`](319-squirrel-asset-habitat-and-refuge.md); Review Gate C is accepted.
 
 1. Author and validate the semantic figure, animation roles, prepared render,
    catalogue entry, and bounded sound family.
@@ -943,11 +952,11 @@ Do not add season, sleep, squirrel, resource, cache, or breeding policy to
 - [x] Land ordinary functional sleep content, player state, cancellation,
       realm quorum, wake, and cross-client clock publication.
 - [x] Prove sleep and date jumps execute no skipped simulation work.
-- [ ] Add continuous local seasonal accessibility/recovery for all five
+- [x] Add continuous local seasonal accessibility/recovery for all five
       resource strata without direct stock replacement.
-- [ ] Preserve inactive resource and animal freeze plus exact population
+- [x] Preserve inactive resource and animal freeze plus exact population
       conservation.
-- [ ] Re-accept rabbit/deer/mallard resource and population evidence.
+- [x] Re-accept rabbit/deer/mallard resource and population evidence.
 - [ ] Author and catalogue the first-party squirrel figure, clips, and bounded
       sound family.
 - [ ] Add squirrel habitat planning, durable realization, diet, lifecycle,

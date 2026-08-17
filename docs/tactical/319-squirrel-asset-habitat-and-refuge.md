@@ -1,6 +1,6 @@
 # Tactical 319: Squirrel Asset, Habitat, and Refuge
 
-Status: drafted 2026-08-17; implementation waits for Tactical 318 Review Gate C
+Status: active 2026-08-17; Tactical 318 Review Gate C accepted
 
 Parent: [`315`](315-authoritative-seasonal-calendar-and-squirrel-ecology.md)
 Phase D

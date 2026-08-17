@@ -1,6 +1,6 @@
 # Tactical 318: Seasonal Resource Opportunity
 
-Status: planned 2026-08-17; ready for implementation
+Status: implemented 2026-08-17; automated Review Gate C accepted
 
 Parent: [`315`](315-authoritative-seasonal-calendar-and-squirrel-ecology.md)
 Phase C
@@ -164,13 +164,32 @@ holds, and the established rabbit/deer/mallard lifecycle remains viable
 without a target population correction. Do not begin squirrel tuning until
 this evidence is recorded.
 
+Accepted 2026-08-17 at
+`f27ccd3841f6f29a11ceb02766c8897b03c3c07c`. The deterministic 56-day report
+at `/tmp/mclone-seasonal-resource-opportunity.json` has SHA-256
+`0e8db9f012fabc8429a66a8dc655538d38276eab55a01280f4762fdfa362fcef` and
+compares tropical, northern/southern temperate, wet, dry, high-elevation, and
+cold cells at days 1, 15, 29, and 43. It keeps terrain potential and standing
+stock distinct from accessibility and recovery. The focused ledger receipts
+prove sharp forward/backward date changes do no stock work, inactive cells
+freeze exactly, and full/accelerated closed-domain execution is exact.
+
+The revision-pinned five-window matrix (checksum
+`e998297ef9bf6ba6d88b99cb4690e67956a9161b495a27d750facad795737e78`)
+passed four 120-day windows and one 200-day negative-seed stress window. Its
+daily checksums are `75c9a962c00b`, `4c8ab84a8955`, `0ee29ecfc652`,
+`ef65c8771b87`, and `67d50da94304`. Outcomes diverge honestly, including
+local extinctions, without refill or population targeting; every conservation
+invariant passes. `cargo check --workspace`, the browser/Wasm typecheck-build,
+thin-adapter purity, and the real-seed full/accelerated canary also pass.
+
 ## Completion Checklist
 
-- [ ] Add and test the pure fixed-point five-stratum response.
-- [ ] Add topology-aware authoritative local sampling in `mclone-server`.
-- [ ] Apply accessibility only to physically reached intake.
-- [ ] Apply recovery only to loaded active-cell production.
-- [ ] Extend persistence revision, snapshots, reports, and invariants.
-- [ ] Prove sharp date jumps and inactive time do no resource work.
-- [ ] Re-accept full/accelerated and rabbit/deer/mallard campaigns.
-- [ ] Record Review Gate C evidence in Tactical 315 and living topics.
+- [x] Add and test the pure fixed-point five-stratum response.
+- [x] Add topology-aware authoritative local sampling in `mclone-server`.
+- [x] Apply accessibility only to physically reached intake.
+- [x] Apply recovery only to loaded active-cell production.
+- [x] Extend persistence revision, snapshots, reports, and invariants.
+- [x] Prove sharp date jumps and inactive time do no resource work.
+- [x] Re-accept full/accelerated and rabbit/deer/mallard campaigns.
+- [x] Record Review Gate C evidence in Tactical 315 and living topics.

@@ -64,7 +64,10 @@ breeding cooldown. Food, resource recovery, movement, and mortality remain
 individual and terrain-driven. A failed parented mallard nest is removed only
 after authoritative parent mortality, preventing it from permanently blocking
 later clutches without treating unloaded parents as dead. The exact revision-5
-120/200-day acceptance campaign remains open; Tactical 308 owns its evidence.
+120/200-day lifecycle is now re-accepted by Tactical 318's revision-pinned
+five-window seasonal-resource campaign. Exact conservation passes even where
+terrain-driven local extinction occurs; no refill or target population was
+added.
 
 Active coordinating parent Tactical
 [`315`](../tactical/315-authoritative-seasonal-calendar-and-squirrel-ecology.md)
@@ -79,7 +82,10 @@ remain later alternatives rather than parallel roster work.
 Phase C is bounded by Tactical
 [`318`](../tactical/318-seasonal-resource-opportunity.md): current climate may
 change derived access and future loaded recovery, but never directly replace
-standing stock or advance an inactive animal/resource record.
+standing stock or advance an inactive animal/resource record. That contract
+and automated Review Gate C are now implemented and accepted, unblocking the
+bounded squirrel actor/habitat/refuge phase in Tactical
+[`319`](../tactical/319-squirrel-asset-habitat-and-refuge.md).
 
 ## Scope
 

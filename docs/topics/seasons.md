@@ -87,9 +87,20 @@ loaded food accessibility and recovery before promoting squirrels through
 mast, bounded caches, tree refuge, and the ordinary durable lifecycle. It does
 not make calendar transitions directly add or remove food or animals.
 
+Its Phase C child Tactical
+[`318`](../tactical/318-seasonal-resource-opportunity.md) is now implemented
+and accepted. Resource rule revision 3 applies continuous local seasonal
+accessibility and loaded recovery to all five existing strata while retaining
+terrain potential and durable standing stock. Direct date changes and sleep
+do no resource work; inactive cells freeze; retained profiles remain exactly
+neutral. A deterministic seven-site/four-date report, exact jump and
+full/accelerated receipts, and a revision-pinned 120/200-day five-window
+rabbit/deer/mallard campaign pass without a population target. Squirrel Phase
+D is therefore unblocked.
+
 No terrain or biome season generation, active weather event, migration
 producer, seasonal hydrology, wildlife tagging, or managed-habitat
-infrastructure is implemented. Seasonal resource opportunity and squirrel
+infrastructure is implemented. Squirrel habitat, refuge, cache, and lifecycle
 ecology remain the next bounded phases.
 The selected direction is that unloaded terrain and entities receive no ticks
 or elapsed-time catch-up. Climate and ambient seasonal opportunities may be

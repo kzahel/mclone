@@ -74,7 +74,13 @@ actual food access, condition, reproduction, and mortality rather than a
 seasonal count multiplier.
 Its Phase C child
 [`318`](../tactical/318-seasonal-resource-opportunity.md) now binds the
-five-stratum active-resource implementation and Review Gate C.
+five-stratum active-resource implementation. Review Gate C is accepted at
+resource rule revision 3: seven climate/terrain sites visibly diverge, sharp
+calendar changes do no stock work, inactive cells freeze, and the exact
+five-window 120/200-day rabbit/deer/mallard campaign passes without refill or
+population targeting. Squirrel asset, woodland habitat, durable initial
+population, ground forage, and tree refuge are now unblocked under Tactical
+[`319`](../tactical/319-squirrel-asset-habitat-and-refuge.md).
 
 ## Scope
 
