@@ -29,7 +29,7 @@ use super::{
     TERRAIN_PREVIEW_SAMPLE_BYTES, TERRAIN_PREVIEW_UNIFORM_BYTES, TERRAIN_PREVIEW_WORKGROUP_AXIS,
     TerrainClipmap, TerrainClipmapConfig, TerrainClipmapDiagnostics, TerrainClipmapTile,
     TerrainCompositionSourceIdentity, TerrainExactBoundaryProfile, TerrainExactCoverageMask,
-    TerrainExactCoverageMode, TerrainExactHandoffTopology, TerrainExactTransitionField,
+    TerrainExactCoverageMode, TerrainExactTransitionField,
     TerrainHorizonPresentation, TerrainPreviewCamera, TerrainPreviewDrawOptions,
     TerrainPreviewLayer, TerrainPreviewSource, TerrainPreviewSplitLayout,
     TerrainVegetationCoordinator, TerrainVegetationCoordinatorState, TerrainVegetationDesiredTile,
@@ -48,7 +48,7 @@ use super::{
 pub const TERRAIN_PREVIEW_MATERIAL_UV_COUNT: usize = 256;
 const TERRAIN_PREVIEW_MATERIAL_TABLE_BYTES: u64 =
     (TERRAIN_PREVIEW_MATERIAL_UV_COUNT * 4 * 4 * size_of::<f32>()) as u64;
-const TERRAIN_EXACT_COVERAGE_UNIFORM_BYTES: u64 = 80;
+const TERRAIN_EXACT_COVERAGE_UNIFORM_BYTES: u64 = 64;
 const TERRAIN_EXACT_CONNECTOR_INSTANCE_BYTES: u64 = 12;
 const TERRAIN_EXACT_CONNECTOR_VERTICES_PER_INSTANCE: u32 = 6;
 const TERRAIN_HORIZON_TREE_CULL_MARGIN_BLOCKS: f32 = 16.0;
@@ -163,7 +163,6 @@ const TERRAIN_HORIZON_NORMAL_EDGE_EAST: u32 = 1 << 28;
 const TERRAIN_HORIZON_NORMAL_EDGE_NORTH: u32 = 1 << 29;
 const TERRAIN_HORIZON_NORMAL_EDGE_SOUTH: u32 = 1 << 30;
 const TERRAIN_HORIZON_SMOOTH_VERTICES_PER_CELL: u32 = 6;
-const TERRAIN_HORIZON_VOXEL_SHELL_VERTICES_PER_CELL: u32 = 30;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct TerrainViewportFrameStats {
@@ -295,7 +294,6 @@ pub struct TerrainHorizonFrameStats {
     pub vegetation_bytes: u64,
     pub resident_bytes: u64,
     pub exact_coverage_mode: TerrainExactCoverageMode,
-    pub exact_handoff_topology: TerrainExactHandoffTopology,
     pub exact_coverage_generation: u64,
     pub exact_painted_chunks: u32,
     pub exact_coverage_mask_bytes: u64,
@@ -434,8 +432,6 @@ struct TerrainExactCoverageResources {
     connector_instances: Vec<TerrainExactConnectorInstance>,
     mode: TerrainExactCoverageMode,
     uploaded_mode: TerrainExactCoverageMode,
-    topology: TerrainExactHandoffTopology,
-    uploaded_topology: TerrainExactHandoffTopology,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -521,7 +517,6 @@ impl TerrainExactCoverageResources {
             view_formats: &[],
         });
         let boundary_view = boundary_texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let topology = TerrainExactHandoffTopology::VoxelShell;
         queue.write_buffer(
             &uniform_buffer,
             0,
@@ -530,7 +525,6 @@ impl TerrainExactCoverageResources {
                 &transition,
                 &boundary,
                 TerrainExactCoverageMode::Disabled,
-                topology,
             ),
         );
         queue.write_buffer(&mask_buffer, 0, &mask.word_bytes());
@@ -575,8 +569,6 @@ impl TerrainExactCoverageResources {
             connector_instances: Vec::new(),
             mode: TerrainExactCoverageMode::Disabled,
             uploaded_mode: TerrainExactCoverageMode::Disabled,
-            topology,
-            uploaded_topology: topology,
         })
     }
 
@@ -653,7 +645,7 @@ impl TerrainExactCoverageResources {
         queue.write_buffer(
             &self._uniform_buffer,
             0,
-            &terrain_exact_uniform_bytes(&mask, transition, boundary, mode, self.topology),
+            &terrain_exact_uniform_bytes(&mask, transition, boundary, mode),
         );
         self.mask = mask;
         self.transition = transition.clone();
@@ -661,7 +653,6 @@ impl TerrainExactCoverageResources {
         self.connector_instances = terrain_exact_connector_instances(&self.mask, boundary);
         self.mode = mode;
         self.uploaded_mode = mode;
-        self.uploaded_topology = self.topology;
         Ok(())
     }
 
@@ -669,12 +660,8 @@ impl TerrainExactCoverageResources {
         self.mode = TerrainExactCoverageMode::Disabled;
     }
 
-    fn set_topology(&mut self, topology: TerrainExactHandoffTopology) {
-        self.topology = topology;
-    }
-
     fn sync(&mut self, queue: &wgpu::Queue) {
-        if self.uploaded_mode != self.mode || self.uploaded_topology != self.topology {
+        if self.uploaded_mode != self.mode {
             queue.write_buffer(
                 &self._uniform_buffer,
                 0,
@@ -683,11 +670,9 @@ impl TerrainExactCoverageResources {
                     &self.transition,
                     &self.boundary,
                     self.mode,
-                    self.topology,
                 ),
             );
             self.uploaded_mode = self.mode;
-            self.uploaded_topology = self.topology;
         }
     }
 }
@@ -736,7 +721,6 @@ fn terrain_exact_uniform_bytes(
     transition: &TerrainExactTransitionField,
     boundary: &TerrainExactBoundaryProfile,
     mode: TerrainExactCoverageMode,
-    topology: TerrainExactHandoffTopology,
 ) -> [u8; TERRAIN_EXACT_COVERAGE_UNIFORM_BYTES as usize] {
     let mut bytes = [0; TERRAIN_EXACT_COVERAGE_UNIFORM_BYTES as usize];
     bytes[..32].copy_from_slice(&mask.uniform_bytes(mode));
@@ -768,7 +752,6 @@ fn terrain_exact_uniform_bytes(
         let start = 48 + index * size_of::<i32>();
         bytes[start..start + size_of::<i32>()].copy_from_slice(&value.to_ne_bytes());
     }
-    bytes[64..68].copy_from_slice(&(topology as u32).to_ne_bytes());
     bytes
 }
 
@@ -3533,10 +3516,6 @@ impl TerrainHorizonRenderer {
         self.exact_coverage_snapshot = None;
     }
 
-    pub fn set_exact_handoff_topology(&mut self, topology: TerrainExactHandoffTopology) {
-        self.renderer.exact_coverage.set_topology(topology);
-    }
-
     pub fn set_authoritative_tree_ownership(&mut self, enabled: bool) {
         self.authoritative_tree_ownership = enabled;
     }
@@ -3927,7 +3906,6 @@ impl TerrainHorizonRenderer {
         let exact_connector_generation = self.renderer.exact_coverage.mask.generation;
         let exact_connector_instances = if self.renderer.exact_coverage.mode
             != TerrainExactCoverageMode::Disabled
-            && self.renderer.exact_coverage.topology == TerrainExactHandoffTopology::DirectSmooth
         {
             self.renderer.exact_coverage.connector_instances.clone()
         } else {
@@ -4110,10 +4088,7 @@ impl TerrainHorizonRenderer {
                         / self.renderer.horizon_render_cell_stride;
                     pass.draw(
                         0..render_cells.pow(2)
-                            * terrain_horizon_vertices_per_cell(
-                                level.snapshot.sample_spacing,
-                                self.renderer.exact_coverage.topology,
-                            ),
+                            * terrain_horizon_vertices_per_cell(level.snapshot.sample_spacing),
                         0..1,
                     );
                     drawn_tiles = drawn_tiles.saturating_add(1);
@@ -4123,10 +4098,7 @@ impl TerrainHorizonRenderer {
                     drawn_levels = drawn_levels.saturating_add(1);
                 }
             }
-            if self.renderer.exact_coverage.mode != TerrainExactCoverageMode::Disabled
-                && self.renderer.exact_coverage.topology
-                    == TerrainExactHandoffTopology::DirectSmooth
-            {
+            if self.renderer.exact_coverage.mode != TerrainExactCoverageMode::Disabled {
                 let connector_pipeline = if multiview {
                     self.renderer
                         .horizon_exact_connector_multiview_pipeline
@@ -4271,7 +4243,6 @@ impl TerrainHorizonRenderer {
                     .saturating_mul(render_cells.pow(2))
                     .saturating_mul(terrain_horizon_vertices_per_cell(
                         level.snapshot.sample_spacing,
-                        self.renderer.exact_coverage.topology,
                     )),
             )
         });
@@ -4417,7 +4388,6 @@ impl TerrainHorizonRenderer {
             vegetation_bytes,
             resident_bytes,
             exact_coverage_mode: self.renderer.exact_coverage.mode,
-            exact_handoff_topology: self.renderer.exact_coverage.topology,
             exact_coverage_generation: self.renderer.exact_coverage.mask.generation,
             exact_painted_chunks: self.renderer.exact_coverage.mask.painted_chunks,
             exact_coverage_mask_bytes: TERRAIN_EXACT_COVERAGE_MASK_BYTES,
@@ -4613,15 +4583,8 @@ fn terrain_horizon_samples_per_axis() -> u32 {
         .saturating_add(TERRAIN_HORIZON_NORMAL_HALO_RADIUS.saturating_mul(2))
 }
 
-const fn terrain_horizon_vertices_per_cell(
-    sample_spacing: u32,
-    topology: TerrainExactHandoffTopology,
-) -> u32 {
-    if sample_spacing == 1 && matches!(topology, TerrainExactHandoffTopology::VoxelShell) {
-        TERRAIN_HORIZON_VOXEL_SHELL_VERTICES_PER_CELL
-    } else {
-        TERRAIN_HORIZON_SMOOTH_VERTICES_PER_CELL
-    }
+const fn terrain_horizon_vertices_per_cell(_sample_spacing: u32) -> u32 {
+    TERRAIN_HORIZON_SMOOTH_VERTICES_PER_CELL
 }
 
 fn terrain_horizon_normal_halo_samples_per_tile() -> u32 {
@@ -5364,35 +5327,26 @@ mod tests {
     }
 
     #[test]
-    fn horizon_review_topology_selects_voxel_or_smooth_finest_geometry() {
-        assert_eq!(
-            terrain_horizon_vertices_per_cell(1, TerrainExactHandoffTopology::VoxelShell),
-            TERRAIN_HORIZON_VOXEL_SHELL_VERTICES_PER_CELL
-        );
-        assert_eq!(
-            terrain_horizon_vertices_per_cell(1, TerrainExactHandoffTopology::DirectSmooth),
-            TERRAIN_HORIZON_SMOOTH_VERTICES_PER_CELL
-        );
-        for spacing in [2, 4, 8, 16, 32, 64, 128, 256, 512] {
+    fn horizon_uses_only_smooth_geometry_and_the_exact_connector() {
+        for spacing in [1, 2, 4, 8, 16, 32, 64, 128, 256, 512] {
             assert_eq!(
-                terrain_horizon_vertices_per_cell(spacing, TerrainExactHandoffTopology::VoxelShell,),
+                terrain_horizon_vertices_per_cell(spacing),
                 TERRAIN_HORIZON_SMOOTH_VERTICES_PER_CELL
             );
         }
 
         let shader = super::super::TERRAIN_PREVIEW_RENDER_WGSL;
-        assert!(shader.contains("let voxel_shell = !direct_exact_handoff()"));
-        assert!(shader.contains("let vertices_per_cell = select(6u, 30u, voxel_shell);"));
-        assert!(shader.contains("appearance_transition_weight = exact_transition_weight"));
+        assert!(shader.contains("let cell_index = vertex_index / 6u;"));
+        assert!(shader.contains("let appearance_transition_weight = exact_transition_weight"));
         assert!(shader.contains("var exact_boundary_profile: texture_2d<u32>;"));
         assert!(shader.contains("fn exact_connector_vertex("));
         assert!(shader.contains("bottom_y = min(procedural_y, exact_y)"));
         assert!(shader.contains("vec2<f32>(world_z, -world_y)"));
         assert!(shader.contains("vec2<f32>(world_x, -world_y)"));
         assert!(shader.contains("fn exact_connector_vertex_main("));
-        assert!(shader.contains("surface_kind = 3u;"));
-        assert!(shader.contains("bottom_y = top_y - 32.0;"));
-        assert!(shader.contains("surface_kind = 2u;"));
+        assert!(shader.contains("out.side_surface = 1u;"));
+        assert!(!shader.contains("let vertices_per_cell = select("));
+        assert!(!shader.contains("round(stitched_height)"));
     }
 
     #[test]
@@ -5421,7 +5375,7 @@ mod tests {
     }
 
     #[test]
-    fn horizon_near_materials_use_active_pack_faces_and_worldgen_strata() {
+    fn horizon_transition_uses_active_pack_top_and_connector_faces() {
         let table =
             TerrainPreviewMaterialTable::from_catalog(&mclone_mesh::TexturedMeshCatalog::default());
         assert_eq!(
@@ -5432,14 +5386,12 @@ mod tests {
         let shader = super::super::terrain_preview_render_wgsl(
             mclone_render_color::RenderTargetColorTransform::Identity,
         );
-        assert!(!shader.contains("__MCLONE_SURFACE_COLUMN_PROFILE_WGSL__"));
-        assert!(shader.contains("fn mclone_preview_column_profile("));
         assert!(shader.contains("material_table.side_uvs[material]"));
         assert!(shader.contains("material_table.grass_tints"));
         assert!(shader.contains("material_uses_grass_tint(input.material, false)"));
         assert!(shader.contains("full_sky_environmental_illumination()"));
         assert!(shader.contains("if display_material != 2u"));
-        assert!(shader.contains("terrain_horizon_near_material_weight("));
+        assert!(shader.contains("exact_transition_weight(world_position.xz)"));
     }
 
     #[test]
@@ -5475,30 +5427,22 @@ mod tests {
     }
 
     #[test]
-    fn horizon_voxel_shade_converges_without_blending_geometry_owners() {
+    fn horizon_smooth_shade_keeps_one_geometry_owner() {
         let shader = super::super::TERRAIN_PREVIEW_RENDER_WGSL;
         assert!(shader.contains("let smooth_geometric_shade = clamp("));
-        assert!(shader.contains("let voxel_smooth_transition_weight = select("));
-        assert!(shader.contains(
-            "light = mix(smooth_geometric_shade, light, voxel_smooth_transition_weight);"
-        ));
-        assert_eq!(
-            shader
-                .matches("terrain_horizon_near_material_weight(cell_x, cell_z, cells)")
-                .count(),
-            1
-        );
+        assert!(shader.contains("let light = smooth_geometric_shade;"));
+        assert!(!shader.contains("voxel_smooth_transition_weight"));
         assert!(!shader.contains("mix(stitched_height"));
     }
 
     #[test]
-    fn horizon_surface_response_converges_across_voxel_and_smooth_terrain() {
+    fn horizon_surface_response_converges_from_exact_to_smooth_terrain() {
         let shader = super::super::TERRAIN_PREVIEW_RENDER_WGSL;
         assert!(shader.contains("fn material_uses_grass_tint("));
         assert!(shader.contains("albedo = surface_tint(input, input.material, false);"));
         assert!(shader.contains("let resolved_exact_weight = clamp(exact_weight"));
         assert_eq!(shader.matches("input.world_position.w,").count(), 3);
-        assert!(!shader.contains("input.near_shell != 0u,\n            );"));
+        assert_eq!(shader.matches("out.side_surface = 1u;").count(), 1);
     }
 
     #[test]
@@ -5515,18 +5459,11 @@ mod tests {
     fn horizon_shader_welds_fine_outer_edges_to_coarse_interpolation() {
         let shader = super::super::TERRAIN_PREVIEW_RENDER_WGSL;
         assert!(shader.contains("fn terrain_horizon_geometry_height("));
-        assert!(shader.contains("fn terrain_horizon_parent_boundary_y("));
         assert!(shader.contains("let rendered_x = sample_x / cell_stride;"));
         assert!(shader.contains("let rendered_z = sample_z / cell_stride;"));
         assert!(shader.contains("west_or_east && (rendered_z & 1) != 0"));
         assert!(shader.contains("north_or_south && (rendered_x & 1) != 0"));
         assert!(shader.contains("stitched_height + 1.0"));
-        assert!(shader.contains("parent_boundary_y = terrain_horizon_parent_boundary_y("));
-        assert!(shader.contains("bottom_y = min(top_y, parent_boundary_y);"));
-        assert!(shader.contains("upper_y = max(top_y, parent_boundary_y);"));
-        assert!(!shader.contains("bottom_y = min(top_y, neighbor_y);"));
-        assert!(shader.contains("let endpoint = 1 - i32(corner.x);"));
-        assert!(shader.contains("1.0 - cardinal_horizontal,"));
         assert_eq!(
             shader
                 .matches("let left = terrain_horizon_geometry_height(")

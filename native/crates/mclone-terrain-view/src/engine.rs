@@ -1,10 +1,9 @@
 use crate::{
     BoundedRepresentationOwnershipSnapshot, McloneTreeOccurrenceId,
     TERRAIN_HORIZON_MAX_PROVEN_RENDER_CELL_STRIDE, TerrainClipmap, TerrainClipmapConfig,
-    TerrainExactCoverageMode, TerrainExactHandoffTopology, TerrainHorizonFrameStats,
-    TerrainHorizonPresentation, TerrainHorizonRenderTarget, TerrainHorizonRenderer,
-    TerrainPreparedExactFrame, TerrainPreviewMaterialAtlas, TerrainVegetationExecutor,
-    TerrainViewSourceIdentity,
+    TerrainExactCoverageMode, TerrainHorizonFrameStats, TerrainHorizonPresentation,
+    TerrainHorizonRenderTarget, TerrainHorizonRenderer, TerrainPreparedExactFrame,
+    TerrainPreviewMaterialAtlas, TerrainVegetationExecutor, TerrainViewSourceIdentity,
 };
 use mclone_render_color::{RenderColorProfile, RenderTargetColorTransform};
 use mclone_worldgen::terrain_preview::{
@@ -310,11 +309,6 @@ impl TerrainViewEngine {
     /// canonical ownership snapshot instead.
     pub fn set_authoritative_tree_ownership(&mut self, enabled: bool) {
         self.renderer.set_authoritative_tree_ownership(enabled);
-    }
-
-    /// Select the temporary Tactical 313 A/B geometry path.
-    pub fn set_exact_handoff_topology(&mut self, topology: TerrainExactHandoffTopology) {
-        self.renderer.set_exact_handoff_topology(topology);
     }
 
     pub fn shutdown(&mut self) {

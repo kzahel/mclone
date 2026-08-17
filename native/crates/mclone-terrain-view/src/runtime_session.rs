@@ -3,8 +3,8 @@ use std::time::Duration;
 use crate::{
     BoundedRepresentationOwnershipSnapshot, ExactPaintedCoverageSnapshot, McloneTreeOccurrenceId,
     TerrainClipmapConfig, TerrainCompositionSourceIdentity, TerrainExactCoverageMode,
-    TerrainExactHandoffTopology, TerrainHorizonFrameStats, TerrainHorizonPresentation,
-    TerrainHorizonRenderTarget, TerrainPreparedExactFrame, TerrainPreviewCamera,
+    TerrainHorizonFrameStats, TerrainHorizonPresentation, TerrainHorizonRenderTarget,
+    TerrainPreparedExactFrame, TerrainPreviewCamera,
     TerrainPreviewMaterialAtlas, TerrainPreviewProjectionKind, TerrainPreviewView,
     TerrainVegetationExecutor, TerrainViewEngine, TerrainViewEngineConfig,
     TerrainViewSourceIdentity, terrain_preview_focus_y_for_profile,
@@ -147,7 +147,7 @@ impl TerrainRuntimeSession {
             1,
             1,
         )?;
-        let mut engine = TerrainViewEngine::new(
+        let engine = TerrainViewEngine::new(
             device,
             queue,
             color_format,
@@ -163,7 +163,6 @@ impl TerrainRuntimeSession {
             material_atlas,
             vegetation_executor,
         )?;
-        engine.set_exact_handoff_topology(TerrainExactHandoffTopology::DirectSmooth);
         let mut session = Self {
             engine,
             config,
@@ -194,10 +193,6 @@ impl TerrainRuntimeSession {
             self.config.width = width;
             self.config.height = height;
         }
-    }
-
-    pub fn set_exact_handoff_topology(&mut self, topology: TerrainExactHandoffTopology) {
-        self.engine.set_exact_handoff_topology(topology);
     }
 
     pub const fn view_state(&self) -> WorldViewState {

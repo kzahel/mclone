@@ -3,9 +3,8 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, ensure};
 use mclone_terrain_view::{
-    TerrainExactCoverageMode, TerrainExactHandoffTopology, TerrainHorizonFrameStats,
-    TerrainHorizonVegetationServiceStats, TerrainVegetationCoordinatorState,
-    TerrainVegetationExecutorKind,
+    TerrainExactCoverageMode, TerrainHorizonFrameStats, TerrainHorizonVegetationServiceStats,
+    TerrainVegetationCoordinatorState, TerrainVegetationExecutorKind,
 };
 use mclone_view_control::{
     ViewPoint, ViewportMetrics, WorldViewIntent, WorldViewMode, WorldViewState,
@@ -363,7 +362,6 @@ impl SmokeRecorder {
         if let Some(expected) = expected_coverage_mode {
             ensure!(
                 stats.exact_coverage_mode == expected
-                    && stats.exact_handoff_topology == TerrainExactHandoffTopology::DirectSmooth
                     && stats.exact_painted_chunks == exact.painted_chunks
                     && stats.exact_coverage_generation == exact.coverage_generation
                     && stats.tree_ownership_generation == exact.coverage_generation
@@ -448,10 +446,6 @@ impl SmokeRecorder {
         fields.insert("drawn_levels".to_owned(), json!(stats.drawn_levels));
         fields.insert("drawn_tiles".to_owned(), json!(stats.drawn_tiles));
         fields.insert("vertex_count".to_owned(), json!(stats.vertex_count));
-        fields.insert(
-            "exact_handoff_topology".to_owned(),
-            json!(stats.exact_handoff_topology.label()),
-        );
         fields.insert(
             "exact_connector_segments".to_owned(),
             json!(stats.exact_connector_segments),
@@ -589,10 +583,6 @@ impl SmokeRecorder {
         let fields = receipt
             .as_object_mut()
             .expect("a JSON object literal produces an object");
-        fields.insert(
-            "final_exact_handoff_topology".to_owned(),
-            json!(final_stats.exact_handoff_topology.label()),
-        );
         fields.insert(
             "final_exact_connector_segments".to_owned(),
             json!(final_stats.exact_connector_segments),

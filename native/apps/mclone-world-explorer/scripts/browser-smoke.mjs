@@ -418,7 +418,6 @@ function assertFixedReady(value, stage) {
       || value.drawnLevels !== 10
       || value.fixedResidentBytes !== 133_209_640
       || value.vertexCount <= 0
-      || value.exactHandoffTopology !== "direct-smooth"
       || value.exactConnectorVertexCount !== value.exactConnectorSegments * 6
       || value.exactConnectorBytes % 12 !== 0
       || value.exactConnectorSegments * 12 > value.exactConnectorBytes

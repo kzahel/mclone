@@ -33,8 +33,6 @@ struct TerrainPreviewSample {
 // __MCLONE_TARGET_COLOR_TRANSFER_WGSL__
 const terrain_target_color_transform: f32 = __MCLONE_TARGET_COLOR_TRANSFORM__;
 // MCLONE_FOG_FUNCTION
-// __MCLONE_SURFACE_COLUMN_PROFILE_WGSL__
-
 const TERRAIN_HORIZON_NORMAL_EDGE_WEST: u32 = 0x08000000u;
 const TERRAIN_HORIZON_NORMAL_EDGE_EAST: u32 = 0x10000000u;
 const TERRAIN_HORIZON_NORMAL_EDGE_NORTH: u32 = 0x20000000u;
@@ -84,7 +82,6 @@ struct TerrainExactCoverageParams {
     mode_count_generation: vec4<u32>,
     transition_origin_size: vec4<i32>,
     boundary_origin_size: vec4<i32>,
-    options: vec4<u32>,
 };
 
 @group(2) @binding(0)
@@ -116,10 +113,7 @@ struct VertexOutput {
     @location(9) surface_y: f32,
     @location(10) @interpolate(flat) view_index: u32,
     @location(11) world_uv: vec2<f32>,
-    @location(12) @interpolate(flat) surface_kind: u32,
-    @location(13) @interpolate(flat) near_shell: u32,
-    @location(14) @interpolate(flat) surface_recipe: u32,
-    @location(15) @interpolate(flat) column_top_y: f32,
+    @location(12) @interpolate(flat) side_surface: u32,
 };
 
 fn exact_chunk_masked(chunk: vec2<i32>) -> bool {
@@ -142,13 +136,8 @@ fn exact_chunk_painted(world_xz: vec2<f32>) -> bool {
     return exact_chunk_masked(vec2<i32>(floor(world_xz / 16.0)));
 }
 
-fn direct_exact_handoff() -> bool {
-    return exact_coverage.options.x == 1u;
-}
-
 fn exact_transition_weight(world_xz: vec2<f32>) -> f32 {
-    if !direct_exact_handoff()
-        || exact_coverage.mode_count_generation.x == 0u
+    if exact_coverage.mode_count_generation.x == 0u
         || exact_coverage.transition_origin_size.z <= 0
         || exact_coverage.transition_origin_size.w <= 0 {
         return 0.0;
@@ -170,8 +159,7 @@ fn exact_transition_weight(world_xz: vec2<f32>) -> f32 {
 }
 
 fn exact_boundary_column(block_xz: vec2<i32>) -> u32 {
-    if !direct_exact_handoff()
-        || exact_coverage.mode_count_generation.x == 0u
+    if exact_coverage.mode_count_generation.x == 0u
         || exact_coverage.boundary_origin_size.z <= 0
         || exact_coverage.boundary_origin_size.w <= 0 {
         return 0u;
@@ -333,25 +321,6 @@ fn terrain_horizon_geometry_height(
     return original_height;
 }
 
-// The spacing-one voxel shell rounds its top independently of the smooth
-// parent. Re-evaluate the stitched fine-edge endpoint that lies on the parent
-// boundary so the reserved cardinal face terminates on the parent's actual
-// piecewise-linear profile instead of another rounded fine sample.
-fn terrain_horizon_parent_boundary_y(
-    sample_x: i32,
-    sample_z: i32,
-    cells: i32,
-    instance_index: u32,
-) -> f32 {
-    return terrain_horizon_geometry_height(
-        sample_x,
-        sample_z,
-        cells,
-        1,
-        instance_index,
-    ) + 1.0;
-}
-
 fn terrain_horizon_coarse_footprint_weight(
     sample_x: i32,
     sample_z: i32,
@@ -375,28 +344,6 @@ fn terrain_horizon_coarse_footprint_weight(
         distance = min(distance, cells - sample_z);
     }
     return clamp((2.0 - f32(distance)) * 0.5, 0.0, 1.0);
-}
-
-fn terrain_horizon_near_material_weight(
-    cell_x: u32,
-    cell_z: u32,
-    cells: u32,
-) -> f32 {
-    let flags = params.content_stage_flags.w;
-    var distance = 32u;
-    if (flags & TERRAIN_HORIZON_NORMAL_EDGE_WEST) != 0u {
-        distance = min(distance, cell_x);
-    }
-    if (flags & TERRAIN_HORIZON_NORMAL_EDGE_EAST) != 0u {
-        distance = min(distance, cells - 1u - cell_x);
-    }
-    if (flags & TERRAIN_HORIZON_NORMAL_EDGE_NORTH) != 0u {
-        distance = min(distance, cell_z);
-    }
-    if (flags & TERRAIN_HORIZON_NORMAL_EDGE_SOUTH) != 0u {
-        distance = min(distance, cells - 1u - cell_z);
-    }
-    return clamp((f32(distance) + 0.5) / 32.0, 0.0, 1.0);
 }
 
 fn rgb8(color: u32) -> vec3<f32> {
@@ -785,21 +732,12 @@ fn terrain_vertex(
     let cells = u32(params.origin_spacing_cells.w);
     let cell_stride = max(terrain_render_cell_stride, 1u);
     let render_cells = cells / cell_stride;
-    let voxel_shell = !direct_exact_handoff()
-        && sample_halo_radius() > 0
-        && params.origin_spacing_cells.z == 1
-        && cell_stride == 1u;
-    let vertices_per_cell = select(6u, 30u, voxel_shell);
-    let cell_index = vertex_index / vertices_per_cell;
+    let cell_index = vertex_index / 6u;
     let cell_x = (cell_index % render_cells) * cell_stride;
     let cell_z = (cell_index / render_cells) * cell_stride;
-    let vertex_in_cell = vertex_index % vertices_per_cell;
-    let face_index = select(0u, vertex_in_cell / 6u, voxel_shell);
-    let corner = grid_corner(vertex_in_cell % 6u);
-    let smooth_sample_x = cell_x + corner.x * cell_stride;
-    let smooth_sample_z = cell_z + corner.y * cell_stride;
-    let sample_x = select(smooth_sample_x, cell_x, voxel_shell);
-    let sample_z = select(smooth_sample_z, cell_z, voxel_shell);
+    let corner = grid_corner(vertex_index % 6u);
+    let sample_x = cell_x + corner.x * cell_stride;
+    let sample_z = cell_z + corner.y * cell_stride;
     let logical_x = i32(sample_x);
     let logical_z = i32(sample_z);
     let index = sample_z * params.layer_samples_size.y + sample_x;
@@ -907,181 +845,18 @@ fn terrain_vertex(
         0.34,
         1.05,
     );
-    var light = smooth_geometric_shade;
-
-    let cell_world_x = params.origin_spacing_cells.x
-        + i32(cell_x) * params.origin_spacing_cells.z;
-    let cell_world_z = params.origin_spacing_cells.y
-        + i32(cell_z) * params.origin_spacing_cells.z;
-    var vertex_world_x = f32(params.origin_spacing_cells.x
-        + i32(smooth_sample_x) * params.origin_spacing_cells.z);
-    var vertex_world_z = f32(params.origin_spacing_cells.y
-        + i32(smooth_sample_z) * params.origin_spacing_cells.z);
-    var vertex_world_y = stitched_height + 1.0;
-    var world_uv = vec2<f32>(vertex_world_x, vertex_world_z);
-    var surface_kind = 0u;
-    var vertex_material = terrain_material(sample);
-    let voxel_smooth_transition_weight = select(
-        0.0,
-        terrain_horizon_near_material_weight(cell_x, cell_z, cells),
-        voxel_shell,
-    );
-    var appearance_transition_weight = voxel_smooth_transition_weight;
-    if direct_exact_handoff() {
-        appearance_transition_weight = exact_transition_weight(vec2<f32>(
-            vertex_world_x,
-            vertex_world_z,
-        ));
-    }
-
-
-    if voxel_shell {
-        let top_y = round(stitched_height) + 1.0;
-        vertex_world_x = f32(cell_world_x) + f32(corner.x);
-        vertex_world_z = f32(cell_world_z) + f32(corner.y);
-        vertex_world_y = top_y;
-        world_uv = vec2<f32>(vertex_world_x, vertex_world_z);
-        light = 1.0;
-
-        if face_index != 0u {
-            var neighbor_x = i32(cell_x);
-            var neighbor_z = i32(cell_z);
-            if face_index == 1u {
-                neighbor_x -= 1;
-            } else if face_index == 2u {
-                neighbor_x += 1;
-            } else if face_index == 3u {
-                neighbor_z -= 1;
-            } else {
-                neighbor_z += 1;
-            }
-            let neighbor_y = round(terrain_horizon_geometry_height(
-                neighbor_x,
-                neighbor_z,
-                i32(cells),
-                1,
-                instance_index,
-            )) + 1.0;
-            let discard_exact = exact_coverage.mode_count_generation.x == 1u;
-            let current_exact = discard_exact && exact_chunk_painted(vec2<f32>(
-                f32(cell_world_x) + 0.5,
-                f32(cell_world_z) + 0.5,
-            ));
-            let neighbor_exact = discard_exact && exact_chunk_painted(vec2<f32>(
-                f32(cell_world_x + (neighbor_x - i32(cell_x))) + 0.5,
-                f32(cell_world_z + (neighbor_z - i32(cell_z))) + 0.5,
-            ));
-            let flags = params.content_stage_flags.w;
-            let outer_edge = (
-                face_index == 1u
-                    && cell_x == 0u
-                    && (flags & TERRAIN_HORIZON_NORMAL_EDGE_WEST) != 0u
-            ) || (
-                face_index == 2u
-                    && cell_x + 1u == cells
-                    && (flags & TERRAIN_HORIZON_NORMAL_EDGE_EAST) != 0u
-            ) || (
-                face_index == 3u
-                    && cell_z == 0u
-                    && (flags & TERRAIN_HORIZON_NORMAL_EDGE_NORTH) != 0u
-            ) || (
-                face_index == 4u
-                    && cell_z + 1u == cells
-                    && (flags & TERRAIN_HORIZON_NORMAL_EDGE_SOUTH) != 0u
-            );
-            var bottom_y = top_y;
-            var upper_y = top_y;
-            var parent_boundary_y = top_y;
-            var use_parent_boundary = false;
-            if !current_exact && neighbor_exact && terrain_material(sample) != 2u {
-                // The exact coverage contract currently supplies readiness but
-                // not a complete surface profile. Keep a bounded curtain on
-                // the procedural side of the ownership plane as the explicit
-                // fallback connector.
-                bottom_y = top_y - 32.0;
-                surface_kind = 2u;
-            } else if !current_exact && outer_edge {
-                // The top is block-rounded, but the adjacent spacing-two mesh
-                // consumes the continuous stitched parent profile. Connect to
-                // that profile at this segment endpoint. Taking endpoint
-                // envelopes preserves the cardinal face winding even where
-                // the two profiles cross inside one block-wide segment.
-                // The camera-centered fine clipmap observes this perimeter
-                // from inside. Reverse only the connector's horizontal
-                // endpoint order so its front face points inward; ordinary
-                // voxel risers retain their outward cardinal winding.
-                let endpoint = 1 - i32(corner.x);
-                var parent_sample_x = i32(cell_x);
-                var parent_sample_z = i32(cell_z);
-                if face_index == 1u {
-                    parent_sample_x = 0;
-                    parent_sample_z += 1 - endpoint;
-                } else if face_index == 2u {
-                    parent_sample_x = i32(cells);
-                    parent_sample_z += endpoint;
-                } else if face_index == 3u {
-                    parent_sample_x += endpoint;
-                    parent_sample_z = 0;
-                } else {
-                    parent_sample_x += 1 - endpoint;
-                    parent_sample_z = i32(cells);
-                }
-                parent_boundary_y = terrain_horizon_parent_boundary_y(
-                    parent_sample_x,
-                    parent_sample_z,
-                    i32(cells),
-                    instance_index,
-                );
-                use_parent_boundary = true;
-                surface_kind = 1u;
-            } else if !current_exact && top_y > neighbor_y {
-                bottom_y = neighbor_y;
-                surface_kind = 1u;
-            }
-
-            let cardinal_horizontal = f32(corner.x);
-            let horizontal = select(
-                cardinal_horizontal,
-                1.0 - cardinal_horizontal,
-                use_parent_boundary,
-            );
-            if use_parent_boundary {
-                bottom_y = min(top_y, parent_boundary_y);
-                upper_y = max(top_y, parent_boundary_y);
-            }
-            vertex_world_y = mix(bottom_y, upper_y, f32(corner.y));
-            if face_index == 1u {
-                vertex_world_x = f32(cell_world_x)
-                    + select(0.0, 0.001, neighbor_exact);
-                vertex_world_z = f32(cell_world_z) + 1.0 - horizontal;
-                light = 0.6;
-            } else if face_index == 2u {
-                vertex_world_x = f32(cell_world_x) + 1.0
-                    - select(0.0, 0.001, neighbor_exact);
-                vertex_world_z = f32(cell_world_z) + horizontal;
-                light = 0.6;
-            } else if face_index == 3u {
-                vertex_world_x = f32(cell_world_x) + horizontal;
-                vertex_world_z = f32(cell_world_z)
-                    + select(0.0, 0.001, neighbor_exact);
-                light = 0.8;
-            } else {
-                vertex_world_x = f32(cell_world_x) + 1.0 - horizontal;
-                vertex_world_z = f32(cell_world_z) + 1.0
-                    - select(0.0, 0.001, neighbor_exact);
-                light = 0.8;
-            }
-            world_uv = select(
-                vec2<f32>(vertex_world_z, vertex_world_y),
-                vec2<f32>(vertex_world_x, vertex_world_y),
-                face_index >= 3u,
-            );
-        }
-        // Keep one voxel geometry owner while its face shade approaches the
-        // smooth owner's slope shade over the same committed outer-footprint
-        // band already used by material presentation.
-        light = mix(smooth_geometric_shade, light, voxel_smooth_transition_weight);
-    }
+    let light = smooth_geometric_shade;
+    let vertex_world_x = f32(params.origin_spacing_cells.x
+        + i32(sample_x) * params.origin_spacing_cells.z);
+    let vertex_world_z = f32(params.origin_spacing_cells.y
+        + i32(sample_z) * params.origin_spacing_cells.z);
+    let vertex_world_y = stitched_height + 1.0;
+    let world_uv = vec2<f32>(vertex_world_x, vertex_world_z);
+    let vertex_material = terrain_material(sample);
+    let appearance_transition_weight = exact_transition_weight(vec2<f32>(
+        vertex_world_x,
+        vertex_world_z,
+    ));
 
     var out: VertexOutput;
     out.position = terrain_clip_position(
@@ -1120,10 +895,7 @@ fn terrain_vertex(
     out.surface_y = sample.terrain.x;
     out.view_index = view_index;
     out.world_uv = world_uv;
-    out.surface_kind = surface_kind;
-    out.near_shell = select(0u, 1u, voxel_shell);
-    out.surface_recipe = u32(round(sample.semantics.w));
-    out.column_top_y = select(stitched_height + 1.0, round(stitched_height) + 1.0, voxel_shell);
+    out.side_surface = 0u;
     return out;
 }
 
@@ -1168,8 +940,7 @@ fn exact_connector_vertex(
     }
 
     let packed = exact_boundary_column(exact_block);
-    let connector_valid = direct_exact_handoff()
-        && exact_boundary_valid(packed)
+    let connector_valid = exact_boundary_valid(packed)
         && !exact_boundary_water(packed)
         && cell_x >= 0
         && cell_z >= 0
@@ -1238,10 +1009,7 @@ fn exact_connector_vertex(
         vec2<f32>(world_x, -world_y),
         side >= 2u,
     );
-    out.surface_kind = 3u;
-    out.near_shell = 0u;
-    out.surface_recipe = u32(round(sample.semantics.w));
-    out.column_top_y = top_y;
+    out.side_surface = 1u;
     return out;
 }
 
@@ -1314,21 +1082,6 @@ fn terrain_horizon_level_color(sample_spacing: u32) -> vec3<f32> {
     );
     let level = min(u32(round(log2(max(f32(sample_spacing), 1.0)))), 9u);
     return colors[level];
-}
-
-fn resolved_surface_material(input: VertexOutput) -> u32 {
-    if input.near_shell == 0u || input.surface_kind == 0u {
-        return input.material;
-    }
-    let profile = mclone_preview_column_profile(input.material, input.surface_recipe);
-    let depth = u32(max(floor(input.column_top_y - input.world_position.y + 0.0001), 0.0));
-    if depth == 0u {
-        return profile.x;
-    }
-    if depth < profile.z {
-        return profile.y;
-    }
-    return profile.w;
 }
 
 fn material_uses_grass_tint(material: u32, side_surface: bool) -> bool {
@@ -1416,7 +1169,7 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let grass_family = input.material == 4u || input.material == 5u
         || input.material == 13u || input.material == 14u;
     // Resolve grass from the same active-pack tint table on both sides of the
-    // voxel-to-smooth boundary. The vertex color remains the fallback for
+    // exact-to-smooth boundary. The vertex color remains the fallback for
     // untinted materials, whose far response deliberately retains a stable
     // low-frequency approximation as texture detail recedes.
     if input.textured != 0u && input.material < 256u
@@ -1429,11 +1182,9 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
         color = vec3<f32>(0.48, 0.49, 0.47) * input.light;
         albedo = vec3<f32>(0.48, 0.49, 0.47);
     }
-    let side_surface = input.surface_kind != 0u;
-    let display_material = resolved_surface_material(input);
-    if input.textured != 0u
-        && (input.near_shell != 0u || direct_exact_handoff())
-        && display_material < 256u {
+    let side_surface = input.side_surface != 0u;
+    let display_material = input.material;
+    if input.textured != 0u && display_material < 256u {
         var far_color = color;
         var far_albedo = albedo;
         if input.material < 256u {
@@ -1519,7 +1270,7 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
     if input.textured != 0u
         && params.content_stage_flags.x >= 1u
         && input.material != 2u
-        && input.surface_kind == 0u
+        && input.side_surface == 0u
         && preview_profile() == 0u {
         let visible_half_width = max(input.river.y, blocks_per_pixel * 0.70);
         let river_distance_alpha = 1.0 - smoothstep(
@@ -1608,15 +1359,7 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
         color = terrain_horizon_level_color(u32(params.origin_spacing_cells.z));
     } else if horizon_diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_TOPOLOGY {
         color = vec3<f32>(0.08, 0.42, 0.95);
-        if input.near_shell != 0u {
-            color = vec3<f32>(0.18, 0.86, 0.22);
-            if input.surface_kind == 1u {
-                color = vec3<f32>(1.0, 0.55, 0.06);
-            } else if input.surface_kind == 2u {
-                color = vec3<f32>(0.96, 0.06, 0.72);
-            }
-        }
-        if input.surface_kind == 3u {
+        if input.side_surface != 0u {
             color = vec3<f32>(0.04, 0.94, 0.82);
         }
     } else if horizon_diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_ALBEDO {
@@ -1653,7 +1396,7 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
         var texture_weight = 0.0;
         if input.textured != 0u {
             texture_weight = material_texture_weight(material_blocks_per_pixel, 0.0);
-            if input.near_shell != 0u && display_material != 2u {
+            if display_material != 2u {
                 texture_weight = mix(texture_weight, 1.0, input.world_position.w);
             }
             if diagnostic_river_alpha > 0.0 {

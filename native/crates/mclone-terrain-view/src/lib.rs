@@ -72,7 +72,7 @@ pub use composition::{
     TERRAIN_EXACT_TRANSITION_HALO_TEXELS, TERRAIN_EXACT_TRANSITION_MAX_BYTES,
     TERRAIN_EXACT_TRANSITION_MAX_TEXELS_PER_AXIS, TerrainCompositionSourceIdentity,
     TerrainExactBoundaryColumn, TerrainExactBoundaryProfile, TerrainExactCoverageMask,
-    TerrainExactCoverageMode, TerrainExactHandoffTopology, TerrainExactTransitionField,
+    TerrainExactCoverageMode, TerrainExactTransitionField,
     terrain_exact_exposed_boundary_blocks, terrain_exact_player_connected_chunks,
 };
 pub use engine::{TerrainViewEngine, TerrainViewEngineConfig};
@@ -223,10 +223,6 @@ fn exact_connector_vertex_multiview_main(
 }"#,
     );
     let source = inject_multiview_vertex_entry(TERRAIN_PREVIEW_RENDER_WGSL, multiview_entry);
-    let source = source.replace(
-        "// __MCLONE_SURFACE_COLUMN_PROFILE_WGSL__",
-        mclone_worldgen::levelgen::mclone_overworld_preview_column_profile_wgsl(),
-    );
     let source = mclone_render::fog::inject_fog_wgsl(&source);
     mclone_render_color::inject_target_color_transform_wgsl(&source, transform)
         .expect("terrain preview render WGSL has one color transfer and transform marker")

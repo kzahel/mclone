@@ -149,8 +149,6 @@ const SCENE_HOST_FIELDS: &[&str] = &[
     "screen_effects",
     "terrain_view",
     "terrain_horizon_diagnostic",
-    "terrain_exact_handoff_topology",
-    "terrain_exact_review_footprint",
     "terrain_vegetation_executor_factory",
     "underwater_effects",
     "last_underwater_update",
