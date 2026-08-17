@@ -47,6 +47,7 @@ export const FIRST_PARTY_SEMANTIC_ASSETS: readonly FirstPartySemanticAsset[] = [
   firstPartyProp("oak_fence_gate_item", "item_prop", "item_center", "live_gameplay"),
   firstPartyProp("rabbit_burrow", "world_prop", "ground", "live_gameplay"),
   firstPartyProp("wildlife_remains", "world_prop", "ground", "live_gameplay"),
+  firstPartyProp("sleeping_mat", "world_prop", "ground", "live_gameplay"),
 ];
 
 export const FIRST_PARTY_FIGURES: readonly FirstPartyFigure[] =
