@@ -12,17 +12,17 @@ use mclone_server::{
     WILDLIFE_LIFECYCLE_RULE_REVISION, WILDLIFE_RESOURCE_KIND_COUNT,
     WILDLIFE_RESOURCE_RULE_REVISION, WILDLIFE_SIMULATION_SCHEMA_VERSION,
     WildlifeForageCellSnapshot, WildlifeLifecycleTuning, WildlifePopulationSnapshot,
-    WildlifePopulationSubject, WildlifeResourceKind, WildlifeSimulationConfig,
-    WildlifeSimulationDeathCause, WildlifeSimulationEvent, WildlifeSimulationEventKind,
-    WildlifeSimulationLifeStage, WildlifeSimulationRemainsSnapshot, WildlifeSimulationSession,
-    WildlifeSimulationSex, WildlifeSimulationSpecies, WildlifeSimulationSuppressionReason,
-    WildlifeSimulationWorkSnapshot,
+    WildlifePopulationSubject, WildlifeResourceKind, WildlifeResourceStratumSnapshot,
+    WildlifeSimulationConfig, WildlifeSimulationDeathCause, WildlifeSimulationEvent,
+    WildlifeSimulationEventKind, WildlifeSimulationLifeStage, WildlifeSimulationRemainsSnapshot,
+    WildlifeSimulationSession, WildlifeSimulationSex, WildlifeSimulationSpecies,
+    WildlifeSimulationSuppressionReason, WildlifeSimulationWorkSnapshot,
 };
 use mclone_worldgen::levelgen::MCLONE_WILDLIFE_POPULATION_REVISION;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-const REPORT_SCHEMA_VERSION: u32 = 4;
+const REPORT_SCHEMA_VERSION: u32 = 5;
 const MINECRAFT_DAY_TICKS: u64 = 24_000;
 
 type AnyResult<T> = Result<T, Box<dyn Error>>;
@@ -134,6 +134,9 @@ struct ForageCounts {
     strata: [ResourceCounts; WILDLIFE_RESOURCE_KIND_COUNT],
     potential: u64,
     available: u64,
+    effective_accessible: u64,
+    accessibility_basis_points: u16,
+    recovery_factor_basis_points: u16,
     cumulative_recovered: u64,
     cumulative_rabbit_consumed: u64,
     cumulative_deer_consumed: u64,
@@ -150,6 +153,9 @@ struct ResourceCounts {
     resource: WildlifeResourceKind,
     potential: u64,
     available: u64,
+    effective_accessible: u64,
+    accessibility_basis_points: u16,
+    recovery_factor_basis_points: u16,
     cumulative_recovered: u64,
     cumulative_rabbit_consumed: u64,
     cumulative_deer_consumed: u64,
@@ -166,6 +172,9 @@ impl Default for ResourceCounts {
             resource: WildlifeResourceKind::LowHerbaceous,
             potential: 0,
             available: 0,
+            effective_accessible: 0,
+            accessibility_basis_points: 0,
+            recovery_factor_basis_points: 0,
             cumulative_recovered: 0,
             cumulative_rabbit_consumed: 0,
             cumulative_deer_consumed: 0,
@@ -1068,6 +1077,16 @@ fn count_forage(cells: &[WildlifeForageCellSnapshot], previous: &ForageCounts) -
                 .iter()
                 .map(|cell| u64::from(cell.strata[index].available))
                 .sum(),
+            effective_accessible: cells
+                .iter()
+                .map(|cell| u64::from(cell.strata[index].effective_accessible))
+                .sum(),
+            accessibility_basis_points: weighted_resource_factor(cells, index, |stratum| {
+                stratum.accessibility_basis_points
+            }),
+            recovery_factor_basis_points: weighted_resource_factor(cells, index, |stratum| {
+                stratum.recovery_factor_basis_points
+            }),
             cumulative_recovered: cells.iter().map(|cell| cell.strata[index].recovered).sum(),
             cumulative_rabbit_consumed: cells
                 .iter()
@@ -1102,6 +1121,13 @@ fn count_forage(cells: &[WildlifeForageCellSnapshot], previous: &ForageCounts) -
         strata,
         potential: strata.iter().map(|entry| entry.potential).sum(),
         available: strata.iter().map(|entry| entry.available).sum(),
+        effective_accessible: strata.iter().map(|entry| entry.effective_accessible).sum(),
+        accessibility_basis_points: weighted_strata_factor(&strata, |entry| {
+            entry.accessibility_basis_points
+        }),
+        recovery_factor_basis_points: weighted_strata_factor(&strata, |entry| {
+            entry.recovery_factor_basis_points
+        }),
         cumulative_recovered: strata.iter().map(|entry| entry.cumulative_recovered).sum(),
         cumulative_rabbit_consumed: strata
             .iter()
@@ -1132,6 +1158,46 @@ fn count_forage(cells: &[WildlifeForageCellSnapshot], previous: &ForageCounts) -
     counts
 }
 
+fn weighted_resource_factor(
+    cells: &[WildlifeForageCellSnapshot],
+    index: usize,
+    factor: impl Fn(WildlifeResourceStratumSnapshot) -> u16,
+) -> u16 {
+    let weight = cells
+        .iter()
+        .map(|cell| u128::from(cell.strata[index].potential))
+        .sum::<u128>();
+    if weight == 0 {
+        return 0;
+    }
+    let weighted = cells
+        .iter()
+        .map(|cell| {
+            let stratum = cell.strata[index];
+            u128::from(stratum.potential) * u128::from(factor(stratum))
+        })
+        .sum::<u128>();
+    (weighted / weight) as u16
+}
+
+fn weighted_strata_factor(
+    strata: &[ResourceCounts; WILDLIFE_RESOURCE_KIND_COUNT],
+    factor: impl Fn(ResourceCounts) -> u16,
+) -> u16 {
+    let weight = strata
+        .iter()
+        .map(|entry| u128::from(entry.potential))
+        .sum::<u128>();
+    if weight == 0 {
+        return 0;
+    }
+    let weighted = strata
+        .iter()
+        .map(|entry| u128::from(entry.potential) * u128::from(factor(*entry)))
+        .sum::<u128>();
+    (weighted / weight) as u16
+}
+
 fn distribution(values: impl Iterator<Item = u32>) -> IntegerDistribution {
     let mut values = values.collect::<Vec<_>>();
     if values.is_empty() {
@@ -1156,7 +1222,7 @@ fn percentile(values: &[u32], percentile: usize) -> u32 {
 fn write_csv_header(writer: &mut impl Write) -> AnyResult<()> {
     writeln!(
         writer,
-        "sample,day,tick,total,rabbits,rabbit_adults,rabbit_young,deer,deer_adult_females,deer_adult_males,deer_young,mallards,mallard_adult_females,mallard_adult_males,mallard_young,rabbit_births,deer_births,mallard_births,mallard_nests_established,deaths,forage_available,forage_potential,low_herbaceous_available,woody_browse_available,seeds_soft_mast_available,aquatic_vegetation_available,aquatic_invertebrates_available,rabbit_consumed,deer_consumed,mallard_consumed,rabbit_energy_p50,deer_energy_p50,mallard_energy_p50,remains_records,remains_biomass,suppressed,decision_admitted,path_admitted,path_deferred,identity_checksum,invariants_passed"
+        "sample,day,tick,total,rabbits,rabbit_adults,rabbit_young,deer,deer_adult_females,deer_adult_males,deer_young,mallards,mallard_adult_females,mallard_adult_males,mallard_young,rabbit_births,deer_births,mallard_births,mallard_nests_established,deaths,forage_available,forage_effective_accessible,forage_accessibility_basis_points,forage_recovery_factor_basis_points,forage_potential,low_herbaceous_available,woody_browse_available,seeds_soft_mast_available,aquatic_vegetation_available,aquatic_invertebrates_available,rabbit_consumed,deer_consumed,mallard_consumed,rabbit_energy_p50,deer_energy_p50,mallard_energy_p50,remains_records,remains_biomass,suppressed,decision_admitted,path_admitted,path_deferred,identity_checksum,invariants_passed"
     )?;
     Ok(())
 }
@@ -1184,6 +1250,9 @@ fn write_csv_row(writer: &mut impl Write, row: &DailySummary) -> AnyResult<()> {
         row.events.mallard_nests_established.to_string(),
         row.events.deaths().to_string(),
         row.forage.available.to_string(),
+        row.forage.effective_accessible.to_string(),
+        row.forage.accessibility_basis_points.to_string(),
+        row.forage.recovery_factor_basis_points.to_string(),
         row.forage.potential.to_string(),
         row.forage.strata[0].available.to_string(),
         row.forage.strata[1].available.to_string(),

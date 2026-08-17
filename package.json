@@ -44,6 +44,7 @@
     "native:scheduler-loading:persisted-sqlite:perf": "cargo run --release --manifest-path native/Cargo.toml -p mclone-server --bin scheduler_loading_perf -- --persisted-sqlite-reload",
     "native:wildlife:simulate": "cargo run --release --manifest-path native/Cargo.toml -p mclone-server --bin wildlife_population_sim --",
     "native:wildlife:sites": "cargo run --release --manifest-path native/Cargo.toml -p mclone-server --bin wildlife_population_sites --",
+    "native:wildlife:seasonal-resources": "cargo run --release --manifest-path native/Cargo.toml -p mclone-server --bin seasonal_resource_opportunity --",
     "native:wildlife:campaign": "node ./scripts/run-wildlife-population-campaign.mjs",
     "native:mesh-cpu:smoke": "cargo run --manifest-path native/Cargo.toml -p mclone-native-client --bin mesh_cpu_perf -- --render-distance 5 --max-seconds 120",
     "native:mesh-cpu:perf": "cargo run --release --manifest-path native/Cargo.toml -p mclone-native-client --bin mesh_cpu_perf -- --render-distance 10 --max-seconds 180",

@@ -123,6 +123,26 @@ pub struct WildlifeForageCellSnapshot {
     pub terrain_revision: u64,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SeasonalWildlifeResourceSample {
+    pub position: WildlifeForageCellPos,
+    pub resource: WildlifeResourceKind,
+    pub world_x: i32,
+    pub world_z: i32,
+    pub surface_y: i32,
+    pub latitude_millidegrees: i32,
+    pub mean_temperature_basis_points: i16,
+    pub moisture_basis_points: u16,
+    pub orbital_phase_steps: u16,
+    pub local_phase_steps: u16,
+    pub response_strength_basis_points: u16,
+    pub current_temperature_basis_points: i16,
+    pub snow_tendency_basis_points: u16,
+    pub accessibility_basis_points: u16,
+    pub recovery_factor_basis_points: u16,
+}
+
 impl WildlifeForageCellSnapshot {
     pub fn stratum(self, kind: WildlifeResourceKind) -> WildlifeResourceStratumSnapshot {
         self.strata[kind.index()]
@@ -222,8 +242,27 @@ impl SeasonalWildlifeResourceSampler {
         kind: WildlifeResourceKind,
         calendar: Option<AuthoritativeCalendarSample>,
     ) -> SeasonalResourceOpportunity {
+        self.sample(position, kind, calendar).map_or(
+            SeasonalResourceOpportunity::NEUTRAL,
+            |sample| SeasonalResourceOpportunity {
+                accessibility: mclone_season::SeasonalResourceFactor::from_basis_points_clamped(
+                    sample.accessibility_basis_points,
+                ),
+                recovery: mclone_season::SeasonalResourceFactor::from_basis_points_clamped(
+                    sample.recovery_factor_basis_points,
+                ),
+            },
+        )
+    }
+
+    pub(crate) fn sample(
+        self,
+        position: WildlifeForageCellPos,
+        kind: WildlifeResourceKind,
+        calendar: Option<AuthoritativeCalendarSample>,
+    ) -> Option<SeasonalWildlifeResourceSample> {
         let (Some(terrain), Some(calendar)) = (self.terrain, calendar) else {
-            return SeasonalResourceOpportunity::NEUTRAL;
+            return None;
         };
         let world_x = position
             .x
@@ -238,7 +277,7 @@ impl SeasonalWildlifeResourceSampler {
             .coordinate_policy
             .latitude_at(f64::from(world_x), f64::from(world_z))
         else {
-            return SeasonalResourceOpportunity::NEUTRAL;
+            return None;
         };
         let moisture = (terrain.climate.moisture * 0.5 + 0.5).clamp(0.0, 1.0) as f32;
         let local_season = EvaluatedLocalSeason::evaluate(LocalSeasonInput {
@@ -248,13 +287,42 @@ impl SeasonalWildlifeResourceSampler {
             moisture,
             altitude_blocks: terrain.surface_y as f32,
         });
-        evaluate_seasonal_resource_opportunity(SeasonalResourceInput {
+        let opportunity = evaluate_seasonal_resource_opportunity(SeasonalResourceInput {
             enabled: true,
             resource: kind.seasonal_kind(),
             local_season,
             moisture,
+        });
+        Some(SeasonalWildlifeResourceSample {
+            position,
+            resource: kind,
+            world_x,
+            world_z,
+            surface_y: terrain.surface_y,
+            latitude_millidegrees: (latitude.degrees * 1_000.0).round() as i32,
+            mean_temperature_basis_points: unit_signed_basis_points(
+                terrain.climate.temperature as f32,
+            ),
+            moisture_basis_points: unit_basis_points(moisture),
+            orbital_phase_steps: calendar.orbital_phase.steps(),
+            local_phase_steps: (local_season.local_phase * 10_000.0).round() as u16 % 10_000,
+            response_strength_basis_points: unit_basis_points(local_season.response_strength),
+            current_temperature_basis_points: unit_signed_basis_points(
+                local_season.current_temperature,
+            ),
+            snow_tendency_basis_points: unit_basis_points(local_season.snow_tendency),
+            accessibility_basis_points: opportunity.accessibility.basis_points(),
+            recovery_factor_basis_points: opportunity.recovery.basis_points(),
         })
     }
+}
+
+fn unit_basis_points(value: f32) -> u16 {
+    (value.clamp(0.0, 1.0) * f32::from(SEASONAL_RESOURCE_FACTOR_SCALE)).round() as u16
+}
+
+fn unit_signed_basis_points(value: f32) -> i16 {
+    (value.clamp(-1.0, 1.0) * f32::from(SEASONAL_RESOURCE_FACTOR_SCALE)).round() as i16
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]

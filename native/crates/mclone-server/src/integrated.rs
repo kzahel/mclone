@@ -624,6 +624,20 @@ impl RealmServer {
             })
     }
 
+    pub fn seasonal_wildlife_resource_sample(
+        &self,
+        position: crate::WildlifeForageCellPos,
+        kind: crate::WildlifeResourceKind,
+    ) -> Option<crate::SeasonalWildlifeResourceSample> {
+        let calendar = self
+            .season_calendar_policy
+            .sample(self.day_time)
+            .expect("validated realm calendar policy must remain sampleable");
+        self.active_dimension
+            .seasonal_resource_sampler
+            .sample(position, kind, calendar)
+    }
+
     /// Advances the ordinary entity/ecology owner over a caller-frozen loaded
     /// domain without spending time on unrelated scheduler, network, fluid,
     /// lighting, or presentation phases. The population runner proves this
