@@ -4,11 +4,14 @@
 //! knowing whether a session is local, TCP, or WebSocket. `LocalRealmSession`
 //! is the in-memory adapter used by integrated hosts and tests.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::cell::RefCell;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::ops::{Deref, DerefMut};
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 use std::time::Duration;
+
+const CLOSED_WILDLIFE_BLOCK_CACHE_CAPACITY: usize = 262_144;
 
 use mclone_blocks::block_collision_aabb;
 use mclone_core::{
@@ -205,6 +208,10 @@ pub struct DimensionRuntime {
     deer_population: DeerPopulationHistory,
     wildlife_resources: crate::wildlife_resources::WildlifeResourceLedger,
     seasonal_resource_sampler: crate::wildlife_resources::SeasonalWildlifeResourceSampler,
+    /// Memoized block facts for the explicitly frozen closed-domain wildlife
+    /// runner. Ordinary simulation never consults this cache. Any accepted
+    /// ecology block mutation clears it before the next accelerated tick.
+    closed_wildlife_blocks: RefCell<HashMap<BlockPos, Option<BlockStateId>>>,
 }
 
 impl DimensionRuntime {
@@ -249,6 +256,7 @@ impl DimensionRuntime {
             deer_population: DeerPopulationHistory::default(),
             wildlife_resources: crate::wildlife_resources::WildlifeResourceLedger::default(),
             seasonal_resource_sampler,
+            closed_wildlife_blocks: RefCell::new(HashMap::new()),
         }
     }
 
@@ -671,14 +679,27 @@ impl RealmServer {
             );
         let runtime = &mut self.active_dimension;
         let scheduler = &runtime.scheduler;
-        let mut entity_updates =
-            runtime
-                .entities
-                .tick_stationary_at_time(entity_ticking_chunks, &[], day_time, |pos| {
-                    scheduler
-                        .block_at_world(pos)
-                        .map(|block| BlockStateId(u32::from(block)))
-                });
+        let closed_wildlife_blocks = &runtime.closed_wildlife_blocks;
+        let frozen_block_at = |pos: BlockPos| {
+            if let Some(block) = closed_wildlife_blocks.borrow().get(&pos).copied() {
+                return block;
+            }
+            let block = scheduler
+                .block_at_world(pos)
+                .map(|block| BlockStateId(u32::from(block)));
+            let mut cache = closed_wildlife_blocks.borrow_mut();
+            if cache.len() >= CLOSED_WILDLIFE_BLOCK_CACHE_CAPACITY {
+                cache.clear();
+            }
+            cache.insert(pos, block);
+            block
+        };
+        let mut entity_updates = runtime.entities.tick_stationary_at_time(
+            entity_ticking_chunks,
+            &[],
+            day_time,
+            &frozen_block_at,
+        );
         let entity_ticking_set = entity_ticking_chunks
             .iter()
             .copied()
@@ -691,17 +712,14 @@ impl RealmServer {
             &|pos| {
                 entity_ticking_set
                     .contains(&pos.chunk_pos())
-                    .then(|| {
-                        scheduler
-                            .block_at_world(pos)
-                            .map(|block| BlockStateId(u32::from(block)))
-                    })
+                    .then(|| frozen_block_at(pos))
                     .flatten()
             },
         ));
 
         let rabbit_digs = runtime.entities.drain_rabbit_digs();
         let rabbit_raids = runtime.entities.drain_rabbit_raids();
+        let mut ecology_blocks_changed = false;
         for event in rabbit_digs {
             let completed = self
                 .scheduler
@@ -709,6 +727,7 @@ impl RealmServer {
                 .is_some_and(|block| matches!(block, mclone_worldgen::block::DIRT | GRASS_BLOCK))
                 && self.set_block_from_simulation(event.target, AIR);
             if completed {
+                ecology_blocks_changed = true;
                 entity_updates.extend(
                     self.active_dimension
                         .entities
@@ -736,12 +755,19 @@ impl RealmServer {
                     .entities
                     .complete_rabbit_raid(event.rabbit)
             {
+                ecology_blocks_changed = true;
                 entity_updates.push(updated);
             }
         }
 
         let bee_pollinations = self.active_dimension.entities.drain_bee_pollinations();
-        let _ = self.apply_bee_pollinations(&bee_pollinations);
+        ecology_blocks_changed |= !self.apply_bee_pollinations(&bee_pollinations).is_empty();
+        if ecology_blocks_changed {
+            self.active_dimension
+                .closed_wildlife_blocks
+                .borrow_mut()
+                .clear();
+        }
         let _ = self.scheduler.drain_pending_block_delta_events();
         let _ = self.active_dimension.entities.drain_mallard_calls();
         let _ = self.active_dimension.entities.drain_mallard_tracks();
