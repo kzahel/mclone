@@ -1,7 +1,7 @@
 # Tactical 313: Direct Exact-to-Smooth Horizon Transition
 
-Status: Phases 0-2 candidate implemented 2026-08-16; Human Review 1 pending
-before mandatory voxel-path deletion
+Status: Phases 0-4 implemented 2026-08-17; Human Review 1 accepted, voxel path
+deleted, and final Human Review 2 pending
 
 Topic: `procedural-horizon-clipmap`
 
@@ -448,6 +448,78 @@ capture definitions remain present only so the reviewer can compare the
 candidate. Acceptance authorizes their deletion and final cross-platform
 Phase 4 validation; rejection keeps this tactical open for correction.
 
+That statement records the state at revision `3f0ff7ee`. Human Review 1 later
+accepted the direct path and explicitly preferred removing the less compelling
+intermediate system rather than keeping two terrain handoffs.
+
+## Human Review 1 Result and Deletion Record
+
+Human Review 1 accepted the direct exact-to-smooth presentation on 2026-08-17.
+The reviewer found the transition unobtrusive and preferred the new result.
+The one reported defect was local to the surviving connector: the active-pack
+grass-block side sprite placed its grass strip at the lower edge. Revision
+`44b5c9be` reverses the connector's world-Y material coordinate, leaving its
+geometry and appearance weight unchanged. Inspected before/after pixels at
+`/tmp/mclone-t313-grass-connector-low.png` and
+`/tmp/mclone-t313-grass-connector-fix.png` put the grass strip against the
+upper exact-terrain edge.
+
+Revision `22ee5622` then completed Phase 3. It removed the 30-invocation
+spacing-one shell, rounded top and cardinal risers, fixed curtain and parent
+risers, topology enum, review environment selector, capture-only footprint
+hooks, shader varyings, topology diagnostics, and voxel-only column-profile
+inputs. The finest procedural level now has one six-vertex smooth topology;
+only the measured exact-perimeter connector survives. The change removed 569
+lines while preserving connected admission, the generation-cached appearance
+field, exact water arbitration, vegetation ownership, and mono/multiview
+bindings. Revision `cb06c20f` deleted the 498-line A/B capture harness and its
+package command. Revision `45609a44` tightened World Explorer's fixed-byte
+contract and renamed its frontier for the sole surviving exact-to-smooth path.
+
+The deletion build's representative low-view scene retains the candidate's
+`1,633,494` terrain vertices, `277` connector segments, `1,662` connector
+vertices, `3,324` connector bytes, and `1,296`-byte transition payload. Native
+preparation took `27` microseconds in that run. Removing the selector bit
+shrinks fixed residency from `133,209,640` to `133,209,624` bytes. Exact Only
+continues to admit no procedural horizon or transition allocation.
+
+## Phase 4 Validation Record
+
+The direct-only deletion build passed the following 2026-08-17 gates:
+
+- all `113` `mclone-terrain-view` library tests passed except the one
+  intentionally ignored adapter-dependent GPU test; generated WGSL validation
+  passed, and source search found no voxel topology, review selector, or old
+  shader-varying path;
+- all `180` `mclone-scene` library tests passed, including composed-only
+  projection reach and terrain-view source/admission contracts;
+- native World Explorer window and offscreen smokes passed continuous movement,
+  negative-coordinate rebase, million-block teleport, map, zoom, and orbit.
+  Inspected deletion-build pixels live under
+  `/tmp/mclone-t313-final-world-explorer`;
+- headed desktop and phone-sized World Explorer WebGPU smokes passed pointer,
+  touch, Worker restart, negative-coordinate, teleport, and shutdown gates.
+  Inspected moving frames are
+  `/tmp/mclone-world-explorer-web-desktop-movement.png` and
+  `/tmp/mclone-world-explorer-web-mobile-movement.png`;
+- the live-game headed WebGPU terrain-horizon toggle and persisted reload passed
+  with `49` exact columns, `10` drawn levels, `23` drawn tiles, and drained
+  vegetation. Inspected canvases are
+  `/tmp/mclone-native-web-terrain-horizon-toggle-canvas.png` and
+  `/tmp/mclone-native-web-terrain-horizon-reload-canvas.png`;
+- Terrain Lab's runtime WebGPU composition passed; synthetic stereo produced
+  `251,024` differing eye pixels; desktop XR and both Android packages compiled;
+- a physical Pixel 7a flat-client launch passed the project smoke after
+  installing the current APK and staging its required texture pack. The
+  inspected frame is `/tmp/mclone-t313-pixel-flat.png`; and
+- physical Quest 3 ordinary OpenXR launch and the full-frame terrain multiview
+  proof passed. The runtime reported a `1680x1760` two-layer swapchain,
+  `multiview=true`, `17` submitted runtime frames, zero skipped frames, and
+  `2,943,831` differing pixels against a `2,956` minimum.
+
+Human Review 2 is the remaining binding stop. The tactical is not complete
+until the reviewer accepts the final direct-only still and moving evidence.
+
 ## Acceptance
 
 - The composed frame has only exact terrain and smooth procedural terrain as
@@ -511,10 +583,8 @@ Phase 4 validation; rejection keeps this tactical open for correction.
   exact set and scene-wide snapshot arbitration.
 - `native/crates/mclone-mesh` -- exact boundary material/height facts where
   the existing prepared mesh contract owns them.
-- `native/crates/mclone-worldgen` -- procedural endpoint material and retained
-  side-profile semantics used by the connector.
-- `scripts/capture-direct-terrain-handoff-review.mjs` -- temporary A/B
-  evidence, mandatory deletion gate, and review receipt.
+- `native/crates/mclone-worldgen` -- procedural endpoint material and surface
+  semantics sampled by the smooth owner and connector.
 - [`309-procedural-horizon-lighting-and-seam-convergence.md`](309-procedural-horizon-lighting-and-seam-convergence.md)
   -- accepted environmental-light foundation and redirected voxel-specific
   closeout.

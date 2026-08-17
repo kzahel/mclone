@@ -6,12 +6,13 @@ Status: the standalone cross-platform proof, transition hardening, shared
 vegetation service, Terrain Lab composition, and live-game adoption are
 complete. Tactical
 [`313`](../tactical/313-direct-exact-to-smooth-horizon-transition.md) now has
-its direct exact-to-smooth candidate at Human Review 1: ordinary sessions use
-smooth spacing-one geometry, a generation-cached 32-block appearance field,
-focus-connected irregular exact admission, and a measured exact-profile
-perimeter connector. The former spacing-one voxel shell remains only behind a
-capture environment selector until that review; acceptance requires deleting
-it rather than retaining a disabled fallback. As of 2026-08-11, the shared
+one direct exact-to-smooth implementation awaiting final Human Review 2:
+ordinary sessions use smooth spacing-one geometry, a generation-cached
+32-block appearance field, focus-connected irregular exact admission, and a
+measured exact-profile perimeter connector. Human Review 1 accepted that
+direction; the former spacing-one voxel shell, shader branches, diagnostics,
+selector, and A/B harness are deleted rather than retained as a fallback. As
+of 2026-08-11, the shared
 in-game Graphics screen exposes
 `Terrain Horizon: Exact Only / Composed` as a live session control. The same
 UI action, settings reducer, and scene effect serve desktop, browser, flat
@@ -21,8 +22,10 @@ rather than the default because its accepted Quest comparison regressed on
 GPU. The control is available only for a local
 `mclone-overworld-v1` source; remote and incompatible-profile sessions show
 the row as unavailable and project inherited state back to exact-only.
-Native, browser-Wasm, flat-Android APK, and Android-XR APK builds pass;
-physical flat-Android pixel acceptance remains later work.
+Native, browser-Wasm, flat-Android APK, and Android-XR APK builds pass. Tactical
+313's direct-only deletion build also passes an inspected physical Pixel 7a
+flat-client frame and physical Quest 3 ordinary OpenXR plus full-frame
+multiview proof.
 
 The 2026-08-13 phone-browser black-frame regression is resolved. XR
 multiview support had added `@builtin(view_index)` entry points to the same
@@ -100,8 +103,8 @@ cross-platform proof was completed and deployed on 2026-07-25 by Tactical
 toroidal planning, a ten-level fixed-budget renderer, native tree proxies, and
 one Rust terrain-view engine now run through Explorer, Terrain Lab, and the
 opt-in live game on native and browser hosts. Android and XR promotion are now
-implemented; physical flat-Android evidence remains open. Product scope and
-platform hosting are independent: the small
+implemented; Tactical 313 includes physical flat-Android acceptance for the
+direct frontier. Product scope and platform hosting are independent: the small
 Explorer and full game may both run in the browser, while the same terrain
 system remains usable on desktop, Android, and XR. Tactical
 [`245`](../tactical/245-retire-chunk-far-lod-runtime.md) remains the completed
@@ -191,7 +194,7 @@ intermediate adds an unconvincing topology pop and a second transition before
 exact terrain.
 Tactical
 [`313`](../tactical/313-direct-exact-to-smooth-horizon-transition.md) now owns
-the visual gate and has implemented its pre-deletion candidate. Smooth
+the visual gate and has implemented its direct-only deletion candidate. Smooth
 spacing-one geometry carries the successful near/far parameter interpolation
 through a 32-block world-space field prepared once per admitted generation.
 The exact draw, procedural discard, connector, field, and vegetation ownership
@@ -202,11 +205,19 @@ two-sided vertical perimeter connector over measured height differences.
 The revision-`3f0ff7ee` Human Review 1 packet contains 28 matched and
 state-validated captures. Its ordinary 5-by-5 field is `1,296` bytes and took
 `18-37` microseconds to prepare natively; direct terrain submits `1,633,494`
-vertices versus `2,614,872` for the temporary voxel comparison. Native window,
-offscreen, headed desktop WebGPU, and synthetic-stereo gates pass movement,
-negative rebase, teleport, and orbit. The capture-only voxel selector remains
-solely for Human Review 1. It and all voxel shader topology must be deleted
-after acceptance, followed by the final platform and physical-device matrix.
+vertices versus `2,614,872` for the temporary voxel comparison. Human Review 1
+accepted the direct result. Revisions `22ee5622` and `cb06c20f` deleted the
+voxel geometry and 498-line A/B harness. The finest procedural level now has
+one six-vertex topology, fixed residency is `133,209,624` bytes, and source
+search plus generated WGSL validation find no dormant voxel mode. Revision
+`44b5c9be` also corrected the surviving connector's grass-side material
+orientation so the grass strip follows its upper exact edge.
+
+The direct-only native window/offscreen, headed desktop and phone-sized WebGPU,
+live-game WebGPU, Terrain Lab WebGPU, synthetic-stereo, Android build, desktop
+XR, physical Pixel 7a, and physical Quest 3 gates pass. The Quest proof covers
+ordinary OpenXR and full-frame terrain multiview. Exact Only remains
+horizon-allocation-free. Human Review 2 is the remaining Tactical 313 stop.
 The exact renderer's full-sky/zero-block-light RGB now applies once to every
 procedural terrain level, sampled and analytic water, and proxy tree after
 albedo and geometric shade composition. A fixed 32-image, two-seed native
@@ -222,7 +233,7 @@ diagnostic is constant across procedural topology and surface class, while
 noon remains normally illuminated. That topology-independent lighting result
 is retained by Tactical 313. Tactical 304's single-owner exact coverage,
 material, water, and bounded connector lessons remain foundations, while its
-voxel-shell topology is now explicitly selected for removal.
+voxel-shell topology survives only in history.
 The first Phase 2 review packet improved the appearance terms but was rejected
 for the geometric crack above. Voxel face shade
 approaches the smooth slope response over the existing committed presentation

@@ -33,20 +33,22 @@ Human Review then rejected two voxel-to-smooth seam corrections and redirected
 the remaining appearance closeout rather than polishing the exact-to-voxel
 border. Tactical
 [`313`](../tactical/313-direct-exact-to-smooth-horizon-transition.md) now owns
-the selected replacement and has implemented the Human Review 1 candidate.
+the selected replacement and has implemented the direct-only deletion
+candidate after Human Review 1 accepted the direction.
 One smooth spacing-one surface approaches exact materials over a 32-block
 world-space distance from a connected non-rectangular exact perimeter, while
 an exact surface profile supplies compact vertical connector quads. The
 ordinary live, Explorer, and Terrain Lab paths select direct smooth topology.
-The old voxel shell remains only behind a capture environment selector and is
-scheduled for mandatory deletion immediately after candidate acceptance.
+The old voxel shell, shader branches, topology selector, diagnostics, and A/B
+harness are deleted; Git history is their only remaining implementation.
 
 The revision-`3f0ff7ee` packet validates natural, material, lighting, water,
 texture, topology, irregular-footprint, and motion views. Its direct candidate
 submits `37.53%` fewer terrain vertices in the primary scene. The ordinary
 transition field is `1,296` bytes, prepares in `18-37` microseconds natively,
 and is cached by exact coverage generation; settled frames skip identical GPU
-uploads. Human Review 1 is the current binding stop.
+uploads. Deletion-build native, browser, Android, stereo, and physical Quest
+gates pass. Human Review 2 is the current binding stop.
 
 Every procedural land level, sampled and analytic water, and proxy tree now
 consumes the exact renderer's full-sky/zero-block-light environmental RGB once
@@ -117,7 +119,7 @@ fixed 32-float TerrainPreviewSample
         |
         +--> block-state id --> active-pack top/side faces + tint flags
         |
-        +--> surface recipe --> worldgen-owned side/subsurface/body strata
+        +--> surface recipe --> worldgen-owned visible material semantics
         |
         v
 smooth spacing-one surface / stitched smooth farther rings
@@ -161,20 +163,20 @@ avoids inventing nonsensical fractional block ids, but it also means a coarse
 triangle has one atlas sprite. Continuous fields such as river distance,
 wetland-pool influence, light, and world position interpolate normally.
 
-### Historical near voxel shell and retained side strata
+### Historical near voxel shell and retained material lessons
 
-The temporary Human Review comparison still contains Tactical 304's topology,
-but it is not the ordinary path. Its spacing-one one-block cell has a rounded
-integer-height flat top plus reserved north, south, east, and west risers;
-unexposed risers become degenerate triangles. The coarser levels remain the
-stitched smooth heightfield.
+Tactical 304's deleted spacing-one cell used a rounded integer-height flat top
+plus reserved north, south, east, and west risers; unexposed risers became
+degenerate triangles. Coarser levels remained the stitched smooth heightfield.
+Tactical 313 retained the material and ownership lessons but removed that
+topology and its supporting column-profile shader inputs.
 
-Worldgen resolves each visible material and surface recipe to a compact
-`top/upper-side/subsurface-depth/body` profile shared with generated WGSL.
-Grass uses grass top, grass-block side, three dirt blocks, then stone. Sand,
-gravel, clay, snow, water, and exposed-stone recipes select their own bounded
-profiles. This is approximate untouched-natural-terrain semantics, not a
-renderer-authored raw-id strata table or a cache of canonical columns.
+The deleted shell resolved each visible material and surface recipe to a
+compact `top/upper-side/subsurface-depth/body` profile in generated WGSL.
+Grass used grass top, grass-block side, three dirt blocks, then stone; other
+recipes selected their own bounded profiles. The direct path no longer uploads
+that voxel-only profile. Its surviving connector instead consumes the exact
+boundary column's side material and samples the procedural endpoint normally.
 
 ### Current direct smooth appearance band
 
@@ -191,6 +193,9 @@ Only exposed solid perimeter columns produce two-sided vertical connector
 quads, and each quad spans the exact/procedural height difference rather than
 an unconditional depth. The transition field, profile, exact draw, procedural
 discard, and vegetation ownership share one admitted coverage generation.
+Connector side sprites invert their world-Y material coordinate so a
+grass-block side's grass strip follows the upper exact edge rather than the
+connector bottom.
 
 ### Texture selection and filtering
 
@@ -338,7 +343,7 @@ vertices after tile culling. This slice does not claim a GPU-time result;
 portable timestamp evidence remains future work. Exact command lines and
 inspected pixel paths are recorded in Tactical 304.
 
-### Tactical 313 direct candidate cost
+### Tactical 313 direct-only cost
 
 The revision-`3f0ff7ee` primary matched scene submits `1,633,494` direct
 terrain vertices instead of `2,614,872` through the temporary voxel shell, a
@@ -346,9 +351,10 @@ terrain vertices instead of `2,614,872` through the temporary voxel shell, a
 segments, `1,662` vertices, and `3,324` bytes. The ordinary transition payload
 is `1,296` bytes and took `18-37` microseconds to prepare in the native review
 packet. The field is cached by admitted exact generation, and identical GPU
-coverage uploads are skipped. Fixed allocation remains `133,209,640` bytes in
-both temporary A/B modes because the comparison build still reserves the same
-bounded resources; final allocation is remeasured after voxel deletion.
+coverage uploads are skipped. The deletion build preserves those primary
+geometry and transition figures. Removing the selector bit reduces fixed
+allocation from the comparison build's `133,209,640` bytes to
+`133,209,624` bytes.
 
 ### Tactical 276 baseline
 
@@ -433,8 +439,7 @@ remain under `/tmp` by policy.
    heightfield overlay produces sloped rivers or ponds at grazing angles.
 4. Decide whether decoration lakes receive deterministic multiscale summaries
    or deliberately remain exact-range-only.
-5. Complete Tactical 313 Human Review 1, delete the temporary voxel topology,
-   and run its final cross-platform and Human Review 2 gates.
+5. Complete Tactical 313 Human Review 2 on the final direct-only pixels.
 6. Add renderer GPU timing before increasing atlas samples, biome blending, or
    water shading complexity.
 
