@@ -8,9 +8,28 @@ export default figure("red_squirrel", ({
   asciiTexture,
   part,
   box,
+  clip,
+  defaultClip,
+  geometryException,
+  metadata,
   quadrupedWalk,
   followThrough,
 }) => {
+  metadata({
+    bodyPlans: ["quadruped"],
+    disposition: "passive",
+    groups: ["animal"],
+    habitats: ["land"],
+    scale: "small",
+    themes: ["squirrel", "woodland", "arboreal", "mast", "cache", "temperate"],
+  });
+  for (const climbingTailPart of ["tail", "tail_plume", "tail_tip"]) {
+    geometryException({
+      rule: "ground-penetration",
+      parts: [climbingTailPart],
+      reason: "The named tail segment trails below the squirrel's feet only during the elevated vertical trunk-climb clip; authoritative support keeps the actor above horizontal terrain.",
+    });
+  }
   mat("fur", "#b8582f");
   mat("fur_light", "#d7864d");
   mat("fur_dark", "#703623");
@@ -155,6 +174,8 @@ export default figure("red_squirrel", ({
   }));
 
   quadrupedWalk("bound", {
+    label: "Woodland bound",
+    role: "locomotion",
     fps: 20,
     duration: 0.72,
     cycleDistance: 0.82,
@@ -189,4 +210,308 @@ export default figure("red_squirrel", ({
       followThrough("tail", { source: "body", sourceChannel: "pos", sourceAxis: "y", axis: "x", degrees: 14, overshoot: 0.85, lag: 0.17 }),
     ],
   });
+
+  quadrupedWalk("flee", {
+    label: "Cover escape",
+    role: "locomotion",
+    fps: 30,
+    duration: 0.46,
+    cycleDistance: 1.14,
+    gait: "bound",
+    loop: true,
+    samples: 19,
+    contactParts: {
+      frontLeft: "foot_fl",
+      frontRight: "foot_fr",
+      backLeft: "foot_bl",
+      backRight: "foot_br",
+    },
+    body: "body",
+    bodyBob: 0.11,
+    bodyBobCenter: 0.1,
+    bodyBobPhase: 0.5,
+    head: "head",
+    headSwingDegrees: 4,
+    legs: {
+      frontLeft: "leg_fl",
+      frontRight: "leg_fr",
+      backLeft: "leg_bl",
+      backRight: "leg_br",
+    },
+    stanceRatio: 0.38,
+    swingDegrees: 39,
+    tail: "tail",
+    tailSwingDegrees: 16,
+    tracks: [
+      followThrough("ear_l", { source: "body", sourceChannel: "pos", sourceAxis: "y", axis: "x", degrees: 20, overshoot: 0.85, lag: 0.08 }),
+      followThrough("ear_r", { source: "body", sourceChannel: "pos", sourceAxis: "y", axis: "x", degrees: 20, overshoot: 0.85, lag: 0.08 }),
+      followThrough("tail", { source: "body", sourceChannel: "pos", sourceAxis: "y", axis: "x", degrees: 19, overshoot: 0.9, lag: 0.12 }),
+    ],
+  });
+
+  clip("idle", {
+    label: "Woodland watch",
+    role: "idle",
+    fps: 20,
+    loop: true,
+    keys: [
+      ["body", 0, { at: [0, 0, 0] }],
+      ["body", 1.4, { at: [0, 0.012, 0] }],
+      ["body", 2.8, { at: [0, 0, 0] }],
+      ["head", 0, { rot: [0, -5, 0] }],
+      ["head", 1.4, { rot: [-4, 6, 0] }],
+      ["head", 2.8, { rot: [0, -5, 0] }],
+      ["ear_l", 0, { rot: [0, 0, 0] }],
+      ["ear_l", 0.65, { rot: [-12, 0, 7] }],
+      ["ear_l", 1.3, { rot: [0, 0, 0] }],
+      ["ear_l", 2.8, { rot: [0, 0, 0] }],
+      ["ear_r", 0, { rot: [0, 0, 0] }],
+      ["ear_r", 1.7, { rot: [-10, 0, -6] }],
+      ["ear_r", 2.3, { rot: [0, 0, 0] }],
+      ["ear_r", 2.8, { rot: [0, 0, 0] }],
+      ["tail", 0, { rot: [0, 0, -4] }],
+      ["tail", 1.4, { rot: [0, 0, 5] }],
+      ["tail", 2.8, { rot: [0, 0, -4] }],
+    ],
+  });
+
+  clip("forage", {
+    label: "Mast forage",
+    role: "idle",
+    fps: 20,
+    loop: true,
+    keys: [
+      ["body", 0, { at: [0, -0.025, 0.02], rot: [8, 0, 0] }],
+      ["body", 0.7, { at: [0, -0.04, -0.015], rot: [11, 0, 0] }],
+      ["body", 1.4, { at: [0, -0.025, 0.02], rot: [8, 0, 0] }],
+      ["head", 0, { rot: [30, -4, 0] }],
+      ["head", 0.35, { rot: [38, 4, 0] }],
+      ["head", 0.7, { rot: [31, 0, 0] }],
+      ["head", 1.05, { rot: [37, -4, 0] }],
+      ["head", 1.4, { rot: [30, -4, 0] }],
+      ["leg_fl", 0, { rot: [-18, 0, 0] }],
+      ["leg_fl", 0.7, { rot: [-25, 0, 0] }],
+      ["leg_fl", 1.4, { rot: [-18, 0, 0] }],
+      ["leg_fr", 0, { rot: [-25, 0, 0] }],
+      ["leg_fr", 0.7, { rot: [-18, 0, 0] }],
+      ["leg_fr", 1.4, { rot: [-25, 0, 0] }],
+      ["tail", 0, { rot: [0, 0, -6] }],
+      ["tail", 0.7, { rot: [0, 0, 6] }],
+      ["tail", 1.4, { rot: [0, 0, -6] }],
+    ],
+  });
+
+  clip("carry", {
+    label: "Carry mast",
+    role: "idle",
+    fps: 20,
+    loop: true,
+    keys: [
+      ["body", 0, { at: [0, 0.025, 0], rot: [-4, 0, 0] }],
+      ["body", 1, { at: [0, 0.035, 0], rot: [-3, 0, 0] }],
+      ["body", 2, { at: [0, 0.025, 0], rot: [-4, 0, 0] }],
+      ["head", 0, { rot: [-10, 0, 0] }],
+      ["head", 1, { rot: [-7, 3, 0] }],
+      ["head", 2, { rot: [-10, 0, 0] }],
+      ["leg_fl", 0, { rot: [-62, 0, -8] }],
+      ["leg_fl", 2, { rot: [-62, 0, -8] }],
+      ["leg_fr", 0, { rot: [-62, 0, 8] }],
+      ["leg_fr", 2, { rot: [-62, 0, 8] }],
+      ["tail", 0, { rot: [-5, 0, 0] }],
+      ["tail", 1, { rot: [-1, 0, 3] }],
+      ["tail", 2, { rot: [-5, 0, 0] }],
+    ],
+  });
+
+  clip("cache_deposit", {
+    label: "Cache deposit",
+    role: "action",
+    nextClip: "idle",
+    fps: 24,
+    loop: false,
+    keys: [
+      ["body", 0, { at: [0, 0, 0], rot: [0, 0, 0] }],
+      ["body", 0.35, { at: [0, -0.035, -0.035], rot: [13, 0, 0] }],
+      ["body", 0.75, { at: [0, -0.045, -0.05], rot: [17, 0, 0] }],
+      ["body", 1.1, { at: [0, 0, 0], rot: [0, 0, 0] }],
+      ["head", 0, { rot: [0, 0, 0] }],
+      ["head", 0.35, { rot: [29, 0, 0] }],
+      ["head", 0.75, { rot: [40, 0, 0] }],
+      ["head", 1.1, { rot: [0, 0, 0] }],
+      ["leg_fl", 0, { rot: [0, 0, 0] }],
+      ["leg_fl", 0.35, { rot: [-38, 0, 0] }],
+      ["leg_fl", 0.55, { rot: [34, 0, 0] }],
+      ["leg_fl", 0.75, { rot: [-38, 0, 0] }],
+      ["leg_fl", 1.1, { rot: [0, 0, 0] }],
+      ["leg_fr", 0, { rot: [0, 0, 0] }],
+      ["leg_fr", 0.35, { rot: [34, 0, 0] }],
+      ["leg_fr", 0.55, { rot: [-38, 0, 0] }],
+      ["leg_fr", 0.75, { rot: [34, 0, 0] }],
+      ["leg_fr", 1.1, { rot: [0, 0, 0] }],
+    ],
+  });
+
+  clip("cache_retrieve", {
+    label: "Cache retrieve",
+    role: "action",
+    nextClip: "carry",
+    fps: 24,
+    loop: false,
+    keys: [
+      ["body", 0, { at: [0, 0, 0], rot: [0, 0, 0] }],
+      ["body", 0.4, { at: [0, -0.04, -0.04], rot: [16, 0, 0] }],
+      ["body", 0.8, { at: [0, -0.025, 0], rot: [8, 0, 0] }],
+      ["body", 1.2, { at: [0, 0.025, 0], rot: [-4, 0, 0] }],
+      ["head", 0, { rot: [0, 0, 0] }],
+      ["head", 0.4, { rot: [39, 0, 0] }],
+      ["head", 0.8, { rot: [18, 0, 0] }],
+      ["head", 1.2, { rot: [-10, 0, 0] }],
+      ["leg_fl", 0, { rot: [0, 0, 0] }],
+      ["leg_fl", 0.4, { rot: [-36, 0, 0] }],
+      ["leg_fl", 0.8, { rot: [-18, 0, 0] }],
+      ["leg_fl", 1.2, { rot: [-62, 0, -8] }],
+      ["leg_fr", 0, { rot: [0, 0, 0] }],
+      ["leg_fr", 0.4, { rot: [31, 0, 0] }],
+      ["leg_fr", 0.8, { rot: [-18, 0, 0] }],
+      ["leg_fr", 1.2, { rot: [-62, 0, 8] }],
+    ],
+  });
+
+  clip("climb", {
+    label: "Trunk climb",
+    role: "locomotion",
+    fps: 24,
+    loop: true,
+    locomotion: {
+      kind: "quadruped-walk",
+      cycleDistance: 0.56,
+      direction: [0, 1, 0],
+      units: "figure",
+    },
+    keys: [
+      ["body", 0, { at: [0, 0.5, 0], rot: [72, 0, 0] }],
+      ["body", 0.4, { at: [0, 0.54, 0], rot: [74, 0, 0] }],
+      ["body", 0.8, { at: [0, 0.5, 0], rot: [72, 0, 0] }],
+      ["head", 0, { rot: [-9, 0, 0] }],
+      ["head", 0.4, { rot: [-3, 0, 0] }],
+      ["head", 0.8, { rot: [-9, 0, 0] }],
+      ["leg_fl", 0, { rot: [-42, 0, 0] }],
+      ["leg_fl", 0.4, { rot: [34, 0, 0] }],
+      ["leg_fl", 0.8, { rot: [-42, 0, 0] }],
+      ["leg_fr", 0, { rot: [34, 0, 0] }],
+      ["leg_fr", 0.4, { rot: [-42, 0, 0] }],
+      ["leg_fr", 0.8, { rot: [34, 0, 0] }],
+      ["leg_bl", 0, { rot: [38, 0, 0] }],
+      ["leg_bl", 0.4, { rot: [-30, 0, 0] }],
+      ["leg_bl", 0.8, { rot: [38, 0, 0] }],
+      ["leg_br", 0, { rot: [-30, 0, 0] }],
+      ["leg_br", 0.4, { rot: [38, 0, 0] }],
+      ["leg_br", 0.8, { rot: [-30, 0, 0] }],
+      ["tail", 0, { rot: [48, 0, -4] }],
+      ["tail", 0.4, { rot: [54, 0, 4] }],
+      ["tail", 0.8, { rot: [48, 0, -4] }],
+    ],
+  });
+
+  const appendRefugePose = (keys: Parameters<typeof clip>[1]["keys"], time: number) => {
+    keys.push(
+      ["body", time, { at: [0, -0.12, -0.06], rot: [10, 0, 0] }],
+      ["head", time, { rot: [-8, 0, 0] }],
+      ["leg_fl", time, { rot: [-48, 0, 0] }],
+      ["leg_fr", time, { rot: [-48, 0, 0] }],
+      ["leg_bl", time, { rot: [38, 0, 0] }],
+      ["leg_br", time, { rot: [38, 0, 0] }],
+      ["tail", time, { rot: [-31, 0, 20] }],
+    );
+  };
+  const appendStandingPose = (keys: Parameters<typeof clip>[1]["keys"], time: number) => {
+    for (const name of ["body", "head", "leg_fl", "leg_fr", "leg_bl", "leg_br", "tail"]) {
+      keys.push([name, time, name === "body" ? { at: [0, 0, 0], rot: [0, 0, 0] } : { rot: [0, 0, 0] }]);
+    }
+  };
+
+  const refugeEnterKeys: Parameters<typeof clip>[1]["keys"] = [];
+  appendStandingPose(refugeEnterKeys, 0);
+  refugeEnterKeys.push(
+    ["body", 0.45, { at: [0, -0.05, -0.03], rot: [6, 0, 0] }],
+    ["leg_fl", 0.45, { rot: [-24, 0, 0] }],
+    ["leg_fr", 0.45, { rot: [-24, 0, 0] }],
+    ["leg_bl", 0.45, { rot: [18, 0, 0] }],
+    ["leg_br", 0.45, { rot: [18, 0, 0] }],
+  );
+  appendRefugePose(refugeEnterKeys, 0.9);
+  clip("refuge_enter", {
+    label: "Enter tree refuge",
+    role: "action",
+    nextClip: "refuge_idle",
+    fps: 24,
+    loop: false,
+    keys: refugeEnterKeys,
+  });
+
+  const refugeIdleKeys: Parameters<typeof clip>[1]["keys"] = [];
+  appendRefugePose(refugeIdleKeys, 0);
+  appendRefugePose(refugeIdleKeys, 2.2);
+  refugeIdleKeys.push(
+    ["head", 1.1, { rot: [-5, 4, 0] }],
+    ["ear_l", 0, { rot: [-8, 0, 5] }],
+    ["ear_l", 1.1, { rot: [-14, 0, 8] }],
+    ["ear_l", 2.2, { rot: [-8, 0, 5] }],
+    ["ear_r", 0, { rot: [-10, 0, -6] }],
+    ["ear_r", 2.2, { rot: [-10, 0, -6] }],
+  );
+  clip("refuge_idle", {
+    label: "Tree refuge rest",
+    role: "idle",
+    fps: 20,
+    loop: true,
+    keys: refugeIdleKeys,
+  });
+
+  const refugeExitKeys: Parameters<typeof clip>[1]["keys"] = [];
+  appendRefugePose(refugeExitKeys, 0);
+  refugeExitKeys.push(
+    ["body", 0.45, { at: [0, -0.05, -0.03], rot: [6, 0, 0] }],
+    ["leg_fl", 0.45, { rot: [-24, 0, 0] }],
+    ["leg_fr", 0.45, { rot: [-24, 0, 0] }],
+    ["leg_bl", 0.45, { rot: [18, 0, 0] }],
+    ["leg_br", 0.45, { rot: [18, 0, 0] }],
+  );
+  appendStandingPose(refugeExitKeys, 0.9);
+  clip("refuge_exit", {
+    label: "Leave tree refuge",
+    role: "action",
+    nextClip: "idle",
+    fps: 24,
+    loop: false,
+    keys: refugeExitKeys,
+  });
+
+  clip("alarm", {
+    label: "Tail-flag alarm",
+    role: "action",
+    nextClip: "flee",
+    fps: 24,
+    loop: false,
+    keys: [
+      ["body", 0, { at: [0, 0, 0], rot: [0, 0, 0] }],
+      ["body", 0.18, { at: [0, 0.07, 0], rot: [-6, 0, 0] }],
+      ["body", 0.65, { at: [0, 0.025, 0], rot: [-3, 0, 0] }],
+      ["head", 0, { rot: [0, 0, 0] }],
+      ["head", 0.18, { rot: [-15, -7, 0] }],
+      ["head", 0.65, { rot: [-12, 8, 0] }],
+      ["ear_l", 0, { rot: [0, 0, 0] }],
+      ["ear_l", 0.18, { rot: [-16, 0, 9] }],
+      ["ear_l", 0.65, { rot: [-9, 0, 4] }],
+      ["ear_r", 0, { rot: [0, 0, 0] }],
+      ["ear_r", 0.18, { rot: [-9, 0, -4] }],
+      ["ear_r", 0.65, { rot: [-16, 0, -9] }],
+      ["tail", 0, { rot: [0, 0, 0] }],
+      ["tail", 0.18, { rot: [-34, 0, -12] }],
+      ["tail", 0.42, { rot: [-24, 0, 13] }],
+      ["tail", 0.65, { rot: [-31, 0, -8] }],
+    ],
+  });
+
+  defaultClip("idle");
 });
