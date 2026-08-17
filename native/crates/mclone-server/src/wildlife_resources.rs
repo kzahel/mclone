@@ -4,21 +4,31 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use mclone_blocks::{BlockFluidKind, block_fluid_kind};
 use mclone_core::{BlockPos, BlockStateId, ChunkPos};
+use mclone_season::{
+    AuthoritativeCalendarSample, EvaluatedLocalSeason, LocalSeasonInput,
+    SEASONAL_RESOURCE_FACTOR_SCALE, SeasonalResourceInput, SeasonalResourceKind,
+    SeasonalResourceOpportunity, SolarCoordinatePolicy, evaluate_seasonal_resource_opportunity,
+};
 use mclone_worldgen::block::{
     ACACIA_LEAVES, BIRCH_LEAVES, DANDELION, DARK_OAK_LEAVES, FERN, GRASS, GRASS_BLOCK,
     JUNGLE_LEAVES, LARGE_FERN_LOWER, LARGE_FERN_UPPER, LILY_PAD, OAK_LEAVES, POPPY, SPRUCE_LEAVES,
     SUGAR_CANE, TALL_GRASS_LOWER, TALL_GRASS_UPPER, generated_block_state_id,
 };
+use mclone_worldgen::levelgen::{McloneOverworldSampler, McloneOverworldSamplingTopology};
 use serde::{Deserialize, Serialize};
 
-use crate::{ChunkStoreError, ChunkStoreResult, SavedDataRecord};
+use crate::{
+    ChunkStoreError, ChunkStoreResult, DimensionDefinition, SavedDataRecord, WorldGenerationProfile,
+};
 
 pub(crate) const WILDLIFE_RESOURCE_SAVED_DATA_KEY: &str = "mclone:wildlife-forage-v1";
-pub const WILDLIFE_RESOURCE_RULE_REVISION: u32 = 2;
-const WILDLIFE_RESOURCE_CODEC_VERSION: u32 = 2;
+pub const WILDLIFE_RESOURCE_RULE_REVISION: u32 = 3;
+const WILDLIFE_RESOURCE_CODEC_VERSION: u32 = 3;
 pub const WILDLIFE_RESOURCE_CELL_WIDTH_BLOCKS: i32 = 64;
 pub const WILDLIFE_RESOURCE_KIND_COUNT: usize = 5;
 const RECOVERY_DENOMINATOR: u32 = 1_200;
+const SCALED_RECOVERY_DENOMINATOR: u64 =
+    RECOVERY_DENOMINATOR as u64 * SEASONAL_RESOURCE_FACTOR_SCALE as u64;
 const RESAMPLE_INTERVAL_TICKS: u64 = 1_200;
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -54,6 +64,16 @@ impl WildlifeResourceKind {
             Self::AquaticInvertebrates => 3,
         }
     }
+
+    pub(crate) const fn seasonal_kind(self) -> SeasonalResourceKind {
+        match self {
+            Self::LowHerbaceous => SeasonalResourceKind::LowHerbaceous,
+            Self::WoodyBrowse => SeasonalResourceKind::WoodyBrowse,
+            Self::SeedsAndSoftMast => SeasonalResourceKind::SeedsAndSoftMast,
+            Self::AquaticVegetation => SeasonalResourceKind::AquaticVegetation,
+            Self::AquaticInvertebrates => SeasonalResourceKind::AquaticInvertebrates,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -86,6 +106,9 @@ impl WildlifeForageCellPos {
 pub struct WildlifeResourceStratumSnapshot {
     pub potential: u32,
     pub available: u32,
+    pub accessibility_basis_points: u16,
+    pub effective_accessible: u32,
+    pub recovery_factor_basis_points: u16,
     pub recovered: u64,
     pub rabbit_consumed: u64,
     pub deer_consumed: u64,
@@ -167,6 +190,73 @@ pub(crate) const MALLARD_DIET: [WildlifeDietEntry; 3] = [
     },
 ];
 
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct SeasonalWildlifeResourceSampler {
+    terrain: Option<McloneOverworldSampler>,
+    coordinate_policy: SolarCoordinatePolicy,
+}
+
+impl SeasonalWildlifeResourceSampler {
+    pub(crate) fn new(definition: &DimensionDefinition) -> Self {
+        if definition.generation_profile != WorldGenerationProfile::McloneOverworldV1 {
+            return Self {
+                terrain: None,
+                coordinate_policy: SolarCoordinatePolicy::VanillaFixed,
+            };
+        }
+        let topology =
+            McloneOverworldSamplingTopology::from_horizontal_topology(definition.topology)
+                .expect("validated Mclone generation topology must support terrain sampling");
+        Self {
+            terrain: Some(McloneOverworldSampler::new_with_topology(
+                definition.seed,
+                topology,
+            )),
+            coordinate_policy: SolarCoordinatePolicy::mclone_for_topology(definition.topology),
+        }
+    }
+
+    pub(crate) fn opportunity(
+        self,
+        position: WildlifeForageCellPos,
+        kind: WildlifeResourceKind,
+        calendar: Option<AuthoritativeCalendarSample>,
+    ) -> SeasonalResourceOpportunity {
+        let (Some(terrain), Some(calendar)) = (self.terrain, calendar) else {
+            return SeasonalResourceOpportunity::NEUTRAL;
+        };
+        let world_x = position
+            .x
+            .saturating_mul(WILDLIFE_RESOURCE_CELL_WIDTH_BLOCKS)
+            .saturating_add(WILDLIFE_RESOURCE_CELL_WIDTH_BLOCKS / 2);
+        let world_z = position
+            .z
+            .saturating_mul(WILDLIFE_RESOURCE_CELL_WIDTH_BLOCKS)
+            .saturating_add(WILDLIFE_RESOURCE_CELL_WIDTH_BLOCKS / 2);
+        let terrain = terrain.sample(world_x, world_z);
+        let Ok(latitude) = self
+            .coordinate_policy
+            .latitude_at(f64::from(world_x), f64::from(world_z))
+        else {
+            return SeasonalResourceOpportunity::NEUTRAL;
+        };
+        let moisture = (terrain.climate.moisture * 0.5 + 0.5).clamp(0.0, 1.0) as f32;
+        let local_season = EvaluatedLocalSeason::evaluate(LocalSeasonInput {
+            orbital_phase: calendar.orbital_phase,
+            effective_latitude_degrees: latitude.degrees,
+            mean_temperature: terrain.climate.temperature.clamp(-1.0, 1.0) as f32,
+            moisture,
+            altitude_blocks: terrain.surface_y as f32,
+        });
+        evaluate_seasonal_resource_opportunity(SeasonalResourceInput {
+            enabled: true,
+            resource: kind.seasonal_kind(),
+            local_season,
+            moisture,
+        })
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) struct WildlifeDietIntake {
     pub(crate) resource: Option<WildlifeResourceKind>,
@@ -186,7 +276,7 @@ pub(crate) struct WildlifeResourceLedger {
 struct WildlifeResourceStratum {
     potential: u32,
     available: u32,
-    recovery_remainder: u32,
+    recovery_remainder: u64,
     recovered: u64,
     consumed: [u64; 3],
 }
@@ -236,14 +326,12 @@ impl WildlifeResourceLedger {
         }
         let mut cells = BTreeMap::new();
         for record in payload.cells {
-            if record
-                .cell
-                .strata
-                .iter()
-                .any(|stratum| stratum.available > stratum.potential)
-            {
+            if record.cell.strata.iter().any(|stratum| {
+                stratum.available > stratum.potential
+                    || stratum.recovery_remainder >= SCALED_RECOVERY_DENOMINATOR
+            }) {
                 return Err(ChunkStoreError::InvalidData(
-                    "wildlife resource cell has invalid availability".to_owned(),
+                    "wildlife resource cell has invalid stock or recovery remainder".to_owned(),
                 ));
             }
             if cells.insert(record.position, record.cell).is_some() {
@@ -292,7 +380,19 @@ impl WildlifeResourceLedger {
         self.dirty = false;
     }
 
+    #[cfg(test)]
     pub(crate) fn recover_loaded(&mut self, chunks: &BTreeSet<ChunkPos>) -> u32 {
+        self.recover_loaded_with_opportunity(chunks, &|_, _| SeasonalResourceOpportunity::NEUTRAL)
+    }
+
+    pub(crate) fn recover_loaded_with_opportunity<F>(
+        &mut self,
+        chunks: &BTreeSet<ChunkPos>,
+        opportunity_at: &F,
+    ) -> u32
+    where
+        F: Fn(WildlifeForageCellPos, WildlifeResourceKind) -> SeasonalResourceOpportunity,
+    {
         let mut total = 0_u32;
         for (position, cell) in &mut self.cells {
             if !position.overlaps_any_chunk(chunks) {
@@ -303,12 +403,15 @@ impl WildlifeResourceLedger {
                 if stratum.available >= stratum.potential {
                     continue;
                 }
-                let numerator = stratum
-                    .recovery_remainder
-                    .saturating_add((stratum.potential / kind.recovery_days()).max(1));
-                let recovered = numerator / RECOVERY_DENOMINATOR;
-                stratum.recovery_remainder = numerator % RECOVERY_DENOMINATOR;
-                let recovered = recovered.min(stratum.potential - stratum.available);
+                let opportunity = opportunity_at(*position, kind);
+                let recovery_units = u64::from((stratum.potential / kind.recovery_days()).max(1));
+                let numerator = stratum.recovery_remainder.saturating_add(
+                    recovery_units.saturating_mul(u64::from(opportunity.recovery.basis_points())),
+                );
+                let recovered = numerator / SCALED_RECOVERY_DENOMINATOR;
+                stratum.recovery_remainder = numerator % SCALED_RECOVERY_DENOMINATOR;
+                let recovered =
+                    recovered.min(u64::from(stratum.potential - stratum.available)) as u32;
                 if recovered > 0 {
                     stratum.available += recovered;
                     stratum.recovered = stratum.recovered.saturating_add(u64::from(recovered));
@@ -320,6 +423,7 @@ impl WildlifeResourceLedger {
         total
     }
 
+    #[cfg(test)]
     pub(crate) fn consume_diet_at<F>(
         &mut self,
         consumer: WildlifeForageConsumer,
@@ -329,6 +433,37 @@ impl WildlifeResourceLedger {
         activity_cost: u16,
         maximum_energy: u16,
         simulation_tick: u64,
+        block_state_at: &F,
+    ) -> WildlifeDietIntake
+    where
+        F: Fn(BlockPos) -> Option<BlockStateId>,
+    {
+        self.consume_diet_at_with_opportunity(
+            consumer,
+            diet,
+            feet,
+            energy,
+            activity_cost,
+            maximum_energy,
+            simulation_tick,
+            &|_, _| SeasonalResourceOpportunity::NEUTRAL,
+            block_state_at,
+        )
+    }
+
+    pub(crate) fn consume_diet_at_with_opportunity<F>(
+        &mut self,
+        consumer: WildlifeForageConsumer,
+        diet: &[WildlifeDietEntry],
+        feet: BlockPos,
+        energy: u16,
+        activity_cost: u16,
+        maximum_energy: u16,
+        simulation_tick: u64,
+        opportunity_at: &impl Fn(
+            WildlifeForageCellPos,
+            WildlifeResourceKind,
+        ) -> SeasonalResourceOpportunity,
         block_state_at: &F,
     ) -> WildlifeDietIntake
     where
@@ -351,7 +486,9 @@ impl WildlifeResourceLedger {
                 entry.maximum_bite,
             );
             let stratum = &mut cell.strata[entry.resource.index()];
-            let consumed = u32::from(requested).min(stratum.available) as u16;
+            let opportunity = opportunity_at(position, entry.resource);
+            let effective_accessible = opportunity.accessibility.apply_floor(stratum.available);
+            let consumed = u32::from(requested).min(effective_accessible) as u16;
             if consumed == 0 {
                 continue;
             }
@@ -398,16 +535,34 @@ impl WildlifeResourceLedger {
         self.dirty = true;
     }
 
+    #[cfg(test)]
     pub(crate) fn snapshots(&self) -> Vec<WildlifeForageCellSnapshot> {
+        self.snapshots_with_opportunity(&|_, _| SeasonalResourceOpportunity::NEUTRAL)
+    }
+
+    pub(crate) fn snapshots_with_opportunity<F>(
+        &self,
+        opportunity_at: &F,
+    ) -> Vec<WildlifeForageCellSnapshot>
+    where
+        F: Fn(WildlifeForageCellPos, WildlifeResourceKind) -> SeasonalResourceOpportunity,
+    {
         self.cells
             .iter()
             .map(|(position, cell)| WildlifeForageCellSnapshot {
                 position: *position,
                 strata: std::array::from_fn(|index| {
                     let stratum = cell.strata[index];
+                    let kind = WildlifeResourceKind::ALL[index];
+                    let opportunity = opportunity_at(*position, kind);
                     WildlifeResourceStratumSnapshot {
                         potential: stratum.potential,
                         available: stratum.available,
+                        accessibility_basis_points: opportunity.accessibility.basis_points(),
+                        effective_accessible: opportunity
+                            .accessibility
+                            .apply_floor(stratum.available),
+                        recovery_factor_basis_points: opportunity.recovery.basis_points(),
                         recovered: stratum.recovered,
                         rabbit_consumed: stratum.consumed[0],
                         deer_consumed: stratum.consumed[1],
@@ -586,7 +741,15 @@ fn wildlife_forage_request(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mclone_season::{SeasonCalendarPolicy, SeasonalResourceFactor};
     use mclone_worldgen::block::{AIR, DIRT, WATER};
+
+    fn opportunity(accessibility: u16, recovery: u16) -> SeasonalResourceOpportunity {
+        SeasonalResourceOpportunity {
+            accessibility: SeasonalResourceFactor::from_basis_points_clamped(accessibility),
+            recovery: SeasonalResourceFactor::from_basis_points_clamped(recovery),
+        }
+    }
 
     fn mixed_habitat(pos: BlockPos) -> Option<BlockStateId> {
         let raw = if pos.y < 63 {
@@ -739,6 +902,158 @@ mod tests {
             .stratum(WildlifeResourceKind::LowHerbaceous)
             .available;
         assert_eq!(after, before);
+    }
+
+    #[test]
+    fn seasonal_accessibility_caps_only_reached_intake_without_deleting_stock() {
+        let mut ledger = WildlifeResourceLedger::default();
+        let feet = BlockPos::new(2, 64, 2);
+        let inaccessible = |_, _| opportunity(0, SEASONAL_RESOURCE_FACTOR_SCALE);
+        let intake = ledger.consume_diet_at_with_opportunity(
+            WildlifeForageConsumer::Rabbit,
+            &RABBIT_DIET,
+            feet,
+            0,
+            1,
+            1_000,
+            20,
+            &inaccessible,
+            &mixed_habitat,
+        );
+        assert_eq!(intake, WildlifeDietIntake::default());
+        let hidden = ledger.snapshots_with_opportunity(&inaccessible)[0]
+            .stratum(WildlifeResourceKind::LowHerbaceous);
+        assert!(hidden.potential > 0);
+        assert_eq!(hidden.available, hidden.potential);
+        assert_eq!(hidden.accessibility_basis_points, 0);
+        assert_eq!(hidden.effective_accessible, 0);
+
+        let available = |_, _| SeasonalResourceOpportunity::NEUTRAL;
+        let intake = ledger.consume_diet_at_with_opportunity(
+            WildlifeForageConsumer::Rabbit,
+            &RABBIT_DIET,
+            feet,
+            0,
+            1,
+            1_000,
+            21,
+            &available,
+            &mixed_habitat,
+        );
+        assert!(intake.units > 0);
+        let after = ledger.snapshots_with_opportunity(&available)[0]
+            .stratum(WildlifeResourceKind::LowHerbaceous);
+        assert_eq!(hidden.available - after.available, u32::from(intake.units));
+    }
+
+    #[test]
+    fn seasonal_recovery_scales_integer_work_and_inactive_cells_freeze() {
+        let mut initial = WildlifeResourceLedger::default();
+        let feet = BlockPos::new(2, 64, 2);
+        let inaccessible = |_, _| opportunity(0, 0);
+        let _ = initial.consume_diet_at_with_opportunity(
+            WildlifeForageConsumer::Rabbit,
+            &RABBIT_DIET,
+            feet,
+            0,
+            1,
+            1_000,
+            20,
+            &inaccessible,
+            &mixed_habitat,
+        );
+        let position = WildlifeForageCellPos::from_block(feet);
+        initial.cells.get_mut(&position).unwrap().strata
+            [WildlifeResourceKind::LowHerbaceous.index()]
+        .available = 0;
+
+        let frozen = initial.clone();
+        let full = |_, _| opportunity(10_000, 10_000);
+        for _ in 0..2_400 {
+            initial
+                .recover_loaded_with_opportunity(&BTreeSet::from([ChunkPos::new(100, 100)]), &full);
+        }
+        assert_eq!(initial, frozen);
+
+        let mut full_ledger = frozen.clone();
+        let mut half_ledger = frozen;
+        let half = |_, _| opportunity(10_000, 5_000);
+        for _ in 0..1_200 {
+            let chunks = BTreeSet::from([ChunkPos::new(0, 0)]);
+            full_ledger.recover_loaded_with_opportunity(&chunks, &full);
+            half_ledger.recover_loaded_with_opportunity(&chunks, &half);
+        }
+        let full_recovery = full_ledger.snapshots_with_opportunity(&full)[0]
+            .stratum(WildlifeResourceKind::LowHerbaceous);
+        let half_recovery = half_ledger.snapshots_with_opportunity(&half)[0]
+            .stratum(WildlifeResourceKind::LowHerbaceous);
+        assert!(full_recovery.recovered > half_recovery.recovered);
+        assert!(half_recovery.recovered > 0);
+        assert!(full_recovery.available <= full_recovery.potential);
+        assert!(half_recovery.available <= half_recovery.potential);
+    }
+
+    #[test]
+    fn opportunity_changes_are_derived_and_leave_saved_stock_unchanged() {
+        let mut ledger = WildlifeResourceLedger::default();
+        let feet = BlockPos::new(2, 64, 2);
+        let _ = ledger.consume_diet_at(
+            WildlifeForageConsumer::Rabbit,
+            &RABBIT_DIET,
+            feet,
+            0,
+            1,
+            1_000,
+            20,
+            &mixed_habitat,
+        );
+        let saved_before = ledger.saved_record().unwrap().bytes;
+        let full = |_, _| opportunity(10_000, 10_000);
+        let lean = |_, _| opportunity(2_500, 1_500);
+        let abundant = ledger.snapshots_with_opportunity(&full)[0]
+            .stratum(WildlifeResourceKind::LowHerbaceous);
+        let concealed = ledger.snapshots_with_opportunity(&lean)[0]
+            .stratum(WildlifeResourceKind::LowHerbaceous);
+        assert_eq!(abundant.potential, concealed.potential);
+        assert_eq!(abundant.available, concealed.available);
+        assert!(abundant.effective_accessible > concealed.effective_accessible);
+        assert!(abundant.recovery_factor_basis_points > concealed.recovery_factor_basis_points);
+        assert_eq!(ledger.saved_record().unwrap().bytes, saved_before);
+    }
+
+    #[test]
+    fn authoritative_sampler_uses_calendar_latitude_and_profile_policy() {
+        let definition =
+            DimensionDefinition::overworld(12_345, WorldGenerationProfile::McloneOverworldV1);
+        let sampler = SeasonalWildlifeResourceSampler::new(&definition);
+        let northern_solstice = SeasonCalendarPolicy::MCLONE_OVERWORLD_V1
+            .sample(14 * mclone_core::time::DAY_LENGTH_TICKS)
+            .unwrap();
+        let north = sampler.opportunity(
+            WildlifeForageCellPos { x: 0, z: 128 },
+            WildlifeResourceKind::LowHerbaceous,
+            northern_solstice,
+        );
+        let south = sampler.opportunity(
+            WildlifeForageCellPos { x: 0, z: -129 },
+            WildlifeResourceKind::LowHerbaceous,
+            northern_solstice,
+        );
+        assert!(north.accessibility > south.accessibility);
+        assert!(north.recovery > south.recovery);
+
+        let retained = SeasonalWildlifeResourceSampler::new(&DimensionDefinition::overworld(
+            12_345,
+            WorldGenerationProfile::Overworld,
+        ));
+        assert_eq!(
+            retained.opportunity(
+                WildlifeForageCellPos { x: 0, z: 128 },
+                WildlifeResourceKind::LowHerbaceous,
+                northern_solstice,
+            ),
+            SeasonalResourceOpportunity::NEUTRAL
+        );
     }
 
     #[test]

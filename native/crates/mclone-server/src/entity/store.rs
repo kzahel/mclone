@@ -26,8 +26,8 @@ use crate::persistence::{
 };
 use crate::players::ServerPlayerId;
 use crate::wildlife_resources::{
-    DEER_DIET, MALLARD_DIET, RABBIT_DIET, WildlifeDietEntry, WildlifeForageConsumer,
-    WildlifeResourceLedger,
+    DEER_DIET, MALLARD_DIET, RABBIT_DIET, WildlifeDietEntry, WildlifeForageCellPos,
+    WildlifeForageConsumer, WildlifeResourceKind, WildlifeResourceLedger,
 };
 
 use super::ServerEntityState;
@@ -600,6 +600,7 @@ impl ServerEntityStore {
             .collect()
     }
 
+    #[cfg(test)]
     pub(crate) fn tick_wildlife_lifecycle<F>(
         &mut self,
         simulation_tick: u64,
@@ -609,6 +610,30 @@ impl ServerEntityStore {
     ) -> Vec<ServerEntityState>
     where
         F: Fn(BlockPos) -> Option<BlockStateId>,
+    {
+        self.tick_wildlife_lifecycle_with_opportunity(
+            simulation_tick,
+            entity_ticking_chunks,
+            resources,
+            &|_, _| mclone_season::SeasonalResourceOpportunity::NEUTRAL,
+            block_state_at,
+        )
+    }
+
+    pub(crate) fn tick_wildlife_lifecycle_with_opportunity<F, G>(
+        &mut self,
+        simulation_tick: u64,
+        entity_ticking_chunks: &[ChunkPos],
+        resources: &mut WildlifeResourceLedger,
+        opportunity_at: &G,
+        block_state_at: &F,
+    ) -> Vec<ServerEntityState>
+    where
+        F: Fn(BlockPos) -> Option<BlockStateId>,
+        G: Fn(
+            WildlifeForageCellPos,
+            WildlifeResourceKind,
+        ) -> mclone_season::SeasonalResourceOpportunity,
     {
         let tuning = self.wildlife_tuning;
         if tuning.cadence_ticks == 0
@@ -620,7 +645,7 @@ impl ServerEntityStore {
             .iter()
             .copied()
             .collect::<BTreeSet<_>>();
-        resources.recover_loaded(&ticking_chunks);
+        resources.recover_loaded_with_opportunity(&ticking_chunks, opportunity_at);
         let mut wildlife_ids = self
             .entities
             .values()
@@ -756,7 +781,7 @@ impl ServerEntityStore {
                 _ => 0,
             };
             let intake = if foraging {
-                resources.consume_diet_at(
+                resources.consume_diet_at_with_opportunity(
                     consumer,
                     diet,
                     feet,
@@ -764,6 +789,7 @@ impl ServerEntityStore {
                     cost,
                     tuning.maximum_energy,
                     simulation_tick,
+                    opportunity_at,
                     block_state_at,
                 )
             } else {
