@@ -84,11 +84,9 @@ pub(crate) fn sample_squirrel_habitat(
             let ground =
                 block_at(column.below()).ok_or(SquirrelHabitatFailure::MissingBlockData)?;
             let body = block_at(column).ok_or(SquirrelHabitatFailure::MissingBlockData)?;
-            let head =
-                block_at(column.offset(0, 1, 0)).ok_or(SquirrelHabitatFailure::MissingBlockData)?;
             sample.open_ground_columns = sample
                 .open_ground_columns
-                .saturating_add(u16::from(ground != AIR && body == AIR && head == AIR));
+                .saturating_add(u16::from(ground != AIR && body == AIR));
 
             let mut woody_column = false;
             for dy in -1..=8 {
@@ -105,9 +103,6 @@ pub(crate) fn sample_squirrel_habitat(
                     let refuge = pos.offset(side_x, 0, side_z);
                     if refuge.y < feet.y + 3
                         || block_at(refuge).ok_or(SquirrelHabitatFailure::MissingBlockData)? != AIR
-                        || block_at(refuge.offset(0, 1, 0))
-                            .ok_or(SquirrelHabitatFailure::MissingBlockData)?
-                            != AIR
                     {
                         continue;
                     }
@@ -121,15 +116,14 @@ pub(crate) fn sample_squirrel_habitat(
                     }
                     let approach = BlockPos::new(refuge.x, feet.y, refuge.z);
                     if block_at(approach).ok_or(SquirrelHabitatFailure::MissingBlockData)? == AIR
-                        && block_at(approach.offset(0, 1, 0))
-                            .ok_or(SquirrelHabitatFailure::MissingBlockData)?
-                            == AIR
                         && block_at(approach.below())
                             .ok_or(SquirrelHabitatFailure::MissingBlockData)?
                             != AIR
                     {
+                        let approach_distance =
+                            (approach.x - feet.x).abs() + (approach.z - feet.z).abs();
                         refuge_candidates.push((
-                            distance,
+                            approach_distance,
                             refuge.y,
                             refuge.x,
                             refuge.z,
@@ -174,6 +168,7 @@ pub(crate) fn find_squirrel_refuge_candidate(
     feet: BlockPos,
     block_state_at: &impl Fn(BlockPos) -> Option<BlockStateId>,
 ) -> Option<SquirrelRefugeCandidate> {
+    let mut candidates = Vec::new();
     for radius in 1..=SQUIRREL_HABITAT_RADIUS {
         for dx in -radius..=radius {
             for dz in -radius..=radius {
@@ -198,18 +193,29 @@ pub(crate) fn find_squirrel_refuge_candidate(
                                 block_collision_aabb(state, approach.below()).is_some()
                             })
                         {
-                            return Some(SquirrelRefugeCandidate {
-                                approach,
-                                trunk,
-                                refuge,
-                            });
+                            let approach_distance =
+                                (approach.x - feet.x).abs() + (approach.z - feet.z).abs();
+                            candidates.push((
+                                approach_distance,
+                                refuge.y,
+                                refuge.x,
+                                refuge.z,
+                                SquirrelRefugeCandidate {
+                                    approach,
+                                    trunk,
+                                    refuge,
+                                },
+                            ));
                         }
                     }
                 }
             }
         }
     }
-    None
+    candidates
+        .into_iter()
+        .min_by_key(|candidate| (candidate.0, candidate.1, candidate.2, candidate.3))
+        .map(|candidate| candidate.4)
 }
 
 pub(crate) fn squirrel_refuge_support_is_valid(
@@ -230,9 +236,7 @@ fn squirrel_space_is_clear(
     feet: BlockPos,
     block_state_at: &impl Fn(BlockPos) -> Option<BlockStateId>,
 ) -> bool {
-    [feet, feet.offset(0, 1, 0)].into_iter().all(|pos| {
-        block_state_at(pos).is_some_and(|state| block_collision_aabb(state, pos).is_none())
-    })
+    block_state_at(feet).is_some_and(|state| block_collision_aabb(state, feet).is_none())
 }
 
 fn squirrel_leaf_support_exists(

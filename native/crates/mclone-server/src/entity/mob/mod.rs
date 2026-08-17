@@ -178,6 +178,15 @@ impl RabbitEcologyAdmission {
     };
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) struct SquirrelEcologyAdmission {
+    pub(crate) refuge_query: bool,
+}
+
+impl SquirrelEcologyAdmission {
+    const UNBOUNDED: Self = Self { refuge_query: true };
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum MallardHabitatKind {
     Water,
@@ -1172,6 +1181,7 @@ impl MobRuntimeState {
             day_time,
             &[],
             RabbitEcologyAdmission::UNBOUNDED,
+            SquirrelEcologyAdmission::UNBOUNDED,
             block_state_at,
         );
     }
@@ -1185,6 +1195,7 @@ impl MobRuntimeState {
         day_time: u64,
         rabbit_refuges: &[RabbitRefugeCandidate],
         rabbit_admission: RabbitEcologyAdmission,
+        squirrel_admission: SquirrelEcologyAdmission,
         block_state_at: &F,
     ) where
         F: Fn(BlockPos) -> Option<BlockStateId>,
@@ -1193,7 +1204,7 @@ impl MobRuntimeState {
         self.y_body_rot_degrees = entity.y_rot_degrees;
 
         if entity.kind == EntityKind::Squirrel {
-            self.tick_squirrel(entity, nearby_players, block_state_at);
+            self.tick_squirrel(entity, nearby_players, squirrel_admission, block_state_at);
             return;
         }
 
@@ -1277,6 +1288,7 @@ impl MobRuntimeState {
         &mut self,
         entity: &mut ServerEntityState,
         nearby_players: &[MobPlayerTarget],
+        admission: SquirrelEcologyAdmission,
         blocks: &F,
     ) where
         F: Fn(BlockPos) -> Option<BlockStateId>,
@@ -1398,7 +1410,10 @@ impl MobRuntimeState {
                 }
             }
             mclone_protocol::SquirrelBehavior::Alarm => {
-                if nearest_threat.is_some() && behavior_ticks >= SQUIRREL_ALARM_TICKS {
+                if nearest_threat.is_some()
+                    && behavior_ticks >= SQUIRREL_ALARM_TICKS
+                    && admission.refuge_query
+                {
                     let route = find_squirrel_refuge_candidate(
                         BlockPos::containing(entity.position),
                         blocks,
@@ -1532,6 +1547,14 @@ impl MobRuntimeState {
         self.y_body_rot_degrees = entity.y_rot_degrees;
         self.y_head_rot_degrees = entity.y_rot_degrees;
         self.delta_movement = Vec3d::ZERO;
+    }
+
+    pub(crate) fn squirrel_refuge_query_needed(&self) -> bool {
+        self.squirrel_refuge_route.is_none()
+            && self.species.squirrel().is_some_and(|squirrel| {
+                squirrel.behavior() == mclone_protocol::SquirrelBehavior::Alarm
+                    && squirrel.behavior_ticks().saturating_add(1) >= SQUIRREL_ALARM_TICKS
+            })
     }
 
     fn tick_rabbit<F>(
@@ -4805,6 +4828,7 @@ mod tests {
             12_000,
             &[refuge],
             RabbitEcologyAdmission::UNBOUNDED,
+            SquirrelEcologyAdmission::UNBOUNDED,
             &flat_ground,
         );
 
@@ -5115,6 +5139,7 @@ mod tests {
             6_000,
             &[local_refuge],
             RabbitEcologyAdmission::UNBOUNDED,
+            SquirrelEcologyAdmission::UNBOUNDED,
             &flat_ground,
         );
 

@@ -5692,6 +5692,21 @@ impl RealmServer {
             let plan = planner
                 .plan_for_chunk(pos)
                 .map_err(|error| ChunkStoreError::InvalidData(error.to_string()))?;
+            if plan.encounter_for_chunk(pos).is_some_and(|encounter| {
+                encounter.species == McloneWildlifeSpecies::Squirrel
+                    && (-1..=1).any(|dx| {
+                        (-1..=1).any(|dz| {
+                            self.scheduler
+                                .client_visible_snapshot(ChunkPos::new(
+                                    pos.x.saturating_add(dx),
+                                    pos.z.saturating_add(dz),
+                                ))
+                                .is_none()
+                        })
+                    })
+            }) {
+                continue;
+            }
             if let Some(encounter) = plan.encounter_for_chunk(pos)
                 && let Some(placement) = if encounter.species == McloneWildlifeSpecies::Squirrel {
                     let recently_disturbed = player_positions.iter().any(|player| {

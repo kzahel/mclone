@@ -9,12 +9,12 @@ use std::sync::Arc;
 use anyhow::Result;
 use glam::{Vec3, vec3};
 use mclone_assets::{
-    MemoryAssetSource, chicken_figure_id, chicken_figure_path, cow_figure_id, cow_figure_path,
-    default_player_figure_path, upright_bear_figure_path,
+    FigureAsset, chicken_figure_id, default_player_figure_id, prepare_figure_asset,
+    red_squirrel_figure_id, upright_bear_figure_id,
 };
-use mclone_core::Vec3d;
+use mclone_core::{AnimationClipId, Vec3d};
 
-use crate::asset_lab_figure::load_first_party_semantic_figures;
+use crate::asset_lab_figure::{SemanticFigureSet, compile_figure_asset};
 use crate::chunk::{
     ChunkMultiviewRenderTarget, ChunkRenderTarget, ChunkRenderView, TexturedSectionRenderOptions,
 };
@@ -124,11 +124,11 @@ impl ActorCompositionFixture {
             ActorInstance::remote_player_with_figure(
                 vec3(997.5, 64.0, 1_000.0),
                 25.0,
-                cow_figure_id(),
+                red_squirrel_figure_id(),
             )
-            .with_dimensions(0.9, 1.4)
+            .with_dimensions(0.42, 0.62)
             .with_id(ActorInstanceId::Entity(9))
-            .with_walk_animation_distance(0.31),
+            .with_animation_distance(AnimationClipId::from_static("bound"), 0.31),
             ActorInstance::item_egg(vec3(1_000.0, 64.0, 1_000.0), -20.0, 0.3, 0.3)
                 .with_packed_light(0),
             ActorInstance::remote_player(vec3(1_004.7, 64.0, 1_000.0), -35.0)
@@ -386,40 +386,32 @@ fn actor_multiview_frame_target(target: ChunkMultiviewRenderTarget<'_>) -> Rende
 }
 
 fn actor_fixture_figures() -> Result<crate::entity::ActorFigureSet> {
-    let mut source = MemoryAssetSource::new();
-    source.insert_text(
-        default_player_figure_path(),
-        include_str!("../../../../assets/mclone/figures/player.figure.json"),
-    );
-    source.insert_text(
-        upright_bear_figure_path(),
-        include_str!("../../../../assets/mclone/figures/upright_bear.figure.json"),
-    );
-    source.insert_text(
-        chicken_figure_path(),
-        include_str!("../../../../assets/mclone/figures/chicken.figure.json"),
-    );
-    source.insert_text(
-        cow_figure_path(),
-        include_str!("../../../../assets/mclone/figures/cow.figure.json"),
-    );
-    source.insert_text(
-        mclone_assets::mallard_duck_figure_path(),
-        include_str!("../../../../assets/mclone/figures/mallard_duck.figure.json"),
-    );
-    source.insert_text(
-        mclone_assets::deer_figure_path(),
-        include_str!("../../../../assets/mclone/figures/deer.figure.json"),
-    );
-    source.insert_text(
-        mclone_assets::mallard_nest_figure_path(),
-        include_str!("../../../../assets/mclone/figures/mallard_nest.figure.json"),
-    );
-    source.insert_text(
-        mclone_assets::mallard_feather_figure_path(),
-        include_str!("../../../../assets/mclone/figures/mallard_feather.figure.json"),
-    );
-    load_first_party_semantic_figures(&source)
+    let assets = [
+        (
+            default_player_figure_id(),
+            include_str!("../../../../assets/mclone/figures/player.figure.json"),
+        ),
+        (
+            upright_bear_figure_id(),
+            include_str!("../../../../assets/mclone/figures/upright_bear.figure.json"),
+        ),
+        (
+            chicken_figure_id(),
+            include_str!("../../../../assets/mclone/figures/chicken.figure.json"),
+        ),
+        (
+            red_squirrel_figure_id(),
+            include_str!("../../../../assets/mclone/figures/red_squirrel.figure.json"),
+        ),
+    ];
+    let mut compiled = Vec::with_capacity(assets.len());
+    let mut prepared = Vec::with_capacity(assets.len());
+    for (id, json) in assets {
+        let asset: FigureAsset = serde_json::from_str(json)?;
+        compiled.push((id, compile_figure_asset(&asset)?));
+        prepared.push((id, prepare_figure_asset(&asset)?));
+    }
+    Ok(SemanticFigureSet::with_prepared(compiled, prepared))
 }
 
 fn actor_fixture_atlas() -> (Vec<u8>, ActorTextureLayout) {

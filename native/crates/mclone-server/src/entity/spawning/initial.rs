@@ -14,6 +14,7 @@ use crate::entity::spawning::habitat::{SquirrelHabitatSample, sample_squirrel_ha
 
 const MEMBER_OFFSETS: [(i32, i32); 4] = [(0, 0), (2, 0), (-2, 1), (1, -2)];
 const PLACEMENT_SEARCH_RADIUS: i32 = 6;
+const SQUIRREL_PLACEMENT_SEARCH_RADIUS: i32 = 13;
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum InitialWildlifePlacement {
@@ -98,21 +99,73 @@ where
     if encounter.species != McloneWildlifeSpecies::Squirrel {
         return None;
     }
-    let placement = plan_initial_wildlife_placement(encounter, &mut block_at)?;
-    let InitialWildlifePlacement::Group { positions, .. } = &placement else {
-        return None;
-    };
-    let feet = BlockPos::containing(*positions.first()?);
-    let habitat = sample_squirrel_habitat(
-        feet,
+    let (feet, habitat) = find_suitable_squirrel_founder(
+        encounter,
         generated_suitability,
         forest_cover,
-        mast_accessible_at(feet),
         recently_disturbed,
+        &mut mast_accessible_at,
         &mut block_at,
-    )
-    .ok()?;
-    habitat.suitable().then_some((placement, habitat))
+    )?;
+    let relocated = McloneWildlifeEncounter {
+        anchor_x: feet.x,
+        anchor_z: feet.z,
+        ..encounter
+    };
+    let placement = plan_initial_wildlife_placement(relocated, &mut block_at)?;
+    Some((placement, habitat))
+}
+
+fn find_suitable_squirrel_founder(
+    encounter: McloneWildlifeEncounter,
+    generated_suitability: u16,
+    forest_cover: u16,
+    recently_disturbed: bool,
+    mast_accessible_at: &mut impl FnMut(BlockPos) -> bool,
+    block_at: &mut impl FnMut(BlockPos) -> Option<RawBlockId>,
+) -> Option<(BlockPos, SquirrelHabitatSample)> {
+    let min_x = encounter.owner_chunk.min_block_x() + 1;
+    let min_z = encounter.owner_chunk.min_block_z() + 1;
+    let max_x = encounter.owner_chunk.min_block_x() + 14;
+    let max_z = encounter.owner_chunk.min_block_z() + 14;
+    let preferred_x = encounter.anchor_x.clamp(min_x, max_x);
+    let preferred_z = encounter.anchor_z.clamp(min_z, max_z);
+    for radius in 0..=SQUIRREL_PLACEMENT_SEARCH_RADIUS {
+        for z_offset in -radius..=radius {
+            for x_offset in -radius..=radius {
+                if x_offset.abs().max(z_offset.abs()) != radius {
+                    continue;
+                }
+                let x = preferred_x + x_offset;
+                let z = preferred_z + z_offset;
+                if !(min_x..=max_x).contains(&x) || !(min_z..=max_z).contains(&z) {
+                    continue;
+                }
+                let Ok(feet_y) = top_motion_blocking_no_leaves_feet_y(x, z, &mut *block_at) else {
+                    continue;
+                };
+                let feet = BlockPos::new(x, feet_y, z);
+                if check_debug_actor_placement(EntityKind::Squirrel, feet, &mut *block_at).is_err()
+                {
+                    continue;
+                }
+                let Ok(habitat) = sample_squirrel_habitat(
+                    feet,
+                    generated_suitability,
+                    forest_cover,
+                    mast_accessible_at(feet),
+                    recently_disturbed,
+                    &mut *block_at,
+                ) else {
+                    continue;
+                };
+                if habitat.suitable() {
+                    return Some((feet, habitat));
+                }
+            }
+        }
+    }
+    None
 }
 
 fn species_entity_kind(species: McloneWildlifeSpecies) -> EntityKind {

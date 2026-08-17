@@ -34,7 +34,7 @@ impl SemanticFigureSet {
         }
     }
 
-    fn with_prepared(
+    pub(crate) fn with_prepared(
         figures: impl IntoIterator<Item = (ActorFigureId, CompiledFigure)>,
         prepared_figures: impl IntoIterator<Item = (ActorFigureId, PreparedFigure)>,
     ) -> Self {

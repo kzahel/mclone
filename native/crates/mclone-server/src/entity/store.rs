@@ -36,7 +36,8 @@ use super::metadata::{EntityMetadata, PASSIVE_MOB_KINDS};
 use super::mob::{
     BeeRuntimeSaveData, DeerHerdmateTarget, DeerRuntimeSaveData, MallardFlockmateTarget,
     MallardRuntimeSaveData, MobPlayerTarget, MobRuntimeState, RabbitEcologyAdmission,
-    RabbitRefugeCandidate, RabbitRuntimeSaveData, SquirrelRuntimeSaveData, identity_mallard_sex,
+    RabbitRefugeCandidate, RabbitRuntimeSaveData, SquirrelEcologyAdmission,
+    SquirrelRuntimeSaveData, identity_mallard_sex,
 };
 use super::spawning::habitat::sample_wetland_habitat;
 use super::spawning::mob_category::MobCategory;
@@ -2694,6 +2695,34 @@ impl ServerEntityStore {
                     path_request,
                 });
         }
+        let mut due_squirrel_refuges = ticking_ids
+            .iter()
+            .filter_map(|id| {
+                let entity = self.entities.get(id)?;
+                let mob = self.mobs.get(id)?;
+                (entity.kind == EntityKind::Squirrel && mob.squirrel_refuge_query_needed())
+                    .then_some((*id, entity.persistent_id))
+            })
+            .collect::<Vec<_>>();
+        due_squirrel_refuges.sort_unstable_by_key(|(_, persistent_id)| *persistent_id);
+        if !due_squirrel_refuges.is_empty() {
+            let fairness_offset = day_time
+                .wrapping_mul(u64::from(RABBIT_HABITAT_WORK_PER_TICK))
+                .rem_euclid(due_squirrel_refuges.len() as u64)
+                as usize;
+            due_squirrel_refuges.rotate_left(fairness_offset);
+        }
+        let squirrel_admissions = due_squirrel_refuges
+            .into_iter()
+            .map(|(id, _)| {
+                (
+                    id,
+                    SquirrelEcologyAdmission {
+                        refuge_query: ecology_budget.admit(EcologyWorkClass::HabitatQuery, 0),
+                    },
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
         let mut bee_colony_members = BTreeMap::<EntityPersistentId, Vec<EntityPersistentId>>::new();
         for (id, mob) in &self.mobs {
             let Some(entity) = self.entities.get(id).filter(|entity| entity.alive) else {
@@ -2765,6 +2794,7 @@ impl ServerEntityStore {
                 candidates
             });
             let rabbit_admission = rabbit_admissions.get(&id).copied().unwrap_or_default();
+            let squirrel_admission = squirrel_admissions.get(&id).copied().unwrap_or_default();
             if let Some(entity) = self.entities.get_mut(&id) {
                 if let Some(mob) = self.mobs.get_mut(&id) {
                     let previous_position = entity.position;
@@ -2859,6 +2889,7 @@ impl ServerEntityStore {
                         day_time,
                         &rabbit_candidates,
                         rabbit_admission,
+                        squirrel_admission,
                         &available_block_state_at,
                     );
                     if !entity_ticking_chunks.contains(&entity.chunk_pos()) {
@@ -5429,6 +5460,20 @@ mod tests {
         })
     }
 
+    fn squirrel_overload_tree(pos: BlockPos) -> Option<BlockStateId> {
+        use mclone_worldgen::block::{AIR, GRASS_BLOCK, OAK_LEAVES, OAK_LOG};
+
+        Some(generated_block_state_id(if pos.y <= 63 {
+            GRASS_BLOCK
+        } else if pos.x == 11 && pos.z == 8 && (64..=68).contains(&pos.y) {
+            OAK_LOG
+        } else if pos.y == 68 && (pos.x - 11).abs() <= 2 && (pos.z - 8).abs() <= 2 {
+            OAK_LEAVES
+        } else {
+            AIR
+        }))
+    }
+
     fn ready_wildlife_lifecycle(age_ticks: u32) -> WildlifeLifeState {
         WildlifeLifeState {
             age_ticks,
@@ -6936,6 +6981,38 @@ mod tests {
         assert!(store.mobs.values().all(|mob| {
             mob.rabbit_escape_attempts_for_test()
                 .is_some_and(|attempts| attempts > 0)
+        }));
+    }
+
+    #[test]
+    fn thousand_threatened_squirrels_bound_and_share_refuge_queries() {
+        let mut store = ServerEntityStore::default();
+        for index in 0..1_000 {
+            let offset = f64::from(index % 20) * 0.02;
+            store.insert_passive_mob_for_test(
+                EntityKind::Squirrel,
+                Vec3d::new(8.0 + offset, 64.0, 8.0 + offset),
+                0.0,
+            );
+        }
+        let player = MobPlayerTarget::from_position(Vec3d::new(8.0, 64.0, 8.0));
+        let mut observed_deferral = false;
+        for tick in 0..64 {
+            store.tick_stationary_at_time(
+                &[ChunkPos::new(0, 0)],
+                &[player],
+                12_000 + tick,
+                squirrel_overload_tree,
+            );
+            let work = store.rabbit_ecology_diagnostics().work;
+            assert!(work.admitted[EcologyWorkClass::HabitatQuery as usize] <= 32);
+            observed_deferral |= work.deferred[EcologyWorkClass::HabitatQuery as usize] > 0;
+        }
+
+        assert!(observed_deferral);
+        assert!(store.mobs.values().all(|mob| {
+            mob.squirrel_behavior()
+                .is_some_and(|behavior| behavior != mclone_protocol::SquirrelBehavior::Alarm)
         }));
     }
 
