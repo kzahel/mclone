@@ -593,6 +593,142 @@ impl EvaluatedLocalSeason {
     }
 }
 
+pub const SEASONAL_RESOURCE_FACTOR_SCALE: u16 = 10_000;
+pub const SEASONAL_RESOURCE_RESPONSE_REVISION: u32 = 1;
+
+/// The fixed terrain-resource vocabulary consumed by seasonal opportunity.
+/// This mirrors the server ledger without making `mclone-season` depend on a
+/// simulation owner.
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum SeasonalResourceKind {
+    LowHerbaceous = 0,
+    WoodyBrowse = 1,
+    SeedsAndSoftMast = 2,
+    AquaticVegetation = 3,
+    AquaticInvertebrates = 4,
+}
+
+impl SeasonalResourceKind {
+    pub const ALL: [Self; 5] = [
+        Self::LowHerbaceous,
+        Self::WoodyBrowse,
+        Self::SeedsAndSoftMast,
+        Self::AquaticVegetation,
+        Self::AquaticInvertebrates,
+    ];
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct SeasonalResourceFactor(u16);
+
+impl SeasonalResourceFactor {
+    pub const ZERO: Self = Self(0);
+    pub const FULL: Self = Self(SEASONAL_RESOURCE_FACTOR_SCALE);
+
+    pub const fn from_basis_points_clamped(basis_points: u16) -> Self {
+        Self(if basis_points > SEASONAL_RESOURCE_FACTOR_SCALE {
+            SEASONAL_RESOURCE_FACTOR_SCALE
+        } else {
+            basis_points
+        })
+    }
+
+    pub fn from_unit_clamped(value: f32) -> Self {
+        let value = finite_f32_or(value, 0.0).clamp(0.0, 1.0);
+        Self((value * f32::from(SEASONAL_RESOURCE_FACTOR_SCALE)).round() as u16)
+    }
+
+    pub const fn basis_points(self) -> u16 {
+        self.0
+    }
+
+    pub const fn apply_floor(self, units: u32) -> u32 {
+        ((units as u64 * self.0 as u64) / SEASONAL_RESOURCE_FACTOR_SCALE as u64) as u32
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SeasonalResourceInput {
+    pub enabled: bool,
+    pub resource: SeasonalResourceKind,
+    pub local_season: EvaluatedLocalSeason,
+    /// Normalized annual/local moisture character in `[0, 1]`.
+    pub moisture: f32,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct SeasonalResourceOpportunity {
+    pub accessibility: SeasonalResourceFactor,
+    pub recovery: SeasonalResourceFactor,
+}
+
+impl SeasonalResourceOpportunity {
+    pub const NEUTRAL: Self = Self {
+        accessibility: SeasonalResourceFactor::FULL,
+        recovery: SeasonalResourceFactor::FULL,
+    };
+}
+
+/// Derive current opportunity without mutating terrain potential or standing
+/// stock. Phase-dependent pressure is blended by local response strength, so
+/// opposite hemispheres invert while weak tropical cycles remain stable.
+pub fn evaluate_seasonal_resource_opportunity(
+    input: SeasonalResourceInput,
+) -> SeasonalResourceOpportunity {
+    if !input.enabled {
+        return SeasonalResourceOpportunity::NEUTRAL;
+    }
+
+    let season = input.local_season;
+    let moisture = finite_f32_or(input.moisture, 0.5).clamp(0.0, 1.0);
+    let temperature = finite_f32_or(season.current_temperature, 0.0).clamp(-1.0, 1.0);
+    let response = finite_f32_or(season.response_strength, 0.0).clamp(0.0, 1.0);
+    let snow = finite_f32_or(season.snow_tendency, 0.0).clamp(0.0, 1.0);
+    let thaw = smoothstep(-0.55, 0.05, f64::from(temperature)) as f32;
+    let warmth = smoothstep(-0.35, 0.55, f64::from(temperature)) as f32;
+    let mast_peak = cyclic_opportunity_pulse(season.local_phase, 0.61, 0.34);
+    let seasonal_mast = 0.62 + response * (mast_peak - 0.62);
+
+    let (accessibility, recovery) = match input.resource {
+        SeasonalResourceKind::LowHerbaceous => (
+            0.18 + 0.82 * thaw * (1.0 - snow * 0.82),
+            0.04 + 0.96 * warmth * (0.16 + moisture * 0.84) * (1.0 - snow * 0.78),
+        ),
+        SeasonalResourceKind::WoodyBrowse => (
+            0.70 + 0.30 * thaw * (1.0 - snow * 0.28),
+            0.20 + 0.80 * (0.48 + warmth * 0.52) * (0.42 + moisture * 0.58),
+        ),
+        SeasonalResourceKind::SeedsAndSoftMast => (
+            (0.42 + seasonal_mast * 0.58) * (1.0 - snow * 0.34),
+            0.06 + 0.94
+                * (0.20 + warmth * 0.80)
+                * (0.18 + moisture * 0.82)
+                * (0.24 + seasonal_mast * 0.76),
+        ),
+        SeasonalResourceKind::AquaticVegetation => (
+            0.10 + 0.90 * thaw * (1.0 - snow * 0.72),
+            0.03 + 0.97 * warmth * (0.12 + moisture * 0.88) * (1.0 - snow * 0.68),
+        ),
+        SeasonalResourceKind::AquaticInvertebrates => (
+            0.12 + 0.88 * warmth * (0.30 + moisture * 0.70),
+            0.05 + 0.95 * warmth * (0.24 + moisture * 0.76) * (1.0 - snow * 0.45),
+        ),
+    };
+
+    SeasonalResourceOpportunity {
+        accessibility: SeasonalResourceFactor::from_unit_clamped(accessibility),
+        recovery: SeasonalResourceFactor::from_unit_clamped(recovery),
+    }
+}
+
+fn cyclic_opportunity_pulse(phase: f32, center: f32, half_width: f32) -> f32 {
+    let phase = finite_f32_or(phase, 0.0).rem_euclid(1.0);
+    let distance = (phase - center + 0.5).rem_euclid(1.0) - 0.5;
+    let normalized = (distance.abs() / half_width.max(0.000_1)).clamp(0.0, 1.0);
+    (1.0 - smoothstep(0.0, 1.0, f64::from(normalized)) as f32).clamp(0.0, 1.0)
+}
+
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 pub enum SeasonalSurfaceFamily {
@@ -1983,6 +2119,184 @@ mod tests {
             moisture,
             altitude_blocks: altitude,
         })
+    }
+
+    fn resource_opportunity(
+        resource: SeasonalResourceKind,
+        local_season: EvaluatedLocalSeason,
+        moisture: f32,
+    ) -> SeasonalResourceOpportunity {
+        evaluate_seasonal_resource_opportunity(SeasonalResourceInput {
+            enabled: true,
+            resource,
+            local_season,
+            moisture,
+        })
+    }
+
+    #[test]
+    fn disabled_seasonal_resources_are_exactly_neutral() {
+        let local_season = local(65.0, OrbitalPhase::SOUTHERN_SOLSTICE, -0.8, 0.1, 220.0);
+        for resource in SeasonalResourceKind::ALL {
+            assert_eq!(
+                evaluate_seasonal_resource_opportunity(SeasonalResourceInput {
+                    enabled: false,
+                    resource,
+                    local_season,
+                    moisture: 0.1,
+                }),
+                SeasonalResourceOpportunity::NEUTRAL
+            );
+        }
+    }
+
+    #[test]
+    fn seasonal_resource_factors_are_bounded_and_apply_exact_floor() {
+        assert_eq!(SeasonalResourceFactor::ZERO.apply_floor(123), 0);
+        assert_eq!(SeasonalResourceFactor::FULL.apply_floor(123), 123);
+        assert_eq!(SeasonalResourceFactor(3_333).apply_floor(10), 3);
+        assert_eq!(
+            SeasonalResourceFactor::from_basis_points_clamped(u16::MAX),
+            SeasonalResourceFactor::FULL
+        );
+
+        for phase in (0..ORBITAL_PHASE_STEPS).step_by(137) {
+            let local_season = local(
+                52.0,
+                OrbitalPhase::from_steps_wrapped(phase),
+                0.15,
+                0.63,
+                96.0,
+            );
+            for resource in SeasonalResourceKind::ALL {
+                let opportunity = resource_opportunity(resource, local_season, 0.63);
+                assert!(opportunity.accessibility.basis_points() <= SEASONAL_RESOURCE_FACTOR_SCALE);
+                assert!(opportunity.recovery.basis_points() <= SEASONAL_RESOURCE_FACTOR_SCALE);
+            }
+        }
+    }
+
+    #[test]
+    fn temperate_hemispheres_invert_herbaceous_opportunity() {
+        let north_summer = resource_opportunity(
+            SeasonalResourceKind::LowHerbaceous,
+            local(48.0, OrbitalPhase::NORTHERN_SOLSTICE, 0.1, 0.7, 72.0),
+            0.7,
+        );
+        let north_winter = resource_opportunity(
+            SeasonalResourceKind::LowHerbaceous,
+            local(48.0, OrbitalPhase::SOUTHERN_SOLSTICE, 0.1, 0.7, 72.0),
+            0.7,
+        );
+        let south_summer = resource_opportunity(
+            SeasonalResourceKind::LowHerbaceous,
+            local(-48.0, OrbitalPhase::SOUTHERN_SOLSTICE, 0.1, 0.7, 72.0),
+            0.7,
+        );
+        let south_winter = resource_opportunity(
+            SeasonalResourceKind::LowHerbaceous,
+            local(-48.0, OrbitalPhase::NORTHERN_SOLSTICE, 0.1, 0.7, 72.0),
+            0.7,
+        );
+
+        assert!(north_summer.accessibility > north_winter.accessibility);
+        assert!(north_summer.recovery > north_winter.recovery);
+        assert!(south_summer.accessibility > south_winter.accessibility);
+        assert!(south_summer.recovery > south_winter.recovery);
+        assert_eq!(north_summer, south_summer);
+        assert_eq!(north_winter, south_winter);
+    }
+
+    #[test]
+    fn tropical_cycle_is_stable_while_altitude_and_moisture_still_matter() {
+        let tropical_a = resource_opportunity(
+            SeasonalResourceKind::SeedsAndSoftMast,
+            local(0.0, OrbitalPhase::NORTHWARD_EQUINOX, 0.45, 0.7, 72.0),
+            0.7,
+        );
+        let tropical_b = resource_opportunity(
+            SeasonalResourceKind::SeedsAndSoftMast,
+            local(0.0, OrbitalPhase::SOUTHERN_SOLSTICE, 0.45, 0.7, 72.0),
+            0.7,
+        );
+        assert_eq!(tropical_a, tropical_b);
+
+        let low_wet = resource_opportunity(
+            SeasonalResourceKind::AquaticVegetation,
+            local(42.0, OrbitalPhase::NORTHERN_SOLSTICE, 0.3, 0.9, 72.0),
+            0.9,
+        );
+        let high_wet = resource_opportunity(
+            SeasonalResourceKind::AquaticVegetation,
+            local(42.0, OrbitalPhase::NORTHERN_SOLSTICE, 0.3, 0.9, 260.0),
+            0.9,
+        );
+        let low_dry = resource_opportunity(
+            SeasonalResourceKind::AquaticVegetation,
+            local(42.0, OrbitalPhase::NORTHERN_SOLSTICE, 0.3, 0.1, 72.0),
+            0.1,
+        );
+        assert!(low_wet.recovery > high_wet.recovery);
+        assert!(low_wet.recovery > low_dry.recovery);
+    }
+
+    #[test]
+    fn mast_has_a_broad_continuous_decline_season_shoulder() {
+        let early = resource_opportunity(
+            SeasonalResourceKind::SeedsAndSoftMast,
+            local(
+                50.0,
+                OrbitalPhase::from_steps_wrapped(4_999),
+                0.2,
+                0.7,
+                72.0,
+            ),
+            0.7,
+        );
+        let late = resource_opportunity(
+            SeasonalResourceKind::SeedsAndSoftMast,
+            local(
+                50.0,
+                OrbitalPhase::from_steps_wrapped(5_001),
+                0.2,
+                0.7,
+                72.0,
+            ),
+            0.7,
+        );
+        assert!(
+            early
+                .accessibility
+                .basis_points()
+                .abs_diff(late.accessibility.basis_points())
+                <= 8
+        );
+        assert!(
+            early
+                .recovery
+                .basis_points()
+                .abs_diff(late.recovery.basis_points())
+                <= 8
+        );
+
+        let peak = resource_opportunity(
+            SeasonalResourceKind::SeedsAndSoftMast,
+            local(
+                50.0,
+                OrbitalPhase::from_steps_wrapped(6_100),
+                0.2,
+                0.7,
+                72.0,
+            ),
+            0.7,
+        );
+        let spring = resource_opportunity(
+            SeasonalResourceKind::SeedsAndSoftMast,
+            local(50.0, OrbitalPhase::NORTHWARD_EQUINOX, 0.2, 0.7, 72.0),
+            0.7,
+        );
+        assert!(peak.accessibility > spring.accessibility);
+        assert!(peak.recovery > spring.recovery);
     }
 
     fn response(
