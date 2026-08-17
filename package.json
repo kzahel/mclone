@@ -72,7 +72,6 @@
     "native:worldgen:find-biome-seed": "cargo run --manifest-path native/Cargo.toml -p mclone-worldgen --bin find_biome_seed --",
     "native:worldgen:card": "cargo run --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-native-client -- --worldgen-showcase-card /tmp/mclone-worldgen-showcase --generation-profile small-island-v1 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 16 --width 640 --height 400 --day-time 6000 --freeze-time --transient --debug-passive-showcase false --lighting false --fullbright true",
     "native:terrain-seam-review:capture": "node ./scripts/capture-terrain-seam-review.mjs",
-    "native:terrain-handoff-review:capture": "node ./scripts/capture-direct-terrain-handoff-review.mjs",
     "native:seasons:solar-capture": "node ./scripts/capture-seasonal-solar.mjs",
     "native:seasons:appearance-capture": "node ./scripts/capture-seasonal-appearance.mjs",
     "native:seasons:celestial-capture": "node ./scripts/capture-celestial-sky.mjs",
