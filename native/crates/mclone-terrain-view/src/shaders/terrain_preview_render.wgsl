@@ -1229,9 +1229,13 @@ fn exact_connector_vertex(
     out.biome = u32(round(sample.semantics.y));
     out.surface_y = sample.terrain.x;
     out.view_index = view_index;
+    // Atlas V increases from a side sprite's grass-bearing top toward its
+    // dirt-bearing bottom, while world Y increases upward. Negating world Y
+    // keeps the grass strip at the connector's upper edge rather than the
+    // lower edge of every repeated block interval.
     out.world_uv = select(
-        vec2<f32>(world_z, world_y),
-        vec2<f32>(world_x, world_y),
+        vec2<f32>(world_z, -world_y),
+        vec2<f32>(world_x, -world_y),
         side >= 2u,
     );
     out.surface_kind = 3u;

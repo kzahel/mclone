@@ -5387,6 +5387,8 @@ mod tests {
         assert!(shader.contains("var exact_boundary_profile: texture_2d<u32>;"));
         assert!(shader.contains("fn exact_connector_vertex("));
         assert!(shader.contains("bottom_y = min(procedural_y, exact_y)"));
+        assert!(shader.contains("vec2<f32>(world_z, -world_y)"));
+        assert!(shader.contains("vec2<f32>(world_x, -world_y)"));
         assert!(shader.contains("fn exact_connector_vertex_main("));
         assert!(shader.contains("surface_kind = 3u;"));
         assert!(shader.contains("bottom_y = top_y - 32.0;"));
