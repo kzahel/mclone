@@ -271,6 +271,7 @@ pub(crate) struct MobRuntimeState {
     rabbit_underground_threat_hold: bool,
     rabbit_completed_dig: Option<BlockPos>,
     rabbit_completed_raid: Option<BlockPos>,
+    rabbit_no_dig_site_origin: Option<BlockPos>,
 }
 
 impl MobRuntimeState {
@@ -370,6 +371,7 @@ impl MobRuntimeState {
             rabbit_underground_threat_hold: false,
             rabbit_completed_dig: None,
             rabbit_completed_raid: None,
+            rabbit_no_dig_site_origin: None,
         }
     }
 
@@ -496,6 +498,7 @@ impl MobRuntimeState {
             rabbit_underground_threat_hold: false,
             rabbit_completed_dig: None,
             rabbit_completed_raid: None,
+            rabbit_no_dig_site_origin: None,
         }
     }
 
@@ -1066,6 +1069,7 @@ impl MobRuntimeState {
                 ),
             ) <= RABBIT_BLOCK_RECONSIDER_RADIUS_SQR
         {
+            self.rabbit_no_dig_site_origin = None;
             self.rabbit_habitat_intent = None;
             self.navigation.stop();
             self.species
@@ -1428,30 +1432,31 @@ impl MobRuntimeState {
                         && saved.dig_cooldown == 0
                         && nearby_rabbit_refuge_count(entity.position, refuges)
                             < RABBIT_MAX_LOCAL_REFUGES
-                        && let Some(target) = select_rabbit_dig_site(entity.position, blocks)
                     {
-                        self.species
-                            .rabbit_mut()
-                            .expect("rabbit species")
-                            .set_dig_target(Some(target));
-                        let entrance = rabbit_entrance_position(target, entity.position);
-                        if entity.position.distance_to_sqr(entrance)
-                            <= RABBIT_TARGET_REACHED_DISTANCE_SQR
-                        {
-                            next = mclone_protocol::RabbitBehavior::Dig;
-                        } else if self.start_rabbit_navigation(
-                            *entity,
-                            entrance,
-                            RABBIT_HOP_SPEED,
-                            blocks,
-                        ) {
-                            selected = Some(RabbitHabitatIntent {
-                                kind: RabbitIntentKind::Dig,
-                                target: entrance,
-                                block: Some(target),
-                                ticks_remaining: RABBIT_INTENT_TICKS,
-                                stall_ticks: 0,
-                            });
+                        if let Some(target) = self.select_rabbit_dig_site(entity.position, blocks) {
+                            self.species
+                                .rabbit_mut()
+                                .expect("rabbit species")
+                                .set_dig_target(Some(target));
+                            let entrance = rabbit_entrance_position(target, entity.position);
+                            if entity.position.distance_to_sqr(entrance)
+                                <= RABBIT_TARGET_REACHED_DISTANCE_SQR
+                            {
+                                next = mclone_protocol::RabbitBehavior::Dig;
+                            } else if self.start_rabbit_navigation(
+                                *entity,
+                                entrance,
+                                RABBIT_HOP_SPEED,
+                                blocks,
+                            ) {
+                                selected = Some(RabbitHabitatIntent {
+                                    kind: RabbitIntentKind::Dig,
+                                    target: entrance,
+                                    block: Some(target),
+                                    ticks_remaining: RABBIT_INTENT_TICKS,
+                                    stall_ticks: 0,
+                                });
+                            }
                         }
                     }
                     self.rabbit_habitat_intent = selected;
@@ -1653,6 +1658,19 @@ impl MobRuntimeState {
             entity.height = EntityMetadata::RABBIT.dimensions.height * scale;
         }
         set_rabbit_animation(entity, behavior);
+    }
+
+    fn select_rabbit_dig_site<F>(&mut self, position: Vec3d, blocks: &F) -> Option<BlockPos>
+    where
+        F: Fn(BlockPos) -> Option<BlockStateId>,
+    {
+        let origin = BlockPos::containing(position);
+        if self.rabbit_no_dig_site_origin == Some(origin) {
+            return None;
+        }
+        let target = select_rabbit_dig_site(position, blocks);
+        self.rabbit_no_dig_site_origin = target.is_none().then_some(origin);
+        target
     }
 
     fn rabbit_escape_intent_is_usable(&self, position: Vec3d, threat: Vec3d) -> bool {
@@ -4091,6 +4109,8 @@ fn mob_random_seed(id: EntityId, kind: EntityKind) -> i64 {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
+
     use super::*;
     use crate::entity::metadata::EntityMetadata;
 
@@ -4534,6 +4554,54 @@ mod tests {
             Some(mclone_protocol::RabbitBehavior::Idle)
         );
         assert!(entity.position.x > 2.0);
+    }
+
+    #[test]
+    fn rabbit_reuses_a_negative_dig_search_until_movement_or_block_change() {
+        let metadata = EntityMetadata::RABBIT;
+        let mut entity = ServerEntityState::from_metadata(
+            EntityId(78),
+            EntityPersistentId::new(0, 78),
+            metadata,
+            Vec3d::new(0.5, 64.0, 0.5),
+            0.0,
+            0.0,
+            None,
+            true,
+        );
+        let mut mob = MobRuntimeState::from_spawn(EntityId(78), metadata, true, 0.0);
+        let calls = Cell::new(0_u32);
+        let unavailable = |_pos: BlockPos| {
+            calls.set(calls.get() + 1);
+            None
+        };
+
+        assert_eq!(
+            mob.select_rabbit_dig_site(entity.position, &unavailable),
+            None
+        );
+        let first_calls = calls.get();
+        assert!(first_calls > 0);
+        assert_eq!(
+            mob.select_rabbit_dig_site(entity.position, &unavailable),
+            None
+        );
+        assert_eq!(calls.get(), first_calls);
+
+        entity.position = entity.position.add(Vec3d::new(1.0, 0.0, 0.0));
+        assert_eq!(
+            mob.select_rabbit_dig_site(entity.position, &unavailable),
+            None
+        );
+        let moved_calls = calls.get();
+        assert!(moved_calls > first_calls);
+
+        assert!(mob.on_block_changed(entity, BlockPos::new(1, 64, 1)));
+        assert_eq!(
+            mob.select_rabbit_dig_site(entity.position, &unavailable),
+            None
+        );
+        assert!(calls.get() > moved_calls);
     }
 
     #[test]

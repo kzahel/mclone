@@ -5,7 +5,7 @@
 //! is the in-memory adapter used by integrated hosts and tests.
 
 use std::cell::RefCell;
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet};
 use std::ops::{Deref, DerefMut};
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
@@ -38,6 +38,7 @@ use mclone_worldgen::block::{
 };
 use mclone_worldgen::levelgen::{McloneOverworldSamplingTopology, McloneOverworldWildlifePlanner};
 use mclone_worldgen::prng::SimpleRandomSource;
+use rustc_hash::FxHashMap;
 
 #[cfg(target_arch = "wasm32")]
 use crate::WasmServerJobWorkerConfig;
@@ -211,7 +212,7 @@ pub struct DimensionRuntime {
     /// Memoized block facts for the explicitly frozen closed-domain wildlife
     /// runner. Ordinary simulation never consults this cache. Any accepted
     /// ecology block mutation clears it before the next accelerated tick.
-    closed_wildlife_blocks: RefCell<HashMap<BlockPos, Option<BlockStateId>>>,
+    closed_wildlife_blocks: RefCell<FxHashMap<BlockPos, Option<BlockStateId>>>,
 }
 
 impl DimensionRuntime {
@@ -256,7 +257,7 @@ impl DimensionRuntime {
             deer_population: DeerPopulationHistory::default(),
             wildlife_resources: crate::wildlife_resources::WildlifeResourceLedger::default(),
             seasonal_resource_sampler,
-            closed_wildlife_blocks: RefCell::new(HashMap::new()),
+            closed_wildlife_blocks: RefCell::new(FxHashMap::default()),
         }
     }
 

@@ -15,6 +15,7 @@ mclone-physics = { workspace = true, optional = true }
 mclone-protocol.workspace = true
 mclone-season.workspace = true
 mclone-worldgen.workspace = true
+rustc-hash = "1"
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
