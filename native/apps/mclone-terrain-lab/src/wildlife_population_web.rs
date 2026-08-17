@@ -21,7 +21,7 @@ struct WildlifePopulationSummary {
     depth_cells: u32,
     occupied_cells: u32,
     animal_count: u32,
-    species_counts: [u32; 4],
+    species_counts: [u32; 5],
     checksum: String,
     cells: Vec<WildlifePopulationCellReceipt>,
 }
@@ -46,6 +46,7 @@ struct WildlifePopulationCellReceipt {
     deer_weight: u16,
     mallard_weight: u16,
     bee_weight: u16,
+    squirrel_weight: u16,
     desired_density: u16,
     occupancy_roll: u16,
     species_roll: u32,
@@ -129,7 +130,7 @@ impl TerrainLabWildlifePopulationCompiler {
         let mut cells = Vec::with_capacity(usize::try_from(cell_count).unwrap_or(0));
         let mut occupied_cells = 0_u32;
         let mut animal_count = 0_u32;
-        let mut species_counts = [0_u32; 4];
+        let mut species_counts = [0_u32; 5];
         let mut checksum = 0xcbf2_9ce4_8422_2325_u64;
         for offset_z in 0..depth_cells {
             for offset_x in 0..width_cells {
@@ -164,6 +165,7 @@ impl TerrainLabWildlifePopulationCompiler {
                 checksum = fnv_mix(checksum, u64::from(plan.suitability.deer));
                 checksum = fnv_mix(checksum, u64::from(plan.suitability.mallard));
                 checksum = fnv_mix(checksum, u64::from(plan.suitability.bee));
+                checksum = fnv_mix(checksum, u64::from(plan.suitability.squirrel));
                 checksum = fnv_mix(checksum, u64::from(plan.desired_density));
                 checksum = fnv_mix(checksum, u64::from(plan.occupancy_roll));
                 checksum = fnv_mix(checksum, u64::from(plan.species_roll));
@@ -196,6 +198,7 @@ impl TerrainLabWildlifePopulationCompiler {
                     deer_weight: plan.suitability.deer,
                     mallard_weight: plan.suitability.mallard,
                     bee_weight: plan.suitability.bee,
+                    squirrel_weight: plan.suitability.squirrel,
                     desired_density: plan.desired_density,
                     occupancy_roll: plan.occupancy_roll,
                     species_roll: plan.species_roll,

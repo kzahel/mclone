@@ -37,6 +37,7 @@ struct SiteCandidate {
     mallard_groups: u32,
     mallards: u32,
     bees: u32,
+    squirrels: u32,
     habitat_labels: Vec<String>,
     mean_desired_density: u32,
     encounters: Vec<SiteEncounter>,
@@ -154,6 +155,7 @@ fn candidate_for_window(
     let mut mallard_groups = 0;
     let mut mallards = 0;
     let mut bees = 0;
+    let mut squirrels = 0;
     let mut density_sum = 0_u32;
     let mut habitat_labels = BTreeSet::new();
     for plan in plans {
@@ -177,6 +179,7 @@ fn candidate_for_window(
                 mallards += u32::from(encounter.group_size);
             }
             McloneWildlifeSpecies::Bee => bees += u32::from(encounter.group_size),
+            McloneWildlifeSpecies::Squirrel => squirrels += u32::from(encounter.group_size),
         }
         let habitat = format!("{:?}", plan.selected_habitat.biome);
         habitat_labels.insert(habitat.clone());
@@ -217,6 +220,7 @@ fn candidate_for_window(
         mallard_groups,
         mallards,
         bees,
+        squirrels,
         habitat_labels: habitat_labels.into_iter().collect(),
         mean_desired_density,
         encounters,

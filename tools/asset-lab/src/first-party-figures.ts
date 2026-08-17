@@ -29,7 +29,7 @@ export const FIRST_PARTY_SEMANTIC_ASSETS: readonly FirstPartySemanticAsset[] = [
   firstPartyActor("deer"),
   firstPartyActor("bee", "live_gameplay"),
   firstPartyActor("rabbit", "live_gameplay"),
-  firstPartyActor("red_squirrel", "review_only"),
+  firstPartyActor("red_squirrel", "live_gameplay"),
   firstPartyProp("mallard_nest", "world_prop", "ground"),
   firstPartyProp("mallard_feather", "item_prop", "item_center"),
   firstPartyProp("hunting_spear", "item_prop", "item_center"),

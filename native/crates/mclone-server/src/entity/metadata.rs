@@ -139,6 +139,15 @@ impl EntityMetadata {
         client_tracking_range: 10,
     };
 
+    pub(crate) const SQUIRREL: Self = Self {
+        kind: EntityKind::Squirrel,
+        category: EntityCategory::Creature,
+        dimensions: EntityDimensions::scalable(0.42, 0.62),
+        standing_eye_height: StandingEyeHeight::HeightScale(0.78),
+        movement_speed: 0.32,
+        client_tracking_range: 10,
+    };
+
     pub(crate) const RABBIT_BURROW: Self = Self {
         kind: EntityKind::RabbitBurrow,
         category: EntityCategory::Misc,
@@ -201,7 +210,7 @@ impl EntityMetadata {
             EntityKind::SleepingMat => Some(Self::SLEEPING_MAT),
             EntityKind::Mannequin => Some(Self::MANNEQUIN),
             EntityKind::Item => Some(Self::ITEM),
-            EntityKind::Squirrel => None,
+            EntityKind::Squirrel => Some(Self::SQUIRREL),
             EntityKind::DebugCube => None,
         }
     }
@@ -219,6 +228,7 @@ impl EntityMetadata {
                 | EntityKind::Deer
                 | EntityKind::Bee
                 | EntityKind::Rabbit
+                | EntityKind::Squirrel
                 | EntityKind::Mannequin
         )
     }
@@ -291,6 +301,18 @@ mod tests {
         assert_eq!(metadata.movement_speed, 0.28);
         assert!(metadata.is_passive_mob());
         assert!(!PASSIVE_MOB_KINDS.contains(&EntityKind::Deer));
+    }
+
+    #[test]
+    fn squirrel_metadata_is_a_small_original_passive_creature() {
+        let metadata = EntityMetadata::for_kind(EntityKind::Squirrel).expect("squirrel metadata");
+
+        assert_eq!(metadata.category, EntityCategory::Creature);
+        assert_eq!(metadata.dimensions, EntityDimensions::scalable(0.42, 0.62));
+        assert_eq!(metadata.standing_eye_height(), 0.62 * 0.78);
+        assert_eq!(metadata.movement_speed, 0.32);
+        assert!(metadata.is_passive_mob());
+        assert!(!PASSIVE_MOB_KINDS.contains(&EntityKind::Squirrel));
     }
 
     #[test]

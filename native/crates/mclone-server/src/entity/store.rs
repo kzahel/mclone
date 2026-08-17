@@ -11,7 +11,7 @@ use mclone_protocol::{
     BeeBehavior, BeeSoundCue, DeerSoundCue, DeerSoundKind, EntityId, EntityKind,
     EntityPersistentId, ItemKind, ItemStackSnapshot, MallardCallCue, MallardLifeStage,
     MallardNestSnapshotData, MallardSex, MallardSnapshotData, MallardTrackCue, RabbitBehavior,
-    RabbitLifeStage, RabbitSoundCue,
+    RabbitLifeStage, RabbitSoundCue, SquirrelSoundCue, SquirrelSoundKind,
 };
 
 use crate::ecology::{
@@ -26,7 +26,7 @@ use crate::persistence::{
 };
 use crate::players::ServerPlayerId;
 use crate::wildlife_resources::{
-    DEER_DIET, MALLARD_DIET, RABBIT_DIET, WildlifeDietEntry, WildlifeForageCellPos,
+    DEER_DIET, MALLARD_DIET, RABBIT_DIET, SQUIRREL_DIET, WildlifeDietEntry, WildlifeForageCellPos,
     WildlifeForageConsumer, WildlifeResourceKind, WildlifeResourceLedger,
 };
 
@@ -36,7 +36,7 @@ use super::metadata::{EntityMetadata, PASSIVE_MOB_KINDS};
 use super::mob::{
     BeeRuntimeSaveData, DeerHerdmateTarget, DeerRuntimeSaveData, MallardFlockmateTarget,
     MallardRuntimeSaveData, MobPlayerTarget, MobRuntimeState, RabbitEcologyAdmission,
-    RabbitRefugeCandidate, RabbitRuntimeSaveData, identity_mallard_sex,
+    RabbitRefugeCandidate, RabbitRuntimeSaveData, SquirrelRuntimeSaveData, identity_mallard_sex,
 };
 use super::spawning::habitat::sample_wetland_habitat;
 use super::spawning::mob_category::MobCategory;
@@ -69,6 +69,8 @@ const MALLARD_CALL_FLOCK_SUPPRESSION_RADIUS_SQR: f64 = 12.0 * 12.0;
 const MALLARD_TRACK_SPACING_SQR: f64 = 2.0 * 2.0;
 const DEER_SOUND_HERD_SUPPRESSION_RADIUS_SQR: f64 = 12.0 * 12.0;
 const RABBIT_SOUND_AUDIBLE_RADIUS: f32 = 16.0;
+const SQUIRREL_SOUND_AUDIBLE_RADIUS: f32 = 18.0;
+const SQUIRREL_SOUND_SUPPRESSION_RADIUS_SQR: f64 = 10.0 * 10.0;
 const RABBIT_RAID_COOLDOWN_TICKS: u32 = 600;
 const RABBIT_LOVE_TICKS: u32 = 600;
 const RABBIT_PAIR_PUSH_MAX: f64 = 0.04;
@@ -175,6 +177,7 @@ pub(crate) struct ServerEntityStore {
     pending_deer_sounds: Vec<DeerSoundCue>,
     pending_bee_sounds: Vec<BeeSoundCue>,
     pending_rabbit_sounds: Vec<RabbitSoundCue>,
+    pending_squirrel_sounds: Vec<SquirrelSoundCue>,
     pending_rabbit_digs: Vec<RabbitDigEvent>,
     pending_rabbit_raids: Vec<RabbitRaidEvent>,
     pending_bee_pollinations: Vec<BeePollinationEvent>,
@@ -183,6 +186,7 @@ pub(crate) struct ServerEntityStore {
     deer_cue_sequence: u64,
     bee_cue_sequence: u64,
     rabbit_cue_sequence: u64,
+    squirrel_cue_sequence: u64,
     last_rabbit_ecology: RabbitEcologyTickDiagnostics,
     wildlife_tuning: WildlifeLifecycleTuning,
     pending_wildlife_events: Vec<WildlifeEcologyEvent>,
@@ -219,8 +223,11 @@ pub(crate) struct WildlifeLifeDiagnostic {
     pub(crate) deer_sex: Option<mclone_protocol::DeerSex>,
     pub(crate) mallard_life_stage: Option<MallardLifeStage>,
     pub(crate) mallard_sex: Option<MallardSex>,
+    pub(crate) squirrel_life_stage: Option<mclone_protocol::SquirrelLifeStage>,
+    pub(crate) squirrel_sex: Option<mclone_protocol::SquirrelSex>,
     pub(crate) rabbit_behavior: Option<RabbitBehavior>,
     pub(crate) deer_behavior: Option<mclone_protocol::DeerBehavior>,
+    pub(crate) squirrel_behavior: Option<mclone_protocol::SquirrelBehavior>,
     pub(crate) rabbit_has_refuge: bool,
     pub(crate) rabbit_sheltered: bool,
     pub(crate) parents: [Option<EntityPersistentId>; 2],
@@ -530,8 +537,11 @@ impl ServerEntityStore {
                             deer_sex: None,
                             mallard_life_stage: None,
                             mallard_sex: None,
+                            squirrel_life_stage: None,
+                            squirrel_sex: None,
                             rabbit_behavior: Some(rabbit.behavior),
                             deer_behavior: None,
+                            squirrel_behavior: None,
                             rabbit_has_refuge: rabbit.known_refuges.iter().any(Option::is_some),
                             rabbit_sheltered: rabbit.sheltered_in.is_some(),
                             parents: rabbit.parents,
@@ -549,8 +559,11 @@ impl ServerEntityStore {
                             deer_sex: Some(deer.sex),
                             mallard_life_stage: None,
                             mallard_sex: None,
+                            squirrel_life_stage: None,
+                            squirrel_sex: None,
                             rabbit_behavior: None,
                             deer_behavior: Some(deer.behavior),
+                            squirrel_behavior: None,
                             rabbit_has_refuge: false,
                             rabbit_sheltered: false,
                             parents: [None; 2],
@@ -568,12 +581,37 @@ impl ServerEntityStore {
                             deer_sex: None,
                             mallard_life_stage: Some(mallard.life_stage),
                             mallard_sex: Some(mallard.sex),
+                            squirrel_life_stage: None,
+                            squirrel_sex: None,
                             rabbit_behavior: None,
                             deer_behavior: None,
+                            squirrel_behavior: None,
                             rabbit_has_refuge: false,
                             rabbit_sheltered: false,
                             parents: mallard.parents,
                             lifecycle: mallard.lifecycle,
+                        })
+                    }
+                    EntityKind::Squirrel => {
+                        let squirrel = mob.squirrel_save_data()?;
+                        Some(WildlifeLifeDiagnostic {
+                            persistent_id: entity.persistent_id,
+                            kind: entity.kind,
+                            position: entity.position,
+                            rabbit_life_stage: None,
+                            deer_life_stage: None,
+                            deer_sex: None,
+                            mallard_life_stage: None,
+                            mallard_sex: None,
+                            squirrel_life_stage: Some(squirrel.life_stage),
+                            squirrel_sex: Some(squirrel.sex),
+                            rabbit_behavior: None,
+                            deer_behavior: None,
+                            squirrel_behavior: Some(squirrel.behavior),
+                            rabbit_has_refuge: false,
+                            rabbit_sheltered: false,
+                            parents: [None; 2],
+                            lifecycle: squirrel.lifecycle,
                         })
                     }
                     _ => None,
@@ -654,7 +692,10 @@ impl ServerEntityStore {
                     && ticking_chunks.contains(&entity.chunk_pos())
                     && matches!(
                         entity.kind,
-                        EntityKind::Rabbit | EntityKind::Deer | EntityKind::Mallard
+                        EntityKind::Rabbit
+                            | EntityKind::Deer
+                            | EntityKind::Mallard
+                            | EntityKind::Squirrel
                     )
             })
             .map(|entity| (entity.persistent_id, entity.id))
@@ -670,6 +711,7 @@ impl ServerEntityStore {
                     EntityKind::Rabbit => WildlifeSpecies::Rabbit,
                     EntityKind::Deer => WildlifeSpecies::Deer,
                     EntityKind::Mallard => WildlifeSpecies::Mallard,
+                    EntityKind::Squirrel => WildlifeSpecies::Squirrel,
                     _ => continue,
                 },
                 feet.x.div_euclid(64),
@@ -697,6 +739,7 @@ impl ServerEntityStore {
                         EntityKind::Rabbit => WildlifeSpecies::Rabbit,
                         EntityKind::Deer => WildlifeSpecies::Deer,
                         EntityKind::Mallard => WildlifeSpecies::Mallard,
+                        EntityKind::Squirrel => WildlifeSpecies::Squirrel,
                         _ => continue,
                     },
                     feet.x.div_euclid(64),
@@ -760,6 +803,27 @@ impl ServerEntityStore {
                     tuning.mallard_soft_cell_density,
                     WildlifeSpecies::Mallard,
                 ),
+                EntityKind::Squirrel => {
+                    let behavior = self
+                        .mobs
+                        .get(&id)
+                        .and_then(MobRuntimeState::squirrel_behavior)
+                        .unwrap_or(mclone_protocol::SquirrelBehavior::Idle);
+                    (
+                        WildlifeForageConsumer::Squirrel,
+                        &SQUIRREL_DIET,
+                        behavior == mclone_protocol::SquirrelBehavior::Forage,
+                        match behavior {
+                            mclone_protocol::SquirrelBehavior::Flee => 4,
+                            mclone_protocol::SquirrelBehavior::Bound
+                            | mclone_protocol::SquirrelBehavior::Climb => 2,
+                            mclone_protocol::SquirrelBehavior::RefugeIdle => 0,
+                            _ => 1,
+                        },
+                        tuning.squirrel_soft_cell_density,
+                        WildlifeSpecies::Squirrel,
+                    )
+                }
                 _ => continue,
             };
             let energy = match entity.kind {
@@ -778,6 +842,11 @@ impl ServerEntityStore {
                     .get(&id)
                     .and_then(MobRuntimeState::mallard_save_data)
                     .map_or(0, |mallard| mallard.lifecycle.energy),
+                EntityKind::Squirrel => self
+                    .mobs
+                    .get(&id)
+                    .and_then(MobRuntimeState::squirrel_save_data)
+                    .map_or(0, |squirrel| squirrel.lifecycle.energy),
                 _ => 0,
             };
             let intake = if foraging {
@@ -806,17 +875,22 @@ impl ServerEntityStore {
             );
             if let Some(entity) = self.entities.get_mut(&id) {
                 mob.reconcile_wildlife_maturation(entity, tuning);
+                if entity.kind == EntityKind::Squirrel {
+                    entity.squirrel = mob.squirrel_snapshot_data();
+                }
             }
             let lifecycle = match entity.kind {
                 EntityKind::Rabbit => mob.rabbit_save_data().expect("rabbit state").lifecycle,
                 EntityKind::Deer => mob.deer_save_data().expect("deer state").lifecycle,
                 EntityKind::Mallard => mob.mallard_save_data().expect("mallard state").lifecycle,
+                EntityKind::Squirrel => mob.squirrel_save_data().expect("squirrel state").lifecycle,
                 _ => continue,
             };
             let starvation_ticks = match entity.kind {
                 EntityKind::Rabbit => tuning.rabbit_starvation_ticks,
                 EntityKind::Deer => tuning.deer_starvation_ticks,
                 EntityKind::Mallard => tuning.mallard_starvation_ticks,
+                EntityKind::Squirrel => tuning.squirrel_starvation_ticks,
                 _ => continue,
             };
             let death_cause = if lifecycle.age_ticks >= lifecycle.lifespan_ticks {
@@ -885,7 +959,7 @@ impl ServerEntityStore {
                 if let Some(reason) = reason {
                     deer_reproduction_blocked.insert(id, reason);
                 }
-            } else {
+            } else if entity.kind == EntityKind::Mallard {
                 let reason = if overloaded {
                     Some(WildlifeReproductionSuppression::HardOverload)
                 } else if density > soft_density {
@@ -920,11 +994,13 @@ impl ServerEntityStore {
                 WildlifeSpecies::Rabbit => 120,
                 WildlifeSpecies::Deer => 900,
                 WildlifeSpecies::Mallard => 180,
+                WildlifeSpecies::Squirrel => 100,
             };
             let source_species = match species {
                 WildlifeSpecies::Rabbit => WildlifeRemainsSpecies::Rabbit,
                 WildlifeSpecies::Deer => WildlifeRemainsSpecies::Deer,
                 WildlifeSpecies::Mallard => WildlifeRemainsSpecies::Mallard,
+                WildlifeSpecies::Squirrel => WildlifeRemainsSpecies::Squirrel,
             };
             let remains_cause = match cause {
                 crate::ecology::WildlifeDeathCause::OldAge => WildlifeRemainsCause::OldAge,
@@ -1093,6 +1169,7 @@ impl ServerEntityStore {
                 WildlifeRemainsSpecies::Rabbit => WildlifeSpecies::Rabbit,
                 WildlifeRemainsSpecies::Deer => WildlifeSpecies::Deer,
                 WildlifeRemainsSpecies::Mallard => WildlifeSpecies::Mallard,
+                WildlifeRemainsSpecies::Squirrel => WildlifeSpecies::Squirrel,
             };
             self.pending_wildlife_events.push(WildlifeEcologyEvent {
                 tick: simulation_tick,
@@ -1756,6 +1833,10 @@ impl ServerEntityStore {
 
     pub(crate) fn drain_rabbit_sounds(&mut self) -> Vec<RabbitSoundCue> {
         std::mem::take(&mut self.pending_rabbit_sounds)
+    }
+
+    pub(crate) fn drain_squirrel_sounds(&mut self) -> Vec<SquirrelSoundCue> {
+        std::mem::take(&mut self.pending_squirrel_sounds)
     }
 
     pub(crate) fn drain_rabbit_digs(&mut self) -> Vec<RabbitDigEvent> {
@@ -2648,6 +2729,7 @@ impl ServerEntityStore {
         let mut bee_deposits = Vec::new();
         let mut bee_sound_candidates = Vec::new();
         let mut rabbit_breeding_candidates = Vec::new();
+        let mut squirrel_sound_candidates = Vec::new();
         for id in &ticking_ids {
             let id = *id;
             let rabbit_candidates = self.entities.get(&id).map_or_else(Vec::new, |entity| {
@@ -2688,6 +2770,7 @@ impl ServerEntityStore {
                     let previous_position = entity.position;
                     let previous_deer_behavior = entity.deer.map(|deer| deer.behavior);
                     let previous_rabbit_behavior = mob.rabbit_behavior();
+                    let previous_squirrel_behavior = mob.squirrel_behavior();
                     let previous_rabbit_shelter = mob.rabbit_refuge_claim();
                     if entity.kind == EntityKind::Bee {
                         let home = mob.bee_home();
@@ -2781,6 +2864,27 @@ impl ServerEntityStore {
                     if !entity_ticking_chunks.contains(&entity.chunk_pos()) {
                         entity.position = previous_position;
                         mob.reject_unavailable_movement(*entity);
+                    }
+                    let squirrel_behavior = mob.squirrel_behavior();
+                    if previous_squirrel_behavior != squirrel_behavior {
+                        let kind = match squirrel_behavior {
+                            Some(mclone_protocol::SquirrelBehavior::Alarm) => {
+                                Some(SquirrelSoundKind::Alarm)
+                            }
+                            Some(mclone_protocol::SquirrelBehavior::Flee)
+                            | Some(mclone_protocol::SquirrelBehavior::Climb)
+                            | Some(mclone_protocol::SquirrelBehavior::RefugeEnter)
+                            | Some(mclone_protocol::SquirrelBehavior::RefugeExit) => {
+                                Some(SquirrelSoundKind::Rustle)
+                            }
+                            Some(mclone_protocol::SquirrelBehavior::Forage) => {
+                                Some(SquirrelSoundKind::Dig)
+                            }
+                            _ => None,
+                        };
+                        if let Some(kind) = kind {
+                            squirrel_sound_candidates.push((id, entity.position, kind));
+                        }
                     }
                     let current_rabbit_shelter = mob.rabbit_refuge_claim();
                     if previous_rabbit_shelter != current_rabbit_shelter {
@@ -3315,6 +3419,23 @@ impl ServerEntityStore {
                 kind,
             });
         }
+        let mut admitted_squirrel_sounds = Vec::new();
+        for (source, position, kind) in squirrel_sound_candidates {
+            if admitted_squirrel_sounds.iter().any(|admitted: &Vec3d| {
+                squared_distance_xz(*admitted, position) <= SQUIRREL_SOUND_SUPPRESSION_RADIUS_SQR
+            }) {
+                continue;
+            }
+            admitted_squirrel_sounds.push(position);
+            self.squirrel_cue_sequence = self.squirrel_cue_sequence.wrapping_add(1);
+            self.pending_squirrel_sounds.push(SquirrelSoundCue {
+                source,
+                position,
+                sequence: self.squirrel_cue_sequence,
+                audible_radius: SQUIRREL_SOUND_AUDIBLE_RADIUS,
+                kind,
+            });
+        }
         for (home, source_flower, position) in bee_deposits {
             let Some((colony_id, colony)) = self.bee_colonies.iter_mut().find(|(id, _)| {
                 self.entities
@@ -3629,6 +3750,13 @@ impl ServerEntityStore {
                 state.height *= 0.72;
             }
             state
+        } else if kind == EntityKind::Squirrel {
+            let mut state = state;
+            state.squirrel = self
+                .mobs
+                .get(&id)
+                .and_then(MobRuntimeState::squirrel_snapshot_data);
+            state
         } else {
             state
         };
@@ -3705,6 +3833,7 @@ impl ServerEntityStore {
                 None,
                 None,
                 None,
+                None,
             ),
         );
         self.entities.insert(id, state);
@@ -3773,6 +3902,7 @@ impl ServerEntityStore {
                 None,
                 None,
                 Some(saved),
+                None,
                 None,
             ),
         );
@@ -3845,6 +3975,7 @@ impl ServerEntityStore {
                 None,
                 None,
                 Some(saved),
+                None,
             ),
         );
         self.entities.insert(id, state);
@@ -3914,6 +4045,7 @@ impl ServerEntityStore {
                 None,
                 None,
                 Some(saved),
+                None,
                 None,
                 None,
             ),
@@ -4117,6 +4249,7 @@ impl ServerEntityStore {
                 None,
                 None,
                 None,
+                None,
             )?,
             ("minecraft:chicken", EntitySavePayload::Chicken { egg_time }) => self
                 .insert_saved_passive_mob(
@@ -4125,6 +4258,7 @@ impl ServerEntityStore {
                     canonical_position,
                     EntityKind::Chicken,
                     Some(*egg_time),
+                    None,
                     None,
                     None,
                     None,
@@ -4179,6 +4313,7 @@ impl ServerEntityStore {
                 None,
                 None,
                 None,
+                None,
             )?,
             (
                 "mclone:deer",
@@ -4227,6 +4362,7 @@ impl ServerEntityStore {
                 }),
                 None,
                 None,
+                None,
             )?,
             (
                 "mclone:bee",
@@ -4252,6 +4388,7 @@ impl ServerEntityStore {
                     behavior_ticks: *behavior_ticks,
                     carrying_pollen: *carrying_pollen,
                 }),
+                None,
                 None,
             )?,
             (
@@ -4313,6 +4450,54 @@ impl ServerEntityStore {
                         recent_intake: *recent_intake,
                         reproductive_condition: *reproductive_condition,
                         reproduction_cooldown: *breed_cooldown,
+                    },
+                }),
+                None,
+            )?,
+            (
+                "mclone:red_squirrel",
+                EntitySavePayload::Squirrel {
+                    sex,
+                    life_stage,
+                    behavior,
+                    behavior_ticks,
+                    behavior_epoch,
+                    retained_intent,
+                    refuge,
+                    age_ticks,
+                    lifespan_ticks,
+                    energy,
+                    deficit_ticks,
+                    recent_intake,
+                    reproductive_condition,
+                    reproduction_cooldown,
+                },
+            ) => self.insert_saved_passive_mob(
+                id,
+                saved,
+                canonical_position,
+                EntityKind::Squirrel,
+                None,
+                None,
+                None,
+                None,
+                None,
+                Some(SquirrelRuntimeSaveData {
+                    sex: *sex,
+                    life_stage: *life_stage,
+                    behavior: *behavior,
+                    behavior_ticks: *behavior_ticks,
+                    behavior_epoch: *behavior_epoch,
+                    retained_intent: *retained_intent,
+                    refuge: *refuge,
+                    lifecycle: WildlifeLifeState {
+                        age_ticks: *age_ticks,
+                        lifespan_ticks: *lifespan_ticks,
+                        energy: *energy,
+                        deficit_ticks: *deficit_ticks,
+                        recent_intake: *recent_intake,
+                        reproductive_condition: *reproductive_condition,
+                        reproduction_cooldown: *reproduction_cooldown,
                     },
                 }),
             )?,
@@ -4429,6 +4614,7 @@ impl ServerEntityStore {
                 None,
                 None,
                 None,
+                None,
             )?,
             (
                 "minecraft:item",
@@ -4472,6 +4658,7 @@ impl ServerEntityStore {
         deer: Option<DeerRuntimeSaveData>,
         bee: Option<BeeRuntimeSaveData>,
         rabbit: Option<RabbitRuntimeSaveData>,
+        squirrel: Option<SquirrelRuntimeSaveData>,
     ) -> ChunkStoreResult<ServerEntityState> {
         let metadata = EntityMetadata::for_kind(kind).ok_or_else(|| {
             ChunkStoreError::InvalidData(format!("entity kind {kind:?} has no metadata"))
@@ -4498,6 +4685,7 @@ impl ServerEntityStore {
             deer,
             bee,
             rabbit,
+            squirrel,
         );
         let mut state = state;
         if kind == EntityKind::Mallard {
@@ -4526,6 +4714,13 @@ impl ServerEntityStore {
             } else if mob.rabbit_life_stage() == Some(RabbitLifeStage::Kit) {
                 state.width *= 0.62;
                 state.height *= 0.62;
+            }
+        }
+        if kind == EntityKind::Squirrel {
+            state.squirrel = mob.squirrel_snapshot_data();
+            if state.squirrel.unwrap().life_stage == mclone_protocol::SquirrelLifeStage::Kit {
+                state.width *= 0.68;
+                state.height *= 0.68;
             }
         }
         self.mobs.insert(id, mob);
@@ -4702,6 +4897,25 @@ impl ServerEntityStore {
                 }
             }
             EntityKind::SleepingMat => EntitySavePayload::SleepingMat,
+            EntityKind::Squirrel => {
+                let squirrel = self.mobs.get(&entity.id)?.squirrel_save_data()?;
+                EntitySavePayload::Squirrel {
+                    sex: squirrel.sex,
+                    life_stage: squirrel.life_stage,
+                    behavior: squirrel.behavior,
+                    behavior_ticks: squirrel.behavior_ticks,
+                    behavior_epoch: squirrel.behavior_epoch,
+                    retained_intent: squirrel.retained_intent,
+                    refuge: squirrel.refuge,
+                    age_ticks: squirrel.lifecycle.age_ticks,
+                    lifespan_ticks: squirrel.lifecycle.lifespan_ticks,
+                    energy: squirrel.lifecycle.energy,
+                    deficit_ticks: squirrel.lifecycle.deficit_ticks,
+                    recent_intake: squirrel.lifecycle.recent_intake,
+                    reproductive_condition: squirrel.lifecycle.reproductive_condition,
+                    reproduction_cooldown: squirrel.lifecycle.reproduction_cooldown,
+                }
+            }
             EntityKind::Mannequin => EntitySavePayload::Mannequin,
             EntityKind::Item => EntitySavePayload::Item {
                 stack: entity.item_stack.map(ItemStackSaveRecord::from)?,
@@ -4709,7 +4923,6 @@ impl ServerEntityStore {
                 pickup_delay: self.items.get(&entity.id)?.pickup_delay(),
             },
             EntityKind::DebugCube => return None,
-            EntityKind::Squirrel => return None,
         };
         Some(EntitySaveRecord {
             persistent_id,
@@ -4876,7 +5089,7 @@ fn entity_kind_code(kind: EntityKind) -> Option<&'static str> {
         EntityKind::Mannequin => Some("mclone:mannequin"),
         EntityKind::Item => Some("minecraft:item"),
         EntityKind::DebugCube => None,
-        EntityKind::Squirrel => None,
+        EntityKind::Squirrel => Some("mclone:red_squirrel"),
     }
 }
 

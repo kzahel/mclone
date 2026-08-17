@@ -2,6 +2,7 @@ use mclone_core::{BlockPos, Vec3d};
 use mclone_protocol::{
     BeeBehavior, DeerBehavior, DeerLifeStage, DeerSex, DeerSnapshotData, EntityKind,
     EntityPersistentId, MallardLifeStage, MallardSex, RabbitBehavior, RabbitLifeStage,
+    SquirrelBehavior, SquirrelLifeStage, SquirrelRetainedIntent, SquirrelSex, SquirrelSnapshotData,
 };
 use mclone_worldgen::prng::SimpleRandomSource;
 
@@ -75,6 +76,18 @@ pub(crate) struct RabbitRuntimeSaveData {
     pub(crate) lifecycle: WildlifeLifeState,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct SquirrelRuntimeSaveData {
+    pub(crate) sex: SquirrelSex,
+    pub(crate) life_stage: SquirrelLifeStage,
+    pub(crate) behavior: SquirrelBehavior,
+    pub(crate) behavior_ticks: u32,
+    pub(crate) behavior_epoch: u32,
+    pub(crate) retained_intent: Option<SquirrelRetainedIntent>,
+    pub(crate) refuge: Option<BlockPos>,
+    pub(crate) lifecycle: WildlifeLifeState,
+}
+
 #[derive(Debug, PartialEq)]
 pub(super) enum MobSpeciesState {
     Cow,
@@ -83,6 +96,7 @@ pub(super) enum MobSpeciesState {
     Deer(DeerRuntimeState),
     Bee(BeeRuntimeState),
     Rabbit(RabbitRuntimeState),
+    Squirrel(SquirrelRuntimeState),
 }
 
 impl MobSpeciesState {
@@ -119,14 +133,17 @@ impl MobSpeciesState {
                 persistent_id,
                 wildlife_tuning,
             )),
+            EntityKind::Squirrel => Self::Squirrel(SquirrelRuntimeState::new_founder(
+                persistent_id,
+                wildlife_tuning,
+            )),
             EntityKind::DebugCube
             | EntityKind::Item
             | EntityKind::MallardNest
             | EntityKind::DeerBed
             | EntityKind::BeeNest
             | EntityKind::BeeHotel
-            | EntityKind::SleepingMat
-            | EntityKind::Squirrel => {
+            | EntityKind::SleepingMat => {
                 debug_assert!(false, "non-mob entities do not use mob species state");
                 Self::Cow
             }
@@ -150,6 +167,7 @@ impl MobSpeciesState {
         deer: Option<DeerRuntimeSaveData>,
         bee: Option<BeeRuntimeSaveData>,
         rabbit: Option<RabbitRuntimeSaveData>,
+        squirrel: Option<SquirrelRuntimeSaveData>,
     ) -> Self {
         match kind {
             EntityKind::Cow | EntityKind::Mannequin => Self::Cow,
@@ -199,14 +217,22 @@ impl MobSpeciesState {
                     )
                 }),
             )),
+            EntityKind::Squirrel => Self::Squirrel(SquirrelRuntimeState::from_saved(
+                persistent_id,
+                squirrel.unwrap_or_else(|| {
+                    SquirrelRuntimeState::founder_save_data(
+                        persistent_id,
+                        WildlifeLifecycleTuning::default(),
+                    )
+                }),
+            )),
             EntityKind::DebugCube
             | EntityKind::Item
             | EntityKind::MallardNest
             | EntityKind::DeerBed
             | EntityKind::BeeNest
             | EntityKind::BeeHotel
-            | EntityKind::SleepingMat
-            | EntityKind::Squirrel => {
+            | EntityKind::SleepingMat => {
                 debug_assert!(false, "non-mob entities do not use mob species state");
                 Self::Cow
             }
@@ -234,6 +260,7 @@ impl MobSpeciesState {
             Self::Deer(_) => {}
             Self::Bee(_) => {}
             Self::Rabbit(_) => {}
+            Self::Squirrel(_) => {}
         }
     }
 
@@ -245,6 +272,7 @@ impl MobSpeciesState {
             Self::Deer(_) => None,
             Self::Bee(_) => None,
             Self::Rabbit(_) => None,
+            Self::Squirrel(_) => None,
         }
     }
 
@@ -256,71 +284,238 @@ impl MobSpeciesState {
             Self::Deer(_) => None,
             Self::Bee(_) => None,
             Self::Rabbit(_) => None,
+            Self::Squirrel(_) => None,
         }
     }
 
     pub(super) fn mallard(&self) -> Option<&MallardRuntimeState> {
         match self {
             Self::Mallard(mallard) => Some(mallard),
-            Self::Cow | Self::Chicken(_) | Self::Deer(_) | Self::Bee(_) | Self::Rabbit(_) => None,
+            Self::Cow
+            | Self::Chicken(_)
+            | Self::Deer(_)
+            | Self::Bee(_)
+            | Self::Rabbit(_)
+            | Self::Squirrel(_) => None,
         }
     }
 
     pub(super) fn mallard_mut(&mut self) -> Option<&mut MallardRuntimeState> {
         match self {
             Self::Mallard(mallard) => Some(mallard),
-            Self::Cow | Self::Chicken(_) | Self::Deer(_) | Self::Bee(_) | Self::Rabbit(_) => None,
+            Self::Cow
+            | Self::Chicken(_)
+            | Self::Deer(_)
+            | Self::Bee(_)
+            | Self::Rabbit(_)
+            | Self::Squirrel(_) => None,
         }
     }
 
     pub(super) fn deer(&self) -> Option<&DeerRuntimeState> {
         match self {
             Self::Deer(deer) => Some(deer),
-            Self::Cow | Self::Chicken(_) | Self::Mallard(_) | Self::Bee(_) | Self::Rabbit(_) => {
-                None
-            }
+            Self::Cow
+            | Self::Chicken(_)
+            | Self::Mallard(_)
+            | Self::Bee(_)
+            | Self::Rabbit(_)
+            | Self::Squirrel(_) => None,
         }
     }
 
     pub(super) fn deer_mut(&mut self) -> Option<&mut DeerRuntimeState> {
         match self {
             Self::Deer(deer) => Some(deer),
-            Self::Cow | Self::Chicken(_) | Self::Mallard(_) | Self::Bee(_) | Self::Rabbit(_) => {
-                None
-            }
+            Self::Cow
+            | Self::Chicken(_)
+            | Self::Mallard(_)
+            | Self::Bee(_)
+            | Self::Rabbit(_)
+            | Self::Squirrel(_) => None,
         }
     }
 
     pub(super) fn bee(&self) -> Option<&BeeRuntimeState> {
         match self {
             Self::Bee(bee) => Some(bee),
-            Self::Cow | Self::Chicken(_) | Self::Mallard(_) | Self::Deer(_) | Self::Rabbit(_) => {
-                None
-            }
+            Self::Cow
+            | Self::Chicken(_)
+            | Self::Mallard(_)
+            | Self::Deer(_)
+            | Self::Rabbit(_)
+            | Self::Squirrel(_) => None,
         }
     }
 
     pub(super) fn bee_mut(&mut self) -> Option<&mut BeeRuntimeState> {
         match self {
             Self::Bee(bee) => Some(bee),
-            Self::Cow | Self::Chicken(_) | Self::Mallard(_) | Self::Deer(_) | Self::Rabbit(_) => {
-                None
-            }
+            Self::Cow
+            | Self::Chicken(_)
+            | Self::Mallard(_)
+            | Self::Deer(_)
+            | Self::Rabbit(_)
+            | Self::Squirrel(_) => None,
         }
     }
 
     pub(super) fn rabbit(&self) -> Option<&RabbitRuntimeState> {
         match self {
             Self::Rabbit(rabbit) => Some(rabbit),
-            Self::Cow | Self::Chicken(_) | Self::Mallard(_) | Self::Deer(_) | Self::Bee(_) => None,
+            Self::Cow
+            | Self::Chicken(_)
+            | Self::Mallard(_)
+            | Self::Deer(_)
+            | Self::Bee(_)
+            | Self::Squirrel(_) => None,
         }
     }
 
     pub(super) fn rabbit_mut(&mut self) -> Option<&mut RabbitRuntimeState> {
         match self {
             Self::Rabbit(rabbit) => Some(rabbit),
-            Self::Cow | Self::Chicken(_) | Self::Mallard(_) | Self::Deer(_) | Self::Bee(_) => None,
+            Self::Cow
+            | Self::Chicken(_)
+            | Self::Mallard(_)
+            | Self::Deer(_)
+            | Self::Bee(_)
+            | Self::Squirrel(_) => None,
         }
+    }
+
+    pub(super) fn squirrel(&self) -> Option<&SquirrelRuntimeState> {
+        match self {
+            Self::Squirrel(squirrel) => Some(squirrel),
+            Self::Cow
+            | Self::Chicken(_)
+            | Self::Mallard(_)
+            | Self::Deer(_)
+            | Self::Bee(_)
+            | Self::Rabbit(_) => None,
+        }
+    }
+
+    pub(super) fn squirrel_mut(&mut self) -> Option<&mut SquirrelRuntimeState> {
+        match self {
+            Self::Squirrel(squirrel) => Some(squirrel),
+            Self::Cow
+            | Self::Chicken(_)
+            | Self::Mallard(_)
+            | Self::Deer(_)
+            | Self::Bee(_)
+            | Self::Rabbit(_) => None,
+        }
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub(super) struct SquirrelRuntimeState {
+    saved: SquirrelRuntimeSaveData,
+}
+
+impl SquirrelRuntimeState {
+    fn founder_save_data(
+        identity: EntityPersistentId,
+        tuning: WildlifeLifecycleTuning,
+    ) -> SquirrelRuntimeSaveData {
+        SquirrelRuntimeSaveData {
+            sex: if identity.least.is_multiple_of(2) {
+                SquirrelSex::Female
+            } else {
+                SquirrelSex::Male
+            },
+            life_stage: SquirrelLifeStage::Adult,
+            behavior: SquirrelBehavior::Idle,
+            behavior_ticks: 0,
+            behavior_epoch: 0,
+            retained_intent: None,
+            refuge: None,
+            lifecycle: WildlifeLifeState::founder(
+                identity,
+                tuning.squirrel_maturation_ticks,
+                tuning.squirrel_lifespan_ticks,
+                tuning.squirrel_lifespan_variance_ticks,
+            ),
+        }
+    }
+
+    fn new_founder(identity: EntityPersistentId, tuning: WildlifeLifecycleTuning) -> Self {
+        Self {
+            saved: Self::founder_save_data(identity, tuning),
+        }
+    }
+
+    fn from_saved(identity: EntityPersistentId, mut saved: SquirrelRuntimeSaveData) -> Self {
+        let tuning = WildlifeLifecycleTuning::default();
+        saved.lifecycle.normalize_lifespan(
+            identity,
+            tuning.squirrel_lifespan_ticks,
+            tuning.squirrel_lifespan_variance_ticks,
+        );
+        Self { saved }
+    }
+
+    pub(super) const fn save_data(&self) -> SquirrelRuntimeSaveData {
+        self.saved
+    }
+
+    pub(super) const fn snapshot_data(&self) -> SquirrelSnapshotData {
+        SquirrelSnapshotData {
+            sex: self.saved.sex,
+            age_ticks: self.saved.lifecycle.age_ticks,
+            life_stage: self.saved.life_stage,
+            condition: self.saved.lifecycle.energy,
+            behavior: self.saved.behavior,
+            behavior_epoch: self.saved.behavior_epoch,
+            retained_intent: self.saved.retained_intent,
+            refuge: self.saved.refuge,
+        }
+    }
+
+    pub(super) const fn behavior(&self) -> SquirrelBehavior {
+        self.saved.behavior
+    }
+
+    pub(super) fn set_behavior(&mut self, behavior: SquirrelBehavior) -> bool {
+        if self.saved.behavior == behavior {
+            return false;
+        }
+        self.saved.behavior = behavior;
+        self.saved.behavior_ticks = 0;
+        self.saved.behavior_epoch = self.saved.behavior_epoch.wrapping_add(1);
+        true
+    }
+
+    pub(super) const fn behavior_ticks(&self) -> u32 {
+        self.saved.behavior_ticks
+    }
+
+    pub(super) fn set_retained_intent(&mut self, intent: Option<SquirrelRetainedIntent>) {
+        self.saved.retained_intent = intent;
+    }
+
+    pub(super) fn set_refuge(&mut self, refuge: Option<BlockPos>) {
+        self.saved.refuge = refuge;
+    }
+
+    pub(super) fn advance_tick(&mut self) {
+        self.saved.behavior_ticks = self.saved.behavior_ticks.saturating_add(1);
+        self.saved.lifecycle.advance_tick();
+    }
+
+    pub(super) fn reconcile_maturation(&mut self, maturation_ticks: u32) -> bool {
+        if self.saved.life_stage == SquirrelLifeStage::Kit
+            && self.saved.lifecycle.age_ticks >= maturation_ticks
+        {
+            self.saved.life_stage = SquirrelLifeStage::Adult;
+            return true;
+        }
+        false
+    }
+
+    pub(super) fn lifecycle_mut(&mut self) -> &mut WildlifeLifeState {
+        &mut self.saved.lifecycle
     }
 }
 

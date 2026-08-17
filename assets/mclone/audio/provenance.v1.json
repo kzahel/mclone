@@ -139,7 +139,8 @@
       "bytes": 8290,
       "families": [
         "mclone:footstep_grass",
-        "mclone:rabbit_dig"
+        "mclone:rabbit_dig",
+        "mclone:squirrel_dig"
       ],
       "path": "assets/mclone/sounds/kenney/impact/footstep_grass_000.ogg",
       "sha256": "9d49497777405d78d7cf7f2888e28277f3a23192300cfd1d79d54876b20f479f",
@@ -150,7 +151,8 @@
       "bytes": 8313,
       "families": [
         "mclone:footstep_grass",
-        "mclone:rabbit_dig"
+        "mclone:rabbit_dig",
+        "mclone:squirrel_dig"
       ],
       "path": "assets/mclone/sounds/kenney/impact/footstep_grass_001.ogg",
       "sha256": "fb28781bd22b2eefdc14077f1adf5c94d7fe9c3a130194633b55f3e0d39d9f04",
@@ -161,7 +163,8 @@
       "bytes": 8278,
       "families": [
         "mclone:footstep_grass",
-        "mclone:rabbit_dig"
+        "mclone:rabbit_dig",
+        "mclone:squirrel_dig"
       ],
       "path": "assets/mclone/sounds/kenney/impact/footstep_grass_002.ogg",
       "sha256": "73a520139f5be716a403bfe9c80e0e94d1e61d8e9de04a354b336392164b53dc",
@@ -172,7 +175,8 @@
       "bytes": 8129,
       "families": [
         "mclone:footstep_grass",
-        "mclone:rabbit_dig"
+        "mclone:rabbit_dig",
+        "mclone:squirrel_dig"
       ],
       "path": "assets/mclone/sounds/kenney/impact/footstep_grass_003.ogg",
       "sha256": "0546e1d8ab2def714425701a18bd34c5ee2794b12e858e5b595aabcf38a34137",
@@ -183,7 +187,8 @@
       "bytes": 7800,
       "families": [
         "mclone:footstep_grass",
-        "mclone:rabbit_dig"
+        "mclone:rabbit_dig",
+        "mclone:squirrel_dig"
       ],
       "path": "assets/mclone/sounds/kenney/impact/footstep_grass_004.ogg",
       "sha256": "086fd4ab3546a507ea5f5c759a9a10e535c95ade13705c238bc0eeffd7d4e8ba",
@@ -807,7 +812,8 @@
         "mclone:landing_grass",
         "mclone:landing_snow",
         "mclone:place_soft",
-        "mclone:rabbit_thump"
+        "mclone:rabbit_thump",
+        "mclone:squirrel_alarm"
       ],
       "path": "assets/mclone/sounds/kenney/impact/impactSoft_medium_000.ogg",
       "sha256": "7d3ba0bb5e60a11b5d3e558c141303dcf494256675fbf753c0d252d2cf0481e3",
@@ -821,7 +827,8 @@
         "mclone:landing_grass",
         "mclone:landing_snow",
         "mclone:place_soft",
-        "mclone:rabbit_thump"
+        "mclone:rabbit_thump",
+        "mclone:squirrel_alarm"
       ],
       "path": "assets/mclone/sounds/kenney/impact/impactSoft_medium_001.ogg",
       "sha256": "7642a4fd43e547afe4f7adfadb3dabb681c0ff512f52c1674bae30a726841faf",
@@ -835,7 +842,8 @@
         "mclone:landing_grass",
         "mclone:landing_snow",
         "mclone:place_soft",
-        "mclone:rabbit_thump"
+        "mclone:rabbit_thump",
+        "mclone:squirrel_alarm"
       ],
       "path": "assets/mclone/sounds/kenney/impact/impactSoft_medium_002.ogg",
       "sha256": "5069e3571a77d7f7aae9ef71d0364aa245fb7d64a7c8cc9956f221d03088c089",
@@ -849,7 +857,8 @@
         "mclone:landing_grass",
         "mclone:landing_snow",
         "mclone:place_soft",
-        "mclone:rabbit_thump"
+        "mclone:rabbit_thump",
+        "mclone:squirrel_alarm"
       ],
       "path": "assets/mclone/sounds/kenney/impact/impactSoft_medium_003.ogg",
       "sha256": "5c4a1f35fde7e14046931da7bc3d1b23736541b7190ba107e08a379c4ca43cd6",
@@ -863,7 +872,8 @@
         "mclone:landing_grass",
         "mclone:landing_snow",
         "mclone:place_soft",
-        "mclone:rabbit_thump"
+        "mclone:rabbit_thump",
+        "mclone:squirrel_alarm"
       ],
       "path": "assets/mclone/sounds/kenney/impact/impactSoft_medium_004.ogg",
       "sha256": "b0a4dea90eed47accf50b768beff1166f2f1486fb139e4d025b2427637624bca",
@@ -1074,7 +1084,8 @@
       "bytes": 16508,
       "families": [
         "mclone:cloth_move",
-        "mclone:rabbit_rustle"
+        "mclone:rabbit_rustle",
+        "mclone:squirrel_rustle"
       ],
       "path": "assets/mclone/sounds/kenney/rpg/cloth1.ogg",
       "sha256": "ddb93a3671233f95da0e0b10367f082f7eb42fa6caaddcf776410aa8833c747d",
@@ -1085,7 +1096,8 @@
       "bytes": 11787,
       "families": [
         "mclone:cloth_move",
-        "mclone:rabbit_rustle"
+        "mclone:rabbit_rustle",
+        "mclone:squirrel_rustle"
       ],
       "path": "assets/mclone/sounds/kenney/rpg/cloth2.ogg",
       "sha256": "8a7451193c38bc05483aec25dd193e163a15d44cf7fff04ac7912573231b0201",
@@ -1096,7 +1108,8 @@
       "bytes": 12432,
       "families": [
         "mclone:cloth_move",
-        "mclone:rabbit_rustle"
+        "mclone:rabbit_rustle",
+        "mclone:squirrel_rustle"
       ],
       "path": "assets/mclone/sounds/kenney/rpg/cloth3.ogg",
       "sha256": "a48632d17a4f1416541d261a32a31612e01267144c407fa3ecab3ff410f0085b",
@@ -1107,7 +1120,8 @@
       "bytes": 11043,
       "families": [
         "mclone:cloth_move",
-        "mclone:rabbit_rustle"
+        "mclone:rabbit_rustle",
+        "mclone:squirrel_rustle"
       ],
       "path": "assets/mclone/sounds/kenney/rpg/cloth4.ogg",
       "sha256": "e7ab9a6c4466dea874196c61f59bf1da05cfe58748f42fadd695d441a154a99b",

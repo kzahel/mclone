@@ -86,8 +86,9 @@ const WILDLIFE_REMAINS_ENTITY_CHUNK_RECORD_VERSION: u32 = 13;
 const MALLARD_LIFECYCLE_ENTITY_CHUNK_RECORD_VERSION: u32 = 14;
 const MALLARD_NEST_INTENT_ENTITY_CHUNK_RECORD_VERSION: u32 = 15;
 const SLEEPING_MAT_ENTITY_CHUNK_RECORD_VERSION: u32 = 16;
+const SQUIRREL_ENTITY_CHUNK_RECORD_VERSION: u32 = 17;
 const DEER_ANTLER_SHED_LEGACY_REMAINING_TICKS: i32 = 36_000;
-pub const ENTITY_CHUNK_RECORD_VERSION: u32 = 16;
+pub const ENTITY_CHUNK_RECORD_VERSION: u32 = 17;
 const LEGACY_PLAYER_RECORD_VERSION: u32 = 1;
 const STATISTICS_PLAYER_RECORD_VERSION: u32 = 2;
 const PLAYER_LIFE_RECORD_VERSION: u32 = 3;
@@ -608,6 +609,22 @@ pub enum EntitySavePayload {
         decay_remainder: u32,
     },
     SleepingMat,
+    Squirrel {
+        sex: mclone_protocol::SquirrelSex,
+        life_stage: mclone_protocol::SquirrelLifeStage,
+        behavior: mclone_protocol::SquirrelBehavior,
+        behavior_ticks: u32,
+        behavior_epoch: u32,
+        retained_intent: Option<mclone_protocol::SquirrelRetainedIntent>,
+        refuge: Option<BlockPos>,
+        age_ticks: u32,
+        lifespan_ticks: u32,
+        energy: u16,
+        deficit_ticks: u32,
+        recent_intake: u16,
+        reproductive_condition: u16,
+        reproduction_cooldown: u32,
+    },
     Item {
         stack: ItemStackSaveRecord,
         age: u64,
@@ -620,6 +637,7 @@ pub enum WildlifeRemainsSpecies {
     Rabbit,
     Deer,
     Mallard,
+    Squirrel,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -6828,6 +6846,7 @@ fn write_entity_save_payload(
                     WildlifeRemainsSpecies::Rabbit => 0,
                     WildlifeRemainsSpecies::Deer => 1,
                     WildlifeRemainsSpecies::Mallard => 2,
+                    WildlifeRemainsSpecies::Squirrel => 3,
                 },
             )?;
             write_u64(writer, source.most)?;
@@ -6844,6 +6863,65 @@ fn write_entity_save_payload(
             write_u32(writer, *decay_remainder)
         }
         EntitySavePayload::SleepingMat => write_u8(writer, 13),
+        EntitySavePayload::Squirrel {
+            sex,
+            life_stage,
+            behavior,
+            behavior_ticks,
+            behavior_epoch,
+            retained_intent,
+            refuge,
+            age_ticks,
+            lifespan_ticks,
+            energy,
+            deficit_ticks,
+            recent_intake,
+            reproductive_condition,
+            reproduction_cooldown,
+        } => {
+            write_u8(writer, 14)?;
+            write_u8(
+                writer,
+                match sex {
+                    mclone_protocol::SquirrelSex::Female => 0,
+                    mclone_protocol::SquirrelSex::Male => 1,
+                },
+            )?;
+            write_u8(
+                writer,
+                match life_stage {
+                    mclone_protocol::SquirrelLifeStage::Kit => 0,
+                    mclone_protocol::SquirrelLifeStage::Adult => 1,
+                },
+            )?;
+            write_u8(writer, squirrel_behavior_code(*behavior))?;
+            write_u32(writer, *behavior_ticks)?;
+            write_u32(writer, *behavior_epoch)?;
+            write_bool(writer, retained_intent.is_some())?;
+            if let Some(intent) = retained_intent {
+                write_u8(
+                    writer,
+                    match intent {
+                        mclone_protocol::SquirrelRetainedIntent::GroundForage => 0,
+                        mclone_protocol::SquirrelRetainedIntent::CoverEscape => 1,
+                        mclone_protocol::SquirrelRetainedIntent::TreeRefuge => 2,
+                    },
+                )?;
+            }
+            write_bool(writer, refuge.is_some())?;
+            if let Some(refuge) = refuge {
+                write_i32(writer, refuge.x)?;
+                write_i32(writer, refuge.y)?;
+                write_i32(writer, refuge.z)?;
+            }
+            write_u32(writer, *age_ticks)?;
+            write_u32(writer, *lifespan_ticks)?;
+            write_u16(writer, *energy)?;
+            write_u32(writer, *deficit_ticks)?;
+            write_u16(writer, *recent_intake)?;
+            write_u16(writer, *reproductive_condition)?;
+            write_u32(writer, *reproduction_cooldown)
+        }
         EntitySavePayload::Item {
             stack,
             age,
@@ -7328,6 +7406,7 @@ fn read_entity_save_payload(
                 0 => WildlifeRemainsSpecies::Rabbit,
                 1 => WildlifeRemainsSpecies::Deer,
                 2 => WildlifeRemainsSpecies::Mallard,
+                3 => WildlifeRemainsSpecies::Squirrel,
                 value => {
                     return Err(ChunkStoreError::InvalidData(format!(
                         "unknown wildlife remains species {value}"
@@ -7364,6 +7443,79 @@ fn read_entity_save_payload(
         13 if codec_version >= SLEEPING_MAT_ENTITY_CHUNK_RECORD_VERSION => {
             Ok(EntitySavePayload::SleepingMat)
         }
+        14 if codec_version >= SQUIRREL_ENTITY_CHUNK_RECORD_VERSION => {
+            let sex = match read_u8(reader)? {
+                0 => mclone_protocol::SquirrelSex::Female,
+                1 => mclone_protocol::SquirrelSex::Male,
+                value => {
+                    return Err(ChunkStoreError::InvalidData(format!(
+                        "unknown squirrel sex {value}"
+                    )));
+                }
+            };
+            let life_stage = match read_u8(reader)? {
+                0 => mclone_protocol::SquirrelLifeStage::Kit,
+                1 => mclone_protocol::SquirrelLifeStage::Adult,
+                value => {
+                    return Err(ChunkStoreError::InvalidData(format!(
+                        "unknown squirrel life stage {value}"
+                    )));
+                }
+            };
+            let behavior = squirrel_behavior_from_code(read_u8(reader)?)?;
+            let behavior_ticks = read_u32(reader)?;
+            let behavior_epoch = read_u32(reader)?;
+            let retained_intent = if read_bool(reader)? {
+                Some(match read_u8(reader)? {
+                    0 => mclone_protocol::SquirrelRetainedIntent::GroundForage,
+                    1 => mclone_protocol::SquirrelRetainedIntent::CoverEscape,
+                    2 => mclone_protocol::SquirrelRetainedIntent::TreeRefuge,
+                    value => {
+                        return Err(ChunkStoreError::InvalidData(format!(
+                            "unknown squirrel retained intent {value}"
+                        )));
+                    }
+                })
+            } else {
+                None
+            };
+            let refuge = read_bool(reader)?.then(|| {
+                Ok::<_, ChunkStoreError>(BlockPos::new(
+                    read_i32(reader)?,
+                    read_i32(reader)?,
+                    read_i32(reader)?,
+                ))
+            });
+            let refuge = refuge.transpose()?;
+            let age_ticks = read_u32(reader)?;
+            let lifespan_ticks = read_u32(reader)?;
+            let energy = read_u16(reader)?;
+            let deficit_ticks = read_u32(reader)?;
+            let recent_intake = read_u16(reader)?;
+            let reproductive_condition = read_u16(reader)?;
+            let reproduction_cooldown = read_u32(reader)?;
+            if energy > 1_000 || reproductive_condition > 1_000 {
+                return Err(ChunkStoreError::InvalidData(
+                    "invalid squirrel biological state".to_owned(),
+                ));
+            }
+            Ok(EntitySavePayload::Squirrel {
+                sex,
+                life_stage,
+                behavior,
+                behavior_ticks,
+                behavior_epoch,
+                retained_intent,
+                refuge,
+                age_ticks,
+                lifespan_ticks,
+                energy,
+                deficit_ticks,
+                recent_intake,
+                reproductive_condition,
+                reproduction_cooldown,
+            })
+        }
         value => Err(ChunkStoreError::InvalidData(format!(
             "unknown entity save payload kind {value}"
         ))),
@@ -7383,6 +7535,41 @@ const fn rabbit_behavior_code(behavior: mclone_protocol::RabbitBehavior) -> u8 {
         mclone_protocol::RabbitBehavior::Underground => 8,
         mclone_protocol::RabbitBehavior::Courtship => 9,
     }
+}
+
+const fn squirrel_behavior_code(behavior: mclone_protocol::SquirrelBehavior) -> u8 {
+    match behavior {
+        mclone_protocol::SquirrelBehavior::Idle => 0,
+        mclone_protocol::SquirrelBehavior::Bound => 1,
+        mclone_protocol::SquirrelBehavior::Forage => 2,
+        mclone_protocol::SquirrelBehavior::Alarm => 3,
+        mclone_protocol::SquirrelBehavior::Flee => 4,
+        mclone_protocol::SquirrelBehavior::TrunkApproach => 5,
+        mclone_protocol::SquirrelBehavior::Climb => 6,
+        mclone_protocol::SquirrelBehavior::RefugeEnter => 7,
+        mclone_protocol::SquirrelBehavior::RefugeIdle => 8,
+        mclone_protocol::SquirrelBehavior::RefugeExit => 9,
+    }
+}
+
+fn squirrel_behavior_from_code(code: u8) -> ChunkStoreResult<mclone_protocol::SquirrelBehavior> {
+    Ok(match code {
+        0 => mclone_protocol::SquirrelBehavior::Idle,
+        1 => mclone_protocol::SquirrelBehavior::Bound,
+        2 => mclone_protocol::SquirrelBehavior::Forage,
+        3 => mclone_protocol::SquirrelBehavior::Alarm,
+        4 => mclone_protocol::SquirrelBehavior::Flee,
+        5 => mclone_protocol::SquirrelBehavior::TrunkApproach,
+        6 => mclone_protocol::SquirrelBehavior::Climb,
+        7 => mclone_protocol::SquirrelBehavior::RefugeEnter,
+        8 => mclone_protocol::SquirrelBehavior::RefugeIdle,
+        9 => mclone_protocol::SquirrelBehavior::RefugeExit,
+        value => {
+            return Err(ChunkStoreError::InvalidData(format!(
+                "unknown squirrel behavior {value}"
+            )));
+        }
+    })
 }
 
 fn rabbit_behavior_from_code(value: u8) -> ChunkStoreResult<mclone_protocol::RabbitBehavior> {
@@ -8221,6 +8408,32 @@ mod tests {
                 damage: 0,
                 last_used_tick: 0,
             }
+        );
+    }
+
+    #[test]
+    fn squirrel_biology_intent_and_refuge_roundtrip() {
+        let payload = EntitySavePayload::Squirrel {
+            sex: mclone_protocol::SquirrelSex::Female,
+            life_stage: mclone_protocol::SquirrelLifeStage::Adult,
+            behavior: mclone_protocol::SquirrelBehavior::RefugeIdle,
+            behavior_ticks: 73,
+            behavior_epoch: 9,
+            retained_intent: Some(mclone_protocol::SquirrelRetainedIntent::TreeRefuge),
+            refuge: Some(BlockPos::new(-4, 71, 12)),
+            age_ticks: 98_765,
+            lifespan_ticks: 1_234_567,
+            energy: 711,
+            deficit_ticks: 12,
+            recent_intake: 28,
+            reproductive_condition: 650,
+            reproduction_cooldown: 4_321,
+        };
+        let mut bytes = Vec::new();
+        write_entity_save_payload(&mut bytes, &payload).unwrap();
+        assert_eq!(
+            read_entity_save_payload(&mut bytes.as_slice(), ENTITY_CHUNK_RECORD_VERSION).unwrap(),
+            payload
         );
     }
 

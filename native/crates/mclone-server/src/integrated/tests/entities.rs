@@ -828,7 +828,7 @@ fn transient_natural_spawning_creates_volatile_entities_from_generated_habitats(
     server.set_lighting_enabled(true);
     let player = server.add_player();
     let center = crate::spawn::initial_spawn_center_for_seed(seed);
-    set_dedicated_chunk_view_and_poll(&mut server, player, center, 4);
+    set_dedicated_chunk_view_and_poll(&mut server, player, center, 8);
 
     for _ in 0..400 {
         let report = server
@@ -889,7 +889,7 @@ fn persistent_initial_wildlife_survives_reload_without_seed_resurrection() {
     server.set_lighting_enabled(true);
     let player = server.add_player();
     let center = crate::spawn::initial_spawn_center_for_seed(seed);
-    set_dedicated_chunk_view_and_poll(&mut server, player, center, 4);
+    set_dedicated_chunk_view_and_poll(&mut server, player, center, 8);
 
     let spawned = server.entities.states();
     assert!(
@@ -903,6 +903,7 @@ fn persistent_initial_wildlife_survives_reload_without_seed_resurrection() {
             | EntityKind::Mallard
             | EntityKind::Bee
             | EntityKind::BeeNest
+            | EntityKind::Squirrel
     )));
     let spawning = server.natural_spawning_diagnostics(server.simulation_tick(), &[]);
     assert!(!spawning.live_attempts_enabled);
@@ -946,7 +947,7 @@ fn persistent_initial_wildlife_survives_reload_without_seed_resurrection() {
         "persistent initial wildlife should leave runtime state on full chunk unload"
     );
 
-    set_dedicated_chunk_view_and_poll(&mut server, player, center, 4);
+    set_dedicated_chunk_view_and_poll(&mut server, player, center, 8);
     for _ in 0..256 {
         server
             .try_simulation_tick_report_for_player(player)
@@ -985,7 +986,7 @@ fn transient_initial_wildlife_realizes_each_chunk_once_per_session() {
     server.set_lighting_enabled(false);
     let player = server.add_player();
     let center = crate::spawn::initial_spawn_center_for_seed(seed);
-    set_dedicated_chunk_view_and_poll(&mut server, player, center, 4);
+    set_dedicated_chunk_view_and_poll(&mut server, player, center, 8);
     assert!(
         !server.entities.states().is_empty(),
         "first transient realization should create wildlife"
@@ -1002,7 +1003,7 @@ fn transient_initial_wildlife_realizes_each_chunk_once_per_session() {
     }
     assert!(server.entities.states().is_empty());
 
-    set_dedicated_chunk_view_and_poll(&mut server, player, center, 4);
+    set_dedicated_chunk_view_and_poll(&mut server, player, center, 8);
     for _ in 0..32 {
         server
             .try_simulation_tick_report_for_player(player)

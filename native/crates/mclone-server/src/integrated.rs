@@ -36,7 +36,9 @@ use mclone_worldgen::block::{
     AIR, DANDELION, GRASS_BLOCK, POPPY, RawBlockId, block_name, farmland_moisture,
     generated_block_state_id, material_blocks_motion,
 };
-use mclone_worldgen::levelgen::{McloneOverworldSamplingTopology, McloneOverworldWildlifePlanner};
+use mclone_worldgen::levelgen::{
+    McloneOverworldSamplingTopology, McloneOverworldWildlifePlanner, McloneWildlifeSpecies,
+};
 use mclone_worldgen::prng::SimpleRandomSource;
 use rustc_hash::FxHashMap;
 
@@ -46,7 +48,9 @@ use crate::deer_population::{DEER_POPULATION_HISTORY_KEY, DeerPopulationHistory}
 use crate::entity::spawning::dry_run::{
     NaturalSpawnDryRunDiagnostics, dry_run_creature_spawn_eligibility,
 };
-use crate::entity::spawning::initial::{InitialWildlifePlacement, plan_initial_wildlife_placement};
+use crate::entity::spawning::initial::{
+    InitialWildlifePlacement, plan_initial_squirrel_placement, plan_initial_wildlife_placement,
+};
 use crate::entity::spawning::live::{
     CREATURE_SPAWN_MAX_SPAWNS_PER_TICK, CreatureSpawnDiagnostics, plan_creature_spawns,
 };
@@ -779,6 +783,7 @@ impl RealmServer {
         let _ = self.active_dimension.entities.drain_deer_sounds();
         let _ = self.active_dimension.entities.drain_bee_sounds();
         let _ = self.active_dimension.entities.drain_rabbit_sounds();
+        let _ = self.active_dimension.entities.drain_squirrel_sounds();
 
         let entity_chunks_after_tick = self.entities.persistent_entity_chunk_positions();
         self.mark_entity_chunk_index_changes(entity_chunks_before_tick, entity_chunks_after_tick);
@@ -3321,6 +3326,7 @@ impl RealmServer {
         let deer_sounds = self.active_dimension.entities.drain_deer_sounds();
         let bee_sounds = self.active_dimension.entities.drain_bee_sounds();
         let rabbit_sounds = self.active_dimension.entities.drain_rabbit_sounds();
+        let squirrel_sounds = self.active_dimension.entities.drain_squirrel_sounds();
         let bee_pollinations = self.active_dimension.entities.drain_bee_pollinations();
         let mallard_tracks = self.active_dimension.entities.drain_mallard_tracks();
         let mallard_hatches = self
@@ -3334,6 +3340,7 @@ impl RealmServer {
             mallard_hatches,
         );
         self.route_deer_sounds(deer_sounds);
+        self.route_squirrel_sounds(squirrel_sounds);
         self.route_deer_observations(&entity_updates);
         let pollinated_positions = self.apply_bee_pollinations(&bee_pollinations);
         fluid_events.extend(self.scheduler.drain_pending_block_delta_events());
@@ -5669,15 +5676,66 @@ impl RealmServer {
         let planner =
             McloneOverworldWildlifePlanner::new(self.active_dimension.definition.seed, topology);
         let persistent = self.scheduler.entity_chunks_supported();
+        let simulation_tick = self.simulation_tick;
+        let calendar = self
+            .season_calendar_policy
+            .sample(self.day_time)
+            .expect("validated realm calendar policy must remain sampleable");
+        let seasonal_resource_opportunities =
+            crate::wildlife_resources::SeasonalWildlifeOpportunityCache::new(
+                self.active_dimension.seasonal_resource_sampler.clone(),
+                calendar,
+            );
+        let player_positions = self.natural_spawn_player_positions();
         let mut realized = Vec::new();
         for pos in ready_chunks {
             let plan = planner
                 .plan_for_chunk(pos)
                 .map_err(|error| ChunkStoreError::InvalidData(error.to_string()))?;
             if let Some(encounter) = plan.encounter_for_chunk(pos)
-                && let Some(placement) = plan_initial_wildlife_placement(encounter, |block| {
-                    self.scheduler.block_at_world(block)
-                })
+                && let Some(placement) = if encounter.species == McloneWildlifeSpecies::Squirrel {
+                    let recently_disturbed = player_positions.iter().any(|player| {
+                        let dx = player.x - f64::from(encounter.anchor_x);
+                        let dz = player.z - f64::from(encounter.anchor_z);
+                        dx * dx + dz * dz < 12.0 * 12.0
+                    });
+                    let runtime = &mut self.active_dimension;
+                    let scheduler = &runtime.scheduler;
+                    plan_initial_squirrel_placement(
+                        encounter,
+                        plan.suitability.squirrel,
+                        plan.selected_habitat.forest_cover,
+                        recently_disturbed,
+                        |feet| {
+                            let position =
+                                crate::wildlife_resources::WildlifeForageCellPos::from_block(feet);
+                            let opportunity = seasonal_resource_opportunities.opportunity(
+                                position,
+                                crate::wildlife_resources::WildlifeResourceKind::SeedsAndSoftMast,
+                            );
+                            runtime
+                                .wildlife_resources
+                                .has_accessible_resource_at_with_opportunity(
+                                crate::wildlife_resources::WildlifeForageConsumer::Squirrel,
+                                crate::wildlife_resources::WildlifeResourceKind::SeedsAndSoftMast,
+                                feet,
+                                simulation_tick,
+                                opportunity,
+                                &|block| {
+                                    scheduler
+                                        .block_at_world(block)
+                                        .map(|raw| BlockStateId(u32::from(raw)))
+                                },
+                            )
+                        },
+                        |block| scheduler.block_at_world(block),
+                    )
+                    .map(|(placement, _)| placement)
+                } else {
+                    plan_initial_wildlife_placement(encounter, |block| {
+                        self.scheduler.block_at_world(block)
+                    })
+                }
             {
                 let y_rot_degrees =
                     initial_wildlife_y_rot_degrees(encounter.anchor_x, encounter.anchor_z, 0);
@@ -6107,6 +6165,17 @@ impl RealmServer {
             {
                 self.chunk_tracking
                     .queue_update_for_player(player_id, ServerUpdate::DeerSound(cue));
+            }
+        }
+    }
+
+    fn route_squirrel_sounds(&mut self, cues: Vec<mclone_protocol::SquirrelSoundCue>) {
+        for cue in cues {
+            for player_id in
+                self.mallard_players_in_range(cue.position, f64::from(cue.audible_radius))
+            {
+                self.chunk_tracking
+                    .queue_update_for_player(player_id, ServerUpdate::SquirrelSound(cue));
             }
         }
     }

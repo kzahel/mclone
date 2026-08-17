@@ -15,6 +15,246 @@ const WETLAND_HABITAT_MIN_WATER_COLUMNS: u16 = 2;
 pub(crate) const FOREST_EDGE_HABITAT_RADIUS: i32 = 6;
 pub(crate) const FLOWERING_HABITAT_RADIUS: i32 = 6;
 pub(crate) const RABBIT_HABITAT_RADIUS: i32 = 6;
+pub(crate) const SQUIRREL_HABITAT_RADIUS: i32 = 8;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct SquirrelRefugeCandidate {
+    pub(crate) approach: BlockPos,
+    pub(crate) trunk: BlockPos,
+    pub(crate) refuge: BlockPos,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) struct SquirrelHabitatSample {
+    pub(crate) fitness: HabitatFitness,
+    pub(crate) generated_suitability: u16,
+    pub(crate) forest_cover: u16,
+    pub(crate) woody_columns: u16,
+    pub(crate) mast_leaf_blocks: u16,
+    pub(crate) open_ground_columns: u16,
+    pub(crate) max_floor_step: u8,
+    pub(crate) mast_accessible: bool,
+    pub(crate) refuge: Option<SquirrelRefugeCandidate>,
+    pub(crate) recently_disturbed: bool,
+}
+
+impl SquirrelHabitatSample {
+    pub(crate) fn suitable(self) -> bool {
+        self.generated_suitability >= 90
+            && (180..=850).contains(&self.forest_cover)
+            && self.woody_columns >= 2
+            && self.mast_leaf_blocks >= 4
+            && self.open_ground_columns >= 6
+            && self.max_floor_step <= 2
+            && self.mast_accessible
+            && self.refuge.is_some()
+            && !self.recently_disturbed
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum SquirrelHabitatFailure {
+    MissingBlockData,
+}
+
+pub(crate) fn sample_squirrel_habitat(
+    feet: BlockPos,
+    generated_suitability: u16,
+    forest_cover: u16,
+    mast_accessible: bool,
+    recently_disturbed: bool,
+    block_at: &mut impl FnMut(BlockPos) -> Option<RawBlockId>,
+) -> Result<SquirrelHabitatSample, SquirrelHabitatFailure> {
+    let mut sample = SquirrelHabitatSample {
+        generated_suitability,
+        forest_cover,
+        mast_accessible,
+        recently_disturbed,
+        ..SquirrelHabitatSample::default()
+    };
+    let mut refuge_candidates = Vec::new();
+
+    for dx in -SQUIRREL_HABITAT_RADIUS..=SQUIRREL_HABITAT_RADIUS {
+        for dz in -SQUIRREL_HABITAT_RADIUS..=SQUIRREL_HABITAT_RADIUS {
+            let distance = dx.abs() + dz.abs();
+            if distance > SQUIRREL_HABITAT_RADIUS {
+                continue;
+            }
+            let column = feet.offset(dx, 0, dz);
+            let ground =
+                block_at(column.below()).ok_or(SquirrelHabitatFailure::MissingBlockData)?;
+            let body = block_at(column).ok_or(SquirrelHabitatFailure::MissingBlockData)?;
+            let head =
+                block_at(column.offset(0, 1, 0)).ok_or(SquirrelHabitatFailure::MissingBlockData)?;
+            sample.open_ground_columns = sample
+                .open_ground_columns
+                .saturating_add(u16::from(ground != AIR && body == AIR && head == AIR));
+
+            let mut woody_column = false;
+            for dy in -1..=8 {
+                let pos = column.offset(0, dy, 0);
+                let raw = block_at(pos).ok_or(SquirrelHabitatFailure::MissingBlockData)?;
+                woody_column |= is_woody_cover(raw);
+                sample.mast_leaf_blocks = sample
+                    .mast_leaf_blocks
+                    .saturating_add(u16::from(is_mast_leaf(raw)));
+                if !is_tree_log(raw) || dy < 0 {
+                    continue;
+                }
+                for (side_x, side_z) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+                    let refuge = pos.offset(side_x, 0, side_z);
+                    if refuge.y < feet.y + 3
+                        || block_at(refuge).ok_or(SquirrelHabitatFailure::MissingBlockData)? != AIR
+                        || block_at(refuge.offset(0, 1, 0))
+                            .ok_or(SquirrelHabitatFailure::MissingBlockData)?
+                            != AIR
+                    {
+                        continue;
+                    }
+                    let leaf_support = (-1..=1).any(|leaf_dx| {
+                        (-1..=1).any(|leaf_dz| {
+                            block_at(refuge.offset(leaf_dx, 1, leaf_dz)).is_some_and(is_mast_leaf)
+                        })
+                    });
+                    if !leaf_support {
+                        continue;
+                    }
+                    let approach = BlockPos::new(refuge.x, feet.y, refuge.z);
+                    if block_at(approach).ok_or(SquirrelHabitatFailure::MissingBlockData)? == AIR
+                        && block_at(approach.offset(0, 1, 0))
+                            .ok_or(SquirrelHabitatFailure::MissingBlockData)?
+                            == AIR
+                        && block_at(approach.below())
+                            .ok_or(SquirrelHabitatFailure::MissingBlockData)?
+                            != AIR
+                    {
+                        refuge_candidates.push((
+                            distance,
+                            refuge.y,
+                            refuge.x,
+                            refuge.z,
+                            SquirrelRefugeCandidate {
+                                approach,
+                                trunk: pos,
+                                refuge,
+                            },
+                        ));
+                    }
+                }
+            }
+            sample.woody_columns = sample.woody_columns.saturating_add(u16::from(woody_column));
+        }
+    }
+
+    for (dx, dz) in [(3, 0), (-3, 0), (0, 3), (0, -3)] {
+        let mut step = 3_u8;
+        for dy in [0_i32, 1, -1, 2, -2] {
+            let floor = feet.offset(dx, dy - 1, dz);
+            if block_at(floor).ok_or(SquirrelHabitatFailure::MissingBlockData)? != AIR {
+                step = dy.unsigned_abs().min(3) as u8;
+                break;
+            }
+        }
+        sample.max_floor_step = sample.max_floor_step.max(step);
+    }
+    refuge_candidates
+        .sort_unstable_by_key(|candidate| (candidate.0, candidate.1, candidate.2, candidate.3));
+    sample.refuge = refuge_candidates.first().map(|candidate| candidate.4);
+    sample.fitness = HabitatFitness::from_dimensions(
+        score(sample.mast_leaf_blocks, 12),
+        score(sample.woody_columns, 8),
+        u8::from(sample.refuge.is_some()) * 100,
+        score(sample.open_ground_columns, 16),
+        100_u8.saturating_sub(sample.max_floor_step.saturating_mul(34)),
+    );
+    Ok(sample)
+}
+
+pub(crate) fn find_squirrel_refuge_candidate(
+    feet: BlockPos,
+    block_state_at: &impl Fn(BlockPos) -> Option<BlockStateId>,
+) -> Option<SquirrelRefugeCandidate> {
+    for radius in 1..=SQUIRREL_HABITAT_RADIUS {
+        for dx in -radius..=radius {
+            for dz in -radius..=radius {
+                if dx.abs() + dz.abs() != radius {
+                    continue;
+                }
+                for dy in 3..=8 {
+                    let trunk = feet.offset(dx, dy, dz);
+                    if !block_state_at(trunk).is_some_and(is_tree_log_state) {
+                        continue;
+                    }
+                    for (side_x, side_z) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+                        let refuge = trunk.offset(side_x, 0, side_z);
+                        if !squirrel_space_is_clear(refuge, block_state_at)
+                            || !squirrel_leaf_support_exists(refuge, block_state_at)
+                        {
+                            continue;
+                        }
+                        let approach = BlockPos::new(refuge.x, feet.y, refuge.z);
+                        if squirrel_space_is_clear(approach, block_state_at)
+                            && block_state_at(approach.below()).is_some_and(|state| {
+                                block_collision_aabb(state, approach.below()).is_some()
+                            })
+                        {
+                            return Some(SquirrelRefugeCandidate {
+                                approach,
+                                trunk,
+                                refuge,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+pub(crate) fn squirrel_refuge_support_is_valid(
+    candidate: SquirrelRefugeCandidate,
+    block_state_at: &impl Fn(BlockPos) -> Option<BlockStateId>,
+) -> bool {
+    let min_y = candidate.approach.y;
+    let max_y = candidate.refuge.y;
+    (min_y..=max_y).all(|y| {
+        let side = BlockPos::new(candidate.refuge.x, y, candidate.refuge.z);
+        let trunk = BlockPos::new(candidate.trunk.x, y, candidate.trunk.z);
+        squirrel_space_is_clear(side, block_state_at)
+            && block_state_at(trunk).is_some_and(is_tree_log_state)
+    }) && squirrel_leaf_support_exists(candidate.refuge, block_state_at)
+}
+
+fn squirrel_space_is_clear(
+    feet: BlockPos,
+    block_state_at: &impl Fn(BlockPos) -> Option<BlockStateId>,
+) -> bool {
+    [feet, feet.offset(0, 1, 0)].into_iter().all(|pos| {
+        block_state_at(pos).is_some_and(|state| block_collision_aabb(state, pos).is_none())
+    })
+}
+
+fn squirrel_leaf_support_exists(
+    refuge: BlockPos,
+    block_state_at: &impl Fn(BlockPos) -> Option<BlockStateId>,
+) -> bool {
+    (-1..=1).any(|dx| {
+        (-1..=1).any(|dz| block_state_at(refuge.offset(dx, 1, dz)).is_some_and(is_mast_leaf_state))
+    })
+}
+
+fn is_tree_log_state(state: BlockStateId) -> bool {
+    [OAK_LOG, BIRCH_LOG, SPRUCE_LOG, DARK_OAK_LOG, ACACIA_LOG]
+        .into_iter()
+        .any(|raw| state == generated_block_state_id(raw))
+}
+
+fn is_mast_leaf_state(state: BlockStateId) -> bool {
+    [OAK_LEAVES, BIRCH_LEAVES, DARK_OAK_LEAVES]
+        .into_iter()
+        .any(|raw| state == generated_block_state_id(raw))
+}
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) struct RabbitHabitatSample {
@@ -284,6 +524,17 @@ fn is_woody_cover(raw: RawBlockId) -> bool {
             | ACACIA_LOG
             | ACACIA_LEAVES
     )
+}
+
+pub(crate) fn is_tree_log(raw: RawBlockId) -> bool {
+    matches!(
+        raw,
+        OAK_LOG | BIRCH_LOG | SPRUCE_LOG | DARK_OAK_LOG | ACACIA_LOG
+    )
+}
+
+pub(crate) fn is_mast_leaf(raw: RawBlockId) -> bool {
+    matches!(raw, OAK_LEAVES | BIRCH_LEAVES | DARK_OAK_LEAVES)
 }
 
 fn is_browse(raw: RawBlockId) -> bool {
@@ -719,5 +970,100 @@ mod tests {
         .unwrap();
         assert!(!flat.suitable());
         assert_eq!(flat.diggable_banks, 0);
+    }
+
+    fn squirrel_edge(pos: BlockPos) -> Option<RawBlockId> {
+        Some(if pos.y <= 62 {
+            DIRT
+        } else if pos.y == 63 {
+            GRASS_BLOCK
+        } else if pos.x == 3 && pos.z == 0 && (64..=68).contains(&pos.y) {
+            OAK_LOG
+        } else if pos.y == 68 && (pos.x - 3).abs() <= 2 && pos.z.abs() <= 2 && pos.x != 3 {
+            OAK_LEAVES
+        } else {
+            AIR
+        })
+    }
+
+    #[test]
+    fn squirrel_habitat_requires_edge_mast_and_a_supported_refuge() {
+        let suitable = sample_squirrel_habitat(
+            BlockPos::new(0, 64, 0),
+            420,
+            480,
+            true,
+            false,
+            &mut squirrel_edge,
+        )
+        .unwrap();
+        assert!(suitable.suitable());
+        assert!(suitable.mast_leaf_blocks >= 4);
+        assert_eq!(suitable.refuge.unwrap().trunk.x, 3);
+
+        let no_mast = sample_squirrel_habitat(
+            BlockPos::new(0, 64, 0),
+            420,
+            480,
+            false,
+            false,
+            &mut squirrel_edge,
+        )
+        .unwrap();
+        assert!(!no_mast.suitable());
+
+        let dense = sample_squirrel_habitat(
+            BlockPos::new(0, 64, 0),
+            420,
+            920,
+            true,
+            false,
+            &mut squirrel_edge,
+        )
+        .unwrap();
+        assert!(!dense.suitable());
+
+        let disturbed = sample_squirrel_habitat(
+            BlockPos::new(0, 64, 0),
+            420,
+            480,
+            true,
+            true,
+            &mut squirrel_edge,
+        )
+        .unwrap();
+        assert!(!disturbed.suitable());
+
+        let open_plain =
+            sample_squirrel_habitat(BlockPos::new(0, 64, 0), 420, 480, true, false, &mut |pos| {
+                Some(if pos.y == 63 { GRASS_BLOCK } else { AIR })
+            })
+            .unwrap();
+        assert!(!open_plain.suitable());
+        assert!(open_plain.refuge.is_none());
+
+        assert_eq!(
+            sample_squirrel_habitat(BlockPos::new(0, 64, 0), 420, 480, true, false, &mut |_| {
+                None
+            },),
+            Err(SquirrelHabitatFailure::MissingBlockData)
+        );
+
+        let candidate = find_squirrel_refuge_candidate(BlockPos::new(0, 64, 0), &|pos| {
+            squirrel_edge(pos).map(generated_block_state_id)
+        })
+        .expect("supported tree should expose one refuge route");
+        assert!(squirrel_refuge_support_is_valid(candidate, &|pos| {
+            squirrel_edge(pos).map(generated_block_state_id)
+        }));
+        assert!(!squirrel_refuge_support_is_valid(candidate, &|pos| {
+            squirrel_edge(pos).map(|raw| {
+                generated_block_state_id(if pos == BlockPos::new(3, 65, 0) {
+                    AIR
+                } else {
+                    raw
+                })
+            })
+        }));
     }
 }

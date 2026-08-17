@@ -24,8 +24,8 @@ use crate::{
 };
 
 pub(crate) const WILDLIFE_RESOURCE_SAVED_DATA_KEY: &str = "mclone:wildlife-forage-v1";
-pub const WILDLIFE_RESOURCE_RULE_REVISION: u32 = 3;
-const WILDLIFE_RESOURCE_CODEC_VERSION: u32 = 3;
+pub const WILDLIFE_RESOURCE_RULE_REVISION: u32 = 4;
+const WILDLIFE_RESOURCE_CODEC_VERSION: u32 = 4;
 pub const WILDLIFE_RESOURCE_CELL_WIDTH_BLOCKS: i32 = 64;
 pub const WILDLIFE_RESOURCE_KIND_COUNT: usize = 5;
 const RECOVERY_DENOMINATOR: u32 = 1_200;
@@ -116,6 +116,7 @@ pub struct WildlifeResourceStratumSnapshot {
     pub rabbit_consumed: u64,
     pub deer_consumed: u64,
     pub mallard_consumed: u64,
+    pub squirrel_consumed: u64,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -157,6 +158,7 @@ pub(crate) enum WildlifeForageConsumer {
     Rabbit,
     Deer,
     Mallard,
+    Squirrel,
 }
 
 impl WildlifeForageConsumer {
@@ -165,6 +167,7 @@ impl WildlifeForageConsumer {
             Self::Rabbit => 0,
             Self::Deer => 1,
             Self::Mallard => 2,
+            Self::Squirrel => 3,
         }
     }
 }
@@ -212,6 +215,12 @@ pub(crate) const MALLARD_DIET: [WildlifeDietEntry; 3] = [
         maximum_bite: 6,
     },
 ];
+
+pub(crate) const SQUIRREL_DIET: [WildlifeDietEntry; 1] = [WildlifeDietEntry {
+    resource: WildlifeResourceKind::SeedsAndSoftMast,
+    energy_per_unit: 28,
+    maximum_bite: 7,
+}];
 
 #[derive(Clone, Debug)]
 pub(crate) struct SeasonalWildlifeResourceSampler {
@@ -390,10 +399,7 @@ impl SeasonalWildlifeResourceSampler {
         })
     }
 
-    fn habitat(
-        &self,
-        position: WildlifeForageCellPos,
-    ) -> Option<SeasonalWildlifeHabitatSample> {
+    fn habitat(&self, position: WildlifeForageCellPos) -> Option<SeasonalWildlifeHabitatSample> {
         let Some(terrain) = self.terrain else {
             return None;
         };
@@ -479,7 +485,7 @@ struct WildlifeResourceStratum {
     available: u32,
     recovery_remainder: u64,
     recovered: u64,
-    consumed: [u64; 3],
+    consumed: [u64; 4],
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -574,6 +580,32 @@ impl WildlifeResourceLedger {
 
     pub(crate) const fn is_dirty(&self) -> bool {
         self.dirty
+    }
+
+    pub(crate) fn has_accessible_resource_at_with_opportunity<F>(
+        &mut self,
+        consumer: WildlifeForageConsumer,
+        kind: WildlifeResourceKind,
+        feet: BlockPos,
+        simulation_tick: u64,
+        opportunity: SeasonalResourceOpportunity,
+        block_state_at: &F,
+    ) -> bool
+    where
+        F: Fn(BlockPos) -> Option<BlockStateId>,
+    {
+        self.resample_if_due(feet, simulation_tick, block_state_at);
+        if !resource_site_is_compatible(consumer, kind, feet, block_state_at) {
+            return false;
+        }
+        self.cells
+            .get(&WildlifeForageCellPos::from_block(feet))
+            .is_some_and(|cell| {
+                opportunity
+                    .accessibility
+                    .apply_floor(cell.strata[kind.index()].available)
+                    > 0
+            })
     }
 
     pub(crate) fn mark_saved(&mut self, revision: u64) {
@@ -676,7 +708,7 @@ impl WildlifeResourceLedger {
             return WildlifeDietIntake::default();
         };
         for entry in diet {
-            if !resource_site_is_compatible(entry.resource, feet, block_state_at) {
+            if !resource_site_is_compatible(consumer, entry.resource, feet, block_state_at) {
                 continue;
             }
             let requested = wildlife_forage_request(
@@ -768,6 +800,7 @@ impl WildlifeResourceLedger {
                         rabbit_consumed: stratum.consumed[0],
                         deer_consumed: stratum.consumed[1],
                         mallard_consumed: stratum.consumed[2],
+                        squirrel_consumed: stratum.consumed[3],
                     }
                 }),
                 terrain_revision: cell.terrain_revision,
@@ -826,6 +859,7 @@ where
 }
 
 fn resource_site_is_compatible<F>(
+    consumer: WildlifeForageConsumer,
     kind: WildlifeResourceKind,
     feet: BlockPos,
     block_state_at: &F,
@@ -840,6 +874,9 @@ where
         }
         WildlifeResourceKind::WoodyBrowse => {
             nearby_state(feet, 2, 3, block_state_at, |state| is_woody_browse(state))
+        }
+        WildlifeResourceKind::SeedsAndSoftMast if consumer == WildlifeForageConsumer::Squirrel => {
+            nearby_state(feet, 4, 6, block_state_at, is_squirrel_mast)
         }
         WildlifeResourceKind::SeedsAndSoftMast => {
             block_state_at(feet.below()) == Some(generated_block_state_id(GRASS_BLOCK))
@@ -918,6 +955,15 @@ fn is_woody_browse(state: BlockStateId) -> bool {
             || value == generated_block_state_id(DARK_OAK_LEAVES)
             || value == generated_block_state_id(ACACIA_LEAVES)
             || value == generated_block_state_id(JUNGLE_LEAVES)
+    )
+}
+
+fn is_squirrel_mast(state: BlockStateId) -> bool {
+    matches!(
+        state,
+        value if value == generated_block_state_id(OAK_LEAVES)
+            || value == generated_block_state_id(BIRCH_LEAVES)
+            || value == generated_block_state_id(DARK_OAK_LEAVES)
     )
 }
 
@@ -1000,6 +1046,54 @@ mod tests {
 
         let restored = WildlifeResourceLedger::from_saved(ledger.saved_record().unwrap()).unwrap();
         assert_eq!(restored.snapshots(), ledger.snapshots());
+    }
+
+    #[test]
+    fn squirrels_consume_only_reached_mast_and_preserve_accounting() {
+        let feet = BlockPos::new(2, 64, 2);
+        let mut ledger = WildlifeResourceLedger::default();
+        let reached = ledger.consume_diet_at(
+            WildlifeForageConsumer::Squirrel,
+            &SQUIRREL_DIET,
+            feet,
+            0,
+            1,
+            1_000,
+            20,
+            &mixed_habitat,
+        );
+        assert_eq!(
+            reached.resource,
+            Some(WildlifeResourceKind::SeedsAndSoftMast)
+        );
+        assert!(reached.units > 0);
+        let mast = ledger.snapshots()[0].stratum(WildlifeResourceKind::SeedsAndSoftMast);
+        assert_eq!(mast.squirrel_consumed, u64::from(reached.units));
+        assert_eq!(mast.potential - mast.available, u32::from(reached.units));
+
+        let no_mast = |pos: BlockPos| {
+            mixed_habitat(pos).map(|state| {
+                if state == generated_block_state_id(OAK_LEAVES) {
+                    generated_block_state_id(AIR)
+                } else {
+                    state
+                }
+            })
+        };
+        let mut absent = WildlifeResourceLedger::default();
+        assert_eq!(
+            absent.consume_diet_at(
+                WildlifeForageConsumer::Squirrel,
+                &SQUIRREL_DIET,
+                feet,
+                0,
+                1,
+                1_000,
+                20,
+                &no_mast,
+            ),
+            WildlifeDietIntake::default()
+        );
     }
 
     #[test]

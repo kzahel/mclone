@@ -10,6 +10,7 @@ use mclone_worldgen::{
 use super::{
     dry_run::top_motion_blocking_no_leaves_feet_y, placements::check_debug_actor_placement,
 };
+use crate::entity::spawning::habitat::{SquirrelHabitatSample, sample_squirrel_habitat};
 
 const MEMBER_OFFSETS: [(i32, i32); 4] = [(0, 0), (2, 0), (-2, 1), (1, -2)];
 const PLACEMENT_SEARCH_RADIUS: i32 = 6;
@@ -82,12 +83,45 @@ where
     }
 }
 
+pub(crate) fn plan_initial_squirrel_placement<F, G>(
+    encounter: McloneWildlifeEncounter,
+    generated_suitability: u16,
+    forest_cover: u16,
+    recently_disturbed: bool,
+    mut mast_accessible_at: G,
+    mut block_at: F,
+) -> Option<(InitialWildlifePlacement, SquirrelHabitatSample)>
+where
+    F: FnMut(BlockPos) -> Option<RawBlockId>,
+    G: FnMut(BlockPos) -> bool,
+{
+    if encounter.species != McloneWildlifeSpecies::Squirrel {
+        return None;
+    }
+    let placement = plan_initial_wildlife_placement(encounter, &mut block_at)?;
+    let InitialWildlifePlacement::Group { positions, .. } = &placement else {
+        return None;
+    };
+    let feet = BlockPos::containing(*positions.first()?);
+    let habitat = sample_squirrel_habitat(
+        feet,
+        generated_suitability,
+        forest_cover,
+        mast_accessible_at(feet),
+        recently_disturbed,
+        &mut block_at,
+    )
+    .ok()?;
+    habitat.suitable().then_some((placement, habitat))
+}
+
 fn species_entity_kind(species: McloneWildlifeSpecies) -> EntityKind {
     match species {
         McloneWildlifeSpecies::Rabbit => EntityKind::Rabbit,
         McloneWildlifeSpecies::Deer => EntityKind::Deer,
         McloneWildlifeSpecies::Mallard => EntityKind::Mallard,
         McloneWildlifeSpecies::Bee => EntityKind::BeeNest,
+        McloneWildlifeSpecies::Squirrel => EntityKind::Squirrel,
     }
 }
 
@@ -134,7 +168,7 @@ fn find_safe_position_in_chunk(
 
 #[cfg(test)]
 mod tests {
-    use mclone_worldgen::block::{AIR, GRASS_BLOCK};
+    use mclone_worldgen::block::{AIR, DIRT, GRASS_BLOCK, OAK_LEAVES, OAK_LOG};
 
     use super::*;
 
@@ -190,5 +224,51 @@ mod tests {
         };
         assert_eq!(position, Vec3d::new(8.5, 64.0, 8.5));
         assert_eq!(bee_positions.len(), 3);
+    }
+
+    fn squirrel_edge(pos: BlockPos) -> Option<RawBlockId> {
+        Some(if pos.y <= 62 {
+            DIRT
+        } else if pos.y == 63 {
+            GRASS_BLOCK
+        } else if pos.x == 3 && pos.z == 0 && (64..=68).contains(&pos.y) {
+            OAK_LOG
+        } else if pos.y == 68 && (pos.x - 3).abs() <= 2 && pos.z.abs() <= 2 && pos.x != 3 {
+            OAK_LEAVES
+        } else {
+            AIR
+        })
+    }
+
+    #[test]
+    fn squirrel_placement_requires_live_mast_refuge_and_quiet_edge() {
+        let encounter = McloneWildlifeEncounter {
+            species: McloneWildlifeSpecies::Squirrel,
+            group_size: 2,
+            anchor_x: 0,
+            anchor_z: 0,
+            owner_chunk: ChunkPos::new(0, 0),
+        };
+        let (placement, habitat) =
+            plan_initial_squirrel_placement(encounter, 420, 480, false, |_| true, squirrel_edge)
+                .expect("woodland edge with reached mast should admit squirrels");
+        let InitialWildlifePlacement::Group { kind, positions } = placement else {
+            panic!("squirrels should use ordinary group placement");
+        };
+        assert_eq!(kind, EntityKind::Squirrel);
+        assert_eq!(positions.len(), 2);
+        assert!(habitat.suitable());
+        assert!(habitat.refuge.is_some());
+
+        assert!(
+            plan_initial_squirrel_placement(encounter, 420, 480, false, |_| false, squirrel_edge,)
+                .is_none(),
+            "unreachable mast must not admit the encounter"
+        );
+        assert!(
+            plan_initial_squirrel_placement(encounter, 420, 480, true, |_| true, squirrel_edge,)
+                .is_none(),
+            "recent player disturbance must suppress initial materialization"
+        );
     }
 }

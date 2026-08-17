@@ -22,7 +22,10 @@ use crate::ecology::WildlifeLifeState;
 use crate::ecology::{Availability, KnownPlace, WildlifeLifecycleTuning};
 
 use super::metadata::EntityMetadata;
-use super::spawning::habitat::sample_wetland_habitat;
+use super::spawning::habitat::{
+    SquirrelRefugeCandidate, find_squirrel_refuge_candidate, sample_wetland_habitat,
+    squirrel_refuge_support_is_valid,
+};
 use super::state::ServerEntityState;
 
 mod attributes;
@@ -39,7 +42,8 @@ use navigation::GroundPathNavigation;
 use species::MobSpeciesState;
 pub(crate) use species::{
     BeeRuntimeSaveData, DeerRuntimeSaveData, MALLARD_GROWTH_REQUIRED_TICKS, MallardRuntimeSaveData,
-    RABBIT_GROWTH_REQUIRED_TICKS, RabbitRuntimeSaveData, identity_mallard_sex,
+    RABBIT_GROWTH_REQUIRED_TICKS, RabbitRuntimeSaveData, SquirrelRuntimeSaveData,
+    identity_mallard_sex,
 };
 
 const PLAYER_EYE_HEIGHT: f64 = 1.62;
@@ -105,6 +109,13 @@ const RABBIT_MAX_LOCAL_REFUGES: usize = 3;
 const RABBIT_DIG_COOLDOWN_TICKS: u32 = 2_400;
 const RABBIT_DECISION_INTERVAL_TICKS: u64 = 10;
 const RABBIT_BLOCK_RECONSIDER_RADIUS_SQR: f64 = 14.0 * 14.0;
+const SQUIRREL_THREAT_RADIUS_SQR: f64 = 10.0 * 10.0;
+const SQUIRREL_ALARM_TICKS: u32 = 12;
+const SQUIRREL_COVER_FLEE_TICKS: u32 = 18;
+const SQUIRREL_REFUGE_REST_TICKS: u32 = 80;
+const SQUIRREL_GROUND_SPEED: f64 = 0.10;
+const SQUIRREL_FLEE_SPEED: f64 = 0.18;
+const SQUIRREL_CLIMB_SPEED: f64 = 0.09;
 pub(crate) const DEER_FALL_PRESENTATION_TICKS: u32 = 30;
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -272,6 +283,8 @@ pub(crate) struct MobRuntimeState {
     rabbit_completed_dig: Option<BlockPos>,
     rabbit_completed_raid: Option<BlockPos>,
     rabbit_no_dig_site_origin: Option<BlockPos>,
+    squirrel_refuge_route: Option<SquirrelRefugeCandidate>,
+    squirrel_ground_target: Option<Vec3d>,
 }
 
 impl MobRuntimeState {
@@ -321,6 +334,7 @@ impl MobRuntimeState {
             EntityKind::Deer => passive::register_cow_goals(&mut goal_selector),
             EntityKind::Bee => {}
             EntityKind::Rabbit => {}
+            EntityKind::Squirrel => {}
             EntityKind::Mannequin => passive::register_mannequin_goals(&mut goal_selector),
             EntityKind::DebugCube
             | EntityKind::Item
@@ -329,8 +343,7 @@ impl MobRuntimeState {
             | EntityKind::BeeNest
             | EntityKind::BeeHotel
             | EntityKind::RabbitBurrow
-            | EntityKind::SleepingMat
-            | EntityKind::Squirrel => {}
+            | EntityKind::SleepingMat => {}
             EntityKind::WildlifeRemains => {}
         }
         let attributes = MobAttributes::from_metadata(metadata);
@@ -373,6 +386,8 @@ impl MobRuntimeState {
             rabbit_completed_dig: None,
             rabbit_completed_raid: None,
             rabbit_no_dig_site_origin: None,
+            squirrel_refuge_route: None,
+            squirrel_ground_target: None,
         }
     }
 
@@ -402,6 +417,7 @@ impl MobRuntimeState {
             deer,
             bee,
             rabbit,
+            None,
         )
     }
 
@@ -418,6 +434,7 @@ impl MobRuntimeState {
         deer: Option<DeerRuntimeSaveData>,
         bee: Option<BeeRuntimeSaveData>,
         rabbit: Option<RabbitRuntimeSaveData>,
+        squirrel: Option<SquirrelRuntimeSaveData>,
     ) -> Self {
         debug_assert!(
             metadata.is_passive_mob(),
@@ -439,6 +456,7 @@ impl MobRuntimeState {
             deer,
             bee,
             rabbit,
+            squirrel,
         );
 
         let mut goal_selector = GoalSelector::default();
@@ -449,6 +467,7 @@ impl MobRuntimeState {
             EntityKind::Deer => passive::register_cow_goals(&mut goal_selector),
             EntityKind::Bee => {}
             EntityKind::Rabbit => {}
+            EntityKind::Squirrel => {}
             EntityKind::Mannequin => passive::register_mannequin_goals(&mut goal_selector),
             EntityKind::DebugCube
             | EntityKind::Item
@@ -457,8 +476,7 @@ impl MobRuntimeState {
             | EntityKind::BeeNest
             | EntityKind::BeeHotel
             | EntityKind::RabbitBurrow
-            | EntityKind::SleepingMat
-            | EntityKind::Squirrel => {}
+            | EntityKind::SleepingMat => {}
             EntityKind::WildlifeRemains => {}
         }
         let attributes = MobAttributes::from_metadata(metadata);
@@ -501,6 +519,8 @@ impl MobRuntimeState {
             rabbit_completed_dig: None,
             rabbit_completed_raid: None,
             rabbit_no_dig_site_origin: None,
+            squirrel_refuge_route: None,
+            squirrel_ground_target: None,
         }
     }
 
@@ -675,6 +695,20 @@ impl MobRuntimeState {
         self.species.rabbit().map(|rabbit| rabbit.life_stage())
     }
 
+    pub(crate) fn squirrel_save_data(&self) -> Option<SquirrelRuntimeSaveData> {
+        self.species.squirrel().map(|squirrel| squirrel.save_data())
+    }
+
+    pub(crate) fn squirrel_snapshot_data(&self) -> Option<mclone_protocol::SquirrelSnapshotData> {
+        self.species
+            .squirrel()
+            .map(|squirrel| squirrel.snapshot_data())
+    }
+
+    pub(crate) fn squirrel_behavior(&self) -> Option<mclone_protocol::SquirrelBehavior> {
+        self.species.squirrel().map(|squirrel| squirrel.behavior())
+    }
+
     pub(crate) fn apply_wildlife_energy_step(
         &mut self,
         intake: u16,
@@ -691,6 +725,10 @@ impl MobRuntimeState {
                 .apply_energy_step(intake, cost, cadence_ticks, maximum_energy);
         } else if let Some(mallard) = self.species.mallard_mut() {
             mallard
+                .lifecycle_mut()
+                .apply_energy_step(intake, cost, cadence_ticks, maximum_energy);
+        } else if let Some(squirrel) = self.species.squirrel_mut() {
+            squirrel
                 .lifecycle_mut()
                 .apply_energy_step(intake, cost, cadence_ticks, maximum_energy);
         }
@@ -722,6 +760,12 @@ impl MobRuntimeState {
             if let Some(snapshot) = entity.mallard.as_mut() {
                 snapshot.life_stage = mclone_protocol::MallardLifeStage::Adult;
             }
+        } else if let Some(squirrel) = self.species.squirrel_mut()
+            && squirrel.reconcile_maturation(tuning.squirrel_maturation_ticks)
+        {
+            entity.width = EntityMetadata::SQUIRREL.dimensions.width;
+            entity.height = EntityMetadata::SQUIRREL.dimensions.height;
+            entity.squirrel = Some(squirrel.snapshot_data());
         }
     }
 
@@ -1148,6 +1192,11 @@ impl MobRuntimeState {
         self.on_ground = entity.on_ground;
         self.y_body_rot_degrees = entity.y_rot_degrees;
 
+        if entity.kind == EntityKind::Squirrel {
+            self.tick_squirrel(entity, nearby_players, block_state_at);
+            return;
+        }
+
         if entity.kind == EntityKind::Rabbit {
             self.tick_rabbit(
                 entity,
@@ -1222,6 +1271,267 @@ impl MobRuntimeState {
         self.move_control = context.move_control;
         self.jump_control = context.jump_control;
         self.look_control = context.look_control;
+    }
+
+    fn tick_squirrel<F>(
+        &mut self,
+        entity: &mut ServerEntityState,
+        nearby_players: &[MobPlayerTarget],
+        blocks: &F,
+    ) where
+        F: Fn(BlockPos) -> Option<BlockStateId>,
+    {
+        let Some(squirrel) = self.species.squirrel_mut() else {
+            return;
+        };
+        squirrel.advance_tick();
+        let nearest_threat = nearby_players
+            .iter()
+            .copied()
+            .filter(|target| {
+                squared_horizontal_distance(entity.position, target.position)
+                    <= SQUIRREL_THREAT_RADIUS_SQR
+            })
+            .min_by(|left, right| {
+                squared_horizontal_distance(entity.position, left.position).total_cmp(
+                    &squared_horizontal_distance(entity.position, right.position),
+                )
+            });
+
+        if self
+            .squirrel_refuge_route
+            .is_some_and(|candidate| !squirrel_refuge_support_is_valid(candidate, blocks))
+        {
+            self.squirrel_refuge_route = None;
+            self.squirrel_ground_target = None;
+            let squirrel = self.species.squirrel_mut().expect("squirrel species");
+            squirrel.set_refuge(None);
+            squirrel
+                .set_retained_intent(Some(mclone_protocol::SquirrelRetainedIntent::CoverEscape));
+            squirrel.set_behavior(mclone_protocol::SquirrelBehavior::Flee);
+        }
+
+        let behavior = self
+            .species
+            .squirrel()
+            .expect("squirrel species")
+            .behavior();
+        let behavior_ticks = self
+            .species
+            .squirrel()
+            .expect("squirrel species")
+            .behavior_ticks();
+
+        match behavior {
+            mclone_protocol::SquirrelBehavior::RefugeIdle => {
+                if nearest_threat.is_none() && behavior_ticks >= SQUIRREL_REFUGE_REST_TICKS {
+                    self.species
+                        .squirrel_mut()
+                        .expect("squirrel species")
+                        .set_behavior(mclone_protocol::SquirrelBehavior::RefugeExit);
+                }
+            }
+            mclone_protocol::SquirrelBehavior::RefugeEnter => {
+                if behavior_ticks >= 8 {
+                    self.species
+                        .squirrel_mut()
+                        .expect("squirrel species")
+                        .set_behavior(mclone_protocol::SquirrelBehavior::RefugeIdle);
+                }
+            }
+            mclone_protocol::SquirrelBehavior::RefugeExit => {
+                if let Some(route) = self.squirrel_refuge_route {
+                    let target_y = f64::from(route.approach.y);
+                    if entity.position.y <= target_y + SQUIRREL_CLIMB_SPEED {
+                        entity.position.y = target_y;
+                        entity.on_ground = true;
+                        self.species
+                            .squirrel_mut()
+                            .expect("squirrel species")
+                            .set_behavior(mclone_protocol::SquirrelBehavior::Idle);
+                    } else {
+                        move_squirrel_vertical(entity, -SQUIRREL_CLIMB_SPEED, route, blocks);
+                    }
+                } else {
+                    self.species
+                        .squirrel_mut()
+                        .expect("squirrel species")
+                        .set_behavior(mclone_protocol::SquirrelBehavior::Flee);
+                }
+            }
+            mclone_protocol::SquirrelBehavior::Climb => {
+                if let Some(route) = self.squirrel_refuge_route {
+                    let target_y = f64::from(route.refuge.y);
+                    if entity.position.y + SQUIRREL_CLIMB_SPEED >= target_y {
+                        entity.position = Vec3d::new(
+                            f64::from(route.refuge.x) + 0.5,
+                            target_y,
+                            f64::from(route.refuge.z) + 0.5,
+                        );
+                        entity.on_ground = false;
+                        self.species
+                            .squirrel_mut()
+                            .expect("squirrel species")
+                            .set_behavior(mclone_protocol::SquirrelBehavior::RefugeEnter);
+                    } else {
+                        move_squirrel_vertical(entity, SQUIRREL_CLIMB_SPEED, route, blocks);
+                    }
+                }
+            }
+            mclone_protocol::SquirrelBehavior::TrunkApproach => {
+                if let Some(route) = self.squirrel_refuge_route {
+                    let target = Vec3d::new(
+                        f64::from(route.approach.x) + 0.5,
+                        f64::from(route.approach.y),
+                        f64::from(route.approach.z) + 0.5,
+                    );
+                    if squared_horizontal_distance(entity.position, target) <= 0.35 * 0.35 {
+                        entity.position.x = target.x;
+                        entity.position.z = target.z;
+                        self.species
+                            .squirrel_mut()
+                            .expect("squirrel species")
+                            .set_behavior(mclone_protocol::SquirrelBehavior::Climb);
+                    } else {
+                        move_deer_toward(entity, target, SQUIRREL_FLEE_SPEED, blocks);
+                    }
+                }
+            }
+            mclone_protocol::SquirrelBehavior::Alarm => {
+                if nearest_threat.is_some() && behavior_ticks >= SQUIRREL_ALARM_TICKS {
+                    let route = find_squirrel_refuge_candidate(
+                        BlockPos::containing(entity.position),
+                        blocks,
+                    );
+                    self.squirrel_refuge_route = route;
+                    let squirrel = self.species.squirrel_mut().expect("squirrel species");
+                    squirrel.set_retained_intent(Some(
+                        mclone_protocol::SquirrelRetainedIntent::CoverEscape,
+                    ));
+                    if let Some(route) = route {
+                        squirrel.set_refuge(Some(route.refuge));
+                    }
+                    squirrel.set_behavior(mclone_protocol::SquirrelBehavior::Flee);
+                } else if nearest_threat.is_none() {
+                    self.species
+                        .squirrel_mut()
+                        .expect("squirrel species")
+                        .set_behavior(mclone_protocol::SquirrelBehavior::Idle);
+                }
+            }
+            mclone_protocol::SquirrelBehavior::Flee => {
+                if let Some(route) = self.squirrel_refuge_route {
+                    let target = Vec3d::new(
+                        f64::from(route.approach.x) + 0.5,
+                        f64::from(route.approach.y),
+                        f64::from(route.approach.z) + 0.5,
+                    );
+                    move_deer_toward(entity, target, SQUIRREL_FLEE_SPEED, blocks);
+                    if behavior_ticks >= SQUIRREL_COVER_FLEE_TICKS {
+                        let squirrel = self.species.squirrel_mut().expect("squirrel species");
+                        squirrel.set_retained_intent(Some(
+                            mclone_protocol::SquirrelRetainedIntent::TreeRefuge,
+                        ));
+                        squirrel.set_behavior(mclone_protocol::SquirrelBehavior::TrunkApproach);
+                    }
+                } else if let Some(threat) = nearest_threat {
+                    let dx = entity.position.x - threat.position.x;
+                    let dz = entity.position.z - threat.position.z;
+                    let length = (dx * dx + dz * dz).sqrt().max(1.0e-6);
+                    let target = Vec3d::new(
+                        entity.position.x + dx / length * 6.0,
+                        entity.position.y,
+                        entity.position.z + dz / length * 6.0,
+                    );
+                    move_deer_toward(entity, target, SQUIRREL_FLEE_SPEED, blocks);
+                } else {
+                    self.species
+                        .squirrel_mut()
+                        .expect("squirrel species")
+                        .set_behavior(mclone_protocol::SquirrelBehavior::Idle);
+                }
+            }
+            mclone_protocol::SquirrelBehavior::Forage => {
+                if nearest_threat.is_some() {
+                    self.species
+                        .squirrel_mut()
+                        .expect("squirrel species")
+                        .set_behavior(mclone_protocol::SquirrelBehavior::Alarm);
+                } else if behavior_ticks >= 36 {
+                    let dx = self.random.next_int_bound(13) - 6;
+                    let dz = self.random.next_int_bound(13) - 6;
+                    self.squirrel_ground_target = Some(entity.position.add(Vec3d::new(
+                        f64::from(dx),
+                        0.0,
+                        f64::from(dz),
+                    )));
+                    self.species
+                        .squirrel_mut()
+                        .expect("squirrel species")
+                        .set_behavior(mclone_protocol::SquirrelBehavior::Bound);
+                }
+            }
+            mclone_protocol::SquirrelBehavior::Bound => {
+                if nearest_threat.is_some() {
+                    self.species
+                        .squirrel_mut()
+                        .expect("squirrel species")
+                        .set_behavior(mclone_protocol::SquirrelBehavior::Alarm);
+                } else if let Some(target) = self.squirrel_ground_target {
+                    move_deer_toward(entity, target, SQUIRREL_GROUND_SPEED, blocks);
+                    if squared_horizontal_distance(entity.position, target) <= 0.35 * 0.35
+                        || behavior_ticks >= 100
+                    {
+                        self.squirrel_ground_target = None;
+                        self.species
+                            .squirrel_mut()
+                            .expect("squirrel species")
+                            .set_behavior(mclone_protocol::SquirrelBehavior::Idle);
+                    }
+                }
+            }
+            mclone_protocol::SquirrelBehavior::Idle => {
+                if nearest_threat.is_some() {
+                    self.species
+                        .squirrel_mut()
+                        .expect("squirrel species")
+                        .set_behavior(mclone_protocol::SquirrelBehavior::Alarm);
+                } else if behavior_ticks >= 60 {
+                    let squirrel = self.species.squirrel_mut().expect("squirrel species");
+                    squirrel.set_retained_intent(Some(
+                        mclone_protocol::SquirrelRetainedIntent::GroundForage,
+                    ));
+                    squirrel.set_behavior(mclone_protocol::SquirrelBehavior::Forage);
+                }
+            }
+        }
+
+        if self.squirrel_refuge_route.is_none() && !entity.on_ground {
+            let feet = BlockPos::containing(entity.position);
+            if blocks(feet).is_some() && blocks(feet.below()).is_some() {
+                let requested = Vec3d::new(0.0, -MOB_GRAVITY, 0.0);
+                let bounding_box = collision_aabb_for_feet_position(
+                    entity.position,
+                    f64::from(entity.width),
+                    f64::from(entity.height),
+                );
+                let traveled = collide_movement(blocks, bounding_box, requested);
+                entity.position = entity.position.add(traveled);
+                entity.on_ground = collide_movement_result(requested, traveled).on_ground;
+            }
+        }
+
+        let snapshot = self
+            .species
+            .squirrel()
+            .expect("squirrel species")
+            .snapshot_data();
+        entity.squirrel = Some(snapshot);
+        set_squirrel_animation(entity, snapshot.behavior);
+        self.on_ground = entity.on_ground;
+        self.y_body_rot_degrees = entity.y_rot_degrees;
+        self.y_head_rot_degrees = entity.y_rot_degrees;
+        self.delta_movement = Vec3d::ZERO;
     }
 
     fn tick_rabbit<F>(
@@ -3959,6 +4269,67 @@ where
     move_deer_toward(entity, target, speed, blocks);
 }
 
+fn move_squirrel_vertical<F>(
+    entity: &mut ServerEntityState,
+    vertical_speed: f64,
+    route: SquirrelRefugeCandidate,
+    blocks: &F,
+) where
+    F: Fn(BlockPos) -> Option<BlockStateId>,
+{
+    let target_x = f64::from(route.refuge.x) + 0.5;
+    let target_z = f64::from(route.refuge.z) + 0.5;
+    let requested = Vec3d::new(
+        (target_x - entity.position.x).clamp(-0.03, 0.03),
+        vertical_speed,
+        (target_z - entity.position.z).clamp(-0.03, 0.03),
+    );
+    let bounding_box = collision_aabb_for_feet_position(
+        entity.position,
+        f64::from(entity.width),
+        f64::from(entity.height),
+    );
+    let traveled = collide_movement(blocks, bounding_box, requested);
+    entity.position = entity.position.add(traveled);
+    entity.on_ground =
+        vertical_speed < 0.0 && collide_movement_result(requested, traveled).on_ground;
+    let dx = f64::from(route.trunk.x) + 0.5 - entity.position.x;
+    let dz = f64::from(route.trunk.z) + 0.5 - entity.position.z;
+    if dx * dx + dz * dz > 1.0e-8 {
+        entity.y_rot_degrees = (-dx).atan2(dz).to_degrees() as f32;
+    }
+}
+
+fn set_squirrel_animation(
+    entity: &mut ServerEntityState,
+    behavior: mclone_protocol::SquirrelBehavior,
+) {
+    let (clip, elapsed) = match behavior {
+        mclone_protocol::SquirrelBehavior::Idle => ("idle", true),
+        mclone_protocol::SquirrelBehavior::Bound
+        | mclone_protocol::SquirrelBehavior::TrunkApproach => ("bound", false),
+        mclone_protocol::SquirrelBehavior::Forage => ("forage", true),
+        mclone_protocol::SquirrelBehavior::Alarm => ("alarm", true),
+        mclone_protocol::SquirrelBehavior::Flee => ("flee", false),
+        mclone_protocol::SquirrelBehavior::Climb => ("climb", false),
+        mclone_protocol::SquirrelBehavior::RefugeEnter => ("refuge_enter", true),
+        mclone_protocol::SquirrelBehavior::RefugeIdle => ("refuge_idle", true),
+        mclone_protocol::SquirrelBehavior::RefugeExit => ("refuge_exit", true),
+    };
+    let clip = AnimationClipId::from_static(clip);
+    if entity.animation.is_some_and(|current| current.clip == clip) {
+        return;
+    }
+    let epoch = entity
+        .animation
+        .map_or(0, |current| current.epoch.wrapping_add(1));
+    entity.animation = Some(if elapsed {
+        AnimationState::elapsed(clip, epoch, entity.tick_count)
+    } else {
+        AnimationState::distance(clip, epoch)
+    });
+}
+
 fn set_rabbit_animation(entity: &mut ServerEntityState, behavior: mclone_protocol::RabbitBehavior) {
     let (clip, elapsed) = match behavior {
         mclone_protocol::RabbitBehavior::Idle | mclone_protocol::RabbitBehavior::Underground => {
@@ -4146,6 +4517,20 @@ mod tests {
         None
     }
 
+    fn squirrel_tree(pos: BlockPos) -> Option<BlockStateId> {
+        use mclone_worldgen::block::{AIR, GRASS_BLOCK, OAK_LEAVES, OAK_LOG};
+
+        Some(generated_block_state_id(if pos.y <= 63 {
+            GRASS_BLOCK
+        } else if pos.x == 3 && pos.z == 0 && (64..=68).contains(&pos.y) {
+            OAK_LOG
+        } else if pos.y == 68 && (pos.x - 3).abs() <= 2 && pos.z.abs() <= 2 && pos.x != 3 {
+            OAK_LEAVES
+        } else {
+            AIR
+        }))
+    }
+
     fn saved_rabbit(
         refuge: EntityPersistentId,
         behavior: mclone_protocol::RabbitBehavior,
@@ -4177,6 +4562,84 @@ mod tests {
             raid_cooldown,
             lifecycle: crate::ecology::WildlifeLifeState::founder(refuge, 24_000, 480_000, 120_000),
         }
+    }
+
+    #[test]
+    fn squirrel_alarms_flees_climbs_and_reacts_to_refuge_loss() {
+        use mclone_protocol::SquirrelBehavior;
+
+        let id = EntityId(94);
+        let mut entity = ServerEntityState::from_metadata(
+            id,
+            EntityPersistentId::new(0, 94),
+            EntityMetadata::SQUIRREL,
+            Vec3d::new(0.5, 64.0, 0.5),
+            0.0,
+            0.0,
+            None,
+            true,
+        );
+        let mut mob = MobRuntimeState::from_spawn(id, EntityMetadata::SQUIRREL, true, 0.0);
+        let threat = MobPlayerTarget::from_position(Vec3d::new(0.5, 64.0, 1.5));
+        let mut observed = Vec::new();
+        let mut climb_heights = Vec::new();
+
+        for _ in 0..240 {
+            entity.tick_count += 1;
+            mob.tick_entity(&mut entity, &[threat], &[], &[], &squirrel_tree);
+            let behavior = mob.squirrel_behavior().expect("squirrel behavior");
+            if observed.last() != Some(&behavior) {
+                observed.push(behavior);
+            }
+            if behavior == SquirrelBehavior::Climb {
+                climb_heights.push(entity.position.y);
+            }
+            if behavior == SquirrelBehavior::RefugeIdle {
+                break;
+            }
+        }
+
+        for expected in [
+            SquirrelBehavior::Alarm,
+            SquirrelBehavior::Flee,
+            SquirrelBehavior::TrunkApproach,
+            SquirrelBehavior::Climb,
+            SquirrelBehavior::RefugeEnter,
+            SquirrelBehavior::RefugeIdle,
+        ] {
+            assert!(
+                observed.contains(&expected),
+                "missing {expected:?}: {observed:?}"
+            );
+        }
+        assert!(climb_heights.len() > 2, "climb must span ordinary ticks");
+        assert!(
+            climb_heights
+                .windows(2)
+                .all(|pair| pair[1] - pair[0] <= SQUIRREL_CLIMB_SPEED + 1.0e-9),
+            "refuge entry must not teleport"
+        );
+        let refuge_height = entity.position.y;
+        assert!(!entity.on_ground);
+
+        let support_present = Cell::new(true);
+        let damaged_tree = |pos: BlockPos| {
+            if !support_present.get() && pos == BlockPos::new(3, 65, 0) {
+                Some(generated_block_state_id(mclone_worldgen::block::AIR))
+            } else {
+                squirrel_tree(pos)
+            }
+        };
+        support_present.set(false);
+        entity.tick_count += 1;
+        mob.tick_entity(&mut entity, &[], &[], &[], &damaged_tree);
+        assert!(mob.squirrel_save_data().unwrap().refuge.is_none());
+        assert!(entity.position.y < refuge_height);
+        assert_ne!(
+            mob.squirrel_behavior(),
+            Some(SquirrelBehavior::RefugeIdle),
+            "lost support must invalidate refuge occupancy"
+        );
     }
 
     #[test]

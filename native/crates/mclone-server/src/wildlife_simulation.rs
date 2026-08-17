@@ -60,6 +60,7 @@ pub enum WildlifeSimulationSpecies {
     Rabbit,
     Deer,
     Mallard,
+    Squirrel,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -584,6 +585,7 @@ fn subject_from_diagnostic(state: WildlifeLifeDiagnostic) -> Option<WildlifePopu
         EntityKind::Rabbit => WildlifeSimulationSpecies::Rabbit,
         EntityKind::Deer => WildlifeSimulationSpecies::Deer,
         EntityKind::Mallard => WildlifeSimulationSpecies::Mallard,
+        EntityKind::Squirrel => WildlifeSimulationSpecies::Squirrel,
         _ => return None,
     };
     let chunk = BlockPos::containing(state.position).chunk_pos();
@@ -591,27 +593,30 @@ fn subject_from_diagnostic(state: WildlifeLifeDiagnostic) -> Option<WildlifePopu
         state.rabbit_life_stage,
         state.deer_life_stage,
         state.mallard_life_stage,
+        state.squirrel_life_stage,
     ) {
-        (Some(RabbitLifeStage::Kit), _, _)
-        | (_, Some(DeerLifeStage::Fawn), _)
-        | (_, _, Some(mclone_protocol::MallardLifeStage::Duckling)) => {
+        (Some(RabbitLifeStage::Kit), _, _, _)
+        | (_, Some(DeerLifeStage::Fawn), _, _)
+        | (_, _, Some(mclone_protocol::MallardLifeStage::Duckling), _)
+        | (_, _, _, Some(mclone_protocol::SquirrelLifeStage::Kit)) => {
             WildlifeSimulationLifeStage::Young
         }
-        (Some(RabbitLifeStage::Adult), _, _)
-        | (_, Some(DeerLifeStage::Adult), _)
-        | (_, _, Some(mclone_protocol::MallardLifeStage::Adult)) => {
+        (Some(RabbitLifeStage::Adult), _, _, _)
+        | (_, Some(DeerLifeStage::Adult), _, _)
+        | (_, _, Some(mclone_protocol::MallardLifeStage::Adult), _)
+        | (_, _, _, Some(mclone_protocol::SquirrelLifeStage::Adult)) => {
             WildlifeSimulationLifeStage::Adult
         }
         _ => return None,
     };
-    let sex = match (state.deer_sex, state.mallard_sex) {
-        (Some(DeerSex::Female), _) | (_, Some(mclone_protocol::MallardSex::Female)) => {
-            WildlifeSimulationSex::Female
-        }
-        (Some(DeerSex::Male), _) | (_, Some(mclone_protocol::MallardSex::Male)) => {
-            WildlifeSimulationSex::Male
-        }
-        (None, None) => WildlifeSimulationSex::Unknown,
+    let sex = match (state.deer_sex, state.mallard_sex, state.squirrel_sex) {
+        (Some(DeerSex::Female), _, _)
+        | (_, Some(mclone_protocol::MallardSex::Female), _)
+        | (_, _, Some(mclone_protocol::SquirrelSex::Female)) => WildlifeSimulationSex::Female,
+        (Some(DeerSex::Male), _, _)
+        | (_, Some(mclone_protocol::MallardSex::Male), _)
+        | (_, _, Some(mclone_protocol::SquirrelSex::Male)) => WildlifeSimulationSex::Male,
+        (None, None, None) => WildlifeSimulationSex::Unknown,
     };
     Some(WildlifePopulationSubject {
         identity_most: state.persistent_id.most,
@@ -680,6 +685,7 @@ fn simulation_event_from_ecology(
             WildlifeSpecies::Rabbit => WildlifeSimulationSpecies::Rabbit,
             WildlifeSpecies::Deer => WildlifeSimulationSpecies::Deer,
             WildlifeSpecies::Mallard => WildlifeSimulationSpecies::Mallard,
+            WildlifeSpecies::Squirrel => WildlifeSimulationSpecies::Squirrel,
         },
         subject: event.subject.into(),
         event: match event.kind {
@@ -766,6 +772,7 @@ fn simulation_remains_from_diagnostic(
             crate::WildlifeRemainsSpecies::Rabbit => WildlifeSimulationSpecies::Rabbit,
             crate::WildlifeRemainsSpecies::Deer => WildlifeSimulationSpecies::Deer,
             crate::WildlifeRemainsSpecies::Mallard => WildlifeSimulationSpecies::Mallard,
+            crate::WildlifeRemainsSpecies::Squirrel => WildlifeSimulationSpecies::Squirrel,
         },
         source: remains.source.into(),
         biomass: remains.biomass,

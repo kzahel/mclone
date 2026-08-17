@@ -11,13 +11,14 @@ use serde::{Deserialize, Serialize};
 
 pub(crate) const MAX_KNOWN_PLACES: usize = 3;
 
-pub const WILDLIFE_LIFECYCLE_RULE_REVISION: u32 = 5;
+pub const WILDLIFE_LIFECYCLE_RULE_REVISION: u32 = 6;
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub(crate) enum WildlifeSpecies {
     Rabbit,
     Deer,
     Mallard,
+    Squirrel,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -104,10 +105,18 @@ pub struct WildlifeLifecycleTuning {
     pub mallard_reproductive_energy: u16,
     pub mallard_birth_energy_cost: u16,
     pub mallard_starvation_ticks: u32,
+    pub squirrel_maturation_ticks: u32,
+    pub squirrel_lifespan_ticks: u32,
+    pub squirrel_lifespan_variance_ticks: u32,
+    pub squirrel_breeding_cooldown_ticks: u32,
+    pub squirrel_reproductive_energy: u16,
+    pub squirrel_birth_energy_cost: u16,
+    pub squirrel_starvation_ticks: u32,
     pub hard_population_guard: u32,
     pub rabbit_soft_cell_density: u16,
     pub deer_soft_cell_density: u16,
     pub mallard_soft_cell_density: u16,
+    pub squirrel_soft_cell_density: u16,
 }
 
 impl Default for WildlifeLifecycleTuning {
@@ -137,10 +146,18 @@ impl Default for WildlifeLifecycleTuning {
             mallard_reproductive_energy: 600,
             mallard_birth_energy_cost: 240,
             mallard_starvation_ticks: 144_000,
+            squirrel_maturation_ticks: 48_000,
+            squirrel_lifespan_ticks: 1_680_000,
+            squirrel_lifespan_variance_ticks: 360_000,
+            squirrel_breeding_cooldown_ticks: 96_000,
+            squirrel_reproductive_energy: 620,
+            squirrel_birth_energy_cost: 240,
+            squirrel_starvation_ticks: 120_000,
             hard_population_guard: 4_096,
             rabbit_soft_cell_density: 12,
             deer_soft_cell_density: 8,
             mallard_soft_cell_density: 10,
+            squirrel_soft_cell_density: 10,
         }
     }
 }
@@ -491,7 +508,7 @@ mod tests {
     #[test]
     fn production_lifecycle_tuning_avoids_one_day_breeding_pulses() {
         let tuning = WildlifeLifecycleTuning::default();
-        assert_eq!(tuning.revision, 5);
+        assert_eq!(tuning.revision, 6);
         assert_eq!(tuning.rabbit_maturation_ticks, 48_000);
         assert_eq!(tuning.rabbit_breeding_cooldown_ticks, 48_000);
         assert_eq!(tuning.rabbit_lifespan_ticks, 1_440_000);
@@ -501,6 +518,8 @@ mod tests {
         assert_eq!(tuning.mallard_breeding_cooldown_ticks, 96_000);
         assert_eq!(tuning.mallard_lifespan_ticks, 2_160_000);
         assert_eq!(tuning.mallard_starvation_ticks, 144_000);
+        assert_eq!(tuning.squirrel_maturation_ticks, 48_000);
+        assert_eq!(tuning.squirrel_breeding_cooldown_ticks, 96_000);
     }
 
     #[test]

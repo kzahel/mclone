@@ -71,6 +71,9 @@ pub const BEE_BUZZ: SoundKey = SoundKey("mclone:bee_buzz");
 pub const RABBIT_THUMP: SoundKey = SoundKey("mclone:rabbit_thump");
 pub const RABBIT_DIG: SoundKey = SoundKey("mclone:rabbit_dig");
 pub const RABBIT_RUSTLE: SoundKey = SoundKey("mclone:rabbit_rustle");
+pub const SQUIRREL_ALARM: SoundKey = SoundKey("mclone:squirrel_alarm");
+pub const SQUIRREL_DIG: SoundKey = SoundKey("mclone:squirrel_dig");
+pub const SQUIRREL_RUSTLE: SoundKey = SoundKey("mclone:squirrel_rustle");
 pub const WOOD_CREAK: SoundKey = SoundKey("mclone:wood_creak");
 pub const UI_BACK: SoundKey = SoundKey("mclone:ui_back");
 pub const UI_CONFIRM: SoundKey = SoundKey("mclone:ui_confirm");
@@ -114,6 +117,9 @@ const CATALOG_SOUND_KEYS: &[SoundKey] = &[
     RABBIT_THUMP,
     RABBIT_DIG,
     RABBIT_RUSTLE,
+    SQUIRREL_ALARM,
+    SQUIRREL_DIG,
+    SQUIRREL_RUSTLE,
     WOOD_CREAK,
     UI_BACK,
     UI_CONFIRM,
@@ -1275,7 +1281,7 @@ mod tests {
         let prepared = PreparedAudioAssets::load_first_party(&source).unwrap();
 
         assert_eq!(prepared.sound_count(), 129);
-        assert_eq!(prepared.family_count(), 41);
+        assert_eq!(prepared.family_count(), 44);
     }
 
     #[test]

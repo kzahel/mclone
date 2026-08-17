@@ -108,8 +108,9 @@ use mclone_assets::{ActorFigureId, AssetPackCatalog, AssetPackSelection, BlockSt
 use mclone_audio::PreparedAudioAssets;
 use mclone_audio::{
     AcousticMaterial, AudioOutputCapability, BEE_BUZZ, DEER_ALARM, DEER_CONTACT, DEER_IMPACT,
-    MALLARD_CALL, PlaybackParams, RABBIT_DIG, RABBIT_RUSTLE, RABBIT_THUMP, SoundKey, UI_BACK,
-    UI_CONFIRM, UI_ERROR, UI_OPEN, UI_SELECT, WOOD_CREAK, landing_playback_for_impact,
+    MALLARD_CALL, PlaybackParams, RABBIT_DIG, RABBIT_RUSTLE, RABBIT_THUMP, SQUIRREL_ALARM,
+    SQUIRREL_DIG, SQUIRREL_RUSTLE, SoundKey, UI_BACK, UI_CONFIRM, UI_ERROR, UI_OPEN, UI_SELECT,
+    WOOD_CREAK, landing_playback_for_impact,
 };
 use mclone_client::block_facts::terrain_id;
 use mclone_client::{
@@ -5660,6 +5661,7 @@ impl McloneSceneHost {
         let deer_sounds = runtime.drain_deer_sounds();
         let bee_sounds = runtime.drain_bee_sounds();
         let rabbit_sounds = runtime.drain_rabbit_sounds();
+        let squirrel_sounds = runtime.drain_squirrel_sounds();
         let tracks = runtime.drain_mallard_tracks();
         let topology = runtime.client().topology();
         let positioned_calls = calls
@@ -5720,6 +5722,25 @@ impl McloneSceneHost {
                 mclone_protocol::RabbitSoundKind::Thump => RABBIT_THUMP,
                 mclone_protocol::RabbitSoundKind::Dig => RABBIT_DIG,
                 mclone_protocol::RabbitSoundKind::Rustle => RABBIT_RUSTLE,
+            };
+            self.services.audio.play_with(
+                key,
+                PlaybackParams {
+                    gain,
+                    pan: self.world_sound_pan(position),
+                    seed: cue.sequence,
+                    ..PlaybackParams::default()
+                },
+            );
+        }
+        for cue in squirrel_sounds {
+            let position = topology.nearest_position_lift(cue.position, listener);
+            let distance = position.subtract(listener).length_sqr().sqrt();
+            let gain = (1.0 - distance / f64::from(cue.audible_radius)).clamp(0.0, 1.0) as f32;
+            let key = match cue.kind {
+                mclone_protocol::SquirrelSoundKind::Alarm => SQUIRREL_ALARM,
+                mclone_protocol::SquirrelSoundKind::Rustle => SQUIRREL_RUSTLE,
+                mclone_protocol::SquirrelSoundKind::Dig => SQUIRREL_DIG,
             };
             self.services.audio.play_with(
                 key,

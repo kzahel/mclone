@@ -9,7 +9,7 @@ use super::{
     mclone_overworld_landform_kind,
 };
 
-pub const MCLONE_WILDLIFE_POPULATION_REVISION: u16 = 1;
+pub const MCLONE_WILDLIFE_POPULATION_REVISION: u16 = 2;
 pub const MCLONE_WILDLIFE_POPULATION_CELL_BLOCKS: i32 = CHUNK_WIDTH * 4;
 pub const MCLONE_WILDLIFE_POPULATION_CELL_CHUNKS: i32 =
     MCLONE_WILDLIFE_POPULATION_CELL_BLOCKS / CHUNK_WIDTH;
@@ -59,10 +59,17 @@ pub enum McloneWildlifeSpecies {
     Deer = 1,
     Mallard = 2,
     Bee = 3,
+    Squirrel = 4,
 }
 
 impl McloneWildlifeSpecies {
-    pub const ALL: [Self; 4] = [Self::Rabbit, Self::Deer, Self::Mallard, Self::Bee];
+    pub const ALL: [Self; 5] = [
+        Self::Rabbit,
+        Self::Deer,
+        Self::Mallard,
+        Self::Bee,
+        Self::Squirrel,
+    ];
 
     pub const fn label(self) -> &'static str {
         match self {
@@ -70,6 +77,7 @@ impl McloneWildlifeSpecies {
             Self::Deer => "deer",
             Self::Mallard => "mallard",
             Self::Bee => "bee",
+            Self::Squirrel => "squirrel",
         }
     }
 
@@ -79,6 +87,7 @@ impl McloneWildlifeSpecies {
             Self::Deer => (2, 3),
             Self::Mallard => (2, 4),
             Self::Bee => (2, 3),
+            Self::Squirrel => (2, 4),
         }
     }
 }
@@ -89,6 +98,7 @@ pub struct McloneWildlifeSuitability {
     pub deer: u16,
     pub mallard: u16,
     pub bee: u16,
+    pub squirrel: u16,
 }
 
 impl McloneWildlifeSuitability {
@@ -98,6 +108,7 @@ impl McloneWildlifeSuitability {
             McloneWildlifeSpecies::Deer => self.deer,
             McloneWildlifeSpecies::Mallard => self.mallard,
             McloneWildlifeSpecies::Bee => self.bee,
+            McloneWildlifeSpecies::Squirrel => self.squirrel,
         }
     }
 
@@ -235,7 +246,7 @@ impl McloneOverworldWildlifePlanner {
 
         let representative = samples[4];
         let mut suitability = McloneWildlifeSuitability::default();
-        let mut best_candidate = [0_usize; 4];
+        let mut best_candidate = [0_usize; 5];
         for species in McloneWildlifeSpecies::ALL {
             let (index, weight) = sample_weights
                 .iter()
@@ -249,6 +260,7 @@ impl McloneOverworldWildlifePlanner {
                 McloneWildlifeSpecies::Deer => suitability.deer = weight,
                 McloneWildlifeSpecies::Mallard => suitability.mallard = weight,
                 McloneWildlifeSpecies::Bee => suitability.bee = weight,
+                McloneWildlifeSpecies::Squirrel => suitability.squirrel = weight,
             }
         }
 
@@ -367,6 +379,11 @@ impl McloneOverworldWildlifePlanner {
             * 0.68;
         let flowering = productivity * (0.48 + openness * 0.34 + forest_edge * 0.18);
         let bee = land * flowering * temperature_comfort * 0.48;
+        let squirrel = land
+            * productivity
+            * (forest_edge * 0.52 + forest_cover * 0.36 + openness * 0.12)
+            * slope_comfort
+            * 0.62;
         (
             McloneWildlifeHabitatSample {
                 world_x,
@@ -386,6 +403,7 @@ impl McloneOverworldWildlifePlanner {
                 deer: to_permille(deer),
                 mallard: to_permille(mallard),
                 bee: to_permille(bee),
+                squirrel: to_permille(squirrel),
             },
         )
     }
@@ -556,7 +574,7 @@ mod tests {
         );
         let mut occupied = 0_u32;
         let mut animals = 0_u32;
-        let mut counts = [0_u32; 4];
+        let mut counts = [0_u32; 5];
         let mut density_sum = 0_u64;
         for x in -32..32 {
             for z in -32..32 {
@@ -573,7 +591,7 @@ mod tests {
         }
         assert_eq!(
             (occupied, animals, counts, density_sum),
-            (1_519, 4_331, [854, 286, 163, 216], 1_535_936)
+            (1_500, 4_279, [750, 254, 151, 186, 159], 1_536_547)
         );
         assert!((1_300..=1_750).contains(&occupied));
         assert!(counts.into_iter().all(|count| count >= 150));
