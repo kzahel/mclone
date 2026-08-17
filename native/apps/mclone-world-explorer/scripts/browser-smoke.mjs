@@ -416,7 +416,7 @@ function assertFixedReady(value, stage) {
       || value.vegetationCommittedLevels !== 3
       || value.pendingRefills !== 0
       || value.drawnLevels !== 10
-      || value.fixedResidentBytes !== 133_209_640
+      || value.fixedResidentBytes !== 133_209_624
       || value.vertexCount <= 0
       || value.exactConnectorVertexCount !== value.exactConnectorSegments * 6
       || value.exactConnectorBytes % 12 !== 0
