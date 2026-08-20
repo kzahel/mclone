@@ -1,8 +1,8 @@
 # Tactical 323: Quest Frontier Performance Recovery
 
 Status: implementation authorized 2026-08-20; constant-time suppression
-accepted by measurement, inactive-transition shading measured, and compact
-support drawing in progress.
+accepted by measurement; inactive-transition shading and compact support
+drawing measured; optional Quest foveation evaluation in progress.
 
 Topics: `procedural-horizon-clipmap`, `performance`,
 `quest-frontier-performance`
@@ -203,6 +203,35 @@ connected exact shapes, water edges, and pool exhaustion. Inspect native,
 headed WebGPU, flat Android, and stereo pixels at the first drawable
 milestone. Any changed visible topology or shading pauses for human review.
 
+### Phase 3 Evidence
+
+Commit `4bed75e5` tested one immutable compact cell-index stream per support
+tile. It retained the existing procedural samples, shading, skirts, and
+connector passes, while visualization modes kept full coverage. The expanded
+144-test suite included empty, full, irregular, and negative exact masks plus
+mono/multiview WGSL validation. The preferred RD8 image was byte-identical to
+Phase 2 and its complete receipt reported 32,768 candidate cells versus 31,744
+submitted cells:
+
+```text
+/tmp/mclone-t323-compact/rd8-elevated-product.png
+/tmp/mclone-t323-compact/rd8-elevated-forced-fallback.png
+```
+
+Only 1,024 cells, or `3.1%`, were exact-owned. The certificate genuinely owns
+the remaining support-tile area because the coarse base is suppressed for the
+whole selected tile. Narrowing it further would require changing both support
+ownership and suppression topology, outside this pixel-preserving candidate.
+
+The matched Quest sample measured `13.401 / 14.421ms` app-work p50/p95,
+`7.294ms` thread-CPU p50, `6.116ms` blocked p50, `7.543ms` app GPU, and `22.5%`
+over-period frames. This did not improve on Phase 2 and added a pipeline,
+index-fetch work, and 16 KiB of fixed storage per support resource. Commit
+`e8f419a5` therefore removes the candidate. Raw device evidence is
+`/tmp/mclone-t323-compact-preferred.txt`; the negative result constrains any
+future support compaction to begin with narrower certificate ownership rather
+than another draw-list encoding.
+
 ## Phase 4: Acceptance And Optional Quality Lever
 
 After the three pixel-preserving candidates, rebuild one release APK and run
@@ -221,7 +250,8 @@ foveation level or any other quality tradeoff.
 - [x] Matched exact/preferred/fallback/preferred Quest baseline is recorded.
 - [x] Constant-time suppression is implemented, validated, and measured.
 - [x] Zero-weight transition shading is eliminated and pixel-validated.
-- [ ] Support submission is compacted without weakening the certificate.
+- [x] Compact support submission is measured and rejected without weakening
+      the certificate.
 - [ ] Native, headed WebGPU, flat Android, stereo, and Quest gates pass.
 - [ ] Final stationary and orbit Quest measurements are recorded honestly.
 - [ ] Any remaining foveation decision is separated behind human acceptance.
