@@ -64,9 +64,8 @@ const TERRAIN_FRONTIER_CONNECTOR_WATER_FLAG: u32 = 1 << 9;
 const TERRAIN_FRONTIER_CONNECTOR_FALLBACK_FLAG: u32 = 1 << 10;
 const TERRAIN_FRONTIER_CONNECTOR_OUTER_FLAG: u32 = 1 << 11;
 const TERRAIN_FRONTIER_DISPATCHES_PER_FRAME: usize = 4;
-const TERRAIN_FRONTIER_SUPPORT_RECORD_BYTES: u64 = 16;
-const TERRAIN_FRONTIER_SUPPORT_BUFFER_BYTES: u64 =
-    TERRAIN_FRONTIER_SUPPORT_RECORD_BYTES * super::TERRAIN_FRONTIER_FINE_TILE_CAPACITY as u64;
+const TERRAIN_FRONTIER_SUPPORT_LOOKUP_MAX_TILES_PER_AXIS: usize = 18;
+const TERRAIN_FRONTIER_SUPPORT_LOOKUP_BUFFER_BYTES: u64 = 96;
 const TERRAIN_HORIZON_TREE_CULL_MARGIN_BLOCKS: f32 = 16.0;
 const TERRAIN_HORIZON_CULL_MIN_Y: f32 = -64.0;
 const TERRAIN_HORIZON_CULL_MAX_Y: f32 = 512.0;
@@ -466,7 +465,7 @@ struct TerrainExactCoverageResources {
     _transition_sampler: wgpu::Sampler,
     _boundary_texture: wgpu::Texture,
     _boundary_view: wgpu::TextureView,
-    _frontier_support_buffer: wgpu::Buffer,
+    _frontier_support_lookup_buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
     mask: TerrainExactCoverageMask,
     transition: TerrainExactTransitionField,
@@ -543,6 +542,101 @@ struct TerrainFrontierSupportGpu {
     dispatched_total: u64,
 }
 
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+struct TerrainFrontierSupportLookup {
+    origin_tile_x: i32,
+    origin_tile_z: i32,
+    width: u32,
+    height: u32,
+    rows: [u32; TERRAIN_FRONTIER_SUPPORT_LOOKUP_MAX_TILES_PER_AXIS],
+}
+
+impl TerrainFrontierSupportLookup {
+    fn from_tiles(tiles: &BTreeSet<TerrainFrontierFineTileKey>) -> Result<Self, String> {
+        let Some(first) = tiles.first() else {
+            return Ok(Self::default());
+        };
+        let mut min_x = first.tile_x;
+        let mut max_x = first.tile_x;
+        let mut min_z = first.tile_z;
+        let mut max_z = first.tile_z;
+        for tile in tiles {
+            min_x = min_x.min(tile.tile_x);
+            max_x = max_x.max(tile.tile_x);
+            min_z = min_z.min(tile.tile_z);
+            max_z = max_z.max(tile.tile_z);
+        }
+        let width = max_x
+            .checked_sub(min_x)
+            .and_then(|span| span.checked_add(1))
+            .ok_or("frontier support lookup width overflow")?;
+        let height = max_z
+            .checked_sub(min_z)
+            .and_then(|span| span.checked_add(1))
+            .ok_or("frontier support lookup height overflow")?;
+        if width > TERRAIN_FRONTIER_SUPPORT_LOOKUP_MAX_TILES_PER_AXIS as i64
+            || height > TERRAIN_FRONTIER_SUPPORT_LOOKUP_MAX_TILES_PER_AXIS as i64
+        {
+            return Err(format!(
+                "frontier support lookup {}x{} exceeds {}x{} tiles",
+                width,
+                height,
+                TERRAIN_FRONTIER_SUPPORT_LOOKUP_MAX_TILES_PER_AXIS,
+                TERRAIN_FRONTIER_SUPPORT_LOOKUP_MAX_TILES_PER_AXIS,
+            ));
+        }
+        let origin_tile_x = i32::try_from(min_x)
+            .map_err(|_| "frontier support lookup X origin exceeds shader coordinates")?;
+        let origin_tile_z = i32::try_from(min_z)
+            .map_err(|_| "frontier support lookup Z origin exceeds shader coordinates")?;
+        let mut lookup = Self {
+            origin_tile_x,
+            origin_tile_z,
+            width: u32::try_from(width).expect("bounded frontier lookup width fits u32"),
+            height: u32::try_from(height).expect("bounded frontier lookup height fits u32"),
+            rows: [0; TERRAIN_FRONTIER_SUPPORT_LOOKUP_MAX_TILES_PER_AXIS],
+        };
+        for tile in tiles {
+            let local_x = usize::try_from(tile.tile_x - min_x)
+                .expect("bounded frontier lookup X offset fits usize");
+            let local_z = usize::try_from(tile.tile_z - min_z)
+                .expect("bounded frontier lookup Z offset fits usize");
+            lookup.rows[local_z] |= 1_u32 << local_x;
+        }
+        Ok(lookup)
+    }
+
+    fn contains(&self, tile: TerrainFrontierFineTileKey) -> bool {
+        let local_x = tile.tile_x - i64::from(self.origin_tile_x);
+        let local_z = tile.tile_z - i64::from(self.origin_tile_z);
+        if local_x < 0
+            || local_z < 0
+            || local_x >= i64::from(self.width)
+            || local_z >= i64::from(self.height)
+        {
+            return false;
+        }
+        self.rows[local_z as usize] & (1_u32 << local_x as u32) != 0
+    }
+
+    fn selected_count(&self) -> u32 {
+        self.rows.iter().map(|row| row.count_ones()).sum()
+    }
+
+    fn bytes(&self) -> [u8; TERRAIN_FRONTIER_SUPPORT_LOOKUP_BUFFER_BYTES as usize] {
+        let mut bytes = [0; TERRAIN_FRONTIER_SUPPORT_LOOKUP_BUFFER_BYTES as usize];
+        bytes[0..4].copy_from_slice(&self.origin_tile_x.to_ne_bytes());
+        bytes[4..8].copy_from_slice(&self.origin_tile_z.to_ne_bytes());
+        bytes[8..12].copy_from_slice(&(self.width as i32).to_ne_bytes());
+        bytes[12..16].copy_from_slice(&(self.height as i32).to_ne_bytes());
+        for (index, row) in self.rows.iter().enumerate() {
+            let start = 16 + index * size_of::<u32>();
+            bytes[start..start + 4].copy_from_slice(&row.to_ne_bytes());
+        }
+        bytes
+    }
+}
+
 impl TerrainExactCoverageResources {
     fn new(
         device: &wgpu::Device,
@@ -609,9 +703,9 @@ impl TerrainExactCoverageResources {
             view_formats: &[],
         });
         let boundary_view = boundary_texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let frontier_support_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("mclone_terrain_frontier_support_tiles"),
-            size: TERRAIN_FRONTIER_SUPPORT_BUFFER_BYTES,
+        let frontier_support_lookup_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("mclone_terrain_frontier_support_lookup"),
+            size: TERRAIN_FRONTIER_SUPPORT_LOOKUP_BUFFER_BYTES,
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -627,9 +721,9 @@ impl TerrainExactCoverageResources {
         );
         queue.write_buffer(&mask_buffer, 0, &mask.word_bytes());
         queue.write_buffer(
-            &frontier_support_buffer,
+            &frontier_support_lookup_buffer,
             0,
-            &vec![0_u8; TERRAIN_FRONTIER_SUPPORT_BUFFER_BYTES as usize],
+            &TerrainFrontierSupportLookup::default().bytes(),
         );
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("mclone_terrain_exact_coverage_bind_group"),
@@ -657,7 +751,7 @@ impl TerrainExactCoverageResources {
                 },
                 wgpu::BindGroupEntry {
                     binding: 5,
-                    resource: frontier_support_buffer.as_entire_binding(),
+                    resource: frontier_support_lookup_buffer.as_entire_binding(),
                 },
             ],
         });
@@ -669,7 +763,7 @@ impl TerrainExactCoverageResources {
             _transition_sampler: transition_sampler,
             _boundary_texture: boundary_texture,
             _boundary_view: boundary_view,
-            _frontier_support_buffer: frontier_support_buffer,
+            _frontier_support_lookup_buffer: frontier_support_lookup_buffer,
             bind_group,
             mask,
             transition,
@@ -778,20 +872,12 @@ impl TerrainExactCoverageResources {
             return Ok(());
         }
         if tiles.len() > super::TERRAIN_FRONTIER_FINE_TILE_CAPACITY as usize {
-            return Err("frontier support tiles exceed the fixed proof buffer".to_owned());
+            return Err("frontier support tiles exceed the fixed resource pool".to_owned());
         }
-        let mut bytes = vec![0_u8; TERRAIN_FRONTIER_SUPPORT_BUFFER_BYTES as usize];
-        for (index, tile) in tiles.iter().enumerate() {
-            let tile_x = i32::try_from(tile.tile_x)
-                .map_err(|_| "frontier support tile X exceeds shader coordinates")?;
-            let tile_z = i32::try_from(tile.tile_z)
-                .map_err(|_| "frontier support tile Z exceeds shader coordinates")?;
-            let start = index * TERRAIN_FRONTIER_SUPPORT_RECORD_BYTES as usize;
-            bytes[start..start + 4].copy_from_slice(&tile_x.to_ne_bytes());
-            bytes[start + 4..start + 8].copy_from_slice(&tile_z.to_ne_bytes());
-            bytes[start + 8..start + 12].copy_from_slice(&1_u32.to_ne_bytes());
-        }
-        queue.write_buffer(&self._frontier_support_buffer, 0, &bytes);
+        let lookup = TerrainFrontierSupportLookup::from_tiles(tiles)?;
+        debug_assert_eq!(lookup.selected_count(), tiles.len() as u32);
+        debug_assert!(tiles.iter().all(|tile| lookup.contains(*tile)));
+        queue.write_buffer(&self._frontier_support_lookup_buffer, 0, &lookup.bytes());
         self.frontier_support_tiles = tiles.clone();
         Ok(())
     }
@@ -1865,7 +1951,7 @@ impl TerrainViewportRenderer {
                         5,
                         wgpu::ShaderStages::VERTEX_FRAGMENT,
                         true,
-                        TERRAIN_FRONTIER_SUPPORT_BUFFER_BYTES,
+                        TERRAIN_FRONTIER_SUPPORT_LOOKUP_BUFFER_BYTES,
                     ),
                 ],
             });
@@ -5342,7 +5428,7 @@ impl TerrainHorizonRenderer {
             .saturating_add(TERRAIN_EXACT_COVERAGE_MASK_BYTES)
             .saturating_add(super::TERRAIN_EXACT_TRANSITION_MAX_BYTES)
             .saturating_add(super::TERRAIN_EXACT_BOUNDARY_MAX_BYTES)
-            .saturating_add(TERRAIN_FRONTIER_SUPPORT_BUFFER_BYTES);
+            .saturating_add(TERRAIN_FRONTIER_SUPPORT_LOOKUP_BUFFER_BYTES);
         let vegetation_bytes = self
             .slots
             .iter()
@@ -6504,12 +6590,68 @@ mod tests {
         assert!(shader.contains("TERRAIN_FRONTIER_CONNECTOR_WATER_FLAG"));
         assert!(shader.contains("TERRAIN_FRONTIER_CONNECTOR_OUTER_FLAG"));
         assert!(shader.contains("frontier_support_tile_selected(input.world_xz)"));
+        assert!(shader.contains("frontier_support_lookup.rows[u32(local.y)]"));
+        assert!(!shader.contains("for (var index = 0u; index < TERRAIN_FRONTIER_SUPPORT"));
         assert!(shader.contains(
             "if u32(params.origin_spacing_cells.z) > 1u\n        && frontier_support_tile_selected"
         ));
         assert!(shader.contains("out.side_surface = 1u;"));
         assert!(!shader.contains("let vertices_per_cell = select("));
         assert!(!shader.contains("round(stitched_height)"));
+    }
+
+    #[test]
+    fn frontier_support_lookup_is_bounded_direct_and_negative_safe() {
+        let tiles = [
+            TerrainFrontierFineTileKey {
+                tile_x: -9,
+                tile_z: -5,
+            },
+            TerrainFrontierFineTileKey {
+                tile_x: 8,
+                tile_z: -5,
+            },
+            TerrainFrontierFineTileKey {
+                tile_x: -1,
+                tile_z: 3,
+            },
+            TerrainFrontierFineTileKey {
+                tile_x: 8,
+                tile_z: 12,
+            },
+        ]
+        .into_iter()
+        .collect::<BTreeSet<_>>();
+        let lookup = TerrainFrontierSupportLookup::from_tiles(&tiles).unwrap();
+        assert_eq!((lookup.origin_tile_x, lookup.origin_tile_z), (-9, -5));
+        assert_eq!((lookup.width, lookup.height), (18, 18));
+        assert_eq!(lookup.selected_count(), tiles.len() as u32);
+        for tile in &tiles {
+            assert!(lookup.contains(*tile));
+        }
+        assert!(!lookup.contains(TerrainFrontierFineTileKey {
+            tile_x: -8,
+            tile_z: -5,
+        }));
+        assert!(!lookup.contains(TerrainFrontierFineTileKey {
+            tile_x: 9,
+            tile_z: 12,
+        }));
+        assert_eq!(lookup.bytes().len(), 96);
+
+        let too_wide = [
+            TerrainFrontierFineTileKey {
+                tile_x: -9,
+                tile_z: 0,
+            },
+            TerrainFrontierFineTileKey {
+                tile_x: 9,
+                tile_z: 0,
+            },
+        ]
+        .into_iter()
+        .collect::<BTreeSet<_>>();
+        assert!(TerrainFrontierSupportLookup::from_tiles(&too_wide).is_err());
     }
 
     #[test]

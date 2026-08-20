@@ -47,7 +47,6 @@ const TERRAIN_HORIZON_DIAGNOSTIC_OCCLUSION: u32 = 6u;
 const TERRAIN_HORIZON_DIAGNOSTIC_WATER: u32 = 7u;
 const TERRAIN_HORIZON_DIAGNOSTIC_TEXTURE: u32 = 8u;
 const TERRAIN_HORIZON_DIAGNOSTIC_FRONTIER_SUPPORT: u32 = 9u;
-const TERRAIN_FRONTIER_SUPPORT_TILE_CAPACITY: u32 = 32u;
 const TERRAIN_FRONTIER_CONNECTOR_FLAG: u32 = 0x00000100u;
 const TERRAIN_FRONTIER_CONNECTOR_WATER_FLAG: u32 = 0x00000200u;
 const TERRAIN_FRONTIER_CONNECTOR_FALLBACK_FLAG: u32 = 0x00000400u;
@@ -110,15 +109,13 @@ var exact_transition_sampler: sampler;
 @group(2) @binding(4)
 var exact_boundary_profile: texture_2d<u32>;
 
-struct TerrainFrontierSupportTile {
-    tile_x: i32,
-    tile_z: i32,
-    enabled: u32,
-    padding: u32,
+struct TerrainFrontierSupportLookup {
+    origin_size: vec4<i32>,
+    rows: array<u32, 18>,
 };
 
 @group(2) @binding(5)
-var<storage, read> frontier_support_tiles: array<TerrainFrontierSupportTile>;
+var<storage, read> frontier_support_lookup: TerrainFrontierSupportLookup;
 
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
@@ -172,15 +169,14 @@ fn exact_frontier_adjacent(world_xz: vec2<f32>) -> bool {
 
 fn frontier_support_tile_selected(world_xz: vec2<f32>) -> bool {
     let tile = vec2<i32>(floor(world_xz / 64.0));
-    for (var index = 0u; index < TERRAIN_FRONTIER_SUPPORT_TILE_CAPACITY; index += 1u) {
-        let support = frontier_support_tiles[index];
-        if support.enabled != 0u
-            && support.tile_x == tile.x
-            && support.tile_z == tile.y {
-            return true;
-        }
+    let local = tile - frontier_support_lookup.origin_size.xy;
+    if local.x < 0 || local.y < 0
+        || local.x >= frontier_support_lookup.origin_size.z
+        || local.y >= frontier_support_lookup.origin_size.w {
+        return false;
     }
-    return false;
+    let row = frontier_support_lookup.rows[u32(local.y)];
+    return (row & (1u << u32(local.x))) != 0u;
 }
 
 fn exact_transition_weight(world_xz: vec2<f32>) -> f32 {
