@@ -396,11 +396,21 @@ struct WindowFrameWorkSample {
     terrain_arena_index_capacity_bytes: u64,
     terrain_opaque_ms: f64,
     terrain_translucent_ms: f64,
+    terrain_frontier_state: Option<&'static str>,
+    terrain_frontier_complete: Option<bool>,
+    terrain_frontier_exact_generation: Option<u64>,
+    terrain_frontier_presentation_hash: Option<u64>,
+    terrain_frontier_active_support_tiles: Option<u32>,
+    terrain_frontier_pending_support_tiles: Option<u32>,
+    terrain_frontier_target_ready: Option<bool>,
 }
 
 impl WindowFrameWorkSample {
     fn from_summary(summary: &MonoSceneFrameSummary) -> Self {
         let upload = summary.upload;
+        let terrain_frontier = summary
+            .terrain_view
+            .map(|terrain| terrain.frontier_admission);
         Self {
             section_count: summary.render.section_count,
             drawn_section_count: summary.render.drawn_section_count,
@@ -498,6 +508,17 @@ impl WindowFrameWorkSample {
                 .terrain_arena_index_capacity_bytes,
             terrain_opaque_ms: summary.render_timing.terrain_opaque_ms,
             terrain_translucent_ms: summary.render_timing.terrain_translucent_ms,
+            terrain_frontier_state: terrain_frontier.map(|receipt| receipt.state.label()),
+            terrain_frontier_complete: terrain_frontier.map(|receipt| receipt.complete()),
+            terrain_frontier_exact_generation: terrain_frontier
+                .map(|receipt| receipt.exact_generation),
+            terrain_frontier_presentation_hash: terrain_frontier
+                .map(|receipt| receipt.presentation.semantic_hash),
+            terrain_frontier_active_support_tiles: terrain_frontier
+                .map(|receipt| receipt.active_support_tiles),
+            terrain_frontier_pending_support_tiles: terrain_frontier
+                .map(|receipt| receipt.pending_support_tiles),
+            terrain_frontier_target_ready: summary.terrain_view.map(|terrain| terrain.target_ready),
         }
     }
 
@@ -508,6 +529,15 @@ impl WindowFrameWorkSample {
                 "drawn_section_count": self.drawn_section_count,
                 "frustum_section_count": self.frustum_section_count,
                 "drawn_index_count": self.drawn_index_count,
+            },
+            "terrain_frontier": {
+                "state": self.terrain_frontier_state,
+                "complete": self.terrain_frontier_complete,
+                "exact_generation": self.terrain_frontier_exact_generation,
+                "presentation_hash": self.terrain_frontier_presentation_hash,
+                "active_support_tiles": self.terrain_frontier_active_support_tiles,
+                "pending_support_tiles": self.terrain_frontier_pending_support_tiles,
+                "target_ready": self.terrain_frontier_target_ready,
             },
             "server": {
                 "tick_ms": self.server_tick_ms,

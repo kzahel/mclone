@@ -142,6 +142,7 @@ pub struct MonoSceneFrameSummary {
     pub render_timing: FullFrameRenderTiming,
     pub timing: XrTerrainFrameTiming,
     pub upload: XrTerrainUploadSummary,
+    pub terrain_view: Option<crate::terrain_view::SceneTerrainViewDiagnostics>,
 }
 
 /// One independently posed flat presentation view. The target and depth
@@ -1025,6 +1026,7 @@ impl McloneSceneHost {
             render_timing: FullFrameRenderTiming::default(),
             timing: summary.timing,
             upload: summary.upload,
+            terrain_view: self.terrain_view_diagnostics(),
         })
     }
 
@@ -2772,6 +2774,7 @@ impl McloneSceneHost {
             render_timing: preview_render_timing.unwrap_or_default(),
             timing,
             upload,
+            terrain_view: self.terrain_view_diagnostics(),
         })
     }
 

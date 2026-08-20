@@ -252,6 +252,7 @@ mod tests {
                     pending_compile_jobs_after: 2,
                     ..Default::default()
                 },
+                terrain_view: None,
             }),
             BudgetDecisionPanelReport::empty(),
         );
