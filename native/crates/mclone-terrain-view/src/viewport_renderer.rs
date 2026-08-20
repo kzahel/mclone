@@ -29,12 +29,11 @@ use super::{
     TERRAIN_PREVIEW_SAMPLE_BYTES, TERRAIN_PREVIEW_UNIFORM_BYTES, TERRAIN_PREVIEW_WORKGROUP_AXIS,
     TerrainClipmap, TerrainClipmapConfig, TerrainClipmapDiagnostics, TerrainClipmapTile,
     TerrainCompositionSourceIdentity, TerrainExactBoundaryProfile, TerrainExactCoverageMask,
-    TerrainExactCoverageMode, TerrainExactTransitionField,
-    TerrainHorizonPresentation, TerrainPreviewCamera, TerrainPreviewDrawOptions,
-    TerrainPreviewLayer, TerrainPreviewSource, TerrainPreviewSplitLayout,
-    TerrainVegetationCoordinator, TerrainVegetationCoordinatorState, TerrainVegetationDesiredTile,
-    TerrainVegetationExecutor, TerrainVegetationExecutorKind, TerrainVegetationSlotToken,
-    TerrainViewportPlan, TerrainViewportTileId,
+    TerrainExactCoverageMode, TerrainExactTransitionField, TerrainHorizonPresentation,
+    TerrainPreviewCamera, TerrainPreviewDrawOptions, TerrainPreviewLayer, TerrainPreviewSource,
+    TerrainPreviewSplitLayout, TerrainVegetationCoordinator, TerrainVegetationCoordinatorState,
+    TerrainVegetationDesiredTile, TerrainVegetationExecutor, TerrainVegetationExecutorKind,
+    TerrainVegetationSlotToken, TerrainViewportPlan, TerrainViewportTileId,
     horizon_admission::{
         TERRAIN_HORIZON_STAGING_SLOTS_PER_LEVEL, TerrainHorizonAdmission,
         TerrainHorizonBeginTransition, TerrainHorizonLevelPresentation, TerrainHorizonResourceTile,
@@ -3287,6 +3286,7 @@ pub struct TerrainHorizonRenderer {
     slots: Vec<TerrainViewportGpuTile>,
     admission: TerrainHorizonAdmission,
     pending: VecDeque<TerrainHorizonResourceTile>,
+    vegetation_max_sample_spacing: u32,
     vegetation_executor: Option<Box<dyn TerrainVegetationExecutor>>,
     vegetation_coordinator: Option<TerrainVegetationCoordinator>,
     vegetation_error: Option<String>,
@@ -3363,6 +3363,7 @@ impl TerrainHorizonRenderer {
             material_atlas,
             config,
             1,
+            TERRAIN_PREVIEW_MAX_TREE_RECORD_SAMPLE_SPACING,
             vegetation_executor,
             target_color_transform,
         )
@@ -3378,6 +3379,7 @@ impl TerrainHorizonRenderer {
         material_atlas: TerrainPreviewMaterialAtlas<'_>,
         config: TerrainClipmapConfig,
         render_cell_stride: u32,
+        vegetation_max_sample_spacing: u32,
         vegetation_executor: Option<Box<dyn TerrainVegetationExecutor>>,
         target_color_transform: RenderTargetColorTransform,
     ) -> Result<Self, String> {
@@ -3395,6 +3397,14 @@ impl TerrainHorizonRenderer {
                 "terrain horizon render cell stride {render_cell_stride} exceeds the proven \
                  geometry/normal transition contract {}",
                 super::TERRAIN_HORIZON_MAX_PROVEN_RENDER_CELL_STRIDE,
+            ));
+        }
+        if !vegetation_max_sample_spacing.is_power_of_two()
+            || vegetation_max_sample_spacing < config.base_sample_spacing
+            || vegetation_max_sample_spacing > TERRAIN_PREVIEW_MAX_TREE_RECORD_SAMPLE_SPACING
+        {
+            return Err(format!(
+                "terrain horizon vegetation spacing {vegetation_max_sample_spacing} is outside the proven record range"
             ));
         }
         let clipmap = TerrainClipmap::new(config)?;
@@ -3444,6 +3454,7 @@ impl TerrainHorizonRenderer {
             slots,
             admission,
             pending: VecDeque::with_capacity(config.allocation_slots() as usize),
+            vegetation_max_sample_spacing,
             vegetation_executor,
             vegetation_coordinator: None,
             vegetation_error: None,
@@ -3908,13 +3919,12 @@ impl TerrainHorizonRenderer {
         let mut frustum_culled_tiles = 0_u32;
         let mut far_culled_tiles = 0_u32;
         let exact_connector_generation = self.renderer.exact_coverage.mask.generation;
-        let exact_connector_instances = if self.renderer.exact_coverage.mode
-            != TerrainExactCoverageMode::Disabled
-        {
-            self.renderer.exact_coverage.connector_instances.clone()
-        } else {
-            Vec::new()
-        };
+        let exact_connector_instances =
+            if self.renderer.exact_coverage.mode != TerrainExactCoverageMode::Disabled {
+                self.renderer.exact_coverage.connector_instances.clone()
+            } else {
+                Vec::new()
+            };
         for level in &terrain_levels {
             let inner_hole = finer_level_bounds(&terrain_levels, level.snapshot.level);
             for resource in &level.tiles {
@@ -3987,7 +3997,7 @@ impl TerrainHorizonRenderer {
         let vegetation_levels = self.admission.vegetation_presentations();
         self.visible_vegetation_slots.fill(false);
         for level in &vegetation_levels {
-            if level.snapshot.sample_spacing > TERRAIN_PREVIEW_MAX_TREE_RECORD_SAMPLE_SPACING {
+            if level.snapshot.sample_spacing > self.vegetation_max_sample_spacing {
                 continue;
             }
             let inner_hole = finer_level_bounds(&vegetation_levels, level.snapshot.level);
@@ -4149,7 +4159,7 @@ impl TerrainHorizonRenderer {
             pass.set_pipeline(tree_pipeline);
             pass.set_bind_group(1, &self.renderer.exact_coverage.bind_group, &[]);
             for level in &vegetation_levels {
-                if level.snapshot.sample_spacing > TERRAIN_PREVIEW_MAX_TREE_RECORD_SAMPLE_SPACING {
+                if level.snapshot.sample_spacing > self.vegetation_max_sample_spacing {
                     continue;
                 }
                 for resource in &level.tiles {
@@ -4181,9 +4191,7 @@ impl TerrainHorizonRenderer {
             .sum();
         let vegetation_resources = vegetation_levels
             .iter()
-            .filter(|level| {
-                level.snapshot.sample_spacing <= TERRAIN_PREVIEW_MAX_TREE_RECORD_SAMPLE_SPACING
-            })
+            .filter(|level| level.snapshot.sample_spacing <= self.vegetation_max_sample_spacing)
             .flat_map(|level| level.tiles.iter())
             .collect::<Vec<_>>();
         let tree_instance_count = vegetation_resources.iter().fold(0_u32, |count, resource| {
@@ -4426,9 +4434,7 @@ impl TerrainHorizonRenderer {
             source,
             levels
                 .iter()
-                .filter(|level| {
-                    level.snapshot.sample_spacing <= TERRAIN_PREVIEW_MAX_TREE_RECORD_SAMPLE_SPACING
-                })
+                .filter(|level| level.snapshot.sample_spacing <= self.vegetation_max_sample_spacing)
                 .flat_map(|level| level.tiles.iter())
                 .filter_map(|resource| {
                     self.slots[resource.resource_slot as usize]
@@ -4499,9 +4505,7 @@ impl TerrainHorizonRenderer {
             .admission
             .current_requested_presentations()
             .into_iter()
-            .filter(|level| {
-                level.snapshot.sample_spacing <= TERRAIN_PREVIEW_MAX_TREE_RECORD_SAMPLE_SPACING
-            })
+            .filter(|level| level.snapshot.sample_spacing <= self.vegetation_max_sample_spacing)
             .flat_map(|level| level.tiles)
             .map(|resource| TerrainVegetationDesiredTile {
                 tile: terrain_horizon_tile_id(self.seed, self.content_stage, resource.tile),

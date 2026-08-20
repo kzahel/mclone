@@ -10,6 +10,7 @@ name = "mclone_ui"
 path = "src/lib.rs"
 
 [dependencies]
+mclone-core.workspace = true
 mclone-diagnostics.workspace = true
 mclone-input.workspace = true
 mclone-protocol.workspace = true

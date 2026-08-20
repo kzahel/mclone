@@ -8,8 +8,8 @@ use mclone_input::TouchControlsMode;
 use mclone_season::{CelestialDebugSettings, SeasonPreviewSettings};
 use mclone_ui::{
     GameCollisionMode, GameFogSettings, GameGrassDetail, GameLeafDetail, GameMovementMode,
-    GamePlayerModel, GameSimulationCadence, GameTerrainPresentation, GameTravelAssistMode,
-    GameTurnMode, GameWorldRenderScaleMode, GameXrRenderMode, GameXrTurnMode, StatusOverlay,
+    GamePlayerModel, GameSimulationCadence, GameTravelAssistMode, GameTurnMode,
+    GameWorldRenderScaleMode, GameXrRenderMode, GameXrTurnMode, StatusOverlay, TerrainLodPreset,
 };
 
 /// Platform hooks emitted by shared client-experience policy.
@@ -33,7 +33,7 @@ pub trait ClientExperienceSettingsHost {
     fn set_section_occlusion_culling(&mut self, enabled: bool) -> Result<()>;
     fn set_leaf_detail(&mut self, detail: GameLeafDetail) -> Result<()>;
     fn set_grass_detail(&mut self, detail: GameGrassDetail) -> Result<()>;
-    fn set_terrain_presentation(&mut self, presentation: GameTerrainPresentation) -> Result<()>;
+    fn set_terrain_lod_preset(&mut self, presentation: TerrainLodPreset) -> Result<()>;
     fn set_fog_settings(&mut self, settings: GameFogSettings) -> Result<()>;
     fn set_season_preview(&mut self, settings: SeasonPreviewSettings) -> Result<()>;
     fn set_celestial_debug(&mut self, settings: CelestialDebugSettings) -> Result<()>;
@@ -83,8 +83,8 @@ where
             ClientExperienceSettingEffect::SetGrassDetail(detail) => {
                 target.set_grass_detail(detail)?;
             }
-            ClientExperienceSettingEffect::SetTerrainPresentation(presentation) => {
-                target.set_terrain_presentation(presentation)?;
+            ClientExperienceSettingEffect::SetTerrainLodPreset(presentation) => {
+                target.set_terrain_lod_preset(presentation)?;
             }
             ClientExperienceSettingEffect::SetFogSettings(settings) => {
                 target.set_fog_settings(settings)?;
@@ -234,7 +234,7 @@ mod tests {
         record_method!(set_section_occlusion_culling(enabled: bool));
         record_method!(set_leaf_detail(detail: GameLeafDetail));
         record_method!(set_grass_detail(detail: GameGrassDetail));
-        record_method!(set_terrain_presentation(presentation: GameTerrainPresentation));
+        record_method!(set_terrain_lod_preset(presentation: TerrainLodPreset));
         record_method!(set_fog_settings(settings: GameFogSettings));
         record_method!(set_season_preview(settings: SeasonPreviewSettings));
         record_method!(set_celestial_debug(settings: CelestialDebugSettings));
@@ -286,9 +286,7 @@ mod tests {
             setting_effects: vec![
                 ClientExperienceSettingEffect::SetLeafDetail(GameLeafDetail::Bushy),
                 ClientExperienceSettingEffect::SetGrassDetail(GameGrassDetail::Lush),
-                ClientExperienceSettingEffect::SetTerrainPresentation(
-                    GameTerrainPresentation::Composed,
-                ),
+                ClientExperienceSettingEffect::SetTerrainLodPreset(TerrainLodPreset::Medium),
                 ClientExperienceSettingEffect::SetFogSettings(GameFogSettings::default()),
                 ClientExperienceSettingEffect::SetFullbright(true),
                 ClientExperienceSettingEffect::SetTravelAssistMode(GameTravelAssistMode::Blink),
@@ -308,7 +306,7 @@ mod tests {
             vec![
                 "set_leaf_detail",
                 "set_grass_detail",
-                "set_terrain_presentation",
+                "set_terrain_lod_preset",
                 "set_fog_settings",
                 "set_fullbright",
                 "set_travel_assist_mode",

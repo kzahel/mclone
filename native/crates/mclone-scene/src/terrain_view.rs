@@ -5,23 +5,21 @@ use mclone_app_runtime::frame_render::{TerrainBackdropRenderContext, TerrainBack
 use mclone_app_runtime::host_mode::SingleViewHostMode;
 use mclone_app_runtime::render_asset_data::TexturedMeshAssets;
 use mclone_blocks::{BlockFluidKind, block_fluid_kind};
-use mclone_core::{ChunkPos, HorizontalTopology};
+use mclone_core::{ChunkPos, HorizontalTopology, TerrainLodPreset};
 use mclone_render::color_profile::RenderColorProfile;
 use mclone_terrain_view::{
-    ExactPaintedCoverageSnapshot, TerrainClipmapConfig, TerrainCompositionSourceIdentity,
-    TerrainExactBoundaryColumn, TerrainExactBoundaryProfile, TerrainExactCoverageMode,
-    TerrainHorizonDiagnostic, TerrainHorizonFrameStats,
-    TerrainHorizonPresentation, TerrainHorizonRenderTarget, TerrainPreparedExactFrame,
-    TerrainPreviewCamera, TerrainPreviewMaterialAtlas, TerrainPreviewMaterialTable,
-    TerrainPreviewView, TerrainVegetationExecutor, TerrainViewEngine, TerrainViewEngineConfig,
+    ExactPaintedCoverageSnapshot, TerrainCompositionSourceIdentity, TerrainExactBoundaryColumn,
+    TerrainExactBoundaryProfile, TerrainExactCoverageMode, TerrainHorizonDiagnostic,
+    TerrainHorizonFrameStats, TerrainHorizonPresentation, TerrainHorizonRenderTarget,
+    TerrainLodPresetDescriptor, TerrainPreparedExactFrame, TerrainPreviewCamera,
+    TerrainPreviewMaterialAtlas, TerrainPreviewMaterialTable, TerrainPreviewView,
+    TerrainVegetationExecutor, TerrainViewEngine, TerrainViewEngineConfig,
     TerrainViewSourceIdentity, terrain_exact_exposed_boundary_blocks,
     terrain_exact_player_connected_chunks,
 };
 use mclone_worldgen::terrain_preview::{TerrainPreviewContentStage, TerrainPreviewProfile};
 
-use crate::{
-    GameTerrainPresentation, McloneSceneHost, WorldInstanceId, engine_terrain_presentation,
-};
+use crate::{McloneSceneHost, WorldInstanceId, engine_terrain_lod_preset};
 
 pub(crate) type SceneTerrainVegetationExecutorFactory =
     Box<dyn Fn() -> Result<Box<dyn TerrainVegetationExecutor>, String>>;
@@ -98,8 +96,13 @@ impl SceneTerrainViewState {
         world: WorldInstanceId,
         seed: i64,
         topology: HorizontalTopology,
+        lod: TerrainLodPresetDescriptor,
         vegetation_executor: Option<Box<dyn TerrainVegetationExecutor>>,
     ) -> Result<Self> {
+        let lod = lod.validated().map_err(anyhow::Error::msg)?;
+        let clipmap = lod
+            .clipmap
+            .context("cannot create a terrain-view engine for LOD Off")?;
         let source = live_source(world, seed, topology)?;
         let coverage_generation = 1;
         let coverage = ExactPaintedCoverageSnapshot::new(
@@ -120,8 +123,11 @@ impl SceneTerrainViewState {
                 width: 1,
                 height: 1,
                 source,
-                clipmap: scene_terrain_clipmap_config(),
-                render_cell_stride: scene_terrain_render_cell_stride(),
+                clipmap,
+                render_cell_stride: lod.render_cell_stride,
+                vegetation_max_sample_spacing: lod
+                    .vegetation_max_sample_spacing
+                    .context("enabled terrain LOD has no vegetation bound")?,
                 vegetation_enabled,
                 color_profile,
             },
@@ -305,23 +311,23 @@ impl SceneTerrainViewState {
 }
 
 pub(crate) fn scene_terrain_projection_far_distance(
-    mode: mclone_app_runtime::startup_args::TerrainPresentationMode,
+    preset: TerrainLodPreset,
     ordinary_far_distance: f32,
 ) -> f32 {
-    if mode == mclone_app_runtime::startup_args::TerrainPresentationMode::Composed {
+    if preset.horizon_enabled() {
         ordinary_far_distance
-            .max(scene_terrain_clipmap_config().conservative_view_distance_blocks())
+            .max(TerrainLodPresetDescriptor::for_preset(preset).terrain_visibility_distance())
     } else {
         ordinary_far_distance
     }
 }
 
 impl McloneSceneHost {
-    pub const fn terrain_presentation_preference(&self) -> GameTerrainPresentation {
-        self.terrain_presentation_preference
+    pub const fn terrain_lod_preset_preference(&self) -> TerrainLodPreset {
+        self.terrain_lod_preset_preference
     }
 
-    pub fn terrain_presentation_supported(&self) -> bool {
+    pub fn terrain_lod_supported(&self) -> bool {
         self.active_world.scene.world_generation_profile
             == mclone_server::WorldGenerationProfile::McloneOverworldV1
             && self.active_world.runtime.as_ref().map_or_else(
@@ -330,37 +336,33 @@ impl McloneSceneHost {
             )
     }
 
-    pub(crate) fn effective_terrain_presentation_mode(
-        &self,
-    ) -> mclone_app_runtime::startup_args::TerrainPresentationMode {
-        if self.terrain_presentation_supported() {
-            engine_terrain_presentation(self.terrain_presentation_preference)
+    pub(crate) fn effective_terrain_lod_preset(&self) -> TerrainLodPreset {
+        if self.terrain_lod_supported() {
+            engine_terrain_lod_preset(self.terrain_lod_preset_preference)
         } else {
-            mclone_app_runtime::startup_args::TerrainPresentationMode::ExactOnly
+            TerrainLodPreset::Off
         }
     }
 
     pub(crate) fn terrain_projection_far_distance(&self, ordinary_far_distance: f32) -> f32 {
         scene_terrain_projection_far_distance(
-            self.effective_terrain_presentation_mode(),
+            self.effective_terrain_lod_preset(),
             ordinary_far_distance,
         )
     }
 
-    pub fn request_terrain_presentation(
-        &mut self,
-        presentation: GameTerrainPresentation,
-    ) -> Result<()> {
-        if presentation == self.terrain_presentation_preference {
+    pub fn request_terrain_lod_preset(&mut self, presentation: TerrainLodPreset) -> Result<()> {
+        if presentation == self.terrain_lod_preset_preference {
             return Ok(());
         }
-        self.terrain_presentation_preference = presentation;
+        self.terrain_lod_preset_preference = presentation;
+        self.terrain_lod_persisted_preference = Some(presentation);
         self.reset_terrain_view();
         self.persist_graphics_preferences();
         log::info!(
             "terrain horizon preference set to {}; active={}",
             presentation.label(),
-            self.effective_terrain_presentation_mode().label(),
+            self.effective_terrain_lod_preset().label(),
         );
         Ok(())
     }
@@ -371,9 +373,8 @@ impl McloneSceneHost {
         queue: &wgpu::Queue,
         focus: [f64; 3],
     ) -> Result<bool> {
-        if self.effective_terrain_presentation_mode()
-            != mclone_app_runtime::startup_args::TerrainPresentationMode::Composed
-        {
+        let effective_preset = self.effective_terrain_lod_preset();
+        if !effective_preset.horizon_enabled() {
             self.reset_terrain_view();
             return Ok(false);
         }
@@ -408,6 +409,7 @@ impl McloneSceneHost {
                 world,
                 seed,
                 topology,
+                TerrainLodPresetDescriptor::for_preset(effective_preset),
                 vegetation_executor,
             )?);
         }
@@ -558,14 +560,6 @@ impl SceneTerrainViewState {
     }
 }
 
-const fn scene_terrain_render_cell_stride() -> u32 {
-    1
-}
-
-fn scene_terrain_clipmap_config() -> TerrainClipmapConfig {
-    TerrainClipmapConfig::default()
-}
-
 fn live_source(
     world: WorldInstanceId,
     seed: i64,
@@ -708,16 +702,16 @@ mod tests {
     }
 
     #[test]
-    fn only_composed_terrain_extends_the_shared_projection_reach() {
-        use mclone_app_runtime::startup_args::TerrainPresentationMode;
-
+    fn lod_presets_extend_projection_to_their_shared_reach() {
         assert_eq!(
-            scene_terrain_projection_far_distance(TerrainPresentationMode::ExactOnly, 1_084.0),
+            scene_terrain_projection_far_distance(TerrainLodPreset::Off, 1_084.0),
             1_084.0
         );
-        assert!(
-            scene_terrain_projection_far_distance(TerrainPresentationMode::Composed, 1_084.0)
-                > 139_000.0
-        );
+        let low = scene_terrain_projection_far_distance(TerrainLodPreset::Low, 1_084.0);
+        let medium = scene_terrain_projection_far_distance(TerrainLodPreset::Medium, 1_084.0);
+        let high = scene_terrain_projection_far_distance(TerrainLodPreset::High, 1_084.0);
+        assert!(low > 1_084.0);
+        assert!(medium > low);
+        assert!(high > medium);
     }
 }

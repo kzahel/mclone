@@ -1112,7 +1112,9 @@ mod android {
     }
 
     fn android_xr_startup_scene_defaults() -> StartupSceneOptions {
-        StartupSceneOptions::default()
+        StartupSceneOptions::default().with_graphics_platform_profile(
+            mclone_app_runtime::graphics_preferences::ClientGraphicsPlatformProfile::AndroidXr,
+        )
     }
 
     fn android_xr_scene_options_from_startup(

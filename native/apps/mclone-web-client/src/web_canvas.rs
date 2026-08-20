@@ -2751,7 +2751,7 @@ pub(super) fn ui_action_label(action: GameUiAction) -> &'static str {
         GameUiAction::ToggleSectionOcclusion => "toggleSectionOcclusion",
         GameUiAction::SetLeafDetail(_) => "setLeafDetail",
         GameUiAction::SetGrassDetail(_) => "setGrassDetail",
-        GameUiAction::SetTerrainPresentation(_) => "setTerrainPresentation",
+        GameUiAction::SetTerrainLodPreset(_) => "setTerrainLodPreset",
         GameUiAction::SetFogSettings(_) => "setFogSettings",
         GameUiAction::SetSeasonPreview(_) => "setSeasonPreview",
         GameUiAction::SetCelestialDebug(_) => "setCelestialDebug",
@@ -3083,7 +3083,9 @@ fn parse_startup_options_from_query(search: &str) -> Result<StartupOptions, JsVa
     let params = web_sys::UrlSearchParams::new_with_str(search).map_err(|error| {
         JsValue::from_str(&format!("failed to parse startup query string: {error:?}"))
     })?;
-    let mut scene = StartupSceneOptions::default();
+    let mut scene = StartupSceneOptions::default().with_graphics_platform_profile(
+        mclone_app_runtime::graphics_preferences::ClientGraphicsPlatformProfile::Web,
+    );
     scene.render_distance = WEB_DEFAULT_RENDER_DISTANCE;
     let mut state = StartupArgState::new(scene, TexturedSectionRenderOptions::default());
     for key in STARTUP_QUERY_KEYS {

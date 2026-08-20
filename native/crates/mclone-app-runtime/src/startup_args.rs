@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
+pub use mclone_core::TerrainLodPreset;
 use mclone_core::{AxisTopology, HorizontalTopology};
 use mclone_frame_budget::RenderCompileCapacityReport;
 use mclone_render::chunk::TexturedSectionRenderOptions;
@@ -16,6 +17,7 @@ use mclone_ui::GameMovementMode;
 
 use crate::{
     DEFAULT_RENDER_SECTION_COMPILE_MAX_PENDING_JOBS, DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
+    graphics_preferences::ClientGraphicsPlatformProfile,
 };
 
 pub const ARG_SEED: &str = "--seed";
@@ -44,6 +46,8 @@ pub const ARG_DEBUG_LIGHT_ADMISSION_DELAY_TICKS: &str = "--debug-light-admission
 pub const ARG_SECTION_OCCLUSION: &str = "--section-occlusion";
 pub const ARG_FULLBRIGHT: &str = "--fullbright";
 pub const ARG_RENDER_COLOR_PROFILE: &str = "--render-color-profile";
+pub const ARG_TERRAIN_LOD_QUALITY: &str = "--terrain-lod-quality";
+/// Deprecated compatibility alias for `--terrain-lod-quality`.
 pub const ARG_TERRAIN_PRESENTATION: &str = "--terrain-presentation";
 pub const ARG_SCREENSHOT_EYE: &str = "--screenshot-eye";
 pub const ARG_SCREENSHOT_TARGET: &str = "--screenshot-target";
@@ -78,6 +82,7 @@ pub const STARTUP_ARG_FLAGS: &[&str] = &[
     ARG_SECTION_OCCLUSION,
     ARG_FULLBRIGHT,
     ARG_RENDER_COLOR_PROFILE,
+    ARG_TERRAIN_LOD_QUALITY,
     ARG_TERRAIN_PRESENTATION,
     ARG_SCREENSHOT_EYE,
     ARG_SCREENSHOT_TARGET,
@@ -107,6 +112,8 @@ pub const QUERY_DEBUG_LIGHT_ADMISSION_DELAY_TICKS: &str = "debugLightAdmissionDe
 pub const QUERY_SECTION_OCCLUSION: &str = "sectionOcclusion";
 pub const QUERY_FULLBRIGHT: &str = "fullbright";
 pub const QUERY_RENDER_COLOR_PROFILE: &str = "renderColorProfile";
+pub const QUERY_TERRAIN_LOD_QUALITY: &str = "terrainLodQuality";
+/// Deprecated compatibility alias for `terrainLodQuality`.
 pub const QUERY_TERRAIN_PRESENTATION: &str = "terrainPresentation";
 pub const QUERY_SCREENSHOT_EYE: &str = "screenshotEye";
 pub const QUERY_SCREENSHOT_TARGET: &str = "screenshotTarget";
@@ -136,6 +143,7 @@ pub const STARTUP_QUERY_KEYS: &[&str] = &[
     QUERY_SECTION_OCCLUSION,
     QUERY_FULLBRIGHT,
     QUERY_RENDER_COLOR_PROFILE,
+    QUERY_TERRAIN_LOD_QUALITY,
     QUERY_TERRAIN_PRESENTATION,
     QUERY_SCREENSHOT_EYE,
     QUERY_SCREENSHOT_TARGET,
@@ -145,22 +153,6 @@ pub const DEFAULT_STARTUP_SEED: i64 = 12_345;
 pub const DEFAULT_STARTUP_CHUNK_X: i32 = 0;
 pub const DEFAULT_STARTUP_CHUNK_Z: i32 = 0;
 pub const DEFAULT_STARTUP_RENDER_DISTANCE: u32 = 5;
-
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub enum TerrainPresentationMode {
-    #[default]
-    ExactOnly,
-    Composed,
-}
-
-impl TerrainPresentationMode {
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::ExactOnly => "exact-only",
-            Self::Composed => "composed",
-        }
-    }
-}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RenderDistanceLimits {
@@ -197,8 +189,9 @@ pub struct StartupSceneOptions {
     pub lighting_enabled: bool,
     pub light_status_batch_size: usize,
     pub debug_light_admission_delay_ticks: u32,
-    pub terrain_presentation: TerrainPresentationMode,
-    pub terrain_presentation_explicit: bool,
+    pub graphics_platform_profile: ClientGraphicsPlatformProfile,
+    pub terrain_lod_preset: TerrainLodPreset,
+    pub terrain_lod_preset_explicit: bool,
 }
 
 impl Default for StartupSceneOptions {
@@ -226,13 +219,27 @@ impl Default for StartupSceneOptions {
             lighting_enabled: true,
             light_status_batch_size: DEFAULT_LIGHT_STATUS_BATCH_SIZE,
             debug_light_admission_delay_ticks: 0,
-            terrain_presentation: TerrainPresentationMode::ExactOnly,
-            terrain_presentation_explicit: false,
+            graphics_platform_profile: ClientGraphicsPlatformProfile::NativeDesktopFlat,
+            terrain_lod_preset: ClientGraphicsPlatformProfile::NativeDesktopFlat
+                .default_terrain_lod_preset(),
+            terrain_lod_preset_explicit: false,
         }
     }
 }
 
 impl StartupSceneOptions {
+    /// Applies the host's default without changing an explicit launch value.
+    pub fn with_graphics_platform_profile(
+        mut self,
+        profile: ClientGraphicsPlatformProfile,
+    ) -> Self {
+        self.graphics_platform_profile = profile;
+        if !self.terrain_lod_preset_explicit {
+            self.terrain_lod_preset = profile.default_terrain_lod_preset();
+        }
+        self
+    }
+
     /// Applies the flat-client product default of starting at a fixed day time.
     ///
     /// Platform adapters should use named overlays like this instead of
@@ -536,10 +543,9 @@ impl StartupArgState {
                 self.render_options.color_profile =
                     parse_render_color_profile_arg(ARG_RENDER_COLOR_PROFILE, args.next())?;
             }
-            ARG_TERRAIN_PRESENTATION => {
-                self.scene.terrain_presentation =
-                    parse_terrain_presentation_mode(ARG_TERRAIN_PRESENTATION, args.next())?;
-                self.scene.terrain_presentation_explicit = true;
+            ARG_TERRAIN_LOD_QUALITY | ARG_TERRAIN_PRESENTATION => {
+                self.scene.terrain_lod_preset = parse_terrain_lod_preset(&arg, args.next())?;
+                self.scene.terrain_lod_preset_explicit = true;
             }
             ARG_SCREENSHOT_EYE => {
                 self.camera.eye = Some(parse_f32_vec3_arg(ARG_SCREENSHOT_EYE, args.next())?);
@@ -667,10 +673,9 @@ impl StartupArgState {
                 self.render_options.color_profile =
                     parse_render_color_profile_arg(QUERY_RENDER_COLOR_PROFILE, value)?;
             }
-            QUERY_TERRAIN_PRESENTATION => {
-                self.scene.terrain_presentation =
-                    parse_terrain_presentation_mode(QUERY_TERRAIN_PRESENTATION, value)?;
-                self.scene.terrain_presentation_explicit = true;
+            QUERY_TERRAIN_LOD_QUALITY | QUERY_TERRAIN_PRESENTATION => {
+                self.scene.terrain_lod_preset = parse_terrain_lod_preset(key, value)?;
+                self.scene.terrain_lod_preset_explicit = true;
             }
             QUERY_SCREENSHOT_EYE => {
                 self.camera.eye = Some(parse_f32_vec3_arg(QUERY_SCREENSHOT_EYE, value)?);
@@ -799,16 +804,10 @@ pub fn parse_render_color_profile_arg(
         .map_err(|message| anyhow::anyhow!("{flag} {message}"))
 }
 
-pub fn parse_terrain_presentation_mode(
-    flag: &str,
-    value: Option<String>,
-) -> Result<TerrainPresentationMode> {
-    let value = value.with_context(|| format!("{flag} requires exact-only or composed"))?;
-    match value.trim().to_ascii_lowercase().as_str() {
-        "exact-only" | "exact" | "off" | "false" => Ok(TerrainPresentationMode::ExactOnly),
-        "composed" | "horizon" | "on" | "true" => Ok(TerrainPresentationMode::Composed),
-        _ => bail!("{flag} must be exact-only or composed, got `{value}`"),
-    }
+pub fn parse_terrain_lod_preset(flag: &str, value: Option<String>) -> Result<TerrainLodPreset> {
+    let value = value.with_context(|| format!("{flag} requires off, low, medium, or high"))?;
+    TerrainLodPreset::parse_startup_label(&value)
+        .map_err(|message| anyhow::anyhow!("{flag} {message}"))
 }
 
 pub fn parse_f32_vec3_arg(flag: &str, value: Option<String>) -> Result<[f32; 3]> {
@@ -965,8 +964,9 @@ mod tests {
                 lighting_enabled: true,
                 light_status_batch_size: DEFAULT_LIGHT_STATUS_BATCH_SIZE,
                 debug_light_admission_delay_ticks: 0,
-                terrain_presentation: TerrainPresentationMode::ExactOnly,
-                terrain_presentation_explicit: false,
+                graphics_platform_profile: ClientGraphicsPlatformProfile::NativeDesktopFlat,
+                terrain_lod_preset: TerrainLodPreset::High,
+                terrain_lod_preset_explicit: false,
             }
         );
         assert_eq!(
@@ -1122,8 +1122,9 @@ mod tests {
                 lighting_enabled: true,
                 light_status_batch_size: 5,
                 debug_light_admission_delay_ticks: 0,
-                terrain_presentation: TerrainPresentationMode::ExactOnly,
-                terrain_presentation_explicit: false,
+                graphics_platform_profile: ClientGraphicsPlatformProfile::NativeDesktopFlat,
+                terrain_lod_preset: TerrainLodPreset::High,
+                terrain_lod_preset_explicit: false,
             }
         );
         assert_eq!(
@@ -1487,8 +1488,9 @@ mod tests {
                 lighting_enabled: false,
                 light_status_batch_size: 5,
                 debug_light_admission_delay_ticks: 40,
-                terrain_presentation: TerrainPresentationMode::ExactOnly,
-                terrain_presentation_explicit: false,
+                graphics_platform_profile: ClientGraphicsPlatformProfile::NativeDesktopFlat,
+                terrain_lod_preset: TerrainLodPreset::High,
+                terrain_lod_preset_explicit: false,
             }
         );
         assert!(!options.render_options.section_occlusion_culling);
@@ -1520,36 +1522,48 @@ mod tests {
     }
 
     #[test]
-    fn terrain_presentation_is_explicit_and_host_neutral() {
+    fn terrain_lod_quality_supports_canonical_and_legacy_launch_inputs() {
         assert_eq!(
-            StartupSceneOptions::default().terrain_presentation,
-            TerrainPresentationMode::ExactOnly
+            StartupSceneOptions::default().terrain_lod_preset,
+            TerrainLodPreset::High
         );
         let argv = parse(&[ARG_TERRAIN_PRESENTATION, "composed"]).scene;
-        assert_eq!(argv.terrain_presentation, TerrainPresentationMode::Composed);
-        assert!(argv.terrain_presentation_explicit);
+        assert_eq!(argv.terrain_lod_preset, TerrainLodPreset::High);
+        assert!(argv.terrain_lod_preset_explicit);
+        let canonical = parse(&[ARG_TERRAIN_LOD_QUALITY, "low"]).scene;
+        assert_eq!(canonical.terrain_lod_preset, TerrainLodPreset::Low);
+        assert!(canonical.terrain_lod_preset_explicit);
         let mut query = StartupArgState::default();
         assert!(
             query
                 .parse_query_param(
-                    QUERY_TERRAIN_PRESENTATION,
-                    Some("horizon".to_owned()),
+                    QUERY_TERRAIN_LOD_QUALITY,
+                    Some("medium".to_owned()),
                     RenderDistanceLimits::new(1, 16),
                 )
                 .unwrap()
         );
         let query = query.finish().scene;
+        assert_eq!(query.terrain_lod_preset, TerrainLodPreset::Medium);
+        assert!(query.terrain_lod_preset_explicit);
         assert_eq!(
-            query.terrain_presentation,
-            TerrainPresentationMode::Composed
-        );
-        assert!(query.terrain_presentation_explicit);
-        assert_eq!(
-            parse_terrain_presentation_mode(ARG_TERRAIN_PRESENTATION, Some("sideways".to_owned()))
+            parse_terrain_lod_preset(ARG_TERRAIN_LOD_QUALITY, Some("sideways".to_owned()))
                 .unwrap_err()
                 .to_string(),
-            "--terrain-presentation must be exact-only or composed, got `sideways`"
+            "--terrain-lod-quality terrain LOD quality must be off, low, medium, or high, got `sideways`"
         );
+    }
+
+    #[test]
+    fn platform_profile_changes_only_an_unset_launch_default() {
+        let web = StartupSceneOptions::default()
+            .with_graphics_platform_profile(ClientGraphicsPlatformProfile::Web);
+        assert_eq!(web.terrain_lod_preset, TerrainLodPreset::Medium);
+
+        let explicit = parse(&[ARG_TERRAIN_LOD_QUALITY, "low"])
+            .scene
+            .with_graphics_platform_profile(ClientGraphicsPlatformProfile::NativeDesktopFlat);
+        assert_eq!(explicit.terrain_lod_preset, TerrainLodPreset::Low);
     }
 
     #[test]

@@ -206,13 +206,13 @@ use mclone_ui::{
     FlatHudDebugOverlay, Font, GameAuxiliarySplitMode, GameCollisionMode, GameDeathCause,
     GameFlatPresentationState, GameFogSettings, GameFramePacingMode, GameGrassDetail,
     GameLeafDetail, GameLocalPlayControllerFamily, GameLocalPlayGuestInput, GameLocalPlayState,
-    GameMovementMode, GamePlayerModel, GameScreen, GameSimulationCadence, GameTerrainPresentation,
-    GameTouchSettings, GameTravelAssistMode, GameTurnMode, GameUiAction, GameUiHost,
-    GameUiRenderState, GameWorldRenderScaleMode, GameXrRenderMode, GameXrRenderPathState,
-    GameXrRenderTransitionState, GameXrTurnMode, GamepadHudOverlay, GuiDrawList, GuiKey, GuiScale,
-    LoadingProgressOverlay, Point, Rect, StatusOverlay, StorageProfileBackend,
-    StorageProfileUiState, TouchOverlay, UiDebugSnapshot, UiDrawCacheStats, UiPanelRevision,
-    WheatTargetHud, WorldCatalogUiStatus, render_loading_progress_overlay, render_status_overlay,
+    GameMovementMode, GamePlayerModel, GameScreen, GameSimulationCadence, GameTouchSettings,
+    GameTravelAssistMode, GameTurnMode, GameUiAction, GameUiHost, GameUiRenderState,
+    GameWorldRenderScaleMode, GameXrRenderMode, GameXrRenderPathState, GameXrRenderTransitionState,
+    GameXrTurnMode, GamepadHudOverlay, GuiDrawList, GuiKey, GuiScale, LoadingProgressOverlay,
+    Point, Rect, StatusOverlay, StorageProfileBackend, StorageProfileUiState, TerrainLodPreset,
+    TouchOverlay, UiDebugSnapshot, UiDrawCacheStats, UiPanelRevision, WheatTargetHud,
+    WorldCatalogUiStatus, render_loading_progress_overlay, render_status_overlay,
 };
 
 mod asset_replacement;
@@ -265,30 +265,12 @@ pub(crate) const fn game_grass_detail(detail: GrassQuality) -> GameGrassDetail {
     }
 }
 
-pub(crate) const fn engine_terrain_presentation(
-    presentation: GameTerrainPresentation,
-) -> mclone_app_runtime::startup_args::TerrainPresentationMode {
-    match presentation {
-        GameTerrainPresentation::ExactOnly => {
-            mclone_app_runtime::startup_args::TerrainPresentationMode::ExactOnly
-        }
-        GameTerrainPresentation::Composed => {
-            mclone_app_runtime::startup_args::TerrainPresentationMode::Composed
-        }
-    }
+pub(crate) const fn engine_terrain_lod_preset(preset: TerrainLodPreset) -> TerrainLodPreset {
+    preset
 }
 
-pub(crate) const fn game_terrain_presentation(
-    mode: mclone_app_runtime::startup_args::TerrainPresentationMode,
-) -> GameTerrainPresentation {
-    match mode {
-        mclone_app_runtime::startup_args::TerrainPresentationMode::ExactOnly => {
-            GameTerrainPresentation::ExactOnly
-        }
-        mclone_app_runtime::startup_args::TerrainPresentationMode::Composed => {
-            GameTerrainPresentation::Composed
-        }
-    }
+pub(crate) const fn game_terrain_lod_preset(preset: TerrainLodPreset) -> TerrainLodPreset {
+    preset
 }
 
 pub use comfort::*;
@@ -1315,7 +1297,8 @@ pub struct McloneSceneHost {
     asset_pack_preference_error: Option<String>,
     graphics_preference_storage: Option<Box<dyn ClientGraphicsPreferenceStorage>>,
     graphics_preference_error: Option<String>,
-    terrain_presentation_preference: GameTerrainPresentation,
+    terrain_lod_preset_preference: TerrainLodPreset,
+    terrain_lod_persisted_preference: Option<TerrainLodPreset>,
     fog_settings: GameFogSettings,
     pending_leaf_detail: Option<mclone_mesh::LeafDetail>,
     pending_restored_asset_pack_selection:

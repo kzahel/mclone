@@ -4,6 +4,7 @@ mod animation;
 mod bit_storage;
 mod chunk;
 mod pos;
+mod terrain_lod;
 pub mod time;
 mod topology;
 
@@ -24,6 +25,7 @@ pub use pos::{
     Aabb, BlockHitResult, BlockPos, Direction, HitResultType, Vec3d, block_pos_to_chunk_coord,
 };
 use sha2::{Digest, Sha256};
+pub use terrain_lod::TerrainLodPreset;
 pub use topology::{AxisTopology, ChunkLift, HorizontalTopology, LiftedChunkPos, TopologyError};
 
 pub const TARGET_MINECRAFT_VERSION: &str = "1.17.1";

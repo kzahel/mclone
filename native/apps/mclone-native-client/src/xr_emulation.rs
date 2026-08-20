@@ -287,9 +287,7 @@ pub(crate) fn run_xr_emulation_screenshot(
             }
             let mut views = synthetic_stereo_views(driver.host().camera_snapshot(), size);
             driver.drive_stereo_until_view_settled(device, queue, views)?;
-            if scene.startup.terrain_presentation
-                == mclone_app_runtime::startup_args::TerrainPresentationMode::Composed
-            {
+            if scene.startup.terrain_lod_preset.horizon_enabled() {
                 drive_terrain_horizon_until_ready(
                     &mut driver,
                     device,
@@ -586,8 +584,8 @@ fn drive_terrain_horizon_until_ready(
     bail!(
         "synthetic-stereo composed horizon did not become ready within 360 rendered frames: \
          preference={:?} source_supported={} diagnostics={last:?}",
-        driver.host().terrain_presentation_preference(),
-        driver.host().terrain_presentation_supported(),
+        driver.host().terrain_lod_preset_preference(),
+        driver.host().terrain_lod_supported(),
     )
 }
 

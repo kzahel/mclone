@@ -10,9 +10,9 @@ use mclone_ui::{
     DebugActorTool, GameAuxiliarySplitMode, GameCollisionMode, GameFogSettings,
     GameFramePacingMode, GameGrassDetail, GameLeafDetail, GameLocalPlayGuestInput,
     GameLocalPlayLayout, GameLocalPlayState, GameMovementMode, GamePlayerModel, GameScenarioId,
-    GameSimulationCadence, GameStorageAction, GameTerrainPresentation, GameTouchSettings,
-    GameTravelAssistMode, GameTurnMode, GameUiAction, GameUiRenderState, GameWorldRenderScaleMode,
-    GameXrRenderMode, GameXrRenderPathState, GameXrRenderTransitionState, GameXrTurnMode,
+    GameSimulationCadence, GameStorageAction, GameTouchSettings, GameTravelAssistMode,
+    GameTurnMode, GameUiAction, GameUiRenderState, GameWorldRenderScaleMode, GameXrRenderMode,
+    GameXrRenderPathState, GameXrRenderTransitionState, GameXrTurnMode, TerrainLodPreset,
 };
 
 use crate::asset_pack_ui::{ClientAssetPackController, ClientAssetPackEffect};
@@ -159,7 +159,7 @@ impl ClientExperienceController {
             GameUiAction::ToggleSectionOcclusion
             | GameUiAction::SetLeafDetail(_)
             | GameUiAction::SetGrassDetail(_)
-            | GameUiAction::SetTerrainPresentation(_)
+            | GameUiAction::SetTerrainLodPreset(_)
             | GameUiAction::SetFogSettings(_)
             | GameUiAction::SetSeasonPreview(_)
             | GameUiAction::SetCelestialDebug(_)
@@ -366,7 +366,7 @@ pub struct ClientExperienceSettingsProfile {
     pub section_occlusion: ClientExperienceCapabilityStatus,
     pub leaf_detail: ClientExperienceCapabilityStatus,
     pub grass_detail: ClientExperienceCapabilityStatus,
-    pub terrain_presentation: ClientExperienceCapabilityStatus,
+    pub terrain_lod_preset: ClientExperienceCapabilityStatus,
     pub fog: ClientExperienceCapabilityStatus,
     pub fullbright: ClientExperienceCapabilityStatus,
     pub player_collision_box: ClientExperienceCapabilityStatus,
@@ -404,7 +404,7 @@ impl ClientExperienceSettingsProfile {
             section_occlusion: ClientExperienceCapabilityStatus::Supported,
             leaf_detail: ClientExperienceCapabilityStatus::Supported,
             grass_detail: ClientExperienceCapabilityStatus::Supported,
-            terrain_presentation: ClientExperienceCapabilityStatus::Supported,
+            terrain_lod_preset: ClientExperienceCapabilityStatus::Supported,
             fog: ClientExperienceCapabilityStatus::Supported,
             fullbright: ClientExperienceCapabilityStatus::Supported,
             player_collision_box: ClientExperienceCapabilityStatus::Supported,
@@ -439,7 +439,7 @@ impl ClientExperienceSettingsProfile {
             ClientExperienceActionKind::ToggleSectionOcclusion => self.section_occlusion,
             ClientExperienceActionKind::SetLeafDetail => self.leaf_detail,
             ClientExperienceActionKind::SetGrassDetail => self.grass_detail,
-            ClientExperienceActionKind::SetTerrainPresentation => self.terrain_presentation,
+            ClientExperienceActionKind::SetTerrainLodPreset => self.terrain_lod_preset,
             ClientExperienceActionKind::SetFogSettings => self.fog,
             ClientExperienceActionKind::ToggleFullbright => self.fullbright,
             ClientExperienceActionKind::TogglePlayerCollisionBox => self.player_collision_box,
@@ -490,7 +490,7 @@ impl ClientExperienceSettingsProfile {
             (F::SectionOcclusion, self.section_occlusion),
             (F::LeafDetail, self.leaf_detail),
             (F::GrassDetail, self.grass_detail),
-            (F::TerrainPresentation, self.terrain_presentation),
+            (F::TerrainLodPreset, self.terrain_lod_preset),
             (F::Fog, self.fog),
             (F::Fullbright, self.fullbright),
             (F::PlayerCollisionBox, self.player_collision_box),
@@ -516,7 +516,7 @@ pub enum ClientExperienceFeatureCapability {
     SectionOcclusion,
     LeafDetail,
     GrassDetail,
-    TerrainPresentation,
+    TerrainLodPreset,
     Fog,
     Fullbright,
     PlayerCollisionBox,
@@ -790,11 +790,13 @@ impl ClientExperienceSettingsController {
                     .setting_effects
                     .push(ClientExperienceSettingEffect::SetGrassDetail(detail));
             }
-            GameUiAction::SetTerrainPresentation(presentation) => {
-                self.state.terrain_presentation = presentation;
-                effects.setting_effects.push(
-                    ClientExperienceSettingEffect::SetTerrainPresentation(presentation),
-                );
+            GameUiAction::SetTerrainLodPreset(presentation) => {
+                self.state.terrain_lod_preset = presentation;
+                effects
+                    .setting_effects
+                    .push(ClientExperienceSettingEffect::SetTerrainLodPreset(
+                        presentation,
+                    ));
             }
             GameUiAction::SetFogSettings(settings) => {
                 self.state.fog = settings.normalized();
@@ -1127,8 +1129,8 @@ impl ClientExperienceSettingsController {
                 profile.grass_detail,
             ),
             (
-                ClientExperienceActionKind::SetTerrainPresentation,
-                profile.terrain_presentation,
+                ClientExperienceActionKind::SetTerrainLodPreset,
+                profile.terrain_lod_preset,
             ),
             (ClientExperienceActionKind::SetFogSettings, profile.fog),
             (
@@ -1308,7 +1310,7 @@ pub struct ClientExperienceSettingsState {
     pub section_occlusion_culling: bool,
     pub leaf_detail: GameLeafDetail,
     pub grass_detail: GameGrassDetail,
-    pub terrain_presentation: GameTerrainPresentation,
+    pub terrain_lod_preset: TerrainLodPreset,
     pub fog: GameFogSettings,
     pub season_preview: SeasonPreviewSettings,
     pub celestial_debug: CelestialDebugSettings,
@@ -1355,7 +1357,7 @@ impl From<GameUiRenderState> for ClientExperienceSettingsState {
             section_occlusion_culling: state.section_occlusion_culling,
             leaf_detail: state.leaf_detail,
             grass_detail: state.grass_detail,
-            terrain_presentation: state.terrain_presentation,
+            terrain_lod_preset: state.terrain_lod_preset,
             fog: state.fog.normalized(),
             season_preview: state.season_preview,
             celestial_debug: state.celestial_debug_settings,
@@ -1403,7 +1405,7 @@ impl ClientExperienceSettingsState {
         state.section_occlusion_culling = self.section_occlusion_culling;
         state.leaf_detail = self.leaf_detail;
         state.grass_detail = self.grass_detail;
-        state.terrain_presentation = self.terrain_presentation;
+        state.terrain_lod_preset = self.terrain_lod_preset;
         state.fog = self.fog.normalized();
         state.season_preview = self.season_preview;
         state.celestial_debug_settings = self.celestial_debug;
@@ -1614,7 +1616,7 @@ pub enum ClientExperienceSettingEffect {
     SetSectionOcclusionCulling(bool),
     SetLeafDetail(GameLeafDetail),
     SetGrassDetail(GameGrassDetail),
-    SetTerrainPresentation(GameTerrainPresentation),
+    SetTerrainLodPreset(TerrainLodPreset),
     SetFogSettings(GameFogSettings),
     SetSeasonPreview(SeasonPreviewSettings),
     SetCelestialDebug(CelestialDebugSettings),
@@ -1710,7 +1712,7 @@ pub enum ClientExperienceActionKind {
     ToggleSectionOcclusion,
     SetLeafDetail,
     SetGrassDetail,
-    SetTerrainPresentation,
+    SetTerrainLodPreset,
     SetFogSettings,
     SetSeasonPreview,
     SetCelestialDebug,
@@ -1800,9 +1802,7 @@ pub fn client_experience_action_kind(action: GameUiAction) -> ClientExperienceAc
         GameUiAction::ToggleSectionOcclusion => ClientExperienceActionKind::ToggleSectionOcclusion,
         GameUiAction::SetLeafDetail(_) => ClientExperienceActionKind::SetLeafDetail,
         GameUiAction::SetGrassDetail(_) => ClientExperienceActionKind::SetGrassDetail,
-        GameUiAction::SetTerrainPresentation(_) => {
-            ClientExperienceActionKind::SetTerrainPresentation
-        }
+        GameUiAction::SetTerrainLodPreset(_) => ClientExperienceActionKind::SetTerrainLodPreset,
         GameUiAction::SetFogSettings(_) => ClientExperienceActionKind::SetFogSettings,
         GameUiAction::SetSeasonPreview(_) => ClientExperienceActionKind::SetSeasonPreview,
         GameUiAction::SetCelestialDebug(_) => ClientExperienceActionKind::SetCelestialDebug,
@@ -1883,7 +1883,7 @@ pub const fn classify_client_experience_action_kind(
         | ClientExperienceActionKind::ToggleSectionOcclusion
         | ClientExperienceActionKind::SetLeafDetail
         | ClientExperienceActionKind::SetGrassDetail
-        | ClientExperienceActionKind::SetTerrainPresentation
+        | ClientExperienceActionKind::SetTerrainLodPreset
         | ClientExperienceActionKind::SetFogSettings
         | ClientExperienceActionKind::SetSeasonPreview
         | ClientExperienceActionKind::SetCelestialDebug
@@ -2427,17 +2427,17 @@ mod tests {
         );
 
         let effects = settings.apply_ui_action(
-            GameUiAction::SetTerrainPresentation(GameTerrainPresentation::Composed),
+            GameUiAction::SetTerrainLodPreset(TerrainLodPreset::Medium),
             ClientExperienceSettingsProfile::default(),
         );
         assert_eq!(
-            settings.state().terrain_presentation,
-            GameTerrainPresentation::Composed
+            settings.state().terrain_lod_preset,
+            TerrainLodPreset::Medium
         );
         assert_eq!(
             effects.setting_effects,
-            vec![ClientExperienceSettingEffect::SetTerrainPresentation(
-                GameTerrainPresentation::Composed
+            vec![ClientExperienceSettingEffect::SetTerrainLodPreset(
+                TerrainLodPreset::Medium
             )]
         );
 

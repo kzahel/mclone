@@ -3009,7 +3009,7 @@ impl GameUiHost {
             GameUiAction::ToggleSectionOcclusion
             | GameUiAction::SetLeafDetail(_)
             | GameUiAction::SetGrassDetail(_)
-            | GameUiAction::SetTerrainPresentation(_)
+            | GameUiAction::SetTerrainLodPreset(_)
             | GameUiAction::SetFogSettings(_)
             | GameUiAction::SetSeasonPreview(_)
             | GameUiAction::SetCelestialDebug(_)
@@ -4647,17 +4647,22 @@ fn options_category_rows(
                     UiWidget::cycle(
                         UI_V2_OPTIONS_TERRAIN_PRESENTATION,
                         ph,
-                        "Terrain Horizon",
-                        if state.terrain_presentation == crate::GameTerrainPresentation::Composed
-                            && !state.terrain_presentation_available
+                        "Distant Terrain",
+                        if state.terrain_lod_preset.horizon_enabled()
+                            && !state.terrain_lod_available
                         {
-                            "Composed (Unavailable)"
+                            match state.terrain_lod_preset {
+                                crate::TerrainLodPreset::Low => "Low (Unavailable)",
+                                crate::TerrainLodPreset::Medium => "Medium (Unavailable)",
+                                crate::TerrainLodPreset::High => "High (Unavailable)",
+                                crate::TerrainLodPreset::Off => "Off",
+                            }
                         } else {
-                            state.terrain_presentation.label()
+                            state.terrain_lod_preset.label()
                         },
                     )
-                    .action(GameUiAction::SetTerrainPresentation(
-                        state.terrain_presentation.next(),
+                    .action(GameUiAction::SetTerrainLodPreset(
+                        state.terrain_lod_preset.next(),
                     )),
                 ),
                 (

@@ -470,9 +470,10 @@ impl McloneSceneHost {
             asset_pack_preference_error: None,
             graphics_preference_storage: None,
             graphics_preference_error: None,
-            terrain_presentation_preference: game_terrain_presentation(
-                scene.startup.terrain_presentation,
+            terrain_lod_preset_preference: game_terrain_lod_preset(
+                scene.startup.terrain_lod_preset,
             ),
+            terrain_lod_persisted_preference: None,
             fog_settings: GameFogSettings::default(),
             pending_leaf_detail: None,
             pending_restored_asset_pack_selection: None,
@@ -687,9 +688,10 @@ impl McloneSceneHost {
             asset_pack_preference_error: None,
             graphics_preference_storage: None,
             graphics_preference_error: None,
-            terrain_presentation_preference: game_terrain_presentation(
-                scene.startup.terrain_presentation,
+            terrain_lod_preset_preference: game_terrain_lod_preset(
+                scene.startup.terrain_lod_preset,
             ),
+            terrain_lod_persisted_preference: None,
             fog_settings: GameFogSettings::default(),
             pending_leaf_detail: None,
             pending_restored_asset_pack_selection: None,
@@ -986,9 +988,10 @@ impl McloneSceneHost {
             asset_pack_preference_error: None,
             graphics_preference_storage: None,
             graphics_preference_error: None,
-            terrain_presentation_preference: game_terrain_presentation(
-                scene.startup.terrain_presentation,
+            terrain_lod_preset_preference: game_terrain_lod_preset(
+                scene.startup.terrain_lod_preset,
             ),
+            terrain_lod_persisted_preference: None,
             fog_settings: GameFogSettings::default(),
             pending_leaf_detail: None,
             pending_restored_asset_pack_selection: None,
@@ -6434,8 +6437,8 @@ impl ClientExperienceSettingsHost for McloneSceneHost {
         Ok(())
     }
 
-    fn set_terrain_presentation(&mut self, presentation: GameTerrainPresentation) -> Result<()> {
-        self.request_terrain_presentation(presentation)
+    fn set_terrain_lod_preset(&mut self, presentation: TerrainLodPreset) -> Result<()> {
+        self.request_terrain_lod_preset(presentation)
     }
 
     fn set_fog_settings(&mut self, settings: GameFogSettings) -> Result<()> {

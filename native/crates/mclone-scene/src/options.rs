@@ -124,34 +124,13 @@ impl McloneSceneHostOptions {
 
     pub(crate) fn project_terrain_presentation_for_source(
         &mut self,
-        local_authoritative_source: bool,
+        _local_authoritative_source: bool,
     ) {
-        if !local_authoritative_source
-            || self.startup.world_generation_profile
-                != mclone_server::WorldGenerationProfile::McloneOverworldV1
-        {
-            self.startup.terrain_presentation =
-                mclone_app_runtime::startup_args::TerrainPresentationMode::ExactOnly;
-        }
+        // Preserve the desired preset. `McloneSceneHost` projects unsupported
+        // sources to an effective Off state while retaining the preference.
     }
 
     pub fn validated(self) -> Result<Self> {
-        if self.startup.terrain_presentation
-            == mclone_app_runtime::startup_args::TerrainPresentationMode::Composed
-        {
-            if self.startup.world_generation_profile
-                != mclone_server::WorldGenerationProfile::McloneOverworldV1
-            {
-                bail!(
-                    "composed terrain presentation currently requires the mclone-overworld-v1 generation profile"
-                );
-            }
-            if self.startup.remote_addr.is_some() {
-                bail!(
-                    "composed terrain presentation requires a local authoritative source until remote generator identity is published"
-                );
-            }
-        }
         if !self.player_movement_cadence.is_valid() {
             bail!(
                 "player movement cadence must have a rate in 1..=1000 Hz and at least one catch-up step, got {}/{}",
@@ -359,16 +338,15 @@ mod tests {
     }
 
     #[test]
-    fn session_source_projection_keeps_composed_only_for_local_overworlds() {
+    fn session_source_projection_retains_the_desired_lod_for_unsupported_sources() {
         let mut compatible = McloneSceneHostOptions::default();
         compatible.world_generation_profile =
             mclone_server::WorldGenerationProfile::McloneOverworldV1;
-        compatible.terrain_presentation =
-            mclone_app_runtime::startup_args::TerrainPresentationMode::Composed;
+        compatible.terrain_lod_preset = mclone_core::TerrainLodPreset::High;
         compatible.project_terrain_presentation_for_source(true);
         assert_eq!(
-            compatible.terrain_presentation,
-            mclone_app_runtime::startup_args::TerrainPresentationMode::Composed
+            compatible.terrain_lod_preset,
+            mclone_core::TerrainLodPreset::High
         );
 
         let mut incompatible_profile = compatible.clone();
@@ -376,15 +354,15 @@ mod tests {
             mclone_server::WorldGenerationProfile::TopologyProbeV1;
         incompatible_profile.project_terrain_presentation_for_source(true);
         assert_eq!(
-            incompatible_profile.terrain_presentation,
-            mclone_app_runtime::startup_args::TerrainPresentationMode::ExactOnly
+            incompatible_profile.terrain_lod_preset,
+            mclone_core::TerrainLodPreset::High
         );
 
         let mut remote = compatible;
         remote.project_terrain_presentation_for_source(false);
         assert_eq!(
-            remote.terrain_presentation,
-            mclone_app_runtime::startup_args::TerrainPresentationMode::ExactOnly
+            remote.terrain_lod_preset,
+            mclone_core::TerrainLodPreset::High
         );
     }
 }

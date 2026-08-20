@@ -2045,7 +2045,7 @@ pub enum GameUiAction {
     ToggleSectionOcclusion,
     SetLeafDetail(GameLeafDetail),
     SetGrassDetail(GameGrassDetail),
-    SetTerrainPresentation(GameTerrainPresentation),
+    SetTerrainLodPreset(TerrainLodPreset),
     SetFogSettings(GameFogSettings),
     SetSeasonPreview(SeasonPreviewSettings),
     SetCelestialDebug(CelestialDebugSettings),
@@ -2265,29 +2265,8 @@ impl GameGrassDetail {
     }
 }
 
-/// Player-facing selection for exact-only or composed terrain horizon rendering.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub enum GameTerrainPresentation {
-    #[default]
-    ExactOnly,
-    Composed,
-}
-
-impl GameTerrainPresentation {
-    pub const fn next(self) -> Self {
-        match self {
-            Self::ExactOnly => Self::Composed,
-            Self::Composed => Self::ExactOnly,
-        }
-    }
-
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::ExactOnly => "Exact Only",
-            Self::Composed => "Composed",
-        }
-    }
-}
+/// Player-facing quality bound for procedural distant terrain.
+pub use mclone_core::TerrainLodPreset;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum GameFogMode {
@@ -2650,8 +2629,8 @@ pub struct GameUiRenderState {
     pub section_occlusion_culling: bool,
     pub leaf_detail: GameLeafDetail,
     pub grass_detail: GameGrassDetail,
-    pub terrain_presentation: GameTerrainPresentation,
-    pub terrain_presentation_available: bool,
+    pub terrain_lod_preset: TerrainLodPreset,
+    pub terrain_lod_available: bool,
     pub fog: GameFogSettings,
     pub season_preview: SeasonPreviewSettings,
     pub seasonal_debug: Option<GameSeasonalDebugState>,
@@ -2704,8 +2683,8 @@ impl Default for GameUiRenderState {
             section_occlusion_culling: true,
             leaf_detail: GameLeafDetail::Blocky,
             grass_detail: GameGrassDetail::Off,
-            terrain_presentation: GameTerrainPresentation::ExactOnly,
-            terrain_presentation_available: true,
+            terrain_lod_preset: TerrainLodPreset::Off,
+            terrain_lod_available: true,
             fog: GameFogSettings::default(),
             season_preview: SeasonPreviewSettings::default(),
             seasonal_debug: None,

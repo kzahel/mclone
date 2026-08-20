@@ -259,13 +259,13 @@ impl McloneSceneHost {
                     }
                 }
                 self.request_grass_detail(engine_grass_detail(preferences.grass_detail));
-                if !self
-                    .active_world
-                    .scene
-                    .startup
-                    .terrain_presentation_explicit
+                self.terrain_lod_persisted_preference = preferences.terrain_lod_preset;
+                if !self.active_world.scene.startup.terrain_lod_preset_explicit
+                    && let Some(preset) = preferences.terrain_lod_preset
+                    && preset != self.terrain_lod_preset_preference
                 {
-                    self.request_terrain_presentation(preferences.terrain_presentation)?;
+                    self.terrain_lod_preset_preference = preset;
+                    self.reset_terrain_view();
                 }
                 self.fog_settings = preferences.fog.normalized();
             }
@@ -557,7 +557,7 @@ impl McloneSceneHost {
         let preferences = ClientGraphicsPreferences {
             leaf_detail: game_leaf_detail(self.active_assets.mesh.catalog.leaf_detail()),
             grass_detail: game_grass_detail(self.render_options.grass_detail),
-            terrain_presentation: self.terrain_presentation_preference(),
+            terrain_lod_preset: self.terrain_lod_persisted_preference,
             fog: self.fog_settings,
         };
         if let Some(storage) = self.graphics_preference_storage.as_ref() {

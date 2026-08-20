@@ -2,8 +2,8 @@ use super::*;
 use crate::{
     GameAuxiliarySplitMode, GameFlatPresentationState, GameFogMode, GameFogSettings,
     GameGrassDetail, GameLeafDetail, GameLocalPlayControllerFamily, GameLocalPlayGuestInput,
-    GameLocalPlayLayout, GameLocalPlayState, GameTerrainPresentation, GameWorldRenderScaleMode,
-    GameXrRenderMode, GameXrRenderModeSet, GameXrRenderPathState, GameXrRenderTransitionState,
+    GameLocalPlayLayout, GameLocalPlayState, GameWorldRenderScaleMode, GameXrRenderMode,
+    GameXrRenderModeSet, GameXrRenderPathState, GameXrRenderTransitionState, TerrainLodPreset,
 };
 
 #[test]
@@ -560,7 +560,7 @@ fn graphics_options_show_and_cycle_grass_detail() {
 }
 
 #[test]
-fn graphics_options_show_and_cycle_terrain_horizon() {
+fn graphics_options_show_and_cycle_distant_terrain_quality() {
     let mut surface = UiSurface::new();
     surface.set_screen(Some(UiScreenId::OptionsCategory {
         parent: GameOptionsParent::Pause,
@@ -568,7 +568,7 @@ fn graphics_options_show_and_cycle_terrain_horizon() {
     }));
     surface.set_scale(GuiScale::from_pixels(960, 540));
     let state = GameUiRenderState {
-        terrain_presentation: GameTerrainPresentation::Composed,
+        terrain_lod_preset: TerrainLodPreset::Medium,
         ..GameUiRenderState::default()
     };
     surface.set_render_state(state);
@@ -578,19 +578,17 @@ fn graphics_options_show_and_cycle_terrain_horizon() {
         .widget(UI_V2_OPTIONS_TERRAIN_PRESENTATION)
         .expect("terrain horizon row")
         .clone();
-    assert_eq!(terrain_horizon.label, "Terrain Horizon");
-    assert_eq!(terrain_horizon.value.as_deref(), Some("Composed"));
+    assert_eq!(terrain_horizon.label, "Distant Terrain");
+    assert_eq!(terrain_horizon.value.as_deref(), Some("Medium"));
     assert!(terrain_horizon.enabled);
     assert!(surface.pointer_down(point_in(terrain_horizon.rect), state));
     assert_eq!(
         surface.pointer_up(point_in(terrain_horizon.rect), state).1,
-        Some(GameUiAction::SetTerrainPresentation(
-            GameTerrainPresentation::ExactOnly,
-        ))
+        Some(GameUiAction::SetTerrainLodPreset(TerrainLodPreset::High,))
     );
 
     let unavailable = GameUiRenderState {
-        terrain_presentation_available: false,
+        terrain_lod_available: false,
         ..state
     };
     surface.set_render_state(unavailable);
@@ -599,7 +597,7 @@ fn graphics_options_show_and_cycle_terrain_horizon() {
             .layout()
             .widget(UI_V2_OPTIONS_TERRAIN_PRESENTATION)
             .and_then(|widget| widget.value.as_deref()),
-        Some("Composed (Unavailable)")
+        Some("Medium (Unavailable)")
     );
 }
 

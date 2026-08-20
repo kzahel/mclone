@@ -113,7 +113,7 @@ const SCENE_HOST_FIELDS: &[&str] = &[
     "asset_pack_preference_error",
     "graphics_preference_storage",
     "graphics_preference_error",
-    "terrain_presentation_preference",
+    "terrain_lod_preset_preference",
     "fog_settings",
     "pending_leaf_detail",
     "pending_restored_asset_pack_selection",

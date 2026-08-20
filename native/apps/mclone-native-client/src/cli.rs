@@ -2062,7 +2062,22 @@ impl Cli {
         let startup_options = startup_args.finish();
         let startup_camera = startup_options.camera;
         let startup_storage = startup_options.storage;
-        let mut scene = SceneOptions::with_startup(startup_options.scene);
+        let graphics_platform_profile = if desktop_xr
+            || xr_mclone_smoke
+            || matches!(mode, Some(HeadlessMode::XrEmulationScreenshot(_)))
+        {
+            mclone_app_runtime::graphics_preferences::ClientGraphicsPlatformProfile::DesktopOpenXr
+        } else {
+            match platform_profile {
+                WindowPlatformProfile::Desktop => mclone_app_runtime::graphics_preferences::ClientGraphicsPlatformProfile::NativeDesktopFlat,
+                WindowPlatformProfile::SteamOs => mclone_app_runtime::graphics_preferences::ClientGraphicsPlatformProfile::SteamOs,
+            }
+        };
+        let mut scene = SceneOptions::with_startup(
+            startup_options
+                .scene
+                .with_graphics_platform_profile(graphics_platform_profile),
+        );
         if season_recent_snow_center.is_some() && season_recent_snow_intensity.is_none() {
             bail!("--season-recent-snow-center requires --season-recent-snow");
         }

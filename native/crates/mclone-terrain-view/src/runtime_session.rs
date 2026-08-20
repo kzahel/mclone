@@ -4,10 +4,9 @@ use crate::{
     BoundedRepresentationOwnershipSnapshot, ExactPaintedCoverageSnapshot, McloneTreeOccurrenceId,
     TerrainClipmapConfig, TerrainCompositionSourceIdentity, TerrainExactCoverageMode,
     TerrainHorizonFrameStats, TerrainHorizonPresentation, TerrainHorizonRenderTarget,
-    TerrainPreparedExactFrame, TerrainPreviewCamera,
-    TerrainPreviewMaterialAtlas, TerrainPreviewProjectionKind, TerrainPreviewView,
-    TerrainVegetationExecutor, TerrainViewEngine, TerrainViewEngineConfig,
-    TerrainViewSourceIdentity, terrain_preview_focus_y_for_profile,
+    TerrainPreparedExactFrame, TerrainPreviewCamera, TerrainPreviewMaterialAtlas,
+    TerrainPreviewProjectionKind, TerrainPreviewView, TerrainVegetationExecutor, TerrainViewEngine,
+    TerrainViewEngineConfig, TerrainViewSourceIdentity, terrain_preview_focus_y_for_profile,
 };
 use mclone_core::HorizontalTopology;
 use mclone_render_color::{RenderColorProfile, RenderTargetColorTransform};
@@ -157,6 +156,8 @@ impl TerrainRuntimeSession {
                 source,
                 clipmap: config.clipmap,
                 render_cell_stride: 1,
+                vegetation_max_sample_spacing:
+                    mclone_worldgen::terrain_preview::TERRAIN_PREVIEW_MAX_TREE_RECORD_SAMPLE_SPACING,
                 vegetation_enabled: config.vegetation_enabled,
                 color_profile: config.color_profile,
             },

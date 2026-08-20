@@ -373,7 +373,11 @@ fn android_pacing_perf_options(
 }
 
 fn android_startup_scene_defaults() -> StartupSceneOptions {
-    StartupSceneOptions::default().with_initial_time_frozen_at(6000)
+    StartupSceneOptions::default()
+        .with_graphics_platform_profile(
+            mclone_app_runtime::graphics_preferences::ClientGraphicsPlatformProfile::FlatAndroid,
+        )
+        .with_initial_time_frozen_at(6000)
 }
 
 pub(crate) fn apply_startup_camera_options(

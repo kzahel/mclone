@@ -2,9 +2,10 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
+use mclone_core::TerrainLodPreset;
 use mclone_ui::{
     GameFogColorMode, GameFogMode, GameFogSettings, GameFogWeatherInfluence, GameGrassDetail,
-    GameLeafDetail, GameTerrainPresentation,
+    GameLeafDetail,
 };
 use serde::{Deserialize, Serialize};
 
@@ -14,11 +15,39 @@ pub const GRAPHICS_PREFERENCE_STORAGE_KEY: &str = "mclone.graphics.preferences.v
 pub const GRAPHICS_PREFERENCE_SCHEMA: u32 = 1;
 pub const GRAPHICS_PREFERENCE_FILE_NAME: &str = "graphics-preferences.v1.json";
 
+/// Shared host classification used only to resolve an unset graphics default.
+///
+/// Preset descriptors remain platform-independent; an explicit player or
+/// launch selection always replaces this fallback.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum ClientGraphicsPlatformProfile {
+    #[default]
+    NativeDesktopFlat,
+    SteamOs,
+    Web,
+    FlatAndroid,
+    DesktopOpenXr,
+    AndroidXr,
+}
+
+impl ClientGraphicsPlatformProfile {
+    pub const fn default_terrain_lod_preset(self) -> TerrainLodPreset {
+        match self {
+            Self::NativeDesktopFlat => TerrainLodPreset::High,
+            Self::SteamOs | Self::Web | Self::DesktopOpenXr | Self::AndroidXr => {
+                TerrainLodPreset::Medium
+            }
+            Self::FlatAndroid => TerrainLodPreset::Low,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct ClientGraphicsPreferences {
     pub leaf_detail: GameLeafDetail,
     pub grass_detail: GameGrassDetail,
-    pub terrain_presentation: GameTerrainPresentation,
+    /// `None` resolves through the current platform profile.
+    pub terrain_lod_preset: Option<TerrainLodPreset>,
     pub fog: GameFogSettings,
 }
 
@@ -57,7 +86,10 @@ impl ClientGraphicsPreferences {
 struct StoredGraphicsPreferences {
     leaf_detail: StoredLeafDetail,
     grass_detail: StoredGrassDetail,
-    terrain_presentation: StoredTerrainPresentation,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    terrain_lod_preset: Option<StoredTerrainLodPreset>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    terrain_presentation: Option<StoredTerrainPresentation>,
     fog: StoredFogSettings,
 }
 
@@ -74,10 +106,8 @@ impl From<ClientGraphicsPreferences> for StoredGraphicsPreferences {
                 GameGrassDetail::Lush => StoredGrassDetail::Lush,
                 GameGrassDetail::Ultra => StoredGrassDetail::Ultra,
             },
-            terrain_presentation: match value.terrain_presentation {
-                GameTerrainPresentation::ExactOnly => StoredTerrainPresentation::ExactOnly,
-                GameTerrainPresentation::Composed => StoredTerrainPresentation::Composed,
-            },
+            terrain_lod_preset: value.terrain_lod_preset.map(StoredTerrainLodPreset::from),
+            terrain_presentation: None,
             fog: StoredFogSettings::from(value.fog),
         }
     }
@@ -96,10 +126,12 @@ impl From<StoredGraphicsPreferences> for ClientGraphicsPreferences {
                 StoredGrassDetail::Lush => GameGrassDetail::Lush,
                 StoredGrassDetail::Ultra => GameGrassDetail::Ultra,
             },
-            terrain_presentation: match value.terrain_presentation {
-                StoredTerrainPresentation::ExactOnly => GameTerrainPresentation::ExactOnly,
-                StoredTerrainPresentation::Composed => GameTerrainPresentation::Composed,
-            },
+            terrain_lod_preset: value.terrain_lod_preset.map(Into::into).or_else(|| {
+                value.terrain_presentation.map(|legacy| match legacy {
+                    StoredTerrainPresentation::ExactOnly => TerrainLodPreset::Off,
+                    StoredTerrainPresentation::Composed => TerrainLodPreset::High,
+                })
+            }),
             fog: value.fog.into(),
         }
     }
@@ -123,10 +155,40 @@ enum StoredGrassDetail {
     Ultra,
 }
 
-#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum StoredTerrainLodPreset {
+    Off,
+    Low,
+    Medium,
+    High,
+}
+
+impl From<TerrainLodPreset> for StoredTerrainLodPreset {
+    fn from(value: TerrainLodPreset) -> Self {
+        match value {
+            TerrainLodPreset::Off => Self::Off,
+            TerrainLodPreset::Low => Self::Low,
+            TerrainLodPreset::Medium => Self::Medium,
+            TerrainLodPreset::High => Self::High,
+        }
+    }
+}
+
+impl From<StoredTerrainLodPreset> for TerrainLodPreset {
+    fn from(value: StoredTerrainLodPreset) -> Self {
+        match value {
+            StoredTerrainLodPreset::Off => Self::Off,
+            StoredTerrainLodPreset::Low => Self::Low,
+            StoredTerrainLodPreset::Medium => Self::Medium,
+            StoredTerrainLodPreset::High => Self::High,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 enum StoredTerrainPresentation {
-    #[default]
     ExactOnly,
     #[serde(alias = "experimental")]
     Composed,
@@ -385,8 +447,8 @@ mod tests {
             GameGrassDetail::Off
         );
         assert_eq!(
-            ClientGraphicsPreferences::default().terrain_presentation,
-            GameTerrainPresentation::ExactOnly
+            ClientGraphicsPreferences::default().terrain_lod_preset,
+            None
         );
         assert_eq!(
             ClientGraphicsPreferences::default().fog,
@@ -400,7 +462,7 @@ mod tests {
         let preferences = ClientGraphicsPreferences {
             leaf_detail: GameLeafDetail::Bushy,
             grass_detail: GameGrassDetail::Lush,
-            terrain_presentation: GameTerrainPresentation::Composed,
+            terrain_lod_preset: Some(TerrainLodPreset::Medium),
             fog: GameFogSettings {
                 mode: GameFogMode::GroundHaze,
                 visibility_blocks: 12_288.0,
@@ -421,26 +483,28 @@ mod tests {
                 .get(GRAPHICS_PREFERENCE_STORAGE_KEY)
                 .unwrap()
                 .expect("stored graphics preferences")
-                .contains(r#""terrainPresentation": "composed""#)
+                .contains(r#""terrainLodPreset": "medium""#)
         );
     }
 
     #[test]
-    fn graphics_preferences_migrate_experimental_terrain_presentation() {
-        let preferences = ClientGraphicsPreferences::from_json(
-            r#"{"schema":1,"preferences":{"terrainPresentation":"experimental"}}"#,
-        )
-        .unwrap();
-        assert_eq!(
-            preferences.terrain_presentation,
-            GameTerrainPresentation::Composed
-        );
-        assert!(
-            preferences
-                .to_json()
-                .unwrap()
-                .contains(r#""terrainPresentation": "composed""#)
-        );
+    fn graphics_preferences_migrate_legacy_terrain_presentation() {
+        for (legacy, expected) in [
+            ("exactOnly", TerrainLodPreset::Off),
+            ("composed", TerrainLodPreset::High),
+            ("experimental", TerrainLodPreset::High),
+        ] {
+            let json =
+                format!(r#"{{"schema":1,"preferences":{{"terrainPresentation":"{legacy}"}}}}"#);
+            let preferences = ClientGraphicsPreferences::from_json(&json).unwrap();
+            assert_eq!(preferences.terrain_lod_preset, Some(expected));
+            let migrated = preferences.to_json().unwrap();
+            assert!(migrated.contains(&format!(
+                r#""terrainLodPreset": "{}""#,
+                expected.startup_label()
+            )));
+            assert!(!migrated.contains("terrainPresentation"));
+        }
     }
 
     #[test]
@@ -471,6 +535,12 @@ mod tests {
         );
         assert!(
             ClientGraphicsPreferences::from_json(
+                r#"{"schema":1,"preferences":{"terrainLodPreset":"cinematic"}}"#
+            )
+            .is_err()
+        );
+        assert!(
+            ClientGraphicsPreferences::from_json(
                 r#"{"schema":1,"preferences":{"fog":{"mode":"volumetric"}}}"#
             )
             .is_err()
@@ -482,6 +552,34 @@ mod tests {
         assert_eq!(
             ClientGraphicsPreferences::from_json(r#"{"schema":1,"preferences":{}}"#).unwrap(),
             ClientGraphicsPreferences::default()
+        );
+    }
+
+    #[test]
+    fn platform_profiles_only_choose_the_unset_default() {
+        assert_eq!(
+            ClientGraphicsPlatformProfile::NativeDesktopFlat.default_terrain_lod_preset(),
+            TerrainLodPreset::High
+        );
+        assert_eq!(
+            ClientGraphicsPlatformProfile::SteamOs.default_terrain_lod_preset(),
+            TerrainLodPreset::Medium
+        );
+        assert_eq!(
+            ClientGraphicsPlatformProfile::Web.default_terrain_lod_preset(),
+            TerrainLodPreset::Medium
+        );
+        assert_eq!(
+            ClientGraphicsPlatformProfile::FlatAndroid.default_terrain_lod_preset(),
+            TerrainLodPreset::Low
+        );
+        assert_eq!(
+            ClientGraphicsPlatformProfile::DesktopOpenXr.default_terrain_lod_preset(),
+            TerrainLodPreset::Medium
+        );
+        assert_eq!(
+            ClientGraphicsPlatformProfile::AndroidXr.default_terrain_lod_preset(),
+            TerrainLodPreset::Medium
         );
     }
 
@@ -498,7 +596,7 @@ mod tests {
         let preferences = ClientGraphicsPreferences {
             leaf_detail: GameLeafDetail::Bushy,
             grass_detail: GameGrassDetail::Ultra,
-            terrain_presentation: GameTerrainPresentation::Composed,
+            terrain_lod_preset: Some(TerrainLodPreset::High),
             fog: GameFogSettings {
                 mode: GameFogMode::Classic,
                 classic_start: 0.6,

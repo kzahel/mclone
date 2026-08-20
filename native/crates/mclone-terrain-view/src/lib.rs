@@ -11,6 +11,7 @@ mod clipmap;
 mod composition;
 mod engine;
 mod horizon_admission;
+mod lod;
 #[cfg(not(target_arch = "wasm32"))]
 mod native_vegetation;
 mod runtime_exact;
@@ -72,10 +73,14 @@ pub use composition::{
     TERRAIN_EXACT_TRANSITION_HALO_TEXELS, TERRAIN_EXACT_TRANSITION_MAX_BYTES,
     TERRAIN_EXACT_TRANSITION_MAX_TEXELS_PER_AXIS, TerrainCompositionSourceIdentity,
     TerrainExactBoundaryColumn, TerrainExactBoundaryProfile, TerrainExactCoverageMask,
-    TerrainExactCoverageMode, TerrainExactTransitionField,
-    terrain_exact_exposed_boundary_blocks, terrain_exact_player_connected_chunks,
+    TerrainExactCoverageMode, TerrainExactTransitionField, terrain_exact_exposed_boundary_blocks,
+    terrain_exact_player_connected_chunks,
 };
 pub use engine::{TerrainViewEngine, TerrainViewEngineConfig};
+pub use lod::{
+    TERRAIN_LOD_HIGH_LEVEL_COUNT, TERRAIN_LOD_LOW_LEVEL_COUNT, TERRAIN_LOD_MEDIUM_LEVEL_COUNT,
+    TerrainLodPresetDescriptor,
+};
 #[cfg(not(target_arch = "wasm32"))]
 pub use native_vegetation::NativeTerrainVegetationExecutor;
 pub use runtime_exact::{

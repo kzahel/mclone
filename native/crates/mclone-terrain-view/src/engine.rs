@@ -7,7 +7,8 @@ use crate::{
 };
 use mclone_render_color::{RenderColorProfile, RenderTargetColorTransform};
 use mclone_worldgen::terrain_preview::{
-    TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS, TerrainPreviewContentStage, TerrainPreviewProfile,
+    TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS, TERRAIN_PREVIEW_MAX_TREE_RECORD_SAMPLE_SPACING,
+    TerrainPreviewContentStage, TerrainPreviewProfile,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -21,6 +22,8 @@ pub struct TerrainViewEngineConfig {
     /// This changes presentation density only; residency, source identity,
     /// exact coverage, and bounded feature ownership remain unchanged.
     pub render_cell_stride: u32,
+    /// Coarsest level allowed to plan, retain, or draw proxy-tree records.
+    pub vegetation_max_sample_spacing: u32,
     pub vegetation_enabled: bool,
     pub color_profile: RenderColorProfile,
 }
@@ -52,6 +55,17 @@ impl TerrainViewEngineConfig {
                  transition contract {}; add stride-aware stitching and halo \
                  evidence before enabling it",
                 self.render_cell_stride, TERRAIN_HORIZON_MAX_PROVEN_RENDER_CELL_STRIDE,
+            ));
+        }
+        if !self.vegetation_max_sample_spacing.is_power_of_two()
+            || self.vegetation_max_sample_spacing < self.clipmap.base_sample_spacing
+            || self.vegetation_max_sample_spacing > TERRAIN_PREVIEW_MAX_TREE_RECORD_SAMPLE_SPACING
+        {
+            return Err(format!(
+                "terrain vegetation maximum sample spacing {} must be a power of two from {} through {}",
+                self.vegetation_max_sample_spacing,
+                self.clipmap.base_sample_spacing,
+                TERRAIN_PREVIEW_MAX_TREE_RECORD_SAMPLE_SPACING,
             ));
         }
         Ok(self)
@@ -99,6 +113,7 @@ impl TerrainViewEngine {
             material_atlas,
             config.clipmap,
             config.render_cell_stride,
+            config.vegetation_max_sample_spacing,
             vegetation_executor,
             target_color_transform,
         )?;
@@ -366,6 +381,7 @@ mod tests {
             source: hidden,
             clipmap: TerrainClipmapConfig::default(),
             render_cell_stride: 1,
+            vegetation_max_sample_spacing: TERRAIN_PREVIEW_MAX_TREE_RECORD_SAMPLE_SPACING,
             vegetation_enabled: false,
             color_profile: RenderColorProfile::Vanilla,
         }
@@ -382,6 +398,7 @@ mod tests {
             source: source(12_345, 1),
             clipmap: TerrainClipmapConfig::default(),
             render_cell_stride,
+            vegetation_max_sample_spacing: TERRAIN_PREVIEW_MAX_TREE_RECORD_SAMPLE_SPACING,
             vegetation_enabled: false,
             color_profile: RenderColorProfile::Vanilla,
         };
