@@ -8,8 +8,8 @@ use sha2::{Digest, Sha256};
 use crate::continental_ecoregion::{
     ClearingCause, ContinentalEcoregionDescriptor, ContinentalEcoregionError,
     ContinentalEcoregionPlan, ContinentalEcoregionTopology, ContinentalStory, EcoregionKind,
-    LandscapePlanDetail, LandscapePlanSample, LandscapeWindowRequest, PhysiographicProvinceKind,
-    PlanConstructionCounts,
+    HabitatRouteKind, LandscapePlanDetail, LandscapePlanSample, LandscapeWindowRequest,
+    PhysiographicProvinceKind, PlanConstructionCounts,
 };
 use crate::continental_ecoregion_harness::CONTINENTAL_ECOREGION_WITNESS_SHA256;
 use crate::levelgen::{
@@ -20,7 +20,7 @@ use crate::levelgen::{
 use crate::terrain_preview::preview_forest_intent;
 
 pub const CONTINENTAL_ECOREGION_ATLAS_SCHEMA_REVISION: &str =
-    "mclone-continental-ecoregion-atlas-v4";
+    "mclone-continental-ecoregion-atlas-v5";
 pub const CONTINENTAL_ECOREGION_ATLAS_DEFAULT_SAMPLES_ACROSS: u32 = 256;
 pub const CONTINENTAL_ECOREGION_ATLAS_MAX_SAMPLES: usize = 262_144;
 pub const CONTINENTAL_ECOREGION_ATLAS_NONE: u8 = u8::MAX;
@@ -191,6 +191,7 @@ pub struct ContinentalEcoregionAtlasMetadata {
     pub province_kinds: Vec<&'static str>,
     pub ecoregion_kinds: Vec<&'static str>,
     pub clearing_causes: Vec<&'static str>,
+    pub habitat_route_kinds: Vec<&'static str>,
     pub metrics: ContinentalEcoregionAtlasMetrics,
 }
 
@@ -212,10 +213,12 @@ pub struct ContinentalEcoregionAtlas {
     pub major_water: Vec<u16>,
     pub wetland: Vec<u16>,
     pub corridor: Vec<u16>,
+    pub corridor_kind: Vec<u8>,
     pub continent_id: Vec<u32>,
     pub province_id: Vec<u32>,
     pub ecoregion_id: Vec<u32>,
     pub clearing_id: Vec<u32>,
+    pub corridor_id: Vec<u32>,
     pub production_land: Vec<u16>,
     pub production_surface_y: Vec<i16>,
     pub production_temperature: Vec<i16>,
@@ -332,6 +335,10 @@ pub fn compile_continental_ecoregion_atlas(
                 .collect(),
             ecoregion_kinds: EcoregionKind::ALL.iter().map(|kind| kind.label()).collect(),
             clearing_causes: ClearingCause::ALL.iter().map(|kind| kind.label()).collect(),
+            habitat_route_kinds: HabitatRouteKind::ALL
+                .iter()
+                .map(|kind| kind.label())
+                .collect(),
             metrics,
         },
         land: arrays.land,
@@ -349,10 +356,12 @@ pub fn compile_continental_ecoregion_atlas(
         major_water: arrays.major_water,
         wetland: arrays.wetland,
         corridor: arrays.corridor,
+        corridor_kind: arrays.corridor_kind,
         continent_id: arrays.continent_id,
         province_id: arrays.province_id,
         ecoregion_id: arrays.ecoregion_id,
         clearing_id: arrays.clearing_id,
+        corridor_id: arrays.corridor_id,
         production_land: arrays.production_land,
         production_surface_y: arrays.production_surface_y,
         production_temperature: arrays.production_temperature,
@@ -381,10 +390,12 @@ struct AtlasArrays {
     major_water: Vec<u16>,
     wetland: Vec<u16>,
     corridor: Vec<u16>,
+    corridor_kind: Vec<u8>,
     continent_id: Vec<u32>,
     province_id: Vec<u32>,
     ecoregion_id: Vec<u32>,
     clearing_id: Vec<u32>,
+    corridor_id: Vec<u32>,
     production_land: Vec<u16>,
     production_surface_y: Vec<i16>,
     production_temperature: Vec<i16>,
@@ -414,10 +425,12 @@ impl AtlasArrays {
             major_water: Vec::with_capacity(capacity),
             wetland: Vec::with_capacity(capacity),
             corridor: Vec::with_capacity(capacity),
+            corridor_kind: Vec::with_capacity(capacity),
             continent_id: Vec::with_capacity(capacity),
             province_id: Vec::with_capacity(capacity),
             ecoregion_id: Vec::with_capacity(capacity),
             clearing_id: Vec::with_capacity(capacity),
+            corridor_id: Vec::with_capacity(capacity),
             production_land: Vec::with_capacity(capacity),
             production_surface_y: Vec::with_capacity(capacity),
             production_temperature: Vec::with_capacity(capacity),
@@ -492,6 +505,12 @@ impl AtlasArrays {
         self.corridor.push(quantize_unit(
             sample.mosaic.map_or(0.0, |fact| fact.corridor),
         ));
+        self.corridor_kind.push(
+            sample
+                .mosaic
+                .and_then(|fact| fact.corridor_kind)
+                .map_or(CONTINENTAL_ECOREGION_ATLAS_NONE, |kind| kind as u8),
+        );
         self.continent_id
             .push(sample.continent.map_or(0, |fact| fact.id.hash as u32));
         self.province_id
@@ -502,6 +521,12 @@ impl AtlasArrays {
             sample
                 .mosaic
                 .and_then(|fact| fact.clearing_id)
+                .map_or(0, |id| id.hash as u32),
+        );
+        self.corridor_id.push(
+            sample
+                .mosaic
+                .and_then(|fact| fact.corridor_id)
                 .map_or(0, |id| id.hash as u32),
         );
     }
@@ -1502,6 +1527,16 @@ mod tests {
         assert_eq!(atlas.metadata.work.exact_chunks, 0);
         assert_eq!(atlas.metadata.production_control_work.exact_chunks, 0);
         assert_eq!(atlas.production_land.len(), atlas.land.len());
+        assert_eq!(atlas.corridor_kind.len(), atlas.land.len());
+        assert_eq!(atlas.corridor_id.len(), atlas.land.len());
+        assert_eq!(atlas.metadata.habitat_route_kinds.len(), 4);
+        assert!(
+            atlas
+                .corridor_kind
+                .iter()
+                .any(|kind| *kind != CONTINENTAL_ECOREGION_ATLAS_NONE)
+        );
+        assert!(atlas.corridor_id.iter().any(|id| *id != 0));
         assert_eq!(atlas.production_biome_kind.len(), atlas.land.len());
         assert_eq!(atlas.production_forest_coverage.len(), atlas.land.len());
         assert_eq!(

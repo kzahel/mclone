@@ -11,12 +11,12 @@ transition, clearing, recurrence, and habitat-connectivity distributions are
 also complete. Decomposed land/ocean, climate, biome, forest-openness, height,
 and water controls now pass and have been pixel-reviewed. Human Review A
 selected “revise” on 2026-08-20: retain the continental, province, ecoregion,
-and clearing candidate. The first correction is implemented: typed,
-adjacency-aware shoulders replace the generic transition band. Replacing the
-single continental corridor band with a real route network is now active.
-Arid expansion
-and World Explorer realization remain gated until the corrected atlas returns
-to review. The current production generator remains a visible control, not a
+and clearing candidate. Both named corrections are implemented: typed,
+adjacency-aware shoulders replace the generic transition band, and stable
+typed spine-and-branch routes replace the single continental corridor stripe.
+The corrected atlas has returned to Human Review A. Arid expansion and World
+Explorer realization remain gated until that review accepts it. The current
+production generator remains a visible control, not a
 protected output target.**
 
 Topic: `continental-ecoregion-planning`
@@ -135,7 +135,7 @@ Landed on 2026-08-20 in shared `mclone-worldgen` ownership:
   `/tmp/mclone-continental-ecoregion/receipt.json` by default.
 
 The pinned native/Wasm witness is
-`612a102fcc909274f029f1a31a6cdfaa348b53536adcb87893e91308ec1e4405`.
+`cd1a8638630df83d4fc5b9f642da9e9dbbbdd06fd1169558a98e9621cf2ef925`.
 It covers three seeds on plane and cylinder through 11,301 exact comparisons:
 whole versus split windows, randomized point traversal, direct coarse
 projection, owner/work caps, zero exact-chunk work, periodic lifts, and four
@@ -143,18 +143,19 @@ independent native threads. The dedicated Wasm test produces the same
 witness through `wasm-bindgen-test-runner`.
 
 The complete Review A macOS `release` receipt at
-`/tmp/mclone-continental-ecoregion/receipt-v6.json` measured:
+`/tmp/mclone-continental-ecoregion/receipt-v8.json` measured the corrected
+plan:
 
 | Query | Observed time |
 |---|---:|
-| continental point | 291 ns/sample |
-| province point | 392 ns/sample |
-| ecoregion point | 491 ns/sample |
-| mosaic point | 529 ns/sample |
-| 65,536-block, 256x256 candidate plan | 62.2 ms total / 949 ns per sample |
-| 131,072-block, 256x256 candidate plan | 51.6 ms total / 787 ns per sample |
-| 65,536-block candidate + complete control, cold / warm | 183.4 / 183.0 ms |
-| 131,072-block candidate + complete control, cold / warm | 180.6 / 181.5 ms |
+| continental point | 296 ns/sample |
+| province point | 430 ns/sample |
+| ecoregion point | 524 ns/sample |
+| mosaic point | 581 ns/sample |
+| 65,536-block, 256x256 candidate plan | 68.1 ms total / 1,039 ns per sample |
+| 131,072-block, 256x256 candidate plan | 56.8 ms total / 867 ns per sample |
+| 65,536-block candidate + complete control, cold / warm | 192.5 / 192.8 ms |
+| 131,072-block candidate + complete control, cold / warm | 189.0 / 188.3 ms |
 
 These timings are descriptive, not yet a budget, and exclude canvas drawing.
 The equal 256x256 cost at the two extents demonstrates direct coarse sampling:
@@ -258,12 +259,11 @@ and 19,968-block p90 transition span; 140 clearings with 2.36 km² median area,
 graph has 374 typed patches, 787 links, a largest connected network of 58
 patches, and only 27.0% of patches linked to another patch.
 
-The desktop-aspect 131 km browser evidence independently reports 113 planned
-clearings, 4.1 km median transition width, 4.2 km median recurrence, and 24.4%
-connected habitat patches. The inspected card is
-`/tmp/mclone-terrain-lab-desktop-chrome-ecoregion-metrics-131km.png`. The low
-connected fraction is a candidate concern to present at Human Review A, not a
-passing mark hidden by the broad union-mask component count.
+The initial desktop-aspect 131 km browser evidence independently reported 113
+planned clearings, 4.1 km median transition width, 4.2 km median recurrence,
+and 24.4% connected habitat patches. That low connected fraction selected the
+route-network correction; it was not a passing mark hidden by the broad
+union-mask component count.
 
 ### Decomposed production control and Review A handoff
 
@@ -330,7 +330,25 @@ The inspected desktop-aspect 131 km evidence now reports a 1.8 km median and
 matched composed map and evidence card retain their existing `/tmp` paths.
 The fixed atlas still requests 50,944 direct samples at 512-block spacing and
 constructs zero exact chunks. Habitat connectivity remains intentionally
-unchanged for the next correction.
+unchanged in this first correction.
+
+Plan schema `mclone-continental-ecoregion-plan-v4` completes the second
+correction. Every continental story now owns a typed riparian spine, wetland
+chain, woodland pass, or open-range link plus three bounded cross-links. Route
+IDs derive from the stable continent identity and slot, and the scalar
+corridor influence is now a realization of those facts rather than their only
+identity. Atlas schema `mclone-continental-ecoregion-atlas-v5` transfers route
+kind and ID alongside its influence.
+
+In the inspected desktop-aspect 131 km atlas, the unchanged habitat graph rule
+now observes 217 typed habitat patches and 2,791 route-mediated links. The
+largest network contains 97 patches, and 44.7% of patches touch at least one
+other patch, up from roughly one quarter under the single stripe. This still
+does not prove animal migration or set an acceptance threshold. The current
+evidence card is
+`/tmp/mclone-terrain-lab-desktop-chrome-ecoregion-metrics-131km.png`, and the
+typed route map is
+`/tmp/mclone-terrain-lab-desktop-chrome-ecoregion-habitat-routes-131km.png`.
 
 ## Candidate Plan Revision 2
 

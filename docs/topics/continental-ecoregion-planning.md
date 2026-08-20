@@ -16,11 +16,15 @@ review evidence rather than an inferred failure or success. Human Review A
 selected a named revision on 2026-08-20: retain the candidate hierarchy and
 clearings, author adjacency-specific ecotones, and replace the single corridor
 band with a typed spine-and-branch habitat network. Arid expansion and World
-Explorer realization remain gated until the corrected atlas returns to review.
+Explorer realization remain gated until the corrected atlas is accepted.
 The ecotone correction is implemented in plan revision 3: same-kind owner
 boundaries disappear, unlike neighbors carry explicit 0.8-2.6 km widths, and
-cover/climate blend continuously to their boundary. The route-network
-correction is the active next slice.
+cover/climate blend continuously to their boundary. Plan revision 4 completes
+the route-network correction with stable typed continental spines and bounded
+cross-links. The same graph rule now links 44.7% of sampled habitat patches,
+up from roughly one quarter; that remains descriptive review evidence rather
+than a migration proof or acceptance threshold. The corrected atlas is back
+at Human Review A.
 Mclone should combine
 top-down continental and ecoregional planning with bottom-up procedural
 realization so the Overworld contains large, recognizable, causally related

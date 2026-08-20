@@ -71,6 +71,12 @@ const CLEARING_COLORS = [
   [117, 176, 140],
   [179, 163, 104],
 ] as const;
+const HABITAT_ROUTE_COLORS = [
+  [44, 164, 176],
+  [65, 178, 151],
+  [175, 154, 87],
+  [210, 189, 92],
+] as const;
 const PRODUCTION_BIOME_COLORS = [
   [23, 75, 105],
   [192, 177, 119],
@@ -507,11 +513,11 @@ function sampleColor(
       return mix([75, 82, 64], [44, 147, 156], strength);
     }
     case "habitat":
-      return [
+      return mix([
         Math.round(65 + openness * 155),
         Math.round(65 + forest * 130 + wetland * 45),
         Math.round(55 + wetland * 170 + corridor * 30),
-      ];
+      ], palette(HABITAT_ROUTE_COLORS, response.corridorKind[index]!), corridor * 0.86);
     case "composed": {
       let color = mix(province, ecoregion, 0.68);
       color = mix(color, [36, 72, 44], forest * 0.42);
@@ -634,6 +640,10 @@ function EcoregionInspector({
     response.transitionPeerKind[index]!,
   );
   const clearing = labelAt(metadata.clearingCauses, response.clearingCause[index]!);
+  const corridorKind = labelAt(
+    metadata.habitatRouteKinds,
+    response.corridorKind[index]!,
+  );
   if (isProductionLayer(layer)) {
     const biome = PRODUCTION_BIOME_LABELS[response.productionBiomeKind[index]!]!;
     return (
@@ -689,6 +699,9 @@ function EcoregionInspector({
         <div><dt>Wetland / corridor</dt><dd>{percent(response.wetland[index]!)} / {
           percent(response.corridor[index]!)
         }</dd></div>
+        <div><dt>Route / ID</dt><dd>{corridorKind ?? "—"} / {
+          hexId(response.corridorId[index]!)
+        }</dd></div>
         <div><dt>Continent ID</dt><dd>{hexId(response.continentId[index]!)}</dd></div>
         <div><dt>Ecoregion ID</dt><dd>{hexId(response.ecoregionId[index]!)}</dd></div>
       </dl>
@@ -713,6 +726,11 @@ function EcoregionLegend({
         label,
         color: CLEARING_COLORS[index]!,
       }))
+      : layer === "habitat"
+        ? response?.metadata.habitatRouteKinds.map((label, index) => ({
+          label,
+          color: HABITAT_ROUTE_COLORS[index]!,
+        }))
       : isProductionLayer(layer)
         ? productionLegendEntries(layer)
         : response?.metadata.ecoregionKinds.map((label, index) => ({

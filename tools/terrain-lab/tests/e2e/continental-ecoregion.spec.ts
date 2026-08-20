@@ -1,7 +1,7 @@
 import { expect, test, type Locator } from "@playwright/test";
 
 const WITNESS_SHA256 =
-  "8f16305aa2f4db5ae365caa4ece3af6ee68aceded88bc7f877b4db7ee42e0742";
+  "cd1a8638630df83d4fc5b9f642da9e9dbbbdd06fd1169558a98e9621cf2ef925";
 
 test("continental ecoregion atlas is direct, layered, and inspectable", async ({
   page,
@@ -30,7 +30,7 @@ test("continental ecoregion atlas is direct, layered, and inspectable", async ({
   await expect(shell).toHaveAttribute("data-ecoregion-step", "256");
   await expect(shell).toHaveAttribute(
     "data-ecoregion-atlas-schema",
-    "mclone-continental-ecoregion-atlas-v4",
+    "mclone-continental-ecoregion-atlas-v5",
   );
   await expect(shell).toHaveAttribute("data-ecoregion-exact-chunks", "0");
   await expect(shell).toHaveAttribute(
@@ -159,6 +159,16 @@ test("reviews 131 km against the current production control", async ({
   );
   expect(transitionMedian).toBeGreaterThanOrEqual(800);
   expect(transitionMedian).toBeLessThanOrEqual(2_600);
+
+  await page.getByLabel("Continental plan layer").selectOption("habitat");
+  await expect(shell).toHaveAttribute("data-ecoregion-layer", "habitat");
+  await expect(page.getByTestId("continental-ecoregion-legend"))
+    .toContainText("riparian spine");
+  await expect(page.getByTestId("continental-ecoregion-legend"))
+    .toContainText("open range link");
+  await stage.screenshot({
+    path: "/tmp/mclone-terrain-lab-desktop-chrome-ecoregion-habitat-routes-131km.png",
+  });
 
   await page.getByLabel("Continental plan layer").selectOption(
     "production-control",

@@ -12,7 +12,7 @@ use sha2::{Digest, Sha256};
 
 use crate::noise::{SeedDomain, ValueNoise2d};
 
-pub const CONTINENTAL_ECOREGION_SCHEMA_REVISION: &str = "mclone-continental-ecoregion-plan-v3";
+pub const CONTINENTAL_ECOREGION_SCHEMA_REVISION: &str = "mclone-continental-ecoregion-plan-v4";
 pub const CONTINENTAL_ECOREGION_DIMENSION_ID: &str = "mclone:overworld";
 pub const CONTINENTAL_ECOREGION_STORED_PROFILE: &str =
     "mclone-overworld-v1-control-field-revision-21";
@@ -36,6 +36,7 @@ const PROVINCE_HASH_DOMAIN: u64 = 0x6365_636f_7072_6f31;
 const ECOREGION_HASH_DOMAIN: u64 = 0x6365_636f_6563_6f31;
 const MOSAIC_HASH_DOMAIN: u64 = 0x6365_636f_6d6f_7331;
 const LOCAL_HASH_DOMAIN: u64 = 0x6365_636f_6c6f_6331;
+const HABITAT_ROUTE_HASH_DOMAIN: u64 = 0x6365_636f_726f_7574;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
@@ -168,6 +169,7 @@ pub enum LandscapeFeatureFamily {
     PhysiographicProvince,
     Ecoregion,
     Clearing,
+    HabitatRoute,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
@@ -310,6 +312,34 @@ impl ClearingCause {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[repr(u8)]
+#[serde(rename_all = "kebab-case")]
+pub enum HabitatRouteKind {
+    RiparianSpine,
+    WetlandChain,
+    WoodlandPass,
+    OpenRangeLink,
+}
+
+impl HabitatRouteKind {
+    pub const ALL: [Self; 4] = [
+        Self::RiparianSpine,
+        Self::WetlandChain,
+        Self::WoodlandPass,
+        Self::OpenRangeLink,
+    ];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::RiparianSpine => "riparian-spine",
+            Self::WetlandChain => "wetland-chain",
+            Self::WoodlandPass => "woodland-pass",
+            Self::OpenRangeLink => "open-range-link",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ContinentalDistrictSample {
@@ -359,6 +389,8 @@ pub struct LandscapeMosaicSample {
     pub forest_core: f32,
     pub wetland: f32,
     pub corridor: f32,
+    pub corridor_id: Option<LandscapeFeatureId>,
+    pub corridor_kind: Option<HabitatRouteKind>,
     pub local_fingerprint: u64,
 }
 
@@ -732,7 +764,7 @@ impl ContinentalEcoregionPlan {
         let along = (dx * axis_x + dz * axis_z) / 32_000.0;
         let across = (-dx * axis_z + dz * axis_x) / 24_000.0;
         let kind = province_kind(continent.story, along, across, id_hash);
-        let corridor = self.corridor_weight(world_x, world_z, continent);
+        let corridor = self.habitat_route_sample(world_x, world_z, continent);
         ProvincePlanSample {
             id,
             continent_id: continent.id,
@@ -740,9 +772,9 @@ impl ContinentalEcoregionPlan {
             core_weight: site.core_weight as f32,
             relief: province_relief(kind),
             major_water: match kind {
-                PhysiographicProvinceKind::RiverLowland => corridor.max(0.45),
-                PhysiographicProvinceKind::LakeBasin => (0.55 + corridor * 0.35).min(1.0),
-                _ => corridor * 0.65,
+                PhysiographicProvinceKind::RiverLowland => corridor.weight.max(0.45),
+                PhysiographicProvinceKind::LakeBasin => (0.55 + corridor.weight * 0.35).min(1.0),
+                _ => corridor.weight * 0.65,
             } as f32,
         }
     }
@@ -880,7 +912,7 @@ impl ContinentalEcoregionPlan {
 
         work.local_field_evaluations += 2;
         let local_variation = self.fields.local_openness.sample(canonical_x, world_z) * 0.08;
-        let corridor = self.corridor_weight(world_x, world_z, continent);
+        let corridor = self.habitat_route_sample(world_x, world_z, continent);
         let (clearing_influence, clearing_id, clearing_cause) = best
             .filter(|(influence, _, _)| *influence > 0.0)
             .map_or((0.0, None, None), |(influence, id, cause)| {
@@ -910,7 +942,7 @@ impl ContinentalEcoregionPlan {
         };
         let wetland = (wetland_affinity
             * f64::from(ecoregion.moisture)
-            * f64::from(province.major_water.max(corridor as f32)))
+            * f64::from(province.major_water.max(corridor.weight as f32)))
         .clamp(0.0, 1.0);
         let local_cell_x = canonical_x.div_euclid(256);
         let local_cell_z = world_z.div_euclid(256);
@@ -930,7 +962,9 @@ impl ContinentalEcoregionPlan {
             openness: openness as f32,
             forest_core: forest_core as f32,
             wetland: wetland as f32,
-            corridor: corridor as f32,
+            corridor: corridor.weight as f32,
+            corridor_id: (corridor.weight > 0.0).then_some(corridor.id),
+            corridor_kind: (corridor.weight > 0.0).then_some(corridor.kind),
             local_fingerprint,
         }
     }
@@ -1008,18 +1042,49 @@ impl ContinentalEcoregionPlan {
         site
     }
 
-    fn corridor_weight(
+    fn habitat_route_sample(
         &self,
         world_x: i32,
         world_z: i32,
         continent: ContinentalDistrictSample,
-    ) -> f64 {
+    ) -> HabitatRouteSample {
         let canonical_x = self.descriptor.topology.canonical_world_x(world_x);
         let dx = (i64::from(canonical_x) - continent.center_x) as f64;
         let dz = (i64::from(world_z) - continent.center_z) as f64;
+        let along = dx * f64::from(continent.axis_x) + dz * f64::from(continent.axis_z);
         let across = -dx * f64::from(continent.axis_z) + dz * f64::from(continent.axis_x);
-        let warp = self.fields.corridor_warp.sample(canonical_x, world_z) * 2_400.0;
-        (1.0 - (across - warp).abs() / 2_800.0).clamp(0.0, 1.0)
+        let warp = self.fields.corridor_warp.sample(canonical_x, world_z);
+        let main_kind = main_habitat_route_kind(continent.story);
+        let main_id = habitat_route_id(continent, 0);
+        let main_cross = across - warp * 1_600.0;
+        let main_width = habitat_route_half_width(main_kind);
+        let main_length = 1.0 - smoothstep(24_000.0, 31_000.0, along.abs());
+        let mut best = HabitatRouteSample {
+            id: main_id,
+            kind: main_kind,
+            weight: ((1.0 - main_cross.abs() / main_width).clamp(0.0, 1.0) * main_length)
+                .clamp(0.0, 1.0),
+        };
+
+        for slot in 1..=3 {
+            let anchor = match slot {
+                1 => -13_000.0,
+                2 => 0.0,
+                _ => 13_000.0,
+            };
+            let kind = branch_habitat_route_kind(continent.story, slot);
+            let id = habitat_route_id(continent, slot);
+            let branch_along = along - anchor - warp * 900.0 * if slot == 2 { -1.0 } else { 1.0 };
+            let branch_width = habitat_route_half_width(kind) * 0.82;
+            let branch_length = 1.0 - smoothstep(17_000.0, 24_000.0, across.abs());
+            let weight = ((1.0 - branch_along.abs() / branch_width).clamp(0.0, 1.0)
+                * branch_length)
+                .clamp(0.0, 1.0);
+            if weight > best.weight || (weight == best.weight && id.hash < best.id.hash) {
+                best = HabitatRouteSample { id, kind, weight };
+            }
+        }
+        best
     }
 }
 
@@ -1034,6 +1099,13 @@ struct ContinentalInternalSample {
     sample: ContinentalDistrictSample,
     land_weight: f32,
     inland_distance_blocks: f32,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct HabitatRouteSample {
+    id: LandscapeFeatureId,
+    kind: HabitatRouteKind,
+    weight: f64,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -1252,6 +1324,46 @@ fn clearing_cause(kind: EcoregionKind, hash: u64) -> ClearingCause {
     }
 }
 
+fn main_habitat_route_kind(story: ContinentalStory) -> HabitatRouteKind {
+    match story {
+        ContinentalStory::RiverValley => HabitatRouteKind::RiparianSpine,
+        ContinentalStory::LakeDistrict => HabitatRouteKind::WetlandChain,
+        ContinentalStory::Escarpment => HabitatRouteKind::WoodlandPass,
+        ContinentalStory::OpenHighland => HabitatRouteKind::OpenRangeLink,
+    }
+}
+
+fn branch_habitat_route_kind(story: ContinentalStory, slot: u8) -> HabitatRouteKind {
+    match (story, slot) {
+        (ContinentalStory::RiverValley, 2) => HabitatRouteKind::WetlandChain,
+        (ContinentalStory::LakeDistrict, 2) => HabitatRouteKind::RiparianSpine,
+        (ContinentalStory::Escarpment, 2) => HabitatRouteKind::OpenRangeLink,
+        (ContinentalStory::OpenHighland, 2) => HabitatRouteKind::WoodlandPass,
+        _ => main_habitat_route_kind(story),
+    }
+}
+
+fn habitat_route_half_width(kind: HabitatRouteKind) -> f64 {
+    match kind {
+        HabitatRouteKind::RiparianSpine => 1_500.0,
+        HabitatRouteKind::WetlandChain => 1_850.0,
+        HabitatRouteKind::WoodlandPass => 1_300.0,
+        HabitatRouteKind::OpenRangeLink => 2_100.0,
+    }
+}
+
+fn habitat_route_id(continent: ContinentalDistrictSample, slot: u8) -> LandscapeFeatureId {
+    feature_id(
+        LandscapeFeatureFamily::HabitatRoute,
+        continent.id.owner_x,
+        continent.id.owner_z,
+        slot,
+        stable_mix64(
+            continent.id.hash ^ HABITAT_ROUTE_HASH_DOMAIN ^ u64::from(slot).rotate_left(41),
+        ),
+    )
+}
+
 fn feature_id(
     family: LandscapeFeatureFamily,
     owner_x: i32,
@@ -1403,6 +1515,10 @@ fn hash_sample(digest: &mut Sha256, sample: &LandscapePlanSample) {
         hash_option(digest, mosaic.clearing_cause, |digest, cause| {
             digest.update([cause as u8]);
         });
+        hash_option(digest, mosaic.corridor_id, hash_id);
+        hash_option(digest, mosaic.corridor_kind, |digest, kind| {
+            digest.update([kind as u8]);
+        });
         hash_float(digest, mosaic.clearing_core);
         hash_float(digest, mosaic.clearing_shoulder);
         hash_float(digest, mosaic.openness);
@@ -1511,6 +1627,38 @@ mod tests {
             ),
             1_800.0
         );
+    }
+
+    #[test]
+    fn habitat_route_spines_and_branches_have_stable_typed_identities() {
+        let continent = ContinentalDistrictSample {
+            id: feature_id(
+                LandscapeFeatureFamily::ContinentalDistrict,
+                -2,
+                7,
+                0,
+                0x1234,
+            ),
+            story: ContinentalStory::LakeDistrict,
+            center_x: 0,
+            center_z: 0,
+            axis_x: 1.0,
+            axis_z: 0.0,
+        };
+        assert_eq!(
+            main_habitat_route_kind(continent.story),
+            HabitatRouteKind::WetlandChain
+        );
+        assert_eq!(
+            branch_habitat_route_kind(continent.story, 2),
+            HabitatRouteKind::RiparianSpine
+        );
+        let spine = habitat_route_id(continent, 0);
+        let branch = habitat_route_id(continent, 2);
+        assert_eq!(spine.family, LandscapeFeatureFamily::HabitatRoute);
+        assert_eq!((spine.owner_x, spine.owner_z), (-2, 7));
+        assert_ne!(spine, branch);
+        assert_eq!(spine, habitat_route_id(continent, 0));
     }
 
     #[test]

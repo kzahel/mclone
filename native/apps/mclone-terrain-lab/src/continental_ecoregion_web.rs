@@ -133,6 +133,16 @@ impl TerrainLabContinentalEcoregionCompiler {
         Ok(Uint16Array::from(self.atlas()?.corridor.as_slice()))
     }
 
+    #[wasm_bindgen(js_name = corridorKind)]
+    pub fn corridor_kind(&self) -> Result<Uint8Array, JsValue> {
+        Ok(Uint8Array::from(self.atlas()?.corridor_kind.as_slice()))
+    }
+
+    #[wasm_bindgen(js_name = corridorId)]
+    pub fn corridor_id(&self) -> Result<Uint32Array, JsValue> {
+        Ok(Uint32Array::from(self.atlas()?.corridor_id.as_slice()))
+    }
+
     #[wasm_bindgen(js_name = continentId)]
     pub fn continent_id(&self) -> Result<Uint32Array, JsValue> {
         Ok(Uint32Array::from(self.atlas()?.continent_id.as_slice()))

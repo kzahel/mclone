@@ -143,6 +143,7 @@ export interface ContinentalEcoregionAtlasMetadata {
   provinceKinds: string[];
   ecoregionKinds: string[];
   clearingCauses: string[];
+  habitatRouteKinds: string[];
   metrics: ContinentalEcoregionAtlasMetrics;
 }
 
@@ -167,10 +168,12 @@ export interface ContinentalEcoregionWorkerSummary {
   majorWater: Uint16Array;
   wetland: Uint16Array;
   corridor: Uint16Array;
+  corridorKind: Uint8Array;
   continentId: Uint32Array;
   provinceId: Uint32Array;
   ecoregionId: Uint32Array;
   clearingId: Uint32Array;
+  corridorId: Uint32Array;
   productionLand: Uint16Array;
   productionSurfaceY: Int16Array;
   productionTemperature: Int16Array;
