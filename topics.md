@@ -282,3 +282,5 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
 - `continental-ecoregion-planning` — top-down continental, physiographic,
   ecoregional, and landscape-mosaic authorship with bottom-up realization,
   ecology-scale habitat geography, and review-gated production integration
+- `quest-frontier-performance` — pixel-preserving suppression, transition
+  shading, and support-geometry reductions for stable Low/RD8 Quest headroom
