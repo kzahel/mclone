@@ -1,7 +1,8 @@
 # Tactical 323: Quest Frontier Performance Recovery
 
 Status: implementation authorized 2026-08-20; constant-time suppression
-accepted by measurement and inactive-transition shading in progress.
+accepted by measurement, inactive-transition shading measured, and compact
+support drawing in progress.
 
 Topics: `procedural-horizon-clipmap`, `performance`,
 `quest-frontier-performance`
@@ -155,6 +156,36 @@ Require byte-identical or explicitly explained pixel evidence at far and
 frontier-focused native views, plus headed WebGPU shader validation, before
 Quest measurement.
 
+### Phase 2 Evidence
+
+Commit `51890e91` leaves derivative evaluation uniform, preserves the exact
+transition path for positive weights, and skips the exact-style tint and
+active-pack sample when the interpolated weight is zero. All 143 terrain-view
+tests, native and Wasm checks, the browser WebGPU probe, and the browser
+terrain-horizon smoke pass. The inspected browser image is:
+
+```text
+/tmp/mclone-native-web-terrain-horizon-toggle-canvas.png
+```
+
+The RD2 native capture is byte-identical to the Phase 1 image. At RD8,
+ImageMagick reports 143 changed preferred pixels (`0.024%`) and 5,533 changed
+forced-fallback pixels (`0.938%`), localized to raster edges with no visible
+seam or composition change in inspected images:
+
+```text
+/tmp/mclone-t323-transition/rd8-elevated-product.png
+/tmp/mclone-t323-transition/rd8-elevated-forced-fallback.png
+```
+
+The matched Quest preferred sample measured `13.273 / 14.305ms` app-work
+p50/p95, `7.344ms` thread-CPU p50, `5.940ms` blocked p50, `7.483ms` app GPU,
+and `17.2%` over-period frames. That is within run variance of Phase 1's
+`13.249 / 14.269ms`, while app GPU moves by only `-0.039ms`. The inactive
+work was likely already eliminated effectively by the mobile shader compiler;
+retain the simpler control flow, but do not credit it with recovered budget.
+Raw device evidence is `/tmp/mclone-t323-transition-preferred.txt`.
+
 ## Phase 3: Compact Support Drawing
 
 Stop submitting complete support-tile surfaces that are wholly discarded or
@@ -189,7 +220,7 @@ foveation level or any other quality tradeoff.
 
 - [x] Matched exact/preferred/fallback/preferred Quest baseline is recorded.
 - [x] Constant-time suppression is implemented, validated, and measured.
-- [ ] Zero-weight transition shading is eliminated and pixel-validated.
+- [x] Zero-weight transition shading is eliminated and pixel-validated.
 - [ ] Support submission is compacted without weakening the certificate.
 - [ ] Native, headed WebGPU, flat Android, stereo, and Quest gates pass.
 - [ ] Final stationary and orbit Quest measurements are recorded honestly.
