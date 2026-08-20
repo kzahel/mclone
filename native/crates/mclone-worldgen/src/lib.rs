@@ -8,6 +8,7 @@ pub mod continental_ecoregion_atlas;
 pub mod continental_ecoregion_harness;
 pub mod continental_surface;
 pub mod continental_surface_harness;
+pub mod continental_surface_journey;
 pub mod feature;
 pub mod homestead_site;
 pub mod landform_plan;

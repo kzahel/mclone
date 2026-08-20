@@ -18,7 +18,13 @@ use mclone_view_control::{
     ContactButton, ContactEvent, ViewPoint, ViewportMetrics, WorldViewHeldDirection,
     WorldViewIntent, WorldViewMode, WorldViewProjection, WorldViewState, pointer_contact_purpose,
 };
-use mclone_worldgen::terrain_preview::TerrainPreviewProfile;
+use mclone_worldgen::{
+    continental_ecoregion::ContinentalEcoregionDescriptor,
+    continental_surface_journey::{
+        ContinentalSurfaceJourneyKind, compile_continental_surface_journeys,
+    },
+    terrain_preview::TerrainPreviewProfile,
+};
 use serde::Serialize;
 use wasm_bindgen::{JsValue, prelude::wasm_bindgen};
 use web_sys::{HtmlCanvasElement, UrlSearchParams};
@@ -32,10 +38,14 @@ const DEFAULT_SEED: i64 = 12_345;
 const DEFAULT_BLOCKS_ACROSS: u32 = 4_096;
 const DEFAULT_EXACT_RADIUS: u32 = 2;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 struct WebExplorerOptions {
     seed: i64,
     terrain_profile: TerrainPreviewProfile,
+    journey: Option<ContinentalSurfaceJourneyKind>,
+    journey_catalog_sha256: Option<String>,
+    journey_heading_x: i8,
+    journey_heading_z: i8,
     center_x: i32,
     center_z: i32,
     blocks_across: u32,
@@ -56,6 +66,10 @@ impl Default for WebExplorerOptions {
         Self {
             seed: DEFAULT_SEED,
             terrain_profile: TerrainPreviewProfile::McloneOverworldV1,
+            journey: None,
+            journey_catalog_sha256: None,
+            journey_heading_x: 0,
+            journey_heading_z: 0,
             center_x: 0,
             center_z: 0,
             blocks_across: DEFAULT_BLOCKS_ACROSS,
@@ -79,9 +93,17 @@ impl WebExplorerOptions {
             .map_err(|error| format!("invalid World Explorer query: {error:?}"))?;
         let mut options = Self::default();
         options.seed = parse_parameter(&parameters, "seed", options.seed)?;
+        let source_explicit = parameters.get("source").is_some();
         if let Some(value) = parameters.get("source") {
             options.terrain_profile = parse_terrain_source(&value)?;
         }
+        if let Some(value) = parameters.get("journey") {
+            options.journey = Some(ContinentalSurfaceJourneyKind::parse_label(&value)?);
+        }
+        let center_x_explicit = parameters.get("centerX").is_some();
+        let center_z_explicit = parameters.get("centerZ").is_some();
+        let blocks_across_explicit = parameters.get("blocksAcross").is_some();
+        let yaw_explicit = parameters.get("yaw").is_some();
         options.center_x = parse_parameter(&parameters, "centerX", options.center_x)?;
         options.center_z = parse_parameter(&parameters, "centerZ", options.center_z)?;
         options.blocks_across =
@@ -95,24 +117,11 @@ impl WebExplorerOptions {
         if let Some(value) = parameters.get("exactAnchor") {
             options.exact_anchor = WorldExplorerExactAnchor::parse_label(&value)?;
         }
+        let composition_explicit = parameters.get("composition").is_some();
         if let Some(value) = parameters.get("composition") {
             options.composition = WorldExplorerCompositionMode::parse_label(&value)?;
         }
         options.source_colors = parameters.get("sourceColors").as_deref() == Some("1");
-        if options.source_colors && options.composition == WorldExplorerCompositionMode::Horizon {
-            return Err(
-                "World Explorer sourceColors=1 requires exact, composed, or coverage composition"
-                    .to_owned(),
-            );
-        }
-        if options.terrain_profile == TerrainPreviewProfile::ContinentalEcoregionCandidate
-            && options.composition != WorldExplorerCompositionMode::Horizon
-        {
-            return Err(
-                "the continental terrain source is horizon-only; use composition=horizon"
-                    .to_owned(),
-            );
-        }
         options.diagnostic_observer_enabled =
             parameters.get("smokeObserver").as_deref() == Some("1");
         options.worker_overflow_probe_enabled =
@@ -136,10 +145,59 @@ impl WebExplorerOptions {
                 }
             };
         }
+        if let Some(journey) = options.journey {
+            if !source_explicit {
+                options.terrain_profile = TerrainPreviewProfile::ContinentalEcoregionCandidate;
+            }
+            if !composition_explicit {
+                options.composition = WorldExplorerCompositionMode::Horizon;
+            }
+            let catalog = compile_continental_surface_journeys(
+                ContinentalEcoregionDescriptor::plane(options.seed),
+            )
+            .map_err(|error| error.to_string())?;
+            let receipt = catalog
+                .journey(journey)
+                .expect("the shared journey catalog is complete");
+            options.journey_catalog_sha256 = Some(catalog.semantic_sha256.clone());
+            options.journey_heading_x = receipt.heading_x;
+            options.journey_heading_z = receipt.heading_z;
+            if !center_x_explicit {
+                options.center_x = receipt.center_x;
+            }
+            if !center_z_explicit {
+                options.center_z = receipt.center_z;
+            }
+            if !blocks_across_explicit {
+                options.blocks_across = receipt.review_frames.overview_blocks;
+            }
+            if !yaw_explicit {
+                options.yaw_radians = f64::from(receipt.review_frames.yaw_radians);
+            }
+        }
+        if options.source_colors && options.composition == WorldExplorerCompositionMode::Horizon {
+            return Err(
+                "World Explorer sourceColors=1 requires exact, composed, or coverage composition"
+                    .to_owned(),
+            );
+        }
+        if options.terrain_profile == TerrainPreviewProfile::ContinentalEcoregionCandidate
+            && options.composition != WorldExplorerCompositionMode::Horizon
+        {
+            return Err(
+                "the continental terrain source is horizon-only; use composition=horizon"
+                    .to_owned(),
+            );
+        }
+        if options.journey.is_some()
+            && options.terrain_profile != TerrainPreviewProfile::ContinentalEcoregionCandidate
+        {
+            return Err("World Explorer journey requires source=continental".to_owned());
+        }
         Ok(options)
     }
 
-    fn view_state(self) -> WorldViewState {
+    fn view_state(&self) -> WorldViewState {
         WorldViewState {
             mode: self.mode,
             focus_x: f64::from(self.center_x),
@@ -158,6 +216,10 @@ struct WebExplorerReport {
     revision: u64,
     seed: String,
     terrain_source: &'static str,
+    journey: Option<&'static str>,
+    journey_catalog_sha256: Option<String>,
+    journey_heading_x: i8,
+    journey_heading_z: i8,
     center_x: i32,
     center_z: i32,
     focus_x: f64,
@@ -305,6 +367,10 @@ pub struct WebWorldExplorer {
     height: u32,
     seed: i64,
     terrain_profile: TerrainPreviewProfile,
+    journey: Option<ContinentalSurfaceJourneyKind>,
+    journey_catalog_sha256: Option<String>,
+    journey_heading_x: i8,
+    journey_heading_z: i8,
     frame_epoch_ms: Option<f64>,
     session: WorldExplorerSession,
     composition: WorldExplorerCompositionMode,
@@ -399,6 +465,10 @@ impl WebWorldExplorer {
             self.last_diagnostic_report = Some(explorer_report(
                 self.seed,
                 self.terrain_profile,
+                self.journey,
+                self.journey_catalog_sha256.clone(),
+                self.journey_heading_x,
+                self.journey_heading_z,
                 self.session.view_state(),
                 self.session.has_held_motion(),
                 stats,
@@ -810,6 +880,10 @@ impl WebWorldExplorer {
             height,
             seed: options.seed,
             terrain_profile: options.terrain_profile,
+            journey: options.journey,
+            journey_catalog_sha256: options.journey_catalog_sha256,
+            journey_heading_x: options.journey_heading_x,
+            journey_heading_z: options.journey_heading_z,
             frame_epoch_ms: None,
             session,
             composition: options.composition,
@@ -894,6 +968,10 @@ pub(crate) fn load_web_assets(
 fn explorer_report(
     seed: i64,
     terrain_profile: TerrainPreviewProfile,
+    journey: Option<ContinentalSurfaceJourneyKind>,
+    journey_catalog_sha256: Option<String>,
+    journey_heading_x: i8,
+    journey_heading_z: i8,
     state: WorldViewState,
     held_motion: bool,
     stats: TerrainHorizonFrameStats,
@@ -911,6 +989,10 @@ fn explorer_report(
         revision: stats.revision,
         seed: seed.to_string(),
         terrain_source: terrain_profile.label(),
+        journey: journey.map(ContinentalSurfaceJourneyKind::label),
+        journey_catalog_sha256,
+        journey_heading_x,
+        journey_heading_z,
         center_x: state.center_x_i32(),
         center_z: state.center_z_i32(),
         focus_x: state.focus_x,

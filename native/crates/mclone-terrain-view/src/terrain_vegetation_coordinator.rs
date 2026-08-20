@@ -2,8 +2,8 @@ use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use mclone_worldgen::terrain_preview::{
-    TERRAIN_PREVIEW_MAX_TREE_RECORD_SAMPLE_SPACING, TerrainPreviewRequest,
-    TerrainPreviewVegetationProduct,
+    TerrainPreviewRequest, TerrainPreviewVegetationProduct,
+    terrain_preview_requests_tree_records_for_profile,
 };
 use mclone_worldgen::terrain_vegetation::{
     TerrainVegetationProductReceipt, TerrainVegetationSourceIdentity,
@@ -296,7 +296,10 @@ impl TerrainVegetationCoordinator {
             }
             let request = request_for(desired_tile.tile, source);
             source.validate_request(request)?;
-            if desired_tile.tile.sample_spacing > TERRAIN_PREVIEW_MAX_TREE_RECORD_SAMPLE_SPACING {
+            if !terrain_preview_requests_tree_records_for_profile(
+                source.profile,
+                desired_tile.tile.sample_spacing,
+            ) {
                 return Err(format!(
                     "terrain vegetation tile spacing {} does not request records",
                     desired_tile.tile.sample_spacing

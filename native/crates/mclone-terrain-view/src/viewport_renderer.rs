@@ -16,6 +16,7 @@ use mclone_worldgen::terrain_preview::{
     TerrainPreviewProfile, TerrainPreviewReferenceGrid, TerrainPreviewRequest,
     TerrainPreviewSample, TerrainPreviewSurfaceQuality, TerrainPreviewVegetationProduct,
     ValidatedTerrainPreviewRequest, terrain_preview_gpu_compile_work,
+    terrain_preview_max_tree_record_sample_spacing,
 };
 use mclone_worldgen::terrain_vegetation::{
     TerrainVegetationSourceIdentity, terrain_vegetation_coverage_receipt,
@@ -67,7 +68,7 @@ const TERRAIN_FRONTIER_DISPATCHES_PER_FRAME: usize = 4;
 const TERRAIN_FRONTIER_SUPPORT_LOOKUP_MAX_TILES_PER_AXIS: usize = 18;
 const TERRAIN_FRONTIER_SUPPORT_LOOKUP_BUFFER_BYTES: u64 = 96;
 const TERRAIN_HORIZON_TREE_CULL_MARGIN_BLOCKS: f32 = 16.0;
-const CONTINENTAL_PROXY_TREE_MAX_VIEW_BLOCKS: f64 = 2_048.0;
+const CONTINENTAL_PROXY_TREE_MAX_VIEW_BLOCKS: f64 = 768.0;
 const TERRAIN_HORIZON_CULL_MIN_Y: f32 = -64.0;
 const TERRAIN_HORIZON_CULL_MAX_Y: f32 = 512.0;
 const TERRAIN_EXACT_CONNECTOR_VERTEX_ATTRIBUTES: [wgpu::VertexAttribute; 2] = [
@@ -3873,12 +3874,14 @@ impl TerrainHorizonRenderer {
                 super::TERRAIN_HORIZON_MAX_PROVEN_RENDER_CELL_STRIDE,
             ));
         }
+        let vegetation_record_limit = terrain_preview_max_tree_record_sample_spacing(profile);
         if !vegetation_max_sample_spacing.is_power_of_two()
             || vegetation_max_sample_spacing < config.base_sample_spacing
-            || vegetation_max_sample_spacing > TERRAIN_PREVIEW_MAX_TREE_RECORD_SAMPLE_SPACING
+            || vegetation_max_sample_spacing > vegetation_record_limit
         {
             return Err(format!(
-                "terrain horizon vegetation spacing {vegetation_max_sample_spacing} is outside the proven record range"
+                "terrain horizon vegetation spacing {vegetation_max_sample_spacing} is outside \
+                 the profile record range through {vegetation_record_limit}"
             ));
         }
         let clipmap = TerrainClipmap::new(config)?;
@@ -3986,12 +3989,14 @@ impl TerrainHorizonRenderer {
                 "live terrain LOD reconfiguration may change only the outer level bound".to_owned(),
             );
         }
+        let vegetation_record_limit = terrain_preview_max_tree_record_sample_spacing(self.profile);
         if !vegetation_max_sample_spacing.is_power_of_two()
             || vegetation_max_sample_spacing < config.base_sample_spacing
-            || vegetation_max_sample_spacing > TERRAIN_PREVIEW_MAX_TREE_RECORD_SAMPLE_SPACING
+            || vegetation_max_sample_spacing > vegetation_record_limit
         {
             return Err(format!(
-                "terrain horizon vegetation spacing {vegetation_max_sample_spacing} is outside the proven record range"
+                "terrain horizon vegetation spacing {vegetation_max_sample_spacing} is outside \
+                 the profile record range through {vegetation_record_limit}"
             ));
         }
         if config == current && vegetation_max_sample_spacing == self.vegetation_max_sample_spacing
@@ -5834,7 +5839,10 @@ impl TerrainHorizonRenderer {
             self.vegetation_coordinator = Some(TerrainVegetationCoordinator::new(
                 executor,
                 source,
-                maximum_terrain_vegetation_desired_tiles(self.clipmap.config())?,
+                maximum_terrain_vegetation_desired_tiles(
+                    self.clipmap.config(),
+                    self.vegetation_max_sample_spacing,
+                )?,
             )?);
         }
         self.vegetation_coordinator
@@ -6285,8 +6293,11 @@ fn terrain_horizon_tile_id(
     }
 }
 
-fn maximum_terrain_vegetation_desired_tiles(config: TerrainClipmapConfig) -> Result<usize, String> {
-    let ratio = TERRAIN_PREVIEW_MAX_TREE_RECORD_SAMPLE_SPACING
+fn maximum_terrain_vegetation_desired_tiles(
+    config: TerrainClipmapConfig,
+    vegetation_max_sample_spacing: u32,
+) -> Result<usize, String> {
+    let ratio = vegetation_max_sample_spacing
         .checked_div(config.base_sample_spacing)
         .ok_or("terrain vegetation base spacing is zero")?;
     let record_level_count = ratio

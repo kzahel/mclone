@@ -1218,10 +1218,10 @@ mod tests {
         let request = TerrainPreviewRequest {
             profile: TerrainPreviewProfile::ContinentalEcoregionCandidate,
             seed: 12_345,
-            center_x: 0,
-            center_z: 0,
+            center_x: -13_824,
+            center_z: 9_216,
             sample_spacing: 1,
-            cells_per_axis: 64,
+            cells_per_axis: 128,
             topology: McloneOverworldSamplingTopology::Unbounded,
             content_stage: TerrainPreviewContentStage::Cover,
             surface_quality: TerrainPreviewSurfaceQuality::Inferred,

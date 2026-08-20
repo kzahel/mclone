@@ -17,7 +17,10 @@ use mclone_view_control::{
 };
 use mclone_worldgen::{
     levelgen::MCLONE_OVERWORLD_SEA_LEVEL,
-    terrain_preview::{TerrainPreviewContentStage, TerrainPreviewProfile},
+    terrain_preview::{
+        TerrainPreviewContentStage, TerrainPreviewProfile,
+        terrain_preview_max_tree_record_sample_spacing,
+    },
 };
 
 const COMPOSED_ORBIT_VIEWER_CLEARANCE_BLOCKS: f32 = 32.0;
@@ -154,8 +157,9 @@ impl TerrainRuntimeSession {
                 source,
                 clipmap: config.clipmap,
                 render_cell_stride: 1,
-                vegetation_max_sample_spacing:
-                    mclone_worldgen::terrain_preview::TERRAIN_PREVIEW_MAX_TREE_RECORD_SAMPLE_SPACING,
+                vegetation_max_sample_spacing: terrain_preview_max_tree_record_sample_spacing(
+                    config.profile,
+                ),
                 vegetation_enabled: config.vegetation_enabled,
                 color_profile: config.color_profile,
             },

@@ -5,7 +5,13 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use mclone_view_control::{WorldViewMode, WorldViewProjection, WorldViewState};
 use mclone_world_explorer::{WorldExplorerCompositionMode, WorldExplorerExactAnchor};
-use mclone_worldgen::terrain_preview::TerrainPreviewProfile;
+use mclone_worldgen::{
+    continental_ecoregion::ContinentalEcoregionDescriptor,
+    continental_surface_journey::{
+        ContinentalSurfaceJourneyKind, compile_continental_surface_journeys,
+    },
+    terrain_preview::TerrainPreviewProfile,
+};
 
 pub const DEFAULT_WIDTH: u32 = 1280;
 pub const DEFAULT_HEIGHT: u32 = 720;
@@ -45,6 +51,7 @@ pub struct ExplorerOptions {
     pub height: u32,
     pub seed: i64,
     pub terrain_profile: TerrainPreviewProfile,
+    pub journey: Option<ContinentalSurfaceJourneyKind>,
     pub center_x: i32,
     pub center_z: i32,
     pub blocks_across: u32,
@@ -72,6 +79,7 @@ impl Default for ExplorerOptions {
             height: DEFAULT_HEIGHT,
             seed: DEFAULT_SEED,
             terrain_profile: TerrainPreviewProfile::McloneOverworldV1,
+            journey: None,
             center_x: 0,
             center_z: 0,
             blocks_across: DEFAULT_BLOCKS_ACROSS,
@@ -97,6 +105,12 @@ impl Default for ExplorerOptions {
 impl ExplorerOptions {
     pub fn parse() -> Result<Option<Self>> {
         let mut options = Self::default();
+        let mut source_explicit = false;
+        let mut center_x_explicit = false;
+        let mut center_z_explicit = false;
+        let mut blocks_across_explicit = false;
+        let mut yaw_explicit = false;
+        let mut composition_explicit = false;
         let mut arguments = env::args_os();
         let _program = arguments.next();
         while let Some(argument) = arguments.next() {
@@ -126,14 +140,34 @@ impl ExplorerOptions {
                 "--seed" => options.seed = parse_value(value(&mut arguments)?, name)?,
                 "--source" => {
                     options.terrain_profile =
-                        parse_terrain_source(&utf8_value(value(&mut arguments)?, name)?)?
+                        parse_terrain_source(&utf8_value(value(&mut arguments)?, name)?)?;
+                    source_explicit = true;
                 }
-                "--center-x" => options.center_x = parse_value(value(&mut arguments)?, name)?,
-                "--center-z" => options.center_z = parse_value(value(&mut arguments)?, name)?,
+                "--journey" => {
+                    options.journey = Some(
+                        ContinentalSurfaceJourneyKind::parse_label(&utf8_value(
+                            value(&mut arguments)?,
+                            name,
+                        )?)
+                        .map_err(anyhow::Error::msg)?,
+                    )
+                }
+                "--center-x" => {
+                    options.center_x = parse_value(value(&mut arguments)?, name)?;
+                    center_x_explicit = true;
+                }
+                "--center-z" => {
+                    options.center_z = parse_value(value(&mut arguments)?, name)?;
+                    center_z_explicit = true;
+                }
                 "--blocks-across" => {
-                    options.blocks_across = parse_value(value(&mut arguments)?, name)?
+                    options.blocks_across = parse_value(value(&mut arguments)?, name)?;
+                    blocks_across_explicit = true;
                 }
-                "--yaw" => options.yaw_radians = parse_value(value(&mut arguments)?, name)?,
+                "--yaw" => {
+                    options.yaw_radians = parse_value(value(&mut arguments)?, name)?;
+                    yaw_explicit = true;
+                }
                 "--pitch" => options.pitch_radians = parse_value(value(&mut arguments)?, name)?,
                 "--view" => {
                     let value = utf8_value(value(&mut arguments)?, name)?;
@@ -158,7 +192,8 @@ impl ExplorerOptions {
                         value(&mut arguments)?,
                         name,
                     )?)
-                    .map_err(anyhow::Error::msg)?
+                    .map_err(anyhow::Error::msg)?;
+                    composition_explicit = true;
                 }
                 "--source-colors" => options.source_colors = true,
                 "--exact-radius" => {
@@ -187,6 +222,33 @@ impl ExplorerOptions {
                 _ => bail!("unknown World Explorer option {name:?}; use --help"),
             }
         }
+        if let Some(journey) = options.journey {
+            if !source_explicit {
+                options.terrain_profile = TerrainPreviewProfile::ContinentalEcoregionCandidate;
+            }
+            if !composition_explicit {
+                options.composition = WorldExplorerCompositionMode::Horizon;
+            }
+            let catalog = compile_continental_surface_journeys(
+                ContinentalEcoregionDescriptor::plane(options.seed),
+            )
+            .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+            let receipt = catalog
+                .journey(journey)
+                .expect("the shared journey catalog is complete");
+            if !center_x_explicit {
+                options.center_x = receipt.center_x;
+            }
+            if !center_z_explicit {
+                options.center_z = receipt.center_z;
+            }
+            if !blocks_across_explicit {
+                options.blocks_across = receipt.review_frames.overview_blocks;
+            }
+            if !yaw_explicit {
+                options.yaw_radians = receipt.review_frames.yaw_radians;
+            }
+        }
         options.validate()?;
         Ok(Some(options))
     }
@@ -211,6 +273,11 @@ impl ExplorerOptions {
             && self.composition != WorldExplorerCompositionMode::Horizon
         {
             bail!("the continental terrain source is horizon-only; use --composition horizon");
+        }
+        if self.journey.is_some()
+            && self.terrain_profile != TerrainPreviewProfile::ContinentalEcoregionCandidate
+        {
+            bail!("--journey requires the continental terrain source");
         }
         if usize::from(self.capture.is_some())
             + usize::from(self.window_capture.is_some())
@@ -242,10 +309,14 @@ impl ExplorerOptions {
     }
 
     pub fn title(&self) -> String {
+        let journey = self
+            .journey
+            .map_or(String::new(), |journey| format!(" — {}", journey.title()));
         format!(
-            "Mclone World Explorer — {} — {} — seed {} — ({}, {}) — {} blocks — {}",
+            "Mclone World Explorer — {} — {}{} — seed {} — ({}, {}) — {} blocks — {}",
             self.composition.label(),
             self.terrain_profile.label(),
+            journey,
             self.seed,
             self.center_x,
             self.center_z,
@@ -327,6 +398,7 @@ Usage: mclone-world-explorer [options]
 
   --seed N                    terrain seed (default {DEFAULT_SEED})
   --source SOURCE             production (default) or continental
+  --journey NAME              select a shared continental review journey
   --center-x N                view center X (default 0)
   --center-z N                view center Z (default 0)
   --blocks-across N           horizontal footprint (default {DEFAULT_BLOCKS_ACROSS})
