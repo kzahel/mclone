@@ -1,8 +1,8 @@
 # Tactical 321: Exact Frontier Support Architecture
 
-Status: Phase 0 architecture audit complete 2026-08-20; awaiting Human
-Review A1. No diagnostic API or pixel-changing frontier implementation is
-authorized before that review.
+Status: Human Review A1 accepted 2026-08-20; Phase 1 diagnostic frontier
+planning is in progress. No candidate geometry implementation is authorized
+before Human Review A2.
 
 Topic: `procedural-horizon-clipmap`
 
@@ -795,4 +795,5 @@ the phase-dependent spacing and legal-render-distance capacity ledger; listed
 the renderer assumptions which need prepared ownership; and specified the
 inputs, invariants, lifecycle, and failure states of a renderer-neutral
 frontier plan and complete composition certificate. Human Review A1 is
-pending before Phase 1 changes diagnostic APIs.
+accepted. Phase 1 may change diagnostic APIs and presentations but not ordinary
+terrain geometry or ownership.

@@ -10,6 +10,7 @@ mod canonical_mesh;
 mod clipmap;
 mod composition;
 mod engine;
+mod frontier;
 mod horizon_admission;
 mod lod;
 #[cfg(not(target_arch = "wasm32"))]
@@ -77,6 +78,17 @@ pub use composition::{
     terrain_exact_player_connected_chunks,
 };
 pub use engine::{TerrainViewEngine, TerrainViewEngineConfig};
+pub use frontier::{
+    TERRAIN_FRONTIER_CONNECTOR_INSTANCE_BYTES, TERRAIN_FRONTIER_CONNECTOR_VERTICES_PER_SEGMENT,
+    TERRAIN_FRONTIER_DIAGNOSTIC_FINE_TILE_CAPACITY, TERRAIN_FRONTIER_FINE_SUPPORT_BAND_BLOCKS,
+    TERRAIN_FRONTIER_SPACING_BUCKETS, TERRAIN_FRONTIER_TERRAIN_RESOURCE_BYTES,
+    TerrainFrontierBoundaryKind, TerrainFrontierCandidateCostReceipt,
+    TerrainFrontierCurrentClosure, TerrainFrontierDirection, TerrainFrontierFineTileKey,
+    TerrainFrontierFormatCapacityReceipt, TerrainFrontierPlan, TerrainFrontierPlanOptions,
+    TerrainFrontierPlanReceipt, TerrainFrontierPlanState, TerrainFrontierPresentationIdentity,
+    TerrainFrontierSegment, terrain_frontier_format_capacity,
+    terrain_frontier_presentation_identity,
+};
 pub use lod::{
     TERRAIN_LOD_HIGH_LEVEL_COUNT, TERRAIN_LOD_LOW_LEVEL_COUNT, TERRAIN_LOD_MEDIUM_LEVEL_COUNT,
     TerrainLodPresetDescriptor,
