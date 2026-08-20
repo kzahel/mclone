@@ -10,12 +10,12 @@ use mclone_render::color_profile::RenderColorProfile;
 use mclone_terrain_view::{
     ExactPaintedCoverageSnapshot, TERRAIN_LOD_HIGH_LEVEL_COUNT, TerrainCompositionSourceIdentity,
     TerrainExactBoundaryColumn, TerrainExactBoundaryProfile, TerrainExactCoverageMode,
-    TerrainFrontierPlanReceipt, TerrainFrontierTopologyProofReceipt, TerrainHorizonDiagnostic,
-    TerrainHorizonFrameStats, TerrainHorizonPresentation, TerrainHorizonRenderTarget,
-    TerrainLodPresetDescriptor, TerrainPreparedExactFrame, TerrainPreviewCamera,
-    TerrainPreviewMaterialAtlas, TerrainPreviewMaterialTable, TerrainPreviewView,
-    TerrainVegetationExecutor, TerrainViewEngine, TerrainViewEngineConfig,
-    TerrainViewSourceIdentity, terrain_exact_exposed_boundary_blocks,
+    TerrainFrontierAdmissionReceipt, TerrainFrontierPlanReceipt,
+    TerrainFrontierTopologyProofReceipt, TerrainHorizonDiagnostic, TerrainHorizonFrameStats,
+    TerrainHorizonPresentation, TerrainHorizonRenderTarget, TerrainLodPresetDescriptor,
+    TerrainPreparedExactFrame, TerrainPreviewCamera, TerrainPreviewMaterialAtlas,
+    TerrainPreviewMaterialTable, TerrainPreviewView, TerrainVegetationExecutor, TerrainViewEngine,
+    TerrainViewEngineConfig, TerrainViewSourceIdentity, terrain_exact_exposed_boundary_blocks,
     terrain_exact_player_connected_chunks,
 };
 use mclone_worldgen::terrain_preview::{TerrainPreviewContentStage, TerrainPreviewProfile};
@@ -81,6 +81,7 @@ pub struct SceneTerrainViewDiagnostics {
     pub frontier_plan_failures: u64,
     pub frontier_topology: TerrainFrontierTopologyProofReceipt,
     pub frontier_topology_failures: u64,
+    pub frontier_admission: TerrainFrontierAdmissionReceipt,
     pub inner_hole_culled_tiles: u32,
     pub frustum_culled_tiles: u32,
     pub far_culled_tiles: u32,
@@ -684,6 +685,7 @@ impl SceneTerrainViewState {
         self.diagnostics.frontier_plan_failures = stats.frontier_plan_failures;
         self.diagnostics.frontier_topology = stats.frontier_topology;
         self.diagnostics.frontier_topology_failures = stats.frontier_topology_failures;
+        self.diagnostics.frontier_admission = stats.frontier_admission;
         self.diagnostics.inner_hole_culled_tiles = stats.inner_hole_culled_tiles;
         self.diagnostics.frustum_culled_tiles = stats.frustum_culled_tiles;
         self.diagnostics.far_culled_tiles = stats.far_culled_tiles;

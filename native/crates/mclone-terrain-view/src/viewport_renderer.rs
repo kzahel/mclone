@@ -30,12 +30,13 @@ use super::{
     TERRAIN_PREVIEW_WORKGROUP_AXIS, TerrainClipmap, TerrainClipmapConfig,
     TerrainClipmapDiagnostics, TerrainClipmapTile, TerrainCompositionSourceIdentity,
     TerrainExactBoundaryProfile, TerrainExactCoverageMask, TerrainExactCoverageMode,
-    TerrainExactTransitionField, TerrainFrontierDirection, TerrainFrontierFineTileKey,
-    TerrainFrontierPlan, TerrainFrontierPlanOptions, TerrainFrontierPlanReceipt,
-    TerrainFrontierPlanState, TerrainFrontierProofClosure, TerrainFrontierTopologyProof,
-    TerrainFrontierTopologyProofOptions, TerrainFrontierTopologyProofReceipt,
-    TerrainFrontierTopologyProofState, TerrainHorizonDiagnostic, TerrainHorizonPresentation,
-    TerrainPreviewCamera, TerrainPreviewDrawOptions, TerrainPreviewLayer, TerrainPreviewSource,
+    TerrainExactTransitionField, TerrainFrontierAdmissionReceipt, TerrainFrontierAdmissionState,
+    TerrainFrontierDirection, TerrainFrontierFineTileKey, TerrainFrontierPlan,
+    TerrainFrontierPlanOptions, TerrainFrontierPlanReceipt, TerrainFrontierPlanState,
+    TerrainFrontierProofClosure, TerrainFrontierTopologyProof, TerrainFrontierTopologyProofOptions,
+    TerrainFrontierTopologyProofReceipt, TerrainFrontierTopologyProofState,
+    TerrainHorizonDiagnostic, TerrainHorizonPresentation, TerrainPreviewCamera,
+    TerrainPreviewDrawOptions, TerrainPreviewLayer, TerrainPreviewSource,
     TerrainPreviewSplitLayout, TerrainVegetationCoordinator, TerrainVegetationCoordinatorState,
     TerrainVegetationDesiredTile, TerrainVegetationExecutor, TerrainVegetationExecutorKind,
     TerrainVegetationSlotToken, TerrainViewportPlan, TerrainViewportTileId,
@@ -336,6 +337,7 @@ pub struct TerrainHorizonFrameStats {
     pub frontier_plan_failures: u64,
     pub frontier_topology: TerrainFrontierTopologyProofReceipt,
     pub frontier_topology_failures: u64,
+    pub frontier_admission: TerrainFrontierAdmissionReceipt,
     pub vegetation_service: TerrainHorizonVegetationServiceStats,
     pub finest_sample_spacing: u32,
     pub coarse_ready: bool,
@@ -3596,8 +3598,15 @@ pub struct TerrainHorizonRenderer {
     frontier_topology: Option<TerrainFrontierTopologyProof>,
     frontier_topology_receipt: TerrainFrontierTopologyProofReceipt,
     frontier_topology_failures: u64,
+    /// Complete certificate currently consumed by every render view.
     frontier_support: Option<TerrainFrontierSupportGpuProof>,
+    /// Preferred fine-support certificate compiling behind the active
+    /// synchronous fallback.
+    frontier_support_pending: Option<TerrainFrontierSupportGpuProof>,
     frontier_support_dispatches_total: u64,
+    frontier_fallback_commits: u64,
+    frontier_preferred_commits: u64,
+    frontier_coalesced_generations: u64,
     frontier_observer_chunk: [i64; 2],
     authoritative_tree_ownership: bool,
     tree_ownership: Option<BoundedRepresentationOwnershipSnapshot<McloneTreeOccurrenceId>>,
@@ -3625,6 +3634,7 @@ impl TerrainHorizonRenderer {
         self.frontier_topology = None;
         self.frontier_topology_receipt = TerrainFrontierTopologyProofReceipt::default();
         self.frontier_support = None;
+        self.frontier_support_pending = None;
         self.frontier_observer_chunk = [0, 0];
         self.tree_ownership = None;
         self.exact_owned_tree_ids.clear();
@@ -3783,7 +3793,11 @@ impl TerrainHorizonRenderer {
             frontier_topology_receipt: TerrainFrontierTopologyProofReceipt::default(),
             frontier_topology_failures: 0,
             frontier_support: None,
+            frontier_support_pending: None,
             frontier_support_dispatches_total: 0,
+            frontier_fallback_commits: 0,
+            frontier_preferred_commits: 0,
+            frontier_coalesced_generations: 0,
             frontier_observer_chunk: [0, 0],
             authoritative_tree_ownership: false,
             tree_ownership: None,
@@ -3958,7 +3972,10 @@ impl TerrainHorizonRenderer {
             self.frontier_receipt = TerrainFrontierPlanReceipt::default();
             self.frontier_topology = None;
             self.frontier_topology_receipt = TerrainFrontierTopologyProofReceipt::default();
-            self.frontier_support = None;
+            if self.frontier_support_pending.take().is_some() {
+                self.frontier_coalesced_generations =
+                    self.frontier_coalesced_generations.saturating_add(1);
+            }
         }
         Ok(())
     }
@@ -3971,6 +3988,7 @@ impl TerrainHorizonRenderer {
         self.frontier_topology = None;
         self.frontier_topology_receipt = TerrainFrontierTopologyProofReceipt::default();
         self.frontier_support = None;
+        self.frontier_support_pending = None;
     }
 
     fn refresh_frontier_plan(
@@ -4066,6 +4084,7 @@ impl TerrainHorizonRenderer {
 
     fn disable_frontier_support(&mut self, queue: &wgpu::Queue) -> Result<(), String> {
         self.frontier_support = None;
+        self.frontier_support_pending = None;
         self.renderer
             .exact_coverage
             .set_frontier_support_tiles(queue, &BTreeSet::new())?;
@@ -4091,27 +4110,28 @@ impl TerrainHorizonRenderer {
             Ok(topology) => {
                 self.frontier_topology_receipt = topology.receipt();
                 self.frontier_topology = Some(topology);
-                self.frontier_support = None;
+                if self.frontier_support_pending.take().is_some() {
+                    self.frontier_coalesced_generations =
+                        self.frontier_coalesced_generations.saturating_add(1);
+                }
             }
             Err(_error) => {
                 self.frontier_topology = None;
                 self.frontier_topology_receipt = TerrainFrontierTopologyProofReceipt::default();
-                self.frontier_support = None;
+                self.frontier_support_pending = None;
                 self.frontier_topology_failures = self.frontier_topology_failures.saturating_add(1);
             }
         }
     }
 
-    fn prepare_frontier_support(
-        &mut self,
+    fn build_frontier_support(
+        &self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-    ) -> Result<(), String> {
-        let Some(topology) = self.frontier_topology.as_ref() else {
-            return self.disable_frontier_support(queue);
-        };
+        topology: &TerrainFrontierTopologyProof,
+    ) -> Result<TerrainFrontierSupportGpuProof, String> {
         if topology.receipt().state != TerrainFrontierTopologyProofState::Complete {
-            return self.disable_frontier_support(queue);
+            return Err("cannot build an incomplete frontier certificate".to_owned());
         }
         let identity = TerrainFrontierSupportGpuIdentity {
             seed: self.seed,
@@ -4121,16 +4141,6 @@ impl TerrainHorizonRenderer {
             support_pool_capacity: topology.receipt().support_pool_capacity,
             selected_tiles: topology.selected_support_tiles().clone(),
         };
-        if self
-            .frontier_support
-            .as_ref()
-            .is_some_and(|support| support.identity == identity)
-        {
-            return Ok(());
-        }
-        self.renderer
-            .exact_coverage
-            .set_frontier_support_tiles(queue, &BTreeSet::new())?;
         let connector_instances = terrain_frontier_proof_connector_instances(topology)?;
         let normal_height_byte_len = terrain_horizon_normal_height_byte_len()?;
         let mut tiles = Vec::with_capacity(identity.selected_tiles.len());
@@ -4182,14 +4192,127 @@ impl TerrainHorizonRenderer {
                 outer_edge_flags,
             });
         }
-        self.frontier_support = Some(TerrainFrontierSupportGpuProof {
+        let committed = tiles.is_empty();
+        Ok(TerrainFrontierSupportGpuProof {
             identity,
             tiles,
             connector_instances,
-            committed: false,
+            committed,
             dispatched_total: 0,
+        })
+    }
+
+    fn ensure_frontier_fallback(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Result<(), String> {
+        let Some(plan) = self.frontier_plan.as_ref() else {
+            return self.disable_frontier_support(queue);
+        };
+        let fallback = TerrainFrontierTopologyProof::prepare(
+            plan,
+            TerrainFrontierTopologyProofOptions {
+                fine_tile_capacity: 0,
+            },
+        )?;
+        let receipt = fallback.receipt();
+        if receipt.state != TerrainFrontierTopologyProofState::Complete {
+            return Err("frontier fallback could not certify the exact boundary".to_owned());
+        }
+        let active_matches = self.frontier_support.as_ref().is_some_and(|support| {
+            support.committed
+                && support.identity.exact_generation == receipt.exact_generation
+                && support.identity.presentation == receipt.presentation
         });
+        if active_matches {
+            return Ok(());
+        }
+        let support = self.build_frontier_support(device, queue, &fallback)?;
+        debug_assert!(support.committed);
+        self.renderer
+            .exact_coverage
+            .set_frontier_support_tiles(queue, &support.identity.selected_tiles)?;
+        self.frontier_support = Some(support);
+        self.frontier_fallback_commits = self.frontier_fallback_commits.saturating_add(1);
         Ok(())
+    }
+
+    fn prepare_frontier_support(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Result<(), String> {
+        let Some(topology) = self.frontier_topology.as_ref() else {
+            return Ok(());
+        };
+        if topology.receipt().state != TerrainFrontierTopologyProofState::Complete {
+            return Ok(());
+        }
+        let receipt = topology.receipt();
+        let desired_matches = |support: &TerrainFrontierSupportGpuProof| {
+            support.identity.exact_generation == receipt.exact_generation
+                && support.identity.presentation == receipt.presentation
+                && support.identity.support_pool_capacity == receipt.support_pool_capacity
+                && support.identity.selected_tiles == *topology.selected_support_tiles()
+        };
+        if self
+            .frontier_support
+            .as_ref()
+            .is_some_and(|support| support.committed && desired_matches(support))
+            || self
+                .frontier_support_pending
+                .as_ref()
+                .is_some_and(desired_matches)
+        {
+            return Ok(());
+        }
+        let pending = self.build_frontier_support(device, queue, topology)?;
+        if self.frontier_support_pending.replace(pending).is_some() {
+            self.frontier_coalesced_generations =
+                self.frontier_coalesced_generations.saturating_add(1);
+        }
+        Ok(())
+    }
+
+    fn frontier_admission_receipt(
+        &self,
+        exact_frontier_required: bool,
+    ) -> TerrainFrontierAdmissionReceipt {
+        let active = self.frontier_support.as_ref();
+        let pending = self.frontier_support_pending.as_ref();
+        let state = if !exact_frontier_required {
+            TerrainFrontierAdmissionState::Disabled
+        } else if active.is_none_or(|support| !support.committed) {
+            TerrainFrontierAdmissionState::Rejected
+        } else if pending.is_some() {
+            TerrainFrontierAdmissionState::PreparingPreferred
+        } else if active.is_some_and(|support| support.identity.support_pool_capacity == 0) {
+            TerrainFrontierAdmissionState::SynchronousFallback
+        } else {
+            TerrainFrontierAdmissionState::Preferred
+        };
+        TerrainFrontierAdmissionReceipt {
+            state,
+            exact_generation: active.map_or(0, |support| support.identity.exact_generation),
+            presentation: active.map_or_else(
+                super::TerrainFrontierPresentationIdentity::default,
+                |support| support.identity.presentation,
+            ),
+            active_support_capacity: active
+                .map_or(0, |support| support.identity.support_pool_capacity),
+            active_support_tiles: active.map_or(0, |support| {
+                support.tiles.len().try_into().unwrap_or(u32::MAX)
+            }),
+            pending_support_capacity: pending
+                .map_or(0, |support| support.identity.support_pool_capacity),
+            pending_support_tiles: pending.map_or(0, |support| {
+                support.tiles.len().try_into().unwrap_or(u32::MAX)
+            }),
+            fallback_commits: self.frontier_fallback_commits,
+            preferred_commits: self.frontier_preferred_commits,
+            coalesced_generations: self.frontier_coalesced_generations,
+        }
     }
 
     pub fn set_authoritative_tree_ownership(&mut self, enabled: bool) {
@@ -4576,21 +4699,25 @@ impl TerrainHorizonRenderer {
                 super::TERRAIN_FRONTIER_PROOF_FINE_TILE_CAPACITY
             };
         self.refresh_frontier_topology_capacity(frontier_support_capacity);
-        let frontier_proof_active = matches!(
-            presentation.diagnostic,
-            TerrainHorizonDiagnostic::FrontierHybridProof
-                | TerrainHorizonDiagnostic::FrontierHybridFallbackProof
-        );
-        if frontier_proof_active {
+        let exact_frontier_required = self.renderer.exact_coverage.mode
+            != TerrainExactCoverageMode::Disabled
+            && self
+                .exact_coverage_snapshot
+                .as_ref()
+                .is_some_and(|coverage| !coverage.chunks().is_empty());
+        let exact_frontier_certifiable = exact_frontier_required
+            && self.frontier_topology_receipt.state == TerrainFrontierTopologyProofState::Complete;
+        if exact_frontier_certifiable {
+            self.ensure_frontier_fallback(device, queue)?;
             self.prepare_frontier_support(device, queue)?;
         } else {
             self.disable_frontier_support(queue)?;
         }
         let mut frontier_support_dispatches = 0_u32;
-        if frontier_proof_active
+        if exact_frontier_certifiable
             && self.pending.is_empty()
             && !self.admission.has_staged_levels()
-            && let Some(support) = self.frontier_support.as_mut()
+            && let Some(support) = self.frontier_support_pending.as_mut()
         {
             for support_tile in support
                 .tiles
@@ -4648,6 +4775,21 @@ impl TerrainHorizonRenderer {
         self.frontier_support_dispatches_total = self
             .frontier_support_dispatches_total
             .saturating_add(u64::from(frontier_support_dispatches));
+        if self
+            .frontier_support_pending
+            .as_ref()
+            .is_some_and(|support| support.committed)
+        {
+            let support = self
+                .frontier_support_pending
+                .take()
+                .expect("checked committed frontier support remains pending");
+            self.renderer
+                .exact_coverage
+                .set_frontier_support_tiles(queue, &support.identity.selected_tiles)?;
+            self.frontier_support = Some(support);
+            self.frontier_preferred_commits = self.frontier_preferred_commits.saturating_add(1);
+        }
         let committed_support_tiles = self
             .frontier_support
             .as_ref()
@@ -4657,6 +4799,11 @@ impl TerrainHorizonRenderer {
         self.renderer
             .exact_coverage
             .set_frontier_support_tiles(queue, &committed_support_tiles)?;
+        let frontier_certificate_active = self.frontier_support.as_ref().is_some_and(|support| {
+            support.committed
+                && support.identity.exact_generation == self.renderer.exact_coverage.mask.generation
+                && support.identity.presentation == self.frontier_receipt.presentation
+        });
         let far_culls = render_view_overrides.map(|view| {
             presentation
                 .fog
@@ -4988,12 +5135,7 @@ impl TerrainHorizonRenderer {
                         .expect("horizon renderer owns its exact connector pipeline")
                 };
                 pass.set_pipeline(connector_pipeline);
-                if frontier_proof_active
-                    && self
-                        .frontier_support
-                        .as_ref()
-                        .is_some_and(|support| support.committed)
-                {
+                if frontier_certificate_active {
                     for level in &terrain_levels {
                         for resource in &level.tiles {
                             if !self.visible_terrain_slots[resource.resource_slot as usize] {
@@ -5225,18 +5367,24 @@ impl TerrainHorizonRenderer {
             .iter()
             .map(|slot| slot.exact_connector_instance_bytes)
             .sum::<u64>();
+        let frontier_generations = self
+            .frontier_support
+            .iter()
+            .chain(self.frontier_support_pending.iter());
         let frontier_support_allocated_tiles =
-            self.frontier_support.as_ref().map_or(0, |support| {
-                support.tiles.len().try_into().unwrap_or(u32::MAX)
+            frontier_generations.clone().fold(0_u32, |count, support| {
+                count.saturating_add(support.tiles.len().try_into().unwrap_or(u32::MAX))
             });
-        let frontier_support_ready_tiles = self.frontier_support.as_ref().map_or(0, |support| {
-            support
-                .tiles
-                .iter()
-                .filter(|tile| tile.ready)
-                .count()
-                .try_into()
-                .unwrap_or(u32::MAX)
+        let frontier_support_ready_tiles = frontier_generations.fold(0_u32, |count, support| {
+            count.saturating_add(
+                support
+                    .tiles
+                    .iter()
+                    .filter(|tile| tile.ready)
+                    .count()
+                    .try_into()
+                    .unwrap_or(u32::MAX),
+            )
         });
         let frontier_support_pending_tiles =
             frontier_support_allocated_tiles.saturating_sub(frontier_support_ready_tiles);
@@ -5247,6 +5395,12 @@ impl TerrainHorizonRenderer {
             .iter()
             .map(|slot| slot.frontier_proof_connector_instance_bytes)
             .chain(self.frontier_support.iter().flat_map(|support| {
+                support
+                    .tiles
+                    .iter()
+                    .map(|tile| tile.tile.frontier_proof_connector_instance_bytes)
+            }))
+            .chain(self.frontier_support_pending.iter().flat_map(|support| {
                 support
                     .tiles
                     .iter()
@@ -5318,13 +5472,9 @@ impl TerrainHorizonRenderer {
             && self.clipmap.center() == (self.requested_center_x, self.requested_center_z)
             && self.clipmap.origins_settled()
             && vegetation_settled
-            && (!frontier_proof_active
-                || (self.frontier_topology_receipt.state
-                    == TerrainFrontierTopologyProofState::Complete
-                    && self
-                        .frontier_support
-                        .as_ref()
-                        .is_some_and(|support| support.committed)));
+            && (!exact_frontier_required
+                || (frontier_certificate_active && self.frontier_support_pending.is_none()));
+        let frontier_admission = self.frontier_admission_receipt(exact_frontier_required);
         Ok(TerrainHorizonFrameStats {
             revision: self.clipmap.diagnostics().revision,
             allocation_slots,
@@ -5399,6 +5549,7 @@ impl TerrainHorizonRenderer {
             frontier_plan_failures: self.frontier_plan_failures,
             frontier_topology: self.frontier_topology_receipt,
             frontier_topology_failures: self.frontier_topology_failures,
+            frontier_admission,
             vegetation_service,
             finest_sample_spacing: self.clipmap.config().base_sample_spacing,
             coarse_ready: drawn_levels > 0,

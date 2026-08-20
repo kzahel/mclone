@@ -127,9 +127,6 @@ impl Default for TerrainFrontierTopologyProofOptions {
 
 impl TerrainFrontierTopologyProofOptions {
     fn validate(self) -> Result<Self, String> {
-        if self.fine_tile_capacity == 0 {
-            return Err("terrain frontier proof fine-tile capacity must be non-zero".to_owned());
-        }
         Ok(self)
     }
 }
@@ -606,6 +603,37 @@ mod tests {
                 .saturating_add(receipt.fallback_solid_segments),
             4_032
         );
+    }
+
+    #[test]
+    fn zero_fine_capacity_is_a_complete_synchronous_fallback() {
+        let plan = plan(
+            square(8, ChunkPos::new(0, 0)),
+            HorizontalTopology::UNBOUNDED,
+            [8, 8],
+            true,
+        );
+        let proof = TerrainFrontierTopologyProof::prepare(
+            &plan,
+            TerrainFrontierTopologyProofOptions {
+                fine_tile_capacity: 0,
+            },
+        )
+        .unwrap();
+        let receipt = proof.receipt();
+        assert_eq!(receipt.state, TerrainFrontierTopologyProofState::Complete);
+        assert_eq!(receipt.selected_support_tiles, 0);
+        assert_eq!(receipt.base_suppression_tiles, 0);
+        assert_eq!(receipt.outer_stitch_segments, 0);
+        assert_eq!(receipt.preferred_solid_segments, 0);
+        assert_eq!(receipt.preferred_water_segments, 0);
+        assert_eq!(
+            receipt
+                .fallback_solid_segments
+                .saturating_add(receipt.fallback_water_segments),
+            1_088
+        );
+        assert_eq!(receipt.certified_segments, receipt.exposed_segments);
     }
 
     #[test]

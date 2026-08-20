@@ -11,6 +11,7 @@ mod clipmap;
 mod composition;
 mod engine;
 mod frontier;
+mod frontier_admission;
 mod frontier_topology;
 mod horizon_admission;
 mod lod;
@@ -90,6 +91,7 @@ pub use frontier::{
     TerrainFrontierSegment, terrain_frontier_format_capacity,
     terrain_frontier_presentation_identity,
 };
+pub use frontier_admission::{TerrainFrontierAdmissionReceipt, TerrainFrontierAdmissionState};
 pub use frontier_topology::{
     TERRAIN_FRONTIER_PROOF_FINE_TILE_CAPACITY, TerrainFrontierProofClosure,
     TerrainFrontierProofOuterEdge, TerrainFrontierProofSegment, TerrainFrontierTopologyProof,

@@ -241,6 +241,21 @@ fn main() -> Result<()> {
                         "connectorVertexCount": terrain.frontier_proof_connector_vertex_count,
                         "connectorBytes": terrain.frontier_proof_connector_bytes,
                     });
+                    let admission = terrain.frontier_admission;
+                    let frontier_admission = serde_json::json!({
+                        "state": admission.state.label(),
+                        "complete": admission.complete(),
+                        "exactGeneration": admission.exact_generation,
+                        "presentationHash": admission.presentation.semantic_hash,
+                        "presentationLevels": admission.presentation.level_count,
+                        "activeSupportCapacity": admission.active_support_capacity,
+                        "activeSupportTiles": admission.active_support_tiles,
+                        "pendingSupportCapacity": admission.pending_support_capacity,
+                        "pendingSupportTiles": admission.pending_support_tiles,
+                        "fallbackCommits": admission.fallback_commits,
+                        "preferredCommits": admission.preferred_commits,
+                        "coalescedGenerations": admission.coalesced_generations,
+                    });
                     serde_json::json!({
                         "enabled": true,
                         "lodPreset": terrain.lod_preset.startup_label(),
@@ -268,6 +283,7 @@ fn main() -> Result<()> {
                         "exactBoundaryPayloadBytes": terrain.exact_boundary_payload_bytes,
                         "frontier": frontier_state,
                         "frontierTopology": frontier_topology,
+                        "frontierAdmission": frontier_admission,
                         "frontierProofGpu": frontier_proof_gpu,
                         "drawnTreeTiles": terrain.drawn_tree_tiles,
                         "drawnTreeTilesByLevel": terrain.drawn_tree_tiles_by_level,
