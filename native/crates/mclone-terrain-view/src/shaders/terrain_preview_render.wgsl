@@ -47,13 +47,11 @@ const TERRAIN_HORIZON_DIAGNOSTIC_OCCLUSION: u32 = 6u;
 const TERRAIN_HORIZON_DIAGNOSTIC_WATER: u32 = 7u;
 const TERRAIN_HORIZON_DIAGNOSTIC_TEXTURE: u32 = 8u;
 const TERRAIN_HORIZON_DIAGNOSTIC_FRONTIER_SUPPORT: u32 = 9u;
-const TERRAIN_HORIZON_DIAGNOSTIC_FRONTIER_HYBRID_PROOF: u32 = 10u;
-const TERRAIN_HORIZON_DIAGNOSTIC_FRONTIER_HYBRID_FALLBACK_PROOF: u32 = 11u;
 const TERRAIN_FRONTIER_SUPPORT_TILE_CAPACITY: u32 = 32u;
-const TERRAIN_FRONTIER_PROOF_CONNECTOR_FLAG: u32 = 0x00000100u;
-const TERRAIN_FRONTIER_PROOF_CONNECTOR_WATER_FLAG: u32 = 0x00000200u;
-const TERRAIN_FRONTIER_PROOF_CONNECTOR_FALLBACK_FLAG: u32 = 0x00000400u;
-const TERRAIN_FRONTIER_PROOF_CONNECTOR_OUTER_FLAG: u32 = 0x00000800u;
+const TERRAIN_FRONTIER_CONNECTOR_FLAG: u32 = 0x00000100u;
+const TERRAIN_FRONTIER_CONNECTOR_WATER_FLAG: u32 = 0x00000200u;
+const TERRAIN_FRONTIER_CONNECTOR_FALLBACK_FLAG: u32 = 0x00000400u;
+const TERRAIN_FRONTIER_CONNECTOR_OUTER_FLAG: u32 = 0x00000800u;
 // The shared exact-distance field reaches 32 blocks. Restrict water's
 // exact-like appearance to its nearest quarter so the handoff remains a small
 // procedural-side halo rather than a broad second water domain.
@@ -1062,7 +1060,7 @@ fn exact_connector_vertex_legacy(
     return out;
 }
 
-fn frontier_proof_height(local_blocks: vec2<f32>) -> f32 {
+fn frontier_connector_height(local_blocks: vec2<f32>) -> f32 {
     let cells = i32(params.origin_spacing_cells.w);
     let spacing = f32(params.origin_spacing_cells.z);
     let sample_position = clamp(
@@ -1084,15 +1082,15 @@ fn frontier_proof_height(local_blocks: vec2<f32>) -> f32 {
         + (h10 - h11) * (1.0 - fraction.y);
 }
 
-fn frontier_proof_connector_vertex(
+fn frontier_connector_vertex(
     vertex_index: u32,
     cell_world_xz: vec2<i32>,
     side_kind: u32,
     view_index: u32,
 ) -> VertexOutput {
     let side = side_kind & 3u;
-    let water = (side_kind & TERRAIN_FRONTIER_PROOF_CONNECTOR_WATER_FLAG) != 0u;
-    let outer = (side_kind & TERRAIN_FRONTIER_PROOF_CONNECTOR_OUTER_FLAG) != 0u;
+    let water = (side_kind & TERRAIN_FRONTIER_CONNECTOR_WATER_FLAG) != 0u;
+    let outer = (side_kind & TERRAIN_FRONTIER_CONNECTOR_OUTER_FLAG) != 0u;
     let corner = grid_corner(vertex_index % 6u);
     let edge_t = f32(corner.x);
     var exact_block = vec2<i32>(cell_world_xz.x - 1, cell_world_xz.y);
@@ -1120,7 +1118,7 @@ fn frontier_proof_connector_vertex(
     let origin = vec2<f32>(params.origin_spacing_cells.xy);
     let world_xz = vec2<f32>(world_x, world_z);
     let local_blocks = world_xz - origin;
-    let procedural_y = frontier_proof_height(local_blocks) + 1.0;
+    let procedural_y = frontier_connector_height(local_blocks) + 1.0;
     let nearest_sample = vec2<i32>(clamp(
         round(local_blocks / spacing),
         vec2<f32>(0.0),
@@ -1201,8 +1199,8 @@ fn exact_connector_vertex(
     side_kind: u32,
     view_index: u32,
 ) -> VertexOutput {
-    if (side_kind & TERRAIN_FRONTIER_PROOF_CONNECTOR_FLAG) != 0u {
-        return frontier_proof_connector_vertex(
+    if (side_kind & TERRAIN_FRONTIER_CONNECTOR_FLAG) != 0u {
+        return frontier_connector_vertex(
             vertex_index,
             cell_world_xz,
             side_kind,

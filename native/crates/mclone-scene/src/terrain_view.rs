@@ -10,12 +10,12 @@ use mclone_render::color_profile::RenderColorProfile;
 use mclone_terrain_view::{
     ExactPaintedCoverageSnapshot, TERRAIN_LOD_HIGH_LEVEL_COUNT, TerrainCompositionSourceIdentity,
     TerrainExactBoundaryColumn, TerrainExactBoundaryProfile, TerrainExactCoverageMode,
-    TerrainFrontierAdmissionReceipt, TerrainFrontierPlanReceipt,
-    TerrainFrontierTopologyProofReceipt, TerrainHorizonDiagnostic, TerrainHorizonFrameStats,
-    TerrainHorizonPresentation, TerrainHorizonRenderTarget, TerrainLodPresetDescriptor,
-    TerrainPreparedExactFrame, TerrainPreviewCamera, TerrainPreviewMaterialAtlas,
-    TerrainPreviewMaterialTable, TerrainPreviewView, TerrainVegetationExecutor, TerrainViewEngine,
-    TerrainViewEngineConfig, TerrainViewSourceIdentity, terrain_exact_exposed_boundary_blocks,
+    TerrainFrontierAdmissionReceipt, TerrainFrontierPlanReceipt, TerrainFrontierTopologyReceipt,
+    TerrainHorizonDiagnostic, TerrainHorizonFrameStats, TerrainHorizonPresentation,
+    TerrainHorizonRenderTarget, TerrainLodPresetDescriptor, TerrainPreparedExactFrame,
+    TerrainPreviewCamera, TerrainPreviewMaterialAtlas, TerrainPreviewMaterialTable,
+    TerrainPreviewView, TerrainVegetationExecutor, TerrainViewEngine, TerrainViewEngineConfig,
+    TerrainViewSourceIdentity, terrain_exact_exposed_boundary_blocks,
     terrain_exact_player_connected_chunks,
 };
 use mclone_worldgen::terrain_preview::{TerrainPreviewContentStage, TerrainPreviewProfile};
@@ -69,9 +69,9 @@ pub struct SceneTerrainViewDiagnostics {
     pub frontier_support_dispatches_total: u64,
     pub frontier_support_resource_bytes: u64,
     pub frontier_support_vertex_count: u32,
-    pub frontier_proof_connector_segments: u32,
-    pub frontier_proof_connector_vertex_count: u32,
-    pub frontier_proof_connector_bytes: u64,
+    pub frontier_connector_segments: u32,
+    pub frontier_connector_vertex_count: u32,
+    pub frontier_connector_bytes: u64,
     pub exact_transition_preparation_micros: u64,
     pub exact_transition_payload_bytes: u64,
     pub exact_boundary_preparation_micros: u64,
@@ -79,7 +79,7 @@ pub struct SceneTerrainViewDiagnostics {
     pub exact_boundary_payload_bytes: u64,
     pub frontier: TerrainFrontierPlanReceipt,
     pub frontier_plan_failures: u64,
-    pub frontier_topology: TerrainFrontierTopologyProofReceipt,
+    pub frontier_topology: TerrainFrontierTopologyReceipt,
     pub frontier_topology_failures: u64,
     pub frontier_admission: TerrainFrontierAdmissionReceipt,
     pub inner_hole_culled_tiles: u32,
@@ -671,11 +671,9 @@ impl SceneTerrainViewState {
             stats.frontier_support_dispatches_total;
         self.diagnostics.frontier_support_resource_bytes = stats.frontier_support_resource_bytes;
         self.diagnostics.frontier_support_vertex_count = stats.frontier_support_vertex_count;
-        self.diagnostics.frontier_proof_connector_segments =
-            stats.frontier_proof_connector_segments;
-        self.diagnostics.frontier_proof_connector_vertex_count =
-            stats.frontier_proof_connector_vertex_count;
-        self.diagnostics.frontier_proof_connector_bytes = stats.frontier_proof_connector_bytes;
+        self.diagnostics.frontier_connector_segments = stats.frontier_connector_segments;
+        self.diagnostics.frontier_connector_vertex_count = stats.frontier_connector_vertex_count;
+        self.diagnostics.frontier_connector_bytes = stats.frontier_connector_bytes;
         self.diagnostics.exact_transition_preparation_micros =
             stats.exact_transition_preparation_micros;
         self.diagnostics.exact_transition_payload_bytes = stats.exact_transition_payload_bytes;

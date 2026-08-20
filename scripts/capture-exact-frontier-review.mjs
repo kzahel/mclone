@@ -30,7 +30,7 @@ function parsePositiveInteger(flag, value, maximum) {
 
 function parseArguments(argv) {
   const options = {
-    output: "/tmp/mclone-exact-frontier-hybrid-review",
+    output: "/tmp/mclone-exact-frontier-review",
     width: 1024,
     height: 576,
     settleFrames: 240,
@@ -57,7 +57,7 @@ function parseArguments(argv) {
     } else if (argument === "--help") {
       process.stdout.write(
         "Usage: node scripts/capture-exact-frontier-review.mjs "
-        + "[--output /tmp/mclone-exact-frontier-hybrid-review] "
+        + "[--output /tmp/mclone-exact-frontier-review] "
         + "[--width 1024] [--height 576] [--settle-frames 240] "
         + "[--skip-build]\n",
       );
@@ -147,7 +147,7 @@ function validateState(capture, state) {
       || state.vegetationJobFailures !== 0) {
     return "vegetation did not settle without failures";
   }
-  const gpu = state.frontierProofGpu;
+  const gpu = state.frontierGpu;
   if (state.frontierAdmission?.complete !== true
       || state.frontierAdmission?.state !== "preferred"
       || state.frontierAdmission?.exactGeneration
@@ -175,14 +175,14 @@ function validateState(capture, state) {
         || gpu.drawnSupportTiles === 0)) {
     return `RD8 did not commit and draw its 20-tile support belt: ${JSON.stringify(gpu)}`;
   }
-  if (capture.diagnostic === "frontier-hybrid-fallback-proof"
+  if (capture.diagnostic === "frontier-fallback"
       && (gpu.allocatedSupportTiles !== 1
         || gpu.supportDispatchesTotal < 1
         || state.frontierTopology.supportPoolCapacity !== 1
         || state.frontierTopology.rejectedSupportTiles === 0
         || (state.frontierTopology.fallbackSolidSegments
           + state.frontierTopology.fallbackWaterSegments) === 0)) {
-    return `forced proof did not exercise the bounded fallback: ${JSON.stringify(state.frontierTopology)}`;
+    return `forced fallback did not exercise the bounded policy: ${JSON.stringify(state.frontierTopology)}`;
   }
   return null;
 }
@@ -199,7 +199,7 @@ function stableState(state) {
     exactConnectorSegments: _exactConnectorSegments,
     exactConnectorVertexCount: _exactConnectorVertexCount,
     exactConnectorBytes: _exactConnectorBytes,
-    frontierProofGpu: _frontierProofGpu,
+    frontierGpu: _frontierGpu,
     frontierAdmission: _frontierAdmission,
     frontier,
     frontierTopology: _frontierTopology,
@@ -262,7 +262,7 @@ const views = {
 const campaign = [
   { name: "rd2-low-product", renderDistance: 2, view: "low", diagnostic: "natural" },
   { name: "rd8-elevated-product", renderDistance: 8, view: "elevated", diagnostic: "natural" },
-  { name: "rd8-elevated-forced-fallback", renderDistance: 8, view: "elevated", diagnostic: "frontier-hybrid-fallback-proof" },
+  { name: "rd8-elevated-forced-fallback", renderDistance: 8, view: "elevated", diagnostic: "frontier-fallback" },
 ];
 const results = [];
 

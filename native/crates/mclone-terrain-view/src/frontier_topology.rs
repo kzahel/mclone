@@ -9,7 +9,7 @@ use crate::{
     TerrainFrontierPlan, TerrainFrontierPresentationIdentity,
 };
 
-pub const TERRAIN_FRONTIER_PROOF_FINE_TILE_CAPACITY: u32 = 32;
+pub const TERRAIN_FRONTIER_FINE_TILE_CAPACITY: u32 = 32;
 
 const TERRAIN_FRONTIER_DIRECTION_STEPS: [(TerrainFrontierDirection, i64, i64); 4] = [
     (TerrainFrontierDirection::West, -1, 0),
@@ -19,14 +19,14 @@ const TERRAIN_FRONTIER_DIRECTION_STEPS: [(TerrainFrontierDirection, i64, i64); 4
 ];
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub enum TerrainFrontierTopologyProofState {
+pub enum TerrainFrontierTopologyState {
     #[default]
     Empty,
     Complete,
     Incomplete,
 }
 
-impl TerrainFrontierTopologyProofState {
+impl TerrainFrontierTopologyState {
     pub const fn label(self) -> &'static str {
         match self {
             Self::Empty => "empty",
@@ -37,7 +37,7 @@ impl TerrainFrontierTopologyProofState {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum TerrainFrontierProofClosure {
+pub enum TerrainFrontierClosure {
     PreferredSolidConnector,
     ResolutionAwareSolidConnector,
     PreferredWaterCurtain,
@@ -47,7 +47,7 @@ pub enum TerrainFrontierProofClosure {
     UnsupportedProceduralCoverage,
 }
 
-impl TerrainFrontierProofClosure {
+impl TerrainFrontierClosure {
     pub const fn certified(self) -> bool {
         matches!(
             self,
@@ -61,7 +61,7 @@ impl TerrainFrontierProofClosure {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct TerrainFrontierProofSegment {
+pub struct TerrainFrontierClosureSegment {
     pub canonical_exact_block: [i32; 2],
     pub lifted_exact_block: [i64; 2],
     pub procedural_block: [i64; 2],
@@ -70,18 +70,18 @@ pub struct TerrainFrontierProofSegment {
     pub procedural_level: Option<u32>,
     pub procedural_sample_spacing: Option<u32>,
     pub support_tile: TerrainFrontierFineTileKey,
-    pub closure: TerrainFrontierProofClosure,
+    pub closure: TerrainFrontierClosure,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct TerrainFrontierProofOuterEdge {
+pub struct TerrainFrontierOuterEdge {
     pub tile: TerrainFrontierFineTileKey,
     pub direction: TerrainFrontierDirection,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct TerrainFrontierTopologyProofReceipt {
-    pub state: TerrainFrontierTopologyProofState,
+pub struct TerrainFrontierTopologyReceipt {
+    pub state: TerrainFrontierTopologyState,
     pub presentation: TerrainFrontierPresentationIdentity,
     pub exact_generation: u64,
     pub preparation_micros: u64,
@@ -113,38 +113,38 @@ pub struct TerrainFrontierTopologyProofReceipt {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct TerrainFrontierTopologyProofOptions {
+pub struct TerrainFrontierTopologyOptions {
     pub fine_tile_capacity: u32,
 }
 
-impl Default for TerrainFrontierTopologyProofOptions {
+impl Default for TerrainFrontierTopologyOptions {
     fn default() -> Self {
         Self {
-            fine_tile_capacity: TERRAIN_FRONTIER_PROOF_FINE_TILE_CAPACITY,
+            fine_tile_capacity: TERRAIN_FRONTIER_FINE_TILE_CAPACITY,
         }
     }
 }
 
-impl TerrainFrontierTopologyProofOptions {
+impl TerrainFrontierTopologyOptions {
     fn validate(self) -> Result<Self, String> {
         Ok(self)
     }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct TerrainFrontierTopologyProof {
+pub struct TerrainFrontierTopology {
     selected_support_tiles: BTreeSet<TerrainFrontierFineTileKey>,
     active_fine_tiles: BTreeSet<TerrainFrontierFineTileKey>,
     base_suppression_tiles: BTreeSet<TerrainFrontierFineTileKey>,
-    outer_edges: Vec<TerrainFrontierProofOuterEdge>,
-    segments: Vec<TerrainFrontierProofSegment>,
-    receipt: TerrainFrontierTopologyProofReceipt,
+    outer_edges: Vec<TerrainFrontierOuterEdge>,
+    segments: Vec<TerrainFrontierClosureSegment>,
+    receipt: TerrainFrontierTopologyReceipt,
 }
 
-impl TerrainFrontierTopologyProof {
+impl TerrainFrontierTopology {
     pub fn prepare(
         plan: &TerrainFrontierPlan,
-        options: TerrainFrontierTopologyProofOptions,
+        options: TerrainFrontierTopologyOptions,
     ) -> Result<Self, String> {
         let started = topology_timing_now();
         let options = options.validate()?;
@@ -162,31 +162,29 @@ impl TerrainFrontierTopologyProof {
             };
             let preferred = active_fine_tiles.contains(&support_tile);
             let closure = match segment.boundary {
-                TerrainFrontierBoundaryKind::WorldBoundary => {
-                    TerrainFrontierProofClosure::WorldBoundary
-                }
+                TerrainFrontierBoundaryKind::WorldBoundary => TerrainFrontierClosure::WorldBoundary,
                 TerrainFrontierBoundaryKind::MissingExactProfile => {
-                    TerrainFrontierProofClosure::UnsupportedExactProfile
+                    TerrainFrontierClosure::UnsupportedExactProfile
                 }
                 TerrainFrontierBoundaryKind::Solid | TerrainFrontierBoundaryKind::Water
                     if segment.procedural_owner_count != 1 =>
                 {
-                    TerrainFrontierProofClosure::UnsupportedProceduralCoverage
+                    TerrainFrontierClosure::UnsupportedProceduralCoverage
                 }
                 TerrainFrontierBoundaryKind::Solid if preferred => {
-                    TerrainFrontierProofClosure::PreferredSolidConnector
+                    TerrainFrontierClosure::PreferredSolidConnector
                 }
                 TerrainFrontierBoundaryKind::Solid => {
-                    TerrainFrontierProofClosure::ResolutionAwareSolidConnector
+                    TerrainFrontierClosure::ResolutionAwareSolidConnector
                 }
                 TerrainFrontierBoundaryKind::Water if preferred => {
-                    TerrainFrontierProofClosure::PreferredWaterCurtain
+                    TerrainFrontierClosure::PreferredWaterCurtain
                 }
                 TerrainFrontierBoundaryKind::Water => {
-                    TerrainFrontierProofClosure::ResolutionAwareWaterCurtain
+                    TerrainFrontierClosure::ResolutionAwareWaterCurtain
                 }
             };
-            segments.push(TerrainFrontierProofSegment {
+            segments.push(TerrainFrontierClosureSegment {
                 canonical_exact_block: segment.canonical_exact_block,
                 lifted_exact_block: segment.lifted_exact_block,
                 procedural_block: segment.procedural_block,
@@ -231,15 +229,15 @@ impl TerrainFrontierTopologyProof {
         &self.base_suppression_tiles
     }
 
-    pub fn outer_edges(&self) -> &[TerrainFrontierProofOuterEdge] {
+    pub fn outer_edges(&self) -> &[TerrainFrontierOuterEdge] {
         &self.outer_edges
     }
 
-    pub fn segments(&self) -> &[TerrainFrontierProofSegment] {
+    pub fn segments(&self) -> &[TerrainFrontierClosureSegment] {
         &self.segments
     }
 
-    pub const fn receipt(&self) -> TerrainFrontierTopologyProofReceipt {
+    pub const fn receipt(&self) -> TerrainFrontierTopologyReceipt {
         self.receipt
     }
 
@@ -263,14 +261,14 @@ impl TerrainFrontierTopologyProof {
         for segment in &self.segments {
             let preferred = self.active_fine_tiles.contains(&segment.support_tile);
             match segment.closure {
-                TerrainFrontierProofClosure::PreferredSolidConnector
-                | TerrainFrontierProofClosure::PreferredWaterCurtain
+                TerrainFrontierClosure::PreferredSolidConnector
+                | TerrainFrontierClosure::PreferredWaterCurtain
                     if !preferred =>
                 {
                     return Err("preferred frontier closure lacks fine ownership".to_owned());
                 }
-                TerrainFrontierProofClosure::ResolutionAwareSolidConnector
-                | TerrainFrontierProofClosure::ResolutionAwareWaterCurtain
+                TerrainFrontierClosure::ResolutionAwareSolidConnector
+                | TerrainFrontierClosure::ResolutionAwareWaterCurtain
                     if preferred =>
                 {
                     return Err("fallback frontier closure overlaps fine ownership".to_owned());
@@ -328,7 +326,7 @@ fn tile_distance(tile: TerrainFrontierFineTileKey, observer: [i64; 2]) -> u128 {
 fn support_outer_edges(
     selected: &BTreeSet<TerrainFrontierFineTileKey>,
     active: &BTreeSet<TerrainFrontierFineTileKey>,
-) -> Vec<TerrainFrontierProofOuterEdge> {
+) -> Vec<TerrainFrontierOuterEdge> {
     let mut edges = Vec::new();
     for tile in selected {
         for (direction, dx, dz) in TERRAIN_FRONTIER_DIRECTION_STEPS {
@@ -337,7 +335,7 @@ fn support_outer_edges(
                 tile_z: tile.tile_z.saturating_add(dz),
             };
             if !active.contains(&neighbor) {
-                edges.push(TerrainFrontierProofOuterEdge {
+                edges.push(TerrainFrontierOuterEdge {
                     tile: *tile,
                     direction,
                 });
@@ -349,17 +347,17 @@ fn support_outer_edges(
 
 fn summarize(
     plan: &TerrainFrontierPlan,
-    options: TerrainFrontierTopologyProofOptions,
+    options: TerrainFrontierTopologyOptions,
     selected: &BTreeSet<TerrainFrontierFineTileKey>,
     suppression: &BTreeSet<TerrainFrontierFineTileKey>,
-    outer_edges: &[TerrainFrontierProofOuterEdge],
-    segments: &[TerrainFrontierProofSegment],
-) -> TerrainFrontierTopologyProofReceipt {
-    let mut receipt = TerrainFrontierTopologyProofReceipt {
+    outer_edges: &[TerrainFrontierOuterEdge],
+    segments: &[TerrainFrontierClosureSegment],
+) -> TerrainFrontierTopologyReceipt {
+    let mut receipt = TerrainFrontierTopologyReceipt {
         state: if segments.is_empty() {
-            TerrainFrontierTopologyProofState::Empty
+            TerrainFrontierTopologyState::Empty
         } else {
-            TerrainFrontierTopologyProofState::Complete
+            TerrainFrontierTopologyState::Complete
         },
         presentation: plan.receipt().presentation,
         exact_generation: plan.receipt().exact_generation,
@@ -393,35 +391,35 @@ fn summarize(
             receipt.unresolved_segments = receipt.unresolved_segments.saturating_add(1);
         }
         match segment.closure {
-            TerrainFrontierProofClosure::PreferredSolidConnector => {
+            TerrainFrontierClosure::PreferredSolidConnector => {
                 receipt.preferred_solid_segments =
                     receipt.preferred_solid_segments.saturating_add(1)
             }
-            TerrainFrontierProofClosure::ResolutionAwareSolidConnector => {
+            TerrainFrontierClosure::ResolutionAwareSolidConnector => {
                 receipt.fallback_solid_segments = receipt.fallback_solid_segments.saturating_add(1)
             }
-            TerrainFrontierProofClosure::PreferredWaterCurtain => {
+            TerrainFrontierClosure::PreferredWaterCurtain => {
                 receipt.preferred_water_segments =
                     receipt.preferred_water_segments.saturating_add(1)
             }
-            TerrainFrontierProofClosure::ResolutionAwareWaterCurtain => {
+            TerrainFrontierClosure::ResolutionAwareWaterCurtain => {
                 receipt.fallback_water_segments = receipt.fallback_water_segments.saturating_add(1)
             }
-            TerrainFrontierProofClosure::WorldBoundary => {
+            TerrainFrontierClosure::WorldBoundary => {
                 receipt.world_boundary_segments = receipt.world_boundary_segments.saturating_add(1)
             }
-            TerrainFrontierProofClosure::UnsupportedExactProfile => {
+            TerrainFrontierClosure::UnsupportedExactProfile => {
                 receipt.unsupported_exact_profile_segments =
                     receipt.unsupported_exact_profile_segments.saturating_add(1)
             }
-            TerrainFrontierProofClosure::UnsupportedProceduralCoverage => {
+            TerrainFrontierClosure::UnsupportedProceduralCoverage => {
                 receipt.unsupported_procedural_segments =
                     receipt.unsupported_procedural_segments.saturating_add(1)
             }
         }
     }
     if receipt.unresolved_segments > 0 {
-        receipt.state = TerrainFrontierTopologyProofState::Incomplete;
+        receipt.state = TerrainFrontierTopologyState::Incomplete;
     }
     let selected_count = receipt.selected_support_tiles;
     let connector_count = receipt
@@ -549,13 +547,11 @@ mod tests {
             [8, 8],
             false,
         );
-        let proof = TerrainFrontierTopologyProof::prepare(
-            &plan,
-            TerrainFrontierTopologyProofOptions::default(),
-        )
-        .unwrap();
+        let proof =
+            TerrainFrontierTopology::prepare(&plan, TerrainFrontierTopologyOptions::default())
+                .unwrap();
         let receipt = proof.receipt();
-        assert_eq!(receipt.state, TerrainFrontierTopologyProofState::Complete);
+        assert_eq!(receipt.state, TerrainFrontierTopologyState::Complete);
         assert_eq!(receipt.exposed_segments, 1_088);
         assert_eq!(receipt.certified_segments, 1_088);
         assert_eq!(receipt.unresolved_segments, 0);
@@ -584,13 +580,11 @@ mod tests {
             [8, 8],
             false,
         );
-        let proof = TerrainFrontierTopologyProof::prepare(
-            &plan,
-            TerrainFrontierTopologyProofOptions::default(),
-        )
-        .unwrap();
+        let proof =
+            TerrainFrontierTopology::prepare(&plan, TerrainFrontierTopologyOptions::default())
+                .unwrap();
         let receipt = proof.receipt();
-        assert_eq!(receipt.state, TerrainFrontierTopologyProofState::Complete);
+        assert_eq!(receipt.state, TerrainFrontierTopologyState::Complete);
         assert_eq!(receipt.exposed_segments, 4_032);
         assert_eq!(receipt.certified_segments, 4_032);
         assert_eq!(receipt.selected_support_tiles, 32);
@@ -613,15 +607,15 @@ mod tests {
             [8, 8],
             true,
         );
-        let proof = TerrainFrontierTopologyProof::prepare(
+        let proof = TerrainFrontierTopology::prepare(
             &plan,
-            TerrainFrontierTopologyProofOptions {
+            TerrainFrontierTopologyOptions {
                 fine_tile_capacity: 0,
             },
         )
         .unwrap();
         let receipt = proof.receipt();
-        assert_eq!(receipt.state, TerrainFrontierTopologyProofState::Complete);
+        assert_eq!(receipt.state, TerrainFrontierTopologyState::Complete);
         assert_eq!(receipt.selected_support_tiles, 0);
         assert_eq!(receipt.base_suppression_tiles, 0);
         assert_eq!(receipt.outer_stitch_segments, 0);
@@ -644,13 +638,13 @@ mod tests {
             [8, 8],
             true,
         );
-        let preferred = TerrainFrontierTopologyProof::prepare(
+        let preferred = TerrainFrontierTopology::prepare(
             &preferred_plan,
-            TerrainFrontierTopologyProofOptions::default(),
+            TerrainFrontierTopologyOptions::default(),
         )
         .unwrap()
         .receipt();
-        assert_eq!(preferred.state, TerrainFrontierTopologyProofState::Complete);
+        assert_eq!(preferred.state, TerrainFrontierTopologyState::Complete);
         assert_eq!(preferred.preferred_water_segments, 64);
         assert_eq!(preferred.fallback_water_segments, 0);
 
@@ -660,15 +654,15 @@ mod tests {
             [8, 8],
             true,
         );
-        let fallback = TerrainFrontierTopologyProof::prepare(
+        let fallback = TerrainFrontierTopology::prepare(
             &fallback_plan,
-            TerrainFrontierTopologyProofOptions {
+            TerrainFrontierTopologyOptions {
                 fine_tile_capacity: 1,
             },
         )
         .unwrap()
         .receipt();
-        assert_eq!(fallback.state, TerrainFrontierTopologyProofState::Complete);
+        assert_eq!(fallback.state, TerrainFrontierTopologyState::Complete);
         assert!(fallback.preferred_water_segments > 0);
         assert!(fallback.fallback_water_segments > 0);
         assert_eq!(
@@ -693,13 +687,11 @@ mod tests {
             TerrainFrontierPlanOptions::default(),
         )
         .unwrap();
-        let receipt = TerrainFrontierTopologyProof::prepare(
-            &plan,
-            TerrainFrontierTopologyProofOptions::default(),
-        )
-        .unwrap()
-        .receipt();
-        assert_eq!(receipt.state, TerrainFrontierTopologyProofState::Incomplete);
+        let receipt =
+            TerrainFrontierTopology::prepare(&plan, TerrainFrontierTopologyOptions::default())
+                .unwrap()
+                .receipt();
+        assert_eq!(receipt.state, TerrainFrontierTopologyState::Incomplete);
         assert_eq!(receipt.unsupported_exact_profile_segments, 64);
         assert_eq!(receipt.unresolved_segments, 64);
     }
@@ -727,14 +719,14 @@ mod tests {
                 .collect(),
         ];
         for chunks in fixtures {
-            let proof = TerrainFrontierTopologyProof::prepare(
+            let proof = TerrainFrontierTopology::prepare(
                 &plan(chunks, HorizontalTopology::UNBOUNDED, [-120, -120], false),
-                TerrainFrontierTopologyProofOptions::default(),
+                TerrainFrontierTopologyOptions::default(),
             )
             .unwrap();
             assert_eq!(
                 proof.receipt().state,
-                TerrainFrontierTopologyProofState::Complete
+                TerrainFrontierTopologyState::Complete
             );
             assert_eq!(
                 proof.selected_support_tiles(),
@@ -761,33 +753,30 @@ mod tests {
     fn finite_world_edges_and_periodic_lifts_remain_certified() {
         let finite =
             HorizontalTopology::new(AxisTopology::finite(0, 1), AxisTopology::finite(0, 1));
-        let finite_proof = TerrainFrontierTopologyProof::prepare(
+        let finite_proof = TerrainFrontierTopology::prepare(
             &plan(BTreeSet::from([ChunkPos::new(0, 0)]), finite, [8, 8], false),
-            TerrainFrontierTopologyProofOptions::default(),
+            TerrainFrontierTopologyOptions::default(),
         )
         .unwrap()
         .receipt();
-        assert_eq!(
-            finite_proof.state,
-            TerrainFrontierTopologyProofState::Complete
-        );
+        assert_eq!(finite_proof.state, TerrainFrontierTopologyState::Complete);
         assert_eq!(finite_proof.world_boundary_segments, 64);
         assert_eq!(finite_proof.connector_vertices, 0);
 
         let cylinder = HorizontalTopology::cylinder_x(-16, 32);
-        let periodic = TerrainFrontierTopologyProof::prepare(
+        let periodic = TerrainFrontierTopology::prepare(
             &plan(
                 BTreeSet::from([ChunkPos::new(15, 0), ChunkPos::new(-16, 0)]),
                 cylinder,
                 [15 * 16 + 8, 8],
                 false,
             ),
-            TerrainFrontierTopologyProofOptions::default(),
+            TerrainFrontierTopologyOptions::default(),
         )
         .unwrap();
         assert_eq!(
             periodic.receipt().state,
-            TerrainFrontierTopologyProofState::Complete
+            TerrainFrontierTopologyState::Complete
         );
         assert!(
             periodic

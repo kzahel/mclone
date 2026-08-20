@@ -93,10 +93,9 @@ pub use frontier::{
 };
 pub use frontier_admission::{TerrainFrontierAdmissionReceipt, TerrainFrontierAdmissionState};
 pub use frontier_topology::{
-    TERRAIN_FRONTIER_PROOF_FINE_TILE_CAPACITY, TerrainFrontierProofClosure,
-    TerrainFrontierProofOuterEdge, TerrainFrontierProofSegment, TerrainFrontierTopologyProof,
-    TerrainFrontierTopologyProofOptions, TerrainFrontierTopologyProofReceipt,
-    TerrainFrontierTopologyProofState,
+    TERRAIN_FRONTIER_FINE_TILE_CAPACITY, TerrainFrontierClosure, TerrainFrontierClosureSegment,
+    TerrainFrontierOuterEdge, TerrainFrontierTopology, TerrainFrontierTopologyOptions,
+    TerrainFrontierTopologyReceipt, TerrainFrontierTopologyState,
 };
 pub use lod::{
     TERRAIN_LOD_HIGH_LEVEL_COUNT, TERRAIN_LOD_LOW_LEVEL_COUNT, TERRAIN_LOD_MEDIUM_LEVEL_COUNT,
@@ -442,12 +441,11 @@ pub enum TerrainHorizonDiagnostic {
     Water = 7,
     Texture = 8,
     FrontierSupport = 9,
-    FrontierHybridProof = 10,
-    FrontierHybridFallbackProof = 11,
+    FrontierFallback = 10,
 }
 
 impl TerrainHorizonDiagnostic {
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 11] = [
         Self::Natural,
         Self::OwnershipLevel,
         Self::Topology,
@@ -458,8 +456,7 @@ impl TerrainHorizonDiagnostic {
         Self::Water,
         Self::Texture,
         Self::FrontierSupport,
-        Self::FrontierHybridProof,
-        Self::FrontierHybridFallbackProof,
+        Self::FrontierFallback,
     ];
 
     pub const fn label(self) -> &'static str {
@@ -474,8 +471,7 @@ impl TerrainHorizonDiagnostic {
             Self::Water => "water",
             Self::Texture => "texture",
             Self::FrontierSupport => "frontier-support",
-            Self::FrontierHybridProof => "frontier-hybrid-proof",
-            Self::FrontierHybridFallbackProof => "frontier-hybrid-fallback-proof",
+            Self::FrontierFallback => "frontier-fallback",
         }
     }
 

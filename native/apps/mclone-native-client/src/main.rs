@@ -228,7 +228,7 @@ fn main() -> Result<()> {
                         "connectorInstanceBytes": topology.connector_instance_bytes,
                         "connectorVertices": topology.connector_vertices,
                     });
-                    let frontier_proof_gpu = serde_json::json!({
+                    let frontier_gpu = serde_json::json!({
                         "allocatedSupportTiles": terrain.frontier_support_allocated_tiles,
                         "readySupportTiles": terrain.frontier_support_ready_tiles,
                         "pendingSupportTiles": terrain.frontier_support_pending_tiles,
@@ -237,9 +237,9 @@ fn main() -> Result<()> {
                         "supportDispatchesTotal": terrain.frontier_support_dispatches_total,
                         "supportResourceBytes": terrain.frontier_support_resource_bytes,
                         "supportVertexCount": terrain.frontier_support_vertex_count,
-                        "connectorSegments": terrain.frontier_proof_connector_segments,
-                        "connectorVertexCount": terrain.frontier_proof_connector_vertex_count,
-                        "connectorBytes": terrain.frontier_proof_connector_bytes,
+                        "connectorSegments": terrain.frontier_connector_segments,
+                        "connectorVertexCount": terrain.frontier_connector_vertex_count,
+                        "connectorBytes": terrain.frontier_connector_bytes,
                     });
                     let admission = terrain.frontier_admission;
                     let frontier_admission = serde_json::json!({
@@ -284,7 +284,7 @@ fn main() -> Result<()> {
                         "frontier": frontier_state,
                         "frontierTopology": frontier_topology,
                         "frontierAdmission": frontier_admission,
-                        "frontierProofGpu": frontier_proof_gpu,
+                        "frontierGpu": frontier_gpu,
                         "drawnTreeTiles": terrain.drawn_tree_tiles,
                         "drawnTreeTilesByLevel": terrain.drawn_tree_tiles_by_level,
                         "drawnTreeInstances": terrain.drawn_tree_instances,

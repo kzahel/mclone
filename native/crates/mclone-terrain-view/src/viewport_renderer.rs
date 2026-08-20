@@ -31,15 +31,15 @@ use super::{
     TerrainClipmapDiagnostics, TerrainClipmapTile, TerrainCompositionSourceIdentity,
     TerrainExactBoundaryProfile, TerrainExactCoverageMask, TerrainExactCoverageMode,
     TerrainExactTransitionField, TerrainFrontierAdmissionReceipt, TerrainFrontierAdmissionState,
-    TerrainFrontierDirection, TerrainFrontierFineTileKey, TerrainFrontierPlan,
-    TerrainFrontierPlanOptions, TerrainFrontierPlanReceipt, TerrainFrontierPlanState,
-    TerrainFrontierProofClosure, TerrainFrontierTopologyProof, TerrainFrontierTopologyProofOptions,
-    TerrainFrontierTopologyProofReceipt, TerrainFrontierTopologyProofState,
-    TerrainHorizonDiagnostic, TerrainHorizonPresentation, TerrainPreviewCamera,
-    TerrainPreviewDrawOptions, TerrainPreviewLayer, TerrainPreviewSource,
-    TerrainPreviewSplitLayout, TerrainVegetationCoordinator, TerrainVegetationCoordinatorState,
-    TerrainVegetationDesiredTile, TerrainVegetationExecutor, TerrainVegetationExecutorKind,
-    TerrainVegetationSlotToken, TerrainViewportPlan, TerrainViewportTileId,
+    TerrainFrontierClosure, TerrainFrontierDirection, TerrainFrontierFineTileKey,
+    TerrainFrontierPlan, TerrainFrontierPlanOptions, TerrainFrontierPlanReceipt,
+    TerrainFrontierPlanState, TerrainFrontierTopology, TerrainFrontierTopologyOptions,
+    TerrainFrontierTopologyReceipt, TerrainFrontierTopologyState, TerrainHorizonDiagnostic,
+    TerrainHorizonPresentation, TerrainPreviewCamera, TerrainPreviewDrawOptions,
+    TerrainPreviewLayer, TerrainPreviewSource, TerrainPreviewSplitLayout,
+    TerrainVegetationCoordinator, TerrainVegetationCoordinatorState, TerrainVegetationDesiredTile,
+    TerrainVegetationExecutor, TerrainVegetationExecutorKind, TerrainVegetationSlotToken,
+    TerrainViewportPlan, TerrainViewportTileId,
     horizon_admission::{
         TERRAIN_HORIZON_STAGING_SLOTS_PER_LEVEL, TerrainHorizonAdmission,
         TerrainHorizonBeginTransition, TerrainHorizonLevelPresentation, TerrainHorizonResourceTile,
@@ -57,14 +57,14 @@ const TERRAIN_PREVIEW_MATERIAL_TABLE_BYTES: u64 =
 const TERRAIN_EXACT_COVERAGE_UNIFORM_BYTES: u64 = 64;
 const TERRAIN_EXACT_CONNECTOR_INSTANCE_BYTES: u64 = 12;
 const TERRAIN_EXACT_CONNECTOR_VERTICES_PER_INSTANCE: u32 = 6;
-const TERRAIN_FRONTIER_PROOF_CONNECTOR_FLAG: u32 = 1 << 8;
-const TERRAIN_FRONTIER_PROOF_CONNECTOR_WATER_FLAG: u32 = 1 << 9;
-const TERRAIN_FRONTIER_PROOF_CONNECTOR_FALLBACK_FLAG: u32 = 1 << 10;
-const TERRAIN_FRONTIER_PROOF_CONNECTOR_OUTER_FLAG: u32 = 1 << 11;
-const TERRAIN_FRONTIER_PROOF_DISPATCHES_PER_FRAME: usize = 4;
+const TERRAIN_FRONTIER_CONNECTOR_FLAG: u32 = 1 << 8;
+const TERRAIN_FRONTIER_CONNECTOR_WATER_FLAG: u32 = 1 << 9;
+const TERRAIN_FRONTIER_CONNECTOR_FALLBACK_FLAG: u32 = 1 << 10;
+const TERRAIN_FRONTIER_CONNECTOR_OUTER_FLAG: u32 = 1 << 11;
+const TERRAIN_FRONTIER_DISPATCHES_PER_FRAME: usize = 4;
 const TERRAIN_FRONTIER_SUPPORT_RECORD_BYTES: u64 = 16;
 const TERRAIN_FRONTIER_SUPPORT_BUFFER_BYTES: u64 =
-    TERRAIN_FRONTIER_SUPPORT_RECORD_BYTES * super::TERRAIN_FRONTIER_PROOF_FINE_TILE_CAPACITY as u64;
+    TERRAIN_FRONTIER_SUPPORT_RECORD_BYTES * super::TERRAIN_FRONTIER_FINE_TILE_CAPACITY as u64;
 const TERRAIN_HORIZON_TREE_CULL_MARGIN_BLOCKS: f32 = 16.0;
 const TERRAIN_HORIZON_CULL_MIN_Y: f32 = -64.0;
 const TERRAIN_HORIZON_CULL_MAX_Y: f32 = 512.0;
@@ -305,9 +305,9 @@ pub struct TerrainHorizonFrameStats {
     pub frontier_support_dispatches_total: u64,
     pub frontier_support_resource_bytes: u64,
     pub frontier_support_vertex_count: u32,
-    pub frontier_proof_connector_segments: u32,
-    pub frontier_proof_connector_vertex_count: u32,
-    pub frontier_proof_connector_bytes: u64,
+    pub frontier_connector_segments: u32,
+    pub frontier_connector_vertex_count: u32,
+    pub frontier_connector_bytes: u64,
     pub vertex_count: u32,
     pub vegetation_ready_tiles: u32,
     pub pending_vegetation_tiles: u32,
@@ -335,7 +335,7 @@ pub struct TerrainHorizonFrameStats {
     pub exact_boundary_payload_bytes: u64,
     pub frontier: TerrainFrontierPlanReceipt,
     pub frontier_plan_failures: u64,
-    pub frontier_topology: TerrainFrontierTopologyProofReceipt,
+    pub frontier_topology: TerrainFrontierTopologyReceipt,
     pub frontier_topology_failures: u64,
     pub frontier_admission: TerrainFrontierAdmissionReceipt,
     pub vegetation_service: TerrainHorizonVegetationServiceStats,
@@ -493,7 +493,7 @@ impl TerrainExactConnectorInstance {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct TerrainFrontierProofConnectorInstance {
+struct TerrainFrontierConnectorInstance {
     geometry: TerrainExactConnectorInstance,
     owner_sample_spacing: u32,
     owner_tile_x: i32,
@@ -503,7 +503,7 @@ struct TerrainFrontierProofConnectorInstance {
     outer: bool,
 }
 
-impl TerrainFrontierProofConnectorInstance {
+impl TerrainFrontierConnectorInstance {
     fn owned_by(&self, request: ValidatedTerrainPreviewRequest) -> bool {
         let footprint = i32::try_from(request.footprint_blocks()).unwrap_or(i32::MAX);
         self.owner_sample_spacing == request.request().sample_spacing
@@ -533,10 +533,10 @@ struct TerrainFrontierSupportGpuIdentity {
     selected_tiles: BTreeSet<TerrainFrontierFineTileKey>,
 }
 
-struct TerrainFrontierSupportGpuProof {
+struct TerrainFrontierSupportGpu {
     identity: TerrainFrontierSupportGpuIdentity,
     tiles: Vec<TerrainFrontierSupportGpuTile>,
-    connector_instances: Vec<TerrainFrontierProofConnectorInstance>,
+    connector_instances: Vec<TerrainFrontierConnectorInstance>,
     committed: bool,
     dispatched_total: u64,
 }
@@ -775,7 +775,7 @@ impl TerrainExactCoverageResources {
         if self.frontier_support_tiles == *tiles {
             return Ok(());
         }
-        if tiles.len() > super::TERRAIN_FRONTIER_PROOF_FINE_TILE_CAPACITY as usize {
+        if tiles.len() > super::TERRAIN_FRONTIER_FINE_TILE_CAPACITY as usize {
             return Err("frontier support tiles exceed the fixed proof buffer".to_owned());
         }
         let mut bytes = vec![0_u8; TERRAIN_FRONTIER_SUPPORT_BUFFER_BYTES as usize];
@@ -850,22 +850,22 @@ fn terrain_exact_connector_instances(
     instances
 }
 
-fn terrain_frontier_proof_connector_instances(
-    proof: &TerrainFrontierTopologyProof,
-) -> Result<Vec<TerrainFrontierProofConnectorInstance>, String> {
-    if proof.receipt().state != TerrainFrontierTopologyProofState::Complete {
+fn terrain_frontier_connector_instances(
+    proof: &TerrainFrontierTopology,
+) -> Result<Vec<TerrainFrontierConnectorInstance>, String> {
+    if proof.receipt().state != TerrainFrontierTopologyState::Complete {
         return Err("frontier proof connectors require a complete topology".to_owned());
     }
     let mut instances = Vec::new();
     for segment in proof.segments() {
         let (fallback, water) = match segment.closure {
-            TerrainFrontierProofClosure::PreferredSolidConnector => (false, false),
-            TerrainFrontierProofClosure::ResolutionAwareSolidConnector => (true, false),
-            TerrainFrontierProofClosure::PreferredWaterCurtain => (false, true),
-            TerrainFrontierProofClosure::ResolutionAwareWaterCurtain => (true, true),
-            TerrainFrontierProofClosure::WorldBoundary => continue,
-            TerrainFrontierProofClosure::UnsupportedExactProfile
-            | TerrainFrontierProofClosure::UnsupportedProceduralCoverage => {
+            TerrainFrontierClosure::PreferredSolidConnector => (false, false),
+            TerrainFrontierClosure::ResolutionAwareSolidConnector => (true, false),
+            TerrainFrontierClosure::PreferredWaterCurtain => (false, true),
+            TerrainFrontierClosure::ResolutionAwareWaterCurtain => (true, true),
+            TerrainFrontierClosure::WorldBoundary => continue,
+            TerrainFrontierClosure::UnsupportedExactProfile
+            | TerrainFrontierClosure::UnsupportedProceduralCoverage => {
                 return Err("complete frontier topology contains an unsupported segment".to_owned());
             }
         };
@@ -892,10 +892,10 @@ fn terrain_frontier_proof_connector_instances(
             TerrainFrontierDirection::East => 0,
             TerrainFrontierDirection::North => 3,
             TerrainFrontierDirection::South => 2,
-        } | TERRAIN_FRONTIER_PROOF_CONNECTOR_FLAG
-            | u32::from(water) * TERRAIN_FRONTIER_PROOF_CONNECTOR_WATER_FLAG
-            | u32::from(fallback) * TERRAIN_FRONTIER_PROOF_CONNECTOR_FALLBACK_FLAG;
-        instances.push(TerrainFrontierProofConnectorInstance {
+        } | TERRAIN_FRONTIER_CONNECTOR_FLAG
+            | u32::from(water) * TERRAIN_FRONTIER_CONNECTOR_WATER_FLAG
+            | u32::from(fallback) * TERRAIN_FRONTIER_CONNECTOR_FALLBACK_FLAG;
+        instances.push(TerrainFrontierConnectorInstance {
             geometry: TerrainExactConnectorInstance {
                 cell_world_x: i32::try_from(segment.procedural_block[0])
                     .map_err(|_| "frontier connector X exceeds shader coordinates")?,
@@ -925,15 +925,15 @@ fn terrain_frontier_proof_connector_instances(
                 TerrainFrontierDirection::North => (min_x + offset, min_z, 2),
                 TerrainFrontierDirection::South => (min_x + offset, min_z + tile_blocks - 1, 3),
             };
-            instances.push(TerrainFrontierProofConnectorInstance {
+            instances.push(TerrainFrontierConnectorInstance {
                 geometry: TerrainExactConnectorInstance {
                     cell_world_x: i32::try_from(cell_x)
                         .map_err(|_| "frontier outer connector X exceeds shader coordinates")?,
                     cell_world_z: i32::try_from(cell_z)
                         .map_err(|_| "frontier outer connector Z exceeds shader coordinates")?,
                     side: side
-                        | TERRAIN_FRONTIER_PROOF_CONNECTOR_FLAG
-                        | TERRAIN_FRONTIER_PROOF_CONNECTOR_OUTER_FLAG,
+                        | TERRAIN_FRONTIER_CONNECTOR_FLAG
+                        | TERRAIN_FRONTIER_CONNECTOR_OUTER_FLAG,
                 },
                 owner_sample_spacing: 1,
                 owner_tile_x: i32::try_from(edge.tile.tile_x)
@@ -1166,10 +1166,10 @@ struct TerrainViewportGpuTile {
     exact_connector_instance_bytes: u64,
     exact_connector_generation: u64,
     exact_connector_request: Option<TerrainPreviewRequest>,
-    frontier_proof_connector_buffer: Option<wgpu::Buffer>,
-    frontier_proof_connector_instance_count: u32,
-    frontier_proof_connector_instance_bytes: u64,
-    frontier_proof_connector_identity: Option<(
+    frontier_connector_buffer: Option<wgpu::Buffer>,
+    frontier_connector_instance_count: u32,
+    frontier_connector_instance_bytes: u64,
+    frontier_connector_identity: Option<(
         u64,
         super::TerrainFrontierPresentationIdentity,
         TerrainPreviewRequest,
@@ -1351,10 +1351,10 @@ impl TerrainViewportGpuTile {
             exact_connector_instance_bytes: 0,
             exact_connector_generation: 0,
             exact_connector_request: None,
-            frontier_proof_connector_buffer: None,
-            frontier_proof_connector_instance_count: 0,
-            frontier_proof_connector_instance_bytes: 0,
-            frontier_proof_connector_identity: None,
+            frontier_connector_buffer: None,
+            frontier_connector_instance_count: 0,
+            frontier_connector_instance_bytes: 0,
+            frontier_connector_identity: None,
             last_used: 0,
         })
     }
@@ -1529,17 +1529,17 @@ impl TerrainViewportGpuTile {
         self.exact_connector_request = None;
     }
 
-    fn refresh_frontier_proof_connectors(
+    fn refresh_frontier_connectors(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         exact_generation: u64,
         presentation: super::TerrainFrontierPresentationIdentity,
-        instances: &[TerrainFrontierProofConnectorInstance],
+        instances: &[TerrainFrontierConnectorInstance],
     ) {
         let request = self.request.request();
         let identity = (exact_generation, presentation, request);
-        if self.frontier_proof_connector_identity == Some(identity) {
+        if self.frontier_connector_identity == Some(identity) {
             return;
         }
         let selected = instances
@@ -1551,11 +1551,11 @@ impl TerrainViewportGpuTile {
             .iter()
             .flat_map(|instance| instance.bytes())
             .collect::<Vec<_>>();
-        self.frontier_proof_connector_buffer = if bytes.is_empty() {
+        self.frontier_connector_buffer = if bytes.is_empty() {
             None
         } else {
             let buffer = device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("mclone_terrain_frontier_proof_connector_instances"),
+                label: Some("mclone_terrain_frontier_connector_instances"),
                 size: bytes.len() as u64,
                 usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
@@ -1563,17 +1563,16 @@ impl TerrainViewportGpuTile {
             queue.write_buffer(&buffer, 0, &bytes);
             Some(buffer)
         };
-        self.frontier_proof_connector_instance_count =
-            selected.len().try_into().unwrap_or(u32::MAX);
-        self.frontier_proof_connector_instance_bytes = bytes.len() as u64;
-        self.frontier_proof_connector_identity = Some(identity);
+        self.frontier_connector_instance_count = selected.len().try_into().unwrap_or(u32::MAX);
+        self.frontier_connector_instance_bytes = bytes.len() as u64;
+        self.frontier_connector_identity = Some(identity);
     }
 
-    fn clear_frontier_proof_connectors(&mut self) {
-        self.frontier_proof_connector_buffer = None;
-        self.frontier_proof_connector_instance_count = 0;
-        self.frontier_proof_connector_instance_bytes = 0;
-        self.frontier_proof_connector_identity = None;
+    fn clear_frontier_connectors(&mut self) {
+        self.frontier_connector_buffer = None;
+        self.frontier_connector_instance_count = 0;
+        self.frontier_connector_instance_bytes = 0;
+        self.frontier_connector_identity = None;
     }
 
     fn upload_macro(
@@ -3595,14 +3594,14 @@ pub struct TerrainHorizonRenderer {
     frontier_plan: Option<TerrainFrontierPlan>,
     frontier_receipt: TerrainFrontierPlanReceipt,
     frontier_plan_failures: u64,
-    frontier_topology: Option<TerrainFrontierTopologyProof>,
-    frontier_topology_receipt: TerrainFrontierTopologyProofReceipt,
+    frontier_topology: Option<TerrainFrontierTopology>,
+    frontier_topology_receipt: TerrainFrontierTopologyReceipt,
     frontier_topology_failures: u64,
     /// Complete certificate currently consumed by every render view.
-    frontier_support: Option<TerrainFrontierSupportGpuProof>,
+    frontier_support: Option<TerrainFrontierSupportGpu>,
     /// Preferred fine-support certificate compiling behind the active
     /// synchronous fallback.
-    frontier_support_pending: Option<TerrainFrontierSupportGpuProof>,
+    frontier_support_pending: Option<TerrainFrontierSupportGpu>,
     frontier_support_dispatches_total: u64,
     frontier_fallback_commits: u64,
     frontier_preferred_commits: u64,
@@ -3624,7 +3623,7 @@ impl TerrainHorizonRenderer {
         for slot in &mut self.slots {
             slot.clear_vegetation();
             slot.clear_exact_connectors();
-            slot.clear_frontier_proof_connectors();
+            slot.clear_frontier_connectors();
         }
         self.renderer.exact_coverage.disable();
         self.exact_coverage_snapshot = None;
@@ -3632,7 +3631,7 @@ impl TerrainHorizonRenderer {
         self.frontier_plan = None;
         self.frontier_receipt = TerrainFrontierPlanReceipt::default();
         self.frontier_topology = None;
-        self.frontier_topology_receipt = TerrainFrontierTopologyProofReceipt::default();
+        self.frontier_topology_receipt = TerrainFrontierTopologyReceipt::default();
         self.frontier_support = None;
         self.frontier_support_pending = None;
         self.frontier_observer_chunk = [0, 0];
@@ -3790,7 +3789,7 @@ impl TerrainHorizonRenderer {
             frontier_receipt: TerrainFrontierPlanReceipt::default(),
             frontier_plan_failures: 0,
             frontier_topology: None,
-            frontier_topology_receipt: TerrainFrontierTopologyProofReceipt::default(),
+            frontier_topology_receipt: TerrainFrontierTopologyReceipt::default(),
             frontier_topology_failures: 0,
             frontier_support: None,
             frontier_support_pending: None,
@@ -3971,7 +3970,7 @@ impl TerrainHorizonRenderer {
             self.frontier_plan = None;
             self.frontier_receipt = TerrainFrontierPlanReceipt::default();
             self.frontier_topology = None;
-            self.frontier_topology_receipt = TerrainFrontierTopologyProofReceipt::default();
+            self.frontier_topology_receipt = TerrainFrontierTopologyReceipt::default();
             if self.frontier_support_pending.take().is_some() {
                 self.frontier_coalesced_generations =
                     self.frontier_coalesced_generations.saturating_add(1);
@@ -3986,7 +3985,7 @@ impl TerrainHorizonRenderer {
         self.frontier_plan = None;
         self.frontier_receipt = TerrainFrontierPlanReceipt::default();
         self.frontier_topology = None;
-        self.frontier_topology_receipt = TerrainFrontierTopologyProofReceipt::default();
+        self.frontier_topology_receipt = TerrainFrontierTopologyReceipt::default();
         self.frontier_support = None;
         self.frontier_support_pending = None;
     }
@@ -3999,7 +3998,7 @@ impl TerrainHorizonRenderer {
             self.frontier_plan = None;
             self.frontier_receipt = TerrainFrontierPlanReceipt::default();
             self.frontier_topology = None;
-            self.frontier_topology_receipt = TerrainFrontierTopologyProofReceipt::default();
+            self.frontier_topology_receipt = TerrainFrontierTopologyReceipt::default();
             return Ok(());
         }
         let Some(coverage) = self.exact_coverage_snapshot.as_ref() else {
@@ -4010,7 +4009,7 @@ impl TerrainHorizonRenderer {
                 ..Default::default()
             };
             self.frontier_topology = None;
-            self.frontier_topology_receipt = TerrainFrontierTopologyProofReceipt::default();
+            self.frontier_topology_receipt = TerrainFrontierTopologyReceipt::default();
             self.frontier_plan_failures = self.frontier_plan_failures.saturating_add(1);
             return Ok(());
         };
@@ -4046,9 +4045,9 @@ impl TerrainHorizonRenderer {
         ) {
             Ok(plan) => {
                 self.frontier_receipt = plan.receipt();
-                match TerrainFrontierTopologyProof::prepare(
+                match TerrainFrontierTopology::prepare(
                     &plan,
-                    TerrainFrontierTopologyProofOptions::default(),
+                    TerrainFrontierTopologyOptions::default(),
                 ) {
                     Ok(topology) => {
                         self.frontier_topology_receipt = topology.receipt();
@@ -4056,8 +4055,7 @@ impl TerrainHorizonRenderer {
                     }
                     Err(_error) => {
                         self.frontier_topology = None;
-                        self.frontier_topology_receipt =
-                            TerrainFrontierTopologyProofReceipt::default();
+                        self.frontier_topology_receipt = TerrainFrontierTopologyReceipt::default();
                         self.frontier_topology_failures =
                             self.frontier_topology_failures.saturating_add(1);
                     }
@@ -4067,7 +4065,7 @@ impl TerrainHorizonRenderer {
             Err(_error) => {
                 self.frontier_plan = None;
                 self.frontier_topology = None;
-                self.frontier_topology_receipt = TerrainFrontierTopologyProofReceipt::default();
+                self.frontier_topology_receipt = TerrainFrontierTopologyReceipt::default();
                 self.frontier_receipt = TerrainFrontierPlanReceipt {
                     enabled: true,
                     state: TerrainFrontierPlanState::Invalid,
@@ -4089,7 +4087,7 @@ impl TerrainHorizonRenderer {
             .exact_coverage
             .set_frontier_support_tiles(queue, &BTreeSet::new())?;
         for slot in &mut self.slots {
-            slot.clear_frontier_proof_connectors();
+            slot.clear_frontier_connectors();
         }
         Ok(())
     }
@@ -4101,9 +4099,9 @@ impl TerrainHorizonRenderer {
         let Some(plan) = self.frontier_plan.as_ref() else {
             return;
         };
-        match TerrainFrontierTopologyProof::prepare(
+        match TerrainFrontierTopology::prepare(
             plan,
-            TerrainFrontierTopologyProofOptions {
+            TerrainFrontierTopologyOptions {
                 fine_tile_capacity: support_pool_capacity,
             },
         ) {
@@ -4117,7 +4115,7 @@ impl TerrainHorizonRenderer {
             }
             Err(_error) => {
                 self.frontier_topology = None;
-                self.frontier_topology_receipt = TerrainFrontierTopologyProofReceipt::default();
+                self.frontier_topology_receipt = TerrainFrontierTopologyReceipt::default();
                 self.frontier_support_pending = None;
                 self.frontier_topology_failures = self.frontier_topology_failures.saturating_add(1);
             }
@@ -4128,9 +4126,9 @@ impl TerrainHorizonRenderer {
         &self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        topology: &TerrainFrontierTopologyProof,
-    ) -> Result<TerrainFrontierSupportGpuProof, String> {
-        if topology.receipt().state != TerrainFrontierTopologyProofState::Complete {
+        topology: &TerrainFrontierTopology,
+    ) -> Result<TerrainFrontierSupportGpu, String> {
+        if topology.receipt().state != TerrainFrontierTopologyState::Complete {
             return Err("cannot build an incomplete frontier certificate".to_owned());
         }
         let identity = TerrainFrontierSupportGpuIdentity {
@@ -4141,7 +4139,7 @@ impl TerrainHorizonRenderer {
             support_pool_capacity: topology.receipt().support_pool_capacity,
             selected_tiles: topology.selected_support_tiles().clone(),
         };
-        let connector_instances = terrain_frontier_proof_connector_instances(topology)?;
+        let connector_instances = terrain_frontier_connector_instances(topology)?;
         let normal_height_byte_len = terrain_horizon_normal_height_byte_len()?;
         let mut tiles = Vec::with_capacity(identity.selected_tiles.len());
         for key in &identity.selected_tiles {
@@ -4178,7 +4176,7 @@ impl TerrainHorizonRenderer {
                     surface_quality: TerrainPreviewSurfaceQuality::Inferred,
                 },
             )?;
-            tile.refresh_frontier_proof_connectors(
+            tile.refresh_frontier_connectors(
                 device,
                 queue,
                 identity.exact_generation,
@@ -4193,7 +4191,7 @@ impl TerrainHorizonRenderer {
             });
         }
         let committed = tiles.is_empty();
-        Ok(TerrainFrontierSupportGpuProof {
+        Ok(TerrainFrontierSupportGpu {
             identity,
             tiles,
             connector_instances,
@@ -4210,14 +4208,14 @@ impl TerrainHorizonRenderer {
         let Some(plan) = self.frontier_plan.as_ref() else {
             return self.disable_frontier_support(queue);
         };
-        let fallback = TerrainFrontierTopologyProof::prepare(
+        let fallback = TerrainFrontierTopology::prepare(
             plan,
-            TerrainFrontierTopologyProofOptions {
+            TerrainFrontierTopologyOptions {
                 fine_tile_capacity: 0,
             },
         )?;
         let receipt = fallback.receipt();
-        if receipt.state != TerrainFrontierTopologyProofState::Complete {
+        if receipt.state != TerrainFrontierTopologyState::Complete {
             return Err("frontier fallback could not certify the exact boundary".to_owned());
         }
         let active_matches = self.frontier_support.as_ref().is_some_and(|support| {
@@ -4238,7 +4236,7 @@ impl TerrainHorizonRenderer {
     fn commit_frontier_support(
         &mut self,
         queue: &wgpu::Queue,
-        support: TerrainFrontierSupportGpuProof,
+        support: TerrainFrontierSupportGpu,
     ) -> Result<(), String> {
         self.renderer
             .exact_coverage
@@ -4247,7 +4245,7 @@ impl TerrainHorizonRenderer {
         // invisible slots from the prior epoch instead of waiting for those
         // slots to become visible and refresh lazily.
         for slot in &mut self.slots {
-            slot.clear_frontier_proof_connectors();
+            slot.clear_frontier_connectors();
         }
         self.frontier_support = Some(support);
         Ok(())
@@ -4261,11 +4259,11 @@ impl TerrainHorizonRenderer {
         let Some(topology) = self.frontier_topology.as_ref() else {
             return Ok(());
         };
-        if topology.receipt().state != TerrainFrontierTopologyProofState::Complete {
+        if topology.receipt().state != TerrainFrontierTopologyState::Complete {
             return Ok(());
         }
         let receipt = topology.receipt();
-        let desired_matches = |support: &TerrainFrontierSupportGpuProof| {
+        let desired_matches = |support: &TerrainFrontierSupportGpu| {
             support.identity.exact_generation == receipt.exact_generation
                 && support.identity.presentation == receipt.presentation
                 && support.identity.support_pool_capacity == receipt.support_pool_capacity
@@ -4708,10 +4706,10 @@ impl TerrainHorizonRenderer {
         let terrain_levels = self.admission.terrain_presentations();
         self.refresh_frontier_plan(&terrain_levels)?;
         let frontier_support_capacity =
-            if presentation.diagnostic == TerrainHorizonDiagnostic::FrontierHybridFallbackProof {
+            if presentation.diagnostic == TerrainHorizonDiagnostic::FrontierFallback {
                 1
             } else {
-                super::TERRAIN_FRONTIER_PROOF_FINE_TILE_CAPACITY
+                super::TERRAIN_FRONTIER_FINE_TILE_CAPACITY
             };
         self.refresh_frontier_topology_capacity(frontier_support_capacity);
         let exact_frontier_required = self.renderer.exact_coverage.mode
@@ -4721,7 +4719,7 @@ impl TerrainHorizonRenderer {
                 .as_ref()
                 .is_some_and(|coverage| !coverage.chunks().is_empty());
         let exact_frontier_certifiable = exact_frontier_required
-            && self.frontier_topology_receipt.state == TerrainFrontierTopologyProofState::Complete;
+            && self.frontier_topology_receipt.state == TerrainFrontierTopologyState::Complete;
         if exact_frontier_certifiable {
             self.ensure_frontier_fallback(device, queue)?;
             self.prepare_frontier_support(device, queue)?;
@@ -4738,7 +4736,7 @@ impl TerrainHorizonRenderer {
                 .tiles
                 .iter_mut()
                 .filter(|tile| !tile.ready)
-                .take(TERRAIN_FRONTIER_PROOF_DISPATCHES_PER_FRAME)
+                .take(TERRAIN_FRONTIER_DISPATCHES_PER_FRAME)
             {
                 queue.write_buffer(
                     &support_tile.tile.uniform_buffer,
@@ -4834,7 +4832,7 @@ impl TerrainHorizonRenderer {
             } else {
                 Vec::new()
             };
-        let frontier_proof_connectors = self
+        let frontier_connectors = self
             .frontier_support
             .as_ref()
             .filter(|support| support.committed)
@@ -4892,10 +4890,8 @@ impl TerrainHorizonRenderer {
                     exact_connector_generation,
                     &exact_connector_instances,
                 );
-                if let Some((generation, frontier_presentation, connectors)) =
-                    frontier_proof_connectors
-                {
-                    slot.refresh_frontier_proof_connectors(
+                if let Some((generation, frontier_presentation, connectors)) = frontier_connectors {
+                    slot.refresh_frontier_connectors(
                         device,
                         queue,
                         generation,
@@ -5045,7 +5041,7 @@ impl TerrainHorizonRenderer {
         let mut drawn_tiles_by_level = [0_u32; TERRAIN_LOD_HIGH_LEVEL_COUNT as usize];
         let mut drawn_exact_connector_segments = 0_u32;
         let mut drawn_frontier_support_tiles = 0_u32;
-        let mut drawn_frontier_proof_connector_segments = 0_u32;
+        let mut drawn_frontier_connector_segments = 0_u32;
         let mut drawn_tree_tiles = 0_u32;
         let mut drawn_tree_instances = 0_u32;
         let mut drawn_tree_tiles_by_level = [0_u32; TERRAIN_LOD_HIGH_LEVEL_COUNT as usize];
@@ -5154,8 +5150,7 @@ impl TerrainHorizonRenderer {
                                 continue;
                             }
                             let slot = &self.slots[resource.resource_slot as usize];
-                            let Some(instance_buffer) =
-                                slot.frontier_proof_connector_buffer.as_ref()
+                            let Some(instance_buffer) = slot.frontier_connector_buffer.as_ref()
                             else {
                                 continue;
                             };
@@ -5163,11 +5158,10 @@ impl TerrainHorizonRenderer {
                             pass.set_vertex_buffer(0, instance_buffer.slice(..));
                             pass.draw(
                                 0..TERRAIN_EXACT_CONNECTOR_VERTICES_PER_INSTANCE,
-                                0..slot.frontier_proof_connector_instance_count,
+                                0..slot.frontier_connector_instance_count,
                             );
-                            drawn_frontier_proof_connector_segments =
-                                drawn_frontier_proof_connector_segments
-                                    .saturating_add(slot.frontier_proof_connector_instance_count);
+                            drawn_frontier_connector_segments = drawn_frontier_connector_segments
+                                .saturating_add(slot.frontier_connector_instance_count);
                         }
                     }
                     if let Some(support) = self.frontier_support.as_ref() {
@@ -5176,7 +5170,7 @@ impl TerrainHorizonRenderer {
                                 continue;
                             }
                             let Some(instance_buffer) =
-                                support_tile.tile.frontier_proof_connector_buffer.as_ref()
+                                support_tile.tile.frontier_connector_buffer.as_ref()
                             else {
                                 continue;
                             };
@@ -5184,11 +5178,11 @@ impl TerrainHorizonRenderer {
                             pass.set_vertex_buffer(0, instance_buffer.slice(..));
                             pass.draw(
                                 0..TERRAIN_EXACT_CONNECTOR_VERTICES_PER_INSTANCE,
-                                0..support_tile.tile.frontier_proof_connector_instance_count,
+                                0..support_tile.tile.frontier_connector_instance_count,
                             );
-                            drawn_frontier_proof_connector_segments =
-                                drawn_frontier_proof_connector_segments.saturating_add(
-                                    support_tile.tile.frontier_proof_connector_instance_count,
+                            drawn_frontier_connector_segments = drawn_frontier_connector_segments
+                                .saturating_add(
+                                    support_tile.tile.frontier_connector_instance_count,
                                 );
                         }
                     }
@@ -5342,12 +5336,12 @@ impl TerrainHorizonRenderer {
         let frontier_support_vertex_count = drawn_frontier_support_tiles
             .saturating_mul(render_cells.pow(2))
             .saturating_mul(terrain_horizon_vertices_per_cell(1));
-        let frontier_proof_connector_vertex_count = drawn_frontier_proof_connector_segments
+        let frontier_connector_vertex_count = drawn_frontier_connector_segments
             .saturating_mul(TERRAIN_EXACT_CONNECTOR_VERTICES_PER_INSTANCE);
         let vertex_count = terrain_vertex_count
             .saturating_add(exact_connector_vertex_count)
             .saturating_add(frontier_support_vertex_count)
-            .saturating_add(frontier_proof_connector_vertex_count)
+            .saturating_add(frontier_connector_vertex_count)
             .saturating_add(
                 drawn_tree_instances.saturating_mul(TERRAIN_PREVIEW_TREE_VERTICES_PER_INSTANCE),
             );
@@ -5402,27 +5396,27 @@ impl TerrainHorizonRenderer {
             frontier_support_allocated_tiles.saturating_sub(frontier_support_ready_tiles);
         let frontier_support_resource_bytes = u64::from(frontier_support_allocated_tiles)
             .saturating_mul(super::TERRAIN_FRONTIER_TERRAIN_RESOURCE_BYTES);
-        let frontier_proof_connector_bytes = self
+        let frontier_connector_bytes = self
             .slots
             .iter()
-            .map(|slot| slot.frontier_proof_connector_instance_bytes)
+            .map(|slot| slot.frontier_connector_instance_bytes)
             .chain(self.frontier_support.iter().flat_map(|support| {
                 support
                     .tiles
                     .iter()
-                    .map(|tile| tile.tile.frontier_proof_connector_instance_bytes)
+                    .map(|tile| tile.tile.frontier_connector_instance_bytes)
             }))
             .chain(self.frontier_support_pending.iter().flat_map(|support| {
                 support
                     .tiles
                     .iter()
-                    .map(|tile| tile.tile.frontier_proof_connector_instance_bytes)
+                    .map(|tile| tile.tile.frontier_connector_instance_bytes)
             }))
             .sum::<u64>();
         let resident_bytes = fixed_resident_bytes
             .saturating_add(exact_connector_bytes)
             .saturating_add(frontier_support_resource_bytes)
-            .saturating_add(frontier_proof_connector_bytes)
+            .saturating_add(frontier_connector_bytes)
             .saturating_add(vegetation_bytes);
         let vegetation_ready_tiles = vegetation_resources
             .iter()
@@ -5525,9 +5519,9 @@ impl TerrainHorizonRenderer {
             frontier_support_dispatches_total: self.frontier_support_dispatches_total,
             frontier_support_resource_bytes,
             frontier_support_vertex_count,
-            frontier_proof_connector_segments: drawn_frontier_proof_connector_segments,
-            frontier_proof_connector_vertex_count,
-            frontier_proof_connector_bytes,
+            frontier_connector_segments: drawn_frontier_connector_segments,
+            frontier_connector_vertex_count,
+            frontier_connector_bytes,
             vertex_count,
             vegetation_ready_tiles,
             pending_vegetation_tiles,
@@ -6525,10 +6519,10 @@ mod tests {
         assert!(shader.contains("vec2<f32>(world_z, -world_y)"));
         assert!(shader.contains("vec2<f32>(world_x, -world_y)"));
         assert!(shader.contains("fn exact_connector_vertex_main("));
-        assert!(shader.contains("fn frontier_proof_connector_vertex("));
-        assert!(shader.contains("fn frontier_proof_height("));
-        assert!(shader.contains("TERRAIN_FRONTIER_PROOF_CONNECTOR_WATER_FLAG"));
-        assert!(shader.contains("TERRAIN_FRONTIER_PROOF_CONNECTOR_OUTER_FLAG"));
+        assert!(shader.contains("fn frontier_connector_vertex("));
+        assert!(shader.contains("fn frontier_connector_height("));
+        assert!(shader.contains("TERRAIN_FRONTIER_CONNECTOR_WATER_FLAG"));
+        assert!(shader.contains("TERRAIN_FRONTIER_CONNECTOR_OUTER_FLAG"));
         assert!(shader.contains("frontier_support_tile_selected(input.world_xz)"));
         assert!(shader.contains(
             "if u32(params.origin_spacing_cells.z) > 1u\n        && frontier_support_tile_selected"
@@ -6564,7 +6558,7 @@ mod tests {
     }
 
     #[test]
-    fn frontier_proof_connectors_have_one_typed_owner_and_outer_closure() {
+    fn frontier_connectors_have_one_typed_owner_and_outer_closure() {
         let source =
             TerrainCompositionSourceIdentity::new(TerrainPreviewProfile::McloneOverworldV1, 12_345);
         let coverage = ExactPaintedCoverageSnapshot::new(
@@ -6603,14 +6597,14 @@ mod tests {
             TerrainFrontierPlanOptions::default(),
         )
         .unwrap();
-        let proof = TerrainFrontierTopologyProof::prepare(
+        let proof = TerrainFrontierTopology::prepare(
             &plan,
-            TerrainFrontierTopologyProofOptions {
+            TerrainFrontierTopologyOptions {
                 fine_tile_capacity: 1,
             },
         )
         .unwrap();
-        let instances = terrain_frontier_proof_connector_instances(&proof).unwrap();
+        let instances = terrain_frontier_connector_instances(&proof).unwrap();
         let boundary_instances = instances.iter().filter(|instance| !instance.outer).count();
         let outer_instances = instances.iter().filter(|instance| instance.outer).count();
         assert_eq!(
@@ -6621,9 +6615,11 @@ mod tests {
             outer_instances,
             proof.receipt().outer_stitch_segments as usize
         );
-        assert!(instances.iter().all(|instance| {
-            instance.geometry.side & TERRAIN_FRONTIER_PROOF_CONNECTOR_FLAG != 0
-        }));
+        assert!(
+            instances
+                .iter()
+                .all(|instance| { instance.geometry.side & TERRAIN_FRONTIER_CONNECTOR_FLAG != 0 })
+        );
         assert!(instances.iter().any(|instance| instance.fallback));
         assert!(instances.iter().any(|instance| instance.water));
         assert!(instances.iter().any(|instance| instance.outer));
