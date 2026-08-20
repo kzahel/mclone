@@ -10,14 +10,16 @@ now include a direct current-production field-revision-21 control. Sampled
 transition, clearing, recurrence, and habitat-connectivity distributions are
 also complete. Decomposed land/ocean, climate, biome, forest-openness, height,
 and water controls now pass and have been pixel-reviewed. Human Review A
-selected “revise” on 2026-08-20: retain the continental, province, ecoregion,
-and clearing candidate. Both named corrections are implemented: typed,
-adjacency-aware shoulders replace the generic transition band, and stable
-typed spine-and-branch routes replace the single continental corridor stripe.
-The corrected atlas has returned to Human Review A. Arid expansion and World
-Explorer realization remain gated until that review accepts it. The current
-production generator remains a visible control, not a
-protected output target.**
+first selected “revise” on 2026-08-20: retain the continental, province,
+ecoregion, and clearing candidate. Both named corrections are implemented:
+typed, adjacency-aware shoulders replace the generic transition band, and
+stable typed spine-and-branch routes replace the single continental corridor
+stripe.
+The corrected atlas returned to Human Review A and was accepted on 2026-08-20.
+The reviewer found the wooded route geometry visibly inorganic and broad-map
+panning too slow. Those are required presentation/realization follow-ups, not
+a rejection of the macro grammar. The current production generator remains a
+visible control, not a protected output target.**
 
 Topic: `continental-ecoregion-planning`
 
@@ -349,6 +351,26 @@ evidence card is
 `/tmp/mclone-terrain-lab-desktop-chrome-ecoregion-metrics-131km.png`, and the
 typed route map is
 `/tmp/mclone-terrain-lab-desktop-chrome-ecoregion-habitat-routes-131km.png`.
+
+### Human Review A decision: accept macro grammar
+
+The reviewer accepted the corrected continental, province, ecoregion,
+clearing, and transition composition. This opens arid-contrast and World
+Explorer work, but records two corrections before the plan should become an
+ecology or production authority:
+
+1. keep panning responsive by moving the retained map immediately, coalescing
+   full rebuilds, and adding bounded overlap reuse where measurement justifies
+   it; and
+2. preserve typed route identities while replacing the visible regular
+   spine-and-cross-link ladder with anchor-responsive, variably wide,
+   interrupted route geometry.
+
+The first is a representation/cache concern: it must not change geography.
+The second is a realization correction: route identity and connectivity stay
+canonical while forest cores, clearings, passes, wetland opportunity, and
+continental story shape their visible course. Neither correction authorizes a
+migration simulator or a production-profile switch.
 
 ## Candidate Plan Revision 2
 

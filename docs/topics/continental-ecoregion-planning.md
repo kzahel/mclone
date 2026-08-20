@@ -11,20 +11,23 @@ clearing, recurrence, and habitat-graph distributions now pass at both 65 km
 and 131 km.
 The first pixel review rejected a cellular composition; Revision 2 increases
 the ecoregion and clearing hierarchy and is the active candidate. Its current
-habitat graph links only about one quarter of typed patches, which is explicit
-review evidence rather than an inferred failure or success. Human Review A
-selected a named revision on 2026-08-20: retain the candidate hierarchy and
-clearings, author adjacency-specific ecotones, and replace the single corridor
-band with a typed spine-and-branch habitat network. Arid expansion and World
-Explorer realization remain gated until the corrected atlas is accepted.
+initial habitat graph linked only about one quarter of typed patches, which
+selected a named revision rather than acting as an inferred quality score.
+Human Review A first selected that revision on 2026-08-20: retain the candidate
+hierarchy and clearings, author adjacency-specific ecotones, and replace the
+single corridor band with a typed spine-and-branch habitat network.
 The ecotone correction is implemented in plan revision 3: same-kind owner
 boundaries disappear, unlike neighbors carry explicit 0.8-2.6 km widths, and
 cover/climate blend continuously to their boundary. Plan revision 4 completes
 the route-network correction with stable typed continental spines and bounded
 cross-links. The same graph rule now links 44.7% of sampled habitat patches,
 up from roughly one quarter; that remains descriptive review evidence rather
-than a migration proof or acceptance threshold. The corrected atlas is back
-at Human Review A.
+than a migration proof or acceptance threshold. Human Review A accepted the
+corrected macro grammar on 2026-08-20. It also required responsive retained-map
+panning and less regular, anchor-responsive route realization. These are
+follow-up representation and geometry corrections, not another rejection of
+the continental hierarchy. Arid contrast and World Explorer realization are
+now permitted while those corrections remain explicit.
 Mclone should combine
 top-down continental and ecoregional planning with bottom-up procedural
 realization so the Overworld contains large, recognizable, causally related
