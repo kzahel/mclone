@@ -8,11 +8,13 @@ pass. Pixel review rejected the first cellular composition and produced the
 larger-scale Revision 2 candidate. Same-coordinate 65 km and 131 km atlases
 now include a direct current-production field-revision-21 control. Sampled
 transition, clearing, recurrence, and habitat-connectivity distributions are
-also complete. Human Review A is not open yet: decomposed production-control
-maps and the final review handoff come next. Human Review A selects the atlas
-grammar before World Explorer realization, and Human Review B selects whether
-the candidate deserves production integration. The current production
-generator remains a visible control, not a protected output target.**
+also complete. Decomposed land/ocean, climate, biome, forest-openness, height,
+and water controls now pass and have been pixel-reviewed. Human Review A is
+open and implementation is paused for the required accept, revise, or reject
+decision. Review A selects the atlas grammar before arid expansion or World
+Explorer realization, and Human Review B selects whether the candidate
+deserves production integration. The current production generator remains a
+visible control, not a protected output target.**
 
 Topic: `continental-ecoregion-planning`
 
@@ -137,24 +139,26 @@ projection, owner/work caps, zero exact-chunk work, periodic lifts, and four
 independent native threads. The dedicated Wasm test produces the same
 witness through `wasm-bindgen-test-runner`.
 
-The paired-control Revision 2 macOS `release` receipt at
-`/tmp/mclone-continental-ecoregion/receipt-v4.json` measured:
+The complete Review A macOS `release` receipt at
+`/tmp/mclone-continental-ecoregion/receipt-v6.json` measured:
 
 | Query | Observed time |
 |---|---:|
-| continental point | 292 ns/sample |
-| province point | 388 ns/sample |
-| ecoregion point | 488 ns/sample |
-| mosaic point | 530 ns/sample |
-| 65,536-block, 256x256 candidate plan | 62.0 ms total / 946 ns per sample |
+| continental point | 291 ns/sample |
+| province point | 392 ns/sample |
+| ecoregion point | 491 ns/sample |
+| mosaic point | 529 ns/sample |
+| 65,536-block, 256x256 candidate plan | 62.2 ms total / 949 ns per sample |
 | 131,072-block, 256x256 candidate plan | 51.6 ms total / 787 ns per sample |
-| 65,536-block, 256x256 candidate + production control | 88.8 ms total / 1,354 ns per sample |
-| 131,072-block, 256x256 candidate + production control | 80.5 ms total / 1,228 ns per sample |
+| 65,536-block candidate + complete control, cold / warm | 183.4 / 183.0 ms |
+| 131,072-block candidate + complete control, cold / warm | 180.6 / 181.5 ms |
 
 These timings are descriptive, not yet a budget, and exclude canvas drawing.
 The equal 256x256 cost at the two extents demonstrates direct coarse sampling:
 the 131 km atlas changes sample spacing rather than generating a larger hidden
-fine plan. Both the candidate and control report zero exact-chunk work. The
+fine plan. Both the candidate and control report zero exact-chunk work. Cold
+and warm receipts pin identical candidate/control checksums and work; there is
+no cache whose warmth can change geography. The
 same candidate windows contain 58,159 land / 7,377 ocean and 42,736 land /
 22,800 ocean samples respectively, so this receipt exercises actual
 land-ocean organization rather than an all-land regional palette.
@@ -229,7 +233,7 @@ extents.
 
 ### Review distributions and habitat graph
 
-Atlas schema `mclone-continental-ecoregion-atlas-v2` closes the remaining
+Atlas schema `mclone-continental-ecoregion-atlas-v3` closes the remaining
 initial distribution gaps without adding browser-owned geography:
 
 - transition width is the smaller horizontal/vertical sampled span through
@@ -257,6 +261,41 @@ connected habitat patches. The inspected card is
 `/tmp/mclone-terrain-lab-desktop-chrome-ecoregion-metrics-131km.png`. The low
 connected fraction is a candidate concern to present at Human Review A, not a
 passing mark hidden by the broad union-mask component count.
+
+### Decomposed production control and Review A handoff
+
+Production forest openness now comes from the same shared production-preview
+forest helper used by Terrain Lab's ordinary cover view. The equivalence test
+compares the atlas against that existing reference grid, including forest
+coverage. At each of the fixed 65,536 samples the complete control performs
+five field samples, four coarse forest-intent samples, one footprint summary,
+and zero exact chunks. Layer changes only redraw the transferred arrays and do
+not compile the candidate or control again.
+
+The inspected 131 km production maps are:
+
+- `/tmp/mclone-terrain-lab-desktop-chrome-ecoregion-production-land-131km.png`;
+- `/tmp/mclone-terrain-lab-desktop-chrome-ecoregion-production-climate-131km.png`;
+- `/tmp/mclone-terrain-lab-desktop-chrome-ecoregion-production-biome-131km.png`;
+- `/tmp/mclone-terrain-lab-desktop-chrome-ecoregion-production-openness-131km.png`;
+- `/tmp/mclone-terrain-lab-desktop-chrome-ecoregion-production-height-131km.png`;
+  and
+- `/tmp/mclone-terrain-lab-desktop-chrome-ecoregion-production-water-131km.png`.
+
+The composed 65 km control is
+`/tmp/mclone-terrain-lab-desktop-chrome-ecoregion-production-control-65km.png`.
+The 131 km browser evidence compiled candidate plus complete production control
+in 215 ms and redrew the selected layer in 10 ms. Current production contains
+1,050 and 2,647 connected open-cover components in the square 65 km and 131 km
+receipts respectively. Its decomposed maps show that the same fine recurring
+fabric is present in land/ocean, climate, biome, cover, height, and water; the
+control's sameyness is not merely a composite-palette artifact.
+
+Human Review A should now choose one of the tactical's three outcomes. The
+review should consider both the candidate's legible continents, provinces,
+large clearings, forest/open structure, and quiet areas and its current weak
+habitat connectivity and broad p90 transition spans. Do not add an arid
+province or begin World Explorer realization until that decision is recorded.
 
 ## Candidate Plan Revision 2
 

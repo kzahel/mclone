@@ -188,6 +188,13 @@ impl TerrainLabContinentalEcoregionCompiler {
             self.atlas()?.production_biome_kind.as_slice(),
         ))
     }
+
+    #[wasm_bindgen(js_name = productionForestCoverage)]
+    pub fn production_forest_coverage(&self) -> Result<Uint16Array, JsValue> {
+        Ok(Uint16Array::from(
+            self.atlas()?.production_forest_coverage.as_slice(),
+        ))
+    }
 }
 
 #[wasm_bindgen(js_name = continentalEcoregionSuiteSha256)]

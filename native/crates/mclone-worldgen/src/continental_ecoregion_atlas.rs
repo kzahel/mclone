@@ -14,11 +14,13 @@ use crate::continental_ecoregion::{
 use crate::continental_ecoregion_harness::CONTINENTAL_ECOREGION_WITNESS_SHA256;
 use crate::levelgen::{
     MCLONE_OVERWORLD_FIELD_REVISION, McloneOverworldBiomeRecipe, McloneOverworldLandformSample,
-    McloneOverworldSampler, McloneOverworldTerrainSample, mclone_overworld_biome_recipe,
+    McloneOverworldSampler, McloneOverworldSamplingTopology, McloneOverworldTerrainSample,
+    McloneOverworldVegetationPlanner, McloneVegetationSource, mclone_overworld_biome_recipe,
 };
+use crate::terrain_preview::preview_forest_intent;
 
 pub const CONTINENTAL_ECOREGION_ATLAS_SCHEMA_REVISION: &str =
-    "mclone-continental-ecoregion-atlas-v2";
+    "mclone-continental-ecoregion-atlas-v3";
 pub const CONTINENTAL_ECOREGION_ATLAS_DEFAULT_SAMPLES_ACROSS: u32 = 256;
 pub const CONTINENTAL_ECOREGION_ATLAS_MAX_SAMPLES: usize = 262_144;
 pub const CONTINENTAL_ECOREGION_ATLAS_NONE: u8 = u8::MAX;
@@ -142,6 +144,8 @@ pub struct ContinentalEcoregionAtlasMetrics {
 pub struct ProductionControlWork {
     pub requested_samples: u64,
     pub field_samples: u64,
+    pub forest_intent_samples: u64,
+    pub forest_footprint_summaries: u64,
     pub exact_chunks: u64,
 }
 
@@ -151,6 +155,7 @@ pub struct ProductionControlMetrics {
     pub land_fraction: f32,
     pub ocean_fraction: f32,
     pub land_components: ComponentDistribution,
+    pub open_components: ComponentDistribution,
     pub biome_components: ComponentDistribution,
     pub biome_kind_counts: Vec<u32>,
     pub journeys: Vec<JourneyReceipt>,
@@ -217,6 +222,7 @@ pub struct ContinentalEcoregionAtlas {
     pub production_ruggedness: Vec<i16>,
     pub production_water: Vec<u16>,
     pub production_biome_kind: Vec<u8>,
+    pub production_forest_coverage: Vec<u16>,
 }
 
 pub fn compile_continental_ecoregion_atlas(
@@ -256,9 +262,24 @@ pub fn compile_continental_ecoregion_atlas(
     ))?;
     let mut arrays = AtlasArrays::with_capacity(sample_count);
     let production_sampler = McloneOverworldSampler::new(request.seed);
+    let production_vegetation = McloneOverworldVegetationPlanner::new(McloneVegetationSource::new(
+        request.seed,
+        McloneOverworldSamplingTopology::Unbounded,
+    ));
     for sample in &window.samples {
         arrays.push(sample);
-        arrays.push_production(production_sampler.sample(sample.world_x, sample.world_z));
+        let production_terrain = production_sampler.sample(sample.world_x, sample.world_z);
+        let production_forest = preview_forest_intent(
+            &production_sampler,
+            None,
+            &production_vegetation,
+            step_blocks,
+            production_terrain,
+            sample.world_x,
+            sample.world_z,
+        )
+        .map_err(|_| ContinentalEcoregionError::CoordinateOverflow)?;
+        arrays.push_production(production_terrain, production_forest.coverage);
     }
     let metrics = atlas_metrics(columns, rows, step_blocks, &window.samples, &arrays);
     let production_control_metrics =
@@ -289,7 +310,13 @@ pub fn compile_continental_ecoregion_atlas(
             production_control_sha256,
             production_control_work: ProductionControlWork {
                 requested_samples: sample_count as u64,
-                field_samples: sample_count as u64,
+                field_samples: sample_count as u64 * 5,
+                forest_intent_samples: sample_count as u64 * if step_blocks <= 4 { 1 } else { 4 },
+                forest_footprint_summaries: if step_blocks <= 4 {
+                    0
+                } else {
+                    sample_count as u64
+                },
                 exact_chunks: 0,
             },
             production_control_metrics,
@@ -330,6 +357,7 @@ pub fn compile_continental_ecoregion_atlas(
         production_ruggedness: arrays.production_ruggedness,
         production_water: arrays.production_water,
         production_biome_kind: arrays.production_biome_kind,
+        production_forest_coverage: arrays.production_forest_coverage,
     })
 }
 
@@ -359,6 +387,7 @@ struct AtlasArrays {
     production_ruggedness: Vec<i16>,
     production_water: Vec<u16>,
     production_biome_kind: Vec<u8>,
+    production_forest_coverage: Vec<u16>,
 }
 
 impl AtlasArrays {
@@ -389,6 +418,7 @@ impl AtlasArrays {
             production_ruggedness: Vec::with_capacity(capacity),
             production_water: Vec::with_capacity(capacity),
             production_biome_kind: Vec::with_capacity(capacity),
+            production_forest_coverage: Vec::with_capacity(capacity),
         }
     }
 
@@ -455,7 +485,7 @@ impl AtlasArrays {
         );
     }
 
-    fn push_production(&mut self, terrain: McloneOverworldTerrainSample) {
+    fn push_production(&mut self, terrain: McloneOverworldTerrainSample, forest_coverage: f32) {
         let land = terrain.continentalness > 0.0;
         let water = if !land {
             1.0
@@ -482,6 +512,8 @@ impl AtlasArrays {
             .push(quantize_signed(terrain.ruggedness));
         self.production_water.push(quantize_unit(water as f32));
         self.production_biome_kind.push(biome_recipe_code(recipe));
+        self.production_forest_coverage
+            .push(quantize_unit(forest_coverage));
     }
 }
 
@@ -612,6 +644,12 @@ fn production_control_metrics(
         .iter()
         .map(|value| *value >= 32_768)
         .collect::<Vec<_>>();
+    let open_mask = arrays
+        .production_forest_coverage
+        .iter()
+        .zip(&land_mask)
+        .map(|(forest, land)| *land && *forest < 26_214)
+        .collect::<Vec<_>>();
     let mut biome_kind_counts = vec![0_u32; 8];
     for kind in &arrays.production_biome_kind {
         biome_kind_counts[*kind as usize] += 1;
@@ -620,6 +658,7 @@ fn production_control_metrics(
         land_fraction: land_mask.iter().filter(|value| **value).count() as f32 / sample_count,
         ocean_fraction: land_mask.iter().filter(|value| !**value).count() as f32 / sample_count,
         land_components: component_distribution(&land_mask, columns, rows, step_blocks),
+        open_components: component_distribution(&open_mask, columns, rows, step_blocks),
         biome_components: kind_component_distribution(
             &arrays.production_biome_kind,
             columns,
@@ -1434,6 +1473,9 @@ fn production_control_sha256(
         digest.update(value.to_le_bytes());
     }
     digest.update(&arrays.production_biome_kind);
+    for value in &arrays.production_forest_coverage {
+        digest.update(value.to_le_bytes());
+    }
     digest
         .finalize()
         .iter()
@@ -1480,6 +1522,18 @@ mod tests {
         assert_eq!(atlas.metadata.production_control_work.exact_chunks, 0);
         assert_eq!(atlas.production_land.len(), atlas.land.len());
         assert_eq!(atlas.production_biome_kind.len(), atlas.land.len());
+        assert_eq!(atlas.production_forest_coverage.len(), atlas.land.len());
+        assert_eq!(
+            atlas.metadata.production_control_work.field_samples,
+            u64::from(atlas.metadata.sample_count) * 5
+        );
+        assert_eq!(
+            atlas
+                .metadata
+                .production_control_work
+                .forest_footprint_summaries,
+            u64::from(atlas.metadata.sample_count)
+        );
         assert_eq!(
             atlas
                 .metadata
@@ -1576,6 +1630,10 @@ mod tests {
         assert_eq!(plane.production_land, cylinder.production_land);
         assert_eq!(plane.production_biome_kind, cylinder.production_biome_kind);
         assert_eq!(
+            plane.production_forest_coverage,
+            cylinder.production_forest_coverage
+        );
+        assert_eq!(
             plane.metadata.production_control_sha256,
             cylinder.metadata.production_control_sha256
         );
@@ -1587,7 +1645,9 @@ mod tests {
 
     #[test]
     fn production_control_matches_the_existing_reference_grid() {
-        use crate::terrain_preview::{TerrainPreviewReferenceGrid, TerrainPreviewRequest};
+        use crate::terrain_preview::{
+            TerrainPreviewContentStage, TerrainPreviewReferenceGrid, TerrainPreviewRequest,
+        };
 
         let atlas = compile_continental_ecoregion_atlas(ContinentalEcoregionAtlasRequest {
             samples_across: 128,
@@ -1597,6 +1657,7 @@ mod tests {
         let reference = TerrainPreviewReferenceGrid::compile(TerrainPreviewRequest {
             cells_per_axis: 128,
             sample_spacing: 512,
+            content_stage: TerrainPreviewContentStage::Cover,
             ..TerrainPreviewRequest::new(12_345, 0, 0, 512)
         })
         .unwrap();
@@ -1613,6 +1674,11 @@ mod tests {
                 assert_eq!(
                     atlas.production_biome_kind[index],
                     expected.biome_recipe as u8
+                );
+                assert!(
+                    atlas.production_forest_coverage[index]
+                        .abs_diff(quantize_unit(expected.forest_coverage))
+                        <= 1
                 );
             }
         }

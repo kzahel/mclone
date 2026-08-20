@@ -76,6 +76,7 @@ self.onmessage = (
         productionRuggedness: compiler.productionRuggedness(),
         productionWater: compiler.productionWater(),
         productionBiomeKind: compiler.productionBiomeKind(),
+        productionForestCoverage: compiler.productionForestCoverage(),
       };
       if (request.revision === activeRevision) {
         post(response);
@@ -122,6 +123,7 @@ function post(response: ContinentalEcoregionWorkerResponse): void {
       response.productionRuggedness.buffer,
       response.productionWater.buffer,
       response.productionBiomeKind.buffer,
+      response.productionForestCoverage.buffer,
     ],
   });
 }

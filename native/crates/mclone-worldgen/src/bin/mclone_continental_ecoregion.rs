@@ -64,14 +64,18 @@ struct AtlasTiming {
     blocks_across: u32,
     sample_step_blocks: u32,
     sample_count: u32,
-    elapsed_ns: u128,
-    nanoseconds_per_sample: u128,
+    cold_elapsed_ns: u128,
+    cold_nanoseconds_per_sample: u128,
+    warm_elapsed_ns: u128,
+    warm_nanoseconds_per_sample: u128,
     candidate_sha256: String,
     production_control_sha256: String,
     candidate_exact_chunks: u64,
     production_control_exact_chunks: u64,
+    production_control_field_samples: u64,
     candidate_ecoregion_components: u32,
     production_control_biome_components: u32,
+    production_control_open_components: u32,
     transition_width_blocks: QuantityDistribution,
     clearing_plans: ClearingPlanDistribution,
     regional_signature_recurrence_blocks: QuantityDistribution,
@@ -165,8 +169,12 @@ fn run() -> Result<(), String> {
     }
     for timing in &receipt.atlas_timings {
         println!(
-            "{}-block candidate+control atlas: {} ns ({} ns/sample)",
-            timing.blocks_across, timing.elapsed_ns, timing.nanoseconds_per_sample
+            "{}-block candidate+control atlas: cold {} ns ({} ns/sample), warm {} ns ({} ns/sample)",
+            timing.blocks_across,
+            timing.cold_elapsed_ns,
+            timing.cold_nanoseconds_per_sample,
+            timing.warm_elapsed_ns,
+            timing.warm_nanoseconds_per_sample
         );
     }
     Ok(())
@@ -249,17 +257,35 @@ fn atlas_timings() -> Result<Vec<AtlasTiming>, String> {
         let started = Instant::now();
         let atlas =
             compile_continental_ecoregion_atlas(request).map_err(|error| error.to_string())?;
-        let elapsed_ns = started.elapsed().as_nanos();
+        let cold_elapsed_ns = started.elapsed().as_nanos();
+        let warm_started = Instant::now();
+        let warm_atlas =
+            compile_continental_ecoregion_atlas(request).map_err(|error| error.to_string())?;
+        let warm_elapsed_ns = warm_started.elapsed().as_nanos();
+        if warm_atlas.metadata.semantic_sha256 != atlas.metadata.semantic_sha256
+            || warm_atlas.metadata.production_control_sha256
+                != atlas.metadata.production_control_sha256
+            || warm_atlas.metadata.work != atlas.metadata.work
+            || warm_atlas.metadata.production_control_work != atlas.metadata.production_control_work
+        {
+            return Err(format!(
+                "cold and warm {}-block atlas receipts diverged",
+                blocks_across
+            ));
+        }
         timings.push(AtlasTiming {
             blocks_across,
             sample_step_blocks: atlas.metadata.sample_step_blocks,
             sample_count: atlas.metadata.sample_count,
-            elapsed_ns,
-            nanoseconds_per_sample: elapsed_ns / u128::from(atlas.metadata.sample_count),
+            cold_elapsed_ns,
+            cold_nanoseconds_per_sample: cold_elapsed_ns / u128::from(atlas.metadata.sample_count),
+            warm_elapsed_ns,
+            warm_nanoseconds_per_sample: warm_elapsed_ns / u128::from(atlas.metadata.sample_count),
             candidate_sha256: atlas.metadata.semantic_sha256,
             production_control_sha256: atlas.metadata.production_control_sha256,
             candidate_exact_chunks: atlas.metadata.work.exact_chunks,
             production_control_exact_chunks: atlas.metadata.production_control_work.exact_chunks,
+            production_control_field_samples: atlas.metadata.production_control_work.field_samples,
             candidate_ecoregion_components: atlas
                 .metadata
                 .metrics
@@ -269,6 +295,11 @@ fn atlas_timings() -> Result<Vec<AtlasTiming>, String> {
                 .metadata
                 .production_control_metrics
                 .biome_components
+                .component_count,
+            production_control_open_components: atlas
+                .metadata
+                .production_control_metrics
+                .open_components
                 .component_count,
             transition_width_blocks: atlas.metadata.metrics.transition_width_blocks,
             clearing_plans: atlas.metadata.metrics.clearing_plans.clone(),

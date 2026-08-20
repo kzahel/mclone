@@ -92,6 +92,11 @@ const PRODUCTION_BIOME_LABELS = [
   "temperate meadow",
 ] as const;
 
+type ProductionEcoregionLayer = Extract<
+  ContinentalEcoregionLayer,
+  `production-${string}`
+>;
+
 export function ContinentalEcoregionCanvas({
   state,
   camera,
@@ -367,13 +372,13 @@ export function ContinentalEcoregionCanvas({
             {response
               ? updating
                 ? "updating plan · frame retained"
-                : state.ecoregionLayer === "production-control"
+                : isProductionLayer(state.ecoregionLayer)
                   ? "production control ready"
                   : "continental plan ready"
               : "planning 65–131 km geography"}
           </span>
           <span className="canvasBadge">
-            {state.ecoregionLayer === "production-control"
+            {isProductionLayer(state.ecoregionLayer)
               ? "field 21 · unbounded plane"
               : "candidate · production unchanged"}
           </span>
@@ -459,22 +464,8 @@ function sampleColor(
   response: ContinentalEcoregionWorkerSummary,
   index: number,
 ): [number, number, number] {
-  if (layer === "production-control") {
-    const base = palette(
-      PRODUCTION_BIOME_COLORS,
-      response.productionBiomeKind[index]!,
-    );
-    const surface = Math.max(0, Math.min(1,
-      (response.productionSurfaceY[index]! - 48) / 88,
-    ));
-    const ruggedness = signedUnit(response.productionRuggedness[index]!);
-    let color = mix([31, 50, 45], base, 0.72 + surface * 0.18);
-    color = mix(color, [225, 222, 181], ruggedness * 0.22);
-    return mix(
-      color,
-      [45, 151, 167],
-      response.productionWater[index]! / 65_535 * 0.62,
-    );
+  if (isProductionLayer(layer)) {
+    return productionSampleColor(layer, response, index);
   }
   const land = response.land[index]! / 65_535;
   if (land < 0.5) {
@@ -531,6 +522,68 @@ function sampleColor(
   }
 }
 
+function productionSampleColor(
+  layer: ProductionEcoregionLayer,
+  response: ContinentalEcoregionWorkerSummary,
+  index: number,
+): [number, number, number] {
+  const continental = response.productionLand[index]! / 65_535;
+  const water = response.productionWater[index]! / 65_535;
+  const biome = palette(PRODUCTION_BIOME_COLORS, response.productionBiomeKind[index]!);
+  switch (layer) {
+    case "production-land":
+      return continental < 0.5
+        ? mix([12, 48, 72], [66, 126, 139], continental * 2)
+        : mix([190, 177, 116], [63, 111, 70], (continental - 0.5) * 2);
+    case "production-climate": {
+      const temperature = signedUnit(response.productionTemperature[index]!);
+      const moisture = signedUnit(response.productionMoisture[index]!);
+      const thermal = mix([93, 146, 184], [201, 151, 69], temperature);
+      return mix(thermal, [48, 132, 105], moisture * 0.64);
+    }
+    case "production-biome":
+      return biome;
+    case "production-openness": {
+      if (continental < 0.5) {
+        return [20, 73, 101];
+      }
+      const forest = response.productionForestCoverage[index]! / 65_535;
+      return mix([210, 196, 104], [33, 82, 52], forest);
+    }
+    case "production-height": {
+      const height = Math.max(0, Math.min(1,
+        (response.productionSurfaceY[index]! - 28) / 132,
+      ));
+      const lowToRock = mix([61, 111, 68], [149, 135, 105], Math.min(1, height * 1.5));
+      const color = mix(lowToRock, [222, 226, 220], Math.max(0, height * 2 - 1));
+      return mix(color, [34, 106, 135], water * 0.72);
+    }
+    case "production-water":
+      return mix(
+        continental < 0.5 ? [17, 66, 91] : [92, 101, 72],
+        [42, 153, 169],
+        water,
+      );
+    case "production-control": {
+    const base = palette(
+      PRODUCTION_BIOME_COLORS,
+      response.productionBiomeKind[index]!,
+    );
+    const surface = Math.max(0, Math.min(1,
+      (response.productionSurfaceY[index]! - 48) / 88,
+    ));
+    const ruggedness = signedUnit(response.productionRuggedness[index]!);
+    let color = mix([31, 50, 45], base, 0.72 + surface * 0.18);
+    color = mix(color, [225, 222, 181], ruggedness * 0.22);
+    return mix(
+      color,
+      [45, 151, 167],
+      response.productionWater[index]! / 65_535 * 0.62,
+    );
+    }
+  }
+}
+
 function drawCoordinateGrid(
   context: CanvasRenderingContext2D,
   canvas: CanvasSize,
@@ -577,7 +630,7 @@ function EcoregionInspector({
   const province = labelAt(metadata.provinceKinds, response.provinceKind[index]!);
   const ecoregion = labelAt(metadata.ecoregionKinds, response.ecoregionKind[index]!);
   const clearing = labelAt(metadata.clearingCauses, response.clearingCause[index]!);
-  if (layer === "production-control") {
+  if (isProductionLayer(layer)) {
     const biome = PRODUCTION_BIOME_LABELS[response.productionBiomeKind[index]!]!;
     return (
       <div className="ecoregionInspector" data-testid="continental-ecoregion-inspector">
@@ -653,11 +706,8 @@ function EcoregionLegend({
         label,
         color: CLEARING_COLORS[index]!,
       }))
-      : layer === "production-control"
-        ? PRODUCTION_BIOME_LABELS.map((label, index) => ({
-          label,
-          color: PRODUCTION_BIOME_COLORS[index]!,
-        }))
+      : isProductionLayer(layer)
+        ? productionLegendEntries(layer)
         : response?.metadata.ecoregionKinds.map((label, index) => ({
           label,
           color: ECOREGION_COLORS[index]!,
@@ -666,7 +716,7 @@ function EcoregionLegend({
     <div className="ecoregionLegend" data-testid="continental-ecoregion-legend">
       <strong>{layerLabel(layer)}</strong>
       <div>
-        {layer === "production-control"
+        {isProductionLayer(layer)
           ? null
           : <span><i style={{ background: "rgb(21 61 82)" }} /> ocean</span>}
         {(entries ?? []).map((entry) => (
@@ -711,7 +761,60 @@ function layerLabel(layer: ContinentalEcoregionLayer): string {
     water: "Water, wetland & riparian relation",
     habitat: "Habitat structure & corridors",
     "production-control": "Current production · field 21",
+    "production-land": "Current production · land & ocean",
+    "production-climate": "Current production · climate",
+    "production-biome": "Current production · biome recipe",
+    "production-openness": "Current production · forest openness",
+    "production-height": "Current production · surface height",
+    "production-water": "Current production · water",
   }[layer];
+}
+
+function isProductionLayer(
+  layer: ContinentalEcoregionLayer,
+): layer is ProductionEcoregionLayer {
+  return layer.startsWith("production-");
+}
+
+function productionLegendEntries(
+  layer: ProductionEcoregionLayer,
+): { label: string; color: readonly [number, number, number] }[] {
+  switch (layer) {
+    case "production-control":
+    case "production-biome":
+      return PRODUCTION_BIOME_LABELS.map((label, index) => ({
+        label,
+        color: PRODUCTION_BIOME_COLORS[index]!,
+      }));
+    case "production-land":
+      return [
+        { label: "ocean", color: [12, 48, 72] },
+        { label: "coast", color: [190, 177, 116] },
+        { label: "continental interior", color: [63, 111, 70] },
+      ];
+    case "production-climate":
+      return [
+        { label: "cold", color: [93, 146, 184] },
+        { label: "warm dry", color: [201, 151, 69] },
+        { label: "wet", color: [48, 132, 105] },
+      ];
+    case "production-openness":
+      return [
+        { label: "open", color: [210, 196, 104] },
+        { label: "forest", color: [33, 82, 52] },
+      ];
+    case "production-height":
+      return [
+        { label: "lowland", color: [61, 111, 68] },
+        { label: "rock", color: [149, 135, 105] },
+        { label: "alpine", color: [222, 226, 220] },
+      ];
+    case "production-water":
+      return [
+        { label: "dry land", color: [92, 101, 72] },
+        { label: "water", color: [42, 153, 169] },
+      ];
+  }
 }
 
 function labelAt(labels: string[], index: number): string | undefined {

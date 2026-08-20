@@ -554,25 +554,15 @@ impl TerrainPreviewReferenceGrid {
                 let biome_recipe = mclone_overworld_biome_recipe(macro_landform);
                 let surface_recipe = mclone_overworld_surface_recipe(macro_landform);
                 let forest_intent = if source.content_stage == TerrainPreviewContentStage::Cover {
-                    if source.sample_spacing <= TERRAIN_PREVIEW_MAX_TREE_RECORD_SAMPLE_SPACING {
-                        preview_point_forest_intent(
-                            &sampler,
-                            stream_plans.as_deref(),
-                            &vegetation_planner,
-                            terrain,
-                            world_x,
-                            world_z,
-                        )?
-                    } else {
-                        preview_footprint_forest_summary(
-                            &sampler,
-                            stream_plans.as_deref(),
-                            &vegetation_planner,
-                            source.sample_spacing,
-                            world_x,
-                            world_z,
-                        )?
-                    }
+                    preview_forest_intent(
+                        &sampler,
+                        stream_plans.as_deref(),
+                        &vegetation_planner,
+                        source.sample_spacing,
+                        terrain,
+                        world_x,
+                        world_z,
+                    )?
                 } else {
                     crate::levelgen::McloneForestIntentSample::EMPTY
                 };
@@ -808,6 +798,36 @@ fn preview_terrain_sample(
         let _ = apply_stream_plans(&mut terrain, world_x, world_z, plans);
     }
     terrain
+}
+
+pub(crate) fn preview_forest_intent(
+    sampler: &McloneOverworldSampler,
+    stream_plans: Option<&[McloneOverworldStreamPlan]>,
+    vegetation_planner: &McloneOverworldVegetationPlanner,
+    sample_spacing: u32,
+    terrain: McloneOverworldTerrainSample,
+    world_x: i32,
+    world_z: i32,
+) -> Result<crate::levelgen::McloneForestIntentSample, String> {
+    if sample_spacing <= TERRAIN_PREVIEW_MAX_TREE_RECORD_SAMPLE_SPACING {
+        preview_point_forest_intent(
+            sampler,
+            stream_plans,
+            vegetation_planner,
+            terrain,
+            world_x,
+            world_z,
+        )
+    } else {
+        preview_footprint_forest_summary(
+            sampler,
+            stream_plans,
+            vegetation_planner,
+            sample_spacing,
+            world_x,
+            world_z,
+        )
+    }
 }
 
 fn preview_point_forest_intent(

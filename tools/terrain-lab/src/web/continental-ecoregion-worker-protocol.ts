@@ -100,6 +100,8 @@ export interface PlanConstructionCounts {
 export interface ProductionControlWork {
   requestedSamples: number;
   fieldSamples: number;
+  forestIntentSamples: number;
+  forestFootprintSummaries: number;
   exactChunks: number;
 }
 
@@ -107,6 +109,7 @@ export interface ProductionControlMetrics {
   landFraction: number;
   oceanFraction: number;
   landComponents: ComponentDistribution;
+  openComponents: ComponentDistribution;
   biomeComponents: ComponentDistribution;
   biomeKindCounts: number[];
   journeys: EcoregionJourneyReceipt[];
@@ -174,6 +177,7 @@ export interface ContinentalEcoregionWorkerSummary {
   productionRuggedness: Int16Array;
   productionWater: Uint16Array;
   productionBiomeKind: Uint8Array;
+  productionForestCoverage: Uint16Array;
 }
 
 export interface ContinentalEcoregionWorkerError {

@@ -412,11 +412,18 @@ export function App(): React.JSX.Element {
       data-ecoregion-control-exact-chunks={
         ecoregionReport?.metadata.productionControlWork.exactChunks ?? ""
       }
+      data-ecoregion-control-field-samples={
+        ecoregionReport?.metadata.productionControlWork.fieldSamples ?? ""
+      }
       data-ecoregion-components={
         ecoregionReport?.metadata.metrics.ecoregionComponents.componentCount ?? ""
       }
       data-ecoregion-control-biome-components={
         ecoregionReport?.metadata.productionControlMetrics.biomeComponents.componentCount
+          ?? ""
+      }
+      data-ecoregion-control-open-components={
+        ecoregionReport?.metadata.productionControlMetrics.openComponents.componentCount
           ?? ""
       }
       data-ecoregion-control-land-fraction={
@@ -1309,18 +1316,26 @@ export function App(): React.JSX.Element {
                         event.target.value as ContinentalEcoregionLayer,
                     })}
                   >
-                    <option value="composed">Composed regional plan</option>
-                    <option value="land-ocean">Land, ocean & inland distance</option>
-                    <option value="province">Physiographic provinces</option>
-                    <option value="ecoregion">Ecoregion identity</option>
-                    <option value="transition">Ecoregion transitions</option>
-                    <option value="openness">Vegetation openness</option>
-                    <option value="clearings">Planned clearings</option>
-                    <option value="water">Water, wetland & riparian relation</option>
-                    <option value="habitat">Habitat structure & corridors</option>
-                    <option value="production-control">
-                      Current production · field 21
-                    </option>
+                    <optgroup label="Candidate plan">
+                      <option value="composed">Composed regional plan</option>
+                      <option value="land-ocean">Land, ocean & inland distance</option>
+                      <option value="province">Physiographic provinces</option>
+                      <option value="ecoregion">Ecoregion identity</option>
+                      <option value="transition">Ecoregion transitions</option>
+                      <option value="openness">Vegetation openness</option>
+                      <option value="clearings">Planned clearings</option>
+                      <option value="water">Water, wetland & riparian relation</option>
+                      <option value="habitat">Habitat structure & corridors</option>
+                    </optgroup>
+                    <optgroup label="Current production · field 21">
+                      <option value="production-control">Composed control</option>
+                      <option value="production-land">Land & ocean</option>
+                      <option value="production-climate">Climate</option>
+                      <option value="production-biome">Biome recipe</option>
+                      <option value="production-openness">Forest openness</option>
+                      <option value="production-height">Surface height</option>
+                      <option value="production-water">Water</option>
+                    </optgroup>
                   </select>
                 </label>
                 <p className="controlNote">
@@ -2189,6 +2204,20 @@ function ContinentalEcoregionEvidence({
           )} · max {
             metadata.productionControlMetrics.biomeComponents.maximumAreaSquareKm.toFixed(1)
           } km²</dd>
+        </div>
+        <div>
+          <dt>Control open components</dt>
+          <dd>{formatInteger(
+            metadata.productionControlMetrics.openComponents.componentCount,
+          )} · max {
+            metadata.productionControlMetrics.openComponents.maximumAreaSquareKm.toFixed(1)
+          } km²</dd>
+        </div>
+        <div>
+          <dt>Control coarse work</dt>
+          <dd>{formatInteger(metadata.productionControlWork.fieldSamples)} fields · {
+            formatInteger(metadata.productionControlWork.forestFootprintSummaries)
+          } cover summaries</dd>
         </div>
         <div>
           <dt>Control checksum</dt>

@@ -30,7 +30,7 @@ test("continental ecoregion atlas is direct, layered, and inspectable", async ({
   await expect(shell).toHaveAttribute("data-ecoregion-step", "256");
   await expect(shell).toHaveAttribute(
     "data-ecoregion-atlas-schema",
-    "mclone-continental-ecoregion-atlas-v2",
+    "mclone-continental-ecoregion-atlas-v3",
   );
   await expect(shell).toHaveAttribute("data-ecoregion-exact-chunks", "0");
   await expect(shell).toHaveAttribute(
@@ -93,6 +93,14 @@ test("continental ecoregion atlas is direct, layered, and inspectable", async ({
   await expect(legend).toContainText("Planned clearings");
   await stage.screenshot({
     path: `/tmp/mclone-terrain-lab-${testInfo.project.name}-ecoregion-clearings.png`,
+  });
+
+  await page.getByLabel("Continental plan layer").selectOption("production-control");
+  await expect(shell).toHaveAttribute("data-ecoregion-layer", "production-control");
+  await expect(shell).toHaveAttribute("data-ecoregion-checksum", checksum ?? "");
+  await stage.screenshot({
+    path:
+      `/tmp/mclone-terrain-lab-${testInfo.project.name}-ecoregion-production-control-65km.png`,
   });
 
   await page.goto(page.url(), { waitUntil: "networkidle" });
@@ -198,6 +206,36 @@ test("reviews 131 km against the current production control", async ({
       "/tmp/mclone-terrain-lab-desktop-chrome-ecoregion-production-control-131km-ui.png",
     fullPage: true,
   });
+  let previousControlVisual = await canvasVisualSignature(canvas);
+  for (const [layer, label, filename] of [
+    ["production-land", "Current production · land & ocean", "land"],
+    ["production-climate", "Current production · climate", "climate"],
+    ["production-biome", "Current production · biome recipe", "biome"],
+    ["production-openness", "Current production · forest openness", "openness"],
+    ["production-height", "Current production · surface height", "height"],
+    ["production-water", "Current production · water", "water"],
+  ] as const) {
+    await page.getByLabel("Continental plan layer").selectOption(layer);
+    await expect(shell).toHaveAttribute("data-ecoregion-layer", layer);
+    await expect(shell).toHaveAttribute(
+      "data-ecoregion-control-checksum",
+      controlChecksum ?? "",
+    );
+    await expect.poll(() => canvasVisualSignature(canvas)).not.toBe(previousControlVisual);
+    await expect(page.getByTestId("continental-ecoregion-legend"))
+      .toContainText(label);
+    await stage.screenshot({
+      path:
+        `/tmp/mclone-terrain-lab-desktop-chrome-ecoregion-production-${filename}-131km.png`,
+    });
+    previousControlVisual = await canvasVisualSignature(canvas);
+  }
+  const controlOpenComponents = Number(
+    await shell.getAttribute("data-ecoregion-control-open-components"),
+  );
+  expect(controlOpenComponents).toBeGreaterThan(10);
+  expect(Number(await shell.getAttribute("data-ecoregion-control-field-samples")))
+    .toBe(samples131 * 5);
   expect(pageErrors).toEqual([]);
 });
 
