@@ -382,8 +382,10 @@ pan and zoom, Terrain Lab immediately translates/scales the last accepted
 raster in world coordinates and keeps its exact receipt visible. Candidate
 plus production-control reconstruction waits for a 100 ms interaction-settle
 window; intermediate view changes replace one pending request rather than
-forming a queue. Raster pixels are rebuilt only when the accepted semantic
-checksum or selected layer changes.
+forming a queue. If an older in-flight rebuild finishes while a newer viewport
+is pending, its result is discarded instead of flashing an intermediate map.
+Raster pixels are rebuilt only when the accepted semantic checksum or selected
+layer changes.
 
 Focused browser acceptance held an eight-step 131 km pan open for 200 ms. The
 canvas changed on the retained frame while the exact checksum stayed fixed,

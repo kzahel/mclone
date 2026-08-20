@@ -250,13 +250,15 @@ export function ContinentalEcoregionCanvas({
         return;
       }
       inFlightRevisionRef.current = undefined;
+      const hasPending = pendingQueryRef.current !== undefined;
       if (next.type === "error") {
-        onError(next.message);
-      } else {
+        if (!hasPending) {
+          onError(next.message);
+        }
+      } else if (!hasPending) {
         responseRef.current = next;
         setResponse(next);
       }
-      const hasPending = pendingQueryRef.current !== undefined;
       setUpdating(hasPending);
       if (hasPending) {
         schedulePendingQueryRef.current(
