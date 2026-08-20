@@ -9,12 +9,14 @@ larger-scale Revision 2 candidate. Same-coordinate 65 km and 131 km atlases
 now include a direct current-production field-revision-21 control. Sampled
 transition, clearing, recurrence, and habitat-connectivity distributions are
 also complete. Decomposed land/ocean, climate, biome, forest-openness, height,
-and water controls now pass and have been pixel-reviewed. Human Review A is
-open and implementation is paused for the required accept, revise, or reject
-decision. Review A selects the atlas grammar before arid expansion or World
-Explorer realization, and Human Review B selects whether the candidate
-deserves production integration. The current production generator remains a
-visible control, not a protected output target.**
+and water controls now pass and have been pixel-reviewed. Human Review A
+selected “revise” on 2026-08-20: retain the continental, province, ecoregion,
+and clearing candidate while tightening and authoring transition shoulders
+and replacing the single continental corridor band with a real route
+network. Implementation is active on those named corrections. Arid expansion
+and World Explorer realization remain gated until the corrected atlas returns
+to review. The current production generator remains a visible control, not a
+protected output target.**
 
 Topic: `continental-ecoregion-planning`
 
@@ -296,6 +298,21 @@ review should consider both the candidate's legible continents, provinces,
 large clearings, forest/open structure, and quiet areas and its current weak
 habitat connectivity and broad p90 transition spans. Do not add an arid
 province or begin World Explorer realization until that decision is recorded.
+
+### Human Review A decision: revise
+
+The reviewer retained the general Revision 2 composition and selected the
+recommended named revision rather than accepting or rejecting the grammar:
+
+1. replace the generic nearest-owner transition shoulder with typed,
+   adjacency-aware ecotone widths and continuous cover/climate blending; and
+2. replace the one warped continent-axis corridor with stable, typed route
+   identities forming a bounded spine-and-branch habitat network.
+
+Return to Review A with the same 65 km and 131 km maps, transition
+distributions, habitat graph, production control, fixed-cost receipt, and
+browser evidence. Do not tune an acceptance threshold into the generator:
+the corrected maps and graph remain evidence for a human decision.
 
 ## Candidate Plan Revision 2
 

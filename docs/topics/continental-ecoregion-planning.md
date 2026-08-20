@@ -12,9 +12,11 @@ and 131 km.
 The first pixel review rejected a cellular composition; Revision 2 increases
 the ecoregion and clearing hierarchy and is the active candidate. Its current
 habitat graph links only about one quarter of typed patches, which is explicit
-review evidence rather than an inferred failure or success. Human Review A is
-now open and implementation is paused for an explicit accept, revise, or
-reject decision; arid expansion and World Explorer realization remain gated.
+review evidence rather than an inferred failure or success. Human Review A
+selected a named revision on 2026-08-20: retain the candidate hierarchy and
+clearings, author adjacency-specific ecotones, and replace the single corridor
+band with a typed spine-and-branch habitat network. Arid expansion and World
+Explorer realization remain gated until the corrected atlas returns to review.
 Mclone should combine
 top-down continental and ecoregional planning with bottom-up procedural
 realization so the Overworld contains large, recognizable, causally related
