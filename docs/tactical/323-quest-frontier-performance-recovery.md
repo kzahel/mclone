@@ -1,7 +1,7 @@
 # Tactical 323: Quest Frontier Performance Recovery
 
-Status: implementation authorized 2026-08-20; matched physical baseline
-complete and constant-time suppression in progress.
+Status: implementation authorized 2026-08-20; constant-time suppression
+accepted by measurement and inactive-transition shading in progress.
 
 Topics: `procedural-horizon-clipmap`, `performance`,
 `quest-frontier-performance`
@@ -84,6 +84,32 @@ coordinates. The representation must:
 Add CPU lookup fixtures and shader-validation coverage. Compare native pixels
 before and after, then measure the same preferred Quest lane.
 
+### Phase 1 Evidence
+
+Commit `ca8bc0ea` replaces the 32-record fragment scan with one collision-free
+18-by-18 row-mask lookup. The mask spans every legal 65-chunk exact profile,
+including negative coordinates, and shrinks fixed suppression storage from
+512 to 96 bytes. The 143-test terrain-view suite, native and Wasm checks, and
+thin-adapter gate pass. Inspected natural and forced-fallback RD8 captures are
+seam-free:
+
+```text
+/tmp/mclone-t323-suppression/rd8-elevated-product.png
+/tmp/mclone-t323-suppression/rd8-elevated-forced-fallback.png
+```
+
+The matched preferred Quest sample measured:
+
+| Candidate | App work p50 / p95 | Thread CPU p50 | Blocked p50 | App GPU | Over-period |
+|---|---:|---:|---:|---:|---:|
+| record scan, preferred range | `15.072-15.232 / 18.633-18.789ms` | `6.880-6.921ms` | `8.154-8.237ms` | `9.089-9.526ms` | `66.4-66.8%` |
+| direct row mask | `13.249 / 14.269ms` | `7.264ms` | `5.975ms` | `7.522ms` | `16.7%` |
+
+This recovers approximately two milliseconds at p50, more than four at p95,
+and roughly two milliseconds of app GPU time. It reaches 72 submissions per
+second but does not satisfy the strict p95 gate, so Phase 2 remains warranted.
+Raw evidence is `/tmp/mclone-t323-suppression-preferred.txt`.
+
 ## Phase 0 Evidence
 
 Commit `1d38a647` exposes the existing frontier diagnostic as an Android-XR
@@ -162,7 +188,7 @@ foveation level or any other quality tradeoff.
 ## Completion Gate
 
 - [x] Matched exact/preferred/fallback/preferred Quest baseline is recorded.
-- [ ] Constant-time suppression is implemented, validated, and measured.
+- [x] Constant-time suppression is implemented, validated, and measured.
 - [ ] Zero-weight transition shading is eliminated and pixel-validated.
 - [ ] Support submission is compacted without weakening the certificate.
 - [ ] Native, headed WebGPU, flat Android, stereo, and Quest gates pass.
