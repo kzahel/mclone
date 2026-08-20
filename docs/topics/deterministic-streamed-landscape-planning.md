@@ -601,6 +601,12 @@ The inspected generators occupy three useful points in the design space:
   generates detailed chunks. This is the strongest open game precedent for
   relational terrain and water, but whole-world precomputation is precisely
   the boundary that Mclone's plane/cylinder experiment cannot assume.
+- Streams Reflowing samples finite jittered terrain plates, builds and
+  persists Priority-Flood receiver forests, and compiles them into indexed
+  river reaches plus separate current fields. It is strong evidence that this
+  representation can make convincing game streams, but its documented cold
+  stalls and inspected plate-boundary semantics do not provide cheap
+  arbitrary-point finalization.
 
 No inspected source demonstrates exact derived hydrology over an unbounded
 world with arbitrary random-access finalization. The novel question is
@@ -624,6 +630,7 @@ produce enough of the same geographic relationships to justify its cost?
 | [Génevaux et al. 2013, *Terrain Generation Using Procedural Models Based on Hydrology*](https://cs.purdue.edu/homes/bbenes/papers/Genevaux13ToG.pdf) | paper pipeline and representations inspected; concepts only | hierarchical river graphs, watershed and crest construction, and terrain reconstruction from hydrologic primitives | not an unbounded tiled generator, topology contract, or production performance proof |
 | [Génevaux et al. 2015, *Terrain Modelling from Feature Primitives*](https://www.cs.purdue.edu/cgvlab/www/publications/Genevaux15CGF/) | paper representation and query structure inspected; concepts only | compactly supported skeletal features, construction hierarchy, bounding volumes, and pruned point queries | does not automatically create correct hydrology, ownership, or streamed cross-region identity |
 | [Fischer, Boeckers, and Zachmann 2022, *Procedural Generation of Landscapes with Water Bodies Using Artificial Drainage Basins*](https://cgvr.cs.uni-bremen.de/papers/cgi22/CGI22.pdf) | full paper pipeline inspected; concepts only | rivers-and-lakes-first construction, basin-aware water levels, and a priority-grown surface | finite generated domain with authored constraints, not an infinite deterministic planner or periodic contract |
+| [Streams Reflowing 2.12.6](streams-reflowing-reference.md) | public claims, release notes, and All Rights Reserved distribution jar inspected and decompiled; clean-room concepts only | finite regional Priority-Flood and D8 drainage, accumulated-width reaches, explicit lakes/spills, indexed column reconstruction, persisted plans, and ordinary water with a separate downstream-current field | plate construction may take seconds or longer, finite edges participate in drainage, optional neighbor repair adds work, and an arbitrary cold point is not independently finalizable at LOD cost |
 | [TauDEM documentation](https://hydrology.usu.edu/taudem/taudem5/help53/TauDEMToolboxOverview.htm) | public tool documentation inspected; vocabulary only | separates pit handling, flow direction, contributing area, channels, order, and watersheds | describes terrain-analysis products, not procedural streaming |
 | [USGS watershed and drainage-basin overview](https://www.usgs.gov/water-science-school/science/watersheds-and-drainage-basins) and [stream order](https://www.usgs.gov/media/images/streamorder) | public scientific vocabulary inspected | common outlets, divides, nested drainage, and stream hierarchy | does not specify game dimensions, algorithms, ownership, topology, or tuning |
 
@@ -639,6 +646,7 @@ produce enough of the same geographic relationships to justify its cost?
 | 2026-07-27 | Tactical 270 Phase 1, commit `14d832b8`, 114 exact comparisons and native/Wasm witnesses | Accept the falsification instrument; retain recenter, discovery-state, and last-writer failures as permanent canaries; stop before candidate implementation |
 | 2026-07-27 | Tactical 270 Phase 2, commits `e7158125`, `4b1dce70`, and `473f071c`, 315 exact comparisons | Advance separate shared-hierarchy and bounded-graph mechanisms to structural atlases; do not infer quality, compose Candidate D, or integrate terrain |
 | 2026-07-27 | Tactical 270 Phase 3, commits `42bcbcd1`, `7e740278`, `edc18490`, and `95069d20`, native/Wasm witnesses plus desktop/phone torus-period captures | Atlas mechanisms are ready for Human Review R1; keep Candidate D, reconstruction, performance budgets, and production integration unauthorized |
+| 2026-08-20 | [Streams Reflowing 2.12.6 implementation study](streams-reflowing-reference.md) | Retain regional drainage plus compact reaches as quality evidence and study independent semantic current; do not adopt its finite persisted plate as the procedural-horizon random-access authority |
 
 Add future experiment IDs, commits, commands, corpus locations, results, and
 decisions here or in the active tactical before relying on them.
@@ -674,6 +682,7 @@ decisions here or in the active tactical before relying on them.
 - [`bounded-world-topology.md`](bounded-world-topology.md)
 - [`world-generation-profiles.md`](world-generation-profiles.md)
 - [`gpu-procedural-terrain.md`](gpu-procedural-terrain.md)
+- [`streams-reflowing-reference.md`](streams-reflowing-reference.md)
 - [`../worldgen-deterministic-order.md`](../worldgen-deterministic-order.md)
 - [`../tactical/258-mclone-macro-terrain-performance-baseline.md`](../tactical/258-mclone-macro-terrain-performance-baseline.md)
 - [`../tactical/265-macro-landform-grammar-research.md`](../tactical/265-macro-landform-grammar-research.md)
