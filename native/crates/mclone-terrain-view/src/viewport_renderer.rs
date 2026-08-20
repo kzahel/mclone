@@ -31,11 +31,13 @@ use super::{
     TerrainClipmapDiagnostics, TerrainClipmapTile, TerrainCompositionSourceIdentity,
     TerrainExactBoundaryProfile, TerrainExactCoverageMask, TerrainExactCoverageMode,
     TerrainExactTransitionField, TerrainFrontierPlan, TerrainFrontierPlanOptions,
-    TerrainFrontierPlanReceipt, TerrainFrontierPlanState, TerrainHorizonPresentation,
-    TerrainPreviewCamera, TerrainPreviewDrawOptions, TerrainPreviewLayer, TerrainPreviewSource,
-    TerrainPreviewSplitLayout, TerrainVegetationCoordinator, TerrainVegetationCoordinatorState,
-    TerrainVegetationDesiredTile, TerrainVegetationExecutor, TerrainVegetationExecutorKind,
-    TerrainVegetationSlotToken, TerrainViewportPlan, TerrainViewportTileId,
+    TerrainFrontierPlanReceipt, TerrainFrontierPlanState, TerrainFrontierTopologyProof,
+    TerrainFrontierTopologyProofOptions, TerrainFrontierTopologyProofReceipt,
+    TerrainHorizonPresentation, TerrainPreviewCamera, TerrainPreviewDrawOptions,
+    TerrainPreviewLayer, TerrainPreviewSource, TerrainPreviewSplitLayout,
+    TerrainVegetationCoordinator, TerrainVegetationCoordinatorState, TerrainVegetationDesiredTile,
+    TerrainVegetationExecutor, TerrainVegetationExecutorKind, TerrainVegetationSlotToken,
+    TerrainViewportPlan, TerrainViewportTileId,
     horizon_admission::{
         TERRAIN_HORIZON_STAGING_SLOTS_PER_LEVEL, TerrainHorizonAdmission,
         TerrainHorizonBeginTransition, TerrainHorizonLevelPresentation, TerrainHorizonResourceTile,
@@ -312,6 +314,8 @@ pub struct TerrainHorizonFrameStats {
     pub exact_boundary_payload_bytes: u64,
     pub frontier: TerrainFrontierPlanReceipt,
     pub frontier_plan_failures: u64,
+    pub frontier_topology: TerrainFrontierTopologyProofReceipt,
+    pub frontier_topology_failures: u64,
     pub vegetation_service: TerrainHorizonVegetationServiceStats,
     pub finest_sample_spacing: u32,
     pub coarse_ready: bool,
@@ -3310,6 +3314,9 @@ pub struct TerrainHorizonRenderer {
     frontier_plan: Option<TerrainFrontierPlan>,
     frontier_receipt: TerrainFrontierPlanReceipt,
     frontier_plan_failures: u64,
+    frontier_topology: Option<TerrainFrontierTopologyProof>,
+    frontier_topology_receipt: TerrainFrontierTopologyProofReceipt,
+    frontier_topology_failures: u64,
     frontier_observer_chunk: [i64; 2],
     authoritative_tree_ownership: bool,
     tree_ownership: Option<BoundedRepresentationOwnershipSnapshot<McloneTreeOccurrenceId>>,
@@ -3333,6 +3340,8 @@ impl TerrainHorizonRenderer {
         self.exact_topology = HorizontalTopology::UNBOUNDED;
         self.frontier_plan = None;
         self.frontier_receipt = TerrainFrontierPlanReceipt::default();
+        self.frontier_topology = None;
+        self.frontier_topology_receipt = TerrainFrontierTopologyProofReceipt::default();
         self.frontier_observer_chunk = [0, 0];
         self.tree_ownership = None;
         self.exact_owned_tree_ids.clear();
@@ -3487,6 +3496,9 @@ impl TerrainHorizonRenderer {
             frontier_plan: None,
             frontier_receipt: TerrainFrontierPlanReceipt::default(),
             frontier_plan_failures: 0,
+            frontier_topology: None,
+            frontier_topology_receipt: TerrainFrontierTopologyProofReceipt::default(),
+            frontier_topology_failures: 0,
             frontier_observer_chunk: [0, 0],
             authoritative_tree_ownership: false,
             tree_ownership: None,
@@ -3659,6 +3671,8 @@ impl TerrainHorizonRenderer {
         if frontier_changed {
             self.frontier_plan = None;
             self.frontier_receipt = TerrainFrontierPlanReceipt::default();
+            self.frontier_topology = None;
+            self.frontier_topology_receipt = TerrainFrontierTopologyProofReceipt::default();
         }
         Ok(())
     }
@@ -3668,6 +3682,8 @@ impl TerrainHorizonRenderer {
         self.exact_coverage_snapshot = None;
         self.frontier_plan = None;
         self.frontier_receipt = TerrainFrontierPlanReceipt::default();
+        self.frontier_topology = None;
+        self.frontier_topology_receipt = TerrainFrontierTopologyProofReceipt::default();
     }
 
     fn refresh_frontier_plan(
@@ -3677,6 +3693,8 @@ impl TerrainHorizonRenderer {
         if self.renderer.exact_coverage.mode == TerrainExactCoverageMode::Disabled {
             self.frontier_plan = None;
             self.frontier_receipt = TerrainFrontierPlanReceipt::default();
+            self.frontier_topology = None;
+            self.frontier_topology_receipt = TerrainFrontierTopologyProofReceipt::default();
             return Ok(());
         }
         let Some(coverage) = self.exact_coverage_snapshot.as_ref() else {
@@ -3686,6 +3704,8 @@ impl TerrainHorizonRenderer {
                 state: TerrainFrontierPlanState::Invalid,
                 ..Default::default()
             };
+            self.frontier_topology = None;
+            self.frontier_topology_receipt = TerrainFrontierTopologyProofReceipt::default();
             self.frontier_plan_failures = self.frontier_plan_failures.saturating_add(1);
             return Ok(());
         };
@@ -3721,10 +3741,28 @@ impl TerrainHorizonRenderer {
         ) {
             Ok(plan) => {
                 self.frontier_receipt = plan.receipt();
+                match TerrainFrontierTopologyProof::prepare(
+                    &plan,
+                    TerrainFrontierTopologyProofOptions::default(),
+                ) {
+                    Ok(topology) => {
+                        self.frontier_topology_receipt = topology.receipt();
+                        self.frontier_topology = Some(topology);
+                    }
+                    Err(_error) => {
+                        self.frontier_topology = None;
+                        self.frontier_topology_receipt =
+                            TerrainFrontierTopologyProofReceipt::default();
+                        self.frontier_topology_failures =
+                            self.frontier_topology_failures.saturating_add(1);
+                    }
+                }
                 self.frontier_plan = Some(plan);
             }
             Err(_error) => {
                 self.frontier_plan = None;
+                self.frontier_topology = None;
+                self.frontier_topology_receipt = TerrainFrontierTopologyProofReceipt::default();
                 self.frontier_receipt = TerrainFrontierPlanReceipt {
                     enabled: true,
                     state: TerrainFrontierPlanState::Invalid,
@@ -4642,6 +4680,8 @@ impl TerrainHorizonRenderer {
             exact_boundary_payload_bytes: self.renderer.exact_coverage.boundary.payload_bytes(),
             frontier: self.frontier_receipt,
             frontier_plan_failures: self.frontier_plan_failures,
+            frontier_topology: self.frontier_topology_receipt,
+            frontier_topology_failures: self.frontier_topology_failures,
             vegetation_service,
             finest_sample_spacing: self.clipmap.config().base_sample_spacing,
             coarse_ready: drawn_levels > 0,
