@@ -7,8 +7,8 @@ use mclone_app_runtime::monotonic::MonotonicInstant;
 /// The server still owns both clocks and periodically corrects the client. This
 /// cadence only advances the cached sample between updates. It deliberately
 /// follows the negotiated gameplay rate rather than body-pose publication:
-/// mixed-reliability XR sessions publish poses at 60 Hz while simulation and
-/// celestial time remain 20 Hz.
+/// mixed-reliability XR sessions may publish poses at 60 Hz while simulation
+/// and celestial time follow a separately configurable authority rate.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct ClientClockCadence {
     next_due: Option<MonotonicInstant>,
@@ -19,7 +19,7 @@ impl Default for ClientClockCadence {
     fn default() -> Self {
         Self {
             next_due: None,
-            interval: interval_for_rate_hz(20),
+            interval: interval_for_rate_hz(mclone_server::DEFAULT_GAMEPLAY_RATE_HZ),
         }
     }
 }
@@ -66,18 +66,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn xr_pose_rate_does_not_change_gameplay_clock_rate() {
+    fn negotiated_gameplay_rate_drives_the_clock_independently_of_xr_pose_rate() {
         let configuration = mclone_protocol::SessionConfiguration::fixed_vanilla(
             2,
             2,
             mclone_protocol::SessionCapabilities::DEVELOPMENT_DEFAULT,
         )
+        .with_gameplay_rate_hz(30)
         .with_pose_profile(
             60,
             60,
             mclone_protocol::EffectiveEphemeralTransport::NativeUdp,
         );
-        assert_eq!(configuration.gameplay_rate_hz, 20);
+        assert_eq!(configuration.gameplay_rate_hz, 30);
         assert_eq!(configuration.body_pose_report_rate_hz, 60);
 
         let mut cadence = ClientClockCadence::default();
@@ -91,7 +92,7 @@ mod tests {
             })
             .count();
 
-        assert_eq!(due_ticks, 20);
+        assert_eq!(due_ticks, 30);
     }
 
     #[test]

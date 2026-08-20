@@ -2810,6 +2810,7 @@ impl McloneSceneHost {
                 queue,
                 &mut encoder,
                 target.color_view,
+                target.size,
                 sky_state.clear_color(),
                 render_view.sky_view_projection(),
                 sky_state,
@@ -3064,6 +3065,7 @@ impl McloneSceneHost {
                 queue,
                 &mut encoder,
                 target.color_view,
+                target.size,
                 sky_clear_color,
                 [
                     terrain_views[0].sky_view_projection(),
@@ -5474,7 +5476,7 @@ impl McloneSceneHost {
             .as_ref()
             .and_then(|runtime| runtime.client().session_configuration())
             .map(|configuration| configuration.gameplay_rate_hz)
-            .unwrap_or(20);
+            .unwrap_or(mclone_server::DEFAULT_GAMEPLAY_RATE_HZ);
         self.client_clock.set_rate_hz(gameplay_rate_hz);
         if self.client_clock.take_due_tick(self.services.clock.now())
             && let Some(runtime) = self.active_world.runtime.as_mut()

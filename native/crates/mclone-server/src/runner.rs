@@ -1235,6 +1235,10 @@ mod native {
                 }
             }
         };
+        if let Err(error) = server.set_gameplay_rate_hz(authority.cadence.gameplay_rate_hz) {
+            let _ = ready_tx.send(Err(error.to_string()));
+            return Ok(());
+        }
         if let Err(error) = server.set_world_generation_profile(authority.world_generation_profile)
         {
             let _ = ready_tx.send(Err(error.to_string()));
@@ -1603,9 +1607,18 @@ mod native {
                 let result = timing_state.set_cadence(cadence, tick_interval);
                 command_queue_depth.fetch_sub(1, Ordering::SeqCst);
                 result?;
+                server.set_gameplay_rate_hz(cadence.gameplay_rate_hz)?;
                 if server.publication_budget_config().enabled {
                     server.set_publication_budget_gameplay_rate_hz(cadence.gameplay_rate_hz);
                 }
+                let updates = server.try_drain_updates()?;
+                publish_updates(
+                    update_tx,
+                    update_queue_depth,
+                    update_queue_bytes,
+                    diagnostics,
+                    updates,
+                )?;
                 *next_tick = Instant::now() + timing_state.tick_interval;
                 refresh_cadence_diagnostics(diagnostics, timing_state);
                 refresh_diagnostics(
@@ -2073,7 +2086,7 @@ mod native {
             );
             assert_eq!(initial.host_tick_interval, Duration::from_secs(60));
 
-            let cadence = SimulationCadenceConfig::new(60, 20, 60);
+            let cadence = SimulationCadenceConfig::new(60, 30, 60);
             runner.set_simulation_cadence(cadence).unwrap();
 
             let deadline = Instant::now() + Duration::from_secs(5);
@@ -2093,6 +2106,60 @@ mod native {
                 );
                 std::thread::sleep(Duration::from_millis(1));
             }
+
+            let updates = drain_until(&mut runner, |updates| {
+                updates.iter().any(|update| {
+                    matches!(
+                        update,
+                        ServerUpdate::SessionConfiguration(mclone_protocol::SessionConfiguration {
+                            gameplay_rate_hz: 30,
+                            ..
+                        })
+                    )
+                })
+            });
+            assert!(updates.iter().any(|update| {
+                matches!(
+                    update,
+                    ServerUpdate::SessionConfiguration(mclone_protocol::SessionConfiguration {
+                        gameplay_rate_hz: 30,
+                        ..
+                    })
+                )
+            }));
+
+            runner.join_shutdown().unwrap();
+        }
+
+        #[test]
+        fn native_runner_publishes_the_configured_initial_gameplay_rate() {
+            let cadence = SimulationCadenceConfig::new(60, 30, 60);
+            let mut runner = NativeIntegratedServerRunner::new(
+                test_runner_config(0).with_cadence_derived_tick_interval(cadence),
+            )
+            .unwrap();
+
+            let updates = drain_until(&mut runner, |updates| {
+                updates.iter().any(|update| {
+                    matches!(
+                        update,
+                        ServerUpdate::SessionConfiguration(mclone_protocol::SessionConfiguration {
+                            gameplay_rate_hz: 30,
+                            ..
+                        })
+                    )
+                })
+            });
+            let negotiated_rates = updates
+                .iter()
+                .filter_map(|update| match update {
+                    ServerUpdate::SessionConfiguration(configuration) => {
+                        Some(configuration.gameplay_rate_hz)
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(negotiated_rates.last(), Some(&30));
 
             runner.join_shutdown().unwrap();
         }

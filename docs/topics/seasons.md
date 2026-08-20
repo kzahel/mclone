@@ -80,16 +80,31 @@ calendar or mutates the authoritative light engine.
 A 2026-08-20 headset-review correction removes two celestial stability
 defects. Client clock projection now advances at the negotiated gameplay rate
 instead of the independently negotiated body-pose publication rate; mixed-
-reliability XR therefore keeps the 20 Hz world clock while reporting poses at
-60 Hz, rather than running ahead and snapping backward at each authoritative
-sample. Original-catalog stars below `0.08` degrees now use that value as a
-minimum raster support footprint with inverse-area opacity compensation, so
-dim stars remain covered under small head-pose changes without gaining
-integrated brightness. The retained Java star catalog is unchanged. Focused
-renderer/scene suites, the browser/WASM build, and inspected 960-pixel and
-Quest-scale synthetic-stereo captures pass. Android-XR packaging is presently
-blocked before Rust compilation by an unrelated stale checked-in first-party
-sound catalog.
+reliability XR can therefore keep a separately configured world clock while
+reporting poses at 60 Hz, rather than running ahead and snapping backward at
+each authoritative sample. The authority publishes the actual
+`SimulationCadenceConfig.gameplay_rate_hz` at startup and after live cadence
+changes, preserves each connection's pose-transport profile, and uses the same
+rate for once-per-second time corrections. The client's pre-negotiation
+fallback uses the server's shared default-rate constant rather than another
+literal.
+
+Original-catalog stars now have a `1.2`-pixel minimum raster diameter, exposed
+as the compile-time `MCLONE_MIN_STAR_RASTER_DIAMETER_PIXELS` renderer tuning
+parameter. Mono/per-eye and full-frame multiview shaders evaluate each star's
+projected axes against the actual target width and height, so physical-headset
+render scale, intentional XR undersampling, and desktop-XR swapchain sizes all
+obey the same screen-space floor. Inverse-area opacity compensation preserves
+integrated brightness and leaves room for subtle residual twinkle. The
+retained Java star catalog opts out and remains exact. Regression cases name
+reduced and recommended Quest sizes, desktop XR, desktop mono, per-eye, and
+multiview contracts. The shared protocol/render/server/runtime/scene suites
+complete with 1,530 passing tests and 11 existing GPU characterizations
+ignored; desktop OpenXR and browser/WASM builds pass; and inspected 960-,
+1,832-by-1,920 Quest-, and 2,448-square desktop-XR synthetic-stereo captures
+are clean. Android-XR
+packaging remains blocked before Rust compilation by an unrelated stale
+checked-in first-party sound catalog.
 
 Active coordinating parent Tactical
 [`315`](../tactical/315-authoritative-seasonal-calendar-and-squirrel-ecology.md)

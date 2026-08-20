@@ -190,6 +190,11 @@ impl SessionConfiguration {
         self.ephemeral_transport = ephemeral_transport;
         self
     }
+
+    pub const fn with_gameplay_rate_hz(mut self, gameplay_rate_hz: u32) -> Self {
+        self.gameplay_rate_hz = gameplay_rate_hz;
+        self
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

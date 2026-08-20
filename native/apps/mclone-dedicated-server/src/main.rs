@@ -472,6 +472,9 @@ fn run_server_loop_inner(
     let mut session_command_counts = BTreeMap::<DedicatedConnectionId, usize>::new();
     let mut summary = DedicatedServerSummary::default();
     let cadence_config = SimulationCadenceConfig::default();
+    server
+        .set_gameplay_rate_hz(cadence_config.gameplay_rate_hz)
+        .context("failed to publish dedicated gameplay cadence")?;
     let host_interval = Duration::from_secs_f64(1.0 / f64::from(cadence_config.host_rate_hz));
     let mut cadence = SimulationCadence::new(cadence_config)
         .expect("default dedicated simulation cadence must be valid");

@@ -164,6 +164,7 @@ const NATURAL_SPAWN_TICK_SEED_MULTIPLIER: i64 = 6_364_136_223_846_793_005;
 fn session_configuration(
     policy: PlayerChunkTrackingPolicy,
     capabilities: SessionCapabilities,
+    gameplay_rate_hz: u32,
 ) -> SessionConfiguration {
     let (max_render_distance, max_chunk_tracking_radius) = policy.session_limits();
     SessionConfiguration::fixed_vanilla(
@@ -171,14 +172,16 @@ fn session_configuration(
         max_chunk_tracking_radius,
         capabilities,
     )
+    .with_gameplay_rate_hz(gameplay_rate_hz)
 }
 
 fn session_configuration_with_pose_transport(
     policy: PlayerChunkTrackingPolicy,
     capabilities: SessionCapabilities,
     transport: EffectiveEphemeralTransport,
+    gameplay_rate_hz: u32,
 ) -> SessionConfiguration {
-    let configuration = session_configuration(policy, capabilities);
+    let configuration = session_configuration(policy, capabilities, gameplay_rate_hz);
     if capabilities.contains(SessionCapabilities::EPHEMERAL_BODY_POSE)
         && transport.is_mixed_reliability()
     {
@@ -360,6 +363,7 @@ pub struct RealmServer {
     active_dimension: DimensionRuntime,
     inactive_dimensions: BTreeMap<DimensionKey, DimensionRuntime>,
     simulation_tick: u64,
+    gameplay_rate_hz: u32,
     day_time: u64,
     season_calendar_policy: mclone_season::SeasonCalendarPolicy,
     do_daylight_cycle: bool,
@@ -1155,6 +1159,7 @@ impl RealmServer {
             active_dimension,
             inactive_dimensions: BTreeMap::new(),
             simulation_tick: 0,
+            gameplay_rate_hz: crate::DEFAULT_GAMEPLAY_RATE_HZ,
             day_time: INITIAL_DAY_TIME,
             season_calendar_policy,
             do_daylight_cycle: true,
@@ -2240,6 +2245,91 @@ impl RealmServer {
             .set_publication_budget_gameplay_rate_hz(gameplay_rate_hz);
     }
 
+    /// Updates the authoritative gameplay cadence and republishes negotiated
+    /// session configuration to every connected player and observer.
+    pub fn set_gameplay_rate_hz(&mut self, gameplay_rate_hz: u32) -> ChunkStoreResult<bool> {
+        if gameplay_rate_hz == 0 {
+            return Err(ChunkStoreError::InvalidData(
+                "gameplay rate must be positive".to_owned(),
+            ));
+        }
+        if self.gameplay_rate_hz == gameplay_rate_hz {
+            return Ok(false);
+        }
+
+        let player_configurations = self
+            .players
+            .iter()
+            .map(|(player_id, player)| {
+                let policy = self
+                    .dimension_runtime(&player.dimension)
+                    .ok_or_else(|| {
+                        ChunkStoreError::InvalidData(format!(
+                            "player {player_id} dimension {} is not loaded",
+                            player.dimension
+                        ))
+                    })?
+                    .chunk_tracking
+                    .policy();
+                Ok((
+                    player_id,
+                    session_configuration_with_pose_transport(
+                        policy,
+                        player.capabilities,
+                        player.pose_transport,
+                        gameplay_rate_hz,
+                    ),
+                ))
+            })
+            .collect::<ChunkStoreResult<Vec<_>>>()?;
+        let observer_configurations = self
+            .observers
+            .iter()
+            .map(|(observer_id, dimension)| {
+                let policy = self
+                    .dimension_runtime(dimension)
+                    .ok_or_else(|| {
+                        ChunkStoreError::InvalidData(format!(
+                            "observer {observer_id:?} dimension {dimension} is not loaded"
+                        ))
+                    })?
+                    .chunk_tracking
+                    .policy();
+                Ok((
+                    *observer_id,
+                    dimension.clone(),
+                    session_configuration(
+                        policy,
+                        SessionCapabilities::DEVELOPMENT_DEFAULT,
+                        gameplay_rate_hz,
+                    ),
+                ))
+            })
+            .collect::<ChunkStoreResult<Vec<_>>>()?;
+
+        self.gameplay_rate_hz = gameplay_rate_hz;
+        for (player_id, configuration) in player_configurations {
+            self.queue_update_for_player_in_current_dimension(
+                player_id,
+                ServerUpdate::SessionConfiguration(configuration),
+            );
+        }
+
+        for (observer_id, dimension, configuration) in observer_configurations {
+            let update = ServerUpdate::SessionConfiguration(configuration);
+            if dimension == self.active_dimension.key {
+                self.active_dimension
+                    .chunk_tracking
+                    .queue_update_for_observer(observer_id, update);
+            } else if let Some(runtime) = self.inactive_dimensions.get_mut(&dimension) {
+                runtime
+                    .chunk_tracking
+                    .queue_update_for_observer(observer_id, update);
+            }
+        }
+        Ok(true)
+    }
+
     pub fn add_player(&mut self) -> ServerPlayerId {
         self.add_player_with_capabilities(SessionCapabilities::DEVELOPMENT_DEFAULT)
     }
@@ -2282,6 +2372,7 @@ impl RealmServer {
         let configuration = session_configuration(
             self.chunk_tracking.policy(),
             SessionCapabilities::DEVELOPMENT_DEFAULT,
+            self.gameplay_rate_hz,
         );
         let world_info = self.world_info_update();
         let time_update = self.time_update();
@@ -2524,11 +2615,14 @@ impl RealmServer {
         pose_transport: EffectiveEphemeralTransport,
     ) -> ChunkStoreResult<ServerPlayerId> {
         self.activate_dimension(&dimension)?;
-        let player_id = self.players.add_in_dimension(dimension, capabilities);
+        let player_id = self
+            .players
+            .add_in_dimension(dimension, capabilities, pose_transport);
         let configuration = session_configuration_with_pose_transport(
             self.chunk_tracking.policy(),
             capabilities,
             pose_transport,
+            self.gameplay_rate_hz,
         );
         let world_info = self.world_info_update();
         let time_update = self.time_update();
@@ -3101,7 +3195,10 @@ impl RealmServer {
         if self.daylight_cycle_running() && !sleep_jump {
             self.day_time = self.day_time.saturating_add(1);
         }
-        if !sleep_jump && (simulation_tick == 1 || simulation_tick.is_multiple_of(20)) {
+        if !sleep_jump
+            && (simulation_tick == 1
+                || simulation_tick.is_multiple_of(self.gameplay_rate_hz as u64))
+        {
             self.queue_time_update_for_all_interest_sources(self.time_update());
         }
         if self.world_metadata.is_some() {

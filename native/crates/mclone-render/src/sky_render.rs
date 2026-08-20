@@ -56,12 +56,13 @@ pub const MCLONE_STAR_COUNT: u32 = 2_048;
 pub const MCLONE_STAR_CATALOG_MAX_COUNT: u32 = 4_096;
 pub const REFERENCE_STAR_CANDIDATE_COUNT: u32 = 1_500;
 pub const REFERENCE_STAR_COUNT: u32 = 780;
-// The dimmest original-catalog quads were about 0.04 degrees wide, below one
-// pixel on current Quest displays. A small minimum support footprint prevents
-// pose micro-jitter from alternating those stars between zero and one covered
-// samples. Opacity is reduced by the inverse area change below, so this does
-// not turn the dim tail into a brighter or denser sky.
-const MCLONE_STABLE_STAR_ANGULAR_DIAMETER_DEGREES: f32 = 0.08;
+/// Minimum rasterized diameter of an original-catalog star, in pixels.
+///
+/// This is deliberately a compile-time product-tuning parameter. The shader
+/// evaluates the projected footprint against the actual render-target size,
+/// so XR undersampling and desktop-XR swapchains receive the same pixel-space
+/// contract. Retained-reference stars opt out to preserve their exact shape.
+pub const MCLONE_MIN_STAR_RASTER_DIAMETER_PIXELS: f32 = 1.2;
 const STAR_INSTANCE_FLOAT_COUNT: usize = 9;
 const STAR_INSTANCE_BYTE_SIZE: wgpu::BufferAddress =
     (STAR_INSTANCE_FLOAT_COUNT * std::mem::size_of::<f32>()) as wgpu::BufferAddress;
@@ -780,6 +781,7 @@ impl SkyRenderer {
         queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
         color_view: &wgpu::TextureView,
+        target_size: [u32; 2],
         clear_color: wgpu::Color,
         sky_view_projection: Mat4,
         sky_state: SkyRenderState,
@@ -788,6 +790,7 @@ impl SkyRenderer {
             queue,
             encoder,
             color_view,
+            target_size,
             clear_color,
             sky_view_projection,
             sky_state,
@@ -801,6 +804,7 @@ impl SkyRenderer {
         queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
         color_view: &wgpu::TextureView,
+        target_size: [u32; 2],
         clear_color: wgpu::Color,
         sky_view_projection: Mat4,
         sky_state: SkyRenderState,
@@ -810,6 +814,7 @@ impl SkyRenderer {
             queue,
             encoder,
             color_view,
+            target_size,
             clear_color,
             sky_view_projection,
             sky_state,
@@ -824,6 +829,7 @@ impl SkyRenderer {
         queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
         color_view: &wgpu::TextureView,
+        target_size: [u32; 2],
         clear_color: wgpu::Color,
         sky_view_projection: Mat4,
         sky_state: SkyRenderState,
@@ -833,6 +839,7 @@ impl SkyRenderer {
             queue,
             encoder,
             color_view,
+            target_size,
             clear_color,
             sky_view_projection,
             sky_state,
@@ -847,6 +854,7 @@ impl SkyRenderer {
         queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
         color_view: &wgpu::TextureView,
+        target_size: [u32; 2],
         clear_color: wgpu::Color,
         sky_view_projection: Mat4,
         sky_state: SkyRenderState,
@@ -857,6 +865,7 @@ impl SkyRenderer {
             queue,
             encoder,
             color_view,
+            target_size,
             clear_color,
             sky_view_projection,
             sky_state,
@@ -871,6 +880,7 @@ impl SkyRenderer {
         queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
         color_view: &wgpu::TextureView,
+        target_size: [u32; 2],
         clear_color: wgpu::Color,
         sky_view_projection: Mat4,
         sky_state: SkyRenderState,
@@ -954,12 +964,13 @@ impl SkyRenderer {
         });
         let (star_instance_buffer, star_catalog_count) =
             self.star_catalog(sky_state.is_reference_profile());
-        let star_draw =
-            celestial_star_draw(sky_state, star_catalog_count).map(|(count, parameters)| {
+        let star_draw = celestial_star_draw(sky_state, star_catalog_count, target_size).map(
+            |(count, parameters)| {
                 let bytes = star_uniform_bytes(sky_view_projection, parameters);
                 let offset = self.star_uniforms.write_slot(queue, view_slot, &bytes);
                 (count, offset)
-            });
+            },
+        );
         let celestial_stats = prepared_celestial_stats(
             sun_range.is_some(),
             halo_range.is_some(),
@@ -1033,6 +1044,7 @@ impl SkyRenderer {
         queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
         color_view: &wgpu::TextureView,
+        target_size: [u32; 2],
         clear_color: wgpu::Color,
         sky_view_projections: [Mat4; 2],
         sky_state: SkyRenderState,
@@ -1042,6 +1054,7 @@ impl SkyRenderer {
             queue,
             encoder,
             color_view,
+            target_size,
             clear_color,
             sky_view_projections,
             sky_state,
@@ -1056,6 +1069,7 @@ impl SkyRenderer {
         queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
         color_view: &wgpu::TextureView,
+        target_size: [u32; 2],
         clear_color: wgpu::Color,
         sky_view_projections: [Mat4; 2],
         sky_state: SkyRenderState,
@@ -1066,6 +1080,7 @@ impl SkyRenderer {
             queue,
             encoder,
             color_view,
+            target_size,
             clear_color,
             sky_view_projections,
             sky_state,
@@ -1080,6 +1095,7 @@ impl SkyRenderer {
         queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
         color_view: &wgpu::TextureView,
+        target_size: [u32; 2],
         clear_color: wgpu::Color,
         sky_view_projections: [Mat4; 2],
         sky_state: SkyRenderState,
@@ -1091,7 +1107,7 @@ impl SkyRenderer {
         renderer.write_uniforms(queue, sky_view_projections);
         let (star_instance_buffer, star_catalog_count) =
             self.star_catalog(sky_state.is_reference_profile());
-        let star_draw = celestial_star_draw(sky_state, star_catalog_count);
+        let star_draw = celestial_star_draw(sky_state, star_catalog_count, target_size);
         if let Some((_, parameters)) = star_draw {
             renderer.write_star_uniforms(queue, sky_view_projections, parameters);
         }
@@ -1689,12 +1705,11 @@ fn mclone_star_catalog() -> Vec<StarInstance> {
     ];
     let mut catalog = Vec::with_capacity(MCLONE_STAR_COUNT as usize);
     for &(right_ascension, declination, color_class) in anchors {
-        let (size, brightness) = stabilize_mclone_star_presentation(0.095, 1.0);
         catalog.push(star_instance(
             right_ascension,
             declination.to_radians(),
-            size,
-            brightness,
+            0.095,
+            1.0,
             color_class,
             0.0,
         ));
@@ -1706,7 +1721,6 @@ fn mclone_star_catalog() -> Vec<StarInstance> {
         let brightness_seed = random_unit(&mut state);
         let brightness = 0.28 + brightness_seed.powi(3) * 0.72;
         let size = 0.025 + brightness * 0.055;
-        let (size, brightness) = stabilize_mclone_star_presentation(size, brightness);
         let color_class = (next_random(&mut state) % 3) as f32;
         let orientation = random_unit(&mut state) * std::f32::consts::TAU;
         catalog.push(star_instance(
@@ -1720,12 +1734,6 @@ fn mclone_star_catalog() -> Vec<StarInstance> {
     }
     catalog.sort_by(|left, right| right[5].total_cmp(&left[5]));
     catalog
-}
-
-fn stabilize_mclone_star_presentation(angular_size_degrees: f32, brightness: f32) -> (f32, f32) {
-    let stable_size = angular_size_degrees.max(MCLONE_STABLE_STAR_ANGULAR_DIAMETER_DEGREES);
-    let area_scale = (angular_size_degrees / stable_size).powi(2);
-    (stable_size, brightness * area_scale)
 }
 
 fn star_instance(
@@ -1863,6 +1871,7 @@ fn random_unit(state: &mut u32) -> f32 {
 fn celestial_star_draw(
     sky_state: SkyRenderState,
     full_count: u32,
+    target_size: [u32; 2],
 ) -> Option<(u32, StarUniformParameters)> {
     let celestial = sky_state.celestial()?;
     let count = celestial.settings.star_density.selected_count(full_count);
@@ -1881,6 +1890,11 @@ fn celestial_star_draw(
     }
     let latitude = celestial.effective_latitude_degrees.to_radians();
     let sidereal = celestial.local_sidereal_angle_turns * std::f32::consts::TAU;
+    let minimum_raster_diameter = if sky_state.is_reference_profile() {
+        0.0
+    } else {
+        MCLONE_MIN_STAR_RASTER_DIAMETER_PIXELS
+    };
     Some((
         count,
         [
@@ -1889,11 +1903,21 @@ fn celestial_star_draw(
             latitude.cos(),
             latitude.sin(),
             visibility,
-            0.0,
-            0.0,
-            0.0,
+            target_size[0] as f32,
+            target_size[1] as f32,
+            minimum_raster_diameter,
         ],
     ))
+}
+
+#[cfg(test)]
+fn stabilized_star_raster_presentation(
+    projected_diameter_pixels: f32,
+    opacity: f32,
+    minimum_diameter_pixels: f32,
+) -> (f32, f32) {
+    let scale = (minimum_diameter_pixels / projected_diameter_pixels.max(1.0e-6)).max(1.0);
+    (projected_diameter_pixels * scale, opacity / scale.powi(2))
 }
 
 fn prepared_celestial_stats(
@@ -2486,35 +2510,78 @@ mod tests {
             let mut settings = CelestialDebugSettings::default();
             settings.star_density = density;
             assert_eq!(
-                celestial_star_draw(base.with_celestial(celestial(settings)), MCLONE_STAR_COUNT)
-                    .unwrap()
-                    .0,
+                celestial_star_draw(
+                    base.with_celestial(celestial(settings)),
+                    MCLONE_STAR_COUNT,
+                    [1_832, 1_920],
+                )
+                .unwrap()
+                .0,
                 expected
             );
         }
         let mut off = CelestialDebugSettings::default();
         off.star_density = mclone_season::CelestialStarDensity::Off;
         assert!(
-            celestial_star_draw(base.with_celestial(celestial(off)), MCLONE_STAR_COUNT).is_none()
+            celestial_star_draw(
+                base.with_celestial(celestial(off)),
+                MCLONE_STAR_COUNT,
+                [1_832, 1_920],
+            )
+            .is_none()
         );
     }
 
     #[test]
-    fn dim_mclone_stars_use_a_stable_support_without_gaining_energy() {
-        let intended_size = 0.025 + 0.28 * 0.055;
-        let intended_brightness = 0.28;
-        let (stable_size, stable_brightness) =
-            stabilize_mclone_star_presentation(intended_size, intended_brightness);
+    fn dim_mclone_stars_have_a_resolution_aware_raster_floor_without_gaining_energy() {
+        // Representative subpixel footprints from reduced Quest, recommended
+        // Quest, desktop XR, and ordinary mono render targets respectively.
+        for (_lane, projected_diameter) in [
+            ("Quest reduced scale", 0.34),
+            ("Quest recommended scale", 0.68),
+            ("desktop XR", 0.86),
+            ("desktop mono", 1.7),
+        ] {
+            let opacity = 0.28;
+            let (stable_diameter, stable_opacity) = stabilized_star_raster_presentation(
+                projected_diameter,
+                opacity,
+                MCLONE_MIN_STAR_RASTER_DIAMETER_PIXELS,
+            );
+            assert!(stable_diameter >= MCLONE_MIN_STAR_RASTER_DIAMETER_PIXELS);
+            assert!(
+                (stable_diameter.powi(2) * stable_opacity - projected_diameter.powi(2) * opacity)
+                    .abs()
+                    < 1.0e-6
+            );
+        }
 
-        assert_eq!(stable_size, MCLONE_STABLE_STAR_ANGULAR_DIAMETER_DEGREES);
-        assert!(stable_brightness < intended_brightness);
-        assert!(
-            (stable_size.powi(2) * stable_brightness - intended_size.powi(2) * intended_brightness)
-                .abs()
-                < 1.0e-7
-        );
+        let original = SkyRenderState::mclone_fixed(0.5, std::f32::consts::PI)
+            .with_celestial(celestial(Default::default()));
+        for (_lane, target_size) in [
+            ("Quest reduced scale", [916, 960]),
+            ("Quest recommended scale", [1_832, 1_920]),
+            ("desktop XR", [2_448, 2_448]),
+            ("desktop mono", [1_920, 1_080]),
+        ] {
+            let parameters = celestial_star_draw(original, MCLONE_STAR_COUNT, target_size)
+                .unwrap()
+                .1;
+            assert_eq!(
+                parameters[5..7],
+                [target_size[0] as f32, target_size[1] as f32]
+            );
+            assert_eq!(parameters[7], MCLONE_MIN_STAR_RASTER_DIAMETER_PIXELS);
+        }
 
-        assert_eq!(stabilize_mclone_star_presentation(0.095, 1.0), (0.095, 1.0));
+        let retained = SkyRenderState::vanilla(0.5, std::f32::consts::PI)
+            .with_celestial(celestial(Default::default()));
+        let retained_parameters =
+            celestial_star_draw(retained, REFERENCE_STAR_COUNT, [2_448, 2_448])
+                .unwrap()
+                .1;
+        assert_eq!(retained_parameters[5..7], [2_448.0, 2_448.0]);
+        assert_eq!(retained_parameters[7], 0.0);
     }
 
     #[test]
@@ -2571,7 +2638,7 @@ mod tests {
     }
 
     #[test]
-    fn sun_shaders_parse_for_mono_and_multiview() {
+    fn celestial_shaders_parse_for_mono_per_eye_and_multiview() {
         for source in [
             include_str!("shaders/sky_sun.wgsl"),
             include_str!("shaders/sky_sun_multiview.wgsl"),
@@ -2580,5 +2647,18 @@ mod tests {
         ] {
             naga::front::wgsl::parse_str(source).expect("celestial WGSL parses");
         }
+        for source in [
+            include_str!("shaders/sky_stars.wgsl"),
+            include_str!("shaders/sky_stars_multiview.wgsl"),
+        ] {
+            assert!(source.contains("fn raster_support_scale("));
+            assert!(source.contains("uniforms.visibility.yz"));
+            assert!(source.contains("uniforms.visibility.w / max(diameter_pixels"));
+            assert!(source.contains("base_opacity / (support_scale * support_scale)"));
+        }
+        assert!(
+            include_str!("shaders/sky_stars_multiview.wgsl")
+                .contains("uniforms.view_projections[u32(view_index)]")
+        );
     }
 }

@@ -4,8 +4,8 @@ use std::fmt;
 use mclone_core::{ChunkPos, Vec3d};
 use mclone_protocol::{
     BeeFieldGuideProgress, ClientIdentity, DeerFieldGuideProgress, DimensionKey,
-    MallardFieldGuideProgress, PlayerAppearance, PlayerDamageCause, PlayerStatistics, PlayerVitals,
-    RabbitFieldGuideProgress, SessionCapabilities,
+    EffectiveEphemeralTransport, MallardFieldGuideProgress, PlayerAppearance, PlayerDamageCause,
+    PlayerStatistics, PlayerVitals, RabbitFieldGuideProgress, SessionCapabilities,
 };
 
 use crate::inventory::ServerInventory;
@@ -62,6 +62,7 @@ pub(crate) struct ServerPlayerEntry {
     pub(crate) life_epoch: u32,
     pub(crate) player_record_revision: u64,
     pub(crate) capabilities: SessionCapabilities,
+    pub(crate) pose_transport: EffectiveEphemeralTransport,
     pub(crate) presentation_epoch: u32,
     pub(crate) remote_pose_sequence: u32,
     pub(crate) remote_pose_sample_time_millis: u32,
@@ -90,6 +91,7 @@ impl Default for ServerPlayerEntry {
             life_epoch: 0,
             player_record_revision: 0,
             capabilities: SessionCapabilities::NONE,
+            pose_transport: EffectiveEphemeralTransport::ReliableFallback,
             presentation_epoch: 1,
             remote_pose_sequence: 0,
             remote_pose_sample_time_millis: 0,
@@ -118,6 +120,7 @@ impl ServerPlayerList {
         &mut self,
         dimension: DimensionKey,
         capabilities: SessionCapabilities,
+        pose_transport: EffectiveEphemeralTransport,
     ) -> ServerPlayerId {
         let id = ServerPlayerId(self.next_id);
         self.next_id = self
@@ -129,6 +132,7 @@ impl ServerPlayerList {
             ServerPlayerEntry {
                 dimension,
                 capabilities,
+                pose_transport,
                 ..ServerPlayerEntry::default()
             },
         );

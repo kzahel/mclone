@@ -28,6 +28,36 @@ fn quad_corner(vertex_index: u32) -> vec2<f32> {
     }
 }
 
+fn clip_to_ndc(clip: vec4<f32>) -> vec2<f32> {
+    let magnitude = max(abs(clip.w), 1.0e-5);
+    let safe_w = select(-magnitude, magnitude, clip.w >= 0.0);
+    return clip.xy / safe_w;
+}
+
+fn raster_support_scale(
+    center: vec3<f32>,
+    right: vec3<f32>,
+    up: vec3<f32>,
+    half_size: f32,
+) -> f32 {
+    let viewport_pixels = max(uniforms.visibility.yz, vec2<f32>(1.0));
+    let center_clip = uniforms.view_projection * vec4<f32>(center, 1.0);
+    let center_ndc = clip_to_ndc(center_clip);
+    let right_ndc = clip_to_ndc(
+        uniforms.view_projection * vec4<f32>(center + right * half_size, 1.0)
+    );
+    let up_ndc = clip_to_ndc(
+        uniforms.view_projection * vec4<f32>(center + up * half_size, 1.0)
+    );
+    // One half-axis spans half the NDC diameter, while NDC spans two pixels
+    // per viewport unit; these factors cancel for the full pixel diameter.
+    let diameter_pixels = min(
+        length((right_ndc - center_ndc) * viewport_pixels),
+        length((up_ndc - center_ndc) * viewport_pixels),
+    );
+    return max(1.0, uniforms.visibility.w / max(diameter_pixels, 1.0e-5));
+}
+
 @vertex
 fn vs_main(input: StarInstance, @builtin(vertex_index) vertex_index: u32) -> VertexOutput {
     let sin_ra = input.equatorial_basis.x;
@@ -46,8 +76,8 @@ fn vs_main(input: StarInstance, @builtin(vertex_index) vertex_index: u32) -> Ver
     let direction = normalize(vec3<f32>(east, up_component, -north));
     let horizon = smoothstep(-0.035, 0.02, direction.y);
     let brightness = input.presentation.y;
-    let opacity = brightness * uniforms.visibility.x * horizon;
-    if opacity <= 0.001 {
+    let base_opacity = brightness * uniforms.visibility.x * horizon;
+    if base_opacity <= 0.001 {
         var culled: VertexOutput;
         culled.position = vec4<f32>(2.0, 2.0, 2.0, 1.0);
         culled.color = vec3<f32>(0.0);
@@ -63,13 +93,14 @@ fn vs_main(input: StarInstance, @builtin(vertex_index) vertex_index: u32) -> Ver
     let corner = quad_corner(vertex_index);
     let roll_sin = input.presentation.w;
     let roll_cos = input.roll_cos;
-    let rolled_corner = vec2<f32>(
-        corner.x * roll_cos - corner.y * roll_sin,
-        corner.y * roll_cos + corner.x * roll_sin,
-    );
+    let rolled_right = right * roll_cos + quad_up * roll_sin;
+    let rolled_up = -right * roll_sin + quad_up * roll_cos;
     let half_size = input.presentation.x;
-    let position = direction * 100.0
-        + (right * rolled_corner.x + quad_up * rolled_corner.y) * half_size;
+    let center = direction * 100.0;
+    let support_scale = raster_support_scale(center, rolled_right, rolled_up, half_size);
+    let opacity = base_opacity / (support_scale * support_scale);
+    let position = center
+        + (rolled_right * corner.x + rolled_up * corner.y) * half_size * support_scale;
     var color = vec3<f32>(0.84, 0.90, 1.0);
     if input.presentation.z < 0.5 {
         color = vec3<f32>(1.0, 0.91, 0.78);

@@ -70,6 +70,27 @@ fn mclone_time_updates_publish_the_profile_selected_calendar() {
     ));
 }
 
+#[test]
+fn time_corrections_follow_the_configured_gameplay_rate() {
+    let mut server = LocalRealmSession::new(0);
+    server.try_drain_updates().unwrap();
+    assert!(server.set_gameplay_rate_hz(10).unwrap());
+    server.try_drain_updates().unwrap();
+
+    let mut correction_ticks = Vec::new();
+    for tick in 1..=20 {
+        let report = server.try_simulation_tick_report().expect("tick");
+        if report
+            .updates
+            .iter()
+            .any(|update| matches!(update, ServerUpdate::TimeUpdate { .. }))
+        {
+            correction_ticks.push(tick);
+        }
+    }
+    assert_eq!(correction_ticks, [1, 10, 20]);
+}
+
 fn request_initial_chunk_view(server: &mut LocalRealmSession) {
     server.set_lighting_enabled(false);
     let updates = server

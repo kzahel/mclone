@@ -2667,6 +2667,10 @@ impl WebIntegratedServerStartup {
         initialize_world_metadata: bool,
         stored_world_metadata_present: bool,
     ) -> Result<WebIntegratedServerActor, String> {
+        worker
+            .server
+            .set_gameplay_rate_hz(self.config.authority.cadence.gameplay_rate_hz)
+            .map_err(|error| error.to_string())?;
         if !stored_world_metadata_present {
             worker
                 .server
@@ -3385,9 +3389,16 @@ impl McloneWebIntegratedServerWorker {
     ) -> Result<JsValue, String> {
         self.cadence = SimulationCadence::new(cadence_config)
             .ok_or_else(|| "invalid browser server cadence config".to_owned())?;
+        self.server
+            .set_gameplay_rate_hz(cadence_config.gameplay_rate_hz)
+            .map_err(|error| error.to_string())?;
         self.diagnostics.simulation_cadence = cadence_config;
         self.refresh_diagnostics(None, false, None);
-        self.worker_response(Vec::new())
+        let updates = self
+            .server
+            .try_drain_updates()
+            .map_err(|error| error.to_string())?;
+        self.worker_response(updates)
     }
 
     fn autosave_indexed_db_dirty_chunks(&mut self) -> Result<(), String> {

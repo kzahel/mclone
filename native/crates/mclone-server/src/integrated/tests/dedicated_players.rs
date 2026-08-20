@@ -103,6 +103,62 @@ fn dedicated_join_orders_negotiated_configuration_before_world_state() {
 }
 
 #[test]
+fn live_gameplay_rate_republishes_each_role_without_losing_pose_transport() {
+    let mut server = RealmServer::new(0);
+    let player = server
+        .add_player_with_capabilities_in_dimension(
+            DimensionKey::overworld(),
+            SessionCapabilities::DEVELOPMENT_DEFAULT,
+            EffectiveEphemeralTransport::WebTransport,
+        )
+        .unwrap();
+    server.try_drain_updates_for_player(player).unwrap();
+
+    assert!(server.set_gameplay_rate_hz(30).unwrap());
+    let updates = server.try_drain_updates_for_player(player).unwrap();
+    assert!(matches!(
+        updates.as_slice(),
+        [ServerUpdate::SessionConfiguration(SessionConfiguration {
+            gameplay_rate_hz: 30,
+            body_pose_report_rate_hz: 60,
+            remote_pose_replication_rate_hz: 60,
+            ephemeral_transport: EffectiveEphemeralTransport::WebTransport,
+            ..
+        })]
+    ));
+
+    let observer = server
+        .add_observer(
+            DimensionKey::overworld(),
+            ChunkView {
+                center: ChunkPos::new(0, 0),
+                render_distance: 0,
+                chunk_tracking_radius: 0,
+            },
+            ObserverSimulationInterest::BlockAndEntityTicking,
+        )
+        .unwrap();
+    let updates = server.try_drain_updates_for_observer(observer).unwrap();
+    assert!(matches!(
+        updates.first(),
+        Some(ServerUpdate::SessionConfiguration(SessionConfiguration {
+            gameplay_rate_hz: 30,
+            ..
+        }))
+    ));
+
+    assert!(server.set_gameplay_rate_hz(15).unwrap());
+    let updates = server.try_drain_updates_for_observer(observer).unwrap();
+    assert!(matches!(
+        updates.as_slice(),
+        [ServerUpdate::SessionConfiguration(SessionConfiguration {
+            gameplay_rate_hz: 15,
+            ..
+        })]
+    ));
+}
+
+#[test]
 fn two_player_sleep_waits_for_all_and_wakes_both_at_exact_morning() {
     let mut server = LocalRealmSession::new(812);
     server.set_lighting_enabled(false);
