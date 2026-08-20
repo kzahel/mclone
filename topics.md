@@ -139,12 +139,12 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
 - `controller-input` — all-target ordinary gamepad collection, shared semantic
   action/context resolution, controller-accessible UI, tracked XR convergence,
   and the later native Steam Input path
-- `structure-catalogue-product` — brainstorm-stage product/growth/economy
-  vision for a "better GrabCraft" acquisition funnel into Mclone: generator-
-  not-library framing, walkable builds, honestly-scoped build-along,
-  deterministic guides/BoM, programmatic-SEO distribution, and a prompt-
-  iteration credit economy that meters bespoke AI authoring while keeping
-  discovery and play free; does not reopen the read-only first proof
+- `structure-catalogue-product` — brainstorm-stage cross-ecosystem structure
+  publishing, creator, growth, and economy vision: rights-clean semantic builds
+  can feed web guides, Java/Bedrock artifacts, and optional Mclone play;
+  co-branded storefronts and licensed human examples support distribution and
+  an AI quality ladder of skill, retrieval, evals, and eventual training;
+  does not reopen the read-only first proof
 - `procedural-structure-starts` — reusable vanilla-shaped placement, start,
   bounding-box, reference, and clipped-piece machinery, first exercised by
   bounded terrain-affecting Mclone streams

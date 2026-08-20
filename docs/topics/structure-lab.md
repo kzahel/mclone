@@ -12,7 +12,9 @@ have been removed after exact parity. The aggregate deployment stages the
 catalogue under `/structures/`, and all closeout gates pass. In-browser block
 editing is indefinitely deferred.**
 
-Last reconciled: **2026-07-21**.
+Last reconciled: **2026-08-20** (clarified that later Java/Bedrock target
+compilers consume the canonical record without reopening this completed
+vertical slice).
 
 ## Current Implementation
 
@@ -335,8 +337,11 @@ records should feed those systems without owning them.
 - User accounts, uploads, moderation, collaborative editing, or hosted saves.
 - Trusting user-supplied baked meshes or thumbnails.
 - An unconstrained procedural architecture grammar.
-- Full vanilla NBT import/export. The canonical record should keep this
-  feasible, but it follows the native record and drift proof.
+- Full vanilla Java/Bedrock import or export. The canonical record should keep
+  later target compilers feasible, but they follow the native record and drift
+  proof and belong to the cross-ecosystem product direction in
+  [`structure-catalogue-product.md`](structure-catalogue-product.md). They do
+  not reopen the completed read-only first proof.
 - Terrain grading, settlement planning, entities, machinery, and simulation.
 
 These are not hidden requirements for the first website and should not inflate

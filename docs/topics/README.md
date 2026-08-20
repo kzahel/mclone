@@ -171,12 +171,13 @@ series implements the same concern, normally reuse the document slug in its
   React/Zustand/Three.js catalogue, checked runtime promotion, and indefinite
   deferral of in-browser editing.
 - [`structure-catalogue-product.md`](structure-catalogue-product.md):
-  brainstorm-stage product/growth/economy vision for a "better GrabCraft" that
-  is also a zero-install acquisition funnel into Mclone—generator-not-library
-  framing, walk-through and honestly-scoped build-along, deterministic guides
-  and bills of materials, programmatic-SEO distribution, and a prompt-iteration
-  credit economy that meters bespoke AI authoring while keeping discovery and
-  play free. Does not reopen the read-only first proof.
+  brainstorm-stage cross-ecosystem structure-publishing, creator, growth, and
+  economy vision—one rights-clean semantic source can feed web guides,
+  Java/Bedrock artifacts, and an optional Mclone walk-through; co-branded
+  creator storefronts and licensed human examples support distribution and an
+  AI quality ladder of skill, retrieval, evals, and eventual training. Keeps
+  discovery and compatibility honest and does not reopen the read-only first
+  proof.
 - [`client-prediction.md`](client-prediction.md): player movement authority —
   accepted permissive client authority, finite-value/bounds safety, no planned
   server movement replay, and explicit teleport continuity.

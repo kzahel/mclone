@@ -2,7 +2,8 @@
 
 Topic: `distribution-go-to-market`
 
-Status: **current product direction recorded 2026-07-22; commercial model,
+Status: **current product direction recorded 2026-07-22 and reconciled with
+the cross-ecosystem structure-publishing thesis 2026-08-20; commercial model,
 pricing, launch order, and storefront approvals remain open.** Steam should be
 the preferred PC purchase and discovery surface, not a channel from which
 Mclone steers customers away. A first-party direct edition should provide a
@@ -12,7 +13,7 @@ direct edition with paid supporter/store editions remains an explicit
 alternative. Web's commercial access model remains open without reducing its
 full-client product scope.
 
-Last reconciled: **2026-07-22**.
+Last reconciled: **2026-08-20**.
 
 External market and policy facts in this document are a dated snapshot, not a
 substitute for reviewing the executed Steam, Meta, payment-provider, and other
@@ -44,8 +45,8 @@ It does **not** own:
   [`platform-parity.md`](platform-parity.md);
 - public asset provenance and the no-Minecraft-content release boundary; that
   lives in [`asset-pack-profiles.md`](asset-pack-profiles.md);
-- the structure catalogue's separate product and acquisition-loop proposal;
-  that lives in
+- the structure catalogue's separate cross-ecosystem product, creator, and
+  acquisition-loop proposal; that lives in
   [`structure-catalogue-product.md`](structure-catalogue-product.md);
 - detailed gameplay, product-design, mod-ecosystem, and inspiration profiles;
   those live in
@@ -349,9 +350,11 @@ search / creator video / shared build / store discovery
 ```
 
 The structure catalogue can feed this loop through searchable builds,
-walk-through previews, deterministic guides, and “open in Mclone” experiences,
-but catalogue traffic should not be counted as game demand until users cross
-into a playable experience.
+walk-through previews, deterministic guides, and optional “open in Mclone”
+experiences. It may also serve Minecraft Java or Bedrock users as a complete
+structure-publishing product. Do not pressure those users into Mclone or count
+catalogue traffic, Java/Bedrock downloads, or interactive walk-throughs as
+game demand until users deliberately cross into a playable Mclone experience.
 
 No-install entry does not erase platform differences. The browser host may use
 Web Workers rather than native threads, WebSocket rather than raw TCP, browser
@@ -377,8 +380,9 @@ Initial messaging should distinguish audiences rather than collapse them into
    install a native application.
 5. **No-store and Linux-first players** who deliberately value direct
    ownership, offline capability, dedicated servers, and supported downloads.
-6. **Builders and creators** entering through structures, seeds, screenshots,
-   videos, build guides, and eventually shareable worlds.
+6. **Builders and creators** using structures, seeds, screenshots, videos,
+   build guides, Java/Bedrock compatibility artifacts, co-branded storefronts,
+   and eventually shareable Mclone worlds.
 7. **Mixed-device groups** for whom one person can play flat while another
    joins from XR, mobile, or web.
 
@@ -386,7 +390,8 @@ The launch campaign need not address all seven equally. Steam survival/building
 players are the broad commercial audience; standalone Quest is the sharpest
 differentiation wedge; web players are both a product audience and the
 lowest-friction acquisition path; direct/Linux users are an important trust
-and advocacy audience; catalogue users form an additional acquisition surface.
+and advocacy audience. Catalogue users are a separate service audience and an
+additional acquisition surface; they do not become Mclone prospects by fiat.
 
 ## Positioning And Message Hierarchy
 
@@ -491,7 +496,8 @@ advertising assumptions:
 - **World loop:** memorable seed/settlement/challenge -> player attempts it ->
   screenshot, video, or world share -> another player starts.
 - **Build loop:** searchable structure/build guide -> interactive preview ->
-  open in the full web client or another client -> modify and share.
+  download a validated Java/Bedrock artifact or optionally open in Mclone ->
+  build, modify, and share through the chosen ecosystem.
 - **Cross-device loop:** one world shown on flat desktop, Deck, and Quest ->
   concrete differentiation -> group purchase or invitation.
 - **Server loop:** free dedicated server -> durable community world -> player
@@ -596,6 +602,24 @@ chat, shared structures/worlds, moderation, telemetry, camera/passthrough, and
 payment flows require deliberate age-rating, parental, privacy, and safety
 design before they become marketing features.
 
+### Minecraft-compatible catalogue policy
+
+A Java/Bedrock structure service is not governed only by technical file
+compatibility. Before selling, gating, or authenticating Minecraft-compatible
+content, review the then-current Minecraft EULA, usage and trademark
+guidelines, mod constraints, Bedrock creator terms, Marketplace partner path,
+and target-store rules against the exact offer. The current usage guidelines
+include restrictions on mods verifying access to paid out-of-game products or
+services that affect in-game functionality. Do not infer approval from another
+service's visible behavior.
+
+The safer initial posture is rights-clean original structures, explicit
+compatibility receipts, honest Java/Bedrock downloads and guides, a
+non-coercive optional Mclone continuation, and no paid in-game entitlement
+bridge until legal and platform review establishes it. A creator-branded
+storefront must also identify the central merchant, account/payment operator,
+affiliate relationship, and disclosure obligations clearly.
+
 ## Decisions Recorded
 
 - Steam is preferred; the strategy must not steer Steam users to direct
@@ -619,6 +643,12 @@ design before they become marketing features.
   narrower-competitor products.
 - Public positioning must be original and product-led, not “Minecraft clone”
   or 1.17.1 parity marketing.
+- A Minecraft-compatible catalogue may be a complete product for Java/Bedrock
+  users. “Open in Mclone” is an optional richer destination, and its conversion
+  must be measured separately from catalogue use.
+- Co-branded creator storefronts, affiliate payouts, catalogue licenses,
+  training licenses, and usage credits are distinct commercial relationships,
+  not one unspecified revenue share.
 
 ## Open Decisions
 
@@ -653,6 +683,12 @@ design before they become marketing features.
   that promise exact?
 - What mod, UGC, chat, creator-marketplace, or shared-world promises are in the
   first public release versus explicitly later?
+- Which Java/Bedrock catalogue artifacts and commercial paths are acceptable
+  under the current Minecraft and target-store agreements, and does any paid
+  Bedrock offer require the official Partner/Marketplace route?
+- Is the structure service branded as Structure Lab, Mclone, or a neutral
+  publishing platform capable of creator-owned domains, and how is the central
+  merchant disclosed?
 
 ## Evidence To Gather Next
 
@@ -694,7 +730,8 @@ Before settling price or launch order:
 - [`asset-pack-profiles.md`](asset-pack-profiles.md) — first-party public asset
   packs and provenance boundary.
 - [`structure-catalogue-product.md`](structure-catalogue-product.md) —
-  catalogue-led acquisition and product-economy exploration.
+  cross-ecosystem structure publication, creator storefront, catalogue-led
+  acquisition, and product-economy exploration.
 - [`voxel-sandbox-competitive-landscape.md`](voxel-sandbox-competitive-landscape.md)
   — design-oriented competitor profiles, gameplay viewing guide, Minecraft
   mod substitutes, source/open-content/mod posture, and the cross-product
