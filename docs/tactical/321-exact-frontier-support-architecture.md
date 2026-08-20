@@ -1,9 +1,10 @@
 # Tactical 321: Exact Frontier Support Architecture
 
-Status: Human Review A1 accepted 2026-08-20. Phase 1 diagnostic frontier
-planning is complete at revisions `328757c3` through `cd9706e3` and is
-awaiting Human Review A2. No candidate geometry implementation is authorized
-before that review selects a direction.
+Status: Human Reviews A1 and A2 accepted 2026-08-20. Phase 1 diagnostic
+frontier planning is complete at revisions `328757c3` through `cd9706e3`.
+Human Review A2 selected bounded Hybrid D; Phase 2's isolated topology proof
+is in progress. Ordinary product geometry remains unchanged before Human
+Review B.
 
 Topic: `procedural-horizon-clipmap`
 
@@ -706,6 +707,12 @@ admission if neither preferred nor fallback closure can certify every edge.
 The support-pool size, fallback pixels, and water topology remain Human Review
 A2 decisions; the measurements do not authorize choosing them implicitly.
 
+Human Review A2 accepted bounded Hybrid D on 2026-08-20. Phase 2 is authorized
+to prove a sparse spacing-one support belt with explicit base suppression and
+outer closure, a resolution-aware exhaustion fallback, and a typed water/coast
+closure. That proof remains opt-in and may not change ordinary composition
+before Human Review B accepts its topology and pixels.
+
 ## Adversarial Evidence Matrix
 
 The architecture and selected implementation must cover the cross-product
@@ -920,3 +927,7 @@ Inspected pixels and receipts prove the RD2 spacing-one case and the RD8
 spacing-two failure without changing ordinary geometry. Candidate cost
 evidence recommends bounded Hybrid D, but implementation is stopped at Human
 Review A2 as required.
+
+Human Review A2 accepted bounded Hybrid D on 2026-08-20 and authorized the
+isolated Phase 2 topology proof. Ordinary geometry remains frozen until Human
+Review B.

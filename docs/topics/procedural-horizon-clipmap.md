@@ -38,8 +38,10 @@ chunk exact window while the exact mask and boundary formats currently permit
 only a 64-chunk span. Tactical
 [`321`](../tactical/321-exact-frontier-support-architecture.md) now owns the
 architecture-first response. Its Phase 0 audit and Human Review A1 are
-accepted. Phase 1 diagnostic planning is complete and stopped at Human Review
-A2; no support candidate changes ordinary geometry yet. The audit establishes
+accepted. Phase 1 diagnostic planning is complete, and Human Review A2
+accepted bounded Hybrid D on 2026-08-20. Phase 2 may build only an opt-in
+topology proof before Human Review B; no support candidate changes ordinary
+geometry yet. The audit establishes
 that radius 4 is the largest square always
 contained by the current finest ring, radius 3 is the largest with a direct
 spacing-one neighbor in every tile phase, and radius 2 is the largest with the
@@ -62,8 +64,8 @@ unsupported solid edges, 192 uncertified water edges, and no connector. The
 inspected `frontier-support` diagnostic shows the corresponding green and
 magenta frontiers.
 
-Candidate projections make bounded Hybrid D the current recommendation for
-Human Review A2: prefer a sparse spacing-one belt, but require an explicit
+Candidate projections selected bounded Hybrid D: prefer a sparse spacing-one
+belt, but require an explicit
 resolution-aware and water-aware fallback when its pool is exhausted. At RD8,
 a complete 6-by-6 finest extent costs 13.45 MB added while a 32-tile sparse
 belt needs 20 new tiles / 11.21 MB. At compact legal RD31, complete expansion
