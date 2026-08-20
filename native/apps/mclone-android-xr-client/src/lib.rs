@@ -155,7 +155,9 @@ mod android {
     const ANDROID_XR_PERF_DEFAULT_FLIGHT_SPEED_BLOCKS_PER_SECOND: f64 = 4.3;
     const ANDROID_XR_PERF_DEFAULT_CHURN_INTERVAL_SECONDS: f64 = 3.0;
     const ANDROID_XR_PERF_DEFAULT_CHURN_OFFSET_CHUNKS: i32 = 16;
-    const ANDROID_XR_PERF_SETTLE_MIN_SECONDS: f64 = 5.0;
+    // Queue quiet can precede a first lazily visited actor or auxiliary render
+    // pipeline on Quest. Keep that one-time compilation outside timed samples.
+    const ANDROID_XR_PERF_SETTLE_MIN_SECONDS: f64 = 10.0;
     const ANDROID_XR_PERF_SETTLE_QUIET_FRAMES: u64 = 45;
     const ANDROID_XR_PERF_SETTLE_PROGRESS_FRAMES: u64 = 120;
     const ANDROID_XR_PERF_WORST_FRAME_COUNT: usize = 5;
