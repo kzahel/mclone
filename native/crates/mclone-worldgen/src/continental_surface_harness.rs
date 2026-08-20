@@ -16,7 +16,7 @@ use crate::{
 pub const CONTINENTAL_SURFACE_HARNESS_SCHEMA_REVISION: &str =
     "mclone-continental-surface-harness-v1";
 pub const CONTINENTAL_SURFACE_WITNESS_SHA256: &str =
-    "cf07feab37cfd48498c8e3c0bd2b10adcd6eafea23f070a65d604d18c878cfd6";
+    "69d083dbde36f497aefb766c975803a937f913d7469806e7afedfb7af6f9d3e9";
 
 const CORPUS_SEEDS: [i64; 2] = [12_345, -98_765];
 const CORPUS_PERIOD_BLOCKS: i32 = 196_608;
@@ -187,10 +187,7 @@ fn run_case(
         substrates.insert(sample.substrate as u8);
         water_samples += u32::from(sample.is_water());
     }
-    if family_counts.iter().take(4).any(|count| *count == 0)
-        || water_samples == 0
-        || substrates.len() < 3
-    {
+    if family_counts.iter().any(|count| *count == 0) || water_samples == 0 || substrates.len() < 3 {
         return Err(format!(
             "surface seed {seed} {:?} corpus lacks contrast: families={family_counts:?}, \
              water={water_samples}, substrates={}",

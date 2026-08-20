@@ -1,7 +1,7 @@
 import { expect, test, type Locator } from "@playwright/test";
 
 const WITNESS_SHA256 =
-  "4e69ce0b3c1814b8901f848752221fcc28ca0f18b714fb5b7135664de06536f8";
+  "a27b4f1b7547c86ffd7de3fe750d8abb421099125d5986683d9d6b61f08d8ee4";
 
 test("continental ecoregion atlas is direct, layered, and inspectable", async ({
   page,
@@ -30,7 +30,7 @@ test("continental ecoregion atlas is direct, layered, and inspectable", async ({
   await expect(shell).toHaveAttribute("data-ecoregion-step", "256");
   await expect(shell).toHaveAttribute(
     "data-ecoregion-atlas-schema",
-    "mclone-continental-ecoregion-atlas-v6",
+    "mclone-continental-ecoregion-atlas-v7",
   );
   await expect(shell).toHaveAttribute("data-ecoregion-exact-chunks", "0");
   await expect(shell).toHaveAttribute(
@@ -157,8 +157,8 @@ test("reviews 131 km against the current production control", async ({
   const transitionMedian = Number(
     await shell.getAttribute("data-ecoregion-transition-median"),
   );
-  expect(transitionMedian).toBeGreaterThanOrEqual(800);
-  expect(transitionMedian).toBeLessThanOrEqual(2_600);
+  expect(transitionMedian).toBeGreaterThanOrEqual(4_096);
+  expect(transitionMedian).toBeLessThanOrEqual(6_700);
 
   await page.getByLabel("Continental plan layer").selectOption("habitat");
   await expect(shell).toHaveAttribute("data-ecoregion-layer", "habitat");
@@ -168,6 +168,29 @@ test("reviews 131 km against the current production control", async ({
     .toContainText("open range link");
   await stage.screenshot({
     path: "/tmp/mclone-terrain-lab-desktop-chrome-ecoregion-habitat-routes-131km.png",
+  });
+
+  await page.getByLabel("Continental plan layer").selectOption("aridity");
+  await expect(shell).toHaveAttribute("data-ecoregion-layer", "aridity");
+  await expect(page.getByTestId("continental-ecoregion-legend"))
+    .toContainText("Rain shadow, aridity & drainage");
+  const aridFraction = Number(
+    await shell.getAttribute("data-ecoregion-arid-fraction"),
+  );
+  const rainShadowFraction = Number(
+    await shell.getAttribute("data-ecoregion-rain-shadow-fraction"),
+  );
+  const permanentDrainageFraction = Number(
+    await shell.getAttribute("data-ecoregion-permanent-drainage-fraction"),
+  );
+  expect(aridFraction).toBeGreaterThan(0);
+  expect(aridFraction).toBeLessThan(0.5);
+  expect(rainShadowFraction).toBeGreaterThan(0);
+  expect(rainShadowFraction).toBeLessThan(0.5);
+  expect(permanentDrainageFraction).toBeGreaterThan(0);
+  expect(permanentDrainageFraction).toBeLessThan(1);
+  await stage.screenshot({
+    path: "/tmp/mclone-terrain-lab-desktop-chrome-ecoregion-aridity-131km.png",
   });
 
   await page.getByLabel("Continental plan layer").selectOption(

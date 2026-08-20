@@ -125,6 +125,22 @@ impl TerrainLabContinentalEcoregionCompiler {
         Ok(Uint16Array::from(self.atlas()?.major_water.as_slice()))
     }
 
+    #[wasm_bindgen(js_name = leewardExposure)]
+    pub fn leeward_exposure(&self) -> Result<Uint16Array, JsValue> {
+        Ok(Uint16Array::from(self.atlas()?.leeward_exposure.as_slice()))
+    }
+
+    pub fn aridity(&self) -> Result<Uint16Array, JsValue> {
+        Ok(Uint16Array::from(self.atlas()?.aridity.as_slice()))
+    }
+
+    #[wasm_bindgen(js_name = drainagePermanence)]
+    pub fn drainage_permanence(&self) -> Result<Uint16Array, JsValue> {
+        Ok(Uint16Array::from(
+            self.atlas()?.drainage_permanence.as_slice(),
+        ))
+    }
+
     pub fn wetland(&self) -> Result<Uint16Array, JsValue> {
         Ok(Uint16Array::from(self.atlas()?.wetland.as_slice()))
     }

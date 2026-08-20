@@ -971,7 +971,10 @@ fn continental_preview_sample(
         continentalness: if ocean { -0.72 } else { 0.92 - coast * 0.52 },
         relief: (sample.province_height.abs() / 52.0).clamp(0.0, 1.0),
         temperature: sample.temperature,
-        moisture: sample.moisture,
+        // The fixed preview carrier has one ecological moisture lane. For the
+        // candidate it carries effective moisture after rain-shadow drying;
+        // the richer surface query retains raw moisture and aridity separately.
+        moisture: 1.0 - sample.aridity,
         water: f32::from(water),
         ruggedness: (upland * 0.78 + (sample.local_height.abs() / 16.0) * 0.22).clamp(0.0, 1.0),
         base_surface_y,
@@ -1452,13 +1455,17 @@ fn compile_continental_proxy_vegetation(
                 continue;
             }
             let forest_structure = sample.forest_core.max(sample.forest_edge * 0.72);
-            if forest_structure < 0.12 {
+            let arid_scrub = ((sample.aridity - 0.58).max(0.0) * 0.24)
+                * (1.0 - sample.wetland)
+                * (1.0 - sample.clearing * 0.45);
+            if forest_structure < 0.12 && arid_scrub < 0.02 {
                 continue;
             }
             let density = (0.10 + sample.forest_core * 0.78 + sample.forest_edge * 0.30)
                 * (1.0 - sample.clearing * 0.94)
                 * (1.0 - sample.openness * 0.38)
-                * (1.0 - sample.wetland * 0.38);
+                * (1.0 - sample.wetland * 0.38)
+                + arid_scrub;
             let admission_hash = continental_proxy_hash(source.seed, cell_x, cell_z, 1);
             let admission = (admission_hash as u32) as f64 / f64::from(u32::MAX);
             if admission >= f64::from(density.clamp(0.0, 0.92)) {

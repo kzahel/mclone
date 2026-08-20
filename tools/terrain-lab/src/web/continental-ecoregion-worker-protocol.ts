@@ -69,6 +69,9 @@ export interface ContinentalEcoregionAtlasMetrics {
   oceanFraction: number;
   quietSpaceFraction: number;
   transitionFraction: number;
+  aridFraction: number;
+  rainShadowFraction: number;
+  permanentDrainageFraction: number;
   continentComponents: ComponentDistribution;
   openComponents: ComponentDistribution;
   forestComponents: ComponentDistribution;
@@ -166,6 +169,9 @@ export interface ContinentalEcoregionWorkerSummary {
   clearingCore: Uint16Array;
   clearingCause: Uint8Array;
   majorWater: Uint16Array;
+  leewardExposure: Uint16Array;
+  aridity: Uint16Array;
+  drainagePermanence: Uint16Array;
   wetland: Uint16Array;
   corridor: Uint16Array;
   corridorKind: Uint8Array;

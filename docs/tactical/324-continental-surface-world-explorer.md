@@ -1,9 +1,10 @@
 # Tactical 324: Continental Surface World Explorer
 
-Status: **in progress 2026-08-20. Phases 1-3 are complete: the shared broad
+Status: **in progress 2026-08-20. Phases 1-4 are complete: the shared broad
 surface and explicit native/browser World Explorer source are drawable with
-source-qualified cover and zero exact or production-vegetation work. Continue
-through arid contrast and six journeys, then stop at Human Review B.**
+source-qualified cover, causal arid contrast, and zero exact or
+production-vegetation work. Continue through six journeys, then stop at Human
+Review B.**
 
 Topic: `continental-ecoregion-planning`
 
@@ -278,9 +279,37 @@ geography.
   surface cover, avoiding a rectangular near-record island in continental
   overview pixels.
 
-Phase 4 is next. The fifth family is still deliberately absent: current
-`aridity` is only inverse moisture and `leeward_exposure` remains zero, so no
-desert-looking pixels are accepted until the plan owns the rain shadow.
+### Phase 4: Arid Rain-Shadow Contrast — complete
+
+- Plan revision 8 publishes prevailing wind, query-position rain-shadow
+  potential, province leeward exposure, continuous moisture and temperature,
+  aridity, and drainage permanence. Nearby continental owners blend their
+  shadow potential, so a district boundary cannot become a desert wall.
+- The fifth surface family lowers those facts into dry basin/shelf relief,
+  suppresses permanent lake and channel water where drainage cannot support
+  it, retains dry washes, opens vegetation, and uses sparse exposed sand,
+  coarse soil, and rock amid continuously tinted dry ground.
+- The first pixel attempt exposed province-sized rectangular substrate slabs.
+  Review rejected that image. Moving climate and rain-shadow response from
+  owner-center constants to continuous point fields removed the semantic
+  cliff; typed tests pin the corrected ownership crossing and a causally dry
+  review point.
+- Terrain Lab atlas schema 7 exposes leeward exposure, aridity, and drainage
+  permanence as a dedicated layer. At fixed 256-square atlases, the 65 km
+  view is 3.1% arid / 1.8% strong rain shadow / 50.3% lasting drainage; the
+  131 km view is 8.0% / 5.1% / 17.5%. Candidate and production controls both
+  construct zero exact chunks.
+- The final plan witness is
+  `a27b4f1b7547c86ffd7de3fe750d8abb421099125d5986683d9d6b61f08d8ee4`;
+  the final surface witness is
+  `69d083dbde36f497aefb766c975803a937f913d7469806e7afedfb7af6f9d3e9`.
+  The fixed 65 km and 131 km direct windows measured 1,479 and 1,214 ns per
+  sample on the review host. The headed browser atlas test and native
+  World Explorer map/oblique captures passed and were visually inspected.
+
+Phase 5 is next: publish the six deterministic journey receipts and matched
+native/deployed-browser review package without adding exact chunks or changing
+the production default.
 
 ## Non-Goals
 

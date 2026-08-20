@@ -537,12 +537,12 @@ fn terrain_color(sample: TerrainPreviewSample, light: f32) -> vec3<f32> {
         let dry = clamp(1.0 - moisture, 0.0, 1.0);
         let open_grass = mix(
             vec3<f32>(0.30, 0.52, 0.20),
-            vec3<f32>(0.56, 0.52, 0.25),
+            vec3<f32>(0.60, 0.50, 0.20),
             dry,
         );
         let wooded_grass = mix(
             vec3<f32>(0.20, 0.42, 0.18),
-            vec3<f32>(0.29, 0.43, 0.20),
+            vec3<f32>(0.34, 0.42, 0.17),
             dry,
         );
         return mix(

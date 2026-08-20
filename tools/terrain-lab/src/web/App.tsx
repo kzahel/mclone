@@ -450,6 +450,15 @@ export function App(): React.JSX.Element {
       data-ecoregion-habitat-connected-fraction={
         ecoregionReport?.metadata.metrics.habitatConnectivity.connectedPatchFraction ?? ""
       }
+      data-ecoregion-arid-fraction={
+        ecoregionReport?.metadata.metrics.aridFraction ?? ""
+      }
+      data-ecoregion-rain-shadow-fraction={
+        ecoregionReport?.metadata.metrics.rainShadowFraction ?? ""
+      }
+      data-ecoregion-permanent-drainage-fraction={
+        ecoregionReport?.metadata.metrics.permanentDrainageFraction ?? ""
+      }
       data-plan-build-ms={planReport?.buildMs ?? ""}
       data-plan-transfer-bytes={planReport?.transferBytes ?? 0}
       data-plan-checksum={planReport?.checksum ?? ""}
@@ -1322,6 +1331,7 @@ export function App(): React.JSX.Element {
                       <option value="province">Physiographic provinces</option>
                       <option value="ecoregion">Ecoregion identity</option>
                       <option value="transition">Ecoregion transitions</option>
+                      <option value="aridity">Rain shadow, aridity & drainage</option>
                       <option value="openness">Vegetation openness</option>
                       <option value="clearings">Planned clearings</option>
                       <option value="water">Water, wetland & riparian relation</option>
@@ -2122,6 +2132,12 @@ function ContinentalEcoregionEvidence({
           <dd>{(metrics.quietSpaceFraction * 100).toFixed(1)}% / {
             (metrics.transitionFraction * 100).toFixed(1)
           }%</dd>
+        </div>
+        <div>
+          <dt>Arid / rain shadow / lasting drainage</dt>
+          <dd>{(metrics.aridFraction * 100).toFixed(1)}% / {
+            (metrics.rainShadowFraction * 100).toFixed(1)
+          }% / {(metrics.permanentDrainageFraction * 100).toFixed(1)}%</dd>
         </div>
         <div>
           <dt>Transition width median / p90</dt>

@@ -20,7 +20,7 @@ use crate::levelgen::{
 use crate::terrain_preview::preview_forest_intent;
 
 pub const CONTINENTAL_ECOREGION_ATLAS_SCHEMA_REVISION: &str =
-    "mclone-continental-ecoregion-atlas-v6";
+    "mclone-continental-ecoregion-atlas-v7";
 pub const CONTINENTAL_ECOREGION_ATLAS_DEFAULT_SAMPLES_ACROSS: u32 = 256;
 pub const CONTINENTAL_ECOREGION_ATLAS_MAX_SAMPLES: usize = 262_144;
 pub const CONTINENTAL_ECOREGION_ATLAS_NONE: u8 = u8::MAX;
@@ -121,6 +121,9 @@ pub struct ContinentalEcoregionAtlasMetrics {
     pub ocean_fraction: f32,
     pub quiet_space_fraction: f32,
     pub transition_fraction: f32,
+    pub arid_fraction: f32,
+    pub rain_shadow_fraction: f32,
+    pub permanent_drainage_fraction: f32,
     pub continent_components: ComponentDistribution,
     pub open_components: ComponentDistribution,
     pub forest_components: ComponentDistribution,
@@ -211,6 +214,9 @@ pub struct ContinentalEcoregionAtlas {
     pub clearing_core: Vec<u16>,
     pub clearing_cause: Vec<u8>,
     pub major_water: Vec<u16>,
+    pub leeward_exposure: Vec<u16>,
+    pub aridity: Vec<u16>,
+    pub drainage_permanence: Vec<u16>,
     pub wetland: Vec<u16>,
     pub corridor: Vec<u16>,
     pub corridor_kind: Vec<u8>,
@@ -354,6 +360,9 @@ pub fn compile_continental_ecoregion_atlas(
         clearing_core: arrays.clearing_core,
         clearing_cause: arrays.clearing_cause,
         major_water: arrays.major_water,
+        leeward_exposure: arrays.leeward_exposure,
+        aridity: arrays.aridity,
+        drainage_permanence: arrays.drainage_permanence,
         wetland: arrays.wetland,
         corridor: arrays.corridor,
         corridor_kind: arrays.corridor_kind,
@@ -388,6 +397,9 @@ struct AtlasArrays {
     clearing_core: Vec<u16>,
     clearing_cause: Vec<u8>,
     major_water: Vec<u16>,
+    leeward_exposure: Vec<u16>,
+    aridity: Vec<u16>,
+    drainage_permanence: Vec<u16>,
     wetland: Vec<u16>,
     corridor: Vec<u16>,
     corridor_kind: Vec<u8>,
@@ -423,6 +435,9 @@ impl AtlasArrays {
             clearing_core: Vec::with_capacity(capacity),
             clearing_cause: Vec::with_capacity(capacity),
             major_water: Vec::with_capacity(capacity),
+            leeward_exposure: Vec::with_capacity(capacity),
+            aridity: Vec::with_capacity(capacity),
+            drainage_permanence: Vec::with_capacity(capacity),
             wetland: Vec::with_capacity(capacity),
             corridor: Vec::with_capacity(capacity),
             corridor_kind: Vec::with_capacity(capacity),
@@ -498,6 +513,17 @@ impl AtlasArrays {
         );
         self.major_water.push(quantize_unit(
             sample.province.map_or(0.0, |fact| fact.major_water),
+        ));
+        self.leeward_exposure.push(quantize_unit(
+            sample.province.map_or(0.0, |fact| fact.leeward_exposure),
+        ));
+        self.aridity.push(quantize_unit(
+            sample.ecoregion.map_or(0.0, |fact| fact.aridity),
+        ));
+        self.drainage_permanence.push(quantize_unit(
+            sample
+                .ecoregion
+                .map_or(0.0, |fact| fact.drainage_permanence),
         ));
         self.wetland.push(quantize_unit(
             sample.mosaic.map_or(0.0, |fact| fact.wetland),
@@ -639,6 +665,24 @@ fn atlas_metrics(
         ocean_fraction: land_mask.iter().filter(|value| !**value).count() as f32 / sample_count,
         quiet_space_fraction: quiet_samples as f32 / sample_count,
         transition_fraction: transition_samples as f32 / sample_count,
+        arid_fraction: arrays
+            .aridity
+            .iter()
+            .filter(|value| **value >= 39_321)
+            .count() as f32
+            / sample_count,
+        rain_shadow_fraction: arrays
+            .leeward_exposure
+            .iter()
+            .filter(|value| **value >= 39_321)
+            .count() as f32
+            / sample_count,
+        permanent_drainage_fraction: arrays
+            .drainage_permanence
+            .iter()
+            .filter(|value| **value >= 32_768)
+            .count() as f32
+            / sample_count,
         continent_components: component_distribution(&land_mask, columns, rows, step_blocks),
         open_components: component_distribution(&open_mask, columns, rows, step_blocks),
         forest_components: component_distribution(&forest_mask, columns, rows, step_blocks),

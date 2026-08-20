@@ -26,6 +26,7 @@ export type ContinentalEcoregionLayer =
   | "province"
   | "ecoregion"
   | "transition"
+  | "aridity"
   | "openness"
   | "clearings"
   | "water"
@@ -238,6 +239,7 @@ const ECOREGION_LAYERS = new Set<ContinentalEcoregionLayer>([
   "province",
   "ecoregion",
   "transition",
+  "aridity",
   "openness",
   "clearings",
   "water",

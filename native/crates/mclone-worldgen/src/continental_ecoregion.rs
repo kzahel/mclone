@@ -12,7 +12,7 @@ use sha2::{Digest, Sha256};
 
 use crate::noise::{SeedDomain, ValueNoise2d};
 
-pub const CONTINENTAL_ECOREGION_SCHEMA_REVISION: &str = "mclone-continental-ecoregion-plan-v7";
+pub const CONTINENTAL_ECOREGION_SCHEMA_REVISION: &str = "mclone-continental-ecoregion-plan-v8";
 pub const CONTINENTAL_ECOREGION_DIMENSION_ID: &str = "mclone:overworld";
 pub const CONTINENTAL_ECOREGION_STORED_PROFILE: &str =
     "mclone-overworld-v1-control-field-revision-21";
@@ -351,6 +351,9 @@ pub struct ContinentalDistrictSample {
     pub center_z: i64,
     pub axis_x: f32,
     pub axis_z: f32,
+    pub prevailing_wind_x: f32,
+    pub prevailing_wind_z: f32,
+    pub rain_shadow_potential: f32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
@@ -362,6 +365,7 @@ pub struct ProvincePlanSample {
     pub core_weight: f32,
     pub relief: f32,
     pub major_water: f32,
+    pub leeward_exposure: f32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
@@ -378,6 +382,8 @@ pub struct EcoregionPlanSample {
     pub base_canopy: f32,
     pub moisture: f32,
     pub temperature: f32,
+    pub aridity: f32,
+    pub drainage_permanence: f32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
@@ -652,6 +658,7 @@ impl ContinentalEcoregionPlan {
         let base_owner_x = canonical_x.div_euclid(CONTINENTAL_CELL_BLOCKS);
         let base_owner_z = world_z.div_euclid(CONTINENTAL_CELL_BLOCKS);
         let mut best: Option<(f64, ContinentalSite)> = None;
+        let mut second: Option<(f64, ContinentalSite)> = None;
 
         for offset_z in -CONTINENT_OWNER_RADIUS..=CONTINENT_OWNER_RADIUS {
             for offset_x in -CONTINENT_OWNER_RADIUS..=CONTINENT_OWNER_RADIUS {
@@ -677,13 +684,26 @@ impl ContinentalEcoregionPlan {
                         || (score == *best_score && site.id.hash < best_site.id.hash)
                 });
                 if replace {
+                    second = best;
                     best = Some((score, site));
+                } else if second.as_ref().is_none_or(|(second_score, second_site)| {
+                    score > *second_score
+                        || (score == *second_score && site.id.hash < second_site.id.hash)
+                }) {
+                    second = Some((score, site));
                 }
             }
         }
 
         let (score, site) = best.expect("continental owner neighborhood is non-empty");
         let land_weight = smoothstep(-0.08, 0.10, score) as f32;
+        let (prevailing_wind_x, prevailing_wind_z) = prevailing_wind(site);
+        let point_shadow = continental_rain_shadow(site, canonical_x, world_z);
+        let rain_shadow_potential = second.map_or(point_shadow, |(second_score, second_site)| {
+            let second_shadow = continental_rain_shadow(second_site, canonical_x, world_z);
+            let owner_interior = smoothstep(0.0, 0.18, score - second_score);
+            lerp_f64(second_shadow, point_shadow, 0.5 + owner_interior * 0.5)
+        });
         ContinentalInternalSample {
             sample: ContinentalDistrictSample {
                 id: site.id,
@@ -692,6 +712,9 @@ impl ContinentalEcoregionPlan {
                 center_z: site.center_z,
                 axis_x: site.axis_x as f32,
                 axis_z: site.axis_z as f32,
+                prevailing_wind_x: prevailing_wind_x as f32,
+                prevailing_wind_z: prevailing_wind_z as f32,
+                rain_shadow_potential: rain_shadow_potential as f32,
             },
             land_weight,
             inland_distance_blocks: (score * site.radius_along.min(site.radius_across)) as f32,
@@ -772,17 +795,23 @@ impl ContinentalEcoregionPlan {
         let along = (dx * axis_x + dz * axis_z) / 32_000.0;
         let across = (-dx * axis_z + dz * axis_x) / 24_000.0;
         let kind = province_kind(continent.story, along, across, id_hash);
+        let major_water = match kind {
+            PhysiographicProvinceKind::RiverLowland => route.weight.max(0.45),
+            PhysiographicProvinceKind::LakeBasin => (0.55 + route.weight * 0.35).min(1.0),
+            _ => route.weight * 0.65,
+        };
+        // Province identity remains discrete, but the district supplied a
+        // blended, query-position rain shadow so internal ownership polygons
+        // cannot become visible as climate boundaries.
+        let leeward_exposure = province_leeward_exposure(continent, kind, id_hash);
         ProvincePlanSample {
             id,
             continent_id: continent.id,
             kind,
             core_weight: site.core_weight as f32,
             relief: province_relief(kind),
-            major_water: match kind {
-                PhysiographicProvinceKind::RiverLowland => route.weight.max(0.45),
-                PhysiographicProvinceKind::LakeBasin => (0.55 + route.weight * 0.35).min(1.0),
-                _ => route.weight * 0.65,
-            } as f32,
+            major_water: major_water as f32,
+            leeward_exposure: leeward_exposure as f32,
         }
     }
 
@@ -810,19 +839,39 @@ impl ContinentalEcoregionPlan {
             id_hash,
         );
         work.local_field_evaluations += 4;
-        let (moisture, temperature) = self.ecoregion_climate(site.owner_x, site.owner_z);
-        let kind = ecoregion_kind(province.kind, moisture, temperature, id_hash);
+        let (owner_moisture, owner_temperature) =
+            self.ecoregion_climate(site.owner_x, site.owner_z);
+        let owner_aridity = ecoregion_aridity(province, owner_moisture, owner_temperature);
+        let kind = ecoregion_kind(
+            province.kind,
+            owner_moisture,
+            owner_temperature,
+            owner_aridity,
+            id_hash,
+        );
         let peer_id_hash = stable_mix64(site.second_hash ^ province.id.hash.rotate_left(23));
         let (peer_moisture, peer_temperature) =
             self.ecoregion_climate(site.second_owner_x, site.second_owner_z);
-        let peer_kind =
-            ecoregion_kind(province.kind, peer_moisture, peer_temperature, peer_id_hash);
+        let peer_aridity = ecoregion_aridity(province, peer_moisture, peer_temperature);
+        let peer_kind = ecoregion_kind(
+            province.kind,
+            peer_moisture,
+            peer_temperature,
+            peer_aridity,
+            peer_id_hash,
+        );
         let transition_width_blocks = 4_096.0 + ecoregion_transition_width_blocks(kind, peer_kind);
         let transition_weight =
             (1.0 - site.boundary_distance_blocks / (transition_width_blocks * 0.5)).clamp(0.0, 1.0);
         let blend = transition_weight * 0.5;
         let (base_openness, base_canopy) = ecoregion_cover(kind);
         let (peer_openness, peer_canopy) = ecoregion_cover(peer_kind);
+        // Climate is continuous within and across the authored ecoregion
+        // ownership cells. Owner-center climate still selects each region's
+        // character, while these point samples drive gradual surface response.
+        let (moisture, temperature) = self.climate_at(world_x, world_z);
+        let aridity = ecoregion_aridity(province, moisture, temperature);
+        let drainage = drainage_permanence(province, moisture, aridity);
         EcoregionPlanSample {
             id,
             province_id: province.id,
@@ -833,14 +882,22 @@ impl ContinentalEcoregionPlan {
             transition_width_blocks: transition_width_blocks as f32,
             base_openness: lerp_f32(base_openness, peer_openness, blend as f32),
             base_canopy: lerp_f32(base_canopy, peer_canopy, blend as f32),
-            moisture: lerp_f64(moisture, peer_moisture, blend) as f32,
-            temperature: lerp_f64(temperature, peer_temperature, blend) as f32,
+            moisture: moisture as f32,
+            temperature: temperature as f32,
+            aridity: aridity as f32,
+            drainage_permanence: drainage as f32,
         }
     }
 
     fn ecoregion_climate(&self, owner_x: i32, owner_z: i32) -> (f64, f64) {
         let climate_x = owner_center_coordinate(owner_x, ECOREGION_CELL_BLOCKS);
         let climate_z = owner_center_coordinate(owner_z, ECOREGION_CELL_BLOCKS);
+        self.climate_at(climate_x, climate_z)
+    }
+
+    fn climate_at(&self, world_x: i32, world_z: i32) -> (f64, f64) {
+        let climate_x = self.descriptor.topology.canonical_world_x(world_x);
+        let climate_z = world_z;
         let moisture = unit_field(self.fields.moisture.sample(climate_x, climate_z));
         let temperature =
             (0.5 + self.fields.temperature.sample(climate_x, climate_z) * 0.16).clamp(0.25, 0.75);
@@ -952,6 +1009,9 @@ impl ContinentalEcoregionPlan {
             }
             HabitatRouteKind::WetlandChain => {}
         }
+        let arid_cover = smoothstep(0.48, 0.84, f64::from(ecoregion.aridity));
+        openness = openness.max(arid_cover * 0.92);
+        forest_core *= 1.0 - arid_cover * 0.92;
         let wetland_affinity = match ecoregion.kind {
             EcoregionKind::ConnectedWetland => 1.0,
             EcoregionKind::RiparianWoodland => 0.72,
@@ -959,6 +1019,7 @@ impl ContinentalEcoregionPlan {
         };
         let wetland = (wetland_affinity
             * f64::from(ecoregion.moisture)
+            * f64::from(ecoregion.drainage_permanence)
             * f64::from(province.major_water.max(corridor as f32)))
         .clamp(0.0, 1.0);
         let wetland = match route.kind {
@@ -1248,13 +1309,85 @@ fn province_relief(kind: PhysiographicProvinceKind) -> f32 {
     }
 }
 
+fn prevailing_wind(site: ContinentalSite) -> (f64, f64) {
+    if site.story == ContinentalStory::Escarpment {
+        // Moist air crosses the high side of the escarpment before continuing
+        // toward the low basin on the negative-across side.
+        (site.axis_z, -site.axis_x)
+    } else {
+        direction(site.id.hash, 18)
+    }
+}
+
+fn continental_rain_shadow(site: ContinentalSite, world_x: i32, world_z: i32) -> f64 {
+    if !site.active {
+        return 0.0;
+    }
+    let (wind_x, wind_z) = prevailing_wind(site);
+    let dx = (i64::from(world_x) - site.center_x) as f64;
+    let dz = (i64::from(world_z) - site.center_z) as f64;
+    let downwind = (dx * wind_x + dz * wind_z) / 28_000.0;
+    let story_strength = match site.story {
+        ContinentalStory::Escarpment => 1.0,
+        ContinentalStory::OpenHighland => 0.66,
+        ContinentalStory::RiverValley => 0.38,
+        ContinentalStory::LakeDistrict => 0.30,
+    };
+    smoothstep(-0.08, 0.72, downwind) * story_strength
+}
+
+fn province_leeward_exposure(
+    continent: ContinentalDistrictSample,
+    kind: PhysiographicProvinceKind,
+    hash: u64,
+) -> f64 {
+    let province_affinity = match kind {
+        PhysiographicProvinceKind::RiverLowland => 1.0,
+        PhysiographicProvinceKind::QuietBench => 0.96,
+        PhysiographicProvinceKind::RollingHills => 0.90,
+        PhysiographicProvinceKind::WoodedUpland => 0.82,
+        PhysiographicProvinceKind::LakeBasin => 0.76,
+        PhysiographicProvinceKind::RockyRidge => 0.72,
+    };
+    let authored_variation = 0.90 + hash_unit(hash, 39) * 0.10;
+    (f64::from(continent.rain_shadow_potential) * province_affinity * authored_variation)
+        .clamp(0.0, 1.0)
+}
+
+fn ecoregion_aridity(province: ProvincePlanSample, moisture: f64, temperature: f64) -> f64 {
+    let atmospheric_dryness = 1.0 - moisture;
+    let warm_evaporation = smoothstep(0.44, 0.72, temperature);
+    (atmospheric_dryness * 0.56
+        + f64::from(province.leeward_exposure) * 0.62
+        + warm_evaporation * 0.12
+        - f64::from(province.major_water) * 0.28)
+        .clamp(0.0, 1.0)
+}
+
+fn drainage_permanence(province: ProvincePlanSample, moisture: f64, aridity: f64) -> f64 {
+    (moisture * 0.52 + f64::from(province.major_water) * 0.38 + (1.0 - aridity) * 0.16
+        - f64::from(province.leeward_exposure) * 0.24)
+        .clamp(0.0, 1.0)
+}
+
 fn ecoregion_kind(
     kind: PhysiographicProvinceKind,
     moisture: f64,
     temperature: f64,
+    aridity: f64,
     hash: u64,
 ) -> EcoregionKind {
     let alternate = (hash >> 57) & 3;
+    if aridity > 0.72 {
+        return if matches!(
+            kind,
+            PhysiographicProvinceKind::RockyRidge | PhysiographicProvinceKind::WoodedUpland
+        ) {
+            EcoregionKind::ExposedUpland
+        } else {
+            EcoregionKind::BroadMeadow
+        };
+    }
     match kind {
         PhysiographicProvinceKind::RiverLowland if moisture > 0.60 => {
             EcoregionKind::ConnectedWetland
@@ -1708,6 +1841,9 @@ fn hash_sample(digest: &mut Sha256, sample: &LandscapePlanSample) {
         digest.update(continent.center_z.to_le_bytes());
         hash_float(digest, continent.axis_x);
         hash_float(digest, continent.axis_z);
+        hash_float(digest, continent.prevailing_wind_x);
+        hash_float(digest, continent.prevailing_wind_z);
+        hash_float(digest, continent.rain_shadow_potential);
     });
     hash_option(digest, sample.province, |digest, province| {
         hash_id(digest, province.id);
@@ -1716,6 +1852,7 @@ fn hash_sample(digest: &mut Sha256, sample: &LandscapePlanSample) {
         hash_float(digest, province.core_weight);
         hash_float(digest, province.relief);
         hash_float(digest, province.major_water);
+        hash_float(digest, province.leeward_exposure);
     });
     hash_option(digest, sample.ecoregion, |digest, ecoregion| {
         hash_id(digest, ecoregion.id);
@@ -1731,6 +1868,8 @@ fn hash_sample(digest: &mut Sha256, sample: &LandscapePlanSample) {
         hash_float(digest, ecoregion.base_canopy);
         hash_float(digest, ecoregion.moisture);
         hash_float(digest, ecoregion.temperature);
+        hash_float(digest, ecoregion.aridity);
+        hash_float(digest, ecoregion.drainage_permanence);
     });
     hash_option(digest, sample.mosaic, |digest, mosaic| {
         hash_option(digest, mosaic.clearing_id, hash_id);
@@ -1866,6 +2005,9 @@ mod tests {
             center_z: 0,
             axis_x: 1.0,
             axis_z: 0.0,
+            prevailing_wind_x: 0.0,
+            prevailing_wind_z: -1.0,
+            rain_shadow_potential: 0.0,
         };
         assert_eq!(
             main_habitat_route_kind(continent.story),

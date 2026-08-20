@@ -76,6 +76,9 @@ struct AtlasTiming {
     candidate_ecoregion_components: u32,
     production_control_biome_components: u32,
     production_control_open_components: u32,
+    arid_fraction: f32,
+    rain_shadow_fraction: f32,
+    permanent_drainage_fraction: f32,
     transition_width_blocks: QuantityDistribution,
     clearing_plans: ClearingPlanDistribution,
     regional_signature_recurrence_blocks: QuantityDistribution,
@@ -301,6 +304,9 @@ fn atlas_timings() -> Result<Vec<AtlasTiming>, String> {
                 .production_control_metrics
                 .open_components
                 .component_count,
+            arid_fraction: atlas.metadata.metrics.arid_fraction,
+            rain_shadow_fraction: atlas.metadata.metrics.rain_shadow_fraction,
+            permanent_drainage_fraction: atlas.metadata.metrics.permanent_drainage_fraction,
             transition_width_blocks: atlas.metadata.metrics.transition_width_blocks,
             clearing_plans: atlas.metadata.metrics.clearing_plans.clone(),
             regional_signature_recurrence_blocks: atlas

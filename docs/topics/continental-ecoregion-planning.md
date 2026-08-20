@@ -42,7 +42,7 @@ the next product gate. Tactical
 implementation: five composable terrain-character families, one shared named
 candidate source, six review journeys, and a stop at Human Review B before
 exact chunks or production integration.
-Its first three milestones are now implemented. The shared surface sampler
+Its first four milestones are now implemented. The shared surface sampler
 publishes four drawable temperate families, explicit water and substrate,
 stable plan identities, and zero exact work under one native/Wasm witness.
 World Explorer native and browser accept the explicit
@@ -54,8 +54,14 @@ global proxy lattice and source revision; it never queries the production
 forest-plan cache. First-pixel review removed
 province-sized rock slabs and reduced visible owner polygons by adding
 coordinate-pure owner warping, continuous province fallbacks, and wider typed
-ecotone fans. Arid planning and six selected journeys remain before Human
-Review B.
+ecotone fans. The fifth arid family now derives from explicit prevailing wind,
+blended rain-shadow potential, continuous climate, leeward exposure, and
+drainage permanence. A rejected first image exposed owner-shaped desert slabs;
+the corrected point-continuous climate crosses district ownership without a
+cliff and realizes dry basins, failed drainage, washes, sparse cover, and
+limited exposed substrate. Terrain Lab exposes those causes directly while
+the candidate remains disconnected from production exact chunks. Six selected
+journeys remain before Human Review B.
 Mclone should combine
 top-down continental and ecoregional planning with bottom-up procedural
 realization so the Overworld contains large, recognizable, causally related

@@ -569,6 +569,9 @@ function sampleColor(
   const water = response.majorWater[index]! / 65_535;
   const wetland = response.wetland[index]! / 65_535;
   const corridor = response.corridor[index]! / 65_535;
+  const leeward = response.leewardExposure[index]! / 65_535;
+  const aridity = response.aridity[index]! / 65_535;
+  const drainage = response.drainagePermanence[index]! / 65_535;
   switch (layer) {
     case "land-ocean": {
       const inland = Math.max(0, Math.min(1,
@@ -582,6 +585,11 @@ function sampleColor(
       return ecoregion;
     case "transition":
       return mix(ecoregion, [213, 184, 129], transition * 0.92);
+    case "aridity": {
+      let color = mix([50, 126, 117], [225, 177, 82], aridity);
+      color = mix(color, [150, 103, 65], leeward * aridity * 0.58);
+      return mix(color, [56, 132, 157], drainage * (1 - aridity) * 0.42);
+    }
     case "openness":
       return mix([33, 71, 47], [213, 202, 103], openness);
     case "clearings": {
@@ -603,6 +611,7 @@ function sampleColor(
       color = mix(color, [36, 72, 44], forest * 0.42);
       color = mix(color, [194, 198, 100], clearing * 0.62);
       color = mix(color, [57, 145, 151], Math.max(wetland * 0.62, corridor * 0.34));
+      color = mix(color, [204, 155, 76], aridity * 0.66);
       return mix(color, [223, 205, 157], transition * 0.18);
     }
   }
@@ -797,6 +806,12 @@ function EcoregionInspector({
         <div><dt>Wetland / corridor</dt><dd>{percent(response.wetland[index]!)} / {
           percent(response.corridor[index]!)
         }</dd></div>
+        <div><dt>Leeward / aridity</dt><dd>{percent(response.leewardExposure[index]!)} / {
+          percent(response.aridity[index]!)
+        }</dd></div>
+        <div><dt>Drainage permanence</dt><dd>{percent(
+          response.drainagePermanence[index]!,
+        )}</dd></div>
         <div><dt>Route / ID</dt><dd>{corridorKind ?? "—"} / {
           hexId(response.corridorId[index]!)
         }</dd></div>
@@ -879,6 +894,7 @@ function layerLabel(layer: ContinentalEcoregionLayer): string {
     province: "Physiographic provinces",
     ecoregion: "Ecoregion identity",
     transition: "Ecoregion transitions",
+    aridity: "Rain shadow, aridity & drainage",
     openness: "Vegetation openness",
     clearings: "Planned clearings",
     water: "Water, wetland & riparian relation",

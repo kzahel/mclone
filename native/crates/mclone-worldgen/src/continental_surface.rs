@@ -19,7 +19,7 @@ use crate::{
     noise::{SeedDomain, ValueNoise2d},
 };
 
-pub const CONTINENTAL_SURFACE_SCHEMA_REVISION: &str = "mclone-continental-surface-v2";
+pub const CONTINENTAL_SURFACE_SCHEMA_REVISION: &str = "mclone-continental-surface-v3";
 pub const CONTINENTAL_SURFACE_SOURCE_LABEL: &str = "continental-ecoregion-candidate-v1";
 pub const CONTINENTAL_SURFACE_FAMILY_COUNT: usize = 5;
 pub const CONTINENTAL_SURFACE_MAX_WINDOW_SAMPLES: usize = 262_144;
@@ -194,6 +194,7 @@ pub struct ContinentalSurfaceSample {
     pub moisture: f32,
     pub aridity: f32,
     pub leeward_exposure: f32,
+    pub drainage_permanence: f32,
 }
 
 impl ContinentalSurfaceSample {
@@ -402,7 +403,22 @@ impl ContinentalSurfacePlan {
             };
             kind * province_identity
         });
-        let arid_weight = 0.0;
+        let leeward_exposure =
+            province.map_or(0.0, |province| f64::from(province.leeward_exposure));
+        let aridity = ecoregion.map_or(0.0, |ecoregion| f64::from(ecoregion.aridity));
+        let drainage_permanence =
+            ecoregion.map_or(1.0, |ecoregion| f64::from(ecoregion.drainage_permanence));
+        let arid_province_compatibility = province.map_or(0.0, |province| match province.kind {
+            PhysiographicProvinceKind::RiverLowland => 1.0,
+            PhysiographicProvinceKind::QuietBench => 0.94,
+            PhysiographicProvinceKind::RollingHills => 0.78,
+            PhysiographicProvinceKind::WoodedUpland => 0.48,
+            PhysiographicProvinceKind::RockyRidge => 0.42,
+            PhysiographicProvinceKind::LakeBasin => 0.22,
+        });
+        let arid_weight = smoothstep(0.48, 0.78, aridity)
+            * smoothstep(0.22, 0.72, leeward_exposure)
+            * arid_province_compatibility;
         let family_weights = normalize_weights([
             coast_weight,
             rolling_weight * land,
@@ -422,7 +438,7 @@ impl ContinentalSurfacePlan {
         let rolling_height = macro_roll * 7.0 + ridge_form * 2.5;
         let upland_height = 20.0 + ridge_form.abs().powf(1.35) * 30.0 + macro_roll * 7.0;
         let lowland_height = macro_roll * 3.0 - unit_field(basin_form) * 4.0;
-        let province_height = province.map_or(0.0, |province| {
+        let base_province_height = province.map_or(0.0, |province| {
             let height = match province.kind {
                 PhysiographicProvinceKind::RiverLowland => lowland_height,
                 PhysiographicProvinceKind::LakeBasin => lowland_height - 2.0,
@@ -435,6 +451,9 @@ impl ContinentalSurfacePlan {
             };
             lerp(common_province_height, height, province_identity)
         });
+        let arid_shelf_height =
+            -unit_field(basin_form) * 7.5 + ridge_form.abs().powf(1.25) * 9.0 + macro_roll * 2.2;
+        let province_height = lerp(base_province_height, arid_shelf_height, arid_weight * 0.72);
 
         let clearing = mosaic.map_or(0.0, |mosaic| f64::from(mosaic.clearing_core));
         let openness = mosaic.map_or(0.0, |mosaic| f64::from(mosaic.openness));
@@ -459,7 +478,7 @@ impl ContinentalSurfacePlan {
         }
 
         if let Some(province) = province {
-            if province.kind == PhysiographicProvinceKind::LakeBasin {
+            if province.kind == PhysiographicProvinceKind::LakeBasin && drainage_permanence > 0.46 {
                 let lake_level = sea_level + 2.0 + f64::from((province.id.hash >> 17) as u8 % 5);
                 let lake_shape = smoothstep(
                     0.54,
@@ -486,11 +505,11 @@ impl ContinentalSurfacePlan {
                 hydrologic_height += river_bed - solid_surface_y;
                 solid_surface_y = river_bed;
             }
-            if river_channel > 0.38 {
+            if river_channel > 0.38 && drainage_permanence > 0.40 {
                 water_level_y = Some(river_level);
                 water_kind = ContinentalSurfaceWaterKind::River;
             }
-        } else if wetland > 0.58 && unit_field(basin_form) > 0.64 {
+        } else if wetland > 0.58 && drainage_permanence > 0.54 && unit_field(basin_form) > 0.64 {
             let pool_level = solid_surface_y.floor() + 1.0;
             solid_surface_y = solid_surface_y.min(pool_level - 1.5);
             water_level_y = Some(pool_level);
@@ -507,6 +526,9 @@ impl ContinentalSurfacePlan {
             local_form,
             wetland,
             openness,
+            aridity,
+            drainage_permanence,
+            river_channel,
         );
         let forest_edge = (forest_core * (1.0 - forest_core) * 4.0).clamp(0.0, 1.0);
         let (temperature, moisture) = ecoregion.map_or((0.5, 0.5), |ecoregion| {
@@ -543,8 +565,9 @@ impl ContinentalSurfacePlan {
             route: route as f32,
             temperature: temperature as f32,
             moisture: moisture as f32,
-            aridity: (1.0 - moisture) as f32,
-            leeward_exposure: 0.0,
+            aridity: aridity as f32,
+            leeward_exposure: leeward_exposure as f32,
+            drainage_permanence: drainage_permanence as f32,
         }
     }
 }
@@ -640,6 +663,9 @@ fn surface_substrate(
     local_form: f64,
     wetland: f64,
     openness: f64,
+    aridity: f64,
+    drainage_permanence: f64,
+    channel: f64,
 ) -> ContinentalSurfaceSubstrate {
     match water {
         ContinentalSurfaceWaterKind::Ocean => {
@@ -657,6 +683,22 @@ fn surface_substrate(
             }
         }
         ContinentalSurfaceWaterKind::WetlandPool => ContinentalSurfaceSubstrate::CoarseSoil,
+        ContinentalSurfaceWaterKind::None if channel > 0.34 && drainage_permanence < 0.40 => {
+            ContinentalSurfaceSubstrate::Gravel
+        }
+        ContinentalSurfaceWaterKind::None
+            if aridity > 0.88 && ridge_form > 0.70 && local_form > 0.40 =>
+        {
+            ContinentalSurfaceSubstrate::Stone
+        }
+        ContinentalSurfaceWaterKind::None if aridity > 0.84 && local_form < -0.72 => {
+            ContinentalSurfaceSubstrate::Sand
+        }
+        ContinentalSurfaceWaterKind::None
+            if aridity > 0.82 && (local_form > 0.72 || ridge_form < -0.82) =>
+        {
+            ContinentalSurfaceSubstrate::CoarseSoil
+        }
         ContinentalSurfaceWaterKind::None
             if family == TerrainCharacterFamily::UplandAndEscarpment
                 && upland > 0.42
@@ -740,6 +782,7 @@ fn semantic_sha256(
             sample.moisture,
             sample.aridity,
             sample.leeward_exposure,
+            sample.drainage_permanence,
         ] {
             digest.update(value.to_bits().to_le_bytes());
         }
@@ -814,7 +857,7 @@ mod tests {
     }
 
     #[test]
-    fn temperate_surface_exercises_four_character_families_and_flat_water() {
+    fn broad_surface_exercises_five_character_families_and_flat_water() {
         let surface =
             ContinentalSurfacePlan::new(ContinentalEcoregionDescriptor::plane(12_345)).unwrap();
         let window = surface
@@ -836,7 +879,33 @@ mod tests {
         assert!(seen[TerrainCharacterFamily::RollingInterior as usize]);
         assert!(seen[TerrainCharacterFamily::FluvialAndWetland as usize]);
         assert!(seen[TerrainCharacterFamily::UplandAndEscarpment as usize]);
-        assert!(!seen[TerrainCharacterFamily::AridRainShadow as usize]);
+        assert!(seen[TerrainCharacterFamily::AridRainShadow as usize]);
         assert!(water > 100);
+    }
+
+    #[test]
+    fn arid_rain_shadow_is_dry_open_and_sparsely_exposed() {
+        let surface =
+            ContinentalSurfacePlan::new(ContinentalEcoregionDescriptor::plane(12_345)).unwrap();
+        let sample = surface.query_point(32_768, 1_536).sample;
+        assert!(sample.leeward_exposure > 0.70);
+        assert!(sample.aridity > 0.75);
+        assert!(sample.drainage_permanence < 0.35);
+        assert!(sample.openness > sample.forest_core);
+        assert_eq!(
+            sample.dominant_family,
+            TerrainCharacterFamily::AridRainShadow
+        );
+    }
+
+    #[test]
+    fn rain_shadow_crosses_district_ownership_without_a_climate_cliff() {
+        let surface =
+            ContinentalSurfacePlan::new(ContinentalEcoregionDescriptor::plane(12_345)).unwrap();
+        let north = surface.query_point(32_768, -1_536).sample;
+        let south = surface.query_point(32_768, -1_024).sample;
+        assert_ne!(north.continent_id, south.continent_id);
+        assert!((north.leeward_exposure - south.leeward_exposure).abs() < 0.15);
+        assert!((north.aridity - south.aridity).abs() < 0.15);
     }
 }
