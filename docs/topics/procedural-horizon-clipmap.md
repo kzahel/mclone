@@ -2,7 +2,236 @@
 
 Topic: `procedural-horizon-clipmap`
 
-Status: the standalone cross-platform proof, transition hardening, shared
+Status: current shared product architecture as of 2026-08-20. The regular
+geometry clipmap, focus-connected exact composition, and bounded hybrid
+frontier run through `mclone-terrain-view` on native, WebGPU, flat Android,
+and XR. Tactical
+[`321`](../tactical/321-exact-frontier-support-architecture.md) completed the
+high-render-distance frontier implementation. Its final human pixel reviews
+remain the acceptance gates; this topic is the canonical system description.
+
+## System Contract
+
+The system combines immutable procedural heightfield tiles with the ready
+connected component of exact chunks. Neither subsystem expands merely to hide
+the other's readiness. Instead, every submitted exact perimeter receives a
+complete frontier certificate:
+
+```text
+worldgen source + camera focus
+              |
+       regular clipmap request
+              |
+    staged -> committed levels -----------------+
+                                                 |
+ready exact columns -> focus-connected coverage  |
+              |                                  |
+     mask + appearance + boundary profile        |
+              |                                  |
+              +----------> frontier plan <-------+
+                                |
+                 complete coarse fallback now
+                                |
+                    preferred fine belt later
+                                |
+        one immutable terrain/water/tree certificate
+                                |
+                    mono / per-eye / multiview
+```
+
+`mclone-terrain-view` owns clipmap planning, procedural evaluation,
+composition formats, frontier planning and topology, certificate admission,
+GPU terrain resources, and proxy vegetation. `mclone-scene` supplies live
+ready exact columns, chooses the focus-connected component, prepares exact
+boundary facts, and consumes one frame summary. Apps choose platform defaults,
+create surfaces or swapchains, translate input, and present; they do not own
+LOD geometry or seam policy.
+
+The only supported product source is a reconstructible local
+`mclone-overworld-v1` world with matching profile, seed, topology, exact
+generation, and procedural source identity. Remote sessions and incompatible
+generation profiles project the effective setting to Off while retaining the
+user's desired preference.
+
+## Regular Clipmap And Presets
+
+Every enabled level is a four-by-four toroidal grid of 64-cell terrain tiles.
+Level zero samples every block. Each following level doubles sample spacing
+and cuts a rectangular hole matching the committed finer level. Smooth
+triangles weld adjacent clipmap levels at their shared footprint; no level
+changes the one-cell render stride to implement a cheaper preset.
+
+Sub-cell motion changes only the camera. When a level crosses a tile boundary,
+the admission owner reuses retained physical slots, prepares the entering
+strip, and commits that complete level atomically. Seven guard resources per
+level permit the prior committed presentation to remain drawable during axial
+or diagonal movement. A teleport drops obsolete staged coverage and reuses the
+same bounded pool. Independently ready levels may commit separately; their
+combined origins and generations form the immutable procedural presentation
+identity used by the frontier certificate.
+
+| Preset | Levels | Logical tiles | Guard tiles | Proxy vegetation spacing |
+|---|---:|---:|---:|---:|
+| Off | 0 | 0 | 0 | none |
+| Low | 6 | 96 | 42 | 1 |
+| Medium | 8 | 128 | 56 | 2 |
+| High | 10 | 160 | 70 | 4 |
+
+Off constructs no terrain-view engine, clipmap, frontier, or proxy-vegetation
+resources. Low, Medium, and High share identical near geometry and differ only
+in outer reach and vegetation reach. Platform profiles choose defaults without
+changing those meanings; Android XR remains Off by default because its full-
+resolution Low workload does not reliably meet 72 Hz.
+
+## Exact Readiness And Formats
+
+The scene admits only the four-connected ready exact component containing the
+focus, or the still-valid component connected to it during transition.
+Disconnected ready islands stay procedural. Growth, eviction, source reset,
+negative coordinates, and periodic-coordinate lifting produce a new immutable
+exact generation rather than mutating the generation being drawn.
+
+One generation supplies all exact-side composition facts:
+
+- a sparse chunk set and packed discard mask;
+- a 32-block appearance-distance field, with water limited to its nearest
+  eight-block procedural-side halo;
+- a typed exposed boundary profile containing height, side material, and
+  water ownership;
+- complete exact/proxy tree ownership; and
+- the source and topology identity used by every consumer.
+
+The shared legal maximum is 65 by 65 chunks, covering desktop render distance
+32. The GPU mask uses 133 words and a 65-chunk row stride. Boundary storage is
+bounded to 1,040 blocks per axis and transition storage to 276 texels per axis.
+Oversized, disconnected, source-mismatched, or incompletely profiled inputs
+are rejected explicitly rather than truncated.
+
+## Frontier Plan And Hybrid Closure
+
+`TerrainFrontierPlan` compares every directed exposed exact block edge with
+one committed procedural presentation. It records the adjacent level and
+sample spacing, unique procedural owner, solid/water/world-boundary class,
+existing spacing-one closure, desired fine tile, topology lift, and bounded
+cost. `TerrainFrontierTopology` then assigns every edge exactly one closure:
+
+- a preferred solid connector or water curtain owned by spacing-one terrain;
+- a resolution-aware solid connector or water curtain evaluated against the
+  actual bordering coarse triangle; or
+- an explicit finite-world boundary.
+
+The preferred layer may allocate at most 32 additional spacing-one tiles.
+Tiles already present in the regular finest ring are reused semantically and
+do not consume that pool. Each added tile is the normal 64-by-64 heightfield
+resource. Its outer block-segmented skirt hands back to the regular clipmap,
+and a suppression key removes the coarser base surface beneath it. Support is
+compiled at no more than four tiles per frame.
+
+Pool exhaustion is deterministic. A topology prepared with zero additional
+fine tiles is a complete synchronous fallback for all solid and water edges;
+it allocates no support terrain and suppresses no base tile. The fallback is
+not an error state or a hidden overlap. The developer-only
+`frontier-fallback` selector reduces the pool to one so those pixels can be
+reviewed at an ordinary site. Natural is always the product path; the former
+hybrid-proof selector and diagnostic-only lifecycle are deleted.
+
+## One-Frame Admission And Ownership
+
+Every new exact generation or procedural presentation first commits a
+resolution-aware fallback certificate in the same render preparation. A
+preferred 32-tile generation may compile behind it. Support terrain,
+coarse-base suppression, and connector ownership become active together only
+after every selected resource is ready. Newer exact or clipmap epochs coalesce
+obsolete pending work. The public admission state is one of `disabled`,
+`synchronous-fallback`, `preparing-preferred`, `preferred`, or `rejected`;
+the three middle states are complete drawable certificates.
+
+Horizontal ownership is binary:
+
+- exact coverage discards every procedural horizontal surface, including
+  water;
+- selected support tiles own only the procedural side of the exact boundary;
+- the regular coarse base is discarded wherever committed support owns the
+  same horizontal tile; and
+- connectors and outer skirts are vertical closure, never a coincident
+  horizontal collar.
+
+The ordinary procedural vegetation presentation remains the sole proxy-tree
+owner over both base and support terrain. Support therefore creates no second
+tree population. Exact-owned complete tree records are removed from that
+population through the same exact generation. Land, water, materials, grass
+and water tint, sky darkening, fog, time of day, and geometric shading all use
+the same per-frame render inputs on both sides of the boundary.
+
+Missing exact boundary facts or missing/ambiguous procedural coverage leave
+the topology incomplete and the certificate rejected. Normal rendering never
+publishes a partial preferred generation. Source reset and device recreation
+drop all GPU frontier epochs and rebuild from shared source facts; no GPU
+identity is persisted.
+
+## View And Platform Consumption
+
+Mono, multi-camera flat frames, synthetic stereo, ordinary per-eye XR, and
+full-frame multiview prepare one immutable frontier and vary only view
+uniforms, culling masks, and targets. Multiview does not plan or compile a
+second support belt. Terrain and proxy-tree shaders have separate single-view
+and multiview modules so browser WGSL never sees unsupported `view_index`
+builtins.
+
+The final Tactical 321 validation inspected crack-free native RD2, native
+RD8 preferred, native forced-fallback, headed WebGPU RD8, flat-Android RD8,
+and synthetic stereo output. A physical Quest 3 accepted both ordinary
+per-eye and full-frame multiview Low/RD8 submissions. The full-resolution
+Quest steady sample measured 14.52 ms p50 and 18.48 ms p95 app work against a
+13.89 ms 72 Hz budget. Settled full-frame multiview measured 16.87 ms p50 and
+20.15 ms p95 while retaining all 96 Low slots and 289 exact columns. Enabled
+LOD on that platform is therefore an explicit quality choice rather than its
+default.
+
+The bounded RD8 preferred case uses 20 added tiles, 11,212,240 terrain bytes,
+and 31,488 active connector bytes. It certifies all 1,088 perimeter segments.
+The forced one-tile case assigns 1,024 of those segments to the fallback.
+RD2 needs no added support tile. A 240-frame native traversal crossed three
+clipmap presentations and 138 exact generations over 130.68 blocks with zero
+incomplete certificates: 188 frames used a complete fallback during
+preparation and 52 used the preferred certificate.
+
+## Diagnostics And Recovery
+
+The native seam receipt exposes four complementary views:
+
+- `frontier`: raw boundary classification and candidate cost;
+- `frontierTopology`: closure assignments, support/suppression counts, and
+  bounded byte/vertex estimates;
+- `frontierAdmission`: active/pending identity, completeness, and lifecycle
+  counters; and
+- `frontierGpu`: allocated/ready support, dispatch, connector, and draw facts.
+
+`frontier-support` colorizes the unmodified classifier. `frontier-fallback`
+forces bounded exhaustion. Window-frame reports record a certificate on every
+presented frame, which is the objective motion gate. Unit fixtures cover legal
+render distances through 32, every finest-tile phase, irregular and adversarial
+connected shapes, water, finite and periodic worlds, negative coordinates,
+growth, eviction, source reset, level transitions, and teleport.
+
+## Accepted Limits
+
+The procedural horizon is a surface heightfield. It does not represent caves,
+arches, overhangs, arbitrary structures, distant block edits, or other sparse
+volumetric silhouettes. An unsupported exact volumetric boundary must remain
+outside this contract rather than being hidden by a curtain. The preferred
+support unit is still a complete 64-by-64 tile, so large high-distance exact
+frontiers have a meaningful vertex and GPU cost even when only a narrow belt
+is visible. A future optimization may compact support draws without changing
+the 32-tile capacity or fallback topology, but it must preserve the same
+certificate and single-owner rules.
+
+## Historical Development Record
+
+The dated material below records how the current system was reached. It is not
+the current contract above.
+
+The standalone cross-platform proof, transition hardening, shared
 vegetation service, Terrain Lab composition, and live-game adoption are
 complete. Tactical
 [`313`](../tactical/313-direct-exact-to-smooth-horizon-transition.md) now has

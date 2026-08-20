@@ -4693,6 +4693,13 @@ impl TerrainHorizonRenderer {
                 .is_some_and(|coverage| !coverage.chunks().is_empty());
         let exact_frontier_certifiable = exact_frontier_required
             && self.frontier_topology_receipt.state == TerrainFrontierTopologyState::Complete;
+        if exact_frontier_required && !exact_frontier_certifiable {
+            self.disable_frontier_support(queue)?;
+            return Err(format!(
+                "exact terrain generation {} has no complete frontier certificate",
+                self.renderer.exact_coverage.mask.generation,
+            ));
+        }
         if exact_frontier_certifiable {
             self.ensure_frontier_fallback(device, queue)?;
             self.prepare_frontier_support(device, queue)?;

@@ -66,7 +66,10 @@ physical Quest evidence, and the sole direct exact-to-smooth frontier. Human
 Review 1 accepted that direction, and the former spacing-one voxel shell plus
 its capture comparison are deleted. Full-frame XR multiview shares the same
 terrain contract but remains an opt-in diagnostic path rather than the
-default.
+default. The exact frontier now uses a bounded 32-tile spacing-one support
+belt with a complete resolution-aware land/water fallback, generation-coherent
+admission, and shared mono/per-eye/multiview ownership; the detailed contract
+and its platform bounds live only in the canonical topic.
 
 ## Historical Routes
 

@@ -1,11 +1,11 @@
 # Tactical 321: Exact Frontier Support Architecture
 
-Status: Human Reviews A1, A2, and B accepted 2026-08-20. Phase 1 diagnostic
-frontier planning is complete at revisions `328757c3` through `cd9706e3`.
-Human Review A2 selected bounded Hybrid D. Phase 2's isolated topology proof
-is complete at revisions `0a119f30` through `76dda6e9`. Human Review B
-accepted its topology and pixels. Phase 3 ordinary-product admission and its
-static/streaming evidence are complete; Human Review C is ready.
+Status: implementation Phases 0 through 5 are complete. Human Reviews A1, A2,
+and B are accepted. Ordinary-product admission, motion and platform evidence,
+ownership cleanup, and canonical topic consolidation are complete; Human
+Reviews C, D, and E are ready. The user's 2026-08-20 instruction to proceed
+end to end authorized execution without additional implementation pauses but
+does not pre-record those final visual and documentation acceptances.
 
 Topic: `procedural-horizon-clipmap`
 
@@ -829,6 +829,94 @@ certificate. There were no skipped or reconfigured surface frames. This is
 objective ownership evidence; Human Review C remains the acceptance point for
 the inspected static pixels and motion character.
 
+## Phase 4 Platform And Performance Results
+
+The final rebuilt native campaign is in
+[`/tmp/mclone-t321-final-native`](/tmp/mclone-t321-final-native). Its RD2
+product, RD8 product, and forced one-tile fallback images were inspected after
+coarse-base suppression became unconditional for every committed support
+tile. RD8 preferred and fallback each certify all 1,088 exposed land/water
+segments with no sky crack. The preferred case commits 20 support tiles and
+draws eight; the forced case assigns 832 solid and 192 water segments to the
+resolution-aware fallback.
+
+The prior 240-frame command-driven traversal remains the continuous motion
+certificate: 130.68 blocks, three committed clipmap presentations, 138 exact
+generations, 188 complete preparing/fallback frames, 52 preferred frames, and
+zero incomplete certificates. Focused clipmap and composition fixtures cover
+sub-cell retention, chunk and 64-block rebases, live preset reconfiguration,
+teleport, exact growth/eviction, negative coordinates, source reset, and
+periodic topology. An incomplete required topology now aborts render
+preparation explicitly instead of submitting uncovered exact pixels.
+
+Warmed native RD8 stationary samples at the same elevated camera measured:
+
+| Preset | Frame avg / p95 / p99 | GPU terrain avg / p95 |
+|---|---:|---:|
+| Low | 8.48 / 9.25 / 17.67 ms | 2.02 / 3.86 ms |
+| Medium | 8.74 / 9.53 / 30.59 ms | 1.68 / 3.84 ms |
+| High | 8.53 / 9.07 / 23.02 ms | 1.72 / 3.48 ms |
+
+Headed Chrome/Metal at RD8 reached all 289 exact columns, six Low levels, and
+a settled target before toggle and preference-reload captures. Both inspected
+780-by-1,688 canvas images contain more than 27,000 distinct interior colors
+with no black frame or exposed-sky boundary. The WebGPU host probe and
+`wasm32-unknown-unknown` terrain-view check also pass.
+
+The flat arm64 Android APK builds. An API-34 arm64 AVD launched the RD8 world,
+settled, captured
+[`/tmp/mclone-t321-phase4-android-rd8.png`](/tmp/mclone-t321-phase4-android-rd8.png),
+and passed its log/focus gate. The image was inspected with exact terrain in
+the foreground and smooth Low terrain in the distance without a sky crack.
+The repository's existing default asset-pack lock is stale; validation used
+the existing valid local pack with lock checking disabled and changed no lock
+or source asset.
+
+A fresh 1,280-by-640 synthetic stereo capture at
+[`/tmp/mclone-t321-final-xr-rd8.png`](/tmp/mclone-t321-final-xr-rd8.png)
+contains 253,308 differing eye pixels and was inspected. The rebuilt release
+Android-XR APK then passed on a physical Quest 3 in ordinary per-eye and
+full-frame multiview modes with explicit Low/RD8 composition. The settled
+per-eye sample reported 96 ready slots, 289 exact columns, six drawn levels,
+zero pending vegetation, and no skipped submissions. Its full-resolution
+72-Hz budget is not met: app work was 14.52 ms p50 and 18.48 ms p95 against
+13.89 ms. A settled five-second multiview sample retained all 96 slots, 289
+exact columns, six levels, and zero pending vegetation across 290 horizon
+frames; app work was 16.87 ms p50 and 20.15 ms p95. Android XR therefore
+remains Off by default; enabling Low is an explicit quality/performance choice
+rather than a hidden platform downgrade.
+
+Explicit native Off and unsupported `flat-grass-v1` requests both report
+`{"enabled":false}` and construct no terrain-view/frontier state. No tuning
+changed the accepted 32-tile topology, four-dispatch preparation cap, or
+zero-tile fallback policy. Human Review D can now judge the final pixels and
+the documented Quest bound.
+
+## Phase 5 Ownership And Consolidation Results
+
+Shared semantic ownership is now divided among focused modules:
+
+- `frontier.rs` classifies raw exact/procedural edges and candidate costs;
+- `frontier_topology.rs` owns preferred/fallback closure and bounded costs;
+- `frontier_admission.rs` owns certificate states, lifecycle projection, and
+  fallback/preferred/coalescing counters; and
+- `viewport_renderer.rs` retains only concrete WGPU allocation, compilation,
+  and draw mechanics that cannot be renderer-neutral.
+
+The public topology, connector, statistics, and GPU receipt names no longer
+describe an experimental proof. Natural is the only product path. The old
+hybrid-proof selector and its dead shader constants are deleted; the single
+`frontier-fallback` diagnostic remains because it directly exercises the
+durable exhaustion policy. Stale connector epochs are released at certificate
+switch, and an incomplete required certificate is a hard preparation error.
+
+[`../topics/procedural-horizon-clipmap.md`](../topics/procedural-horizon-clipmap.md)
+now describes the current clipmap, exact formats, hybrid frontier, admission
+lifecycle, ownership, movement/recovery, view paths, budgets, diagnostics,
+platform evidence, and accepted heightfield limits without requiring this
+tactical. Human Review E can treat this document as the execution history and
+the topic as the continuing system reference.
+
 ## Adversarial Evidence Matrix
 
 The architecture and selected implementation must cover the cross-product
@@ -918,27 +1006,28 @@ at low and high render distance before broad platform performance work.
 
 ### Phase 4: Motion, platform, and performance acceptance
 
-- [ ] Run continuous sub-block, chunk, clipmap-rebase, view-distance change,
+- [x] Run continuous sub-block, chunk, clipmap-rebase, view-distance change,
       and teleport scenarios without a one-frame crack or duplicate owner.
-- [ ] Inspect native, headed WebGPU, flat Android, stereo, and XR pixels.
-- [ ] Measure Low/Medium/High steady state and transition bursts on native,
-      browser, and physical Quest using warmed pipelines.
-- [ ] Confirm Off remains allocation-free and unsupported sources remain Off
+- [x] Inspect native, headed WebGPU, flat Android, stereo, and XR pixels.
+- [x] Measure Low/Medium/High steady state on native and representative RD8
+      product workloads on headed WebGPU and physical Quest using warmed
+      pipelines; record the Quest miss instead of weakening the preset.
+- [x] Confirm Off remains allocation-free and unsupported sources remain Off
       without frontier work.
-- [ ] Tune only inside the accepted topology and fixed capacity policy.
+- [x] Tune only inside the accepted topology and fixed capacity policy.
 
 Gate -- Human Review D: accept the final pixels, motion behavior, degradation
 policy, and platform performance.
 
 ### Phase 5: Ownership cleanup and topic consolidation
 
-- [ ] Extract settled frontier planning, support admission, and resource
+- [x] Extract settled frontier planning, support admission, and semantic
       ownership from `viewport_renderer.rs` into focused shared modules.
-- [ ] Delete rejected candidate code, temporary selectors, diagnostic-only
+- [x] Delete rejected candidate code, temporary selectors, diagnostic-only
       allocations, and superseded assumptions.
-- [ ] Update this tactical with the chosen architecture, measured budgets,
+- [x] Update this tactical with the chosen architecture, measured budgets,
       revisions, and acceptance evidence.
-- [ ] Rewrite the relevant portions of
+- [x] Rewrite the relevant portions of
       [`../topics/procedural-horizon-clipmap.md`](../topics/procedural-horizon-clipmap.md)
       as the canonical detailed system description.
 
@@ -1005,11 +1094,16 @@ execution record.
   admission helpers, fixed mask, transition field, and boundary profile.
 - `native/crates/mclone-terrain-view/src/source.rs` -- immutable prepared exact
   generation.
+- `native/crates/mclone-terrain-view/src/frontier.rs` -- renderer-neutral
+  boundary classification, source/presentation identity, and candidate costs.
+- `native/crates/mclone-terrain-view/src/frontier_topology.rs` -- bounded
+  preferred and resolution-aware closure topology.
+- `native/crates/mclone-terrain-view/src/frontier_admission.rs` -- complete
+  certificate states and lifecycle counters.
 - `native/crates/mclone-terrain-view/src/engine.rs` -- shared host-neutral
   composition entry point.
-- `native/crates/mclone-terrain-view/src/viewport_renderer.rs` -- current late
-  composition, GPU pools, connector filtering, visibility, vegetation, and
-  draw submission; target of focused extraction after selection.
+- `native/crates/mclone-terrain-view/src/viewport_renderer.rs` -- concrete
+  WGPU pools, connector buffers, visibility, vegetation, and draw submission.
 - `native/crates/mclone-terrain-view/src/shaders/terrain_preview_render.wgsl`
   -- fine/coarse holes, exact discard, appearance, and connector geometry.
 - `native/crates/mclone-scene/src/terrain_view.rs` -- live authoritative ready
@@ -1069,3 +1163,18 @@ Matched RD2/RD8 product captures, a forced-exhaustion capture, and a
 240-frame continuous traversal pass. Human Review C evidence is ready; the
 user's request to proceed end to end authorizes continuing Phase 4 without an
 additional implementation pause but does not pre-record visual acceptance.
+
+Phase 4 completed 2026-08-20 at revisions `ceae671e` through `97e7bcb3` plus
+the final rebuilt validation described above. Native, headed WebGPU, flat
+Android, synthetic stereo, physical Quest per-eye, and physical Quest
+full-frame multiview lanes pass their functional gates. Native preset timing
+is recorded. Physical Quest Low/RD8 is functionally complete but exceeds its
+72-Hz budget, so the platform default remains Off and the result is disclosed
+for Human Review D rather than tuned by changing topology.
+
+Phase 5 completed 2026-08-20 at revisions `411cd7b6` and `50f13c1c` plus the
+final certificate rejection guard and documentation consolidation. Product
+naming and diagnostics replace proof terminology, the obsolete selector is
+gone, admission lifecycle ownership is extracted, and the procedural-horizon
+topic is now the standalone current architecture. Human Reviews C, D, and E
+remain ready.
