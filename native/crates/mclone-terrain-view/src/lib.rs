@@ -441,10 +441,11 @@ pub enum TerrainHorizonDiagnostic {
     Texture = 8,
     FrontierSupport = 9,
     FrontierHybridProof = 10,
+    FrontierHybridFallbackProof = 11,
 }
 
 impl TerrainHorizonDiagnostic {
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 12] = [
         Self::Natural,
         Self::OwnershipLevel,
         Self::Topology,
@@ -456,6 +457,7 @@ impl TerrainHorizonDiagnostic {
         Self::Texture,
         Self::FrontierSupport,
         Self::FrontierHybridProof,
+        Self::FrontierHybridFallbackProof,
     ];
 
     pub const fn label(self) -> &'static str {
@@ -471,6 +473,7 @@ impl TerrainHorizonDiagnostic {
             Self::Texture => "texture",
             Self::FrontierSupport => "frontier-support",
             Self::FrontierHybridProof => "frontier-hybrid-proof",
+            Self::FrontierHybridFallbackProof => "frontier-hybrid-fallback-proof",
         }
     }
 

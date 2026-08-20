@@ -527,6 +527,7 @@ struct TerrainFrontierSupportGpuIdentity {
     content_stage: TerrainPreviewContentStage,
     exact_generation: u64,
     presentation: super::TerrainFrontierPresentationIdentity,
+    support_pool_capacity: u32,
     selected_tiles: BTreeSet<TerrainFrontierFineTileKey>,
 }
 
@@ -4074,6 +4075,33 @@ impl TerrainHorizonRenderer {
         Ok(())
     }
 
+    fn refresh_frontier_topology_capacity(&mut self, support_pool_capacity: u32) {
+        if self.frontier_topology_receipt.support_pool_capacity == support_pool_capacity {
+            return;
+        }
+        let Some(plan) = self.frontier_plan.as_ref() else {
+            return;
+        };
+        match TerrainFrontierTopologyProof::prepare(
+            plan,
+            TerrainFrontierTopologyProofOptions {
+                fine_tile_capacity: support_pool_capacity,
+            },
+        ) {
+            Ok(topology) => {
+                self.frontier_topology_receipt = topology.receipt();
+                self.frontier_topology = Some(topology);
+                self.frontier_support = None;
+            }
+            Err(_error) => {
+                self.frontier_topology = None;
+                self.frontier_topology_receipt = TerrainFrontierTopologyProofReceipt::default();
+                self.frontier_support = None;
+                self.frontier_topology_failures = self.frontier_topology_failures.saturating_add(1);
+            }
+        }
+    }
+
     fn prepare_frontier_support(
         &mut self,
         device: &wgpu::Device,
@@ -4090,6 +4118,7 @@ impl TerrainHorizonRenderer {
             content_stage: self.content_stage,
             exact_generation: topology.receipt().exact_generation,
             presentation: topology.receipt().presentation,
+            support_pool_capacity: topology.receipt().support_pool_capacity,
             selected_tiles: topology.selected_support_tiles().clone(),
         };
         if self
@@ -4540,8 +4569,18 @@ impl TerrainHorizonRenderer {
 
         let terrain_levels = self.admission.terrain_presentations();
         self.refresh_frontier_plan(&terrain_levels)?;
-        let frontier_proof_active =
-            presentation.diagnostic == TerrainHorizonDiagnostic::FrontierHybridProof;
+        let frontier_support_capacity =
+            if presentation.diagnostic == TerrainHorizonDiagnostic::FrontierHybridFallbackProof {
+                1
+            } else {
+                super::TERRAIN_FRONTIER_PROOF_FINE_TILE_CAPACITY
+            };
+        self.refresh_frontier_topology_capacity(frontier_support_capacity);
+        let frontier_proof_active = matches!(
+            presentation.diagnostic,
+            TerrainHorizonDiagnostic::FrontierHybridProof
+                | TerrainHorizonDiagnostic::FrontierHybridFallbackProof
+        );
         if frontier_proof_active {
             self.prepare_frontier_support(device, queue)?;
         } else {

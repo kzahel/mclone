@@ -48,6 +48,7 @@ const TERRAIN_HORIZON_DIAGNOSTIC_WATER: u32 = 7u;
 const TERRAIN_HORIZON_DIAGNOSTIC_TEXTURE: u32 = 8u;
 const TERRAIN_HORIZON_DIAGNOSTIC_FRONTIER_SUPPORT: u32 = 9u;
 const TERRAIN_HORIZON_DIAGNOSTIC_FRONTIER_HYBRID_PROOF: u32 = 10u;
+const TERRAIN_HORIZON_DIAGNOSTIC_FRONTIER_HYBRID_FALLBACK_PROOF: u32 = 11u;
 const TERRAIN_FRONTIER_SUPPORT_TILE_CAPACITY: u32 = 32u;
 const TERRAIN_FRONTIER_PROOF_CONNECTOR_FLAG: u32 = 0x00000100u;
 const TERRAIN_FRONTIER_PROOF_CONNECTOR_WATER_FLAG: u32 = 0x00000200u;
@@ -1351,7 +1352,8 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
         discard;
     }
     let horizon_diagnostic = params.multiview_options.y;
-    if horizon_diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_FRONTIER_HYBRID_PROOF
+    if (horizon_diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_FRONTIER_HYBRID_PROOF
+        || horizon_diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_FRONTIER_HYBRID_FALLBACK_PROOF)
         && u32(params.origin_spacing_cells.z) > 1u
         && frontier_support_tile_selected(input.world_xz) {
         discard;
