@@ -46,6 +46,7 @@ const TERRAIN_HORIZON_DIAGNOSTIC_GEOMETRY: u32 = 5u;
 const TERRAIN_HORIZON_DIAGNOSTIC_OCCLUSION: u32 = 6u;
 const TERRAIN_HORIZON_DIAGNOSTIC_WATER: u32 = 7u;
 const TERRAIN_HORIZON_DIAGNOSTIC_TEXTURE: u32 = 8u;
+const TERRAIN_HORIZON_DIAGNOSTIC_FRONTIER_SUPPORT: u32 = 9u;
 // The shared exact-distance field reaches 32 blocks. Restrict water's
 // exact-like appearance to its nearest quarter so the handoff remains a small
 // procedural-side halo rather than a broad second water domain.
@@ -139,6 +140,19 @@ fn exact_chunk_masked(chunk: vec2<i32>) -> bool {
 
 fn exact_chunk_painted(world_xz: vec2<f32>) -> bool {
     return exact_chunk_masked(vec2<i32>(floor(world_xz / 16.0)));
+}
+
+fn exact_frontier_adjacent(world_xz: vec2<f32>) -> bool {
+    let chunk = vec2<i32>(floor(world_xz / 16.0));
+    if exact_chunk_masked(chunk) {
+        return false;
+    }
+    let local = world_xz - vec2<f32>(chunk) * 16.0;
+    let band = 2.0;
+    return (local.x < band && exact_chunk_masked(chunk + vec2<i32>(-1, 0)))
+        || (local.x >= 16.0 - band && exact_chunk_masked(chunk + vec2<i32>(1, 0)))
+        || (local.y < band && exact_chunk_masked(chunk + vec2<i32>(0, -1)))
+        || (local.y >= 16.0 - band && exact_chunk_masked(chunk + vec2<i32>(0, 1)));
 }
 
 fn exact_transition_weight(world_xz: vec2<f32>) -> f32 {
@@ -1391,7 +1405,16 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
     // topology. Apply the exact renderer's full-sky/zero-block-light term once
     // after all albedo and geometric-shade composition.
     color *= environmental_illumination;
-    if horizon_diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_OWNERSHIP_LEVEL {
+    if horizon_diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_FRONTIER_SUPPORT {
+        color = vec3<f32>(0.015, 0.018, 0.025);
+        if exact_frontier_adjacent(input.world_xz) {
+            color = select(
+                vec3<f32>(1.0, 0.04, 0.72),
+                vec3<f32>(0.08, 0.96, 0.24),
+                u32(params.origin_spacing_cells.z) == 1u,
+            );
+        }
+    } else if horizon_diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_OWNERSHIP_LEVEL {
         color = terrain_horizon_level_color(u32(params.origin_spacing_cells.z));
     } else if horizon_diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_TOPOLOGY {
         color = vec3<f32>(0.08, 0.42, 0.95);

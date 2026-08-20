@@ -3,7 +3,7 @@ use std::mem::size_of;
 use std::num::{NonZeroU32, NonZeroU64};
 use std::sync::mpsc;
 
-use mclone_core::{BlockStateId, ChunkPos};
+use mclone_core::{BlockStateId, ChunkPos, HorizontalTopology};
 use mclone_mesh::{TexturedBlockTint, TexturedMeshCatalog};
 use mclone_render_color::{RenderTargetColorTransform, color_transform_wgpu};
 use mclone_worldgen::levelgen::{
@@ -30,8 +30,9 @@ use super::{
     TERRAIN_PREVIEW_WORKGROUP_AXIS, TerrainClipmap, TerrainClipmapConfig,
     TerrainClipmapDiagnostics, TerrainClipmapTile, TerrainCompositionSourceIdentity,
     TerrainExactBoundaryProfile, TerrainExactCoverageMask, TerrainExactCoverageMode,
-    TerrainExactTransitionField, TerrainHorizonPresentation, TerrainPreviewCamera,
-    TerrainPreviewDrawOptions, TerrainPreviewLayer, TerrainPreviewSource,
+    TerrainExactTransitionField, TerrainFrontierPlan, TerrainFrontierPlanOptions,
+    TerrainFrontierPlanReceipt, TerrainFrontierPlanState, TerrainHorizonPresentation,
+    TerrainPreviewCamera, TerrainPreviewDrawOptions, TerrainPreviewLayer, TerrainPreviewSource,
     TerrainPreviewSplitLayout, TerrainVegetationCoordinator, TerrainVegetationCoordinatorState,
     TerrainVegetationDesiredTile, TerrainVegetationExecutor, TerrainVegetationExecutorKind,
     TerrainVegetationSlotToken, TerrainViewportPlan, TerrainViewportTileId,
@@ -39,9 +40,10 @@ use super::{
         TERRAIN_HORIZON_STAGING_SLOTS_PER_LEVEL, TerrainHorizonAdmission,
         TerrainHorizonBeginTransition, TerrainHorizonLevelPresentation, TerrainHorizonResourceTile,
     },
-    mclone_tree_ownership_snapshot, parse_samples, terrain_preview_compute_wgsl,
-    terrain_preview_focus_y_for_profile, terrain_preview_render_multiview_wgsl,
-    terrain_preview_render_wgsl, terrain_preview_tree_multiview_wgsl, terrain_preview_tree_wgsl,
+    mclone_tree_ownership_snapshot, parse_samples, terrain_frontier_presentation_identity,
+    terrain_preview_compute_wgsl, terrain_preview_focus_y_for_profile,
+    terrain_preview_render_multiview_wgsl, terrain_preview_render_wgsl,
+    terrain_preview_tree_multiview_wgsl, terrain_preview_tree_wgsl,
     viewport_uniform_bytes_for_request, viewport_uniform_bytes_for_request_with_presentation,
 };
 
@@ -306,6 +308,10 @@ pub struct TerrainHorizonFrameStats {
     pub exact_coverage_mask_bytes: u64,
     pub exact_transition_preparation_micros: u64,
     pub exact_transition_payload_bytes: u64,
+    pub exact_boundary_columns: u32,
+    pub exact_boundary_payload_bytes: u64,
+    pub frontier: TerrainFrontierPlanReceipt,
+    pub frontier_plan_failures: u64,
     pub vegetation_service: TerrainHorizonVegetationServiceStats,
     pub finest_sample_spacing: u32,
     pub coarse_ready: bool,
@@ -3300,6 +3306,11 @@ pub struct TerrainHorizonRenderer {
     content_stage: TerrainPreviewContentStage,
     dispatched_refills_total: u64,
     exact_coverage_snapshot: Option<ExactPaintedCoverageSnapshot>,
+    exact_topology: HorizontalTopology,
+    frontier_plan: Option<TerrainFrontierPlan>,
+    frontier_receipt: TerrainFrontierPlanReceipt,
+    frontier_plan_failures: u64,
+    frontier_observer_chunk: [i64; 2],
     authoritative_tree_ownership: bool,
     tree_ownership: Option<BoundedRepresentationOwnershipSnapshot<McloneTreeOccurrenceId>>,
     exact_owned_tree_ids: BTreeSet<McloneTreeOccurrenceId>,
@@ -3319,6 +3330,10 @@ impl TerrainHorizonRenderer {
         }
         self.renderer.exact_coverage.disable();
         self.exact_coverage_snapshot = None;
+        self.exact_topology = HorizontalTopology::UNBOUNDED;
+        self.frontier_plan = None;
+        self.frontier_receipt = TerrainFrontierPlanReceipt::default();
+        self.frontier_observer_chunk = [0, 0];
         self.tree_ownership = None;
         self.exact_owned_tree_ids.clear();
     }
@@ -3468,6 +3483,11 @@ impl TerrainHorizonRenderer {
             content_stage: TerrainPreviewContentStage::Cover,
             dispatched_refills_total: 0,
             exact_coverage_snapshot: None,
+            exact_topology: HorizontalTopology::UNBOUNDED,
+            frontier_plan: None,
+            frontier_receipt: TerrainFrontierPlanReceipt::default(),
+            frontier_plan_failures: 0,
+            frontier_observer_chunk: [0, 0],
             authoritative_tree_ownership: false,
             tree_ownership: None,
             exact_owned_tree_ids: BTreeSet::new(),
@@ -3615,6 +3635,7 @@ impl TerrainHorizonRenderer {
         transition: &TerrainExactTransitionField,
         boundary: &TerrainExactBoundaryProfile,
         mode: TerrainExactCoverageMode,
+        topology: HorizontalTopology,
     ) -> Result<(), String> {
         let expected = TerrainCompositionSourceIdentity::new(
             TerrainPreviewProfile::McloneOverworldV1,
@@ -3627,16 +3648,95 @@ impl TerrainHorizonRenderer {
                 expected
             ));
         }
+        let frontier_changed = self.exact_coverage_snapshot.as_ref() != Some(snapshot)
+            || self.renderer.exact_coverage.boundary != *boundary
+            || self.exact_topology != topology;
         self.renderer
             .exact_coverage
             .set_snapshot(queue, snapshot, transition, boundary, mode)?;
         self.exact_coverage_snapshot = Some(snapshot.clone());
+        self.exact_topology = topology;
+        if frontier_changed {
+            self.frontier_plan = None;
+            self.frontier_receipt = TerrainFrontierPlanReceipt::default();
+        }
         Ok(())
     }
 
     pub fn clear_exact_painted_coverage(&mut self) {
         self.renderer.exact_coverage.disable();
         self.exact_coverage_snapshot = None;
+        self.frontier_plan = None;
+        self.frontier_receipt = TerrainFrontierPlanReceipt::default();
+    }
+
+    fn refresh_frontier_plan(
+        &mut self,
+        levels: &[TerrainHorizonLevelPresentation],
+    ) -> Result<(), String> {
+        if self.renderer.exact_coverage.mode == TerrainExactCoverageMode::Disabled {
+            self.frontier_plan = None;
+            self.frontier_receipt = TerrainFrontierPlanReceipt::default();
+            return Ok(());
+        }
+        let Some(coverage) = self.exact_coverage_snapshot.as_ref() else {
+            self.frontier_plan = None;
+            self.frontier_receipt = TerrainFrontierPlanReceipt {
+                enabled: true,
+                state: TerrainFrontierPlanState::Invalid,
+                ..Default::default()
+            };
+            self.frontier_plan_failures = self.frontier_plan_failures.saturating_add(1);
+            return Ok(());
+        };
+        let snapshots = levels
+            .iter()
+            .map(|level| level.snapshot.clone())
+            .collect::<Vec<_>>();
+        let presentation = terrain_frontier_presentation_identity(&snapshots);
+        let observer_chunk = [
+            i64::from(self.requested_center_x.div_euclid(16)),
+            i64::from(self.requested_center_z.div_euclid(16)),
+        ];
+        let observer_changed =
+            !self.exact_topology.is_unbounded() && self.frontier_observer_chunk != observer_chunk;
+        if self.frontier_receipt.enabled
+            && self.frontier_receipt.exact_generation == coverage.generation()
+            && self.frontier_receipt.presentation == presentation
+            && !observer_changed
+        {
+            return Ok(());
+        }
+        let observer_blocks = [
+            observer_chunk[0].saturating_mul(16).saturating_add(8),
+            observer_chunk[1].saturating_mul(16).saturating_add(8),
+        ];
+        match TerrainFrontierPlan::prepare(
+            coverage,
+            &self.renderer.exact_coverage.boundary,
+            self.exact_topology,
+            observer_blocks,
+            &snapshots,
+            TerrainFrontierPlanOptions::default(),
+        ) {
+            Ok(plan) => {
+                self.frontier_receipt = plan.receipt();
+                self.frontier_plan = Some(plan);
+            }
+            Err(_error) => {
+                self.frontier_plan = None;
+                self.frontier_receipt = TerrainFrontierPlanReceipt {
+                    enabled: true,
+                    state: TerrainFrontierPlanState::Invalid,
+                    exact_generation: coverage.generation(),
+                    presentation,
+                    ..Default::default()
+                };
+                self.frontier_plan_failures = self.frontier_plan_failures.saturating_add(1);
+            }
+        }
+        self.frontier_observer_chunk = observer_chunk;
+        Ok(())
     }
 
     pub fn set_authoritative_tree_ownership(&mut self, enabled: bool) {
@@ -4015,6 +4115,7 @@ impl TerrainHorizonRenderer {
         self.refresh_authoritative_tree_ownership(device, queue)?;
 
         let terrain_levels = self.admission.terrain_presentations();
+        self.refresh_frontier_plan(&terrain_levels)?;
         let far_culls = render_view_overrides.map(|view| {
             presentation
                 .fog
@@ -4537,6 +4638,10 @@ impl TerrainHorizonRenderer {
                 .transition
                 .preparation_micros(),
             exact_transition_payload_bytes: self.renderer.exact_coverage.transition.payload_bytes(),
+            exact_boundary_columns: self.renderer.exact_coverage.boundary.valid_columns(),
+            exact_boundary_payload_bytes: self.renderer.exact_coverage.boundary.payload_bytes(),
+            frontier: self.frontier_receipt,
+            frontier_plan_failures: self.frontier_plan_failures,
             vegetation_service,
             finest_sample_spacing: self.clipmap.config().base_sample_spacing,
             coarse_ready: drawn_levels > 0,
@@ -5560,7 +5665,9 @@ mod tests {
             assert!(shader.contains("TERRAIN_HORIZON_DIAGNOSTIC_ENVIRONMENT"));
             assert!(shader.contains("TERRAIN_HORIZON_DIAGNOSTIC_GEOMETRY"));
             assert!(shader.contains("TERRAIN_HORIZON_DIAGNOSTIC_OCCLUSION"));
+            assert!(shader.contains("TERRAIN_HORIZON_DIAGNOSTIC_FRONTIER_SUPPORT"));
         }
+        assert!(terrain.contains("fn exact_frontier_adjacent("));
         assert!(terrain.contains("diagnostic_river_alpha"));
         assert!(terrain.contains("material_texture_weight("));
     }

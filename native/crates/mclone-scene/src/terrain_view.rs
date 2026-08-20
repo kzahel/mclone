@@ -10,11 +10,11 @@ use mclone_render::color_profile::RenderColorProfile;
 use mclone_terrain_view::{
     ExactPaintedCoverageSnapshot, TERRAIN_LOD_HIGH_LEVEL_COUNT, TerrainCompositionSourceIdentity,
     TerrainExactBoundaryColumn, TerrainExactBoundaryProfile, TerrainExactCoverageMode,
-    TerrainHorizonDiagnostic, TerrainHorizonFrameStats, TerrainHorizonPresentation,
-    TerrainHorizonRenderTarget, TerrainLodPresetDescriptor, TerrainPreparedExactFrame,
-    TerrainPreviewCamera, TerrainPreviewMaterialAtlas, TerrainPreviewMaterialTable,
-    TerrainPreviewView, TerrainVegetationExecutor, TerrainViewEngine, TerrainViewEngineConfig,
-    TerrainViewSourceIdentity, terrain_exact_exposed_boundary_blocks,
+    TerrainFrontierPlanReceipt, TerrainHorizonDiagnostic, TerrainHorizonFrameStats,
+    TerrainHorizonPresentation, TerrainHorizonRenderTarget, TerrainLodPresetDescriptor,
+    TerrainPreparedExactFrame, TerrainPreviewCamera, TerrainPreviewMaterialAtlas,
+    TerrainPreviewMaterialTable, TerrainPreviewView, TerrainVegetationExecutor, TerrainViewEngine,
+    TerrainViewEngineConfig, TerrainViewSourceIdentity, terrain_exact_exposed_boundary_blocks,
     terrain_exact_player_connected_chunks,
 };
 use mclone_worldgen::terrain_preview::{TerrainPreviewContentStage, TerrainPreviewProfile};
@@ -62,6 +62,11 @@ pub struct SceneTerrainViewDiagnostics {
     pub exact_connector_bytes: u64,
     pub exact_transition_preparation_micros: u64,
     pub exact_transition_payload_bytes: u64,
+    pub exact_boundary_preparation_micros: u64,
+    pub exact_boundary_columns: u32,
+    pub exact_boundary_payload_bytes: u64,
+    pub frontier: TerrainFrontierPlanReceipt,
+    pub frontier_plan_failures: u64,
     pub inner_hole_culled_tiles: u32,
     pub frustum_culled_tiles: u32,
     pub far_culled_tiles: u32,
@@ -271,7 +276,11 @@ impl SceneTerrainViewState {
     pub(crate) fn set_exact_boundary_profile(
         &mut self,
         boundary: TerrainExactBoundaryProfile,
+        preparation_micros: u64,
     ) -> Result<()> {
+        self.diagnostics.exact_boundary_preparation_micros = preparation_micros;
+        self.diagnostics.exact_boundary_columns = boundary.valid_columns();
+        self.diagnostics.exact_boundary_payload_bytes = boundary.payload_bytes();
         self.exact = self
             .exact
             .clone()
@@ -500,16 +509,18 @@ impl McloneSceneHost {
                 .expect("composed terrain view was initialized")
                 .exact_coverage()
                 .clone();
+            let boundary_started = boundary_timing_now();
             let boundary = live_exact_boundary_profile(
                 self.active_world.runtime.as_ref(),
                 &self.mesh_assets.catalog,
                 &coverage,
                 topology,
             )?;
+            let boundary_preparation_micros = boundary_timing_elapsed_micros(boundary_started);
             self.terrain_view
                 .as_mut()
                 .expect("composed terrain view was initialized")
-                .set_exact_boundary_profile(boundary)?;
+                .set_exact_boundary_profile(boundary, boundary_preparation_micros)?;
         }
         self.active_world
             .draw
@@ -639,6 +650,10 @@ impl SceneTerrainViewState {
         self.diagnostics.exact_transition_preparation_micros =
             stats.exact_transition_preparation_micros;
         self.diagnostics.exact_transition_payload_bytes = stats.exact_transition_payload_bytes;
+        self.diagnostics.exact_boundary_columns = stats.exact_boundary_columns;
+        self.diagnostics.exact_boundary_payload_bytes = stats.exact_boundary_payload_bytes;
+        self.diagnostics.frontier = stats.frontier;
+        self.diagnostics.frontier_plan_failures = stats.frontier_plan_failures;
         self.diagnostics.inner_hole_culled_tiles = stats.inner_hole_culled_tiles;
         self.diagnostics.frustum_culled_tiles = stats.frustum_culled_tiles;
         self.diagnostics.far_culled_tiles = stats.far_culled_tiles;
@@ -692,6 +707,26 @@ fn terrain_exact_center_ready(ready_columns: &BTreeSet<ChunkPos>, focus: [f64; 3
     let center =
         ChunkPos::from_block_coords(floor_f64_to_i32(focus[0]), floor_f64_to_i32(focus[2]));
     ready_columns.contains(&center)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn boundary_timing_now() -> f64 {
+    js_sys::Date::now()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn boundary_timing_now() -> std::time::Instant {
+    std::time::Instant::now()
+}
+
+#[cfg(target_arch = "wasm32")]
+fn boundary_timing_elapsed_micros(started: f64) -> u64 {
+    ((js_sys::Date::now() - started).max(0.0) * 1_000.0) as u64
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn boundary_timing_elapsed_micros(started: std::time::Instant) -> u64 {
+    u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX)
 }
 
 fn live_exact_boundary_profile(

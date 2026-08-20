@@ -705,6 +705,7 @@ pub struct TerrainExactBoundaryProfile {
     origin_block_z: i32,
     width: u32,
     height: u32,
+    valid_columns: u32,
     packed: Vec<u32>,
 }
 
@@ -726,6 +727,7 @@ impl TerrainExactBoundaryProfile {
                 origin_block_z: 0,
                 width: 0,
                 height: 0,
+                valid_columns: 0,
                 packed: Vec::new(),
             });
         }
@@ -783,6 +785,12 @@ impl TerrainExactBoundaryProfile {
             }
             packed[local_z as usize * width as usize + local_x as usize] = value;
         }
+        let valid_columns = packed
+            .iter()
+            .filter(|value| **value & (1 << 31) != 0)
+            .count()
+            .try_into()
+            .unwrap_or(u32::MAX);
         Ok(Self {
             source: coverage.source(),
             generation: coverage.generation(),
@@ -790,6 +798,7 @@ impl TerrainExactBoundaryProfile {
             origin_block_z,
             width,
             height,
+            valid_columns,
             packed,
         })
     }
@@ -808,6 +817,14 @@ impl TerrainExactBoundaryProfile {
 
     pub const fn dimensions(&self) -> [u32; 2] {
         [self.width, self.height]
+    }
+
+    pub const fn valid_columns(&self) -> u32 {
+        self.valid_columns
+    }
+
+    pub fn payload_bytes(&self) -> u64 {
+        (self.packed.len() as u64).saturating_mul(size_of::<u32>() as u64)
     }
 
     pub fn packed(&self) -> &[u32] {

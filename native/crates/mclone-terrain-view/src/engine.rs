@@ -242,6 +242,7 @@ impl TerrainViewEngine {
                 exact.transition(),
                 exact.boundary(),
                 mode,
+                self.config.source.topology(),
             )?;
         } else {
             self.renderer.clear_exact_painted_coverage();

@@ -32,6 +32,7 @@ const TERRAIN_HORIZON_DIAGNOSTIC_GEOMETRY: u32 = 5u;
 const TERRAIN_HORIZON_DIAGNOSTIC_OCCLUSION: u32 = 6u;
 const TERRAIN_HORIZON_DIAGNOSTIC_WATER: u32 = 7u;
 const TERRAIN_HORIZON_DIAGNOSTIC_TEXTURE: u32 = 8u;
+const TERRAIN_HORIZON_DIAGNOSTIC_FRONTIER_SUPPORT: u32 = 9u;
 
 @group(0) @binding(0)
 var<uniform> params: TerrainPreviewParams;
@@ -259,7 +260,9 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let horizon_diagnostic = params.multiview_options.y;
     let environmental_illumination = full_sky_environmental_illumination();
     var color = input.color.rgb * input.color.a * environmental_illumination;
-    if horizon_diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_OWNERSHIP_LEVEL {
+    if horizon_diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_FRONTIER_SUPPORT {
+        color = vec3<f32>(0.0);
+    } else if horizon_diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_OWNERSHIP_LEVEL {
         color = terrain_horizon_level_color(u32(params.origin_spacing_cells.z));
     } else if horizon_diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_TOPOLOGY {
         color = vec3<f32>(0.94, 0.10, 0.72);

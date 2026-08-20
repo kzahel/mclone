@@ -28,3 +28,6 @@ mclone-terrain-view.workspace = true
 mclone-ui.workspace = true
 mclone-worldgen.workspace = true
 wgpu.workspace = true
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+js-sys.workspace = true

@@ -135,6 +135,18 @@ pub enum TerrainFrontierPlanState {
     Empty,
     CurrentComplete,
     CurrentIncomplete,
+    Invalid,
+}
+
+impl TerrainFrontierPlanState {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Empty => "empty",
+            Self::CurrentComplete => "current-complete",
+            Self::CurrentIncomplete => "current-incomplete",
+            Self::Invalid => "invalid",
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -285,7 +297,7 @@ impl TerrainFrontierPlan {
             .difference(&resident_fine_tiles)
             .copied()
             .collect::<BTreeSet<_>>();
-        let receipt = summarize_plan(
+        let mut receipt = summarize_plan(
             coverage,
             presentation,
             format,
@@ -294,8 +306,9 @@ impl TerrainFrontierPlan {
             &resident_fine_tiles,
             &missing_fine_tiles,
             options,
-            frontier_timing_elapsed_micros(started),
+            0,
         )?;
+        receipt.preparation_micros = frontier_timing_elapsed_micros(started);
         Ok(Self {
             source: coverage.source(),
             topology,
@@ -1048,6 +1061,44 @@ mod tests {
     }
 
     #[test]
+    fn negative_coordinates_preserve_the_spacing_one_frontier() {
+        let receipt = plan_square(2, [-9, -5]).receipt();
+        assert_eq!(receipt.exposed_segments, 320);
+        assert_eq!(receipt.spacing_one_connector_segments, 320);
+        assert_eq!(receipt.maximum_adjacent_spacing, 1);
+        assert_eq!(receipt.state, TerrainFrontierPlanState::CurrentComplete);
+    }
+
+    #[test]
+    fn hypothetical_sparse_pool_reports_deterministic_exhaustion() {
+        let center = ChunkPos::new(0, 0);
+        let coverage = ExactPaintedCoverageSnapshot::new(source(), 7, square(8, center)).unwrap();
+        let boundary = solid_boundary(&coverage, HorizontalTopology::UNBOUNDED);
+        let receipt = TerrainFrontierPlan::prepare(
+            &coverage,
+            &boundary,
+            HorizontalTopology::UNBOUNDED,
+            [8, 8],
+            &clipmap_levels([8, 8]),
+            TerrainFrontierPlanOptions {
+                hypothetical_fine_tile_capacity: 1,
+                ..TerrainFrontierPlanOptions::default()
+            },
+        )
+        .unwrap()
+        .receipt();
+        assert!(receipt.candidates.sparse_additional_fine_tiles > 1);
+        assert_eq!(receipt.candidates.sparse_admitted_fine_tiles, 1);
+        assert_eq!(
+            receipt.candidates.sparse_rejected_fine_tiles,
+            receipt
+                .candidates
+                .sparse_additional_fine_tiles
+                .saturating_sub(1)
+        );
+    }
+
+    #[test]
     fn radius_thirty_one_full_finest_candidate_includes_atomic_staging() {
         let candidates = plan_square(31, [0, 0]).receipt().candidates;
         assert_eq!(candidates.full_finest_tiles_per_axis, 18);
@@ -1238,6 +1289,55 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(error, "terrain frontier exact coverage is disconnected");
+    }
+
+    #[test]
+    fn exact_growth_eviction_and_source_reset_produce_distinct_plans() {
+        let base = square(1, ChunkPos::new(0, 0));
+        let grown = square(2, ChunkPos::new(0, 0));
+        let mut evicted = grown.clone();
+        evicted.remove(&ChunkPos::new(2, 0));
+        let levels = clipmap_levels([8, 8]);
+
+        let prepare = |source_identity, generation, chunks: BTreeSet<ChunkPos>| {
+            let coverage =
+                ExactPaintedCoverageSnapshot::new(source_identity, generation, chunks).unwrap();
+            let boundary = solid_boundary(&coverage, HorizontalTopology::UNBOUNDED);
+            TerrainFrontierPlan::prepare(
+                &coverage,
+                &boundary,
+                HorizontalTopology::UNBOUNDED,
+                [8, 8],
+                &levels,
+                TerrainFrontierPlanOptions::default(),
+            )
+            .unwrap()
+        };
+
+        let initial = prepare(source(), 1, base);
+        let expanded = prepare(source(), 2, grown);
+        let reduced = prepare(source(), 3, evicted);
+        let reset_source =
+            TerrainCompositionSourceIdentity::new(TerrainPreviewProfile::McloneOverworldV1, 54_321);
+        let reset = prepare(reset_source, 1, square(1, ChunkPos::new(0, 0)));
+
+        assert_eq!(initial.receipt().exact_generation, 1);
+        assert_eq!(expanded.receipt().exact_generation, 2);
+        assert_eq!(reduced.receipt().exact_generation, 3);
+        assert!(expanded.segments().len() > initial.segments().len());
+        assert!(reduced.segments().len() > expanded.segments().len());
+        assert_eq!(reset.source(), reset_source);
+        assert_ne!(reset.source(), initial.source());
+    }
+
+    #[test]
+    fn committed_presentation_identity_ignores_motion_within_one_tile() {
+        let before = clipmap_levels([0, 0]);
+        let after = clipmap_levels([63, 63]);
+        assert_eq!(
+            terrain_frontier_presentation_identity(&before),
+            terrain_frontier_presentation_identity(&after)
+        );
     }
 
     #[test]
