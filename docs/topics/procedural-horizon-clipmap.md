@@ -7,8 +7,11 @@ geometry clipmap, focus-connected exact composition, and bounded hybrid
 frontier run through `mclone-terrain-view` on native, WebGPU, flat Android,
 and XR. Tactical
 [`321`](../tactical/321-exact-frontier-support-architecture.md) completed the
-high-render-distance frontier implementation. Its final human pixel reviews
-remain the acceptance gates; this topic is the canonical system description.
+high-render-distance frontier implementation. Tactical
+[`323`](../tactical/323-quest-frontier-performance-recovery.md) then removed
+the dominant fragment-time support lookup cost and measured the remaining
+full-belt cost. Final human pixel reviews remain the acceptance gates; this
+topic is the canonical system description.
 
 ## System Contract
 
@@ -188,6 +191,24 @@ Quest steady sample measured 14.52 ms p50 and 18.48 ms p95 app work against a
 LOD on that platform is therefore an explicit quality choice rather than its
 default.
 
+Tactical 323 replaces the old per-fragment scan through 32 support records
+with a collision-free 18-by-18 row-mask lookup. The fixed suppression binding
+shrinks from 512 to 96 bytes and lookup becomes constant time for every legal
+65-chunk exact span, including negative coordinates. The retained preferred
+Quest Low/RD8 path improves to 13.27 ms p50 and 14.31 ms p95 app work with
+7.48 ms reported app GPU and 17.2% over-period frames. It reaches 72
+submissions per second but still misses the strict p95 budget. A zero-weight
+appearance branch is pixel-safe but measured within variance. A compact
+support-cell draw removed only 3.1% of visible support vertices, did not
+improve Quest timing, and was removed rather than retained as complexity.
+
+The now-cheap forced-fallback control measures 12.12 ms p50 and 13.12 ms p95,
+6.73 ms app GPU, and 0.1% over-period frames. This isolates the remaining
+stationary preferred cost to the full spacing-one support belt. Fixed
+foveation Low and Medium do not clear p95 and remain unpromoted. Preferred
+settled orbit remains over budget at 13.71/18.98 ms p50/p95, so Low remains
+Off by default on Quest.
+
 The bounded RD8 preferred case uses 20 added tiles, 11,212,240 terrain bytes,
 and 31,488 active connector bytes. It certifies all 1,088 perimeter segments.
 The forced one-tile case assigns 1,024 of those segments to the fallback.
@@ -222,9 +243,13 @@ volumetric silhouettes. An unsupported exact volumetric boundary must remain
 outside this contract rather than being hidden by a curtain. The preferred
 support unit is still a complete 64-by-64 tile, so large high-distance exact
 frontiers have a meaningful vertex and GPU cost even when only a narrow belt
-is visible. A future optimization may compact support draws without changing
-the 32-tile capacity or fallback topology, but it must preserve the same
-certificate and single-owner rules.
+is needed. Exact-owned cell compaction is not a useful next step: the measured
+RD8 view removed only 1,024 of 32,768 visible support cells. The credible next
+design is sub-tile or strip-owned spacing-one support with a matching bounded
+coarse-suppression representation. That is a certificate topology change, not
+an encoding optimization; it requires a new tactical, adversarial shape
+proofs, and human pixel acceptance while preserving the same single-owner and
+complete-fallback rules.
 
 ## Historical Development Record
 

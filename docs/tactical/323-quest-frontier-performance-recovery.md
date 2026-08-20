@@ -1,8 +1,9 @@
 # Tactical 323: Quest Frontier Performance Recovery
 
-Status: implementation authorized 2026-08-20; constant-time suppression
-accepted by measurement; inactive-transition shading and compact support
-drawing measured; optional Quest foveation evaluation in progress.
+Status: complete 2026-08-20. Constant-time suppression is retained;
+inactive-transition shading is retained as simpler equivalent control flow;
+compact support drawing was measured and reverted; preferred support improved
+substantially but still misses the strict Quest p95 gate.
 
 Topics: `procedural-horizon-clipmap`, `performance`,
 `quest-frontier-performance`
@@ -245,6 +246,64 @@ Medium levels as a separate, explicitly pixel-changing A/B. Do not silently
 change the default. Human acceptance is required before promoting a
 foveation level or any other quality tradeoff.
 
+### Phase 4 Evidence And Disposition
+
+The final retained preferred path is the Phase 2 build after the Phase 3
+revert. Its stationary Quest row remains `13.273 / 14.305ms` app-work p50/p95,
+`7.483ms` app GPU, and `17.2%` over-period frames. Relative to the original
+preferred range, the retained direct lookup recovers about two milliseconds
+at p50, more than four at p95, and about two milliseconds of reported app GPU
+time. It reaches 72 submissions per second but does not meet the tactical's
+strict `13.889ms` p95 target.
+
+The final forced-fallback control now measures `12.116 / 13.123ms` p50/p95,
+`6.904ms` thread-CPU p50, `5.229ms` blocked p50, `6.726ms` app GPU, and only
+`0.1%` over-period frames. It passes both tactical timing thresholds with the
+same 289 exact columns and six Low levels. Once the shared fragment scan is
+removed, the performance difference between the full fine belt and fallback
+becomes visible. This is evidence for a future narrow strip-owned support
+topology; it is not authorization to replace the accepted preferred product
+path with fallback.
+
+The retained preferred settled orbit measures `13.708 / 18.978ms` app-work
+p50/p95, `7.502 / 12.110ms` thread-CPU p50/p95, `8.452ms` app GPU, 68.65
+submitted FPS, and `41.8%` over-period frames. It keeps all 96 slots, 289 exact
+columns, and six Low levels ready, but streaming/motion raises both CPU and GPU
+tails. Raw final evidence:
+
+```text
+/tmp/mclone-t323-transition-preferred.txt
+/tmp/mclone-t323-final-fallback.txt
+/tmp/mclone-t323-final-orbit.txt
+```
+
+Fixed foveation Low measured `13.043 / 14.118ms`, `7.497ms` app GPU, and
+`11.5%` over-period frames. Medium measured `13.159 / 14.202ms`, `7.355ms` app
+GPU, and `13.3%` over-period frames. Neither clears p95, Medium is not better
+than Low overall, and both are broad pixel-quality tradeoffs. Foveation
+therefore remains Off by default with no human promotion decision requested.
+Raw A/B evidence is `/tmp/mclone-t323-foveation-low.txt` and
+`/tmp/mclone-t323-foveation-medium.txt`.
+
+Final shared-path validation includes the 143-test retained terrain-view
+suite, native and Wasm checks, Android and Android-XR builds, the browser
+WebGPU probe and terrain-horizon smoke, native preferred/fallback captures,
+flat-Android RD8 pixels, and RD8 synthetic stereo pixels. Inspected evidence:
+
+```text
+/tmp/mclone-t323-transition/rd8-elevated-product.png
+/tmp/mclone-t323-transition/rd8-elevated-forced-fallback.png
+/tmp/mclone-native-web-terrain-horizon-toggle-canvas.png
+/tmp/mclone-t323-flat-android.png
+/tmp/mclone-t323-xr-emulation.png
+```
+
+The next credible performance slice is not another draw-list encoding. It is
+an architecture review of sub-tile or strip-owned spacing-one support, with a
+matching bounded suppression representation and the same atomic certificate.
+That changes the accepted topology and needs a new tactical plus human pixel
+acceptance before implementation.
+
 ## Completion Gate
 
 - [x] Matched exact/preferred/fallback/preferred Quest baseline is recorded.
@@ -252,9 +311,9 @@ foveation level or any other quality tradeoff.
 - [x] Zero-weight transition shading is eliminated and pixel-validated.
 - [x] Compact support submission is measured and rejected without weakening
       the certificate.
-- [ ] Native, headed WebGPU, flat Android, stereo, and Quest gates pass.
-- [ ] Final stationary and orbit Quest measurements are recorded honestly.
-- [ ] Any remaining foveation decision is separated behind human acceptance.
-- [ ] Living clipmap and performance topics contain the settled result.
-- [ ] The worktree is clean and implementation commits share the topic
+- [x] Native, headed WebGPU, flat Android, stereo, and Quest gates pass.
+- [x] Final stationary and orbit Quest measurements are recorded honestly.
+- [x] Any remaining foveation decision is separated behind human acceptance.
+- [x] Living clipmap and performance topics contain the settled result.
+- [x] The worktree is clean and implementation commits share the topic
       trailers.

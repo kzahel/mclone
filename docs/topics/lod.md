@@ -85,7 +85,11 @@ terrain contract but remains an opt-in diagnostic path rather than the
 default. The exact frontier now uses a bounded 32-tile spacing-one support
 belt with a complete resolution-aware land/water fallback, generation-coherent
 admission, and shared mono/per-eye/multiview ownership; the detailed contract
-and its platform bounds live only in the canonical topic.
+and its platform bounds live only in the canonical topic. Tactical 323 makes
+support suppression constant time and materially improves Quest Low/RD8, but
+the preferred full-tile belt still misses the strict 72 Hz p95 gate; Android
+XR therefore remains Off by default pending a separately reviewed narrower
+support-ownership design.
 
 ## Historical Routes
 

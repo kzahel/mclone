@@ -141,6 +141,33 @@ GPU from `7.052ms` to `9.244ms` and app work from `14.384ms` to `17.053ms`.
 Dual per-eye remains the default; all three live modes remain available for
 future optimization without retaining an inactive target family.
 
+Tactical
+[`323`](../tactical/323-quest-frontier-performance-recovery.md) establishes
+the newer exact-frontier Low/RD8 baseline and recovers the largest measured
+stationary cost. Replacing a per-fragment scan through 32 fine-support records
+with one collision-free row-mask lookup moves the natural preferred path from
+`15.07-15.23 / 18.63-18.79ms` app-work p50/p95 and `9.09-9.53ms` app GPU to
+`13.273 / 14.305ms` and `7.483ms`. It restores 72 submissions per second, but
+still leaves `17.2%` of frames over period and does not clear the strict p95
+gate.
+
+Two apparent follow-ups are now ruled out. Skipping exact-style shading at a
+zero transition weight is within measurement variance, and exact-owned cell
+compaction removes only 3.1% of visible support vertices while adding index
+fetch and resource complexity; that candidate was reverted. Fixed foveation
+Low and Medium reach only `14.118ms` and `14.202ms` p95 and remain Off by
+default.
+
+The forced resolution-aware fallback is the useful attribution control after
+the lookup fix: it measures `12.116 / 13.123ms` p50/p95, `6.726ms` app GPU,
+and `0.1%` over-period frames. The preferred settled orbit remains well over
+budget at `13.708 / 18.978ms` and `41.8%` over-period frames. The next frontier
+performance investigation should therefore start with sub-tile or strip-owned
+spacing-one support and matching coarse suppression, not another draw-list
+encoding, foveation default, or multiview retry. That work changes the accepted
+certificate topology and requires its own architecture tactical and human
+pixel gates.
+
 ## High-Priority Known Performance Issues
 
 This is the first pickup list for measured, broadly applicable performance
