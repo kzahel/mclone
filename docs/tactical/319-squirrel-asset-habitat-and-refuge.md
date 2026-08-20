@@ -267,3 +267,11 @@ Do not infer a multiview pixel pass from the compiled pipeline or from
 synthetic per-eye stereo. Run the ordinary squirrel actor on a Quest or another
 adapter exposing `MULTIVIEW`, inspect both layers, then record Gate D before
 Phase E cache code begins.
+
+A later interactive review exposed a repeat-threat dead state: after descending,
+the squirrel retained a valid refuge route but the fair scheduler correctly
+withheld a redundant habitat-query admission, while `Alarm` incorrectly
+required that admission before using the cached route. The corrected transition
+reuses support-validated route evidence immediately after the ordinary alarm
+window. A focused regression now drives one squirrel through refuge, descent,
+and a complete second alarm/escape/climb/refuge sequence with no query admission.

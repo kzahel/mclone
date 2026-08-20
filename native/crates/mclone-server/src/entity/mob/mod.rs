@@ -1410,23 +1410,26 @@ impl MobRuntimeState {
                 }
             }
             mclone_protocol::SquirrelBehavior::Alarm => {
-                if nearest_threat.is_some()
-                    && behavior_ticks >= SQUIRREL_ALARM_TICKS
-                    && admission.refuge_query
-                {
-                    let route = find_squirrel_refuge_candidate(
-                        BlockPos::containing(entity.position),
-                        blocks,
-                    );
-                    self.squirrel_refuge_route = route;
-                    let squirrel = self.species.squirrel_mut().expect("squirrel species");
-                    squirrel.set_retained_intent(Some(
-                        mclone_protocol::SquirrelRetainedIntent::CoverEscape,
-                    ));
+                if nearest_threat.is_some() && behavior_ticks >= SQUIRREL_ALARM_TICKS {
+                    let route = self.squirrel_refuge_route.or_else(|| {
+                        if admission.refuge_query {
+                            find_squirrel_refuge_candidate(
+                                BlockPos::containing(entity.position),
+                                blocks,
+                            )
+                        } else {
+                            None
+                        }
+                    });
                     if let Some(route) = route {
+                        self.squirrel_refuge_route = Some(route);
+                        let squirrel = self.species.squirrel_mut().expect("squirrel species");
+                        squirrel.set_retained_intent(Some(
+                            mclone_protocol::SquirrelRetainedIntent::CoverEscape,
+                        ));
                         squirrel.set_refuge(Some(route.refuge));
+                        squirrel.set_behavior(mclone_protocol::SquirrelBehavior::Flee);
                     }
-                    squirrel.set_behavior(mclone_protocol::SquirrelBehavior::Flee);
                 } else if nearest_threat.is_none() {
                     self.species
                         .squirrel_mut()
@@ -4663,6 +4666,85 @@ mod tests {
             Some(SquirrelBehavior::RefugeIdle),
             "lost support must invalidate refuge occupancy"
         );
+    }
+
+    #[test]
+    fn squirrel_reuses_a_valid_refuge_route_after_descending() {
+        use mclone_protocol::SquirrelBehavior;
+
+        let id = EntityId(95);
+        let mut entity = ServerEntityState::from_metadata(
+            id,
+            EntityPersistentId::new(0, 95),
+            EntityMetadata::SQUIRREL,
+            Vec3d::new(0.5, 64.0, 0.5),
+            0.0,
+            0.0,
+            None,
+            true,
+        );
+        let mut mob = MobRuntimeState::from_spawn(id, EntityMetadata::SQUIRREL, true, 0.0);
+        let threat = MobPlayerTarget::from_position(Vec3d::new(0.5, 64.0, 1.5));
+
+        for _ in 0..240 {
+            entity.tick_count += 1;
+            mob.tick_entity(&mut entity, &[threat], &[], &[], &squirrel_tree);
+            if mob.squirrel_behavior() == Some(SquirrelBehavior::RefugeIdle) {
+                break;
+            }
+        }
+        assert_eq!(
+            mob.squirrel_behavior(),
+            Some(SquirrelBehavior::RefugeIdle),
+            "first threat must drive the squirrel into its refuge"
+        );
+
+        for _ in 0..240 {
+            entity.tick_count += 1;
+            mob.tick_entity(&mut entity, &[], &[], &[], &squirrel_tree);
+            if mob.squirrel_behavior() == Some(SquirrelBehavior::Idle) && entity.on_ground {
+                break;
+            }
+        }
+        assert_eq!(mob.squirrel_behavior(), Some(SquirrelBehavior::Idle));
+        assert!(entity.on_ground, "squirrel must finish descending");
+
+        let mut observed = Vec::new();
+        for _ in 0..240 {
+            entity.tick_count += 1;
+            mob.tick_entity_at_time_with_ecology(
+                &mut entity,
+                &[threat],
+                &[],
+                &[],
+                6_000,
+                &[],
+                RabbitEcologyAdmission::default(),
+                SquirrelEcologyAdmission::default(),
+                &squirrel_tree,
+            );
+            let behavior = mob.squirrel_behavior().expect("squirrel behavior");
+            if observed.last() != Some(&behavior) {
+                observed.push(behavior);
+            }
+            if behavior == SquirrelBehavior::RefugeIdle {
+                break;
+            }
+        }
+
+        for expected in [
+            SquirrelBehavior::Alarm,
+            SquirrelBehavior::Flee,
+            SquirrelBehavior::TrunkApproach,
+            SquirrelBehavior::Climb,
+            SquirrelBehavior::RefugeEnter,
+            SquirrelBehavior::RefugeIdle,
+        ] {
+            assert!(
+                observed.contains(&expected),
+                "second threat missed {expected:?}: {observed:?}"
+            );
+        }
     }
 
     #[test]

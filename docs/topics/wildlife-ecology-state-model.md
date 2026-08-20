@@ -92,7 +92,11 @@ admits support-checked refuge queries through the shared fair work budget.
 Ground forage and the complete alarm-to-refuge sequence pass conservation,
 persistence, unavailable-evidence, support-loss, behavior, and thousand-animal
 tests. Its final capable-device multiview pixel gate remains open, so durable
-cache state has not begun.
+cache state has not begun. A follow-up repeat-threat regression now proves that
+a squirrel which has descended can reuse its still-valid refuge route without
+waiting for a redundant habitat-query admission; a second player approach
+therefore repeats alarm, escape, climb, and refuge instead of stalling in
+alarm.
 
 ## Scope
 
