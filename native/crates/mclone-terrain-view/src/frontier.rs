@@ -31,7 +31,13 @@ pub const TERRAIN_FRONTIER_TERRAIN_RESOURCE_BYTES: u64 = {
     let normal_samples = drawn_samples + TERRAIN_FRONTIER_NORMAL_HALO_RADIUS * 2;
     let normal_height_bytes =
         normal_samples as u64 * normal_samples as u64 * size_of::<f32>() as u64;
-    semantic_bytes + normal_height_bytes + crate::TERRAIN_PREVIEW_UNIFORM_BYTES * 2
+    let compact_cell_index_bytes = TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS as u64
+        * TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS as u64
+        * size_of::<u32>() as u64;
+    semantic_bytes
+        + normal_height_bytes
+        + crate::TERRAIN_PREVIEW_UNIFORM_BYTES * 2
+        + compact_cell_index_bytes
 };
 
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -1021,7 +1027,7 @@ mod tests {
 
     #[test]
     fn terrain_resource_receipt_matches_renderer_allocation() {
-        assert_eq!(TERRAIN_FRONTIER_TERRAIN_RESOURCE_BYTES, 560_612);
+        assert_eq!(TERRAIN_FRONTIER_TERRAIN_RESOURCE_BYTES, 576_996);
     }
 
     #[test]
@@ -1146,13 +1152,13 @@ mod tests {
         assert_eq!(candidates.full_finest_tiles_per_axis, 18);
         assert_eq!(candidates.full_finest_logical_tiles, 324);
         assert_eq!(candidates.full_finest_staging_tiles, 35);
-        assert_eq!(candidates.full_finest_added_bytes, 188_365_632);
+        assert_eq!(candidates.full_finest_added_bytes, 193_870_656);
         assert_eq!(candidates.sparse_desired_fine_tiles, 128);
         assert_eq!(candidates.sparse_base_resident_fine_tiles, 0);
         assert_eq!(candidates.sparse_additional_fine_tiles, 128);
         assert_eq!(candidates.sparse_admitted_fine_tiles, 128);
         assert_eq!(candidates.sparse_rejected_fine_tiles, 0);
-        assert_eq!(candidates.sparse_additional_bytes, 71_758_336);
+        assert_eq!(candidates.sparse_additional_bytes, 73_855_488);
         assert_eq!(candidates.sparse_outer_edge_segments, 8_192);
         assert_eq!(candidates.sparse_vertex_upper_bound, 3_145_728);
         assert_eq!(candidates.resolution_aware_connector_segments, 4_032);

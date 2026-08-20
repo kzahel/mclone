@@ -1325,6 +1325,14 @@ fn vertex_main(
 }
 
 @vertex
+fn frontier_support_vertex_main(
+    @builtin(vertex_index) vertex_index: u32,
+    @location(0) cell_index: u32,
+) -> VertexOutput {
+    return terrain_vertex(cell_index * 6u + vertex_index, 0u, 0u);
+}
+
+@vertex
 fn exact_connector_vertex_main(
     @builtin(vertex_index) vertex_index: u32,
     @location(0) cell_world_xz: vec2<i32>,

@@ -238,6 +238,15 @@ fn vertex_multiview_main(
 }
 
 @vertex
+fn frontier_support_vertex_multiview_main(
+    @builtin(vertex_index) vertex_index: u32,
+    @location(0) cell_index: u32,
+    @builtin(view_index) view_index: i32,
+) -> VertexOutput {
+    return terrain_vertex(cell_index * 6u + vertex_index, 0u, u32(view_index));
+}
+
+@vertex
 fn exact_connector_vertex_multiview_main(
     @builtin(vertex_index) vertex_index: u32,
     @location(0) cell_world_xz: vec2<i32>,

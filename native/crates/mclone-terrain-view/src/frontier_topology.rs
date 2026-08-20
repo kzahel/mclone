@@ -564,8 +564,8 @@ mod tests {
         assert_eq!(receipt.base_suppression_tiles, 20);
         assert_eq!(receipt.outer_stitch_edges, 24);
         assert_eq!(receipt.outer_stitch_segments, 1_536);
-        assert_eq!(receipt.support_pool_capacity_bytes, 17_939_584);
-        assert_eq!(receipt.active_support_resource_bytes, 11_212_240);
+        assert_eq!(receipt.support_pool_capacity_bytes, 18_463_872);
+        assert_eq!(receipt.active_support_resource_bytes, 11_539_920);
         assert_eq!(receipt.support_compute_dispatches, 20);
         assert_eq!(receipt.support_terrain_vertices, 491_520);
         assert_eq!(receipt.connector_instance_bytes, 13_056);
