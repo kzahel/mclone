@@ -34,9 +34,18 @@ impl TerrainViewEngineConfig {
         self.width = self.width.max(1);
         self.height = self.height.max(1);
         let procedural = self.source.composition_source()?;
-        if procedural.profile != TerrainPreviewProfile::McloneOverworldV1 {
+        if procedural.profile == TerrainPreviewProfile::VanillaOverworld {
             return Err(
-                "the shared procedural horizon currently requires mclone-overworld-v1".to_owned(),
+                "the shared procedural horizon does not host the legacy vanilla profile".to_owned(),
+            );
+        }
+        if procedural.profile == TerrainPreviewProfile::ContinentalEcoregionCandidate
+            && self.vegetation_enabled
+        {
+            return Err(
+                "the continental ecoregion candidate is terrain-only and cannot use the \
+                 production vegetation executor"
+                    .to_owned(),
             );
         }
         self.clipmap = TerrainClipmap::new(self.clipmap)?.config();
@@ -105,19 +114,22 @@ impl TerrainViewEngine {
             );
         }
         let target_color_transform = config.color_profile.target_color_transform(color_format);
-        let renderer = TerrainHorizonRenderer::new_with_target_color_transform_and_cell_stride(
-            device,
-            queue,
-            color_format,
-            config.width,
-            config.height,
-            material_atlas,
-            config.clipmap,
-            config.render_cell_stride,
-            config.vegetation_max_sample_spacing,
-            vegetation_executor,
-            target_color_transform,
-        )?;
+        let profile = config.source.composition_source()?.profile;
+        let renderer =
+            TerrainHorizonRenderer::new_for_profile_with_target_color_transform_and_cell_stride(
+                device,
+                queue,
+                color_format,
+                config.width,
+                config.height,
+                material_atlas,
+                config.clipmap,
+                config.render_cell_stride,
+                config.vegetation_max_sample_spacing,
+                vegetation_executor,
+                target_color_transform,
+                profile,
+            )?;
         let mut engine = Self {
             renderer,
             config,
@@ -387,13 +399,49 @@ mod tests {
     use crate::{ExactPaintedCoverageSnapshot, TerrainCompositionSourceIdentity};
 
     fn source(seed: i64, generation: u64) -> TerrainViewSourceIdentity {
+        source_for_profile(TerrainPreviewProfile::McloneOverworldV1, seed, generation)
+    }
+
+    fn source_for_profile(
+        profile: TerrainPreviewProfile,
+        seed: i64,
+        generation: u64,
+    ) -> TerrainViewSourceIdentity {
         TerrainViewSourceIdentity::detached(
-            TerrainCompositionSourceIdentity::new(TerrainPreviewProfile::McloneOverworldV1, seed),
+            TerrainCompositionSourceIdentity::new(profile, seed),
             HorizontalTopology::UNBOUNDED,
             generation,
             1,
         )
         .unwrap()
+    }
+
+    #[test]
+    fn continental_candidate_is_horizon_only_and_vegetation_free() {
+        let config = TerrainViewEngineConfig {
+            width: 1,
+            height: 1,
+            source: source_for_profile(
+                TerrainPreviewProfile::ContinentalEcoregionCandidate,
+                12_345,
+                1,
+            ),
+            clipmap: TerrainClipmapConfig::default(),
+            render_cell_stride: 1,
+            vegetation_max_sample_spacing: TERRAIN_PREVIEW_MAX_TREE_RECORD_SAMPLE_SPACING,
+            vegetation_enabled: false,
+            color_profile: RenderColorProfile::Vanilla,
+        };
+        assert!(config.validated().is_ok());
+        assert!(
+            TerrainViewEngineConfig {
+                vegetation_enabled: true,
+                ..config
+            }
+            .validated()
+            .unwrap_err()
+            .contains("terrain-only")
+        );
     }
 
     #[test]

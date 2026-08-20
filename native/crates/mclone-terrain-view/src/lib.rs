@@ -683,10 +683,23 @@ pub fn terrain_preview_focus_y_for_profile(
     world_x: i32,
     world_z: i32,
 ) -> f32 {
-    if profile == mclone_worldgen::terrain_preview::TerrainPreviewProfile::VanillaOverworld {
-        return VanillaOverworldLodSampler::new(seed)
-            .sample(world_x, world_z)
-            .display_y as f32;
+    match profile {
+        mclone_worldgen::terrain_preview::TerrainPreviewProfile::VanillaOverworld => {
+            return VanillaOverworldLodSampler::new(seed)
+                .sample(world_x, world_z)
+                .display_y as f32;
+        }
+        mclone_worldgen::terrain_preview::TerrainPreviewProfile::ContinentalEcoregionCandidate => {
+            return mclone_worldgen::continental_surface::ContinentalSurfacePlan::new(
+                mclone_worldgen::continental_ecoregion::ContinentalEcoregionDescriptor::plane(seed),
+            )
+            .expect("the unbounded continental candidate descriptor is valid")
+            .query_point(world_x, world_z)
+            .sample
+            .display_surface_y
+                + 1.0;
+        }
+        mclone_worldgen::terrain_preview::TerrainPreviewProfile::McloneOverworldV1 => {}
     }
     let terrain = McloneOverworldSampler::new(seed).sample(world_x, world_z);
     let display_y =
@@ -1559,6 +1572,7 @@ fn viewport_uniform_bytes_for_request_with_presentation(
         match source.profile {
             mclone_worldgen::terrain_preview::TerrainPreviewProfile::McloneOverworldV1 => 0,
             mclone_worldgen::terrain_preview::TerrainPreviewProfile::VanillaOverworld => 1,
+            mclone_worldgen::terrain_preview::TerrainPreviewProfile::ContinentalEcoregionCandidate => 4,
         } | ((source.surface_quality as u32) << 1),
     ] {
         bytes.extend_from_slice(&word.to_le_bytes());

@@ -132,6 +132,7 @@ pub struct CanonicalTerrainCompiler {
 enum CanonicalTerrainFeatureDependencies {
     Mclone(McloneOverworldFeatureDependencyCache),
     Vanilla(OverworldFeatureDependencyCache),
+    Unsupported,
 }
 
 impl CanonicalTerrainCompiler {
@@ -159,6 +160,9 @@ impl CanonicalTerrainCompiler {
                         OverworldFeatureDependencyCache::new(),
                     )
                 }
+                TerrainPreviewProfile::ContinentalEcoregionCandidate => {
+                    CanonicalTerrainFeatureDependencies::Unsupported
+                }
             },
         }
     }
@@ -179,6 +183,7 @@ impl CanonicalTerrainCompiler {
         match &self.feature_dependencies {
             CanonicalTerrainFeatureDependencies::Mclone(cache) => cache.retained_chunk_count(),
             CanonicalTerrainFeatureDependencies::Vanilla(cache) => cache.retained_chunk_count(),
+            CanonicalTerrainFeatureDependencies::Unsupported => 0,
         }
     }
 
@@ -186,6 +191,7 @@ impl CanonicalTerrainCompiler {
         match &mut self.feature_dependencies {
             CanonicalTerrainFeatureDependencies::Mclone(cache) => cache.clear(),
             CanonicalTerrainFeatureDependencies::Vanilla(cache) => cache.clear(),
+            CanonicalTerrainFeatureDependencies::Unsupported => {}
         }
     }
 
@@ -201,6 +207,9 @@ impl CanonicalTerrainCompiler {
                     }
                     TerrainPreviewProfile::VanillaOverworld => {
                         generate_overworld_surface_chunk(self.seed, chunk_x, chunk_z)
+                    }
+                    TerrainPreviewProfile::ContinentalEcoregionCandidate => {
+                        panic!("continental ecoregion candidate has no exact chunk compiler")
                     }
                 },
                 CanonicalTerrainDependencyCacheReport::default(),
@@ -227,6 +236,9 @@ impl CanonicalTerrainCompiler {
                                 .expect("the feature batch returns every requested chunk"),
                             batch.cache_report.into(),
                         )
+                    }
+                    CanonicalTerrainFeatureDependencies::Unsupported => {
+                        panic!("continental ecoregion candidate has no exact chunk compiler")
                     }
                 };
                 CanonicalTerrainChunk::from_generated(

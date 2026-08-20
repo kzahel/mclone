@@ -1015,6 +1015,7 @@ const fn profile_tag(profile: TerrainPreviewProfile) -> u8 {
     match profile {
         TerrainPreviewProfile::McloneOverworldV1 => 1,
         TerrainPreviewProfile::VanillaOverworld => 2,
+        TerrainPreviewProfile::ContinentalEcoregionCandidate => 3,
     }
 }
 
@@ -1022,6 +1023,7 @@ fn profile_from_tag(tag: u8) -> Result<TerrainPreviewProfile, String> {
     match tag {
         1 => Ok(TerrainPreviewProfile::McloneOverworldV1),
         2 => Ok(TerrainPreviewProfile::VanillaOverworld),
+        3 => Ok(TerrainPreviewProfile::ContinentalEcoregionCandidate),
         other => Err(format!("MCHV terrain profile tag {other} is invalid")),
     }
 }

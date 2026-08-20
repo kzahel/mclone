@@ -1,8 +1,9 @@
 # Tactical 324: Continental Surface World Explorer
 
-Status: **implementation authorized 2026-08-20. Build the accepted continental
-plan into one named, shared broad-surface candidate and stop at Human Review B
-before exact chunks or production integration.**
+Status: **in progress 2026-08-20. Phases 1-2 are complete: the shared broad
+surface and explicit native/browser World Explorer source are drawable with
+zero exact or production-vegetation work. Continue through candidate cover,
+arid contrast, and six journeys, then stop at Human Review B.**
 
 Topic: `continental-ecoregion-planning`
 
@@ -217,6 +218,50 @@ Report descriptive measurements before setting new budgets:
 The current LOD remains a downstream fixed-budget consumer. Do not reduce
 terrain quality based on clipmap level or make coarse visibility canonical
 geography.
+
+## Execution Record
+
+### Phase 1: Shared Candidate Surface — complete
+
+- `mclone-worldgen` owns
+  `continental-ecoregion-candidate-v1`, five composable terrain-character
+  families, explicit solid/display/water levels, substrate, cover facts,
+  stable plan identities, and decomposed height contributions.
+- The pinned native/Wasm corpus compares whole and partitioned windows,
+  randomized point traversal, native threads, and 196,608-block cylinder
+  lifts. Its broad cases exercise the four temperate families, water, and at
+  least three substrates while reporting zero exact chunks, density volumes,
+  and feature batches.
+- First-pixel correction revised the shared plan and surface rather than the
+  renderer: province-owned height terms converge to a common boundary
+  surface, exposed stone needs local ridge evidence, low-frequency owner warp
+  breaks straight ownership edges, and typed ecotone fans carry a 4,096-block
+  base plus adjacency-specific width.
+
+### Phase 2: First Drawable Source — complete
+
+- `TerrainPreviewProfile::ContinentalEcoregionCandidate` routes the shared
+  surface through a CPU/reference clipmap refill and a two-sample stitched
+  height halo. The production source retains its GPU sampler unchanged.
+- Native `--source continental` and browser `source=continental` are explicit
+  horizon-only selections. Both reject exact composition and omit the
+  production vegetation executor; production remains the default.
+- A 1,280-by-720 native Metal capture at an 8,192-block oblique view filled
+  all 160 fixed slots, retained 133,344,028 bytes, and reported zero exact
+  chunks and zero vegetation. A warm complete fill was about 0.9 seconds;
+  first runs after shader compilation also exposed a roughly 13-second
+  pipeline cold-start and are not treated as sampler time.
+- The headed Chrome/WebGPU candidate smoke reached all 160 slots, retained the
+  same byte count, moved and rebased through the shared controls, and kept
+  exact painted chunks and tree instances at zero. Pixel evidence lives under
+  `/tmp/mclone-world-explorer-web-continental-*.png`.
+- Native and Wasm both reproduce the pinned plan and surface witnesses, and
+  the World Explorer all-target suite keeps the source and ownership locks
+  green.
+
+Phase 3 is next. The current color-only cover preview deliberately has no
+candidate tree instances; its remaining faint polygonal ownership reads as a
+known cover-realization problem, not an accepted visual endpoint.
 
 ## Non-Goals
 

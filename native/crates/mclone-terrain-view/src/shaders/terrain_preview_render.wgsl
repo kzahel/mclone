@@ -277,6 +277,14 @@ fn preview_profile() -> u32 {
     return params.content_stage_flags.w & 1u;
 }
 
+fn continental_candidate() -> bool {
+    return (params.content_stage_flags.w & 4u) != 0u;
+}
+
+fn production_mclone_profile() -> bool {
+    return preview_profile() == 0u && !continental_candidate();
+}
+
 fn surface_quality() -> u32 {
     return (params.content_stage_flags.w >> 1u) & 3u;
 }
@@ -524,6 +532,24 @@ fn terrain_color(sample: TerrainPreviewSample, light: f32) -> vec3<f32> {
     }
     if material != 4u {
         return vec3<f32>(0.52, 0.48, 0.39) * light;
+    }
+    if continental_candidate() {
+        let dry = clamp(1.0 - moisture, 0.0, 1.0);
+        let open_grass = mix(
+            vec3<f32>(0.30, 0.52, 0.20),
+            vec3<f32>(0.56, 0.52, 0.25),
+            dry,
+        );
+        let wooded_grass = mix(
+            vec3<f32>(0.20, 0.42, 0.18),
+            vec3<f32>(0.29, 0.43, 0.20),
+            dry,
+        );
+        return mix(
+            open_grass,
+            wooded_grass,
+            clamp(sample.forest_summary.x * 0.38, 0.0, 0.38),
+        ) * light;
     }
     if preview_profile() == 1u {
         return vanilla_grass_color(u32(round(sample.semantics.y))) * light;
@@ -914,7 +940,7 @@ fn terrain_vertex(
     out.textured = select(
         0u,
         1u,
-        params.layer_samples_size.x == 0u && preview_profile() == 0u,
+        params.layer_samples_size.x == 0u && production_mclone_profile(),
     );
     out.river = vec4<f32>(
         sample.hydrology.x,
@@ -1022,7 +1048,7 @@ fn exact_connector_vertex_legacy(
     out.textured = select(
         0u,
         1u,
-        params.layer_samples_size.x == 0u && preview_profile() == 0u,
+        params.layer_samples_size.x == 0u && production_mclone_profile(),
     );
     out.river = vec4<f32>(
         sample.hydrology.x,
@@ -1159,7 +1185,7 @@ fn frontier_connector_vertex(
     out.textured = select(
         0u,
         1u,
-        params.layer_samples_size.x == 0u && preview_profile() == 0u,
+        params.layer_samples_size.x == 0u && production_mclone_profile(),
     );
     out.river = vec4<f32>(
         sample.hydrology.x,

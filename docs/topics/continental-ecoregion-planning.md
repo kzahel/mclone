@@ -42,6 +42,17 @@ the next product gate. Tactical
 implementation: five composable terrain-character families, one shared named
 candidate source, six review journeys, and a stop at Human Review B before
 exact chunks or production integration.
+Its first two milestones are now implemented. The shared surface sampler
+publishes four drawable temperate families, explicit water and substrate,
+stable plan identities, and zero exact work under one native/Wasm witness.
+World Explorer native and browser accept the explicit
+`continental-ecoregion-candidate-v1` source through the ordinary fixed
+clipmap, while production remains the default and candidate mode rejects
+exact composition and production vegetation. First-pixel review removed
+province-sized rock slabs and reduced visible owner polygons by adding
+coordinate-pure owner warping, continuous province fallbacks, and wider typed
+ecotone fans. Candidate cover, arid planning, and six selected journeys remain
+before Human Review B.
 Mclone should combine
 top-down continental and ecoregional planning with bottom-up procedural
 realization so the Overworld contains large, recognizable, causally related

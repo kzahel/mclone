@@ -13,7 +13,7 @@ use crate::continental_ecoregion::{
 pub const CONTINENTAL_ECOREGION_HARNESS_SCHEMA_REVISION: &str =
     "mclone-continental-ecoregion-harness-v1";
 pub const CONTINENTAL_ECOREGION_WITNESS_SHA256: &str =
-    "4e69ce0b3c1814b8901f848752221fcc28ca0f18b714fb5b7135664de06536f8";
+    "3b97f8817bbe1e9b269f21dcb9c96d7c61e2365cbc18a7e664cdc2e34ba90236";
 pub const CONTINENTAL_ECOREGION_CORPUS_SEEDS: [i64; 3] = [12_345, 8_675_309, -98_765];
 pub const CONTINENTAL_ECOREGION_CORPUS_PERIOD_BLOCKS: i32 = 196_608;
 
@@ -325,7 +325,7 @@ fn validate_direct_work(
     if work.province_owner_evaluations > 9
         || work.ecoregion_owner_evaluations > 9
         || work.mosaic_owner_evaluations > 9
-        || work.local_field_evaluations > 6
+        || work.local_field_evaluations > 10
     {
         return Err("direct query exceeded its declared owner or field caps".to_owned());
     }
@@ -340,7 +340,7 @@ fn validate_window_work(work: PlanConstructionCounts, sample_count: usize) -> Re
         || work.province_owner_evaluations > sample_count as u64 * 9
         || work.ecoregion_owner_evaluations > sample_count as u64 * 9
         || work.mosaic_owner_evaluations > sample_count as u64 * 9
-        || work.local_field_evaluations > sample_count as u64 * 6
+        || work.local_field_evaluations > sample_count as u64 * 10
     {
         return Err("window work exceeded a declared per-sample cap".to_owned());
     }

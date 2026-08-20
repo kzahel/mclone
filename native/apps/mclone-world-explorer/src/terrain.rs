@@ -22,6 +22,7 @@ use mclone_world_explorer::{
     WORLD_EXPLORER_TERRAIN_FRONTIER, WorldExplorerCompositionMode, WorldExplorerConfig,
     WorldExplorerSession,
 };
+use mclone_worldgen::terrain_preview::TerrainPreviewProfile;
 
 use crate::options::{ExplorerAssetProfile, ExplorerOptions};
 
@@ -47,6 +48,8 @@ impl ExplorerTerrain {
         let material_table = TerrainPreviewMaterialTable::from_catalog(&assets.catalog);
         let target_color_transform =
             RenderColorProfile::Vanilla.target_color_transform(color_format);
+        let vegetation_enabled =
+            options.terrain_profile == TerrainPreviewProfile::McloneOverworldV1;
         let session = WorldExplorerSession::new(
             device,
             queue,
@@ -55,9 +58,10 @@ impl ExplorerTerrain {
                 width: options.width,
                 height: options.height,
                 seed: options.seed,
+                profile: options.terrain_profile,
                 initial_view: options.initial_view_state(),
                 clipmap: TerrainClipmapConfig::default(),
-                vegetation_enabled: true,
+                vegetation_enabled,
                 color_profile: RenderColorProfile::Vanilla,
             },
             TerrainPreviewMaterialAtlas {
@@ -66,7 +70,10 @@ impl ExplorerTerrain {
                 rgba: assets.atlas.rgba(),
                 material_table: &material_table,
             },
-            Some(Box::new(NativeTerrainVegetationExecutor::new())),
+            vegetation_enabled.then(|| {
+                Box::new(NativeTerrainVegetationExecutor::new())
+                    as Box<dyn mclone_terrain_view::TerrainVegetationExecutor>
+            }),
         )
         .map_err(anyhow::Error::msg)?;
         let exact = ExplorerExactTerrain::new(
@@ -117,8 +124,9 @@ impl ExplorerTerrain {
     pub fn title(&self) -> String {
         let state = self.session.view_state();
         format!(
-            "Mclone World Explorer — {} [1–4] — seed {} — ({}, {}) — {} blocks — {}",
+            "Mclone World Explorer — {} — {} [1–4] — seed {} — ({}, {}) — {} blocks — {}",
             self.composition.label(),
+            self.options.terrain_profile.label(),
             self.options.seed,
             state.center_x_i32(),
             state.center_z_i32(),

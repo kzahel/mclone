@@ -319,6 +319,7 @@ impl TerrainRuntimeCompositionLab {
                 width,
                 height,
                 seed,
+                profile: mclone_worldgen::terrain_preview::TerrainPreviewProfile::McloneOverworldV1,
                 initial_view,
                 clipmap: TerrainClipmapConfig::default(),
                 vegetation_enabled: true,

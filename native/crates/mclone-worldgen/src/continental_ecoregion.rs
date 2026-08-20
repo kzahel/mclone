@@ -12,7 +12,7 @@ use sha2::{Digest, Sha256};
 
 use crate::noise::{SeedDomain, ValueNoise2d};
 
-pub const CONTINENTAL_ECOREGION_SCHEMA_REVISION: &str = "mclone-continental-ecoregion-plan-v5";
+pub const CONTINENTAL_ECOREGION_SCHEMA_REVISION: &str = "mclone-continental-ecoregion-plan-v7";
 pub const CONTINENTAL_ECOREGION_DIMENSION_ID: &str = "mclone:overworld";
 pub const CONTINENTAL_ECOREGION_STORED_PROFILE: &str =
     "mclone-overworld-v1-control-field-revision-21";
@@ -30,6 +30,8 @@ const CLIMATE_MOISTURE_DOMAIN: SeedDomain = SeedDomain::new(0x6365_636f_6d6f_693
 const CLIMATE_TEMPERATURE_DOMAIN: SeedDomain = SeedDomain::new(0x6365_636f_7465_6d31);
 const CORRIDOR_WARP_DOMAIN: SeedDomain = SeedDomain::new(0x6365_636f_636f_7231);
 const LOCAL_OPENNESS_DOMAIN: SeedDomain = SeedDomain::new(0x6365_636f_6f70_6531);
+const OWNER_WARP_X_DOMAIN: SeedDomain = SeedDomain::new(0x6365_636f_7778_5f31);
+const OWNER_WARP_Z_DOMAIN: SeedDomain = SeedDomain::new(0x6365_636f_777a_5f31);
 
 const CONTINENT_HASH_DOMAIN: u64 = 0x6365_636f_636f_6e31;
 const PROVINCE_HASH_DOMAIN: u64 = 0x6365_636f_7072_6f31;
@@ -510,6 +512,8 @@ struct PlanFields {
     temperature: ValueNoise2d,
     corridor_warp: ValueNoise2d,
     local_openness: ValueNoise2d,
+    owner_warp_x: ValueNoise2d,
+    owner_warp_z: ValueNoise2d,
 }
 
 impl PlanFields {
@@ -528,6 +532,8 @@ impl PlanFields {
             temperature: value_noise(CLIMATE_TEMPERATURE_DOMAIN, 32_768),
             corridor_warp: value_noise(CORRIDOR_WARP_DOMAIN, 8_192),
             local_openness: value_noise(LOCAL_OPENNESS_DOMAIN, 1_024),
+            owner_warp_x: value_noise(OWNER_WARP_X_DOMAIN, 12_288),
+            owner_warp_z: value_noise(OWNER_WARP_Z_DOMAIN, 12_288),
         }
     }
 }
@@ -811,12 +817,9 @@ impl ContinentalEcoregionPlan {
             self.ecoregion_climate(site.second_owner_x, site.second_owner_z);
         let peer_kind =
             ecoregion_kind(province.kind, peer_moisture, peer_temperature, peer_id_hash);
-        let transition_width_blocks = ecoregion_transition_width_blocks(kind, peer_kind);
-        let transition_weight = if transition_width_blocks == 0.0 {
-            0.0
-        } else {
-            (1.0 - site.boundary_distance_blocks / (transition_width_blocks * 0.5)).clamp(0.0, 1.0)
-        };
+        let transition_width_blocks = 4_096.0 + ecoregion_transition_width_blocks(kind, peer_kind);
+        let transition_weight =
+            (1.0 - site.boundary_distance_blocks / (transition_width_blocks * 0.5)).clamp(0.0, 1.0);
         let blend = transition_weight * 0.5;
         let (base_openness, base_canopy) = ecoregion_cover(kind);
         let (peer_openness, peer_canopy) = ecoregion_cover(peer_kind);
@@ -924,16 +927,9 @@ impl ContinentalEcoregionPlan {
         let mut openness =
             (f64::from(ecoregion.base_openness) + clearing_influence * 0.72 + local_variation)
                 .clamp(0.0, 1.0);
-        let forest_affinity = match ecoregion.kind {
-            EcoregionKind::OldForestCore => 1.0,
-            EcoregionKind::RiparianWoodland | EcoregionKind::MixedWoodland => 0.82,
-            EcoregionKind::QuietTransition => 0.58,
-            _ => 0.28,
-        };
         let mut forest_core = (f64::from(ecoregion.base_canopy)
-            * forest_affinity
             * (1.0 - clearing_influence)
-            * (0.72 + f64::from(ecoregion.core_weight) * 0.28))
+            * (0.84 + f64::from(ecoregion.core_weight) * 0.16))
             .clamp(0.0, 1.0);
         let corridor = (route.weight
             * habitat_route_context(
@@ -1009,6 +1005,14 @@ impl ContinentalEcoregionPlan {
         level: OwnerLevel,
     ) -> NearestSite {
         let canonical_x = self.descriptor.topology.canonical_world_x(world_x);
+        work.local_field_evaluations += 2;
+        let warp_amplitude = f64::from(scale) * 0.18;
+        let query_x = i64::from(canonical_x)
+            + (self.fields.owner_warp_x.sample(canonical_x, world_z) * warp_amplitude).round()
+                as i64;
+        let query_z = i64::from(world_z)
+            + (self.fields.owner_warp_z.sample(canonical_x, world_z) * warp_amplitude).round()
+                as i64;
         let base_owner_x = canonical_x.div_euclid(scale);
         let base_owner_z = world_z.div_euclid(scale);
         let mut nearest: Option<(f64, NearestSite)> = None;
@@ -1033,8 +1037,7 @@ impl ContinentalEcoregionPlan {
                 let center_z = i64::from(owner_z) * i64::from(scale)
                     + i64::from(scale / 2)
                     + i64::from(signed_hash_offset(hash, 24, jitter));
-                let distance = ((i64::from(canonical_x) - center_x) as f64)
-                    .hypot((i64::from(world_z) - center_z) as f64);
+                let distance = ((query_x - center_x) as f64).hypot((query_z - center_z) as f64);
                 let site = NearestSite {
                     owner_x,
                     owner_z,
@@ -1812,7 +1815,7 @@ mod tests {
         assert!(province.sample.ecoregion.is_none());
         assert_eq!(province.work.ecoregion_owner_evaluations, 0);
         assert_eq!(province.work.mosaic_owner_evaluations, 0);
-        assert_eq!(province.work.local_field_evaluations, 0);
+        assert_eq!(province.work.local_field_evaluations, 2);
         assert_eq!(province.work.exact_chunks, 0);
     }
 

@@ -182,16 +182,19 @@ fn native_and_browser_cutovers_remove_horizon_sync_compilation() {
         0,
         "the Horizon renderer regained synchronous vegetation compilation"
     );
-    assert_eq!(
-        NATIVE_TERRAIN.matches("vegetation_enabled: true").count(),
-        1,
-        "native must retain exactly one named enable site"
-    );
-    assert_eq!(
-        WEB_HOST.matches("vegetation_enabled: true").count(),
-        1,
-        "browser must retain exactly one named enable site"
-    );
+    for (label, source) in [("native", NATIVE_TERRAIN), ("browser", WEB_HOST)] {
+        assert!(
+            source.contains(
+                "options.terrain_profile == TerrainPreviewProfile::McloneOverworldV1"
+            ),
+            "{label} vegetation must remain qualified to the production terrain source"
+        );
+        assert_eq!(
+            source.matches("vegetation_enabled,").count(),
+            1,
+            "{label} must pass one named vegetation enablement into the shared session"
+        );
+    }
     assert!(!NATIVE_TERRAIN.contains("vegetation_enabled: false"));
     assert!(!WEB_HOST.contains("vegetation_enabled: false"));
 }

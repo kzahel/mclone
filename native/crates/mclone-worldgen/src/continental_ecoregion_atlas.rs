@@ -1565,8 +1565,8 @@ mod tests {
         );
         let metrics = &atlas.metadata.metrics;
         assert!(metrics.transition_width_blocks.observation_count > 0);
-        assert!((800..=2_600).contains(&metrics.transition_width_blocks.median));
-        assert!(metrics.transition_width_blocks.maximum <= 2_600);
+        assert!((4_096..=6_696).contains(&metrics.transition_width_blocks.median));
+        assert!(metrics.transition_width_blocks.maximum <= 6_696);
         assert!(metrics.clearing_plans.clearing_count > 0);
         assert_eq!(
             metrics.clearing_plans.clearing_count,

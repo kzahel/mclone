@@ -90,6 +90,7 @@
     "native:world-explorer:web:build": "node ./native/apps/mclone-world-explorer/scripts/build-web.mjs",
     "native:world-explorer:web:smoke": "node ./native/apps/mclone-world-explorer/scripts/browser-smoke.mjs",
     "native:world-explorer:web:smoke:mobile": "node ./native/apps/mclone-world-explorer/scripts/browser-smoke.mjs --mobile",
+    "native:world-explorer:web:continental-smoke": "node ./native/apps/mclone-world-explorer/scripts/browser-continental-smoke.mjs",
     "native:world-explorer:web:composition-smoke": "node ./native/apps/mclone-world-explorer/scripts/browser-composition-smoke.mjs",
     "native:runtime:smoke": "pnpm native:scheduler:smoke",
     "native:runtime:perf": "pnpm native:scheduler:perf",

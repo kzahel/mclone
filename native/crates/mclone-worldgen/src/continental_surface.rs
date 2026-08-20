@@ -19,7 +19,7 @@ use crate::{
     noise::{SeedDomain, ValueNoise2d},
 };
 
-pub const CONTINENTAL_SURFACE_SCHEMA_REVISION: &str = "mclone-continental-surface-v1";
+pub const CONTINENTAL_SURFACE_SCHEMA_REVISION: &str = "mclone-continental-surface-v2";
 pub const CONTINENTAL_SURFACE_SOURCE_LABEL: &str = "continental-ecoregion-candidate-v1";
 pub const CONTINENTAL_SURFACE_FAMILY_COUNT: usize = 5;
 pub const CONTINENTAL_SURFACE_MAX_WINDOW_SAMPLES: usize = 262_144;
@@ -360,13 +360,18 @@ impl ContinentalSurfacePlan {
         let province = plan.province;
         let ecoregion = plan.ecoregion;
         let mosaic = plan.mosaic;
-        let rolling_weight = province.map_or(0.0, |province| match province.kind {
-            PhysiographicProvinceKind::RollingHills => 0.92,
-            PhysiographicProvinceKind::QuietBench => 0.82,
-            PhysiographicProvinceKind::WoodedUpland => 0.48,
-            PhysiographicProvinceKind::RiverLowland => 0.42,
-            PhysiographicProvinceKind::LakeBasin => 0.36,
-            PhysiographicProvinceKind::RockyRidge => 0.18,
+        let province_core = province.map_or(0.0, |province| f64::from(province.core_weight));
+        let province_identity = smoothstep(0.04, 0.70, province_core);
+        let rolling_weight = province.map_or(0.0, |province| {
+            let owned = match province.kind {
+                PhysiographicProvinceKind::RollingHills => 0.92,
+                PhysiographicProvinceKind::QuietBench => 0.82,
+                PhysiographicProvinceKind::WoodedUpland => 0.48,
+                PhysiographicProvinceKind::RiverLowland => 0.42,
+                PhysiographicProvinceKind::LakeBasin => 0.36,
+                PhysiographicProvinceKind::RockyRidge => 0.18,
+            };
+            lerp(0.62, owned, province_identity)
         });
         let water_route = mosaic
             .and_then(|mosaic| mosaic.corridor_kind.map(|kind| (kind, mosaic.corridor)))
@@ -381,9 +386,9 @@ impl ContinentalSurfacePlan {
         let fluvial_weight = (water_route.max(wetland * 0.78).max(province.map_or(
             0.0,
             |province| match province.kind {
-                PhysiographicProvinceKind::RiverLowland => 0.72,
-                PhysiographicProvinceKind::LakeBasin => 0.86,
-                _ => major_water * 0.36,
+                PhysiographicProvinceKind::RiverLowland => 0.72 * province_identity,
+                PhysiographicProvinceKind::LakeBasin => 0.86 * province_identity,
+                _ => major_water * 0.36 * province_identity,
             },
         )))
         .clamp(0.0, 1.0);
@@ -395,7 +400,7 @@ impl ContinentalSurfacePlan {
                 PhysiographicProvinceKind::QuietBench => 0.24,
                 _ => 0.10,
             };
-            kind * (0.62 + f64::from(province.core_weight) * 0.38)
+            kind * province_identity
         });
         let arid_weight = 0.0;
         let family_weights = normalize_weights([
@@ -413,8 +418,7 @@ impl ContinentalSurfacePlan {
         } else {
             4.0 + inland * 15.0 + macro_roll * (3.0 + inland * 2.5)
         };
-        let province_core = province.map_or(0.0, |province| f64::from(province.core_weight));
-        let province_amplitude = 0.30 + smoothstep(0.0, 0.72, province_core) * 0.70;
+        let common_province_height = macro_roll * 4.2 + ridge_form * 1.4;
         let rolling_height = macro_roll * 7.0 + ridge_form * 2.5;
         let upland_height = 20.0 + ridge_form.abs().powf(1.35) * 30.0 + macro_roll * 7.0;
         let lowland_height = macro_roll * 3.0 - unit_field(basin_form) * 4.0;
@@ -429,7 +433,7 @@ impl ContinentalSurfacePlan {
                 PhysiographicProvinceKind::RockyRidge => upland_height,
                 PhysiographicProvinceKind::QuietBench => rolling_height * 0.55 + 5.0,
             };
-            height * province_amplitude
+            lerp(common_province_height, height, province_identity)
         });
 
         let clearing = mosaic.map_or(0.0, |mosaic| f64::from(mosaic.clearing_core));
@@ -500,12 +504,11 @@ impl ContinentalSurfacePlan {
             dominant_family,
             upland_weight,
             ridge_form,
+            local_form,
             wetland,
             openness,
         );
-        let forest_edge = (forest_core * (1.0 - forest_core) * 4.0)
-            .max(ecoregion.map_or(0.0, |ecoregion| f64::from(ecoregion.transition_weight)))
-            .clamp(0.0, 1.0);
+        let forest_edge = (forest_core * (1.0 - forest_core) * 4.0).clamp(0.0, 1.0);
         let (temperature, moisture) = ecoregion.map_or((0.5, 0.5), |ecoregion| {
             (
                 f64::from(ecoregion.temperature),
@@ -634,6 +637,7 @@ fn surface_substrate(
     family: TerrainCharacterFamily,
     upland: f64,
     ridge_form: f64,
+    local_form: f64,
     wetland: f64,
     openness: f64,
 ) -> ContinentalSurfaceSubstrate {
@@ -655,7 +659,9 @@ fn surface_substrate(
         ContinentalSurfaceWaterKind::WetlandPool => ContinentalSurfaceSubstrate::CoarseSoil,
         ContinentalSurfaceWaterKind::None
             if family == TerrainCharacterFamily::UplandAndEscarpment
-                && (upland > 0.68 || ridge_form > 0.54) =>
+                && upland > 0.42
+                && ridge_form > 0.58
+                && local_form > 0.12 =>
         {
             ContinentalSurfaceSubstrate::Stone
         }

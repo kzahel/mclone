@@ -1296,7 +1296,7 @@ impl TerrainViewportGpuTile {
         let normal_height_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("mclone_terrain_horizon_normal_heights"),
             size: normal_height_byte_len,
-            usage: wgpu::BufferUsages::STORAGE,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
         Self::new_with_reference_buffer(
@@ -1470,6 +1470,41 @@ impl TerrainViewportGpuTile {
         queue.write_buffer(reference_sample_buffer, 0, &reference_bytes);
         self.upload_vegetation(device, queue, vegetation)?;
         self.reference = Some(reference);
+        Ok(())
+    }
+
+    fn upload_horizon_reference(
+        &mut self,
+        queue: &wgpu::Queue,
+        sample_byte_len: u64,
+        reference: TerrainPreviewReferenceGrid,
+        height_halo: &[f32],
+    ) -> Result<(), String> {
+        let reference_bytes = reference.packed_bytes();
+        if reference_bytes.len() as u64 != sample_byte_len {
+            return Err(format!(
+                "terrain horizon reference upload is {} bytes, expected {sample_byte_len}",
+                reference_bytes.len()
+            ));
+        }
+        let expected_height_count = usize::try_from(terrain_horizon_samples_per_axis())
+            .map_err(|_| "terrain horizon halo axis exceeds usize")?
+            .checked_pow(2)
+            .ok_or("terrain horizon halo sample count overflow")?;
+        if height_halo.len() != expected_height_count {
+            return Err(format!(
+                "terrain horizon height halo has {} samples, expected {expected_height_count}",
+                height_halo.len()
+            ));
+        }
+        let mut height_bytes = Vec::with_capacity(height_halo.len() * size_of::<f32>());
+        for height in height_halo {
+            height_bytes.extend_from_slice(&height.to_le_bytes());
+        }
+        queue.write_buffer(&self.gpu_sample_buffer, 0, &reference_bytes);
+        queue.write_buffer(&self._normal_height_buffer, 0, &height_bytes);
+        self.reference = Some(reference);
+        self.gpu_submitted = true;
         Ok(())
     }
 
@@ -3672,6 +3707,7 @@ pub struct TerrainHorizonRenderer {
     vegetation_executor: Option<Box<dyn TerrainVegetationExecutor>>,
     vegetation_coordinator: Option<TerrainVegetationCoordinator>,
     vegetation_error: Option<String>,
+    profile: TerrainPreviewProfile,
     seed: i64,
     requested_center_x: i32,
     requested_center_z: i32,
@@ -3789,6 +3825,37 @@ impl TerrainHorizonRenderer {
         vegetation_executor: Option<Box<dyn TerrainVegetationExecutor>>,
         target_color_transform: RenderTargetColorTransform,
     ) -> Result<Self, String> {
+        Self::new_for_profile_with_target_color_transform_and_cell_stride(
+            device,
+            queue,
+            color_format,
+            width,
+            height,
+            material_atlas,
+            config,
+            render_cell_stride,
+            vegetation_max_sample_spacing,
+            vegetation_executor,
+            target_color_transform,
+            TerrainPreviewProfile::McloneOverworldV1,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_for_profile_with_target_color_transform_and_cell_stride(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        color_format: wgpu::TextureFormat,
+        width: u32,
+        height: u32,
+        material_atlas: TerrainPreviewMaterialAtlas<'_>,
+        config: TerrainClipmapConfig,
+        render_cell_stride: u32,
+        vegetation_max_sample_spacing: u32,
+        vegetation_executor: Option<Box<dyn TerrainVegetationExecutor>>,
+        target_color_transform: RenderTargetColorTransform,
+        profile: TerrainPreviewProfile,
+    ) -> Result<Self, String> {
         if render_cell_stride == 0
             || !render_cell_stride.is_power_of_two()
             || TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS % render_cell_stride != 0
@@ -3864,6 +3931,7 @@ impl TerrainHorizonRenderer {
             vegetation_executor,
             vegetation_coordinator: None,
             vegetation_error: None,
+            profile,
             seed: 0,
             requested_center_x: 0,
             requested_center_z: 0,
@@ -4031,10 +4099,7 @@ impl TerrainHorizonRenderer {
         mode: TerrainExactCoverageMode,
         topology: HorizontalTopology,
     ) -> Result<(), String> {
-        let expected = TerrainCompositionSourceIdentity::new(
-            TerrainPreviewProfile::McloneOverworldV1,
-            self.seed,
-        );
+        let expected = TerrainCompositionSourceIdentity::new(self.profile, self.seed);
         if snapshot.source() != expected {
             return Err(format!(
                 "exact-painted coverage source {:?} does not match horizon source {:?}",
@@ -4667,7 +4732,8 @@ impl TerrainHorizonRenderer {
             {
                 continue;
             }
-            let tile_id = terrain_horizon_tile_id(self.seed, self.content_stage, tile);
+            let tile_id =
+                terrain_horizon_tile_id(self.profile, self.seed, self.content_stage, tile);
             let slot = &mut self.slots[slot_index];
             slot.request = tile_id.preview_request().validate()?;
             queue.write_buffer(
@@ -4690,7 +4756,7 @@ impl TerrainHorizonRenderer {
                     presentation.diagnostic,
                 ),
             );
-            {
+            if self.profile.supports_gpu_lod() {
                 let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                     label: Some("mclone_terrain_horizon_compute_pass"),
                     timestamp_writes: None,
@@ -4705,8 +4771,20 @@ impl TerrainHorizonRenderer {
                 let workgroups =
                     terrain_horizon_samples_per_axis().div_ceil(TERRAIN_PREVIEW_WORKGROUP_AXIS);
                 pass.dispatch_workgroups(workgroups, workgroups, 1);
+                slot.gpu_submitted = true;
+            } else {
+                let (reference, height_halo) =
+                    TerrainPreviewReferenceGrid::compile_continental_with_height_halo(
+                        tile_id.preview_request(),
+                        TERRAIN_HORIZON_NORMAL_HALO_RADIUS,
+                    )?;
+                slot.upload_horizon_reference(
+                    queue,
+                    self.renderer.sample_byte_len,
+                    reference,
+                    &height_halo,
+                )?;
             }
-            slot.gpu_submitted = true;
             self.admission.mark_ready(resource.resource_slot)?;
             dispatched_refills = dispatched_refills.saturating_add(1);
         }
@@ -4748,6 +4826,7 @@ impl TerrainHorizonRenderer {
             )?;
         }
         let slots = &self.slots;
+        let profile = self.profile;
         let seed = self.seed;
         let content_stage = self.content_stage;
         self.admission.commit_ready_vegetation(|resource| {
@@ -4756,7 +4835,7 @@ impl TerrainHorizonRenderer {
                 .as_ref()
                 .is_some_and(|product| {
                     product.request().request()
-                        == terrain_horizon_tile_id(seed, content_stage, resource.tile)
+                        == terrain_horizon_tile_id(profile, seed, content_stage, resource.tile)
                             .preview_request()
                 })
         });
@@ -5721,7 +5800,12 @@ impl TerrainHorizonRenderer {
             .filter(|level| level.snapshot.sample_spacing <= self.vegetation_max_sample_spacing)
             .flat_map(|level| level.tiles)
             .map(|resource| TerrainVegetationDesiredTile {
-                tile: terrain_horizon_tile_id(self.seed, self.content_stage, resource.tile),
+                tile: terrain_horizon_tile_id(
+                    self.profile,
+                    self.seed,
+                    self.content_stage,
+                    resource.tile,
+                ),
                 slot: TerrainVegetationSlotToken {
                     physical_slot: resource.resource_slot,
                     slot_generation: resource.slot_generation,
@@ -6176,12 +6260,13 @@ fn terrain_horizon_outer_edge_flags(
 }
 
 fn terrain_horizon_tile_id(
+    profile: TerrainPreviewProfile,
     seed: i64,
     content_stage: TerrainPreviewContentStage,
     tile: TerrainClipmapTile,
 ) -> TerrainViewportTileId {
     TerrainViewportTileId {
-        profile: TerrainPreviewProfile::McloneOverworldV1,
+        profile,
         seed,
         tile_x: tile.tile_x,
         tile_z: tile.tile_z,
@@ -6387,6 +6472,7 @@ fn source_needs_gpu(options: TerrainPreviewDrawOptions, profile: TerrainPreviewP
                 TerrainPreviewSource::Macro | TerrainPreviewSource::Split
             ) || options.layer == TerrainPreviewLayer::Error
         }
+        TerrainPreviewProfile::ContinentalEcoregionCandidate => false,
     }
 }
 

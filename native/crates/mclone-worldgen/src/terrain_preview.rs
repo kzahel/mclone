@@ -15,6 +15,14 @@ use crate::levelgen::{
     VANILLA_OVERWORLD_LOD_REVISION, VanillaOverworldLodSample, VanillaOverworldLodSampler,
     VanillaOverworldMacroSampler,
 };
+use crate::{
+    continental_ecoregion::{ContinentalEcoregionDescriptor, ContinentalEcoregionTopology},
+    continental_surface::{
+        CONTINENTAL_SURFACE_SCHEMA_REVISION, ContinentalSurfacePlan, ContinentalSurfaceSample,
+        ContinentalSurfaceSubstrate, ContinentalSurfaceWaterKind, ContinentalSurfaceWindowRequest,
+        TerrainCharacterFamily,
+    },
+};
 use mclone_core::ChunkPos;
 
 pub const TERRAIN_PREVIEW_REFERENCE_SCHEMA_REVISION: &str =
@@ -58,6 +66,7 @@ impl TerrainPreviewSurfaceQuality {
 pub enum TerrainPreviewProfile {
     #[default]
     McloneOverworldV1,
+    ContinentalEcoregionCandidate,
     VanillaOverworld,
 }
 
@@ -65,6 +74,7 @@ impl TerrainPreviewProfile {
     pub const fn label(self) -> &'static str {
         match self {
             Self::McloneOverworldV1 => "mclone-overworld-v1",
+            Self::ContinentalEcoregionCandidate => "continental-ecoregion-candidate-v1",
             Self::VanillaOverworld => "overworld",
         }
     }
@@ -72,6 +82,7 @@ impl TerrainPreviewProfile {
     pub const fn source_revision(self) -> &'static str {
         match self {
             Self::McloneOverworldV1 => MCLONE_OVERWORLD_FIELD_REVISION,
+            Self::ContinentalEcoregionCandidate => CONTINENTAL_SURFACE_SCHEMA_REVISION,
             Self::VanillaOverworld => VANILLA_OVERWORLD_LOD_REVISION,
         }
     }
@@ -79,9 +90,13 @@ impl TerrainPreviewProfile {
     pub fn parse_label(value: &str) -> Result<Self, String> {
         match value.trim() {
             "mclone-overworld-v1" | "mclone" => Ok(Self::McloneOverworldV1),
+            "continental-ecoregion-candidate-v1" | "continental" | "candidate" => {
+                Ok(Self::ContinentalEcoregionCandidate)
+            }
             "overworld" | "vanilla" | "vanilla-1.17.1" => Ok(Self::VanillaOverworld),
             other => Err(format!(
-                "terrain preview profile must be mclone-overworld-v1 or overworld, got {other:?}"
+                "terrain preview profile must be mclone-overworld-v1, \
+                 continental-ecoregion-candidate-v1, or overworld, got {other:?}"
             )),
         }
     }
@@ -507,11 +522,110 @@ pub struct TerrainPreviewReferenceGrid {
 
 impl TerrainPreviewReferenceGrid {
     pub fn compile(request: TerrainPreviewRequest) -> Result<Self, String> {
-        if request.profile == TerrainPreviewProfile::VanillaOverworld {
-            let mut sampler = VanillaOverworldLodSampler::new(request.seed);
-            return Self::compile_with_vanilla_sampler(request, &mut sampler);
+        match request.profile {
+            TerrainPreviewProfile::McloneOverworldV1 => Self::compile_mclone(request),
+            TerrainPreviewProfile::ContinentalEcoregionCandidate => {
+                Self::compile_continental(request)
+            }
+            TerrainPreviewProfile::VanillaOverworld => {
+                let mut sampler = VanillaOverworldLodSampler::new(request.seed);
+                Self::compile_with_vanilla_sampler(request, &mut sampler)
+            }
         }
-        Self::compile_mclone(request)
+    }
+
+    fn compile_continental(request: TerrainPreviewRequest) -> Result<Self, String> {
+        let (grid, _height_halo) = Self::compile_continental_with_height_halo(request, 0)?;
+        Ok(grid)
+    }
+
+    /// Compile the continental candidate and the display-height halo used by
+    /// the shared horizon's stitched normal contract in one direct query.
+    pub fn compile_continental_with_height_halo(
+        request: TerrainPreviewRequest,
+        halo_radius: u32,
+    ) -> Result<(Self, Vec<f32>), String> {
+        if request.profile != TerrainPreviewProfile::ContinentalEcoregionCandidate {
+            return Err(format!(
+                "continental terrain preview compiler cannot compile profile {}",
+                request.profile.label()
+            ));
+        }
+        if request.topology != McloneOverworldSamplingTopology::Unbounded {
+            return Err(
+                "continental terrain preview currently exposes only the unbounded plane; \
+                 direct worldgen queries retain the independently proven cylinder contract"
+                    .to_owned(),
+            );
+        }
+        let request = request.validate()?;
+        let source = request.request();
+        let halo_blocks = halo_radius
+            .checked_mul(source.sample_spacing)
+            .ok_or("continental terrain preview halo span overflow")?;
+        let min_x = request
+            .min_x()
+            .checked_sub(
+                i32::try_from(halo_blocks)
+                    .map_err(|_| "continental terrain preview halo span exceeds i32 coordinates")?,
+            )
+            .ok_or("continental terrain preview halo minimum X overflow")?;
+        let min_z = request
+            .min_z()
+            .checked_sub(
+                i32::try_from(halo_blocks)
+                    .map_err(|_| "continental terrain preview halo span exceeds i32 coordinates")?,
+            )
+            .ok_or("continental terrain preview halo minimum Z overflow")?;
+        let halo_samples_per_axis = request
+            .samples_per_axis()
+            .checked_add(
+                halo_radius
+                    .checked_mul(2)
+                    .ok_or("continental terrain preview halo sample count overflow")?,
+            )
+            .ok_or("continental terrain preview halo sample count overflow")?;
+        let surface = ContinentalSurfacePlan::new(ContinentalEcoregionDescriptor::new(
+            source.seed,
+            ContinentalEcoregionTopology::Plane,
+        ))
+        .map_err(|error| error.to_string())?;
+        let surface_window = surface
+            .query_window(ContinentalSurfaceWindowRequest::new(
+                min_x,
+                min_z,
+                halo_samples_per_axis,
+                halo_samples_per_axis,
+                source.sample_spacing,
+            ))
+            .map_err(|error| error.to_string())?;
+        let mut samples = Vec::with_capacity(
+            usize::try_from(request.sample_count())
+                .map_err(|_| "terrain preview sample count does not fit usize")?,
+        );
+        for sample_z in 0..request.samples_per_axis() {
+            let source_z = sample_z + halo_radius;
+            for sample_x in 0..request.samples_per_axis() {
+                let source_x = sample_x + halo_radius;
+                let index = usize::try_from(
+                    source_z
+                        .checked_mul(halo_samples_per_axis)
+                        .and_then(|row| row.checked_add(source_x))
+                        .ok_or("continental terrain preview sample index overflow")?,
+                )
+                .map_err(|_| "continental terrain preview sample index exceeds usize")?;
+                samples.push(continental_preview_sample(
+                    surface_window.samples[index],
+                    source.content_stage,
+                ));
+            }
+        }
+        let height_halo = surface_window
+            .samples
+            .iter()
+            .map(|sample| sample.display_surface_y)
+            .collect();
+        Ok((Self { request, samples }, height_halo))
     }
 
     fn compile_mclone(request: TerrainPreviewRequest) -> Result<Self, String> {
@@ -784,6 +898,115 @@ impl TerrainPreviewReferenceGrid {
             .iter()
             .flat_map(|sample| sample.packed())
             .collect()
+    }
+}
+
+fn continental_preview_sample(
+    sample: ContinentalSurfaceSample,
+    content_stage: TerrainPreviewContentStage,
+) -> TerrainPreviewSample {
+    let coast = sample.family_weights[TerrainCharacterFamily::CoastAndHeadland as usize];
+    let upland = sample.family_weights[TerrainCharacterFamily::UplandAndEscarpment as usize];
+    let water = sample.is_water();
+    let ocean = sample.water_kind == ContinentalSurfaceWaterKind::Ocean;
+    let river = sample.water_kind == ContinentalSurfaceWaterKind::River;
+    let wetland_pool = sample.water_kind == ContinentalSurfaceWaterKind::WetlandPool;
+    let river_influence = if river { sample.route.max(0.55) } else { 0.0 };
+    let forest_coverage = if content_stage == TerrainPreviewContentStage::Cover {
+        (sample.forest_core * 0.88 + sample.forest_edge * 0.24).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    let biome_recipe = if ocean {
+        0.0
+    } else if coast > 0.55 {
+        1.0
+    } else if river {
+        2.0
+    } else if sample.dominant_family == TerrainCharacterFamily::AridRainShadow {
+        5.0
+    } else if sample.forest_core > 0.46 {
+        6.0
+    } else {
+        7.0
+    };
+    let landform_kind = match sample.dominant_family {
+        TerrainCharacterFamily::CoastAndHeadland => 1.0,
+        TerrainCharacterFamily::RollingInterior => 5.0,
+        TerrainCharacterFamily::FluvialAndWetland => {
+            if sample.wetland > river_influence {
+                3.0
+            } else {
+                2.0
+            }
+        }
+        TerrainCharacterFamily::UplandAndEscarpment => 8.0,
+        TerrainCharacterFamily::AridRainShadow => 7.0,
+    };
+    let surface_recipe = match (sample.water_kind, sample.substrate) {
+        (ContinentalSurfaceWaterKind::Ocean, ContinentalSurfaceSubstrate::Sand) => 1.0,
+        (ContinentalSurfaceWaterKind::Ocean, ContinentalSurfaceSubstrate::Gravel) => 9.0,
+        (ContinentalSurfaceWaterKind::Ocean, _) => 0.0,
+        (ContinentalSurfaceWaterKind::River, _) => 2.0,
+        (ContinentalSurfaceWaterKind::Lake, _) | (ContinentalSurfaceWaterKind::WetlandPool, _) => {
+            3.0
+        }
+        (_, ContinentalSurfaceSubstrate::Stone) => 8.0,
+        (_, ContinentalSurfaceSubstrate::Grass) => 5.0,
+        (_, ContinentalSurfaceSubstrate::Sand) => 1.0,
+        (_, ContinentalSurfaceSubstrate::Gravel) => 6.0,
+        (_, ContinentalSurfaceSubstrate::CoarseSoil) => 6.0,
+    };
+    let base_surface_y = MCLONE_OVERWORLD_SEA_LEVEL as f32 + sample.continental_height;
+    TerrainPreviewSample {
+        surface_y: sample.solid_surface_y,
+        display_y: sample.display_surface_y,
+        continentalness: if ocean { -0.72 } else { 0.92 - coast * 0.52 },
+        relief: (sample.province_height.abs() / 52.0).clamp(0.0, 1.0),
+        temperature: sample.temperature,
+        moisture: sample.moisture,
+        water: f32::from(water),
+        ruggedness: (upland * 0.78 + (sample.local_height.abs() / 16.0) * 0.22).clamp(0.0, 1.0),
+        base_surface_y,
+        base_display_y: if ocean {
+            MCLONE_OVERWORLD_SEA_LEVEL as f32
+        } else {
+            base_surface_y
+        },
+        ocean_water: f32::from(ocean),
+        macro_surface_material: f32::from(sample.substrate.block_id()),
+        river_signed_distance: if river {
+            -sample.route.max(0.05) * 24.0
+        } else {
+            (1.0 - sample.route) * 64.0
+        },
+        channel_influence: river_influence,
+        bank_influence: if river {
+            (1.0 - river_influence) * sample.route
+        } else {
+            0.0
+        },
+        river_half_width: if river {
+            4.0 + sample.route * 18.0
+        } else {
+            0.0
+        },
+        wetland_influence: sample.wetland,
+        wetland_pool_influence: if wetland_pool { 1.0 } else { 0.0 },
+        submerged_outlet_influence: 0.0,
+        visible_surface_material: f32::from(sample.visible_material()),
+        planned_stream_influence: river_influence,
+        biome_recipe,
+        landform_kind,
+        surface_recipe,
+        forest_coverage,
+        forest_density: forest_coverage * (0.48 + sample.forest_core * 0.42),
+        forest_family: if forest_coverage > 0.0 { 1.0 } else { 0.0 },
+        forest_family_mix: sample.forest_edge * 0.34,
+        mean_canopy_height: 8.0 + sample.forest_core * 7.0,
+        canopy_height_variation: 1.5 + sample.forest_edge * 4.0,
+        grove_or_opening_influence: sample.clearing.max(sample.openness * 0.35),
+        forest_summary_available: f32::from(content_stage == TerrainPreviewContentStage::Cover),
     }
 }
 
@@ -1813,6 +2036,46 @@ mod tests {
         assert_eq!(
             TerrainPreviewProfile::VanillaOverworld.source_revision(),
             VANILLA_OVERWORLD_LOD_REVISION
+        );
+        assert_eq!(
+            TerrainPreviewProfile::ContinentalEcoregionCandidate.source_revision(),
+            CONTINENTAL_SURFACE_SCHEMA_REVISION
+        );
+    }
+
+    #[test]
+    fn continental_candidate_compiles_one_grid_and_stitched_height_halo() {
+        let mut request = TerrainPreviewRequest::new(12_345, -4_096, 8_192, 512)
+            .with_profile(TerrainPreviewProfile::ContinentalEcoregionCandidate)
+            .with_content_stage(TerrainPreviewContentStage::Cover);
+        request.cells_per_axis = 8;
+        let (grid, height_halo) =
+            TerrainPreviewReferenceGrid::compile_continental_with_height_halo(request, 2).unwrap();
+        assert_eq!(grid.samples().len(), 81);
+        assert_eq!(height_halo.len(), 13 * 13);
+        assert!(
+            grid.samples()
+                .iter()
+                .all(|sample| sample.packed().iter().all(|value| value.is_finite()))
+        );
+        let validated = grid.request();
+        let direct = ContinentalSurfacePlan::new(ContinentalEcoregionDescriptor::plane(12_345))
+            .unwrap()
+            .query_point(validated.world_x(0).unwrap(), validated.world_z(0).unwrap())
+            .sample;
+        assert_eq!(grid.sample(0, 0).unwrap().surface_y, direct.solid_surface_y);
+        assert_eq!(
+            grid.sample(0, 0).unwrap().display_y,
+            direct.display_surface_y
+        );
+        assert_eq!(
+            grid.compile_work(),
+            TerrainPreviewCompileWork {
+                sample_lattice_points: 81,
+                terrain_sample_evaluations: 81,
+                forest_intent_evaluations: 0,
+                forest_footprint_summaries: 0,
+            }
         );
     }
 }

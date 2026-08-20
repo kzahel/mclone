@@ -27,6 +27,7 @@ pub struct TerrainRuntimeConfig {
     pub width: u32,
     pub height: u32,
     pub seed: i64,
+    pub profile: TerrainPreviewProfile,
     pub initial_view: WorldViewState,
     pub clipmap: TerrainClipmapConfig,
     pub vegetation_enabled: bool,
@@ -138,10 +139,7 @@ impl TerrainRuntimeSession {
         let residency_anchor = [floor_i32(view_state.focus_x), floor_i32(view_state.focus_z)];
         let target_color_transform = config.color_profile.target_color_transform(color_format);
         let source = TerrainViewSourceIdentity::detached(
-            TerrainCompositionSourceIdentity::new(
-                TerrainPreviewProfile::McloneOverworldV1,
-                config.seed,
-            ),
+            TerrainCompositionSourceIdentity::new(config.profile, config.seed),
             HorizontalTopology::UNBOUNDED,
             1,
             1,
@@ -404,6 +402,11 @@ impl TerrainRuntimeSession {
         radius_chunks: u32,
         anchor: TerrainRuntimeExactAnchor,
     ) -> Result<TerrainRuntimeExactView, String> {
+        if self.config.profile == TerrainPreviewProfile::ContinentalEcoregionCandidate {
+            return Err(
+                "continental ecoregion candidate is a horizon-only review source".to_owned(),
+            );
+        }
         terrain_runtime_exact_view(
             self.config.seed,
             self.view_state,

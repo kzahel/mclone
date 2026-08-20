@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use mclone_view_control::{WorldViewMode, WorldViewProjection, WorldViewState};
 use mclone_world_explorer::{WorldExplorerCompositionMode, WorldExplorerExactAnchor};
+use mclone_worldgen::terrain_preview::TerrainPreviewProfile;
 
 pub const DEFAULT_WIDTH: u32 = 1280;
 pub const DEFAULT_HEIGHT: u32 = 720;
@@ -43,6 +44,7 @@ pub struct ExplorerOptions {
     pub width: u32,
     pub height: u32,
     pub seed: i64,
+    pub terrain_profile: TerrainPreviewProfile,
     pub center_x: i32,
     pub center_z: i32,
     pub blocks_across: u32,
@@ -69,6 +71,7 @@ impl Default for ExplorerOptions {
             width: DEFAULT_WIDTH,
             height: DEFAULT_HEIGHT,
             seed: DEFAULT_SEED,
+            terrain_profile: TerrainPreviewProfile::McloneOverworldV1,
             center_x: 0,
             center_z: 0,
             blocks_across: DEFAULT_BLOCKS_ACROSS,
@@ -121,6 +124,10 @@ impl ExplorerOptions {
                 "--width" => options.width = parse_value(value(&mut arguments)?, name)?,
                 "--height" => options.height = parse_value(value(&mut arguments)?, name)?,
                 "--seed" => options.seed = parse_value(value(&mut arguments)?, name)?,
+                "--source" => {
+                    options.terrain_profile =
+                        parse_terrain_source(&utf8_value(value(&mut arguments)?, name)?)?
+                }
                 "--center-x" => options.center_x = parse_value(value(&mut arguments)?, name)?,
                 "--center-z" => options.center_z = parse_value(value(&mut arguments)?, name)?,
                 "--blocks-across" => {
@@ -200,6 +207,11 @@ impl ExplorerOptions {
         if self.source_colors && self.composition == WorldExplorerCompositionMode::Horizon {
             bail!("--source-colors requires exact, composed, or coverage composition");
         }
+        if self.terrain_profile == TerrainPreviewProfile::ContinentalEcoregionCandidate
+            && self.composition != WorldExplorerCompositionMode::Horizon
+        {
+            bail!("the continental terrain source is horizon-only; use --composition horizon");
+        }
         if usize::from(self.capture.is_some())
             + usize::from(self.window_capture.is_some())
             + usize::from(self.smoke_dir.is_some())
@@ -231,8 +243,9 @@ impl ExplorerOptions {
 
     pub fn title(&self) -> String {
         format!(
-            "Mclone World Explorer — {} — seed {} — ({}, {}) — {} blocks — {}",
+            "Mclone World Explorer — {} — {} — seed {} — ({}, {}) — {} blocks — {}",
             self.composition.label(),
+            self.terrain_profile.label(),
             self.seed,
             self.center_x,
             self.center_z,
@@ -263,6 +276,20 @@ where
     value
         .parse()
         .map_err(|error| anyhow::anyhow!("invalid {name} value {value:?}: {error}"))
+}
+
+fn parse_terrain_source(value: &str) -> Result<TerrainPreviewProfile> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "production" | "mclone" | "mclone-overworld-v1" => {
+            Ok(TerrainPreviewProfile::McloneOverworldV1)
+        }
+        "continental" | "candidate" | "continental-ecoregion-candidate-v1" => {
+            Ok(TerrainPreviewProfile::ContinentalEcoregionCandidate)
+        }
+        other => bail!(
+            "unsupported World Explorer terrain source {other:?}; expected production or continental"
+        ),
+    }
 }
 
 fn utf8_value(value: OsString, name: &str) -> Result<String> {
@@ -299,6 +326,7 @@ Mclone World Explorer
 Usage: mclone-world-explorer [options]
 
   --seed N                    terrain seed (default {DEFAULT_SEED})
+  --source SOURCE             production (default) or continental
   --center-x N                view center X (default 0)
   --center-z N                view center Z (default 0)
   --blocks-across N           horizontal footprint (default {DEFAULT_BLOCKS_ACROSS})
@@ -331,6 +359,14 @@ mod tests {
         assert_eq!(
             ExplorerOptions::default().composition,
             WorldExplorerCompositionMode::Composed
+        );
+        assert_eq!(
+            ExplorerOptions::default().terrain_profile,
+            TerrainPreviewProfile::McloneOverworldV1
+        );
+        assert_eq!(
+            parse_terrain_source("continental").unwrap(),
+            TerrainPreviewProfile::ContinentalEcoregionCandidate
         );
     }
 }

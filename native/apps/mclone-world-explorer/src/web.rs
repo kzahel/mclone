@@ -18,6 +18,7 @@ use mclone_view_control::{
     ContactButton, ContactEvent, ViewPoint, ViewportMetrics, WorldViewHeldDirection,
     WorldViewIntent, WorldViewMode, WorldViewProjection, WorldViewState, pointer_contact_purpose,
 };
+use mclone_worldgen::terrain_preview::TerrainPreviewProfile;
 use serde::Serialize;
 use wasm_bindgen::{JsValue, prelude::wasm_bindgen};
 use web_sys::{HtmlCanvasElement, UrlSearchParams};
@@ -34,6 +35,7 @@ const DEFAULT_EXACT_RADIUS: u32 = 2;
 #[derive(Clone, Copy, Debug)]
 struct WebExplorerOptions {
     seed: i64,
+    terrain_profile: TerrainPreviewProfile,
     center_x: i32,
     center_z: i32,
     blocks_across: u32,
@@ -53,6 +55,7 @@ impl Default for WebExplorerOptions {
     fn default() -> Self {
         Self {
             seed: DEFAULT_SEED,
+            terrain_profile: TerrainPreviewProfile::McloneOverworldV1,
             center_x: 0,
             center_z: 0,
             blocks_across: DEFAULT_BLOCKS_ACROSS,
@@ -76,6 +79,9 @@ impl WebExplorerOptions {
             .map_err(|error| format!("invalid World Explorer query: {error:?}"))?;
         let mut options = Self::default();
         options.seed = parse_parameter(&parameters, "seed", options.seed)?;
+        if let Some(value) = parameters.get("source") {
+            options.terrain_profile = parse_terrain_source(&value)?;
+        }
         options.center_x = parse_parameter(&parameters, "centerX", options.center_x)?;
         options.center_z = parse_parameter(&parameters, "centerZ", options.center_z)?;
         options.blocks_across =
@@ -96,6 +102,14 @@ impl WebExplorerOptions {
         if options.source_colors && options.composition == WorldExplorerCompositionMode::Horizon {
             return Err(
                 "World Explorer sourceColors=1 requires exact, composed, or coverage composition"
+                    .to_owned(),
+            );
+        }
+        if options.terrain_profile == TerrainPreviewProfile::ContinentalEcoregionCandidate
+            && options.composition != WorldExplorerCompositionMode::Horizon
+        {
+            return Err(
+                "the continental terrain source is horizon-only; use composition=horizon"
                     .to_owned(),
             );
         }
@@ -143,6 +157,7 @@ impl WebExplorerOptions {
 struct WebExplorerReport {
     revision: u64,
     seed: String,
+    terrain_source: &'static str,
     center_x: i32,
     center_z: i32,
     focus_x: f64,
@@ -289,6 +304,7 @@ pub struct WebWorldExplorer {
     width: u32,
     height: u32,
     seed: i64,
+    terrain_profile: TerrainPreviewProfile,
     frame_epoch_ms: Option<f64>,
     session: WorldExplorerSession,
     composition: WorldExplorerCompositionMode,
@@ -382,6 +398,7 @@ impl WebWorldExplorer {
         if self.diagnostic_observer_enabled {
             self.last_diagnostic_report = Some(explorer_report(
                 self.seed,
+                self.terrain_profile,
                 self.session.view_state(),
                 self.session.has_held_motion(),
                 stats,
@@ -639,13 +656,19 @@ impl WebWorldExplorer {
         exact_worker_transport_factory: JsValue,
     ) -> Result<Self, String> {
         let options = WebExplorerOptions::parse(&search)?;
-        let vegetation_executor = if options.worker_overflow_probe_enabled {
-            BrowserTerrainVegetationExecutor::with_initial_capacity(
-                vegetation_worker_transport_factory,
-                1_024,
-            )?
+        let vegetation_enabled =
+            options.terrain_profile == TerrainPreviewProfile::McloneOverworldV1;
+        let vegetation_executor = if vegetation_enabled {
+            Some(if options.worker_overflow_probe_enabled {
+                BrowserTerrainVegetationExecutor::with_initial_capacity(
+                    vegetation_worker_transport_factory,
+                    1_024,
+                )?
+            } else {
+                BrowserTerrainVegetationExecutor::new(vegetation_worker_transport_factory)?
+            })
         } else {
-            BrowserTerrainVegetationExecutor::new(vegetation_worker_transport_factory)?
+            None
         };
         let authored_asset_bytes = authored_bytes.to_vec();
         let provisional_asset_bytes = provisional_bytes.to_vec();
@@ -719,9 +742,10 @@ impl WebWorldExplorer {
                 width,
                 height,
                 seed: options.seed,
+                profile: options.terrain_profile,
                 initial_view: options.view_state(),
                 clipmap: TerrainClipmapConfig::default(),
-                vegetation_enabled: true,
+                vegetation_enabled,
                 color_profile: RenderColorProfile::Vanilla,
             },
             TerrainPreviewMaterialAtlas {
@@ -730,7 +754,9 @@ impl WebWorldExplorer {
                 rgba: assets.atlas.rgba(),
                 material_table: &material_table,
             },
-            Some(Box::new(vegetation_executor)),
+            vegetation_executor.map(|executor| {
+                Box::new(executor) as Box<dyn mclone_terrain_view::TerrainVegetationExecutor>
+            }),
         )?;
         let exact = if options.composition == WorldExplorerCompositionMode::Horizon {
             None
@@ -780,6 +806,7 @@ impl WebWorldExplorer {
             width,
             height,
             seed: options.seed,
+            terrain_profile: options.terrain_profile,
             frame_epoch_ms: None,
             session,
             composition: options.composition,
@@ -863,6 +890,7 @@ pub(crate) fn load_web_assets(
 
 fn explorer_report(
     seed: i64,
+    terrain_profile: TerrainPreviewProfile,
     state: WorldViewState,
     held_motion: bool,
     stats: TerrainHorizonFrameStats,
@@ -879,6 +907,7 @@ fn explorer_report(
     WebExplorerReport {
         revision: stats.revision,
         seed: seed.to_string(),
+        terrain_source: terrain_profile.label(),
         center_x: state.center_x_i32(),
         center_z: state.center_z_i32(),
         focus_x: state.focus_x,
@@ -1117,6 +1146,20 @@ where
     value
         .parse()
         .map_err(|error| format!("invalid World Explorer {name}={value:?}: {error}"))
+}
+
+fn parse_terrain_source(value: &str) -> Result<TerrainPreviewProfile, String> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "production" | "mclone" | "mclone-overworld-v1" => {
+            Ok(TerrainPreviewProfile::McloneOverworldV1)
+        }
+        "continental" | "candidate" | "continental-ecoregion-candidate-v1" => {
+            Ok(TerrainPreviewProfile::ContinentalEcoregionCandidate)
+        }
+        other => Err(format!(
+            "unsupported World Explorer terrain source {other:?}; expected production or continental"
+        )),
+    }
 }
 
 fn js_error(message: impl Into<String>) -> JsValue {
