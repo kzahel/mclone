@@ -37,6 +37,14 @@ const SEMANTIC_TERRAIN_WORKER: &str =
     include_str!("../../../../tools/terrain-lab/src/web/semantic-terrain-worker.ts");
 const SEMANTIC_TERRAIN_RUST: &str =
     include_str!("../../../crates/mclone-worldgen/src/semantic_terrain_sandbox.rs");
+const CONTINENTAL_ECOREGION_CANVAS: &str =
+    include_str!("../../../../tools/terrain-lab/src/web/ContinentalEcoregionCanvas.tsx");
+const CONTINENTAL_ECOREGION_WORKER: &str =
+    include_str!("../../../../tools/terrain-lab/src/web/continental-ecoregion-worker.ts");
+const CONTINENTAL_ECOREGION_RUST: &str =
+    include_str!("../../../crates/mclone-worldgen/src/continental_ecoregion.rs");
+const CONTINENTAL_ECOREGION_ATLAS_RUST: &str =
+    include_str!("../../../crates/mclone-worldgen/src/continental_ecoregion_atlas.rs");
 
 #[test]
 fn browser_typescript_has_no_exact_worker_policy() {
@@ -313,4 +321,54 @@ fn semantic_terrain_reconstruction_stays_in_rust() {
     assert!(SEMANTIC_TERRAIN_WORKER.contains("SemanticTerrainSandboxCompiler"));
     assert!(SEMANTIC_TERRAIN_CANVAS.contains("useWorldViewNavigation"));
     assert_eq!(SEMANTIC_TERRAIN_CANVAS.matches("new Worker(").count(), 1);
+}
+
+#[test]
+fn continental_ecoregion_geography_stays_in_shared_rust() {
+    for required in [
+        "ContinentalEcoregionPlan",
+        "query_point",
+        "query_window",
+        "ContinentalStory",
+        "PhysiographicProvinceKind",
+        "EcoregionKind",
+        "ClearingCause",
+    ] {
+        assert!(
+            CONTINENTAL_ECOREGION_RUST.contains(required),
+            "shared continental/ecoregion plan lost owner {required:?}"
+        );
+    }
+    for required in [
+        "compile_continental_ecoregion_atlas",
+        "component_distribution",
+        "journey_receipts",
+        "semantic_sha256",
+    ] {
+        assert!(
+            CONTINENTAL_ECOREGION_ATLAS_RUST.contains(required),
+            "shared continental/ecoregion atlas lost evidence {required:?}"
+        );
+    }
+    for forbidden in [
+        "CONTINENTAL_CELL_BLOCKS",
+        "PROVINCE_CELL_BLOCKS",
+        "ECOREGION_CELL_BLOCKS",
+        "MOSAIC_CELL_BLOCKS",
+        "continental_owner",
+        "ecoregion_owner",
+        "clearing_owner",
+    ] {
+        assert!(
+            !CONTINENTAL_ECOREGION_CANVAS.contains(forbidden)
+                && !CONTINENTAL_ECOREGION_WORKER.contains(forbidden),
+            "Terrain Lab browser code gained geography policy through {forbidden:?}"
+        );
+    }
+    assert!(CONTINENTAL_ECOREGION_WORKER.contains("ContinentalEcoregionCompiler"));
+    assert!(CONTINENTAL_ECOREGION_CANVAS.contains("useWorldViewNavigation"));
+    assert_eq!(
+        CONTINENTAL_ECOREGION_CANVAS.matches("new Worker(").count(),
+        1
+    );
 }

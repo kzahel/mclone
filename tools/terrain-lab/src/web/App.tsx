@@ -15,6 +15,8 @@ import {
   toggleTerrainLabPane,
   validSeed,
   type CanonicalTerrainStage,
+  type ContinentalEcoregionLayer,
+  type ContinentalEcoregionTopology,
   type TerrainLabDetail,
   type TerrainLabContentStage,
   type TerrainLabLayer,
@@ -37,6 +39,10 @@ import {
   CanonicalTerrainCanvas,
   type CanonicalTerrainReport,
 } from "./CanonicalTerrainCanvas";
+import {
+  ContinentalEcoregionCanvas,
+  type ContinentalEcoregionReport,
+} from "./ContinentalEcoregionCanvas";
 import {
   RuntimeCompositionCanvas,
   type RuntimeCompositionReport,
@@ -89,6 +95,11 @@ const PANE_OPTIONS: Array<{ value: TerrainLabPane; label: string; note: string }
     note: "Production exact terrain and procedural horizon on one depth target",
   },
   { value: "canonical", label: "Real terrain", note: "Exact final chunks with textures" },
+  {
+    value: "ecoregion",
+    label: "Continental plan",
+    note: "Authored 65–131 km continents, provinces, ecoregions, and mosaics",
+  },
   {
     value: "plan",
     label: "Landform plan",
@@ -186,6 +197,8 @@ export function App(): React.JSX.Element {
   const [canonicalCacheEnabled, setCanonicalCacheEnabled] = useState(true);
   const [canonicalCacheEpoch, setCanonicalCacheEpoch] = useState(0);
   const [canonicalReport, setCanonicalReport] = useState<CanonicalTerrainReport>();
+  const [ecoregionReport, setEcoregionReport] =
+    useState<ContinentalEcoregionReport>();
   const [runtimeReport, setRuntimeReport] = useState<RuntimeCompositionReport>();
   const [planReport, setPlanReport] = useState<LandformPlanReport>();
   const [planPointReceipt, setPlanPointReceipt] =
@@ -276,6 +289,7 @@ export function App(): React.JSX.Element {
   const chunkWidth = footprint / 16;
   const runtimeVisible = state.panes.includes("runtime");
   const canonicalVisible = state.panes.includes("canonical");
+  const ecoregionVisible = state.panes.includes("ecoregion");
   const planVisible = state.panes.includes("plan");
   const wildlifeVisible = state.panes.includes("wildlife");
   const atlasVisible = state.panes.includes("atlas");
@@ -287,7 +301,7 @@ export function App(): React.JSX.Element {
   const terrainPaneVisible =
     runtimeVisible || canonicalVisible || proceduralVisible;
   const viewPaneVisible = terrainPaneVisible || semanticVisible;
-  const diagnosticOnly = (planVisible || wildlifeVisible || atlasVisible)
+  const diagnosticOnly = (ecoregionVisible || planVisible || wildlifeVisible || atlasVisible)
     && !viewPaneVisible;
   const proceduralSource = proceduralSourceForPanes(state.panes);
   const playHref = terrainLabPlayHref(state);
@@ -324,6 +338,7 @@ export function App(): React.JSX.Element {
       ? "loading"
       : (!proceduralVisible || primaryVisualUnavailable || status === "ready")
       && (!canonicalVisible || primaryVisualUnavailable || canonicalReport?.complete)
+      && (!ecoregionVisible || ecoregionReport)
       && (!runtimeVisible || primaryVisualUnavailable || runtimeReport?.targetReady)
       && (!planVisible || planReport)
       && (!wildlifeVisible || wildlifeReport)
@@ -372,6 +387,21 @@ export function App(): React.JSX.Element {
       data-runtime-target-ready={runtimeReport?.targetReady ? "true" : "false"}
       data-runtime-exact-complete={runtimeReport?.exactComplete ? "true" : "false"}
       data-plan-ready={planReport ? "true" : "false"}
+      data-ecoregion-ready={ecoregionReport ? "true" : "false"}
+      data-ecoregion-layer={state.ecoregionLayer}
+      data-ecoregion-topology={ecoregionReport?.topology ?? ""}
+      data-ecoregion-compile-ms={ecoregionReport?.compileMs ?? ""}
+      data-ecoregion-draw-ms={ecoregionReport?.drawMs ?? ""}
+      data-ecoregion-checksum={ecoregionReport?.semanticSha256 ?? ""}
+      data-ecoregion-witness={ecoregionReport?.witnessSha256 ?? ""}
+      data-ecoregion-samples={ecoregionReport?.sampleCount ?? 0}
+      data-ecoregion-step={ecoregionReport?.sampleStepBlocks ?? 0}
+      data-ecoregion-land-fraction={ecoregionReport?.landFraction ?? ""}
+      data-ecoregion-ocean-fraction={ecoregionReport?.oceanFraction ?? ""}
+      data-ecoregion-exact-chunks={ecoregionReport?.metadata.work.exactChunks ?? ""}
+      data-ecoregion-production-unchanged={
+        ecoregionReport?.productionTerrainUnchanged ? "true" : "false"
+      }
       data-plan-build-ms={planReport?.buildMs ?? ""}
       data-plan-transfer-bytes={planReport?.transferBytes ?? 0}
       data-plan-checksum={planReport?.checksum ?? ""}
@@ -583,7 +613,9 @@ export function App(): React.JSX.Element {
               <div className="planToolbarNote">
                 <span>Research projection</span>
                 <strong>
-                  {atlasVisible
+                  {ecoregionVisible
+                    ? "2D authored continental and ecoregional plan · direct coarse queries"
+                    : atlasVisible
                     ? "2D streamed structural atlas · four synchronized views"
                     : wildlifeVisible
                       ? "2D production population map · fixed 64-block cells"
@@ -818,6 +850,18 @@ export function App(): React.JSX.Element {
                 />
               </div>
             ) : null}
+            {ecoregionVisible ? (
+              <div className="paneFrame continentalEcoregionPaneFrame">
+                <ContinentalEcoregionCanvas
+                  state={state}
+                  camera={camera}
+                  onStateChange={updateState}
+                  onCameraChange={setCamera}
+                  onReport={setEcoregionReport}
+                  onError={setError}
+                />
+              </div>
+            ) : null}
             {wildlifeVisible ? (
               <div className="paneFrame wildlifePopulationPaneFrame">
                 <WildlifePopulationCanvas
@@ -914,6 +958,8 @@ export function App(): React.JSX.Element {
               <strong>
                 {wildlifeVisible && !terrainPaneVisible
                   ? "1:64 population cells"
+                  : ecoregionVisible && !terrainPaneVisible
+                  ? "256 × direct plan samples"
                   : atlasVisible && !terrainPaneVisible
                   ? "1:1024 plan regions"
                   : semanticVisible && !terrainPaneVisible
@@ -1189,6 +1235,53 @@ export function App(): React.JSX.Element {
                   Every overlay is presentation-only. Panning asks Rust for
                   canonical regions around the new viewport; it does not
                   recenter or mutate a solve.
+                </p>
+              </>
+            ) : null}
+            {ecoregionVisible ? (
+              <>
+                <SegmentedControl<ContinentalEcoregionTopology>
+                  label="World topology"
+                  value={state.ecoregionTopology}
+                  options={[
+                    {
+                      value: "plane",
+                      label: "Unbounded plane",
+                      note: "Lazy coordinate-pure continental owners",
+                    },
+                    {
+                      value: "cylinder-x-196608",
+                      label: "196.608 km cylinder",
+                      note: "Large periodic X proof; Z remains unbounded",
+                    },
+                  ]}
+                  onChange={(ecoregionTopology) =>
+                    patchState({ ecoregionTopology })}
+                />
+                <label className="fieldLabel">
+                  <span>Plan layer</span>
+                  <select
+                    aria-label="Continental plan layer"
+                    value={state.ecoregionLayer}
+                    onChange={(event) => patchState({
+                      ecoregionLayer:
+                        event.target.value as ContinentalEcoregionLayer,
+                    })}
+                  >
+                    <option value="composed">Composed regional plan</option>
+                    <option value="land-ocean">Land, ocean & inland distance</option>
+                    <option value="province">Physiographic provinces</option>
+                    <option value="ecoregion">Ecoregion identity</option>
+                    <option value="transition">Ecoregion transitions</option>
+                    <option value="openness">Vegetation openness</option>
+                    <option value="clearings">Planned clearings</option>
+                    <option value="water">Water, wetland & riparian relation</option>
+                    <option value="habitat">Habitat structure & corridors</option>
+                  </select>
+                </label>
+                <p className="controlNote">
+                  Every layer comes from one shared Rust plan. Presentation
+                  switches do not rebuild geography or generate exact chunks.
                 </p>
               </>
             ) : null}
@@ -1652,6 +1745,9 @@ export function App(): React.JSX.Element {
             {atlasVisible ? (
               <StreamedPlanAtlasEvidence report={atlasReport} />
             ) : null}
+            {ecoregionVisible ? (
+              <ContinentalEcoregionEvidence report={ecoregionReport} />
+            ) : null}
             {semanticVisible ? (
               <SemanticTerrainEvidence report={semanticReport} />
             ) : null}
@@ -1901,6 +1997,111 @@ function StreamedPlanAtlasEvidence({
   );
 }
 
+function ContinentalEcoregionEvidence({
+  report,
+}: {
+  report: ContinentalEcoregionReport | undefined;
+}): React.JSX.Element {
+  if (!report) {
+    return (
+      <div className="pointReceipt empty" data-testid="continental-ecoregion-evidence">
+        <strong>Compiling authored regional geography</strong>
+        <span>
+          Rust is sampling the continental, province, ecoregion, and mosaic
+          plan directly off the main thread.
+        </span>
+      </div>
+    );
+  }
+  const { metadata } = report;
+  const metrics = metadata.metrics;
+  return (
+    <div className="pointReceipt" data-testid="continental-ecoregion-evidence">
+      <div className="pointReceiptHeading">
+        <strong>Continental ecoregion candidate</strong>
+        <span>
+          {report.compileMs.toFixed(1)} ms compile · {report.drawMs.toFixed(1)} ms draw
+        </span>
+      </div>
+      <dl className="pointReceiptGrid">
+        <div>
+          <dt>Coverage</dt>
+          <dd>{(metrics.landFraction * 100).toFixed(1)}% land · {
+            (metrics.oceanFraction * 100).toFixed(1)
+          }% ocean</dd>
+        </div>
+        <div>
+          <dt>Direct samples</dt>
+          <dd>{formatInteger(metadata.sampleCount)} · 1:{metadata.sampleStepBlocks}</dd>
+        </div>
+        <div>
+          <dt>Largest land body</dt>
+          <dd>{metrics.continentComponents.maximumAreaSquareKm.toFixed(0)} km²</dd>
+        </div>
+        <div>
+          <dt>Largest open / forest</dt>
+          <dd>
+            {metrics.openComponents.maximumAreaSquareKm.toFixed(1)} / {
+              metrics.forestComponents.maximumAreaSquareKm.toFixed(1)
+            } km²
+          </dd>
+        </div>
+        <div>
+          <dt>Clearing components</dt>
+          <dd>{formatInteger(metrics.clearingComponents.componentCount)} · max {
+            metrics.clearingComponents.maximumAreaSquareKm.toFixed(2)
+          } km²</dd>
+        </div>
+        <div>
+          <dt>Habitat networks</dt>
+          <dd>{formatInteger(metrics.habitatNetworkComponents.componentCount)} · max {
+            metrics.habitatNetworkComponents.maximumAreaSquareKm.toFixed(1)
+          } km²</dd>
+        </div>
+        <div>
+          <dt>Quiet / transition</dt>
+          <dd>{(metrics.quietSpaceFraction * 100).toFixed(1)}% / {
+            (metrics.transitionFraction * 100).toFixed(1)
+          }%</dd>
+        </div>
+        <div>
+          <dt>Plan work</dt>
+          <dd>{formatInteger(metadata.work.continentalOwnerEvaluations)} continental · {
+            metadata.work.exactChunks
+          } chunks</dd>
+        </div>
+        <div>
+          <dt>Semantic checksum</dt>
+          <dd>{report.semanticSha256.slice(0, 16)}…</dd>
+        </div>
+        <div>
+          <dt>Native/Wasm witness</dt>
+          <dd>{report.witnessSha256.slice(0, 16)}…</dd>
+        </div>
+      </dl>
+      <details className="pointReceiptDetails">
+        <summary>10–131 km journey runs</summary>
+        <dl className="pointReceiptGrid">
+          {metrics.journeys.map((journey) => (
+            <div key={journey.label}>
+              <dt>{journey.label}</dt>
+              <dd>
+                {journey.runCount} places · {journey.meanDwellBlocks} m mean · {
+                  journey.repeatedSceneAlarms
+                } repeats
+              </dd>
+            </div>
+          ))}
+        </dl>
+      </details>
+      <span className="pointReceiptPrompt">
+        Counts and checksums describe shared plan facts, not canvas colors.
+        This candidate remains disconnected from production chunks.
+      </span>
+    </div>
+  );
+}
+
 function SemanticTerrainEvidence({
   report,
 }: {
@@ -2122,6 +2323,7 @@ function PaneToggles({
           profile === "overworld"
             ? option.value !== "gpu"
               && option.value !== "runtime"
+              && option.value !== "ecoregion"
               && option.value !== "plan"
               && option.value !== "wildlife"
               && option.value !== "atlas"
@@ -2165,6 +2367,7 @@ function WorkspaceGuide({
   surfaceQuality: TerrainLabState["surfaceQuality"];
 }): React.JSX.Element {
   const exact = panes.includes("canonical");
+  const ecoregion = panes.includes("ecoregion");
   const plan = panes.includes("plan");
   const wildlife = panes.includes("wildlife");
   const atlas = panes.includes("atlas");
@@ -2200,6 +2403,9 @@ function WorkspaceGuide({
           : ""}
         {plan
           ? "Landform plan is a research-only 2D structural diagnostic over the fixed 6.144 km study domain. "
+          : ""}
+        {ecoregion
+          ? "Continental plan uses direct shared Rust queries for land, provinces, ecoregions, clearings, water, and habitat structure while production terrain stays unchanged. "
           : ""}
         {wildlife
           ? "Wildlife runs the production initial-population planner over seed-addressed habitat cells and shows its exact density, species weights, and encounter owners. "
@@ -2243,6 +2449,16 @@ function SourceFootnote({
         Research-only hybrid structure over the fixed 6.144 km Tactical 267
         plane domain. The 32-block cells and skeleton are diagnostic summaries;
         production terrain does not consume this plan.
+      </>
+    );
+  }
+  if (panes.length === 1 && panes[0] === "ecoregion") {
+    return (
+      <>
+        Candidate continental/ecoregional plan over an unbounded plane or
+        196.608 km cylinder. Rust owns every semantic fact, distribution, and
+        checksum; the browser only draws direct coarse arrays. Production
+        terrain remains field revision 21.
       </>
     );
   }

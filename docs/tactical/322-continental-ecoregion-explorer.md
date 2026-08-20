@@ -1,13 +1,16 @@
 # Tactical 322: Continental Ecoregion Explorer
 
-Status: **implementation active 2026-08-20. Phases 1 and 2 are implemented:
-the disconnected shared Rust plan, bounded direct queries, typed temperate
-grammar, native/Wasm canonical corpus, and performance receipt now pass.
-Terrain Lab presentation and distribution metrics are next. Human Review A
-selects the atlas grammar before World Explorer realization, and Human Review
-B selects whether the candidate deserves production integration. The current
-production generator remains a visible control, not a protected output
-target.**
+Status: **implementation active 2026-08-20. Phases 1-3 are implemented: the
+disconnected shared Rust plan, bounded direct queries, typed temperate
+grammar, native/Wasm canonical corpus, fixed-cost Terrain Lab atlas, initial
+distribution and journey metrics, and desktop/phone browser evidence now
+pass. Pixel review rejected the first cellular composition and produced the
+larger-scale Revision 2 candidate. Human Review A is not open yet: paired
+production-control captures, 131 km review evidence, and the remaining metric
+gaps come next. Human Review A selects the atlas grammar before World Explorer
+realization, and Human Review B selects whether the candidate deserves
+production integration. The current production generator remains a visible
+control, not a protected output target.**
 
 Topic: `continental-ecoregion-planning`
 
@@ -111,7 +114,7 @@ not duplicate production worldgen inside the candidate.
 
 Landed on 2026-08-20 in shared `mclone-worldgen` ownership:
 
-- `continental_ecoregion` owns the Revision 1 descriptor, topology
+- `continental_ecoregion` owns the revisioned descriptor, topology
   compatibility, typed continent/province/ecoregion/mosaic facts, authored
   temperate grammar, explicit clearing plans, direct point queries, bounded
   windows, construction counts, and semantic checksums;
@@ -125,23 +128,24 @@ Landed on 2026-08-20 in shared `mclone-worldgen` ownership:
   `/tmp/mclone-continental-ecoregion/receipt.json` by default.
 
 The pinned native/Wasm witness is
-`7abdac6c836ca0c978befe10c6c318741527d11ba5544859a50609c88050bad6`.
+`612a102fcc909274f029f1a31a6cdfaa348b53536adcb87893e91308ec1e4405`.
 It covers three seeds on plane and cylinder through 11,301 exact comparisons:
 whole versus split windows, randomized point traversal, direct coarse
 projection, owner/work caps, zero exact-chunk work, periodic lifts, and four
 independent native threads. The dedicated Wasm test produces the same
 witness through `wasm-bindgen-test-runner`.
 
-The first macOS `dev` profile performance receipt measured:
+The pixel-reviewed Revision 2 macOS `release` receipt at
+`/tmp/mclone-continental-ecoregion/receipt-v3.json` measured:
 
 | Query | Observed time |
 |---|---:|
-| continental point | 736 ns/sample |
-| province point | 804 ns/sample |
-| ecoregion point | 913 ns/sample |
-| mosaic point | 995 ns/sample |
-| 65,536-block, 256x256 mosaic atlas | 69.4 ms total / 1,058 ns per sample |
-| 131,072-block, 256x256 mosaic atlas | 62.7 ms total / 956 ns per sample |
+| continental point | 447 ns/sample |
+| province point | 543 ns/sample |
+| ecoregion point | 639 ns/sample |
+| mosaic point | 688 ns/sample |
+| 65,536-block, 256x256 mosaic atlas | 60.8 ms total / 928 ns per sample |
+| 131,072-block, 256x256 mosaic atlas | 50.8 ms total / 775 ns per sample |
 
 These timings are descriptive, not yet a budget, and exclude canvas drawing.
 The equal 256x256 cost at the two extents demonstrates direct coarse sampling:
@@ -150,17 +154,53 @@ fine plan. The same windows contain 58,159 land / 7,377 ocean and 42,736 land /
 22,800 ocean samples respectively, so this receipt exercises actual
 land-ocean organization rather than an all-land regional palette.
 
-## Candidate Plan Revision 1
+### Phase 3: direct Terrain Lab atlas
 
-Revision 1 is deliberately a concrete authored grammar, not a generic planning
+The shared `continental_ecoregion_atlas` compiler now publishes one flat,
+typed, fixed-resolution atlas for both native and Wasm consumers. Terrain Lab
+runs it in a dedicated Worker and can paint land/ocean, province, ecoregion,
+transition, openness, clearings, water, habitat, and composed layers without
+generating exact chunks. The browser exposes stable IDs under the pointer and
+reports component distributions, typed counts, ecoregion adjacencies, quiet
+space, six journey receipts, work counts, and semantic checksums. Layer
+changes repaint the same arrays and preserve the checksum.
+
+The first drawable candidate failed visual review: 4,096-block ecoregion
+owners, 2,048-block clearing owners, and canopy suppression at every owner
+edge produced a field of similarly sized cells and scattered dots. That is
+the same failure class this tactical exists to prevent. Revision 2 therefore:
+
+- uses 8,192-block ecoregion owners and 24-32 km climate context;
+- selects compatible ecoregion roles from province plus regional climate;
+- uses 4,096-block clearing owners with sparse 0.9-3.8 km elliptical reach;
+- preserves forest structure through an ecotone instead of erasing canopy at
+  every owner boundary; and
+- advances the plan schema to `mclone-continental-ecoregion-plan-v2`.
+
+The inspected Revision 2 captures are:
+
+- `/tmp/mclone-terrain-lab-desktop-chrome-ecoregion-65km.png`;
+- `/tmp/mclone-terrain-lab-desktop-chrome-ecoregion-provinces.png`;
+- `/tmp/mclone-terrain-lab-desktop-chrome-ecoregion-clearings.png`; and
+- `/tmp/mclone-terrain-lab-phone-chrome-ecoregion-ui.png`.
+
+Focused Playwright acceptance passes on desktop Chrome and Pixel 7 emulation.
+It verifies the pinned witness, zero exact chunks, production-disconnected
+status, typed inspection, layer-only redraws, deterministic reload, and a
+bounded 256-sample horizontal resolution. Rust ownership tests forbid browser
+code from gaining continental, ecoregion, or clearing-owner policy.
+
+## Candidate Plan Revision 2
+
+Revision 2 is deliberately a concrete authored grammar, not a generic planning
 framework. It uses a finite hierarchy and bounded coordinate-pure queries:
 
-| Level | Initial span | Revision 1 responsibility |
+| Level | Initial span | Revision 2 responsibility |
 |---|---:|---|
 | continental district | 32-96 km | land/ocean body, broad relief and climate exposure |
 | physiographic province | 8-24 km | upland, basin, lowland, rain-shadow, and major water relation |
-| ecoregion instance | 2-8 km | dominant ecological identity and compatible signatures |
-| landscape mosaic | 256 m-3 km | clearing, forest core/edge, wetland, disturbance, and corridor patches |
+| ecoregion instance | 4-12 km | dominant ecological identity and compatible signatures |
+| landscape mosaic | 512 m-4 km | clearing, forest core/edge, wetland, disturbance, and corridor patches |
 | local realization | 8-256 m | continuous relief and cover irregularity without changing plan identity |
 
 These are review hypotheses, not persisted public constants. Changing scale,
@@ -232,11 +272,11 @@ typed feature family and stable child slot
 The request window, viewport, camera, LOD level, thread, Worker, cache,
 completion order, and exploration path are excluded.
 
-Revision 1 must support the unbounded plane and the existing 6,144-block
-periodic-X proof without assuming that the proof cylinder can contain a
-continent. A scale/topology compatibility receipt may report that a candidate
-level is deliberately compressed or unsupported on a small cylinder. No
-semantic primitive may accidentally self-overlap across a periodic seam.
+Revision 2 supports the unbounded plane and an aligned 196,608-block
+periodic-X candidate. It handles the existing 6,144-block periodic-X proof
+explicitly by reporting that it is too small for this grammar rather than
+silently compressing or self-overlapping a continent. No semantic primitive
+may accidentally self-overlap across a supported periodic seam.
 
 ## Exact Validation
 

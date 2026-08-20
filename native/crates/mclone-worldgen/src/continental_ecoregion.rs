@@ -12,14 +12,14 @@ use sha2::{Digest, Sha256};
 
 use crate::noise::{SeedDomain, ValueNoise2d};
 
-pub const CONTINENTAL_ECOREGION_SCHEMA_REVISION: &str = "mclone-continental-ecoregion-plan-v1";
+pub const CONTINENTAL_ECOREGION_SCHEMA_REVISION: &str = "mclone-continental-ecoregion-plan-v2";
 pub const CONTINENTAL_ECOREGION_DIMENSION_ID: &str = "mclone:overworld";
 pub const CONTINENTAL_ECOREGION_STORED_PROFILE: &str =
     "mclone-overworld-v1-control-field-revision-21";
 pub const CONTINENTAL_CELL_BLOCKS: i32 = 32_768;
 pub const PROVINCE_CELL_BLOCKS: i32 = 16_384;
-pub const ECOREGION_CELL_BLOCKS: i32 = 4_096;
-pub const MOSAIC_CELL_BLOCKS: i32 = 2_048;
+pub const ECOREGION_CELL_BLOCKS: i32 = 8_192;
+pub const MOSAIC_CELL_BLOCKS: i32 = 4_096;
 pub const MIN_SUPPORTED_CYLINDER_BLOCKS: i32 = 131_072;
 pub const MAX_WINDOW_SAMPLES: usize = 262_144;
 
@@ -181,6 +181,7 @@ pub struct LandscapeFeatureId {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[repr(u8)]
 #[serde(rename_all = "kebab-case")]
 pub enum ContinentalStory {
     RiverValley,
@@ -189,7 +190,26 @@ pub enum ContinentalStory {
     OpenHighland,
 }
 
+impl ContinentalStory {
+    pub const ALL: [Self; 4] = [
+        Self::RiverValley,
+        Self::LakeDistrict,
+        Self::Escarpment,
+        Self::OpenHighland,
+    ];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::RiverValley => "river-valley",
+            Self::LakeDistrict => "lake-district",
+            Self::Escarpment => "escarpment",
+            Self::OpenHighland => "open-highland",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[repr(u8)]
 #[serde(rename_all = "kebab-case")]
 pub enum PhysiographicProvinceKind {
     RiverLowland,
@@ -200,7 +220,30 @@ pub enum PhysiographicProvinceKind {
     QuietBench,
 }
 
+impl PhysiographicProvinceKind {
+    pub const ALL: [Self; 6] = [
+        Self::RiverLowland,
+        Self::LakeBasin,
+        Self::RollingHills,
+        Self::WoodedUpland,
+        Self::RockyRidge,
+        Self::QuietBench,
+    ];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::RiverLowland => "river-lowland",
+            Self::LakeBasin => "lake-basin",
+            Self::RollingHills => "rolling-hills",
+            Self::WoodedUpland => "wooded-upland",
+            Self::RockyRidge => "rocky-ridge",
+            Self::QuietBench => "quiet-bench",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[repr(u8)]
 #[serde(rename_all = "kebab-case")]
 pub enum EcoregionKind {
     OldForestCore,
@@ -212,7 +255,32 @@ pub enum EcoregionKind {
     QuietTransition,
 }
 
+impl EcoregionKind {
+    pub const ALL: [Self; 7] = [
+        Self::OldForestCore,
+        Self::BroadMeadow,
+        Self::RiparianWoodland,
+        Self::ConnectedWetland,
+        Self::MixedWoodland,
+        Self::ExposedUpland,
+        Self::QuietTransition,
+    ];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::OldForestCore => "old-forest-core",
+            Self::BroadMeadow => "broad-meadow",
+            Self::RiparianWoodland => "riparian-woodland",
+            Self::ConnectedWetland => "connected-wetland",
+            Self::MixedWoodland => "mixed-woodland",
+            Self::ExposedUpland => "exposed-upland",
+            Self::QuietTransition => "quiet-transition",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[repr(u8)]
 #[serde(rename_all = "kebab-case")]
 pub enum ClearingCause {
     GrazingLawn,
@@ -220,6 +288,26 @@ pub enum ClearingCause {
     Windthrow,
     FloodMeadow,
     ShallowSoil,
+}
+
+impl ClearingCause {
+    pub const ALL: [Self; 5] = [
+        Self::GrazingLawn,
+        Self::OldBurn,
+        Self::Windthrow,
+        Self::FloodMeadow,
+        Self::ShallowSoil,
+    ];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::GrazingLawn => "grazing-lawn",
+            Self::OldBurn => "old-burn",
+            Self::Windthrow => "windthrow",
+            Self::FloodMeadow => "flood-meadow",
+            Self::ShallowSoil => "shallow-soil",
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
@@ -402,8 +490,8 @@ impl PlanFields {
         };
         Self {
             continent_edge: value_noise(CONTINENT_EDGE_DOMAIN, 8_192),
-            moisture: value_noise(CLIMATE_MOISTURE_DOMAIN, 8_192),
-            temperature: value_noise(CLIMATE_TEMPERATURE_DOMAIN, 16_384),
+            moisture: value_noise(CLIMATE_MOISTURE_DOMAIN, 24_576),
+            temperature: value_noise(CLIMATE_TEMPERATURE_DOMAIN, 32_768),
             corridor_warp: value_noise(CORRIDOR_WARP_DOMAIN, 8_192),
             local_openness: value_noise(LOCAL_OPENNESS_DOMAIN, 1_024),
         }
@@ -680,12 +768,13 @@ impl ContinentalEcoregionPlan {
             0,
             id_hash,
         );
-        let kind = ecoregion_kind(province.kind, id_hash);
         work.local_field_evaluations += 2;
-        let canonical_x = self.descriptor.topology.canonical_world_x(world_x);
-        let moisture = unit_field(self.fields.moisture.sample(canonical_x, world_z));
+        let climate_x = owner_center_coordinate(site.owner_x, ECOREGION_CELL_BLOCKS);
+        let climate_z = owner_center_coordinate(site.owner_z, ECOREGION_CELL_BLOCKS);
+        let moisture = unit_field(self.fields.moisture.sample(climate_x, climate_z));
         let temperature =
-            (0.5 + self.fields.temperature.sample(canonical_x, world_z) * 0.16).clamp(0.25, 0.75);
+            (0.5 + self.fields.temperature.sample(climate_x, climate_z) * 0.16).clamp(0.25, 0.75);
+        let kind = ecoregion_kind(province.kind, moisture, temperature, id_hash);
         let (base_openness, base_canopy) = ecoregion_cover(kind);
         EcoregionPlanSample {
             id,
@@ -734,17 +823,17 @@ impl ContinentalEcoregionPlan {
                 }
                 let center_x = i64::from(raw_owner_x) * i64::from(MOSAIC_CELL_BLOCKS)
                     + i64::from(MOSAIC_CELL_BLOCKS / 2)
-                    + i64::from(signed_hash_offset(hash, 8, 400));
+                    + i64::from(signed_hash_offset(hash, 8, 700));
                 let center_z = i64::from(owner_z) * i64::from(MOSAIC_CELL_BLOCKS)
                     + i64::from(MOSAIC_CELL_BLOCKS / 2)
-                    + i64::from(signed_hash_offset(hash, 24, 400));
+                    + i64::from(signed_hash_offset(hash, 24, 700));
                 let (axis_x, axis_z) = direction(hash, 40);
                 let local_x = (i64::from(canonical_x) - center_x) as f64;
                 let local_z = (i64::from(world_z) - center_z) as f64;
                 let along = local_x * axis_x + local_z * axis_z;
                 let across = -local_x * axis_z + local_z * axis_x;
-                let radius_along = 650.0 + hash_unit(hash, 48) * 800.0;
-                let radius_across = 420.0 + hash_unit(hash, 16) * 680.0;
+                let radius_along = 1_400.0 + hash_unit(hash, 48) * 2_400.0;
+                let radius_across = 900.0 + hash_unit(hash, 16) * 1_700.0;
                 let distance =
                     ((along / radius_along).powi(2) + (across / radius_across).powi(2)).sqrt();
                 let influence = (1.0 - distance).clamp(0.0, 1.0);
@@ -790,8 +879,8 @@ impl ContinentalEcoregionPlan {
         let forest_core = (f64::from(ecoregion.base_canopy)
             * forest_affinity
             * (1.0 - clearing_influence)
-            * f64::from(ecoregion.core_weight))
-        .clamp(0.0, 1.0);
+            * (0.72 + f64::from(ecoregion.core_weight) * 0.28))
+            .clamp(0.0, 1.0);
         let wetland_affinity = match ecoregion.kind {
             EcoregionKind::ConnectedWetland => 1.0,
             EcoregionKind::RiparianWoodland => 0.72,
@@ -1016,59 +1105,40 @@ fn province_relief(kind: PhysiographicProvinceKind) -> f32 {
     }
 }
 
-fn ecoregion_kind(kind: PhysiographicProvinceKind, hash: u64) -> EcoregionKind {
-    let slot = ((hash >> 55) % 6) as usize;
-    let choices: &[EcoregionKind] = match kind {
-        PhysiographicProvinceKind::RiverLowland => &[
-            EcoregionKind::RiparianWoodland,
-            EcoregionKind::ConnectedWetland,
-            EcoregionKind::BroadMeadow,
-            EcoregionKind::RiparianWoodland,
-            EcoregionKind::QuietTransition,
-            EcoregionKind::ConnectedWetland,
-        ],
-        PhysiographicProvinceKind::LakeBasin => &[
-            EcoregionKind::ConnectedWetland,
-            EcoregionKind::RiparianWoodland,
-            EcoregionKind::QuietTransition,
-            EcoregionKind::MixedWoodland,
-            EcoregionKind::ConnectedWetland,
-            EcoregionKind::BroadMeadow,
-        ],
-        PhysiographicProvinceKind::RollingHills => &[
-            EcoregionKind::BroadMeadow,
-            EcoregionKind::MixedWoodland,
-            EcoregionKind::QuietTransition,
-            EcoregionKind::BroadMeadow,
-            EcoregionKind::MixedWoodland,
-            EcoregionKind::OldForestCore,
-        ],
-        PhysiographicProvinceKind::WoodedUpland => &[
-            EcoregionKind::OldForestCore,
-            EcoregionKind::MixedWoodland,
-            EcoregionKind::OldForestCore,
-            EcoregionKind::BroadMeadow,
-            EcoregionKind::QuietTransition,
-            EcoregionKind::MixedWoodland,
-        ],
-        PhysiographicProvinceKind::RockyRidge => &[
-            EcoregionKind::ExposedUpland,
-            EcoregionKind::OldForestCore,
-            EcoregionKind::ExposedUpland,
-            EcoregionKind::QuietTransition,
-            EcoregionKind::MixedWoodland,
-            EcoregionKind::ExposedUpland,
-        ],
-        PhysiographicProvinceKind::QuietBench => &[
-            EcoregionKind::QuietTransition,
-            EcoregionKind::MixedWoodland,
-            EcoregionKind::BroadMeadow,
-            EcoregionKind::QuietTransition,
-            EcoregionKind::OldForestCore,
-            EcoregionKind::MixedWoodland,
-        ],
-    };
-    choices[slot]
+fn ecoregion_kind(
+    kind: PhysiographicProvinceKind,
+    moisture: f64,
+    temperature: f64,
+    hash: u64,
+) -> EcoregionKind {
+    let alternate = (hash >> 57) & 3;
+    match kind {
+        PhysiographicProvinceKind::RiverLowland if moisture > 0.60 => {
+            EcoregionKind::ConnectedWetland
+        }
+        PhysiographicProvinceKind::RiverLowland if moisture < 0.34 => EcoregionKind::BroadMeadow,
+        PhysiographicProvinceKind::RiverLowland => EcoregionKind::RiparianWoodland,
+        PhysiographicProvinceKind::LakeBasin if moisture > 0.46 => EcoregionKind::ConnectedWetland,
+        PhysiographicProvinceKind::LakeBasin if alternate == 0 => EcoregionKind::QuietTransition,
+        PhysiographicProvinceKind::LakeBasin => EcoregionKind::RiparianWoodland,
+        PhysiographicProvinceKind::RollingHills if moisture < 0.36 => EcoregionKind::BroadMeadow,
+        PhysiographicProvinceKind::RollingHills if moisture > 0.68 => EcoregionKind::OldForestCore,
+        PhysiographicProvinceKind::RollingHills if alternate <= 1 => EcoregionKind::MixedWoodland,
+        PhysiographicProvinceKind::RollingHills => EcoregionKind::QuietTransition,
+        PhysiographicProvinceKind::WoodedUpland if moisture > 0.58 => EcoregionKind::OldForestCore,
+        PhysiographicProvinceKind::WoodedUpland if moisture < 0.32 && temperature > 0.48 => {
+            EcoregionKind::BroadMeadow
+        }
+        PhysiographicProvinceKind::WoodedUpland => EcoregionKind::MixedWoodland,
+        PhysiographicProvinceKind::RockyRidge if moisture > 0.66 && alternate == 0 => {
+            EcoregionKind::OldForestCore
+        }
+        PhysiographicProvinceKind::RockyRidge => EcoregionKind::ExposedUpland,
+        PhysiographicProvinceKind::QuietBench if moisture < 0.38 => EcoregionKind::BroadMeadow,
+        PhysiographicProvinceKind::QuietBench if moisture > 0.68 => EcoregionKind::OldForestCore,
+        PhysiographicProvinceKind::QuietBench if alternate == 0 => EcoregionKind::MixedWoodland,
+        PhysiographicProvinceKind::QuietBench => EcoregionKind::QuietTransition,
+    }
 }
 
 fn ecoregion_cover(kind: EcoregionKind) -> (f32, f32) {
@@ -1086,13 +1156,13 @@ fn ecoregion_cover(kind: EcoregionKind) -> (f32, f32) {
 fn clearing_enabled(kind: EcoregionKind, hash: u64) -> bool {
     let threshold = match kind {
         EcoregionKind::OldForestCore => 2,
-        EcoregionKind::RiparianWoodland => 3,
-        EcoregionKind::MixedWoodland => 4,
-        EcoregionKind::QuietTransition => 3,
+        EcoregionKind::RiparianWoodland => 2,
+        EcoregionKind::MixedWoodland => 3,
+        EcoregionKind::QuietTransition => 2,
         EcoregionKind::BroadMeadow => 1,
         EcoregionKind::ConnectedWetland | EcoregionKind::ExposedUpland => 1,
     };
-    (hash & 7) < threshold
+    (hash & 15) < threshold
 }
 
 fn clearing_cause(kind: EcoregionKind, hash: u64) -> ClearingCause {
@@ -1142,6 +1212,11 @@ fn stable_mix64(mut value: u64) -> u64 {
 fn signed_hash_offset(hash: u64, shift: u32, maximum: i32) -> i32 {
     let unit = ((hash.rotate_right(shift) & 0xffff) as f64) / 65_535.0;
     ((unit * 2.0 - 1.0) * f64::from(maximum)).round() as i32
+}
+
+fn owner_center_coordinate(owner: i32, scale: i32) -> i32 {
+    let center = i64::from(owner) * i64::from(scale) + i64::from(scale / 2);
+    center.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32
 }
 
 fn hash_unit(hash: u64, shift: u32) -> f64 {

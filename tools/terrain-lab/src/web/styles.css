@@ -670,6 +670,117 @@ h1 {
   gap: 7px;
 }
 
+.continentalEcoregionMap {
+  min-width: 0;
+  background: #071012;
+}
+
+.continentalEcoregionStage {
+  min-height: clamp(680px, calc(100vh - 210px), 900px);
+}
+
+.ecoregionLegend {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: start;
+  gap: 18px;
+  padding: 12px 16px 13px;
+  border-top: 1px solid rgba(235, 245, 238, 0.14);
+  background: rgba(8, 20, 21, 0.98);
+  color: #c3cfca;
+  font-family: "DM Mono", monospace;
+  font-size: 8px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.ecoregionLegend > strong {
+  color: #e0e9e4;
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+}
+
+.ecoregionLegend > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px 16px;
+}
+
+.ecoregionLegend span {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+}
+
+.ecoregionLegend i {
+  width: 9px;
+  height: 9px;
+  flex: 0 0 auto;
+  display: inline-block;
+  border: 1px solid rgba(235, 245, 238, 0.16);
+  border-radius: 1px;
+  box-shadow: 0 0 0 1px rgba(4, 11, 12, 0.72);
+}
+
+.ecoregionInspector {
+  position: absolute;
+  z-index: 5;
+  top: 58px;
+  right: 16px;
+  width: min(330px, calc(100% - 32px));
+  padding: 13px 14px;
+  border: 1px solid rgba(255, 246, 191, 0.3);
+  border-radius: 3px;
+  background: rgba(5, 14, 15, 0.9);
+  backdrop-filter: blur(12px);
+  color: #c6d1cc;
+  font-family: "DM Mono", monospace;
+  font-size: 9px;
+  line-height: 1.45;
+  pointer-events: none;
+}
+
+.ecoregionInspector > div:first-child {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: #95a7a0;
+  text-transform: uppercase;
+}
+
+.ecoregionInspector strong {
+  color: #fff6bf;
+  text-align: right;
+}
+
+.ecoregionInspector p {
+  margin: 8px 0;
+  color: #aab9b3;
+}
+
+.ecoregionInspector dl {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5px 12px;
+  margin: 8px 0 0;
+}
+
+.ecoregionInspector dl > div {
+  display: grid;
+  gap: 2px;
+}
+
+.ecoregionInspector dt {
+  color: #7f928a;
+}
+
+.ecoregionInspector dd {
+  margin: 0;
+  color: #e1e8e4;
+}
+
 .wildlifePopulationMap {
   min-width: 0;
   background: #071012;
@@ -1375,6 +1486,11 @@ button:hover {
     max-height: 580px;
   }
 
+  .continentalEcoregionStage {
+    min-height: 720px;
+    max-height: none;
+  }
+
   .streamedPlanAtlasStage {
     min-height: 920px;
     max-height: none;
@@ -1452,6 +1568,11 @@ button:hover {
 
   .terrainStage {
     min-height: 47vh;
+  }
+
+  .continentalEcoregionStage {
+    min-height: 620px;
+    max-height: none;
   }
 
   .streamedPlanAtlasStage {
@@ -1534,6 +1655,24 @@ button:hover {
     grid-template-columns: 1fr;
     gap: 12px;
     padding: 12px;
+    font-size: 8px;
+  }
+
+  .ecoregionLegend {
+    grid-template-columns: 1fr;
+    gap: 9px;
+    padding: 12px;
+  }
+
+  .ecoregionLegend > div {
+    gap: 7px 12px;
+  }
+
+  .ecoregionInspector {
+    top: 48px;
+    right: 10px;
+    width: min(290px, calc(100% - 20px));
+    padding: 10px 11px;
     font-size: 8px;
   }
 

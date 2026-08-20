@@ -19,6 +19,17 @@ export type TerrainLabTexturePresentation = "textured" | "flat-colors";
 export type TerrainLabComparisonVisualProfile = "off" | TerrainLabVisualProfile;
 export type TerrainLabSource = "gpu" | "reference" | "macro" | "split";
 export type StreamedPlanAtlasTopology = "plane" | "cylinder-x" | "torus";
+export type ContinentalEcoregionTopology = "plane" | "cylinder-x-196608";
+export type ContinentalEcoregionLayer =
+  | "composed"
+  | "land-ocean"
+  | "province"
+  | "ecoregion"
+  | "transition"
+  | "openness"
+  | "clearings"
+  | "water"
+  | "habitat";
 export type SemanticTerrainSubstrate = "flat" | "quiet";
 export type SemanticTerrainFeatures = "range" | "basin" | "combined";
 export type SemanticTerrainCorrection = "regional" | "local";
@@ -26,6 +37,7 @@ export type SemanticTerrainVerticalScale = "1x" | "8x" | "24x";
 export type TerrainLabPane =
   | "runtime"
   | "canonical"
+  | "ecoregion"
   | "plan"
   | "wildlife"
   | "atlas"
@@ -77,6 +89,8 @@ export interface TerrainLabState {
   view: TerrainLabView;
   projection: TerrainLabProjection;
   layer: TerrainLabLayer;
+  ecoregionTopology: ContinentalEcoregionTopology;
+  ecoregionLayer: ContinentalEcoregionLayer;
   planBasinsVisible: boolean;
   planQuietVisible: boolean;
   planDrainageVisible: boolean;
@@ -131,6 +145,8 @@ export const DEFAULT_TERRAIN_LAB_STATE: TerrainLabState = {
   view: "3d",
   projection: "orthographic",
   layer: "terrain",
+  ecoregionTopology: "plane",
+  ecoregionLayer: "composed",
   planBasinsVisible: true,
   planQuietVisible: true,
   planDrainageVisible: true,
@@ -205,6 +221,21 @@ const ATLAS_TOPOLOGIES = new Set<StreamedPlanAtlasTopology>([
   "cylinder-x",
   "torus",
 ]);
+const ECOREGION_TOPOLOGIES = new Set<ContinentalEcoregionTopology>([
+  "plane",
+  "cylinder-x-196608",
+]);
+const ECOREGION_LAYERS = new Set<ContinentalEcoregionLayer>([
+  "composed",
+  "land-ocean",
+  "province",
+  "ecoregion",
+  "transition",
+  "openness",
+  "clearings",
+  "water",
+  "habitat",
+]);
 const SEMANTIC_SUBSTRATES = new Set<SemanticTerrainSubstrate>(["flat", "quiet"]);
 const SEMANTIC_FEATURES = new Set<SemanticTerrainFeatures>([
   "range",
@@ -224,6 +255,7 @@ const SURFACE_QUALITIES = new Set<TerrainLabSurfaceQuality>(["basic", "inferred"
 const PANES = new Set<TerrainLabPane>([
   "runtime",
   "canonical",
+  "ecoregion",
   "plan",
   "wildlife",
   "atlas",
@@ -303,6 +335,12 @@ export function parseTerrainLabState(
     projection:
       validMember(params.get("projection"), PROJECTIONS) ?? fallback.projection,
     layer: validMember(params.get("layer"), LAYERS) ?? fallback.layer,
+    ecoregionTopology:
+      validMember(params.get("ecoregionTopology"), ECOREGION_TOPOLOGIES)
+      ?? fallback.ecoregionTopology,
+    ecoregionLayer:
+      validMember(params.get("ecoregionLayer"), ECOREGION_LAYERS)
+      ?? fallback.ecoregionLayer,
     planBasinsVisible:
       validBoolean(params.get("planBasins")) ?? fallback.planBasinsVisible,
     planQuietVisible:
@@ -401,6 +439,8 @@ export function terrainLabSearch(
   params.set("view", state.view);
   params.set("projection", state.projection);
   params.set("layer", state.layer);
+  params.set("ecoregionTopology", state.ecoregionTopology);
+  params.set("ecoregionLayer", state.ecoregionLayer);
   params.set("planBasins", state.planBasinsVisible ? "1" : "0");
   params.set("planQuiet", state.planQuietVisible ? "1" : "0");
   params.set("planDrainage", state.planDrainageVisible ? "1" : "0");
@@ -481,6 +521,7 @@ export function toggleTerrainLabPane(
   if (
     (state.profile === "overworld" && pane === "gpu")
     || (state.profile === "overworld" && pane === "runtime")
+    || (state.profile === "overworld" && pane === "ecoregion")
     || (state.profile === "overworld" && pane === "plan")
     || (state.profile === "overworld" && pane === "wildlife")
     || (state.profile === "overworld" && pane === "atlas")
@@ -514,6 +555,7 @@ export function switchTerrainLabProfile(
       && (
         pane === "gpu"
         || pane === "runtime"
+        || pane === "ecoregion"
         || pane === "plan"
         || pane === "wildlife"
         || pane === "atlas"
@@ -541,6 +583,7 @@ export function normalizeTerrainLabProfileState(
     state.profile === "overworld"
       ? pane !== "gpu"
         && pane !== "runtime"
+        && pane !== "ecoregion"
         && pane !== "plan"
         && pane !== "wildlife"
         && pane !== "atlas"
@@ -672,6 +715,7 @@ function paneOrder(pane: TerrainLabPane): number {
   return [
     "runtime",
     "canonical",
+    "ecoregion",
     "plan",
     "wildlife",
     "atlas",

@@ -1,0 +1,746 @@
+//! Direct coarse atlas representation and metrics for the continental plan.
+
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
+
+use serde::Serialize;
+
+use crate::continental_ecoregion::{
+    ClearingCause, ContinentalEcoregionDescriptor, ContinentalEcoregionError,
+    ContinentalEcoregionPlan, ContinentalEcoregionTopology, ContinentalStory, EcoregionKind,
+    LandscapePlanDetail, LandscapePlanSample, LandscapeWindowRequest, PhysiographicProvinceKind,
+    PlanConstructionCounts,
+};
+use crate::continental_ecoregion_harness::CONTINENTAL_ECOREGION_WITNESS_SHA256;
+
+pub const CONTINENTAL_ECOREGION_ATLAS_SCHEMA_REVISION: &str =
+    "mclone-continental-ecoregion-atlas-v1";
+pub const CONTINENTAL_ECOREGION_ATLAS_DEFAULT_SAMPLES_ACROSS: u32 = 256;
+pub const CONTINENTAL_ECOREGION_ATLAS_MAX_SAMPLES: usize = 262_144;
+pub const CONTINENTAL_ECOREGION_ATLAS_NONE: u8 = u8::MAX;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ContinentalEcoregionAtlasRequest {
+    pub seed: i64,
+    pub topology: ContinentalEcoregionTopology,
+    pub center_x: i32,
+    pub center_z: i32,
+    pub blocks_across: u32,
+    pub aspect_ratio: f64,
+    pub samples_across: u32,
+}
+
+impl ContinentalEcoregionAtlasRequest {
+    pub const fn plane(seed: i64, center_x: i32, center_z: i32, blocks_across: u32) -> Self {
+        Self {
+            seed,
+            topology: ContinentalEcoregionTopology::Plane,
+            center_x,
+            center_z,
+            blocks_across,
+            aspect_ratio: 1.0,
+            samples_across: CONTINENTAL_ECOREGION_ATLAS_DEFAULT_SAMPLES_ACROSS,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ComponentDistribution {
+    pub component_count: u32,
+    pub covered_samples: u32,
+    pub minimum_samples: u32,
+    pub median_samples: u32,
+    pub p90_samples: u32,
+    pub maximum_samples: u32,
+    pub maximum_area_square_km: f64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdjacencyPair {
+    pub left_kind: u8,
+    pub right_kind: u8,
+    pub boundary_edges: u32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JourneyReceipt {
+    pub label: &'static str,
+    pub distance_blocks: u32,
+    pub run_count: u32,
+    pub repeated_scene_alarms: u32,
+    pub mean_dwell_blocks: u32,
+    pub longest_dwell_blocks: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContinentalEcoregionAtlasMetrics {
+    pub land_fraction: f32,
+    pub ocean_fraction: f32,
+    pub quiet_space_fraction: f32,
+    pub transition_fraction: f32,
+    pub continent_components: ComponentDistribution,
+    pub open_components: ComponentDistribution,
+    pub forest_components: ComponentDistribution,
+    pub wetland_components: ComponentDistribution,
+    pub clearing_components: ComponentDistribution,
+    pub habitat_network_components: ComponentDistribution,
+    pub province_kind_counts: Vec<u32>,
+    pub ecoregion_kind_counts: Vec<u32>,
+    pub clearing_cause_counts: Vec<u32>,
+    pub ecoregion_adjacencies: Vec<AdjacencyPair>,
+    pub journeys: Vec<JourneyReceipt>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContinentalEcoregionAtlasMetadata {
+    pub receipt_schema: &'static str,
+    pub plan_schema: &'static str,
+    pub witness_sha256: &'static str,
+    pub production_terrain_unchanged: bool,
+    pub seed: String,
+    pub topology: &'static str,
+    pub center_x: i32,
+    pub center_z: i32,
+    pub min_x: i32,
+    pub min_z: i32,
+    pub blocks_across: u32,
+    pub blocks_tall: u32,
+    pub sample_step_blocks: u32,
+    pub columns: u32,
+    pub rows: u32,
+    pub sample_count: u32,
+    pub semantic_sha256: String,
+    pub work: PlanConstructionCounts,
+    pub continent_stories: Vec<&'static str>,
+    pub province_kinds: Vec<&'static str>,
+    pub ecoregion_kinds: Vec<&'static str>,
+    pub clearing_causes: Vec<&'static str>,
+    pub metrics: ContinentalEcoregionAtlasMetrics,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ContinentalEcoregionAtlas {
+    pub metadata: ContinentalEcoregionAtlasMetadata,
+    pub land: Vec<u16>,
+    pub inland_distance_quarter_blocks: Vec<i16>,
+    pub continent_story: Vec<u8>,
+    pub province_kind: Vec<u8>,
+    pub ecoregion_kind: Vec<u8>,
+    pub transition: Vec<u16>,
+    pub openness: Vec<u16>,
+    pub forest_core: Vec<u16>,
+    pub clearing_core: Vec<u16>,
+    pub clearing_cause: Vec<u8>,
+    pub major_water: Vec<u16>,
+    pub wetland: Vec<u16>,
+    pub corridor: Vec<u16>,
+    pub continent_id: Vec<u32>,
+    pub province_id: Vec<u32>,
+    pub ecoregion_id: Vec<u32>,
+    pub clearing_id: Vec<u32>,
+}
+
+pub fn compile_continental_ecoregion_atlas(
+    request: ContinentalEcoregionAtlasRequest,
+) -> Result<ContinentalEcoregionAtlas, ContinentalEcoregionError> {
+    validate_request(request)?;
+    let columns = request.samples_across;
+    let rows = ((f64::from(columns) / request.aspect_ratio).ceil() as u32).max(1);
+    let sample_count = (columns as usize)
+        .checked_mul(rows as usize)
+        .ok_or(ContinentalEcoregionError::CoordinateOverflow)?;
+    if sample_count > CONTINENTAL_ECOREGION_ATLAS_MAX_SAMPLES {
+        return Err(ContinentalEcoregionError::InvalidWindow(
+            "atlas sample count exceeds its direct-query cap",
+        ));
+    }
+    let step_blocks = request.blocks_across.div_ceil(columns).max(1);
+    let width_blocks = columns
+        .checked_mul(step_blocks)
+        .ok_or(ContinentalEcoregionError::CoordinateOverflow)?;
+    let height_blocks = rows
+        .checked_mul(step_blocks)
+        .ok_or(ContinentalEcoregionError::CoordinateOverflow)?;
+    let min_x = centered_minimum(request.center_x, width_blocks)?;
+    let min_z = centered_minimum(request.center_z, height_blocks)?;
+    let plan = ContinentalEcoregionPlan::new(ContinentalEcoregionDescriptor::new(
+        request.seed,
+        request.topology,
+    ))?;
+    let window = plan.query_window(LandscapeWindowRequest::new(
+        min_x,
+        min_z,
+        columns,
+        rows,
+        step_blocks,
+        LandscapePlanDetail::Mosaic,
+    ))?;
+    let mut arrays = AtlasArrays::with_capacity(sample_count);
+    for sample in &window.samples {
+        arrays.push(sample);
+    }
+    let metrics = atlas_metrics(columns, rows, step_blocks, &window.samples, &arrays);
+    Ok(ContinentalEcoregionAtlas {
+        metadata: ContinentalEcoregionAtlasMetadata {
+            receipt_schema: CONTINENTAL_ECOREGION_ATLAS_SCHEMA_REVISION,
+            plan_schema: crate::continental_ecoregion::CONTINENTAL_ECOREGION_SCHEMA_REVISION,
+            witness_sha256: CONTINENTAL_ECOREGION_WITNESS_SHA256,
+            production_terrain_unchanged: true,
+            seed: request.seed.to_string(),
+            topology: topology_label(request.topology),
+            center_x: request.center_x,
+            center_z: request.center_z,
+            min_x,
+            min_z,
+            blocks_across: width_blocks,
+            blocks_tall: height_blocks,
+            sample_step_blocks: step_blocks,
+            columns,
+            rows,
+            sample_count: sample_count as u32,
+            semantic_sha256: window.semantic_sha256,
+            work: window.work,
+            continent_stories: ContinentalStory::ALL
+                .iter()
+                .map(|kind| kind.label())
+                .collect(),
+            province_kinds: PhysiographicProvinceKind::ALL
+                .iter()
+                .map(|kind| kind.label())
+                .collect(),
+            ecoregion_kinds: EcoregionKind::ALL.iter().map(|kind| kind.label()).collect(),
+            clearing_causes: ClearingCause::ALL.iter().map(|kind| kind.label()).collect(),
+            metrics,
+        },
+        land: arrays.land,
+        inland_distance_quarter_blocks: arrays.inland_distance_quarter_blocks,
+        continent_story: arrays.continent_story,
+        province_kind: arrays.province_kind,
+        ecoregion_kind: arrays.ecoregion_kind,
+        transition: arrays.transition,
+        openness: arrays.openness,
+        forest_core: arrays.forest_core,
+        clearing_core: arrays.clearing_core,
+        clearing_cause: arrays.clearing_cause,
+        major_water: arrays.major_water,
+        wetland: arrays.wetland,
+        corridor: arrays.corridor,
+        continent_id: arrays.continent_id,
+        province_id: arrays.province_id,
+        ecoregion_id: arrays.ecoregion_id,
+        clearing_id: arrays.clearing_id,
+    })
+}
+
+struct AtlasArrays {
+    land: Vec<u16>,
+    inland_distance_quarter_blocks: Vec<i16>,
+    continent_story: Vec<u8>,
+    province_kind: Vec<u8>,
+    ecoregion_kind: Vec<u8>,
+    transition: Vec<u16>,
+    openness: Vec<u16>,
+    forest_core: Vec<u16>,
+    clearing_core: Vec<u16>,
+    clearing_cause: Vec<u8>,
+    major_water: Vec<u16>,
+    wetland: Vec<u16>,
+    corridor: Vec<u16>,
+    continent_id: Vec<u32>,
+    province_id: Vec<u32>,
+    ecoregion_id: Vec<u32>,
+    clearing_id: Vec<u32>,
+}
+
+impl AtlasArrays {
+    fn with_capacity(capacity: usize) -> Self {
+        Self {
+            land: Vec::with_capacity(capacity),
+            inland_distance_quarter_blocks: Vec::with_capacity(capacity),
+            continent_story: Vec::with_capacity(capacity),
+            province_kind: Vec::with_capacity(capacity),
+            ecoregion_kind: Vec::with_capacity(capacity),
+            transition: Vec::with_capacity(capacity),
+            openness: Vec::with_capacity(capacity),
+            forest_core: Vec::with_capacity(capacity),
+            clearing_core: Vec::with_capacity(capacity),
+            clearing_cause: Vec::with_capacity(capacity),
+            major_water: Vec::with_capacity(capacity),
+            wetland: Vec::with_capacity(capacity),
+            corridor: Vec::with_capacity(capacity),
+            continent_id: Vec::with_capacity(capacity),
+            province_id: Vec::with_capacity(capacity),
+            ecoregion_id: Vec::with_capacity(capacity),
+            clearing_id: Vec::with_capacity(capacity),
+        }
+    }
+
+    fn push(&mut self, sample: &LandscapePlanSample) {
+        self.land.push(quantize_unit(sample.land_weight));
+        self.inland_distance_quarter_blocks.push(
+            (sample.inland_distance_blocks / 4.0)
+                .round()
+                .clamp(f32::from(i16::MIN), f32::from(i16::MAX)) as i16,
+        );
+        self.continent_story.push(
+            sample
+                .continent
+                .map_or(CONTINENTAL_ECOREGION_ATLAS_NONE, |fact| fact.story as u8),
+        );
+        self.province_kind.push(
+            sample
+                .province
+                .map_or(CONTINENTAL_ECOREGION_ATLAS_NONE, |fact| fact.kind as u8),
+        );
+        self.ecoregion_kind.push(
+            sample
+                .ecoregion
+                .map_or(CONTINENTAL_ECOREGION_ATLAS_NONE, |fact| fact.kind as u8),
+        );
+        self.transition.push(quantize_unit(
+            sample.ecoregion.map_or(0.0, |fact| fact.transition_weight),
+        ));
+        self.openness.push(quantize_unit(
+            sample.mosaic.map_or(0.0, |fact| fact.openness),
+        ));
+        self.forest_core.push(quantize_unit(
+            sample.mosaic.map_or(0.0, |fact| fact.forest_core),
+        ));
+        self.clearing_core.push(quantize_unit(
+            sample.mosaic.map_or(0.0, |fact| fact.clearing_core),
+        ));
+        self.clearing_cause.push(
+            sample
+                .mosaic
+                .and_then(|fact| fact.clearing_cause)
+                .map_or(CONTINENTAL_ECOREGION_ATLAS_NONE, |cause| cause as u8),
+        );
+        self.major_water.push(quantize_unit(
+            sample.province.map_or(0.0, |fact| fact.major_water),
+        ));
+        self.wetland.push(quantize_unit(
+            sample.mosaic.map_or(0.0, |fact| fact.wetland),
+        ));
+        self.corridor.push(quantize_unit(
+            sample.mosaic.map_or(0.0, |fact| fact.corridor),
+        ));
+        self.continent_id
+            .push(sample.continent.map_or(0, |fact| fact.id.hash as u32));
+        self.province_id
+            .push(sample.province.map_or(0, |fact| fact.id.hash as u32));
+        self.ecoregion_id
+            .push(sample.ecoregion.map_or(0, |fact| fact.id.hash as u32));
+        self.clearing_id.push(
+            sample
+                .mosaic
+                .and_then(|fact| fact.clearing_id)
+                .map_or(0, |id| id.hash as u32),
+        );
+    }
+}
+
+fn atlas_metrics(
+    columns: u32,
+    rows: u32,
+    step_blocks: u32,
+    samples: &[LandscapePlanSample],
+    arrays: &AtlasArrays,
+) -> ContinentalEcoregionAtlasMetrics {
+    let sample_count = samples.len().max(1) as f32;
+    let land_mask = arrays
+        .land
+        .iter()
+        .map(|value| *value >= 32_768)
+        .collect::<Vec<_>>();
+    let open_mask = arrays
+        .openness
+        .iter()
+        .map(|value| *value >= 39_321)
+        .collect::<Vec<_>>();
+    let forest_mask = arrays
+        .forest_core
+        .iter()
+        .map(|value| *value >= 26_214)
+        .collect::<Vec<_>>();
+    let wetland_mask = arrays
+        .wetland
+        .iter()
+        .map(|value| *value >= 19_661)
+        .collect::<Vec<_>>();
+    let clearing_mask = arrays
+        .clearing_core
+        .iter()
+        .map(|value| *value >= 13_107)
+        .collect::<Vec<_>>();
+    let habitat_mask = arrays
+        .openness
+        .iter()
+        .zip(&arrays.forest_core)
+        .zip(&arrays.wetland)
+        .zip(&arrays.corridor)
+        .map(|(((open, forest), wetland), corridor)| {
+            *open >= 39_321 || *forest >= 32_768 || *wetland >= 19_661 || *corridor >= 16_384
+        })
+        .collect::<Vec<_>>();
+    let quiet_samples = samples
+        .iter()
+        .filter(|sample| {
+            sample
+                .ecoregion
+                .is_some_and(|fact| fact.kind == EcoregionKind::QuietTransition)
+                && sample.mosaic.is_some_and(|fact| fact.clearing_core < 0.2)
+        })
+        .count();
+    let transition_samples = arrays
+        .transition
+        .iter()
+        .filter(|value| **value >= 13_107)
+        .count();
+    let mut province_kind_counts = vec![0_u32; PhysiographicProvinceKind::ALL.len()];
+    let mut ecoregion_kind_counts = vec![0_u32; EcoregionKind::ALL.len()];
+    let mut clearing_cause_counts = vec![0_u32; ClearingCause::ALL.len()];
+    for sample in samples {
+        if let Some(province) = sample.province {
+            province_kind_counts[province.kind as usize] += 1;
+        }
+        if let Some(ecoregion) = sample.ecoregion {
+            ecoregion_kind_counts[ecoregion.kind as usize] += 1;
+        }
+        if let Some(cause) = sample.mosaic.and_then(|fact| fact.clearing_cause) {
+            clearing_cause_counts[cause as usize] += 1;
+        }
+    }
+    ContinentalEcoregionAtlasMetrics {
+        land_fraction: land_mask.iter().filter(|value| **value).count() as f32 / sample_count,
+        ocean_fraction: land_mask.iter().filter(|value| !**value).count() as f32 / sample_count,
+        quiet_space_fraction: quiet_samples as f32 / sample_count,
+        transition_fraction: transition_samples as f32 / sample_count,
+        continent_components: component_distribution(&land_mask, columns, rows, step_blocks),
+        open_components: component_distribution(&open_mask, columns, rows, step_blocks),
+        forest_components: component_distribution(&forest_mask, columns, rows, step_blocks),
+        wetland_components: component_distribution(&wetland_mask, columns, rows, step_blocks),
+        clearing_components: component_distribution(&clearing_mask, columns, rows, step_blocks),
+        habitat_network_components: component_distribution(
+            &habitat_mask,
+            columns,
+            rows,
+            step_blocks,
+        ),
+        province_kind_counts,
+        ecoregion_kind_counts,
+        clearing_cause_counts,
+        ecoregion_adjacencies: adjacency_pairs(&arrays.ecoregion_kind, columns, rows),
+        journeys: journey_receipts(arrays, columns, rows, step_blocks),
+    }
+}
+
+fn component_distribution(
+    mask: &[bool],
+    columns: u32,
+    rows: u32,
+    step_blocks: u32,
+) -> ComponentDistribution {
+    let mut visited = vec![false; mask.len()];
+    let mut sizes = Vec::new();
+    for start in 0..mask.len() {
+        if !mask[start] || visited[start] {
+            continue;
+        }
+        visited[start] = true;
+        let mut queue = VecDeque::from([start]);
+        let mut size = 0_u32;
+        while let Some(index) = queue.pop_front() {
+            size += 1;
+            let column = index % columns as usize;
+            let row = index / columns as usize;
+            for neighbor in [
+                column
+                    .checked_sub(1)
+                    .map(|next| row * columns as usize + next),
+                (column + 1 < columns as usize).then_some(row * columns as usize + column + 1),
+                row.checked_sub(1)
+                    .map(|next| next * columns as usize + column),
+                (row + 1 < rows as usize).then_some((row + 1) * columns as usize + column),
+            ]
+            .into_iter()
+            .flatten()
+            {
+                if mask[neighbor] && !visited[neighbor] {
+                    visited[neighbor] = true;
+                    queue.push_back(neighbor);
+                }
+            }
+        }
+        sizes.push(size);
+    }
+    sizes.sort_unstable();
+    let maximum_samples = sizes.last().copied().unwrap_or(0);
+    let sample_area = f64::from(step_blocks).powi(2) / 1_000_000.0;
+    ComponentDistribution {
+        component_count: sizes.len() as u32,
+        covered_samples: sizes.iter().sum(),
+        minimum_samples: sizes.first().copied().unwrap_or(0),
+        median_samples: percentile(&sizes, 0.5),
+        p90_samples: percentile(&sizes, 0.9),
+        maximum_samples,
+        maximum_area_square_km: f64::from(maximum_samples) * sample_area,
+    }
+}
+
+fn percentile(values: &[u32], percentile: f64) -> u32 {
+    if values.is_empty() {
+        return 0;
+    }
+    let index = ((values.len() - 1) as f64 * percentile).round() as usize;
+    values[index]
+}
+
+fn adjacency_pairs(kinds: &[u8], columns: u32, rows: u32) -> Vec<AdjacencyPair> {
+    let mut pairs = BTreeMap::<(u8, u8), u32>::new();
+    for row in 0..rows as usize {
+        for column in 0..columns as usize {
+            let index = row * columns as usize + column;
+            for neighbor in [
+                (column + 1 < columns as usize).then_some(index + 1),
+                (row + 1 < rows as usize).then_some(index + columns as usize),
+            ]
+            .into_iter()
+            .flatten()
+            {
+                let left = kinds[index];
+                let right = kinds[neighbor];
+                if left == right
+                    || left == CONTINENTAL_ECOREGION_ATLAS_NONE
+                    || right == CONTINENTAL_ECOREGION_ATLAS_NONE
+                {
+                    continue;
+                }
+                let pair = if left < right {
+                    (left, right)
+                } else {
+                    (right, left)
+                };
+                *pairs.entry(pair).or_default() += 1;
+            }
+        }
+    }
+    let mut result = pairs
+        .into_iter()
+        .map(|((left_kind, right_kind), boundary_edges)| AdjacencyPair {
+            left_kind,
+            right_kind,
+            boundary_edges,
+        })
+        .collect::<Vec<_>>();
+    result.sort_by(|left, right| {
+        right
+            .boundary_edges
+            .cmp(&left.boundary_edges)
+            .then_with(|| left.left_kind.cmp(&right.left_kind))
+            .then_with(|| left.right_kind.cmp(&right.right_kind))
+    });
+    result
+}
+
+fn journey_receipts(
+    arrays: &AtlasArrays,
+    columns: u32,
+    rows: u32,
+    step_blocks: u32,
+) -> Vec<JourneyReceipt> {
+    let mut paths = Vec::new();
+    for (label, row) in [
+        ("west-east north", rows / 4),
+        ("west-east center", rows / 2),
+        ("west-east south", rows * 3 / 4),
+    ] {
+        paths.push((
+            label,
+            (0..columns).map(|column| row * columns + column).collect(),
+        ));
+    }
+    for (label, column) in [
+        ("north-south west", columns / 3),
+        ("north-south east", columns * 2 / 3),
+    ] {
+        paths.push((label, (0..rows).map(|row| row * columns + column).collect()));
+    }
+    let diagonal_len = columns.min(rows);
+    paths.push((
+        "northwest-southeast",
+        (0..diagonal_len)
+            .map(|offset| {
+                let denominator = diagonal_len.saturating_sub(1).max(1);
+                let column = offset * columns.saturating_sub(1) / denominator;
+                let row = offset * rows.saturating_sub(1) / denominator;
+                row * columns + column
+            })
+            .collect(),
+    ));
+    paths
+        .into_iter()
+        .map(|(label, indices): (&'static str, Vec<u32>)| {
+            journey_receipt(label, &indices, arrays, step_blocks)
+        })
+        .collect()
+}
+
+fn journey_receipt(
+    label: &'static str,
+    indices: &[u32],
+    arrays: &AtlasArrays,
+    step_blocks: u32,
+) -> JourneyReceipt {
+    let signatures = indices
+        .iter()
+        .map(|index| {
+            let index = *index as usize;
+            (
+                arrays.continent_story[index],
+                arrays.province_kind[index],
+                arrays.ecoregion_kind[index],
+                arrays.openness[index] / 16_384,
+            )
+        })
+        .collect::<Vec<_>>();
+    let mut runs = Vec::new();
+    for signature in signatures {
+        match runs.last_mut() {
+            Some((current, length)) if *current == signature => *length += 1,
+            _ => runs.push((signature, 1_u32)),
+        }
+    }
+    let mut seen = BTreeSet::new();
+    let repeated_scene_alarms = runs
+        .iter()
+        .filter(|(signature, _)| !seen.insert(*signature))
+        .count() as u32;
+    let dwell_total = runs.iter().map(|(_, length)| *length).sum::<u32>();
+    JourneyReceipt {
+        label,
+        distance_blocks: indices.len().saturating_sub(1) as u32 * step_blocks,
+        run_count: runs.len() as u32,
+        repeated_scene_alarms,
+        mean_dwell_blocks: if runs.is_empty() {
+            0
+        } else {
+            dwell_total * step_blocks / runs.len() as u32
+        },
+        longest_dwell_blocks: runs.iter().map(|(_, length)| *length).max().unwrap_or(0)
+            * step_blocks,
+    }
+}
+
+fn validate_request(
+    request: ContinentalEcoregionAtlasRequest,
+) -> Result<(), ContinentalEcoregionError> {
+    if request.blocks_across == 0 {
+        return Err(ContinentalEcoregionError::InvalidWindow(
+            "atlas blocksAcross must be non-zero",
+        ));
+    }
+    if !request.aspect_ratio.is_finite() || request.aspect_ratio <= 0.0 {
+        return Err(ContinentalEcoregionError::InvalidWindow(
+            "atlas aspect ratio must be positive and finite",
+        ));
+    }
+    if request.samples_across < 16 || request.samples_across > 512 {
+        return Err(ContinentalEcoregionError::InvalidWindow(
+            "atlas samplesAcross must be between 16 and 512",
+        ));
+    }
+    Ok(())
+}
+
+fn centered_minimum(center: i32, extent: u32) -> Result<i32, ContinentalEcoregionError> {
+    i32::try_from(i64::from(center) - i64::from(extent) / 2)
+        .map_err(|_| ContinentalEcoregionError::CoordinateOverflow)
+}
+
+fn quantize_unit(value: f32) -> u16 {
+    (value.clamp(0.0, 1.0) * f32::from(u16::MAX)).round() as u16
+}
+
+fn topology_label(topology: ContinentalEcoregionTopology) -> &'static str {
+    match topology {
+        ContinentalEcoregionTopology::Plane => "plane",
+        ContinentalEcoregionTopology::CylinderX {
+            period_blocks: 196_608,
+        } => "cylinder-x-196608",
+        ContinentalEcoregionTopology::CylinderX { .. } => "cylinder-x-custom",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fixed_resolution_atlas_contains_typed_land_and_ocean() {
+        let atlas = compile_continental_ecoregion_atlas(ContinentalEcoregionAtlasRequest {
+            aspect_ratio: 1.5,
+            ..ContinentalEcoregionAtlasRequest::plane(12_345, 0, 0, 65_536)
+        })
+        .unwrap();
+        assert_eq!(atlas.metadata.columns, 256);
+        assert_eq!(atlas.metadata.sample_count, atlas.land.len() as u32);
+        assert!(atlas.metadata.metrics.land_fraction > 0.2);
+        assert!(atlas.metadata.metrics.ocean_fraction > 0.01);
+        assert!(
+            atlas
+                .metadata
+                .metrics
+                .ecoregion_kind_counts
+                .iter()
+                .filter(|count| **count > 0)
+                .count()
+                >= 5
+        );
+        assert_eq!(atlas.metadata.work.exact_chunks, 0);
+    }
+
+    #[test]
+    fn doubling_extent_keeps_direct_sample_count_fixed() {
+        let small = compile_continental_ecoregion_atlas(ContinentalEcoregionAtlasRequest::plane(
+            12_345, 0, 0, 65_536,
+        ))
+        .unwrap();
+        let large = compile_continental_ecoregion_atlas(ContinentalEcoregionAtlasRequest::plane(
+            12_345, 0, 0, 131_072,
+        ))
+        .unwrap();
+        assert_eq!(small.metadata.sample_count, large.metadata.sample_count);
+        assert_eq!(
+            small.metadata.work.requested_samples,
+            large.metadata.work.requested_samples
+        );
+        assert_eq!(
+            small.metadata.sample_step_blocks * 2,
+            large.metadata.sample_step_blocks
+        );
+        assert_ne!(
+            small.metadata.semantic_sha256,
+            large.metadata.semantic_sha256
+        );
+    }
+
+    #[test]
+    fn metrics_and_arrays_are_exactly_repeatable() {
+        let request = ContinentalEcoregionAtlasRequest {
+            center_x: -18_000,
+            center_z: 24_000,
+            blocks_across: 131_072,
+            aspect_ratio: 1.7,
+            ..ContinentalEcoregionAtlasRequest::plane(-98_765, 0, 0, 1)
+        };
+        let first = compile_continental_ecoregion_atlas(request).unwrap();
+        let second = compile_continental_ecoregion_atlas(request).unwrap();
+        assert_eq!(first, second);
+        assert_eq!(first.metadata.metrics.journeys.len(), 6);
+        assert!(!first.metadata.metrics.ecoregion_adjacencies.is_empty());
+    }
+}

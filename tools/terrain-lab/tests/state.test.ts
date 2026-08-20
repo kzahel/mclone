@@ -59,6 +59,8 @@ test("round-trips complete URL state", () => {
     atlasWitnessBoundsVisible: false,
     atlasIdentityVisible: false,
     atlasSeamsVisible: false,
+    ecoregionTopology: "cylinder-x-196608",
+    ecoregionLayer: "habitat",
     semanticSubstrate: "flat",
     semanticFeatures: "basin",
     semanticTopology: "torus",
@@ -192,6 +194,7 @@ test("the vanilla profile replaces GPU with fast macro and excludes Mclone-only 
   assert.equal(toggleTerrainLabPane(vanilla, "gpu"), vanilla);
   assert.equal(toggleTerrainLabPane(vanilla, "runtime"), vanilla);
   assert.equal(toggleTerrainLabPane(vanilla, "plan"), vanilla);
+  assert.equal(toggleTerrainLabPane(vanilla, "ecoregion"), vanilla);
   assert.equal(toggleTerrainLabPane(vanilla, "wildlife"), vanilla);
   assert.equal(toggleTerrainLabPane(vanilla, "atlas"), vanilla);
   assert.equal(toggleTerrainLabPane(vanilla, "semantic"), vanilla);
@@ -255,6 +258,8 @@ test("keeps camera state outside URL-addressed terrain state", () => {
     atlasWitnessBoundsVisible: false,
     atlasIdentityVisible: false,
     atlasSeamsVisible: true,
+    ecoregionTopology: "plane",
+    ecoregionLayer: "composed",
     semanticSubstrate: "quiet",
     semanticFeatures: "combined",
     semanticTopology: "plane",
@@ -303,6 +308,18 @@ test("round-trips streamed planner atlas topology and overlays", () => {
   assert.equal(state.atlasWitnessBoundsVisible, true);
   assert.equal(state.atlasIdentityVisible, false);
   assert.equal(state.atlasSeamsVisible, true);
+  assert.deepEqual(parseTerrainLabState(terrainLabSearch(state)), state);
+});
+
+test("round-trips continental ecoregion atlas controls", () => {
+  const state = parseTerrainLabState(
+    "?panes=ecoregion&ecoregionTopology=cylinder-x-196608"
+      + "&ecoregionLayer=clearings&blocks=65536",
+  );
+  assert.deepEqual(state.panes, ["ecoregion"]);
+  assert.equal(state.ecoregionTopology, "cylinder-x-196608");
+  assert.equal(state.ecoregionLayer, "clearings");
+  assert.equal(state.blocksAcross, 65_536);
   assert.deepEqual(parseTerrainLabState(terrainLabSearch(state)), state);
 });
 
