@@ -5,6 +5,8 @@ Topic: `continental-ecoregion-planning`
 Status: **Accepted product direction as of 2026-08-20. Tactical
 [`322`](../tactical/322-continental-ecoregion-explorer.md) is authorized to
 build the first Rust-owned plan atlas and gate a World Explorer realization.
+Its disconnected shared plan and native/Wasm exact harness now pass; Terrain
+Lab presentation and distribution review are the active next slice.
 Mclone should combine
 top-down continental and ecoregional planning with bottom-up procedural
 realization so the Overworld contains large, recognizable, causally related

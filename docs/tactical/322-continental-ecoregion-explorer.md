@@ -1,11 +1,13 @@
 # Tactical 322: Continental Ecoregion Explorer
 
-Status: **planned 2026-08-20; implementation authorized. Phase 1 should land
-the shared Rust plan and exact invariants before presentation work. Human
-Review A selects the atlas grammar before World Explorer realization, and
-Human Review B selects whether the candidate deserves production integration.
-The current production generator remains a visible control, not a protected
-output target.**
+Status: **implementation active 2026-08-20. Phases 1 and 2 are implemented:
+the disconnected shared Rust plan, bounded direct queries, typed temperate
+grammar, native/Wasm canonical corpus, and performance receipt now pass.
+Terrain Lab presentation and distribution metrics are next. Human Review A
+selects the atlas grammar before World Explorer realization, and Human Review
+B selects whether the candidate deserves production integration. The current
+production generator remains a visible control, not a protected output
+target.**
 
 Topic: `continental-ecoregion-planning`
 
@@ -102,6 +104,51 @@ metric control. This is an A/B reference, not a compatibility promise. Record:
 
 The control must continue to render through its existing implementation. Do
 not duplicate production worldgen inside the candidate.
+
+## Implementation Evidence
+
+### Phases 1-2: shared plan and exact harness
+
+Landed on 2026-08-20 in shared `mclone-worldgen` ownership:
+
+- `continental_ecoregion` owns the Revision 1 descriptor, topology
+  compatibility, typed continent/province/ecoregion/mosaic facts, authored
+  temperate grammar, explicit clearing plans, direct point queries, bounded
+  windows, construction counts, and semantic checksums;
+- the production generator imports none of the candidate facts and retains
+  field revision 21 unchanged;
+- the 6,144-block proof cylinder fails explicitly as too small, while the
+  corpus proves exact lifts on an aligned 196,608-block cylinder;
+- all point/site coordinate construction remains safe at the complete signed
+  `i32` world-coordinate boundary; and
+- `mclone_continental_ecoregion` writes a machine-readable native receipt to
+  `/tmp/mclone-continental-ecoregion/receipt.json` by default.
+
+The pinned native/Wasm witness is
+`7abdac6c836ca0c978befe10c6c318741527d11ba5544859a50609c88050bad6`.
+It covers three seeds on plane and cylinder through 11,301 exact comparisons:
+whole versus split windows, randomized point traversal, direct coarse
+projection, owner/work caps, zero exact-chunk work, periodic lifts, and four
+independent native threads. The dedicated Wasm test produces the same
+witness through `wasm-bindgen-test-runner`.
+
+The first macOS `dev` profile performance receipt measured:
+
+| Query | Observed time |
+|---|---:|
+| continental point | 736 ns/sample |
+| province point | 804 ns/sample |
+| ecoregion point | 913 ns/sample |
+| mosaic point | 995 ns/sample |
+| 65,536-block, 256x256 mosaic atlas | 69.4 ms total / 1,058 ns per sample |
+| 131,072-block, 256x256 mosaic atlas | 62.7 ms total / 956 ns per sample |
+
+These timings are descriptive, not yet a budget, and exclude canvas drawing.
+The equal 256x256 cost at the two extents demonstrates direct coarse sampling:
+the 131 km atlas changes sample spacing rather than generating a larger hidden
+fine plan. The same windows contain 58,159 land / 7,377 ocean and 42,736 land /
+22,800 ocean samples respectively, so this receipt exercises actual
+land-ocean organization rather than an all-land regional palette.
 
 ## Candidate Plan Revision 1
 

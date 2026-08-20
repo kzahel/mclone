@@ -4,6 +4,7 @@ pub mod biome;
 pub mod block;
 pub mod carver;
 pub mod continental_ecoregion;
+pub mod continental_ecoregion_harness;
 pub mod feature;
 pub mod homestead_site;
 pub mod landform_plan;

@@ -538,7 +538,11 @@ impl ContinentalEcoregionPlan {
                     + (across / site.radius_across).powi(2))
                 .sqrt();
                 let edge_warp = self.fields.continent_edge.sample(canonical_x, world_z) * 0.13;
-                let score = 1.0 - distance + edge_warp;
+                let score = if site.active {
+                    1.0 - distance + edge_warp
+                } else {
+                    -1.25 - distance * 0.08
+                };
                 let replace = best.as_ref().is_none_or(|(best_score, best_site)| {
                     score > *best_score
                         || (score == *best_score && site.id.hash < best_site.id.hash)
@@ -598,6 +602,7 @@ impl ContinentalEcoregionPlan {
             radius_across: 22_000.0 + hash_unit(hash, 12) * 16_000.0,
             axis_x,
             axis_z,
+            active: (hash & 7) < 3,
             story: match (hash >> 60) & 3 {
                 0 => ContinentalStory::RiverValley,
                 1 => ContinentalStory::LakeDistrict,
@@ -920,6 +925,7 @@ struct ContinentalSite {
     radius_across: f64,
     axis_x: f64,
     axis_z: f64,
+    active: bool,
     story: ContinentalStory,
 }
 
