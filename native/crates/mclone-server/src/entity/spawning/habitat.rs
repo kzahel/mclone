@@ -16,12 +16,25 @@ pub(crate) const FOREST_EDGE_HABITAT_RADIUS: i32 = 6;
 pub(crate) const FLOWERING_HABITAT_RADIUS: i32 = 6;
 pub(crate) const RABBIT_HABITAT_RADIUS: i32 = 6;
 pub(crate) const SQUIRREL_HABITAT_RADIUS: i32 = 8;
+const SQUIRREL_CANOPY_MAX_RADIUS: i32 = 4;
+const SQUIRREL_CANOPY_MAX_HEIGHT: i32 = 10;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct SquirrelRefugeCandidate {
     pub(crate) approach: BlockPos,
     pub(crate) trunk: BlockPos,
+    pub(crate) trunk_top: BlockPos,
+    pub(crate) canopy_edge_bottom: BlockPos,
+    pub(crate) canopy_edge_top: BlockPos,
     pub(crate) refuge: BlockPos,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct SquirrelRouteBlockFacts {
+    clear: bool,
+    log: bool,
+    mast_leaf: bool,
+    solid_support: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -72,7 +85,6 @@ pub(crate) fn sample_squirrel_habitat(
         recently_disturbed,
         ..SquirrelHabitatSample::default()
     };
-    let mut refuge_candidates = Vec::new();
 
     for dx in -SQUIRREL_HABITAT_RADIUS..=SQUIRREL_HABITAT_RADIUS {
         for dz in -SQUIRREL_HABITAT_RADIUS..=SQUIRREL_HABITAT_RADIUS {
@@ -96,45 +108,6 @@ pub(crate) fn sample_squirrel_habitat(
                 sample.mast_leaf_blocks = sample
                     .mast_leaf_blocks
                     .saturating_add(u16::from(is_mast_leaf(raw)));
-                if !is_tree_log(raw) || dy < 0 {
-                    continue;
-                }
-                for (side_x, side_z) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
-                    let refuge = pos.offset(side_x, 0, side_z);
-                    if refuge.y < feet.y + 3
-                        || block_at(refuge).ok_or(SquirrelHabitatFailure::MissingBlockData)? != AIR
-                    {
-                        continue;
-                    }
-                    let leaf_support = (-1..=1).any(|leaf_dx| {
-                        (-1..=1).any(|leaf_dz| {
-                            block_at(refuge.offset(leaf_dx, 1, leaf_dz)).is_some_and(is_mast_leaf)
-                        })
-                    });
-                    if !leaf_support {
-                        continue;
-                    }
-                    let approach = BlockPos::new(refuge.x, feet.y, refuge.z);
-                    if block_at(approach).ok_or(SquirrelHabitatFailure::MissingBlockData)? == AIR
-                        && block_at(approach.below())
-                            .ok_or(SquirrelHabitatFailure::MissingBlockData)?
-                            != AIR
-                    {
-                        let approach_distance =
-                            (approach.x - feet.x).abs() + (approach.z - feet.z).abs();
-                        refuge_candidates.push((
-                            approach_distance,
-                            refuge.y,
-                            refuge.x,
-                            refuge.z,
-                            SquirrelRefugeCandidate {
-                                approach,
-                                trunk: pos,
-                                refuge,
-                            },
-                        ));
-                    }
-                }
             }
             sample.woody_columns = sample.woody_columns.saturating_add(u16::from(woody_column));
         }
@@ -151,9 +124,9 @@ pub(crate) fn sample_squirrel_habitat(
         }
         sample.max_floor_step = sample.max_floor_step.max(step);
     }
-    refuge_candidates
-        .sort_unstable_by_key(|candidate| (candidate.0, candidate.1, candidate.2, candidate.3));
-    sample.refuge = refuge_candidates.first().map(|candidate| candidate.4);
+    sample.refuge = find_squirrel_refuge_candidate_with_facts(feet, &mut |pos| {
+        block_at(pos).map(|raw| squirrel_route_block_facts(generated_block_state_id(raw), pos))
+    });
     sample.fitness = HabitatFitness::from_dimensions(
         score(sample.mast_leaf_blocks, 12),
         score(sample.woody_columns, 8),
@@ -168,6 +141,15 @@ pub(crate) fn find_squirrel_refuge_candidate(
     feet: BlockPos,
     block_state_at: &impl Fn(BlockPos) -> Option<BlockStateId>,
 ) -> Option<SquirrelRefugeCandidate> {
+    find_squirrel_refuge_candidate_with_facts(feet, &mut |pos| {
+        block_state_at(pos).map(|state| squirrel_route_block_facts(state, pos))
+    })
+}
+
+fn find_squirrel_refuge_candidate_with_facts(
+    feet: BlockPos,
+    facts_at: &mut impl FnMut(BlockPos) -> Option<SquirrelRouteBlockFacts>,
+) -> Option<SquirrelRefugeCandidate> {
     let mut candidates = Vec::new();
     for radius in 1..=SQUIRREL_HABITAT_RADIUS {
         for dx in -radius..=radius {
@@ -175,38 +157,96 @@ pub(crate) fn find_squirrel_refuge_candidate(
                 if dx.abs() + dz.abs() != radius {
                     continue;
                 }
-                for dy in 3..=8 {
-                    let trunk = feet.offset(dx, dy, dz);
-                    if !block_state_at(trunk).is_some_and(is_tree_log_state) {
+                let trunk = feet.offset(dx, 0, dz);
+                if !facts_at(trunk).is_some_and(|facts| facts.log) {
+                    continue;
+                }
+                for (side_x, side_z) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+                    let approach = trunk.offset(side_x, 0, side_z);
+                    if !facts_at(approach).is_some_and(|facts| facts.clear)
+                        || !facts_at(approach.below()).is_some_and(|facts| facts.solid_support)
+                    {
                         continue;
                     }
-                    for (side_x, side_z) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
-                        let refuge = trunk.offset(side_x, 0, side_z);
-                        if !squirrel_space_is_clear(refuge, block_state_at)
-                            || !squirrel_leaf_support_exists(refuge, block_state_at)
-                        {
-                            continue;
+
+                    let canopy_bottom_y =
+                        (feet.y + 2..=feet.y + SQUIRREL_CANOPY_MAX_HEIGHT).find(|y| {
+                            facts_at(BlockPos::new(approach.x, *y, approach.z))
+                                .is_some_and(|facts| facts.mast_leaf)
+                        });
+                    let Some(canopy_bottom_y) = canopy_bottom_y else {
+                        continue;
+                    };
+                    let trunk_top = BlockPos::new(approach.x, canopy_bottom_y - 1, approach.z);
+                    if !(feet.y..=trunk_top.y).all(|y| {
+                        facts_at(BlockPos::new(approach.x, y, approach.z))
+                            .is_some_and(|facts| facts.clear)
+                            && facts_at(BlockPos::new(trunk.x, y, trunk.z))
+                                .is_some_and(|facts| facts.log)
+                    }) {
+                        continue;
+                    }
+
+                    let mut canopy_radius = 0;
+                    for distance in 1..=SQUIRREL_CANOPY_MAX_RADIUS {
+                        let leaf = trunk.offset(
+                            side_x * distance,
+                            canopy_bottom_y - feet.y,
+                            side_z * distance,
+                        );
+                        if facts_at(leaf).is_some_and(|facts| facts.mast_leaf) {
+                            canopy_radius = distance;
+                        } else {
+                            break;
                         }
-                        let approach = BlockPos::new(refuge.x, feet.y, refuge.z);
-                        if squirrel_space_is_clear(approach, block_state_at)
-                            && block_state_at(approach.below()).is_some_and(|state| {
-                                block_collision_aabb(state, approach.below()).is_some()
-                            })
-                        {
-                            let approach_distance =
-                                (approach.x - feet.x).abs() + (approach.z - feet.z).abs();
-                            candidates.push((
-                                approach_distance,
-                                refuge.y,
-                                refuge.x,
-                                refuge.z,
-                                SquirrelRefugeCandidate {
-                                    approach,
-                                    trunk,
-                                    refuge,
-                                },
-                            ));
-                        }
+                    }
+                    if canopy_radius == 0 {
+                        continue;
+                    }
+
+                    let leaf_column = trunk.offset(
+                        side_x * canopy_radius,
+                        canopy_bottom_y - feet.y,
+                        side_z * canopy_radius,
+                    );
+                    let mut canopy_top_y = canopy_bottom_y;
+                    while canopy_top_y < feet.y + SQUIRREL_CANOPY_MAX_HEIGHT
+                        && facts_at(BlockPos::new(
+                            leaf_column.x,
+                            canopy_top_y + 1,
+                            leaf_column.z,
+                        ))
+                        .is_some_and(|facts| facts.mast_leaf)
+                    {
+                        canopy_top_y += 1;
+                    }
+
+                    let canopy_edge_bottom = trunk.offset(
+                        side_x * (canopy_radius + 1),
+                        canopy_bottom_y - feet.y - 1,
+                        side_z * (canopy_radius + 1),
+                    );
+                    let canopy_edge_top =
+                        BlockPos::new(canopy_edge_bottom.x, canopy_top_y + 1, canopy_edge_bottom.z);
+                    let refuge = BlockPos::new(leaf_column.x, canopy_top_y + 1, leaf_column.z);
+                    let candidate = SquirrelRefugeCandidate {
+                        approach,
+                        trunk,
+                        trunk_top,
+                        canopy_edge_bottom,
+                        canopy_edge_top,
+                        refuge,
+                    };
+                    if squirrel_refuge_support_is_valid_with_facts(candidate, facts_at) {
+                        let approach_distance =
+                            (approach.x - feet.x).abs() + (approach.z - feet.z).abs();
+                        candidates.push((
+                            approach_distance,
+                            refuge.y,
+                            refuge.x,
+                            refuge.z,
+                            candidate,
+                        ));
                     }
                 }
             }
@@ -222,30 +262,93 @@ pub(crate) fn squirrel_refuge_support_is_valid(
     candidate: SquirrelRefugeCandidate,
     block_state_at: &impl Fn(BlockPos) -> Option<BlockStateId>,
 ) -> bool {
-    let min_y = candidate.approach.y;
-    let max_y = candidate.refuge.y;
-    (min_y..=max_y).all(|y| {
-        let side = BlockPos::new(candidate.refuge.x, y, candidate.refuge.z);
-        let trunk = BlockPos::new(candidate.trunk.x, y, candidate.trunk.z);
-        squirrel_space_is_clear(side, block_state_at)
-            && block_state_at(trunk).is_some_and(is_tree_log_state)
-    }) && squirrel_leaf_support_exists(candidate.refuge, block_state_at)
-}
-
-fn squirrel_space_is_clear(
-    feet: BlockPos,
-    block_state_at: &impl Fn(BlockPos) -> Option<BlockStateId>,
-) -> bool {
-    block_state_at(feet).is_some_and(|state| block_collision_aabb(state, feet).is_none())
-}
-
-fn squirrel_leaf_support_exists(
-    refuge: BlockPos,
-    block_state_at: &impl Fn(BlockPos) -> Option<BlockStateId>,
-) -> bool {
-    (-1..=1).any(|dx| {
-        (-1..=1).any(|dz| block_state_at(refuge.offset(dx, 1, dz)).is_some_and(is_mast_leaf_state))
+    squirrel_refuge_support_is_valid_with_facts(candidate, &mut |pos| {
+        block_state_at(pos).map(|state| squirrel_route_block_facts(state, pos))
     })
+}
+
+fn squirrel_refuge_support_is_valid_with_facts(
+    candidate: SquirrelRefugeCandidate,
+    facts_at: &mut impl FnMut(BlockPos) -> Option<SquirrelRouteBlockFacts>,
+) -> bool {
+    let side_x = candidate.approach.x - candidate.trunk.x;
+    let side_z = candidate.approach.z - candidate.trunk.z;
+    if side_x.abs() + side_z.abs() != 1
+        || candidate.trunk_top.x != candidate.approach.x
+        || candidate.trunk_top.z != candidate.approach.z
+        || candidate.canopy_edge_bottom.y != candidate.trunk_top.y
+        || candidate.canopy_edge_top.x != candidate.canopy_edge_bottom.x
+        || candidate.canopy_edge_top.z != candidate.canopy_edge_bottom.z
+        || candidate.refuge.y != candidate.canopy_edge_top.y
+    {
+        return false;
+    }
+
+    let canopy_radius = (candidate.refuge.x - candidate.trunk.x).abs()
+        + (candidate.refuge.z - candidate.trunk.z).abs();
+    if canopy_radius == 0
+        || candidate.refuge.x != candidate.trunk.x + side_x * canopy_radius
+        || candidate.refuge.z != candidate.trunk.z + side_z * canopy_radius
+        || candidate.canopy_edge_bottom.x != candidate.trunk.x + side_x * (canopy_radius + 1)
+        || candidate.canopy_edge_bottom.z != candidate.trunk.z + side_z * (canopy_radius + 1)
+    {
+        return false;
+    }
+
+    if !facts_at(candidate.approach).is_some_and(|facts| facts.clear)
+        || !facts_at(candidate.approach.below()).is_some_and(|facts| facts.solid_support)
+        || !(candidate.approach.y..=candidate.trunk_top.y).all(|y| {
+            facts_at(BlockPos::new(candidate.approach.x, y, candidate.approach.z))
+                .is_some_and(|facts| facts.clear)
+                && facts_at(BlockPos::new(candidate.trunk.x, y, candidate.trunk.z))
+                    .is_some_and(|facts| facts.log)
+        })
+    {
+        return false;
+    }
+
+    for distance in 1..=canopy_radius {
+        let underside = BlockPos::new(
+            candidate.trunk.x + side_x * distance,
+            candidate.trunk_top.y,
+            candidate.trunk.z + side_z * distance,
+        );
+        if !facts_at(underside).is_some_and(|facts| facts.clear)
+            || !facts_at(underside.offset(0, 1, 0)).is_some_and(|facts| facts.mast_leaf)
+        {
+            return false;
+        }
+    }
+
+    if !facts_at(candidate.canopy_edge_bottom).is_some_and(|facts| facts.clear)
+        || !(candidate.trunk_top.y + 1..candidate.canopy_edge_top.y).all(|y| {
+            facts_at(BlockPos::new(
+                candidate.canopy_edge_bottom.x,
+                y,
+                candidate.canopy_edge_bottom.z,
+            ))
+            .is_some_and(|facts| facts.clear)
+                && facts_at(BlockPos::new(candidate.refuge.x, y, candidate.refuge.z))
+                    .is_some_and(|facts| facts.mast_leaf)
+        })
+        || !facts_at(candidate.canopy_edge_top).is_some_and(|facts| facts.clear)
+        || !facts_at(candidate.refuge).is_some_and(|facts| facts.clear)
+        || !facts_at(candidate.refuge.below()).is_some_and(|facts| facts.mast_leaf)
+    {
+        return false;
+    }
+
+    true
+}
+
+fn squirrel_route_block_facts(state: BlockStateId, pos: BlockPos) -> SquirrelRouteBlockFacts {
+    let collision = block_collision_aabb(state, pos);
+    SquirrelRouteBlockFacts {
+        clear: collision.is_none(),
+        log: is_tree_log_state(state),
+        mast_leaf: is_mast_leaf_state(state),
+        solid_support: collision.is_some(),
+    }
 }
 
 fn is_tree_log_state(state: BlockStateId) -> bool {
@@ -983,7 +1086,7 @@ mod tests {
             GRASS_BLOCK
         } else if pos.x == 3 && pos.z == 0 && (64..=68).contains(&pos.y) {
             OAK_LOG
-        } else if pos.y == 68 && (pos.x - 3).abs() <= 2 && pos.z.abs() <= 2 && pos.x != 3 {
+        } else if (68..=70).contains(&pos.y) && (pos.x - 3).abs() <= 2 && pos.z.abs() <= 2 {
             OAK_LEAVES
         } else {
             AIR
@@ -1003,7 +1106,16 @@ mod tests {
         .unwrap();
         assert!(suitable.suitable());
         assert!(suitable.mast_leaf_blocks >= 4);
-        assert_eq!(suitable.refuge.unwrap().trunk.x, 3);
+        let route = suitable.refuge.unwrap();
+        assert_eq!(route.trunk.x, 3);
+        assert_eq!(route.approach, BlockPos::new(2, 64, 0));
+        assert_eq!(route.trunk_top, BlockPos::new(2, 67, 0));
+        assert_eq!(route.canopy_edge_bottom, BlockPos::new(0, 67, 0));
+        assert_eq!(route.canopy_edge_top, BlockPos::new(0, 71, 0));
+        assert_eq!(route.refuge, BlockPos::new(1, 71, 0));
+        assert_eq!(route.refuge.y, 71);
+        assert_eq!(route.refuge.below().y, 70);
+        assert_eq!(squirrel_edge(BlockPos::new(3, 69, 1)), Some(OAK_LEAVES));
 
         let no_mast = sample_squirrel_habitat(
             BlockPos::new(0, 64, 0),

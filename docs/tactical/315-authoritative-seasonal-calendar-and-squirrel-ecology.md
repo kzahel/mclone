@@ -483,7 +483,7 @@ after defining production habitat inputs. Favor a bounded combination of:
 - mature woody cover and mast potential;
 - woodland interiors, edges, clearings, and connected tree patches;
 - tolerable slope and ground access;
-- cavity/refuge opportunity;
+- exterior canopy-perch or cavity/refuge opportunity;
 - avoidance of treeless wetland, bare alpine, desert, and open-water cores;
   and
 - sufficient separation from another seed-authored group to avoid ubiquitous
@@ -529,6 +529,9 @@ The first arboreal path may be bounded and specialized, but it must use loaded
 collision/support facts and fail honestly when no route exists. Do not install
 a full unconstrained flying navigator, teleport squirrels into leaves, or
 generalize a universal tree-home framework before another species needs it.
+The implemented immediate route uses a closed-canopy exterior climb to a
+leaf-supported top perch and performs no block edits. A durable drey or cavity
+may be designed later; it is not faked by carving the current tree crown.
 
 ### Caches are durable places with bounded cardinality
 
@@ -769,7 +772,7 @@ the current Mac lacks `wgpu::Features::MULTIVIEW` and no Quest is attached.
 1. Author and validate the semantic figure, animation roles, prepared render,
    catalogue entry, and bounded sound family.
 2. Add shared protocol/entity/lifecycle/render vocabulary.
-3. Define woodland-edge habitat fitness and mast/cavity evidence.
+3. Define woodland-edge habitat fitness and mast/canopy-refuge evidence.
 4. Extend coordinate-pure initial-population planning and Terrain Lab.
 5. Prove exact plane/cylinder planning, owner-chunk realization, empty-record
    extinction, persistence, and order independence.

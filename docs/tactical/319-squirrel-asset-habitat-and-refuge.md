@@ -99,15 +99,18 @@ combines coordinate-pure generated facts with current loaded block evidence:
 - woodland edge or broken-canopy cover rather than dense featureless interior;
 - nearby mast-bearing mature woody vegetation;
 - a live seed/soft-mast resource opportunity at the 64-by-64 forage cell;
-- at least one bounded cavity/refuge candidate in connected woody cover;
+- at least one bounded exterior canopy-perch or cavity candidate in connected
+  woody cover;
 - low herb/ground access for travel and ordinary collision-safe standing;
 - slope and obstruction bounds; and
 - current player distance/disturbance for natural materialization.
 
-Prefer existing Mclone vegetation and forest-edge facts. If a cavity semantic
-is missing, derive a deterministic sparse candidate from the same production
-tree occurrence identity and prove that its live trunk/leaf support exists;
-do not add a squirrel-only noise field or change heightfield shape.
+Prefer existing Mclone vegetation and forest-edge facts. Phase D may use an
+exterior canopy perch when no cavity semantic exists, but every route segment
+must prove its live trunk/leaf support. Do not carve a squirrel-only opening,
+add a squirrel-only noise field, or change heightfield shape. A later durable
+drey or cavity is an ordinary ecology feature, not an implicit consequence of
+climbing and not implemented by this phase.
 
 Extend the coordinate-pure initial-population planner with bounded squirrel
 families and stable IDs. Plane and cylindrical topology must agree at wrapped
@@ -130,9 +133,10 @@ candidate through one bounded neighborhood query. The specialized route is:
 ```text
 ground position
   -> collision-valid trunk approach
-  -> support-checked vertical trunk segments
-  -> support-checked branch/cavity threshold
-  -> retained refuge position
+  -> clear exterior climb beside supported trunk segments
+  -> clear under-crown traverse with leaf cover overhead
+  -> clear climb around the outer leaf face
+  -> leaf-supported top perch retained as the immediate refuge
 ```
 
 Every segment requires loaded block/collision/support facts and bounded
@@ -141,7 +145,9 @@ clip and stable facing; entry succeeds only at the validated threshold. Missing
 or changed support invalidates the route. Refuge exit reverses a validated
 route or returns to the nearest still-valid support. This is a squirrel-focused
 state machine over ordinary world facts, not a universal tree-home graph,
-flight path, noclip mode, or teleport.
+flight path, noclip mode, teleport, or block-editing action. Rabbit burrow
+excavation remains a separate species-owned refuge mechanic; squirrels do not
+dig holes through leaves.
 
 ## Validation And Review Gate D
 
@@ -222,9 +228,11 @@ squirrels.
 
 Reached ground feeding conserves `SeedsAndSoftMast` through the shared
 resource ledger. Threatened squirrels select cover, approach a real trunk,
-climb through gradual support-checked displacement, enter only a validated
-refuge threshold, rest, and reverse the route on exit. Losing support falls
-back to an honest ground behavior. The expensive refuge query uses the shared
+climb its clear exterior, travel under the crown, climb around the outer leaf
+face, and step onto a leaf-supported top perch. They reverse the same route on
+exit, never intersect solid trunk/leaves, and never mutate the tree. Losing
+any route or perch support falls back to an honest ground behavior. The
+expensive refuge query uses the shared
 ecology-work admission class: one thousand continuously threatened squirrels
 perform no more than 32 refuge queries per tick and every identity progresses
 within 64 ticks. Spatial alarm, escape/rustle, and digging/refuge cues use the
@@ -235,10 +243,12 @@ ordinary saved squirrel state. Its typed evidence names the production founder
 path, and its authored tree passes the same support-valid refuge query as live
 gameplay. Native flat and synthetic-stereo captures were inspected at
 `/tmp/mclone-squirrel-woodland.png` and
-`/tmp/mclone-squirrel-woodland-stereo.png`; the stereo layers contain 318,952
-different pixels. Headed WebGPU observed all of `Idle`, `Bound`, `Forage`,
+`/tmp/mclone-squirrel-woodland-stereo.png`; the closed-canopy stereo layers
+contain 318,602 different pixels. Headed WebGPU observed all of `Idle`,
+`Bound`, `Forage`,
 `Alarm`, `Flee`, `TrunkApproach`, `Climb`, `RefugeEnter`, and `RefugeIdle`
-over 424 samples, including a squirrel moving from height 65 to 68. All
+with a bounded 512-sample diagnostic tail plus compact whole-window evidence,
+including a squirrel moving from height 65 to 71. All
 IndexedDB world-record stores remained empty. The inspected browser canvas is
 `/tmp/mclone-native-web-showcase-squirrel-woodland-canvas.png`.
 
@@ -275,3 +285,11 @@ required that admission before using the cached route. The corrected transition
 reuses support-validated route evidence immediately after the ordinary alarm
 window. A focused regression now drives one squirrel through refuge, descent,
 and a complete second alarm/escape/climb/refuge sequence with no query admission.
+
+The 2026-08-20 closed-canopy correction removes the showcase's south-side
+leaf opening. Habitat discovery and live route validation now share the same
+bounded exterior-route proof, and the movement regression checks every climb
+sample for zero solid-block intersection. The fixture explicitly proves that
+the formerly open crown position is a leaf block. Native flat and headed
+WebGPU pixels were re-inspected with the closed crown, and the ordinary Web
+behavior gate reached the supported Y=71 perch without scripting the animal.

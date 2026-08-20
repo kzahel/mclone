@@ -1316,6 +1316,7 @@ impl MobRuntimeState {
         {
             self.squirrel_refuge_route = None;
             self.squirrel_ground_target = None;
+            entity.on_ground = false;
             let squirrel = self.species.squirrel_mut().expect("squirrel species");
             squirrel.set_refuge(None);
             squirrel
@@ -1353,16 +1354,12 @@ impl MobRuntimeState {
             }
             mclone_protocol::SquirrelBehavior::RefugeExit => {
                 if let Some(route) = self.squirrel_refuge_route {
-                    let target_y = f64::from(route.approach.y);
-                    if entity.position.y <= target_y + SQUIRREL_CLIMB_SPEED {
-                        entity.position.y = target_y;
+                    if move_squirrel_from_canopy_perch(entity, route, blocks) {
                         entity.on_ground = true;
                         self.species
                             .squirrel_mut()
                             .expect("squirrel species")
                             .set_behavior(mclone_protocol::SquirrelBehavior::Idle);
-                    } else {
-                        move_squirrel_vertical(entity, -SQUIRREL_CLIMB_SPEED, route, blocks);
                     }
                 } else {
                     self.species
@@ -1373,20 +1370,12 @@ impl MobRuntimeState {
             }
             mclone_protocol::SquirrelBehavior::Climb => {
                 if let Some(route) = self.squirrel_refuge_route {
-                    let target_y = f64::from(route.refuge.y);
-                    if entity.position.y + SQUIRREL_CLIMB_SPEED >= target_y {
-                        entity.position = Vec3d::new(
-                            f64::from(route.refuge.x) + 0.5,
-                            target_y,
-                            f64::from(route.refuge.z) + 0.5,
-                        );
-                        entity.on_ground = false;
+                    if move_squirrel_to_canopy_perch(entity, route, blocks) {
+                        entity.on_ground = true;
                         self.species
                             .squirrel_mut()
                             .expect("squirrel species")
                             .set_behavior(mclone_protocol::SquirrelBehavior::RefugeEnter);
-                    } else {
-                        move_squirrel_vertical(entity, SQUIRREL_CLIMB_SPEED, route, blocks);
                     }
                 }
             }
@@ -4295,21 +4284,97 @@ where
     move_deer_toward(entity, target, speed, blocks);
 }
 
-fn move_squirrel_vertical<F>(
+fn move_squirrel_to_canopy_perch<F>(
     entity: &mut ServerEntityState,
-    vertical_speed: f64,
+    route: SquirrelRefugeCandidate,
+    blocks: &F,
+) -> bool
+where
+    F: Fn(BlockPos) -> Option<BlockStateId>,
+{
+    let trunk_top = squirrel_route_position(route.trunk_top);
+    let canopy_edge_bottom = squirrel_route_position(route.canopy_edge_bottom);
+    let canopy_edge_top = squirrel_route_position(route.canopy_edge_top);
+    let refuge = squirrel_route_position(route.refuge);
+    let target = if entity.position.y + 0.01 < trunk_top.y
+        && squared_horizontal_distance(entity.position, trunk_top) <= 0.35 * 0.35
+    {
+        trunk_top
+    } else if entity.position.y <= trunk_top.y + 0.01
+        && squared_horizontal_distance(entity.position, canopy_edge_bottom) > 0.04 * 0.04
+    {
+        canopy_edge_bottom
+    } else if entity.position.y + 0.01 < canopy_edge_top.y
+        && squared_horizontal_distance(entity.position, canopy_edge_top) <= 0.35 * 0.35
+    {
+        canopy_edge_top
+    } else if entity.position.distance_to_sqr(refuge) > 0.04 * 0.04 {
+        refuge
+    } else {
+        entity.position = refuge;
+        return true;
+    };
+    move_squirrel_along_route(entity, target, route, blocks);
+    false
+}
+
+fn move_squirrel_from_canopy_perch<F>(
+    entity: &mut ServerEntityState,
+    route: SquirrelRefugeCandidate,
+    blocks: &F,
+) -> bool
+where
+    F: Fn(BlockPos) -> Option<BlockStateId>,
+{
+    let approach = squirrel_route_position(route.approach);
+    let trunk_top = squirrel_route_position(route.trunk_top);
+    let canopy_edge_bottom = squirrel_route_position(route.canopy_edge_bottom);
+    let canopy_edge_top = squirrel_route_position(route.canopy_edge_top);
+    let target = if entity.position.y >= canopy_edge_top.y - 0.01
+        && squared_horizontal_distance(entity.position, canopy_edge_top) > 0.04 * 0.04
+    {
+        canopy_edge_top
+    } else if squared_horizontal_distance(entity.position, canopy_edge_top) <= 0.35 * 0.35
+        && entity.position.y > canopy_edge_bottom.y + 0.01
+    {
+        canopy_edge_bottom
+    } else if entity.position.y <= canopy_edge_bottom.y + 0.01
+        && squared_horizontal_distance(entity.position, trunk_top) > 0.04 * 0.04
+    {
+        trunk_top
+    } else if squared_horizontal_distance(entity.position, trunk_top) <= 0.35 * 0.35
+        && entity.position.y > approach.y + 0.01
+    {
+        approach
+    } else if entity.position.distance_to_sqr(approach) <= 0.04 * 0.04 {
+        entity.position = approach;
+        return true;
+    } else {
+        approach
+    };
+    move_squirrel_along_route(entity, target, route, blocks);
+    false
+}
+
+fn squirrel_route_position(pos: BlockPos) -> Vec3d {
+    Vec3d::new(
+        f64::from(pos.x) + 0.5,
+        f64::from(pos.y),
+        f64::from(pos.z) + 0.5,
+    )
+}
+
+fn move_squirrel_along_route<F>(
+    entity: &mut ServerEntityState,
+    target: Vec3d,
     route: SquirrelRefugeCandidate,
     blocks: &F,
 ) where
     F: Fn(BlockPos) -> Option<BlockStateId>,
 {
-    let target_x = f64::from(route.refuge.x) + 0.5;
-    let target_z = f64::from(route.refuge.z) + 0.5;
-    let requested = Vec3d::new(
-        (target_x - entity.position.x).clamp(-0.03, 0.03),
-        vertical_speed,
-        (target_z - entity.position.z).clamp(-0.03, 0.03),
-    );
+    let delta = target.subtract(entity.position);
+    let distance = delta.length_sqr().sqrt().max(1.0e-9);
+    let requested = delta.scale((SQUIRREL_CLIMB_SPEED / distance).min(1.0));
     let bounding_box = collision_aabb_for_feet_position(
         entity.position,
         f64::from(entity.width),
@@ -4317,10 +4382,16 @@ fn move_squirrel_vertical<F>(
     );
     let traveled = collide_movement(blocks, bounding_box, requested);
     entity.position = entity.position.add(traveled);
-    entity.on_ground =
-        vertical_speed < 0.0 && collide_movement_result(requested, traveled).on_ground;
-    let dx = f64::from(route.trunk.x) + 0.5 - entity.position.x;
-    let dz = f64::from(route.trunk.z) + 0.5 - entity.position.z;
+    entity.on_ground = false;
+    let horizontal_motion_sqr = traveled.x * traveled.x + traveled.z * traveled.z;
+    let (dx, dz) = if horizontal_motion_sqr > 1.0e-8 {
+        (traveled.x, traveled.z)
+    } else {
+        (
+            f64::from(route.trunk.x) + 0.5 - entity.position.x,
+            f64::from(route.trunk.z) + 0.5 - entity.position.z,
+        )
+    };
     if dx * dx + dz * dz > 1.0e-8 {
         entity.y_rot_degrees = (-dx).atan2(dz).to_degrees() as f32;
     }
@@ -4550,7 +4621,7 @@ mod tests {
             GRASS_BLOCK
         } else if pos.x == 3 && pos.z == 0 && (64..=68).contains(&pos.y) {
             OAK_LOG
-        } else if pos.y == 68 && (pos.x - 3).abs() <= 2 && pos.z.abs() <= 2 && pos.x != 3 {
+        } else if (68..=70).contains(&pos.y) && (pos.x - 3).abs() <= 2 && pos.z.abs() <= 2 {
             OAK_LEAVES
         } else {
             AIR
@@ -4619,6 +4690,16 @@ mod tests {
             }
             if behavior == SquirrelBehavior::Climb {
                 climb_heights.push(entity.position.y);
+                let body = collision_aabb_for_feet_position(
+                    entity.position,
+                    f64::from(entity.width),
+                    f64::from(entity.height),
+                );
+                assert!(
+                    mclone_blocks::solid_block_aabbs_in(squirrel_tree, body).is_empty(),
+                    "squirrel climb body intersected tree geometry at {:?}",
+                    entity.position
+                );
             }
             if behavior == SquirrelBehavior::RefugeIdle {
                 break;
@@ -4646,11 +4727,12 @@ mod tests {
             "refuge entry must not teleport"
         );
         let refuge_height = entity.position.y;
-        assert!(!entity.on_ground);
+        assert!(entity.on_ground, "canopy perch must have leaf support");
+        let route = mob.squirrel_refuge_route.expect("accepted refuge route");
 
         let support_present = Cell::new(true);
         let damaged_tree = |pos: BlockPos| {
-            if !support_present.get() && pos == BlockPos::new(3, 65, 0) {
+            if !support_present.get() && pos == route.refuge.below() {
                 Some(generated_block_state_id(mclone_worldgen::block::AIR))
             } else {
                 squirrel_tree(pos)
@@ -4700,8 +4782,23 @@ mod tests {
         );
 
         for _ in 0..240 {
+            let behavior_before = mob.squirrel_behavior();
             entity.tick_count += 1;
             mob.tick_entity(&mut entity, &[], &[], &[], &squirrel_tree);
+            if behavior_before == Some(SquirrelBehavior::RefugeExit)
+                || mob.squirrel_behavior() == Some(SquirrelBehavior::RefugeExit)
+            {
+                let body = collision_aabb_for_feet_position(
+                    entity.position,
+                    f64::from(entity.width),
+                    f64::from(entity.height),
+                );
+                assert!(
+                    mclone_blocks::solid_block_aabbs_in(squirrel_tree, body).is_empty(),
+                    "squirrel descent body intersected tree geometry at {:?}",
+                    entity.position
+                );
+            }
             if mob.squirrel_behavior() == Some(SquirrelBehavior::Idle) && entity.on_ground {
                 break;
             }

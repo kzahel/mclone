@@ -85,7 +85,10 @@ forage, spatial sound, and support-checked tree refuge. Its ordinary native,
 headed-WebGPU, synthetic-stereo, persistence, conservation, behavior, and
 overload evidence passes. Cache work remains gated on one capable-device
 full-frame multiview pixel run; the current Mac does not expose `MULTIVIEW`
-and no Quest was attached for the 2026-08-17 review.
+and no Quest was attached for the 2026-08-17 review. The refuge now uses a
+closed-canopy exterior route to a leaf-supported top perch. Squirrels do not
+clip through leaves, carve fixture openings, or mutate trees; future durable
+dreys/cavities remain separate ecology work.
 
 ## Scope
 

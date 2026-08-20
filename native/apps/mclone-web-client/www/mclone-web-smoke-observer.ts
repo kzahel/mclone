@@ -267,6 +267,36 @@ export function installWebSmokeObserver(
         runtime.state.showcaseId === "squirrel-woodland"
         && typeof report.squirrelBehaviors === "string"
       ) {
+        const observedBehaviors = new Set(
+          Array.isArray(runtime.state.squirrelObservedBehaviors)
+            ? runtime.state.squirrelObservedBehaviors.map(String)
+            : [],
+        );
+        for (const behavior of report.squirrelBehaviors.split(",")) {
+          if (behavior) {
+            observedBehaviors.add(behavior);
+          }
+        }
+        runtime.state.squirrelObservedBehaviors = Array.from(observedBehaviors);
+        const heights = String(report.squirrelPositions ?? "")
+          .split(";")
+          .filter(Boolean)
+          .map((position) => Number(position.split(",")[1]))
+          .filter(Number.isFinite);
+        for (const height of heights) {
+          runtime.state.squirrelMinimumHeight = Math.min(
+            Number.isFinite(runtime.state.squirrelMinimumHeight)
+              ? Number(runtime.state.squirrelMinimumHeight)
+              : height,
+            height,
+          );
+          runtime.state.squirrelMaximumHeight = Math.max(
+            Number.isFinite(runtime.state.squirrelMaximumHeight)
+              ? Number(runtime.state.squirrelMaximumHeight)
+              : height,
+            height,
+          );
+        }
         const history = Array.isArray(runtime.state.squirrelBehaviorHistory)
           ? runtime.state.squirrelBehaviorHistory
           : [];

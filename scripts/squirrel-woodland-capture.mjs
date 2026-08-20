@@ -33,6 +33,7 @@ const common = [
   "--day-time", receipt.day_time,
   ...(receipt.freeze_time === "true" ? ["--freeze-time"] : []),
   "--debug-passive-showcase", "false",
+  "--terrain-lod-quality", "off",
   "--lighting", "false", "--fullbright", "true",
 ];
 const env = { ...process.env, MCLONE_PLAYER_PROFILE_FILE: `${root}/player-profile.v1.json` };

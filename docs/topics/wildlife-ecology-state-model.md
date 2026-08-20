@@ -96,7 +96,11 @@ cache state has not begun. A follow-up repeat-threat regression now proves that
 a squirrel which has descended can reuse its still-valid refuge route without
 waiting for a redundant habitat-query admission; a second player approach
 therefore repeats alarm, escape, climb, and refuge instead of stalling in
-alarm.
+alarm. The immediate refuge is now an exterior canopy-top perch: a squirrel
+climbs beside the trunk, crosses under the crown, rounds the outer leaf face,
+and steps onto supported leaves. It neither clips through nor edits the canopy.
+A constructed drey or cavity remains later ecology vocabulary rather than a
+hidden side effect of this movement state.
 
 ## Scope
 

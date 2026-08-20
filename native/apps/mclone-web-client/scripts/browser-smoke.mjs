@@ -1138,11 +1138,10 @@ async function run() {
           try {
             await page.waitForFunction(
               (requiredBehaviors) => {
-                const history = /** @type {Array<Record<string, unknown>>} */ (
-                  globalThis.__mcloneWebApp?.state?.squirrelBehaviorHistory ?? []
-                );
                 const observed = new Set(
-                  history.flatMap((sample) => String(sample.behaviors ?? "").split(",")),
+                  /** @type {Array<string>} */ (
+                    globalThis.__mcloneWebApp?.state?.squirrelObservedBehaviors ?? []
+                  ),
                 );
                 return requiredBehaviors.every((behavior) => observed.has(behavior));
               },
@@ -1158,23 +1157,25 @@ async function run() {
           const history = /** @type {Array<Record<string, unknown>>} */ (await page.evaluate(
             () => globalThis.__mcloneWebApp?.state?.squirrelBehaviorHistory ?? [],
           ));
-          const observedBehaviors = Array.from(new Set(
-            history.flatMap((sample) => String(sample.behaviors ?? "").split(",")),
-          ));
-          const heights = history.flatMap(
-            (sample) => String(sample.positions ?? "")
-              .split(";")
-              .filter(Boolean)
-              .map((position) => Number(position.split(",")[1])),
-          ).filter(Number.isFinite);
+          const squirrelSummary = await page.evaluate(() => ({
+            observedBehaviors:
+              globalThis.__mcloneWebApp?.state?.squirrelObservedBehaviors ?? [],
+            minimumHeight:
+              globalThis.__mcloneWebApp?.state?.squirrelMinimumHeight ?? null,
+            maximumHeight:
+              globalThis.__mcloneWebApp?.state?.squirrelMaximumHeight ?? null,
+          }));
+          const observedBehaviors = /** @type {Array<string>} */ (
+            squirrelSummary.observedBehaviors
+          );
           behaviorEnd = await page.evaluate(
             () => globalThis.__mcloneWebApp?.state?.lastReport ?? null,
           );
           behaviorProbe = {
             sampleCount: history.length,
             observedBehaviors,
-            minimumHeight: Math.min(...heights),
-            maximumHeight: Math.max(...heights),
+            minimumHeight: Number(squirrelSummary.minimumHeight),
+            maximumHeight: Number(squirrelSummary.maximumHeight),
             completedRefuge: observedBehaviors.includes("RefugeIdle"),
           };
         } else if (rabbitShowcase) {

@@ -673,10 +673,16 @@ squirrel AI, habitat, sound, protocol, or rendering.
 
 Native flat and synthetic-stereo captures were inspected. The headed WebGPU
 gate observed `Idle`, `Bound`, `Forage`, `Alarm`, `Flee`, `TrunkApproach`,
-`Climb`, `RefugeEnter`, and `RefugeIdle` across 424 ordinary replicated
-samples, with one squirrel climbing from height 65 to 68. Every IndexedDB
+`Climb`, `RefugeEnter`, and `RefugeIdle` with a bounded 512-sample diagnostic
+tail and compact whole-window evidence, with one squirrel climbing from
+height 65 to 71. Every IndexedDB
 world-record store remained empty. This local review has not been deployed;
 it does not add a public link or claim pushed-revision acceptance.
+
+The 2026-08-20 correction closes the fixture canopy completely. Its squirrel
+uses the production exterior trunk/under-crown/outer-face route to a supported
+top perch; neither fixture data nor behavior cuts leaves, and the route may not
+clip through solid canopy blocks.
 
 ## Code and Documentation Map
 
