@@ -419,6 +419,14 @@ captures retain the paths listed above. The browser measured 244.1 ms for the
 settled candidate-plus-control compile and 10.4 ms to draw; gestures do not
 wait for either operation because they use the retained raster.
 
+Post-follow-up validation passes `cargo fmt --all -- --check`, all 439 active
+`mclone-worldgen` library tests with one intentional ignore, the exact
+`wasm32-unknown-unknown` corpus, all nine browser-ownership locks, all 29
+Terrain Lab unit tests, and the complete desktop/phone Playwright matrix. The
+131 km comparison remains intentionally desktop-only; both platforms exercise
+the retained-frame race and settled replacement. The final organic-route and
+desktop/phone retained-frame captures were inspected before deployment.
+
 ## Candidate Plan Revision 2
 
 Revision 2 is deliberately a concrete authored grammar, not a generic planning
