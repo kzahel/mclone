@@ -6530,6 +6530,9 @@ mod tests {
         assert!(shader.contains("TERRAIN_FRONTIER_PROOF_CONNECTOR_WATER_FLAG"));
         assert!(shader.contains("TERRAIN_FRONTIER_PROOF_CONNECTOR_OUTER_FLAG"));
         assert!(shader.contains("frontier_support_tile_selected(input.world_xz)"));
+        assert!(shader.contains(
+            "if u32(params.origin_spacing_cells.z) > 1u\n        && frontier_support_tile_selected"
+        ));
         assert!(shader.contains("out.side_surface = 1u;"));
         assert!(!shader.contains("let vertices_per_cell = select("));
         assert!(!shader.contains("round(stitched_height)"));

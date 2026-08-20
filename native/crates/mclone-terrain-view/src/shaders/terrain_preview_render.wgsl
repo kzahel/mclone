@@ -1352,9 +1352,7 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
         discard;
     }
     let horizon_diagnostic = params.multiview_options.y;
-    if (horizon_diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_FRONTIER_HYBRID_PROOF
-        || horizon_diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_FRONTIER_HYBRID_FALLBACK_PROOF)
-        && u32(params.origin_spacing_cells.z) > 1u
+    if u32(params.origin_spacing_cells.z) > 1u
         && frontier_support_tile_selected(input.world_xz) {
         discard;
     }
