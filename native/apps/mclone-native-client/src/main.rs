@@ -236,8 +236,6 @@ fn main() -> Result<()> {
                         "supportDispatches": terrain.frontier_support_dispatches,
                         "supportDispatchesTotal": terrain.frontier_support_dispatches_total,
                         "supportResourceBytes": terrain.frontier_support_resource_bytes,
-                        "supportCandidateCellCount": terrain.frontier_support_candidate_cell_count,
-                        "supportSubmittedCellCount": terrain.frontier_support_submitted_cell_count,
                         "supportVertexCount": terrain.frontier_support_vertex_count,
                         "connectorSegments": terrain.frontier_connector_segments,
                         "connectorVertexCount": terrain.frontier_connector_vertex_count,

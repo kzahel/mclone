@@ -68,8 +68,6 @@ pub struct SceneTerrainViewDiagnostics {
     pub frontier_support_dispatches: u32,
     pub frontier_support_dispatches_total: u64,
     pub frontier_support_resource_bytes: u64,
-    pub frontier_support_candidate_cell_count: u32,
-    pub frontier_support_submitted_cell_count: u32,
     pub frontier_support_vertex_count: u32,
     pub frontier_connector_segments: u32,
     pub frontier_connector_vertex_count: u32,
@@ -672,10 +670,6 @@ impl SceneTerrainViewState {
         self.diagnostics.frontier_support_dispatches_total =
             stats.frontier_support_dispatches_total;
         self.diagnostics.frontier_support_resource_bytes = stats.frontier_support_resource_bytes;
-        self.diagnostics.frontier_support_candidate_cell_count =
-            stats.frontier_support_candidate_cell_count;
-        self.diagnostics.frontier_support_submitted_cell_count =
-            stats.frontier_support_submitted_cell_count;
         self.diagnostics.frontier_support_vertex_count = stats.frontier_support_vertex_count;
         self.diagnostics.frontier_connector_segments = stats.frontier_connector_segments;
         self.diagnostics.frontier_connector_vertex_count = stats.frontier_connector_vertex_count;

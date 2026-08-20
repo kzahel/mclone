@@ -66,11 +66,6 @@ const TERRAIN_FRONTIER_CONNECTOR_OUTER_FLAG: u32 = 1 << 11;
 const TERRAIN_FRONTIER_DISPATCHES_PER_FRAME: usize = 4;
 const TERRAIN_FRONTIER_SUPPORT_LOOKUP_MAX_TILES_PER_AXIS: usize = 18;
 const TERRAIN_FRONTIER_SUPPORT_LOOKUP_BUFFER_BYTES: u64 = 96;
-const TERRAIN_FRONTIER_SUPPORT_CELL_INDEX_BYTES: u64 = size_of::<u32>() as u64;
-const TERRAIN_FRONTIER_SUPPORT_CELL_INDEX_BUFFER_BYTES: u64 = TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS
-    as u64
-    * TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS as u64
-    * TERRAIN_FRONTIER_SUPPORT_CELL_INDEX_BYTES;
 const TERRAIN_HORIZON_TREE_CULL_MARGIN_BLOCKS: f32 = 16.0;
 const TERRAIN_HORIZON_CULL_MIN_Y: f32 = -64.0;
 const TERRAIN_HORIZON_CULL_MAX_Y: f32 = 512.0;
@@ -92,21 +87,6 @@ fn terrain_exact_connector_vertex_buffer_layout() -> wgpu::VertexBufferLayout<'s
         array_stride: TERRAIN_EXACT_CONNECTOR_INSTANCE_BYTES,
         step_mode: wgpu::VertexStepMode::Instance,
         attributes: &TERRAIN_EXACT_CONNECTOR_VERTEX_ATTRIBUTES,
-    }
-}
-
-const TERRAIN_FRONTIER_SUPPORT_CELL_INDEX_ATTRIBUTES: [wgpu::VertexAttribute; 1] =
-    [wgpu::VertexAttribute {
-        format: wgpu::VertexFormat::Uint32,
-        offset: 0,
-        shader_location: 0,
-    }];
-
-fn terrain_frontier_support_cell_index_buffer_layout() -> wgpu::VertexBufferLayout<'static> {
-    wgpu::VertexBufferLayout {
-        array_stride: TERRAIN_FRONTIER_SUPPORT_CELL_INDEX_BYTES,
-        step_mode: wgpu::VertexStepMode::Instance,
-        attributes: &TERRAIN_FRONTIER_SUPPORT_CELL_INDEX_ATTRIBUTES,
     }
 }
 
@@ -325,8 +305,6 @@ pub struct TerrainHorizonFrameStats {
     pub frontier_support_dispatches: u32,
     pub frontier_support_dispatches_total: u64,
     pub frontier_support_resource_bytes: u64,
-    pub frontier_support_candidate_cell_count: u32,
-    pub frontier_support_submitted_cell_count: u32,
     pub frontier_support_vertex_count: u32,
     pub frontier_connector_segments: u32,
     pub frontier_connector_vertex_count: u32,
@@ -542,8 +520,6 @@ impl TerrainFrontierConnectorInstance {
 struct TerrainFrontierSupportGpuTile {
     key: TerrainFrontierFineTileKey,
     tile: TerrainViewportGpuTile,
-    compact_cell_index_buffer: wgpu::Buffer,
-    compact_cell_count: u32,
     ready: bool,
     outer_edge_flags: u32,
 }
@@ -659,51 +635,6 @@ impl TerrainFrontierSupportLookup {
         }
         bytes
     }
-}
-
-fn terrain_frontier_support_compact_cell_indices(
-    request: ValidatedTerrainPreviewRequest,
-    exact_mask: &TerrainExactCoverageMask,
-    render_cell_stride: u32,
-) -> Result<Vec<u32>, String> {
-    if render_cell_stride == 0
-        || TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS % render_cell_stride != 0
-        || 16 % render_cell_stride != 0
-    {
-        return Err(format!(
-            "frontier compact-cell stride {render_cell_stride} must divide both the tile and chunk"
-        ));
-    }
-    let render_cells = TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS / render_cell_stride;
-    let candidate_count = render_cells
-        .checked_mul(render_cells)
-        .ok_or("frontier compact-cell candidate count overflow")?;
-    let mut indices = Vec::with_capacity(candidate_count as usize);
-    for cell_index in 0..candidate_count {
-        let cell_x = (cell_index % render_cells) * render_cell_stride;
-        let cell_z = (cell_index / render_cells) * render_cell_stride;
-        let world_x = request
-            .min_x()
-            .checked_add_unsigned(cell_x)
-            .ok_or("frontier compact-cell world X overflow")?;
-        let world_z = request
-            .min_z()
-            .checked_add_unsigned(cell_z)
-            .ok_or("frontier compact-cell world Z overflow")?;
-        let chunk = ChunkPos::new(world_x.div_euclid(16), world_z.div_euclid(16));
-        if !exact_mask.contains(chunk) {
-            indices.push(cell_index);
-        }
-    }
-    Ok(indices)
-}
-
-fn terrain_frontier_support_cell_index_bytes(indices: &[u32]) -> Vec<u8> {
-    let mut bytes = Vec::with_capacity(indices.len() * size_of::<u32>());
-    for index in indices {
-        bytes.extend_from_slice(&index.to_ne_bytes());
-    }
-    bytes
 }
 
 impl TerrainExactCoverageResources {
@@ -1766,8 +1697,6 @@ pub struct TerrainViewportRenderer {
     render_pipeline: Option<wgpu::RenderPipeline>,
     horizon_render_pipeline: Option<wgpu::RenderPipeline>,
     horizon_multiview_render_pipeline: Option<wgpu::RenderPipeline>,
-    horizon_frontier_support_pipeline: Option<wgpu::RenderPipeline>,
-    horizon_frontier_support_multiview_pipeline: Option<wgpu::RenderPipeline>,
     horizon_exact_connector_pipeline: Option<wgpu::RenderPipeline>,
     horizon_exact_connector_multiview_pipeline: Option<wgpu::RenderPipeline>,
     horizon_render_cell_stride: u32,
@@ -2242,91 +2171,6 @@ impl TerrainViewportRenderer {
                 cache: None,
             })
         });
-        let horizon_frontier_support_pipeline =
-            (pipeline_set == TerrainViewportPipelineSet::Horizon).then(|| {
-                device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                    label: Some("mclone_terrain_horizon_frontier_support_pipeline"),
-                    layout: Some(&render_pipeline_layout),
-                    vertex: wgpu::VertexState {
-                        module: &render_shader,
-                        entry_point: Some("frontier_support_vertex_main"),
-                        buffers: &[terrain_frontier_support_cell_index_buffer_layout()],
-                        compilation_options: wgpu::PipelineCompilationOptions {
-                            constants: &horizon_render_constants,
-                            ..Default::default()
-                        },
-                    },
-                    fragment: Some(wgpu::FragmentState {
-                        module: &render_shader,
-                        entry_point: Some("fragment_main"),
-                        targets: &[Some(wgpu::ColorTargetState {
-                            format: color_format,
-                            blend: None,
-                            write_mask: wgpu::ColorWrites::ALL,
-                        })],
-                        compilation_options: Default::default(),
-                    }),
-                    primitive: wgpu::PrimitiveState {
-                        topology: wgpu::PrimitiveTopology::TriangleList,
-                        front_face: wgpu::FrontFace::Ccw,
-                        cull_mode: Some(wgpu::Face::Back),
-                        ..Default::default()
-                    },
-                    depth_stencil: Some(wgpu::DepthStencilState {
-                        format: TERRAIN_PREVIEW_DEPTH_FORMAT,
-                        depth_write_enabled: true,
-                        depth_compare: wgpu::CompareFunction::GreaterEqual,
-                        stencil: Default::default(),
-                        bias: Default::default(),
-                    }),
-                    multisample: Default::default(),
-                    multiview: None,
-                    cache: None,
-                })
-            });
-        let horizon_frontier_support_multiview_pipeline = multiview_enabled.then(|| {
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("mclone_terrain_horizon_frontier_support_multiview_pipeline"),
-                layout: Some(&render_pipeline_layout),
-                vertex: wgpu::VertexState {
-                    module: multiview_render_shader
-                        .as_ref()
-                        .expect("multiview shader exists when multiview is enabled"),
-                    entry_point: Some("frontier_support_vertex_multiview_main"),
-                    buffers: &[terrain_frontier_support_cell_index_buffer_layout()],
-                    compilation_options: wgpu::PipelineCompilationOptions {
-                        constants: &horizon_render_constants,
-                        ..Default::default()
-                    },
-                },
-                fragment: Some(wgpu::FragmentState {
-                    module: &render_shader,
-                    entry_point: Some("fragment_main"),
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format: color_format,
-                        blend: None,
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
-                    compilation_options: Default::default(),
-                }),
-                primitive: wgpu::PrimitiveState {
-                    topology: wgpu::PrimitiveTopology::TriangleList,
-                    front_face: wgpu::FrontFace::Ccw,
-                    cull_mode: Some(wgpu::Face::Back),
-                    ..Default::default()
-                },
-                depth_stencil: Some(wgpu::DepthStencilState {
-                    format: TERRAIN_PREVIEW_DEPTH_FORMAT,
-                    depth_write_enabled: true,
-                    depth_compare: wgpu::CompareFunction::GreaterEqual,
-                    stencil: Default::default(),
-                    bias: Default::default(),
-                }),
-                multisample: Default::default(),
-                multiview: NonZeroU32::new(2),
-                cache: None,
-            })
-        });
         let horizon_exact_connector_pipeline =
             (pipeline_set == TerrainViewportPipelineSet::Horizon).then(|| {
                 device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -2541,8 +2385,6 @@ impl TerrainViewportRenderer {
             render_pipeline,
             horizon_render_pipeline,
             horizon_multiview_render_pipeline,
-            horizon_frontier_support_pipeline,
-            horizon_frontier_support_multiview_pipeline,
             horizon_exact_connector_pipeline,
             horizon_exact_connector_multiview_pipeline,
             horizon_render_cell_stride,
@@ -4380,11 +4222,6 @@ impl TerrainHorizonRenderer {
             selected_tiles: topology.selected_support_tiles().clone(),
         };
         let connector_instances = terrain_frontier_connector_instances(topology)?;
-        if self.renderer.exact_coverage.mask.generation != identity.exact_generation {
-            return Err(
-                "frontier compact-cell mask does not match its certificate generation".to_owned(),
-            );
-        }
         let normal_height_byte_len = terrain_horizon_normal_height_byte_len()?;
         let mut tiles = Vec::with_capacity(identity.selected_tiles.len());
         for key in &identity.selected_tiles {
@@ -4428,33 +4265,9 @@ impl TerrainHorizonRenderer {
                 identity.presentation,
                 &connector_instances,
             );
-            let compact_cell_indices = terrain_frontier_support_compact_cell_indices(
-                tile.request,
-                &self.renderer.exact_coverage.mask,
-                self.renderer.horizon_render_cell_stride,
-            )?;
-            let compact_cell_count = compact_cell_indices
-                .len()
-                .try_into()
-                .map_err(|_| "frontier compact-cell count exceeds u32")?;
-            let compact_cell_index_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("mclone_terrain_frontier_support_cell_indices"),
-                size: TERRAIN_FRONTIER_SUPPORT_CELL_INDEX_BUFFER_BYTES,
-                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
-            if !compact_cell_indices.is_empty() {
-                queue.write_buffer(
-                    &compact_cell_index_buffer,
-                    0,
-                    &terrain_frontier_support_cell_index_bytes(&compact_cell_indices),
-                );
-            }
             tiles.push(TerrainFrontierSupportGpuTile {
                 key: *key,
                 tile,
-                compact_cell_index_buffer,
-                compact_cell_count,
                 ready: false,
                 outer_edge_flags,
             });
@@ -5294,8 +5107,6 @@ impl TerrainHorizonRenderer {
         let mut drawn_tiles_by_level = [0_u32; TERRAIN_LOD_HIGH_LEVEL_COUNT as usize];
         let mut drawn_exact_connector_segments = 0_u32;
         let mut drawn_frontier_support_tiles = 0_u32;
-        let mut drawn_frontier_support_candidate_cells = 0_u32;
-        let mut drawn_frontier_support_submitted_cells = 0_u32;
         let mut drawn_frontier_connector_segments = 0_u32;
         let mut drawn_tree_tiles = 0_u32;
         let mut drawn_tree_instances = 0_u32;
@@ -5371,51 +5182,17 @@ impl TerrainHorizonRenderer {
                 .as_ref()
                 .filter(|support| support.committed)
             {
-                let compact =
-                    self.renderer.exact_coverage.mode == TerrainExactCoverageMode::DiscardPainted;
-                if compact {
-                    let support_pipeline = if multiview {
-                        self.renderer
-                            .horizon_frontier_support_multiview_pipeline
-                            .as_ref()
-                            .expect(
-                                "validated frontier support multiview pipeline remains available",
-                            )
-                    } else {
-                        self.renderer
-                            .horizon_frontier_support_pipeline
-                            .as_ref()
-                            .expect("horizon renderer owns its frontier support pipeline")
-                    };
-                    pass.set_pipeline(support_pipeline);
-                }
-                let render_cells = TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS
-                    / self.renderer.horizon_render_cell_stride;
-                let candidate_cells = render_cells.pow(2);
                 for (index, support_tile) in support.tiles.iter().enumerate() {
                     if !frontier_support_visible[index] {
                         continue;
                     }
                     pass.set_bind_group(0, &support_tile.tile.render_bind_group, &[]);
-                    drawn_frontier_support_candidate_cells =
-                        drawn_frontier_support_candidate_cells.saturating_add(candidate_cells);
-                    if compact {
-                        pass.set_vertex_buffer(0, support_tile.compact_cell_index_buffer.slice(..));
-                        pass.draw(
-                            0..terrain_horizon_vertices_per_cell(1),
-                            0..support_tile.compact_cell_count,
-                        );
-                        drawn_frontier_support_submitted_cells =
-                            drawn_frontier_support_submitted_cells
-                                .saturating_add(support_tile.compact_cell_count);
-                    } else {
-                        pass.draw(
-                            0..candidate_cells * terrain_horizon_vertices_per_cell(1),
-                            0..1,
-                        );
-                        drawn_frontier_support_submitted_cells =
-                            drawn_frontier_support_submitted_cells.saturating_add(candidate_cells);
-                    }
+                    let render_cells = TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS
+                        / self.renderer.horizon_render_cell_stride;
+                    pass.draw(
+                        0..render_cells.pow(2) * terrain_horizon_vertices_per_cell(1),
+                        0..1,
+                    );
                     drawn_frontier_support_tiles = drawn_frontier_support_tiles.saturating_add(1);
                 }
             }
@@ -5622,7 +5399,8 @@ impl TerrainHorizonRenderer {
         });
         let exact_connector_vertex_count = drawn_exact_connector_segments
             .saturating_mul(TERRAIN_EXACT_CONNECTOR_VERTICES_PER_INSTANCE);
-        let frontier_support_vertex_count = drawn_frontier_support_submitted_cells
+        let frontier_support_vertex_count = drawn_frontier_support_tiles
+            .saturating_mul(render_cells.pow(2))
             .saturating_mul(terrain_horizon_vertices_per_cell(1));
         let frontier_connector_vertex_count = drawn_frontier_connector_segments
             .saturating_mul(TERRAIN_EXACT_CONNECTOR_VERTICES_PER_INSTANCE);
@@ -5806,8 +5584,6 @@ impl TerrainHorizonRenderer {
             frontier_support_dispatches,
             frontier_support_dispatches_total: self.frontier_support_dispatches_total,
             frontier_support_resource_bytes,
-            frontier_support_candidate_cell_count: drawn_frontier_support_candidate_cells,
-            frontier_support_submitted_cell_count: drawn_frontier_support_submitted_cells,
             frontier_support_vertex_count,
             frontier_connector_segments: drawn_frontier_connector_segments,
             frontier_connector_vertex_count,
@@ -6809,8 +6585,6 @@ mod tests {
         assert!(shader.contains("vec2<f32>(world_z, -world_y)"));
         assert!(shader.contains("vec2<f32>(world_x, -world_y)"));
         assert!(shader.contains("fn exact_connector_vertex_main("));
-        assert!(shader.contains("fn frontier_support_vertex_main("));
-        assert!(shader.contains("cell_index * 6u + vertex_index"));
         assert!(shader.contains("fn frontier_connector_vertex("));
         assert!(shader.contains("fn frontier_connector_height("));
         assert!(shader.contains("TERRAIN_FRONTIER_CONNECTOR_WATER_FLAG"));
@@ -6878,63 +6652,6 @@ mod tests {
         .into_iter()
         .collect::<BTreeSet<_>>();
         assert!(TerrainFrontierSupportLookup::from_tiles(&too_wide).is_err());
-    }
-
-    #[test]
-    fn frontier_support_compaction_omits_only_exact_owned_cells() {
-        let source =
-            TerrainCompositionSourceIdentity::new(TerrainPreviewProfile::McloneOverworldV1, 12_345);
-        let request = TerrainViewportTileId {
-            profile: TerrainPreviewProfile::McloneOverworldV1,
-            seed: 12_345,
-            tile_x: -1,
-            tile_z: -1,
-            sample_spacing: 1,
-            content_stage: TerrainPreviewContentStage::Cover,
-            surface_quality: TerrainPreviewSurfaceQuality::Inferred,
-        }
-        .preview_request()
-        .validate()
-        .unwrap();
-        let empty = ExactPaintedCoverageSnapshot::new(source, 7, []).unwrap();
-        let full = ExactPaintedCoverageSnapshot::new(
-            source,
-            8,
-            (-4..=-1).flat_map(|z| (-4..=-1).map(move |x| ChunkPos::new(x, z))),
-        )
-        .unwrap();
-        let irregular = ExactPaintedCoverageSnapshot::new(
-            source,
-            9,
-            [ChunkPos::new(-4, -4), ChunkPos::new(-2, -1)],
-        )
-        .unwrap();
-
-        let empty_indices = terrain_frontier_support_compact_cell_indices(
-            request,
-            &empty.packed_mask().unwrap(),
-            1,
-        )
-        .unwrap();
-        assert_eq!(empty_indices.len(), 64 * 64);
-        let full_indices =
-            terrain_frontier_support_compact_cell_indices(request, &full.packed_mask().unwrap(), 1)
-                .unwrap();
-        assert!(full_indices.is_empty());
-        let irregular_indices = terrain_frontier_support_compact_cell_indices(
-            request,
-            &irregular.packed_mask().unwrap(),
-            1,
-        )
-        .unwrap();
-        assert_eq!(irregular_indices.len(), 64 * 64 - 2 * 16 * 16);
-        assert!(!irregular_indices.contains(&0));
-        assert!(!irregular_indices.contains(&(48 * 64 + 32)));
-        assert!(irregular_indices.contains(&(16 * 64 + 16)));
-        assert_eq!(
-            terrain_frontier_support_cell_index_bytes(&irregular_indices).len(),
-            irregular_indices.len() * size_of::<u32>()
-        );
     }
 
     #[test]
