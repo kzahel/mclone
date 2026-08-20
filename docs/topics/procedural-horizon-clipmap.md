@@ -37,12 +37,17 @@ same audit found that legal desktop render distance 32 describes a 65-by-65
 chunk exact window while the exact mask and boundary formats currently permit
 only a 64-chunk span. Tactical
 [`321`](../tactical/321-exact-frontier-support-architecture.md) now owns the
-architecture-first response: document and instrument the combined spatial
-model, establish a typed per-edge composition certificate, measure regular and
-adversarial support costs, and obtain human selection before implementing a
-fine-support belt or resolution-aware fallback. No candidate is yet part of
-the product contract. Completion must consolidate the selected architecture,
-budgets, admission lifecycle, and accepted limitations back into this topic.
+architecture-first response. Its Phase 0 audit is complete and awaiting Human
+Review A1. The audit establishes that radius 4 is the largest square always
+contained by the current finest ring, radius 3 is the largest with a direct
+spacing-one neighbor in every tile phase, and radius 2 is the largest with the
+complete 32-block finest-level halo. It also finds that periodic-coordinate
+lifting, exact eviction, independently committed clipmap levels, water, and
+vegetation must participate in the same per-edge composition certificate;
+connector geometry alone cannot establish the missing invariant. No candidate
+or diagnostic API is yet part of the product contract. Completion must
+consolidate the selected architecture, budgets, admission lifecycle, and
+accepted limitations back into this topic.
 
 The 2026-08-13 phone-browser black-frame regression is resolved. XR
 multiview support had added `@builtin(view_index)` entry points to the same

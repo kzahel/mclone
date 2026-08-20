@@ -1,7 +1,8 @@
 # Tactical 321: Exact Frontier Support Architecture
 
-Status: active architecture and diagnostic phase 2026-08-20; no
-pixel-changing frontier implementation is authorized before Human Review A
+Status: Phase 0 architecture audit complete 2026-08-20; awaiting Human
+Review A1. No diagnostic API or pixel-changing frontier implementation is
+authorized before that review.
 
 Topic: `procedural-horizon-clipmap`
 
@@ -112,15 +113,15 @@ before frontier support is considered.
 
 Current performance evidence establishes a constrained baseline:
 
-| Preset | Logical clipmap tiles | Fixed residency |
-|---|---:|---:|
-| Low | 96 | approximately 81.6 MiB |
-| Medium | 128 | approximately 107.4 MiB |
-| High | 160 | approximately 133.2 MiB |
+| Preset | Logical clipmap tiles | Fixed bytes | Decimal MB | Binary MiB |
+|---|---:|---:|---:|---:|
+| Low | 96 | 81,633,320 | 81.6 | 77.9 |
+| Medium | 128 | 107,421,472 | 107.4 | 102.4 |
+| High | 160 | 133,209,624 | 133.2 | 127.0 |
 
 Each level also owns seven staging resources so movement can retain its prior
-committed presentation. The measured fixed-byte differences imply roughly
-0.56 MiB per fully provisioned terrain resource before dynamic vegetation.
+committed presentation. One fully provisioned terrain resource is 560,612
+bytes, or 0.56 decimal MB / 0.535 MiB, before dynamic vegetation.
 Quest Low is already near its 72 Hz frame target at approximately 12.65 ms
 average app work. New frontier support must therefore remain explicitly
 bounded and measured; `local` or `perimeter-only` is not by itself a budget.
@@ -230,7 +231,11 @@ enough to contain exact coverage plus a support halo. This offers simple
 ownership and can reuse rectangular fine/coarse stitching, but the current
 clipmap and admission pools assume the same tile axis for every level. At
 render distance 32, a 32-block halo needs roughly an 18-by-18 spacing-one
-extent instead of 4-by-4, adding roughly 170 MiB before staging and vegetation.
+extent instead of 4-by-4. Even retaining the now-insufficient seven staging
+slots would add 172.7 decimal MB / 164.7 MiB before vegetation. Preserving the
+current atomic diagonal-movement contract needs up to 35 entering-tile slots
+for that extent, raising the added fixed cost to at least 188.4 decimal MB /
+179.6 MiB before vegetation.
 This is the simplest correctness model and the weakest cross-platform cost
 candidate.
 
@@ -292,6 +297,300 @@ Do not infer a bound from one regular square. Record formulas and validated
 maximums for the 64-chunk mask limit, legal render distances, topology period,
 tile size, halo width, support pool, connector format, and staging policy.
 
+## Phase 0 Architecture Audit
+
+This section is the Human Review A1 checkpoint. It records the code as it
+exists before a diagnostic frontier API or any pixel behavior changes. The
+audit confirms the missing invariant in the problem statement and broadens it:
+the current renderer cannot prove a complete ownership handoff because exact
+admission, clipmap admission, connector construction, water composition, and
+vegetation composition are related by convention rather than one prepared
+composition decision.
+
+### Current ownership and frame flow
+
+| Fact or operation | Current producer | Current consumer / consequence |
+|---|---|---|
+| Render-session resident columns | `mclone-app-runtime` | `mclone-scene` filters them by exact distance and neighbor readiness. |
+| Candidate exact set | `mclone-scene`, using `terrain_exact_player_connected_chunks` | The focus-containing four-connected component becomes the proposed exact draw and mask set. |
+| Exact source and generation | `TerrainPreparedExactFrame` in `mclone-terrain-view` | Couples the exact mask, appearance field, and boundary profile, but not a procedural presentation. |
+| Appearance transition | `composition.rs`, prepared when exact coverage changes | A 32-block field converges color and lighting inputs; it does not provide geometry support. |
+| Exposed boundary heights | `mclone-scene`, by scanning live exact columns | Installed into the prepared exact frame after the initial coverage snapshot. |
+| Requested clipmap | `TerrainClipmap` from camera focus and quality preset | Produces regular level tile requests and rectangular finer-level holes. |
+| Committed clipmap | `TerrainHorizonAdmission` | Each changed level swaps only after all of its staged tiles are ready; levels can swap independently. |
+| Clipmap GPU resources | `viewport_renderer.rs` | Sixteen logical and seven staging resources are provisioned per level. |
+| Procedural discard | Procedural fragment shader | Discards every procedural surface class whose horizontal location is exact-painted. |
+| Exact connector | `viewport_renderer.rs` | Re-derives instances late and only from committed tiles whose sample spacing is one. |
+| Water ownership | Procedural terrain pass plus later exact translucent pass | Procedural water is discarded inside exact coverage; water boundary facts are skipped by the solid connector without a separate closure certificate. |
+| Proxy vegetation | Terrain View vegetation admission and renderer | Uses exact coverage and committed procedural state, but has no frontier-support generation to follow. |
+| Frame settlement | `TerrainViewportRenderer::target_ready` | Checks clipmap, GPU work, and vegetation settlement, but not exact-edge support. |
+
+The actual draw order is also part of the contract. The frame clears sky,
+draws exact opaque and cutout chunks into reversed-Z depth, draws the masked
+procedural backdrop, then later draws actors and exact translucent terrain,
+including exact water. A crack is therefore not simply a connector draw bug:
+the sky becomes visible whenever the exact mask removes procedural geometry
+and no certified geometry path closes the resulting height disagreement.
+
+The current immutable exact generation is useful and should be retained. Its
+limit is that its identity ends at exact-derived fields. It does not name the
+committed clipmap tile set against which those fields were classified. A
+clipmap level can consequently commit a new presentation while the same exact
+generation and its renderer-derived connector remain active.
+
+### Spatial and format capacity ledger
+
+The base terrain grid contains 64 cells per tile. Level `L` has sample spacing
+`2^L`, a tile footprint of `64 * 2^L` blocks, and four tiles per axis. Its full
+rectangular extent is therefore `256 * 2^L` blocks. Quality presets change the
+number of levels, not the four-by-four finest extent or its spacing.
+
+For an ordinary square exact radius `r`, let `C` be the focus chunk coordinate
+on one axis and `q = C mod 4` its phase within a spacing-one tile. The exact
+interval is `[C-r, C+r+1)` chunks. The level-zero gaps beyond the exact
+interval are:
+
+```text
+negative-side gap = (q - r + 8) * 16 blocks
+positive-side gap = (7 - q - r) * 16 blocks
+```
+
+The asymmetric formulas follow from centering the four-tile clipmap on the
+64-block tile containing the focus, rather than centering it on the exact
+window. Across all four chunk phases on both axes:
+
+- radius 4 is the largest exact square guaranteed to remain inside level zero;
+- radius 3 is the largest guaranteed to retain at least one spacing-one block
+  outside every exact edge for a direct connector; and
+- radius 2 is the largest guaranteed to retain the complete 32-block
+  appearance/support halo inside level zero.
+
+More generally, level `L` is guaranteed to leave an immediately exterior
+procedural column on every side only when `r <= 4 * 2^L - 1`. At equality with
+`r = 4 * 2^L`, one phase can place the exact edge exactly on that level's outer
+edge, making the next coarser level the direct neighbor.
+
+| Exact radius | Square chunks | Width | Coarsest direct neighbor required by worst phase | Existing format |
+|---:|---:|---:|---:|---|
+| 2 | 25 | 80 blocks | spacing 1 | valid; full 32-block level-zero halo |
+| 5 | 121 | 176 blocks | spacing 2 | valid |
+| 8 | 289 | 272 blocks | spacing 4 | valid; the sampled origin met spacing 2 |
+| 13 | 729 | 432 blocks | spacing 4 | valid |
+| 31 | 3,969 | 1,008 blocks | spacing 8 | maximum complete odd-width square |
+| 32 | 4,225 | 1,040 blocks | spacing 16 | invalid before frontier planning |
+
+The `r = 8` receipt with zero connector segments is therefore expected, not
+an isolated alignment accident. Other phase combinations can make its direct
+neighbor even coarser than the measured center-zero scene.
+
+The existing exact-derived GPU formats share a nominal 64-chunk maximum but
+reach it through different representations:
+
+| Representation | Fixed capacity | Radius-31 demand | Radius-32 demand |
+|---|---:|---:|---:|
+| Painted mask | 64 by 64 bits / 512 bytes | 63 by 63 chunks | 65 by 65; exceeds capacity |
+| Boundary profile | 1,024 by 1,024 `f32` / 4,194,304 bytes | 1,008 by 1,008 blocks | 1,040 by 1,040; exceeds capacity |
+| Transition field | 272 by 272 bytes at 4 blocks/texel | 268 by 268 texels with halo | 276 by 276 with halo; exceeds capacity |
+
+Desktop currently advertises radius 32, while the XR settings boundary
+advertises at most 16. The product contract must either change the exact
+formats and prove their new bounds or change the shared legal maximum. A
+silent clamp is not an acceptable resolution, and Phase 1 diagnostics must
+report this case as format-invalid rather than misclassifying it as a normal
+unsupported edge.
+
+Fixed terrain residency consists of 23 resources per level: 16 logical tiles
+plus seven staging slots. Each resource consumes 560,612 bytes: 540,800 for
+the semantic samples, 19,044 for normal-height data, and 768 for two aligned
+uniform allocations. The exact mask, maximum transition field, maximum
+boundary profile, and exact uniform add 4,268,864 fixed bytes. This produces
+the Low, Medium, and High totals in Starting Evidence and explains why a
+complete enlarged finest square is not a neutral fix. The seven-slot staging
+bound is itself derived from the maximum entering row plus column of a
+four-by-four grid. An 18-by-18 grid needs up to 35 staging slots to preserve
+the same atomic diagonal shift, so rectangular growth scales both logical and
+staging residency.
+
+The current CPU and upload work also has shape-sensitive worst cases:
+
+- transition preparation is proportional to the exact bounding rectangle;
+- boundary fact sampling is proportional to exposed block edges and may scan
+  downward as far as 1,024 blocks per edge;
+- boundary upload is a dense bounding-rectangle upload, reaching 4,064,256
+  bytes for a radius-31 square whenever coverage generation changes; and
+- a compact radius-31 square has 4,032 block-edge connector segments, but a
+  loose 4,096-chunk adversarial bound is 262,144 segments, about 3 MiB of
+  12-byte instances and 1.57 million submitted vertices.
+
+Those are capacities, not a prediction that ordinary play reaches every
+bound. They establish why Phase 1 must measure preparation and generation
+churn as well as steady draw time.
+
+The periodic-cylinder case exposes a second independent format assumption.
+Connectivity uses topology-aware neighbors, but exact mask packing and dense
+boundary bounds currently use canonical numeric minima and maxima. A small
+locally connected region crossing the canonical wrap can therefore appear
+nearly a full topology period wide. Frontier preparation must operate in one
+observer-local lifted coordinate frame, retain the canonical identity needed
+for sampling, and reject ambiguous lifts explicitly. Merely enlarging the
+64-chunk formats would not repair this case.
+
+### Late renderer assumptions to extract
+
+| Current late assumption | Required prepared composition fact |
+|---|---|
+| Every connector-relevant edge intersects a spacing-one tile. | Bordering committed level and sample spacing for every exposed exact segment. |
+| Calling a clipmap level committed is sufficient for exact composition. | A presentation identity covering all levels and support resources named by the plan. |
+| An exact generation may commit independently of clipmap movement. | One atomic exact/procedural ownership epoch or an explicit safe retention transition. |
+| One rectangular finer-level hole describes all fine/coarse ownership. | Explicit suppression and outer-closure topology for any sparse fine support. |
+| All levels share one `tiles_per_axis`. | A separately bounded support pool if the selected design needs non-regular extent. |
+| The appearance field implies a usable transition. | Separate appearance convergence from geometry closure and certify both. |
+| Skipping water connector instances is harmless. | An explicit exact-water, procedural-water, coast, or unsupported boundary classification. |
+| Vegetation can follow exact coverage alone. | Vegetation ownership keyed to the same committed composition epoch. |
+| Visible connector count represents frontier completeness. | Visibility-independent totals for classified, closed, fallback, and unsupported segments. |
+| Canonical min/max bounds are locally compact. | A topology-aware local coordinate lift shared by mask, boundary, support, and connector facts. |
+| `target_ready` means the composed view is settled. | Certificate readiness and any retained/rejected generation included in settlement. |
+| Boundary preparation is a small incidental cost. | CPU, dense upload, segment, and generation-churn receipts exposed separately. |
+
+The regular clipmap's rectangular inner holes and its fine/coarse edge
+geometry remain valid for complete nested rectangles. They do not define the
+holes, bays, self-near boundaries, or outer edge of a sparse fine-support
+belt. Candidate B or D therefore needs a new explicit ownership topology; it
+cannot reuse the existing inner rectangle by changing tile admission alone.
+
+### Renderer-neutral frontier plan and certificate
+
+Phase 1 should introduce a diagnostic-only plan with the following semantic
+contract. Names and storage layout remain implementation details until A1 is
+accepted.
+
+```text
+TerrainCompositionEpoch {
+    source identity,
+    exact coverage generation,
+    committed procedural presentation identity,
+    topology and local coordinate lift,
+}
+
+TerrainFrontierPlan {
+    epoch,
+    exact coverage and compact exposed boundary segments,
+    per-segment solid / water / unsupported-volume classification,
+    per-segment bordering procedural level, spacing, and readiness,
+    desired fine-support keys,
+    proposed closure decision for every segment,
+    coarse suppression and outer-closure facts,
+    bounded CPU / memory / upload / draw receipt,
+    state: complete | pending | capacity-rejected | format-invalid,
+}
+
+TerrainCompositionCertificate {
+    epoch,
+    immutable exact draw and discard snapshot,
+    immutable committed procedural and support snapshot,
+    exactly one accepted closure path for every exposed segment,
+    vegetation and water ownership decisions,
+    validated bounded-cost receipt,
+}
+```
+
+The plan inputs are one prepared exact frame, one whole committed procedural
+presentation, topology information, the selected frontier policy and caps,
+and the prior complete certificate if it is still drawable. Requested or
+partially staged tiles are evidence of future readiness, never valid closure
+inputs. Boundary segments are the proof unit because an irregular connected
+chunk set can meet different clipmap levels along one side and can contain
+holes or concave bays.
+
+A complete certificate must establish all of these invariants:
+
+1. The exact draw, procedural discard, appearance field, boundary facts,
+   water decision, vegetation decision, and support resources name one epoch.
+2. Every exposed segment has exactly one accepted closure path and references
+   committed resources; no segment is silently omitted because of spacing,
+   visibility, material, or view.
+3. Every horizontal location has one geometry owner. Any support layer also
+   carries an explicit suppression region beneath it and an outer handoff to
+   the regular clipmap.
+4. All referenced resources fit the selected fixed capacities. Allocation or
+   submission cannot expand those bounds after certification.
+5. Mono, both ordinary XR eyes, and full-frame multiview consume the same
+   immutable certificate. Per-view culling may remove invisible work but may
+   not choose a different topology.
+
+The plan is reusable while all epoch fields remain unchanged. Camera motion
+inside the same exact generation and committed clipmap presentation does not
+invalidate it. Exact coverage change, source reset, topology-lift change,
+support-pool commit, or any referenced clipmap-level commit creates a new
+epoch. Stale planning work is coalesced by desired epoch and may never publish
+after a newer epoch becomes current.
+
+### Admission and failure lifecycle
+
+The composition owner needs an explicit two-input commit rather than relying
+on draw order:
+
+```text
+candidate exact + committed procedural presentation
+                         |
+                         v
+                 build frontier plan
+             / complete       pending \
+            v                           v
+  atomically publish             prepare bounded support
+  new certificate               and retain old certificate
+                                           |
+                                           v
+                                  re-plan after commit
+```
+
+Retention is legal only while every exact column named by the prior
+certificate is still drawable and every procedural resource it names remains
+committed. The clipmap admission owner must likewise delay or atomically pair
+a level swap which would invalidate that certificate. Independent level
+atomicity is insufficient once an exact edge depends on a particular level.
+
+Exact eviction is different from exact growth. If streaming removes a column
+used by the prior certificate, retaining that exact generation would itself
+create a hole. The safe transition is an atomically certified smaller exact
+subset, or empty exact coverage with the already committed procedural owner,
+before the unavailable exact draw is removed. Source reset invalidates both
+old exact and old procedural identities and cannot use retention across the
+reset.
+
+`capacity-rejected`, `format-invalid`, and unsupported volumetric boundaries
+are ordinary planned outcomes, not renderer warnings. The final policy may
+select a resolution-aware closure, reduce exact admission to a certifiable
+focus-connected subset, or retreat to procedural ownership. Which degradation
+is product-correct remains deliberately open until the A2 measurements and
+human selection. It may never publish an incomplete certificate, allocate
+without a cap, or leave the previous mask active after its exact draw becomes
+unavailable.
+
+### A1 conclusions and open decisions
+
+Phase 0 recommends accepting these architecture conclusions before adding
+instrumentation:
+
+- the defect is a missing cross-system composition invariant, not merely an
+  undersized finest ring or a spacing-one shader filter;
+- exact-edge boundary segments, classified against one committed procedural
+  presentation, are the correct proof unit;
+- `mclone-terrain-view` should own the plan and certificate, while
+  `mclone-scene` supplies authoritative exact readiness and orchestrates
+  certificate admission;
+- the renderer should consume certified immutable facts and retain only
+  visibility, resource upload, culling, and submission mechanics;
+- legal radius 32 and periodic topology lifting are existing composition
+  contract defects which must be resolved along with frontier support; and
+- candidate A, B, C, or D and the exhaustion fallback remain open until Phase
+  1 produces objective distribution, cost, and pixel evidence.
+
+Human Review A1 may adjust that division of ownership, the certificate proof
+unit, format-scope requirements, or the retention model. Accepting A1
+authorizes diagnostic planning only; it does not select the eventual geometry
+candidate.
+
 ## Adversarial Evidence Matrix
 
 The architecture and selected implementation must cover the cross-product
@@ -321,13 +620,13 @@ receipts rather than multiplying every case into screenshots.
 
 ### Phase 0: Architectural ledger and invariant audit
 
-- [ ] Record the current clipmap, admission, exact snapshot, transition,
+- [x] Record the current clipmap, admission, exact snapshot, transition,
       connector, water, vegetation, and draw data flow with actual owners.
-- [ ] Reconcile every legal render distance with the 64-chunk exact format and
+- [x] Reconcile every legal render distance with the 64-chunk exact format and
       finest-ring capacity.
-- [ ] Identify every late renderer assumption which should become a prepared
+- [x] Identify every late renderer assumption which should become a prepared
       composition fact.
-- [ ] Specify the frontier plan/certificate inputs, outputs, lifetime, and
+- [x] Specify the frontier plan/certificate inputs, outputs, lifetime, and
       failure behavior without changing pixels.
 
 Gate -- Human Review A1: accept or adjust the current-system model and the
@@ -488,4 +787,12 @@ execution record.
 
 Created 2026-08-20 after high exact render distance exposed a remaining sky
 crack outside the fixed finest clipmap region. Creation changes documentation
-only. Phase 0 begins after review of this tactical.
+only.
+
+Phase 0 completed 2026-08-20 without code or pixel changes. The audit traced
+the exact, procedural, connector, water, vegetation, and draw owners; derived
+the phase-dependent spacing and legal-render-distance capacity ledger; listed
+the renderer assumptions which need prepared ownership; and specified the
+inputs, invariants, lifecycle, and failure states of a renderer-neutral
+frontier plan and complete composition certificate. Human Review A1 is
+pending before Phase 1 changes diagnostic APIs.
