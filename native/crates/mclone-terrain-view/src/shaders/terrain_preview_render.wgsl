@@ -46,6 +46,10 @@ const TERRAIN_HORIZON_DIAGNOSTIC_GEOMETRY: u32 = 5u;
 const TERRAIN_HORIZON_DIAGNOSTIC_OCCLUSION: u32 = 6u;
 const TERRAIN_HORIZON_DIAGNOSTIC_WATER: u32 = 7u;
 const TERRAIN_HORIZON_DIAGNOSTIC_TEXTURE: u32 = 8u;
+// The shared exact-distance field reaches 32 blocks. Restrict water's
+// exact-like appearance to its nearest quarter so the handoff remains a small
+// procedural-side halo rather than a broad second water domain.
+const TERRAIN_EXACT_WATER_TRANSITION_MIN_WEIGHT: f32 = 0.75;
 override terrain_sample_halo_radius: u32 = 0u;
 override terrain_render_cell_stride: u32 = 1u;
 
@@ -66,6 +70,7 @@ struct TerrainPreviewMaterialTable {
     side_uvs: array<vec4<f32>, 256>,
     tint_flags: array<vec4<f32>, 256>,
     grass_tints: array<vec4<f32>, 256>,
+    water_tints: array<vec4<f32>, 256>,
 };
 
 @group(1) @binding(0)
@@ -1101,6 +1106,15 @@ fn surface_tint(input: VertexOutput, material: u32, side_surface: bool) -> vec3<
     return material_table.grass_tints[min(biome, 255u)].rgb;
 }
 
+fn surface_water_tint(input: VertexOutput) -> vec4<f32> {
+    let biome = select(
+        input.biome,
+        mclone_grass_biome(input.biome),
+        preview_profile() == 0u,
+    );
+    return material_table.water_tints[min(biome, 255u)];
+}
+
 fn full_sky_environmental_illumination() -> vec3<f32> {
     return vec3<f32>(
         params.fog_render_options.x,
@@ -1140,8 +1154,7 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
     }
     let exact_painted = exact_chunk_painted(input.world_xz);
     if exact_coverage.mode_count_generation.x == 1u
-        && input.material != 2u
-        && exact_chunk_painted(input.world_xz) {
+        && exact_painted {
         discard;
     }
     let world_dx = dpdx(input.world_xz);
@@ -1213,7 +1226,30 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
         }
         var near_color = far_color;
         var near_albedo = far_albedo;
-        if display_material != 2u {
+        var appearance_weight = input.world_position.w;
+        if display_material == 2u {
+            let water_tint = surface_water_tint(input);
+            let exact_water_albedo = apply_material_texture(
+                water_tint.rgb,
+                display_material,
+                false,
+                input.world_uv,
+                material_dx,
+                material_dy,
+                material_blocks_per_pixel,
+                1.0,
+            );
+            // The procedural heightfield stays opaque. Approximate the exact
+            // translucent result by composing its active-pack water sample
+            // over the existing depth-aware procedural water response.
+            near_color = mix(far_color, exact_water_albedo, water_tint.a);
+            near_albedo = mix(far_albedo, exact_water_albedo, water_tint.a);
+            appearance_weight = smoothstep(
+                TERRAIN_EXACT_WATER_TRANSITION_MIN_WEIGHT,
+                1.0,
+                appearance_weight,
+            );
+        } else {
             near_color = surface_tint(input, display_material, side_surface)
                 * input.light;
             near_color = apply_material_texture(
@@ -1239,9 +1275,9 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
                 );
             }
         }
-        color = mix(far_color, near_color, input.world_position.w);
+        color = mix(far_color, near_color, appearance_weight);
         if albedo_diagnostic {
-            albedo = mix(far_albedo, near_albedo, input.world_position.w);
+            albedo = mix(far_albedo, near_albedo, appearance_weight);
         }
     } else if input.textured != 0u && input.material < 256u {
         color = apply_material_texture(

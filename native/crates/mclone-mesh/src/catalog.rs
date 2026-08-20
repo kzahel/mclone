@@ -575,6 +575,16 @@ impl TexturedMeshCatalog {
         crate::tint::block_tint(self, TexturedBlockTint::Grass, 0, 64, 0, |_, _, _| biome_id)
     }
 
+    /// Resolve the exact liquid-meshing water tint and opacity for a
+    /// representative unblended biome. Procedural terrain uses this only in
+    /// its exact-frontier appearance band; exact chunks retain water geometry
+    /// and compositing ownership throughout their admitted footprint.
+    pub fn terrain_water_tint(&self, biome_id: i32) -> [f32; 4] {
+        crate::tint::blended_liquid_color(TexturedFluidKind::Water, 0, 64, 0, 1.0, |_, _, _| {
+            biome_id
+        })
+    }
+
     pub fn occludes(&self, state_id: BlockStateId) -> bool {
         self.blocks
             .get(&state_id)
@@ -1439,6 +1449,14 @@ mod tests {
     #[test]
     fn color_map_rejects_non_vanilla_dimensions() {
         assert!(TexturedColorMap::from_rgba(&[0; 4]).is_none());
+    }
+
+    #[test]
+    fn terrain_water_tint_uses_exact_liquid_color_and_opacity() {
+        assert_eq!(
+            TexturedMeshCatalog::default().terrain_water_tint(1),
+            [63.0 / 255.0, 118.0 / 255.0, 228.0 / 255.0, 0.72]
+        );
     }
 
     #[test]

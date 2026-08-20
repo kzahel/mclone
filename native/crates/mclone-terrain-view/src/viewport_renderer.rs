@@ -47,7 +47,7 @@ use super::{
 
 pub const TERRAIN_PREVIEW_MATERIAL_UV_COUNT: usize = 256;
 const TERRAIN_PREVIEW_MATERIAL_TABLE_BYTES: u64 =
-    (TERRAIN_PREVIEW_MATERIAL_UV_COUNT * 4 * 4 * size_of::<f32>()) as u64;
+    (TERRAIN_PREVIEW_MATERIAL_UV_COUNT * 5 * 4 * size_of::<f32>()) as u64;
 const TERRAIN_EXACT_COVERAGE_UNIFORM_BYTES: u64 = 64;
 const TERRAIN_EXACT_CONNECTOR_INSTANCE_BYTES: u64 = 12;
 const TERRAIN_EXACT_CONNECTOR_VERTICES_PER_INSTANCE: u32 = 6;
@@ -101,6 +101,7 @@ pub struct TerrainPreviewMaterialTable {
     side_uvs: [[f32; 4]; TERRAIN_PREVIEW_MATERIAL_UV_COUNT],
     tint_flags: [[f32; 4]; TERRAIN_PREVIEW_MATERIAL_UV_COUNT],
     grass_tints: [[f32; 4]; TERRAIN_PREVIEW_MATERIAL_UV_COUNT],
+    water_tints: [[f32; 4]; TERRAIN_PREVIEW_MATERIAL_UV_COUNT],
 }
 
 impl TerrainPreviewMaterialTable {
@@ -110,6 +111,7 @@ impl TerrainPreviewMaterialTable {
             side_uvs: [[0.0, 0.0, 1.0, 1.0]; TERRAIN_PREVIEW_MATERIAL_UV_COUNT],
             tint_flags: [[0.0; 4]; TERRAIN_PREVIEW_MATERIAL_UV_COUNT],
             grass_tints: [[1.0; 4]; TERRAIN_PREVIEW_MATERIAL_UV_COUNT],
+            water_tints: [[1.0; 4]; TERRAIN_PREVIEW_MATERIAL_UV_COUNT],
         };
         for raw_id in 0..TERRAIN_PREVIEW_MATERIAL_UV_COUNT {
             if let Some(material) = catalog.terrain_surface_material(BlockStateId(raw_id as u32)) {
@@ -122,6 +124,7 @@ impl TerrainPreviewMaterialTable {
             }
             let tint = catalog.terrain_grass_tint(raw_id as i32);
             table.grass_tints[raw_id] = [tint[0], tint[1], tint[2], 1.0];
+            table.water_tints[raw_id] = catalog.terrain_water_tint(raw_id as i32);
         }
         table
     }
@@ -133,6 +136,7 @@ impl TerrainPreviewMaterialTable {
             &self.side_uvs,
             &self.tint_flags,
             &self.grass_tints,
+            &self.water_tints,
         ] {
             for entry in table {
                 for value in entry {
@@ -5388,9 +5392,10 @@ mod tests {
         );
         assert!(shader.contains("material_table.side_uvs[material]"));
         assert!(shader.contains("material_table.grass_tints"));
+        assert!(shader.contains("material_table.water_tints"));
         assert!(shader.contains("material_uses_grass_tint(input.material, false)"));
         assert!(shader.contains("full_sky_environmental_illumination()"));
-        assert!(shader.contains("if display_material != 2u"));
+        assert!(shader.contains("if display_material == 2u"));
         assert!(shader.contains("exact_transition_weight(world_position.xz)"));
     }
 
@@ -5446,13 +5451,29 @@ mod tests {
     }
 
     #[test]
-    fn horizon_exact_coverage_has_one_horizontal_owner() {
+    fn horizon_exact_coverage_discards_every_procedural_surface_class() {
         let shader = super::super::TERRAIN_PREVIEW_RENDER_WGSL;
         assert!(!shader.contains("exact_chunk_painted_interior"));
         assert!(!shader.contains("let collar = 1.5"));
-        assert!(shader.contains("&& input.material != 2u"));
-        assert!(shader.contains("&& exact_chunk_painted(input.world_xz)"));
+        assert!(shader.contains(
+            "if exact_coverage.mode_count_generation.x == 1u\n        \
+             && exact_painted"
+        ));
+        assert!(!shader.contains(
+            "if exact_coverage.mode_count_generation.x == 1u\n        \
+             && input.material != 2u"
+        ));
         assert_eq!(TERRAIN_EXACT_FRONTIER_TREE_INSET_BLOCKS, 0.0);
+    }
+
+    #[test]
+    fn horizon_water_handoff_uses_only_the_procedural_side_transition_band() {
+        let shader = super::super::TERRAIN_PREVIEW_RENDER_WGSL;
+        assert!(shader.contains("const TERRAIN_EXACT_WATER_TRANSITION_MIN_WEIGHT: f32 = 0.75;"));
+        assert!(shader.contains("let water_tint = surface_water_tint(input);"));
+        assert!(shader.contains("near_color = mix(far_color, exact_water_albedo, water_tint.a);"));
+        assert!(shader.contains("appearance_weight = smoothstep("));
+        assert!(shader.contains("TERRAIN_EXACT_WATER_TRANSITION_MIN_WEIGHT,"));
     }
 
     #[test]

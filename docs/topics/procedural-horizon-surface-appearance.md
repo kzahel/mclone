@@ -20,11 +20,11 @@ implemented the first near-field convergence step with an exact-frontier
 correction. Its spacing-one level presented flat tops and cardinal risers with
 worldgen-owned side strata, direction-specific active-pack faces, pack-native
 grass tint, exact face shade, and shared sky-darken/lightmap inputs. Farther
-rings remained smooth. Opaque procedural water remains the single visible water
-owner through exact-painted chunks and uses one treatment across the near/far
-material transition. Independent water geometry and decoration-lake summaries
-remain separate work. Later review rejected the blocky intermediate topology,
-not these retained material and water lessons.
+rings remained smooth. Its opaque-procedural-water exception was retained
+temporarily, then superseded on 2026-08-20 after it was shown to leak LOD water
+through exact-painted chunks. Independent water geometry and decoration-lake
+summaries remain separate work. Later review rejected the blocky intermediate
+topology, while its retained material lessons continue in the direct path.
 
 Tactical
 [`309`](../tactical/309-procedural-horizon-lighting-and-seam-convergence.md)
@@ -210,10 +210,12 @@ The fragment shader repeats the selected block sprite in world space with
 `fract(world_xz)` and samples it with explicit gradients. The direct
 spacing-one surface approaches exact-strength atlas response near the admitted
 perimeter, then transitions over 32 blocks toward the smooth far presentation,
-whose texture contribution falls from `0.82` near one block per pixel toward `0.42`
-at eight or more blocks per pixel. Water uses the same far-style treatment on
-both sides of that transition so open ocean does not reveal the finest ring as
-a square.
+whose texture contribution falls from `0.82` near one block per pixel toward
+`0.42` at eight or more blocks per pixel. Procedural water keeps the far-style
+response outside the frontier, but its nearest eight-block band approaches the
+exact liquid tint and opacity with the active pack's water texture response.
+Exact water owns the admitted footprint; the band remains wholly on the
+procedural side.
 
 This path is fixed-resident and shared by native, browser, flat Android, and the
 normal per-eye XR renderer. It does not allocate or upload a per-view painted
@@ -296,15 +298,20 @@ The analytic mask currently colors the terrain heightfield; it does not create
 a separate flat surface at sea/pool level. A later geometry slice should compare
 an independent water sheet against the current inexpensive color overlay.
 
-In exact/procedural composition, the opaque procedural water surface remains
-visible through exact-painted chunks while solid procedural faces are removed.
-This is deliberate single-visible-owner arbitration: translucent exact water
-otherwise produces a stable dark square because the compact exact snapshot
-does not carry the water-column compositing depth needed by the opaque horizon.
-The accepted close and elevated captures show the composed water matching the
-horizon-only presentation without horizontal z-fighting. A future translucent
-water contract must replace this rule explicitly rather than draw both water
-surfaces.
+In exact/procedural composition, exact translucent water owns every
+exact-painted chunk. Procedural water is discarded by the same coverage test
+as procedural land, so an opaque LOD sheet cannot replace water inside the
+exact domain. The procedural owner begins outside the perimeter and uses the
+nearest eight blocks of the existing distance field as a smooth appearance
+handoff. This preserves binary, generation-coherent geometry ownership: there
+is no exact-side fade, coincident water sheet, or water exception in the
+coverage mask.
+
+The current boundary profile records whether an exposed solid perimeter column
+contains water, but not an authoritative exact water-surface height. No water
+connector is emitted. If later evidence finds a water-height crack, add the
+minimum exact edge fact and a perimeter-only connector rather than restoring
+horizontal overlap.
 
 ## Decisions and Invariants
 
@@ -355,6 +362,11 @@ coverage uploads are skipped. The deletion build preserves those primary
 geometry and transition figures. Removing the selector bit reduces fixed
 allocation from the comparison build's `133,209,640` bytes to
 `133,209,624` bytes.
+
+The 2026-08-20 water handoff adds a 256-entry exact-liquid `vec4` table beside
+the active-pack face data. The material uniform grows from 16 KiB to 20 KiB;
+clipmap slots, transition payloads, bind groups, sample records, and measured
+fixed residency remain unchanged.
 
 ### Tactical 276 baseline
 

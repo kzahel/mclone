@@ -63,6 +63,15 @@ implementation owner is `mclone-terrain-view`. The canonical terminology and
 document routes live in [`lod.md`](lod.md). The deleted chunk-granular system
 is always called the **retired chunk-based Far LOD**.
 
+The exact-water ownership defect reported on 2026-08-20 is corrected. The
+procedural shader previously exempted water from exact-coverage discard, so an
+opaque LOD water surface could replace translucent exact water throughout the
+admitted footprint. Exact coverage now discards every procedural surface
+class. Exact chunks own water inside; only an eight-block procedural-side
+appearance halo approaches the active pack's exact water response. Land keeps
+the existing 32-block appearance band. Neither path overlaps horizontal
+geometry inside exact coverage.
+
 Same-day composed review exposed one exact/procedural surface-contract defect:
 ordinary continental terrain may bottom out at Y62 and canonical columns then
 receive the profile's Y63 sea fill, but both LOD evaluators raised the display
@@ -178,9 +187,10 @@ procedural-side curtain covers height disagreement without a horizontal
 collar. The spacing-one level is a flat-top/cardinal-riser voxel shell, while
 coarser levels remain smooth. Active-pack face materials, worldgen-owned side
 strata, grass tint, exact face shade, and shared sky-darken/lightmap inputs
-converge the near shell on exact terrain. Opaque procedural water deliberately
-remains the single visible water owner through exact-painted chunks so
-translucent exact water cannot form a differently shaded square. Native,
+converge the near shell on exact terrain. At that checkpoint, opaque
+procedural water deliberately remained the visible owner through exact-painted
+chunks. The 2026-08-20 correction supersedes that exception because it leaked
+LOD presentation into the exact domain. Native,
 desktop/mobile WebGPU, stereo, flat-Android build, and Android-XR build
 boundaries passed, but later product review rejected the intermediate topology.
 Tactical
@@ -231,9 +241,9 @@ Inspected midnight pixels no longer contain daytime-green smooth land,
 bright-cyan procedural water, or daylight proxy crowns. The environmental
 diagnostic is constant across procedural topology and surface class, while
 noon remains normally illuminated. That topology-independent lighting result
-is retained by Tactical 313. Tactical 304's single-owner exact coverage,
-material, water, and bounded connector lessons remain foundations, while its
-voxel-shell topology survives only in history.
+is retained by Tactical 313. Tactical 304's material and bounded-connector
+lessons remain foundations, while its water exception and voxel-shell topology
+survive only in history.
 The first Phase 2 review packet improved the appearance terms but was rejected
 for the geometric crack above. Voxel face shade
 approaches the smooth slope response over the existing committed presentation
@@ -870,13 +880,13 @@ The intended opaque composition is:
 4. actors and vegetation; and
 5. translucent terrain and water.
 
-Solid exact terrain uses full-footprint procedural discard. A bounded curtain
-on the procedural side covers boundary-height disagreement; ordinary
-procedural risers inside exact-owned land are discarded. Water is the explicit
-surface-class exception: the opaque procedural water surface remains visible
-through painted chunks and depth-occludes translucent exact water, avoiding a
-second color/lighting owner until the exact snapshot carries the water-column
-facts needed for a different compositing contract.
+Exact terrain and water use full-footprint procedural discard. A bounded
+connector on the procedural side covers solid boundary-height disagreement;
+ordinary procedural fragments inside exact-owned land are discarded. Exact
+translucent water is the only water owner inside painted chunks. Procedural
+water begins outside that footprint and approaches the exact active-pack water
+response only through a bounded eight-block appearance halo. The halo changes
+neither geometry nor depth ownership.
 
 ### Vegetation
 

@@ -248,15 +248,19 @@ voxel-only top/riser material machinery that has no remaining owner.
 
 ### Preserve explicit water ownership
 
-Retain one visible water owner through the transition. The first direct path
-must preserve the current opaque procedural-water arbitration where the exact
-snapshot lacks enough translucent water-column facts. Do not emit an opaque
-solid curtain across open water or reintroduce coincident exact/procedural
-water sheets.
+Retain one visible water owner through the transition. Exact translucent water
+owns every admitted exact footprint; procedural water is discarded by the
+same generation-coherent coverage test as procedural land. Do not emit an
+opaque solid curtain across open water or reintroduce coincident
+exact/procedural water sheets.
 
-Water classification, environmental light, depth response, analytic
-river/pool coverage, and texture weight must remain continuous across the
-appearance band. A future exact translucent-water handoff is separate work.
+On the procedural side only, the nearest eight blocks of the existing
+32-block distance field approach the exact liquid tint and opacity with the
+active pack's water texture response. That bounded appearance halo does not
+alter geometry or depth ownership. Environmental light, bed-depth response,
+analytic river/pool coverage, and texture weight remain continuous outside it.
+General translucent procedural water and an exact water-height connector
+remain separate work.
 
 ### Delete the voxel path after direct-path review
 
@@ -471,10 +475,11 @@ hooks, shader varyings, topology diagnostics, and voxel-only column-profile
 inputs. The finest procedural level now has one six-vertex smooth topology;
 only the measured exact-perimeter connector survives. The change removed 569
 lines while preserving connected admission, the generation-cached appearance
-field, exact water arbitration, vegetation ownership, and mono/multiview
-bindings. Revision `cb06c20f` deleted the 498-line A/B capture harness and its
-package command. Revision `45609a44` tightened World Explorer's fixed-byte
-contract and renamed its frontier for the sole surviving exact-to-smooth path.
+field, the then-current water arbitration, vegetation ownership, and
+mono/multiview bindings. Revision `cb06c20f` deleted the 498-line A/B capture
+harness and its package command. Revision `45609a44` tightened World Explorer's
+fixed-byte contract and renamed its frontier for the sole surviving
+exact-to-smooth path.
 
 The deletion build's representative low-view scene retains the candidate's
 `1,633,494` terrain vertices, `277` connector segments, `1,662` connector
@@ -482,6 +487,39 @@ vertices, `3,324` connector bytes, and `1,296`-byte transition payload. Native
 preparation took `27` microseconds in that run. Removing the selector bit
 shrinks fixed residency from `133,209,640` to `133,209,624` bytes. Exact Only
 continues to admit no procedural horizon or transition allocation.
+
+## Exact Water Ownership Correction
+
+Review on 2026-08-20 found that the retained water arbitration violated the
+tactical's binary geometry rule: procedural fragments skipped exact-coverage
+discard when their material was water. The opaque horizon could therefore
+replace translucent exact water throughout all 25 admitted chunks, including
+an eight-block close Terrain Lab view where no LOD representation should have
+been visible.
+
+The shared shader now discards every procedural surface class inside admitted
+coverage. Exact chunks own their translucent water there. Outside the
+perimeter, procedural water uses the nearest quarter of the existing 32-block
+appearance field as an eight-block smooth halo toward the exact liquid tint,
+opacity, and active-pack texture response. Land retains its full 32-block
+appearance band. No water geometry overlap or exact-side fade was added.
+
+The water handoff adds one 256-entry exact-liquid `vec4` table beside the
+active-pack face data, growing the material uniform from 16 KiB to 20 KiB.
+Clipmap slots, sample records, transition payloads, bind groups, and measured
+fixed residency remain unchanged at `133,209,624` bytes.
+
+Focused validation passes all `107` mesh tests and all `114` terrain-view
+tests (`113` passed and the declared adapter-dependent test ignored), including
+generated mono and multiview WGSL validation. All four scene terrain-view tests
+pass. Inspected native World Explorer map captures show the composed and
+exact-only water matching throughout the 25-chunk exact square, and an
+eight-block close capture shows only translucent exact water. Native and
+browser World Explorer composition, desktop Terrain Lab runtime composition,
+and the live-game browser toggle/reload smoke all pass. The Android packaging
+script stopped before Rust or shader compilation because the repository's
+generated sound catalog was already stale; this correction did not change that
+asset input.
 
 ## Phase 4 Validation Record
 
@@ -561,8 +599,8 @@ until the reviewer accepts the final direct-only still and moving evidence.
   fine/coarse smooth stitching.
 - General distant edits, structures, caves, arches, overhangs, or a volumetric
   LOD representation.
-- Exact translucent-water parity, independent flat water geometry, or a
-  hydrology rewrite.
+- General translucent procedural-water parity, independent flat water
+  geometry, an exact water-height connector, or a hydrology rewrite.
 - Shadow maps, TAA, screen-space effects, or a general terrain material
   rewrite.
 - Changing canonical world generation or persisted world identity for LOD
