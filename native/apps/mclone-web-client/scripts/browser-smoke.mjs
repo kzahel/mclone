@@ -3440,8 +3440,10 @@ async function run() {
           || probe.togglePixels.distinctInteriorColorCount < 2
           || probe.reloadPixels.distinctInteriorColorCount < 2
           || probe.toggleResult?.terrainViewActive !== true
+          || probe.toggleResult?.terrainViewLodPreset !== "low"
           || probe.toggleResult?.terrainViewDrawnTiles <= 0
           || probe.reloadResult?.terrainViewActive !== true
+          || probe.reloadResult?.terrainViewLodPreset !== "low"
           || probe.reloadResult?.terrainViewDrawnTiles <= 0
           || probe.storedPreset !== "low"
           || probe.reloadedStoredPreset !== "low"
@@ -11805,6 +11807,11 @@ async function runTerrainHorizonRegressionProbe(
     toggleScreenshotPath,
   );
 
+  await page.evaluate(() => {
+    const url = new URL(globalThis.location.href);
+    url.searchParams.delete("terrainLodQuality");
+    globalThis.history.replaceState(null, "", url);
+  });
   await page.reload({ waitUntil: "load" });
   await page.waitForFunction(
     () => {
