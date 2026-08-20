@@ -39,15 +39,6 @@ impl TerrainViewEngineConfig {
                 "the shared procedural horizon does not host the legacy vanilla profile".to_owned(),
             );
         }
-        if procedural.profile == TerrainPreviewProfile::ContinentalEcoregionCandidate
-            && self.vegetation_enabled
-        {
-            return Err(
-                "the continental ecoregion candidate is terrain-only and cannot use the \
-                 production vegetation executor"
-                    .to_owned(),
-            );
-        }
         self.clipmap = TerrainClipmap::new(self.clipmap)?.config();
         if self.render_cell_stride == 0
             || !self.render_cell_stride.is_power_of_two()
@@ -417,7 +408,7 @@ mod tests {
     }
 
     #[test]
-    fn continental_candidate_is_horizon_only_and_vegetation_free() {
+    fn continental_candidate_accepts_its_source_qualified_proxy_vegetation() {
         let config = TerrainViewEngineConfig {
             width: 1,
             height: 1,
@@ -429,19 +420,10 @@ mod tests {
             clipmap: TerrainClipmapConfig::default(),
             render_cell_stride: 1,
             vegetation_max_sample_spacing: TERRAIN_PREVIEW_MAX_TREE_RECORD_SAMPLE_SPACING,
-            vegetation_enabled: false,
+            vegetation_enabled: true,
             color_profile: RenderColorProfile::Vanilla,
         };
         assert!(config.validated().is_ok());
-        assert!(
-            TerrainViewEngineConfig {
-                vegetation_enabled: true,
-                ..config
-            }
-            .validated()
-            .unwrap_err()
-            .contains("terrain-only")
-        );
     }
 
     #[test]

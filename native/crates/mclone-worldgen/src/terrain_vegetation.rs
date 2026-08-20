@@ -11,12 +11,13 @@ use crate::placement::BlockPos;
 #[cfg(test)]
 use crate::terrain_preview::TERRAIN_PREVIEW_MAX_CELLS_PER_AXIS;
 use crate::terrain_preview::{
-    TerrainPreviewContentStage, TerrainPreviewProfile, TerrainPreviewRequest,
-    TerrainPreviewSurfaceQuality, TerrainPreviewVegetationProduct,
+    CONTINENTAL_PROXY_VEGETATION_SOURCE_REVISION, TerrainPreviewContentStage,
+    TerrainPreviewProfile, TerrainPreviewRequest, TerrainPreviewSurfaceQuality,
+    TerrainPreviewVegetationProduct,
 };
 
 pub const TERRAIN_VEGETATION_COMPILER_SOURCE_REVISION: &str =
-    "mclone-terrain-vegetation-compiler-v1";
+    "mclone-terrain-vegetation-compiler-v2";
 pub const TERRAIN_VEGETATION_PRODUCT_REVISION: u32 = 1;
 pub const MCHV_WIRE_VERSION: u16 = 1;
 pub const MCHV_OCCURRENCE_BYTES: usize = 80;
@@ -57,7 +58,7 @@ impl TerrainVegetationSourceIdentity {
             compiler_source_revision: revision_fingerprint(
                 TERRAIN_VEGETATION_COMPILER_SOURCE_REVISION,
             ),
-            vegetation_plan_revision: revision_fingerprint(MCLONE_OVERWORLD_VEGETATION_REVISION),
+            vegetation_plan_revision: revision_fingerprint(vegetation_revision(request.profile)),
             product_revision: TERRAIN_VEGETATION_PRODUCT_REVISION,
         })
     }
@@ -79,7 +80,7 @@ impl TerrainVegetationSourceIdentity {
             compiler_source_revision: revision_fingerprint(
                 TERRAIN_VEGETATION_COMPILER_SOURCE_REVISION,
             ),
-            vegetation_plan_revision: revision_fingerprint(MCLONE_OVERWORLD_VEGETATION_REVISION),
+            vegetation_plan_revision: revision_fingerprint(vegetation_revision(self.profile)),
             product_revision: TERRAIN_VEGETATION_PRODUCT_REVISION,
             ..self
         };
@@ -171,14 +172,23 @@ impl TerrainVegetationCompilerSession {
         if self.source != Some(source) {
             self.install_source(source, self.source.is_some());
         }
-        let cache = self
-            .cache
-            .as_mut()
-            .expect("installing a terrain vegetation source creates its cache");
-        let product = TerrainPreviewVegetationProduct::compile_with_cache(request, cache)
-            .map_err(TerrainVegetationCompileError::Compile)?;
+        let product = if source.profile == TerrainPreviewProfile::ContinentalEcoregionCandidate {
+            TerrainPreviewVegetationProduct::compile(request)
+        } else {
+            let cache = self
+                .cache
+                .as_mut()
+                .expect("installing a production terrain vegetation source creates its cache");
+            TerrainPreviewVegetationProduct::compile_with_cache(request, cache)
+        }
+        .map_err(TerrainVegetationCompileError::Compile)?;
         let job_report = product.cache_report();
-        let retained = cache.report();
+        let retained = self
+            .cache
+            .as_ref()
+            .map_or_else(McloneVegetationPlanCacheReport::default, |cache| {
+                cache.report()
+            });
         self.report.compiled_jobs = self.report.compiled_jobs.saturating_add(1);
         self.report.cell_requests = self
             .report
@@ -196,9 +206,12 @@ impl TerrainVegetationCompilerSession {
 
     fn install_source(&mut self, source: TerrainVegetationSourceIdentity, reset: bool) {
         self.source = Some(source);
-        self.cache = Some(McloneOverworldVegetationPlanCache::new(
-            McloneVegetationSource::new(source.seed, source.topology),
-        ));
+        self.cache = (source.profile == TerrainPreviewProfile::McloneOverworldV1).then(|| {
+            McloneOverworldVegetationPlanCache::new(McloneVegetationSource::new(
+                source.seed,
+                source.topology,
+            ))
+        });
         if reset {
             self.report.source_resets = self.report.source_resets.saturating_add(1);
         } else {
@@ -959,6 +972,16 @@ impl<'a> FrameReader<'a> {
     }
 }
 
+const fn vegetation_revision(profile: TerrainPreviewProfile) -> &'static str {
+    match profile {
+        TerrainPreviewProfile::McloneOverworldV1 => MCLONE_OVERWORLD_VEGETATION_REVISION,
+        TerrainPreviewProfile::ContinentalEcoregionCandidate => {
+            CONTINENTAL_PROXY_VEGETATION_SOURCE_REVISION
+        }
+        TerrainPreviewProfile::VanillaOverworld => "no-terrain-preview-vegetation",
+    }
+}
+
 const fn revision_fingerprint(value: &str) -> u64 {
     let bytes = value.as_bytes();
     let mut hash = FNV1A64_OFFSET;
@@ -1188,6 +1211,50 @@ mod tests {
         assert_eq!(session.report().source_initializations, 1);
         assert_eq!(session.report().source_resets, 0);
         assert!(session.report().retained_cells <= 4_096);
+    }
+
+    #[test]
+    fn candidate_compiler_uses_proxy_records_without_a_production_cache() {
+        let request = TerrainPreviewRequest {
+            profile: TerrainPreviewProfile::ContinentalEcoregionCandidate,
+            seed: 12_345,
+            center_x: 0,
+            center_z: 0,
+            sample_spacing: 1,
+            cells_per_axis: 64,
+            topology: McloneOverworldSamplingTopology::Unbounded,
+            content_stage: TerrainPreviewContentStage::Cover,
+            surface_quality: TerrainPreviewSurfaceQuality::Inferred,
+        };
+        let source = TerrainVegetationSourceIdentity::for_request(request).unwrap();
+        let production_source =
+            TerrainVegetationSourceIdentity::for_request(TerrainPreviewRequest {
+                profile: TerrainPreviewProfile::McloneOverworldV1,
+                ..request
+            })
+            .unwrap();
+        let mut session = TerrainVegetationCompilerSession::new(source);
+        let product = session.compile(source, request).unwrap();
+
+        assert!(!product.occurrences().is_empty());
+        assert!(session.cache.is_none());
+        assert_eq!(session.report().cell_requests, 0);
+        assert_ne!(
+            source.vegetation_plan_revision,
+            production_source.vegetation_plan_revision
+        );
+
+        let (_, job) = identities();
+        let frame = MchvFrame::Completed {
+            job,
+            source,
+            product,
+            compile_micros: 17,
+        };
+        assert_eq!(
+            decode_mchv_frame(&encode_mchv_frame(&frame).unwrap()).unwrap(),
+            frame
+        );
     }
 
     #[test]

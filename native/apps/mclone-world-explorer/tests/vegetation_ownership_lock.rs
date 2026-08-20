@@ -184,10 +184,9 @@ fn native_and_browser_cutovers_remove_horizon_sync_compilation() {
     );
     for (label, source) in [("native", NATIVE_TERRAIN), ("browser", WEB_HOST)] {
         assert!(
-            source.contains(
-                "options.terrain_profile == TerrainPreviewProfile::McloneOverworldV1"
-            ),
-            "{label} vegetation must remain qualified to the production terrain source"
+            source.contains("TerrainPreviewProfile::McloneOverworldV1")
+                && source.contains("TerrainPreviewProfile::ContinentalEcoregionCandidate"),
+            "{label} vegetation must be explicitly qualified to both compatible sources"
         );
         assert_eq!(
             source.matches("vegetation_enabled,").count(),

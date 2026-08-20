@@ -5,11 +5,11 @@ use crate::levelgen::{
     McloneOverworldLandformSample, McloneOverworldSampler, McloneOverworldSamplingTopology,
     McloneOverworldStreamPlan, McloneOverworldStreamPlanCache, McloneOverworldSurfaceRecipe,
     McloneOverworldTerrainSample, McloneOverworldVegetationPlanCache,
-    McloneOverworldVegetationPlanner, McloneTreeFamily, McloneTreeOccurrence,
-    McloneVegetationBounds, McloneVegetationPlanCacheReport, McloneVegetationSource,
-    mclone_overworld_biome_recipe, mclone_overworld_landform_kind,
-    mclone_overworld_macro_surface_top_material, mclone_overworld_preview_visible_material,
-    mclone_overworld_surface_recipe,
+    McloneOverworldVegetationPlanner, McloneTreeArchetype, McloneTreeBounds, McloneTreeFamily,
+    McloneTreeId, McloneTreeOccurrence, McloneTreeRecord, McloneVegetationBounds,
+    McloneVegetationPlanCacheReport, McloneVegetationSource, mclone_overworld_biome_recipe,
+    mclone_overworld_landform_kind, mclone_overworld_macro_surface_top_material,
+    mclone_overworld_preview_visible_material, mclone_overworld_surface_recipe,
 };
 use crate::levelgen::{
     VANILLA_OVERWORLD_LOD_REVISION, VanillaOverworldLodSample, VanillaOverworldLodSampler,
@@ -25,6 +25,8 @@ use crate::{
 };
 use mclone_core::ChunkPos;
 
+use crate::placement::BlockPos;
+
 pub const TERRAIN_PREVIEW_REFERENCE_SCHEMA_REVISION: &str =
     "mclone-terrain-preview-reference-grid-v10";
 pub const TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS: u32 = 64;
@@ -34,6 +36,11 @@ pub const TERRAIN_PREVIEW_MIN_SAMPLE_SPACING: u32 = 1;
 pub const TERRAIN_PREVIEW_MAX_SAMPLE_SPACING: u32 = 1_024;
 pub const TERRAIN_PREVIEW_SAMPLE_FLOATS: usize = 32;
 pub const TERRAIN_PREVIEW_MAX_TREE_RECORD_SAMPLE_SPACING: u32 = 4;
+pub const CONTINENTAL_PROXY_VEGETATION_REVISION: u16 = 1;
+pub const CONTINENTAL_PROXY_VEGETATION_SOURCE_REVISION: &str =
+    "mclone-continental-proxy-vegetation-v1";
+
+const CONTINENTAL_PROXY_VEGETATION_CELL_BLOCKS: i32 = 16;
 
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
 #[repr(u32)]
@@ -1185,8 +1192,11 @@ impl TerrainPreviewVegetationProduct {
     ) -> Result<Self, String> {
         let request = request.validate()?;
         let source = request.request();
-        let summary_available = source.profile == TerrainPreviewProfile::McloneOverworldV1
-            && source.content_stage == TerrainPreviewContentStage::Cover;
+        let summary_available = matches!(
+            source.profile,
+            TerrainPreviewProfile::McloneOverworldV1
+                | TerrainPreviewProfile::ContinentalEcoregionCandidate
+        ) && source.content_stage == TerrainPreviewContentStage::Cover;
         let records_requested =
             summary_available && terrain_preview_requests_tree_records(source.sample_spacing);
         if !records_requested {
@@ -1196,6 +1206,18 @@ impl TerrainPreviewVegetationProduct {
                 records_requested: false,
                 records_aggregated: summary_available,
                 occurrences: Vec::new(),
+                cache_report: McloneVegetationPlanCacheReport::default(),
+            });
+        }
+
+        if source.profile == TerrainPreviewProfile::ContinentalEcoregionCandidate {
+            let occurrences = compile_continental_proxy_vegetation(request)?;
+            return Ok(Self {
+                request,
+                summary_available,
+                records_requested: true,
+                records_aggregated: false,
+                occurrences,
                 cache_report: McloneVegetationPlanCacheReport::default(),
             });
         }
@@ -1291,8 +1313,11 @@ impl TerrainPreviewVegetationProduct {
     ) -> Result<Self, String> {
         let request = request.validate()?;
         let source = request.request();
-        let expected_summary = source.profile == TerrainPreviewProfile::McloneOverworldV1
-            && source.content_stage == TerrainPreviewContentStage::Cover;
+        let expected_summary = matches!(
+            source.profile,
+            TerrainPreviewProfile::McloneOverworldV1
+                | TerrainPreviewProfile::ContinentalEcoregionCandidate
+        ) && source.content_stage == TerrainPreviewContentStage::Cover;
         let expected_records =
             expected_summary && terrain_preview_requests_tree_records(source.sample_spacing);
         if summary_available != expected_summary
@@ -1347,6 +1372,204 @@ impl TerrainPreviewVegetationProduct {
             cache_report,
         })
     }
+}
+
+/// Build review-only tree proxies from the candidate's own cover facts.
+///
+/// The fixed global lattice makes ownership independent of preview tile
+/// partitioning and clipmap residency. These records deliberately use the
+/// existing neutral proxy carrier, but never consult the production forest
+/// planner or its cache.
+fn compile_continental_proxy_vegetation(
+    request: ValidatedTerrainPreviewRequest,
+) -> Result<Vec<McloneTreeOccurrence>, String> {
+    let source = request.request();
+    if source.topology != McloneOverworldSamplingTopology::Unbounded {
+        return Err(
+            "continental proxy vegetation currently supports only the candidate's unbounded \n+             World Explorer source"
+                .to_owned(),
+        );
+    }
+    let footprint = i32::try_from(request.footprint_blocks())
+        .map_err(|_| "continental proxy vegetation footprint exceeds i32")?;
+    let max_x = request
+        .min_x()
+        .checked_add(footprint)
+        .ok_or("continental proxy vegetation maximum X overflow")?;
+    let max_z = request
+        .min_z()
+        .checked_add(footprint)
+        .ok_or("continental proxy vegetation maximum Z overflow")?;
+    let last_x = max_x
+        .checked_sub(1)
+        .ok_or("continental proxy vegetation empty X footprint")?;
+    let last_z = max_z
+        .checked_sub(1)
+        .ok_or("continental proxy vegetation empty Z footprint")?;
+    let min_cell_x = request
+        .min_x()
+        .div_euclid(CONTINENTAL_PROXY_VEGETATION_CELL_BLOCKS);
+    let max_cell_x = last_x.div_euclid(CONTINENTAL_PROXY_VEGETATION_CELL_BLOCKS);
+    let min_cell_z = request
+        .min_z()
+        .div_euclid(CONTINENTAL_PROXY_VEGETATION_CELL_BLOCKS);
+    let max_cell_z = last_z.div_euclid(CONTINENTAL_PROXY_VEGETATION_CELL_BLOCKS);
+    let surface = ContinentalSurfacePlan::new(ContinentalEcoregionDescriptor::new(
+        source.seed,
+        ContinentalEcoregionTopology::Plane,
+    ))
+    .map_err(|error| error.to_string())?;
+    let mut occurrences = Vec::new();
+
+    for cell_x in min_cell_x..=max_cell_x {
+        for cell_z in min_cell_z..=max_cell_z {
+            let position_hash = continental_proxy_hash(source.seed, cell_x, cell_z, 0);
+            let inset = 2_i32;
+            let jitter_span = CONTINENTAL_PROXY_VEGETATION_CELL_BLOCKS - inset * 2;
+            let world_x = cell_x
+                .checked_mul(CONTINENTAL_PROXY_VEGETATION_CELL_BLOCKS)
+                .and_then(|value| {
+                    value.checked_add(inset + (position_hash as i32).rem_euclid(jitter_span))
+                })
+                .ok_or("continental proxy vegetation X coordinate overflow")?;
+            let world_z = cell_z
+                .checked_mul(CONTINENTAL_PROXY_VEGETATION_CELL_BLOCKS)
+                .and_then(|value| {
+                    value
+                        .checked_add(inset + ((position_hash >> 32) as i32).rem_euclid(jitter_span))
+                })
+                .ok_or("continental proxy vegetation Z coordinate overflow")?;
+            if world_x < request.min_x()
+                || world_x >= max_x
+                || world_z < request.min_z()
+                || world_z >= max_z
+            {
+                continue;
+            }
+
+            let sample = surface.query_point(world_x, world_z).sample;
+            if sample.is_water() {
+                continue;
+            }
+            let forest_structure = sample.forest_core.max(sample.forest_edge * 0.72);
+            if forest_structure < 0.12 {
+                continue;
+            }
+            let density = (0.10 + sample.forest_core * 0.78 + sample.forest_edge * 0.30)
+                * (1.0 - sample.clearing * 0.94)
+                * (1.0 - sample.openness * 0.38)
+                * (1.0 - sample.wetland * 0.38);
+            let admission_hash = continental_proxy_hash(source.seed, cell_x, cell_z, 1);
+            let admission = (admission_hash as u32) as f64 / f64::from(u32::MAX);
+            if admission >= f64::from(density.clamp(0.0, 0.92)) {
+                continue;
+            }
+
+            let landmark_rank =
+                (continental_proxy_hash(source.seed, cell_x, cell_z, 2) >> 62) as u8;
+            if !terrain_preview_tree_record_admitted(source.sample_spacing, landmark_rank) {
+                continue;
+            }
+            let family = if sample.aridity > 0.68 && sample.temperature > 0.48 {
+                McloneTreeFamily::WarmDryAcacia
+            } else if sample.moisture > 0.64 && sample.temperature < 0.58 {
+                McloneTreeFamily::CoolWetConifer
+            } else {
+                McloneTreeFamily::TemperateBroadleaf
+            };
+            let silhouette = continental_proxy_hash(source.seed, cell_x, cell_z, 3);
+            let (archetype, trunk_height, crown_radius, crown_depth) = match family {
+                McloneTreeFamily::TemperateBroadleaf => (
+                    McloneTreeArchetype::RoundedBroadleaf,
+                    8 + (silhouette % 5) as u16,
+                    3 + ((silhouette >> 8) % 3) as u16,
+                    4 + ((silhouette >> 16) % 4) as u16,
+                ),
+                McloneTreeFamily::CoolWetConifer => (
+                    McloneTreeArchetype::LayeredConifer,
+                    11 + (silhouette % 7) as u16,
+                    3 + ((silhouette >> 8) % 3) as u16,
+                    7 + ((silhouette >> 16) % 5) as u16,
+                ),
+                McloneTreeFamily::WarmDryAcacia => (
+                    McloneTreeArchetype::ForkedAcacia,
+                    6 + (silhouette % 5) as u16,
+                    4 + ((silhouette >> 8) % 3) as u16,
+                    3 + ((silhouette >> 16) % 3) as u16,
+                ),
+            };
+            let base_y = (sample.solid_surface_y.floor() as i32)
+                .checked_add(1)
+                .ok_or("continental proxy vegetation Y coordinate overflow")?;
+            let base = BlockPos::new(world_x, base_y, world_z);
+            let horizontal_radius =
+                i32::from(crown_radius) + i32::from(family == McloneTreeFamily::WarmDryAcacia) * 2;
+            let max_y = base_y
+                .checked_add(i32::from(trunk_height))
+                .and_then(|value| value.checked_add(2))
+                .ok_or("continental proxy vegetation height overflow")?;
+            let bounds = McloneTreeBounds::new(
+                world_x
+                    .checked_sub(horizontal_radius)
+                    .ok_or("continental proxy vegetation bounds overflow")?,
+                base_y
+                    .checked_sub(1)
+                    .ok_or("continental proxy vegetation bounds overflow")?,
+                world_z
+                    .checked_sub(horizontal_radius)
+                    .ok_or("continental proxy vegetation bounds overflow")?,
+                world_x
+                    .checked_add(horizontal_radius)
+                    .ok_or("continental proxy vegetation bounds overflow")?,
+                max_y,
+                world_z
+                    .checked_add(horizontal_radius)
+                    .ok_or("continental proxy vegetation bounds overflow")?,
+            )
+            .map_err(|error| error.to_string())?;
+            let record = McloneTreeRecord {
+                id: McloneTreeId {
+                    planning_cell_x: cell_x,
+                    planning_cell_z: cell_z,
+                    candidate_slot: 0,
+                    vegetation_revision: CONTINENTAL_PROXY_VEGETATION_REVISION,
+                },
+                canonical_base: base,
+                family,
+                archetype,
+                trunk_height,
+                crown_radius,
+                crown_depth,
+                orientation: (continental_proxy_hash(source.seed, cell_x, cell_z, 4) & 3) as u8,
+                landmark_rank,
+                variant_seed: continental_proxy_hash(source.seed, cell_x, cell_z, 5),
+                bounds,
+            };
+            occurrences.push(McloneTreeOccurrence {
+                record,
+                x_lift: 0,
+                working_bounds: bounds,
+            });
+        }
+    }
+    occurrences.sort_unstable();
+    Ok(occurrences)
+}
+
+fn continental_proxy_hash(seed: i64, cell_x: i32, cell_z: i32, lane: u64) -> u64 {
+    let mut value =
+        (seed as u64) ^ 0x6376_6567_7072_6f78 ^ lane.wrapping_mul(0x9e37_79b9_7f4a_7c15);
+    value ^= (cell_x as u64).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    value = splitmix64(value);
+    value ^= (cell_z as u64).wrapping_mul(0x94d0_49bb_1331_11eb);
+    splitmix64(value)
+}
+
+fn splitmix64(mut value: u64) -> u64 {
+    value = value.wrapping_add(0x9e37_79b9_7f4a_7c15);
+    value = (value ^ (value >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    value = (value ^ (value >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    value ^ (value >> 31)
 }
 
 pub const fn terrain_preview_requests_tree_records(sample_spacing: u32) -> bool {
@@ -2077,5 +2300,46 @@ mod tests {
                 forest_footprint_summaries: 0,
             }
         );
+    }
+
+    #[test]
+    fn continental_proxy_vegetation_is_partition_independent_and_source_owned() {
+        let candidate_request = |center_x, center_z, cells_per_axis| TerrainPreviewRequest {
+            profile: TerrainPreviewProfile::ContinentalEcoregionCandidate,
+            center_x,
+            center_z,
+            cells_per_axis,
+            content_stage: TerrainPreviewContentStage::Cover,
+            surface_quality: TerrainPreviewSurfaceQuality::Inferred,
+            ..TerrainPreviewRequest::new(12_345, center_x, center_z, 1)
+        };
+        let whole = TerrainPreviewVegetationProduct::compile(candidate_request(0, 0, 64)).unwrap();
+        let mut partitioned = Vec::new();
+        for center_z in [-16, 16] {
+            for center_x in [-16, 16] {
+                partitioned.extend(
+                    TerrainPreviewVegetationProduct::compile(candidate_request(
+                        center_x, center_z, 32,
+                    ))
+                    .unwrap()
+                    .occurrences()
+                    .iter()
+                    .copied(),
+                );
+            }
+        }
+        partitioned.sort_unstable();
+
+        assert!(whole.summary_available());
+        assert!(whole.records_requested());
+        assert!(!whole.occurrences().is_empty());
+        assert_eq!(whole.occurrences(), partitioned);
+        assert_eq!(
+            whole.cache_report(),
+            McloneVegetationPlanCacheReport::default()
+        );
+        assert!(whole.occurrences().iter().all(|occurrence| {
+            occurrence.record.id.vegetation_revision == CONTINENTAL_PROXY_VEGETATION_REVISION
+        }));
     }
 }

@@ -1,9 +1,9 @@
 # Tactical 324: Continental Surface World Explorer
 
-Status: **in progress 2026-08-20. Phases 1-2 are complete: the shared broad
+Status: **in progress 2026-08-20. Phases 1-3 are complete: the shared broad
 surface and explicit native/browser World Explorer source are drawable with
-zero exact or production-vegetation work. Continue through candidate cover,
-arid contrast, and six journeys, then stop at Human Review B.**
+source-qualified cover and zero exact or production-vegetation work. Continue
+through arid contrast and six journeys, then stop at Human Review B.**
 
 Topic: `continental-ecoregion-planning`
 
@@ -259,9 +259,28 @@ geography.
   the World Explorer all-target suite keeps the source and ownership locks
   green.
 
-Phase 3 is next. The current color-only cover preview deliberately has no
-candidate tree instances; its remaining faint polygonal ownership reads as a
-known cover-realization problem, not an accepted visual endpoint.
+### Phase 3: Candidate Cover And Water Composition — complete
+
+- The candidate's own cover facts now deterministically populate one fixed
+  global proxy-tree lattice. Tile partitioning produces the same ordered
+  records, and the carrier is tagged with a candidate vegetation revision.
+- The ordinary native thread and browser Worker coordinator compile and move
+  the same typed product. Candidate jobs never construct or query the
+  production forest-plan cache; production and candidate vegetation source
+  fingerprints are distinct.
+- At the seed-12,345 cover checkpoint, native retained 473 instances in 48
+  ready vegetation tiles for 45,408 bytes. The worker spent 4.5 ms compiling
+  the complete settled coverage while all exact counters remained zero.
+  Headed WebGPU retained the same source contract through movement and
+  reported 1,229 records at the second site.
+- Individual proxy geometry draws only at views of 2,048 blocks or closer.
+  Broader views retain the records and use continuous forest/open/wetland
+  surface cover, avoiding a rectangular near-record island in continental
+  overview pixels.
+
+Phase 4 is next. The fifth family is still deliberately absent: current
+`aridity` is only inverse moisture and `leeward_exposure` remains zero, so no
+desert-looking pixels are accepted until the plan owns the rain shadow.
 
 ## Non-Goals
 

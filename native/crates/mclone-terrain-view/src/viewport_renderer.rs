@@ -67,6 +67,7 @@ const TERRAIN_FRONTIER_DISPATCHES_PER_FRAME: usize = 4;
 const TERRAIN_FRONTIER_SUPPORT_LOOKUP_MAX_TILES_PER_AXIS: usize = 18;
 const TERRAIN_FRONTIER_SUPPORT_LOOKUP_BUFFER_BYTES: u64 = 96;
 const TERRAIN_HORIZON_TREE_CULL_MARGIN_BLOCKS: f32 = 16.0;
+const CONTINENTAL_PROXY_TREE_MAX_VIEW_BLOCKS: f64 = 2_048.0;
 const TERRAIN_HORIZON_CULL_MIN_Y: f32 = -64.0;
 const TERRAIN_HORIZON_CULL_MAX_Y: f32 = 512.0;
 const TERRAIN_EXACT_CONNECTOR_VERTEX_ATTRIBUTES: [wgpu::VertexAttribute; 2] = [
@@ -5131,7 +5132,14 @@ impl TerrainHorizonRenderer {
         }
         let vegetation_levels = self.admission.vegetation_presentations();
         self.visible_vegetation_slots.fill(false);
+        let candidate_proxy_geometry_visible = self.profile
+            != TerrainPreviewProfile::ContinentalEcoregionCandidate
+            || presentation.width_blocks.max(presentation.height_blocks)
+                <= CONTINENTAL_PROXY_TREE_MAX_VIEW_BLOCKS;
         for level in &vegetation_levels {
+            if !candidate_proxy_geometry_visible {
+                continue;
+            }
             if level.snapshot.sample_spacing > self.vegetation_max_sample_spacing {
                 continue;
             }
@@ -5792,7 +5800,8 @@ impl TerrainHorizonRenderer {
         if self.vegetation_executor.is_none() && self.vegetation_coordinator.is_none() {
             return Ok(());
         }
-        let source = terrain_horizon_vegetation_source(self.seed, self.content_stage)?;
+        let source =
+            terrain_horizon_vegetation_source(self.profile, self.seed, self.content_stage)?;
         let desired = self
             .admission
             .current_requested_presentations()
@@ -6295,11 +6304,12 @@ fn maximum_terrain_vegetation_desired_tiles(config: TerrainClipmapConfig) -> Res
 }
 
 fn terrain_horizon_vegetation_source(
+    profile: TerrainPreviewProfile,
     seed: i64,
     content_stage: TerrainPreviewContentStage,
 ) -> Result<TerrainVegetationSourceIdentity, String> {
     TerrainVegetationSourceIdentity::for_request(TerrainPreviewRequest {
-        profile: TerrainPreviewProfile::McloneOverworldV1,
+        profile,
         seed,
         center_x: 0,
         center_z: 0,

@@ -48,8 +48,11 @@ impl ExplorerTerrain {
         let material_table = TerrainPreviewMaterialTable::from_catalog(&assets.catalog);
         let target_color_transform =
             RenderColorProfile::Vanilla.target_color_transform(color_format);
-        let vegetation_enabled =
-            options.terrain_profile == TerrainPreviewProfile::McloneOverworldV1;
+        let vegetation_enabled = matches!(
+            options.terrain_profile,
+            TerrainPreviewProfile::McloneOverworldV1
+                | TerrainPreviewProfile::ContinentalEcoregionCandidate
+        );
         let session = WorldExplorerSession::new(
             device,
             queue,

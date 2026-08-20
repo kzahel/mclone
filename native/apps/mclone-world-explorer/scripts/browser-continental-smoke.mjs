@@ -123,10 +123,13 @@ function assertCandidate(snapshot, stage) {
       || snapshot.exactDesiredChunks !== 0
       || snapshot.exactPaintedChunks !== 0
       || snapshot.exactVertexCount !== 0
-      || snapshot.treeInstanceCount !== 0
-      || snapshot.vegetationReadyTiles !== 0) {
+      || snapshot.treeInstanceCount === 0
+      || snapshot.vegetationReadyTiles === 0
+      || snapshot.vegetationRecordCount !== snapshot.treeInstanceCount
+      || snapshot.vegetationCacheCellRequests !== 0
+      || snapshot.vegetationCoordinatorState !== "running") {
     throw new Error(
-      `${stage} is not a complete terrain-only continental frame:\n`
+      `${stage} is not a complete source-qualified continental frame:\n`
         + `${JSON.stringify(snapshot, null, 2)}`,
     );
   }
