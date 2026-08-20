@@ -2,7 +2,7 @@
 
 Topic: `seasons`
 
-Status: active implementation record updated 2026-08-17. Tactical
+Status: active implementation record updated 2026-08-20. Tactical
 [`316`](../tactical/316-authoritative-season-calendar-foundation.md) now gives
 `mclone-overworld-v1` an authoritative revision-1 56-day calendar derived from
 persisted cumulative civil `day_time`. Metadata codec 4 preserves the exact
@@ -76,6 +76,20 @@ trigger. Quarter density cost essentially the same, so full quality remains
 enabled and final Human Review must accept that fixed blended-draw exception
 or request a later sky-compositing slice. None of this creates a gameplay
 calendar or mutates the authoritative light engine.
+
+A 2026-08-20 headset-review correction removes two celestial stability
+defects. Client clock projection now advances at the negotiated gameplay rate
+instead of the independently negotiated body-pose publication rate; mixed-
+reliability XR therefore keeps the 20 Hz world clock while reporting poses at
+60 Hz, rather than running ahead and snapping backward at each authoritative
+sample. Original-catalog stars below `0.08` degrees now use that value as a
+minimum raster support footprint with inverse-area opacity compensation, so
+dim stars remain covered under small head-pose changes without gaining
+integrated brightness. The retained Java star catalog is unchanged. Focused
+renderer/scene suites, the browser/WASM build, and inspected 960-pixel and
+Quest-scale synthetic-stereo captures pass. Android-XR packaging is presently
+blocked before Rust compilation by an unrelated stale checked-in first-party
+sound catalog.
 
 Active coordinating parent Tactical
 [`315`](../tactical/315-authoritative-seasonal-calendar-and-squirrel-ecology.md)

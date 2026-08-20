@@ -1,4 +1,5 @@
 use super::*;
+use crate::client_clock::ClientClockCadence;
 use crate::pose_sync::PlayerPoseSyncCadence;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -542,6 +543,7 @@ impl McloneSceneHost {
             render_completed_result_accept_budget: None,
             per_view_uniform_frame: 0,
             last_locomotion_update: None,
+            client_clock: ClientClockCadence::default(),
             player_pose_sync: PlayerPoseSyncCadence::default(),
             menu_toggle_down: false,
             game_ui_toggle_down: false,
@@ -758,6 +760,7 @@ impl McloneSceneHost {
             render_completed_result_accept_budget: None,
             per_view_uniform_frame: 0,
             last_locomotion_update: None,
+            client_clock: ClientClockCadence::default(),
             player_pose_sync: PlayerPoseSyncCadence::default(),
             menu_toggle_down: false,
             game_ui_toggle_down: false,
@@ -1052,6 +1055,7 @@ impl McloneSceneHost {
             render_completed_result_accept_budget: None,
             per_view_uniform_frame: 0,
             last_locomotion_update: None,
+            client_clock: ClientClockCadence::default(),
             player_pose_sync: PlayerPoseSyncCadence::default(),
             menu_toggle_down: false,
             game_ui_toggle_down: false,
@@ -5827,6 +5831,7 @@ impl McloneSceneHost {
         self.active_world.local_participant.reset_movement();
         self.active_world.footsteps.reset();
         self.active_world.pending_interaction_sounds.clear();
+        self.client_clock.reset();
         self.player_pose_sync.reset();
         self.head_comfort.reset();
         self.clear_xr_blink_teleport();
@@ -5856,6 +5861,7 @@ impl McloneSceneHost {
         self.prefetched_live_upload = None;
         self.last_locomotion_update = None;
         self.active_world.local_participant.reset_movement();
+        self.client_clock.reset();
         self.player_pose_sync.reset();
         self.first_eye_summary = None;
         self.last_ui_panel_stats = WorldGuiPanelRenderStats::default();

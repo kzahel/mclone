@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+mod client_clock;
 mod interactive_input;
 mod player_movement;
 mod pose_sync;
@@ -1379,6 +1380,7 @@ pub struct McloneSceneHost {
     render_completed_result_accept_budget: Option<usize>,
     per_view_uniform_frame: u32,
     last_locomotion_update: Option<MonotonicInstant>,
+    client_clock: client_clock::ClientClockCadence,
     player_pose_sync: pose_sync::PlayerPoseSyncCadence,
     menu_toggle_down: bool,
     game_ui_toggle_down: bool,
@@ -5466,6 +5468,20 @@ impl McloneSceneHost {
     fn commit_engine_camera_player_pose_if_due_timed(
         &mut self,
     ) -> Result<Option<(bool, EngineCameraCommitTiming)>> {
+        let gameplay_rate_hz = self
+            .active_world
+            .runtime
+            .as_ref()
+            .and_then(|runtime| runtime.client().session_configuration())
+            .map(|configuration| configuration.gameplay_rate_hz)
+            .unwrap_or(20);
+        self.client_clock.set_rate_hz(gameplay_rate_hz);
+        if self.client_clock.take_due_tick(self.services.clock.now())
+            && let Some(runtime) = self.active_world.runtime.as_mut()
+        {
+            runtime.core_mut().client_mut().advance_time_tick();
+        }
+
         let report_rate_hz = self
             .active_world
             .runtime
@@ -5476,9 +5492,6 @@ impl McloneSceneHost {
         self.player_pose_sync.set_rate_hz(report_rate_hz);
         if !self.player_pose_sync.is_due(self.services.clock.now()) {
             return Ok(None);
-        }
-        if let Some(runtime) = self.active_world.runtime.as_mut() {
-            runtime.core_mut().client_mut().advance_time_tick();
         }
         self.commit_engine_camera_player_pose_timed().map(Some)
     }

@@ -56,6 +56,12 @@ pub const MCLONE_STAR_COUNT: u32 = 2_048;
 pub const MCLONE_STAR_CATALOG_MAX_COUNT: u32 = 4_096;
 pub const REFERENCE_STAR_CANDIDATE_COUNT: u32 = 1_500;
 pub const REFERENCE_STAR_COUNT: u32 = 780;
+// The dimmest original-catalog quads were about 0.04 degrees wide, below one
+// pixel on current Quest displays. A small minimum support footprint prevents
+// pose micro-jitter from alternating those stars between zero and one covered
+// samples. Opacity is reduced by the inverse area change below, so this does
+// not turn the dim tail into a brighter or denser sky.
+const MCLONE_STABLE_STAR_ANGULAR_DIAMETER_DEGREES: f32 = 0.08;
 const STAR_INSTANCE_FLOAT_COUNT: usize = 9;
 const STAR_INSTANCE_BYTE_SIZE: wgpu::BufferAddress =
     (STAR_INSTANCE_FLOAT_COUNT * std::mem::size_of::<f32>()) as wgpu::BufferAddress;
@@ -1683,11 +1689,12 @@ fn mclone_star_catalog() -> Vec<StarInstance> {
     ];
     let mut catalog = Vec::with_capacity(MCLONE_STAR_COUNT as usize);
     for &(right_ascension, declination, color_class) in anchors {
+        let (size, brightness) = stabilize_mclone_star_presentation(0.095, 1.0);
         catalog.push(star_instance(
             right_ascension,
             declination.to_radians(),
-            0.095,
-            1.0,
+            size,
+            brightness,
             color_class,
             0.0,
         ));
@@ -1699,6 +1706,7 @@ fn mclone_star_catalog() -> Vec<StarInstance> {
         let brightness_seed = random_unit(&mut state);
         let brightness = 0.28 + brightness_seed.powi(3) * 0.72;
         let size = 0.025 + brightness * 0.055;
+        let (size, brightness) = stabilize_mclone_star_presentation(size, brightness);
         let color_class = (next_random(&mut state) % 3) as f32;
         let orientation = random_unit(&mut state) * std::f32::consts::TAU;
         catalog.push(star_instance(
@@ -1712,6 +1720,12 @@ fn mclone_star_catalog() -> Vec<StarInstance> {
     }
     catalog.sort_by(|left, right| right[5].total_cmp(&left[5]));
     catalog
+}
+
+fn stabilize_mclone_star_presentation(angular_size_degrees: f32, brightness: f32) -> (f32, f32) {
+    let stable_size = angular_size_degrees.max(MCLONE_STABLE_STAR_ANGULAR_DIAMETER_DEGREES);
+    let area_scale = (angular_size_degrees / stable_size).powi(2);
+    (stable_size, brightness * area_scale)
 }
 
 fn star_instance(
@@ -2483,6 +2497,24 @@ mod tests {
         assert!(
             celestial_star_draw(base.with_celestial(celestial(off)), MCLONE_STAR_COUNT).is_none()
         );
+    }
+
+    #[test]
+    fn dim_mclone_stars_use_a_stable_support_without_gaining_energy() {
+        let intended_size = 0.025 + 0.28 * 0.055;
+        let intended_brightness = 0.28;
+        let (stable_size, stable_brightness) =
+            stabilize_mclone_star_presentation(intended_size, intended_brightness);
+
+        assert_eq!(stable_size, MCLONE_STABLE_STAR_ANGULAR_DIAMETER_DEGREES);
+        assert!(stable_brightness < intended_brightness);
+        assert!(
+            (stable_size.powi(2) * stable_brightness - intended_size.powi(2) * intended_brightness)
+                .abs()
+                < 1.0e-7
+        );
+
+        assert_eq!(stabilize_mclone_star_presentation(0.095, 1.0), (0.095, 1.0));
     }
 
     #[test]
