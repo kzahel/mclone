@@ -29,6 +29,21 @@ the desired choice, show it as unavailable, and project the effective state
 to Off. Native, browser-Wasm, flat-Android APK, Android-XR APK, synthetic
 stereo, AVD, and physical Quest gates pass.
 
+Review at higher exact render distance has exposed one unresolved composition
+contract. The exact-to-smooth connector is emitted only by spacing-one tiles,
+while focus-connected exact coverage can extend beyond the fixed four-by-four
+finest clipmap bounds and meet spacing-two or coarser terrain directly. The
+same audit found that legal desktop render distance 32 describes a 65-by-65
+chunk exact window while the exact mask and boundary formats currently permit
+only a 64-chunk span. Tactical
+[`321`](../tactical/321-exact-frontier-support-architecture.md) now owns the
+architecture-first response: document and instrument the combined spatial
+model, establish a typed per-edge composition certificate, measure regular and
+adversarial support costs, and obtain human selection before implementing a
+fine-support belt or resolution-aware fallback. No candidate is yet part of
+the product contract. Completion must consolidate the selected architecture,
+budgets, admission lifecycle, and accepted limitations back into this topic.
+
 The 2026-08-13 phone-browser black-frame regression is resolved. XR
 multiview support had added `@builtin(view_index)` entry points to the same
 WGSL modules used by ordinary single-view clients. Chrome validates the whole
