@@ -34,10 +34,8 @@ impl ClientGraphicsPlatformProfile {
     pub const fn default_terrain_lod_preset(self) -> TerrainLodPreset {
         match self {
             Self::NativeDesktopFlat => TerrainLodPreset::High,
-            Self::SteamOs | Self::Web | Self::DesktopOpenXr | Self::AndroidXr => {
-                TerrainLodPreset::Medium
-            }
-            Self::FlatAndroid => TerrainLodPreset::Low,
+            Self::SteamOs | Self::Web | Self::DesktopOpenXr => TerrainLodPreset::Medium,
+            Self::FlatAndroid | Self::AndroidXr => TerrainLodPreset::Low,
         }
     }
 }
@@ -579,7 +577,7 @@ mod tests {
         );
         assert_eq!(
             ClientGraphicsPlatformProfile::AndroidXr.default_terrain_lod_preset(),
-            TerrainLodPreset::Medium
+            TerrainLodPreset::Low
         );
     }
 
