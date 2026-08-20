@@ -1099,12 +1099,59 @@ mod tests {
     }
 
     #[test]
+    fn legal_comb_exhausts_the_default_hypothetical_sparse_pool() {
+        let comb = (-31..=31)
+            .flat_map(|x| {
+                (-31..=31)
+                    .filter(move |z| x % 2 == 0 || *z == 0)
+                    .map(move |z| ChunkPos::new(x, z))
+            })
+            .collect::<BTreeSet<_>>();
+        let coverage = ExactPaintedCoverageSnapshot::new(source(), 8, comb).unwrap();
+        let boundary = solid_boundary(&coverage, HorizontalTopology::UNBOUNDED);
+        let receipt = TerrainFrontierPlan::prepare(
+            &coverage,
+            &boundary,
+            HorizontalTopology::UNBOUNDED,
+            [8, 8],
+            &clipmap_levels([8, 8]),
+            TerrainFrontierPlanOptions::default(),
+        )
+        .unwrap()
+        .receipt();
+        assert!(receipt.format.all_valid);
+        assert_eq!(receipt.candidates.sparse_desired_fine_tiles, 324);
+        assert_eq!(receipt.candidates.sparse_additional_fine_tiles, 308);
+        assert_eq!(
+            receipt.candidates.sparse_admitted_fine_tiles,
+            TERRAIN_FRONTIER_DIAGNOSTIC_FINE_TILE_CAPACITY
+        );
+        assert!(
+            receipt.candidates.sparse_additional_fine_tiles
+                > TERRAIN_FRONTIER_DIAGNOSTIC_FINE_TILE_CAPACITY
+        );
+        assert_eq!(receipt.candidates.sparse_rejected_fine_tiles, 180);
+    }
+
+    #[test]
     fn radius_thirty_one_full_finest_candidate_includes_atomic_staging() {
         let candidates = plan_square(31, [0, 0]).receipt().candidates;
         assert_eq!(candidates.full_finest_tiles_per_axis, 18);
         assert_eq!(candidates.full_finest_logical_tiles, 324);
         assert_eq!(candidates.full_finest_staging_tiles, 35);
         assert_eq!(candidates.full_finest_added_bytes, 188_365_632);
+        assert_eq!(candidates.sparse_desired_fine_tiles, 128);
+        assert_eq!(candidates.sparse_base_resident_fine_tiles, 0);
+        assert_eq!(candidates.sparse_additional_fine_tiles, 128);
+        assert_eq!(candidates.sparse_admitted_fine_tiles, 128);
+        assert_eq!(candidates.sparse_rejected_fine_tiles, 0);
+        assert_eq!(candidates.sparse_additional_bytes, 71_758_336);
+        assert_eq!(candidates.sparse_outer_edge_segments, 8_192);
+        assert_eq!(candidates.sparse_vertex_upper_bound, 3_145_728);
+        assert_eq!(candidates.resolution_aware_connector_segments, 4_032);
+        assert_eq!(candidates.resolution_aware_connector_bytes, 48_384);
+        assert_eq!(candidates.resolution_aware_connector_vertices, 24_192);
+        assert_eq!(candidates.resolution_aware_unresolved_segments, 0);
     }
 
     #[test]
