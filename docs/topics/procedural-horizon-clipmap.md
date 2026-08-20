@@ -405,6 +405,24 @@ for live diagnostics but is not the default XR renderer. Tactical
 the complete renderer/live-switch/regression workstream. Child Tactical
 [`278`](../tactical/278-quest-procedural-horizon-multiview.md) owns the true
 two-layer renderer and its alternating Quest comparison.
+
+A later matched Quest 3 RD5 stationary diagnostic at revision `20ec052d`
+measured the current direct-smooth full-quality path at `68.75 FPS`,
+`14.386 / 15.828ms` average/p95 app work, and `8.058ms` Meta app GPU against
+an exact control at `72.01 FPS`, `5.007 / 5.425ms`, and `2.538ms`. The settled
+composed frame drew 55 of 160 terrain tiles and 612 proxy trees from 35 tiles;
+93 terrain tiles were frustum-culled, 12 were inner-hole-culled, and zero were
+fog/far-culled. Average 72-Hz budget is only `0.497ms` away, while p95 needs
+`1.939ms`.
+
+Tactical
+[`320`](../tactical/320-cross-platform-lod-quality-presets.md) therefore keeps
+this shared clipmap and plans player-facing Off/Low/Medium/High bounds rather
+than another terrain system. Preset semantics remain identical across native,
+Web, Android, and XR clients; only the unset default varies by shared platform
+profile. Fog remains an independent optional setting. Initial Low/Medium
+experiments reduce ring count and proxy-vegetation reach at stride one, while
+High preserves the ten-level full-quality control.
 Canonical exact generation and live authoritative render sections remain
 different truth-source adapters.
 

@@ -43,6 +43,7 @@ The shared Graphics page currently exposes eight rows:
 | World Scale | Live `Auto`, 50%, 67%, 75%, or 100% selection | shared typed action, desktop `HostEffects`, native flat surface | no; relaunch returns to `Auto` |
 | Section Occlusion | Live on/off renderer option | shared settings controller and scene/render host | no |
 | Leaf Detail | Live `Blocky` / `Bushy`; changes derived active-pack leaf geometry through a transactional asset epoch | shared catalog/compiler, settings controller, and scene | yes; schema-1 machine-local graphics preference |
+| Distant Terrain | Live `Exact Only` / `Composed`; Tactical [`320`](../tactical/320-cross-platform-lod-quality-presets.md) plans its replacement with shared Off/Low/Medium/High LOD presets and platform-profile defaults | shared terrain-view, settings controller, and scene | yes; schema-1 machine-local graphics preference |
 | Render Distance | Live chunk-distance slider | shared settings controller and scene/runtime | no |
 | Frame Pacing | Live VSync / Max FPS / Uncapped cycle when supported | shared action and platform cadence/surface host | no |
 | FPS Cap | Live discrete cap cycle when supported | shared action and platform cadence host | no |
@@ -295,7 +296,8 @@ inventory is:
 | Output resolution and refresh rate | add mode enumeration plus safe apply/revert; preserve Gamescope semantics |
 | GUI scale | automatic only; add an Auto plus explicit logical-scale control |
 | UI render resolution | native only; keep native default and evaluate optional Match World mode |
-| Graphics quality preset | absent; define Low/Medium/High or platform-profile-derived bundles only after each member setting exists; manual edits should report Custom |
+| Overall graphics quality preset | absent; do not conflate the focused distant-terrain LOD presets in Tactical [`320`](../tactical/320-cross-platform-lod-quality-presets.md) with a future bundle that also rewrites leaves, grass, world resolution, actors, or effects; manual edits to a later broad bundle should report Custom |
+| Distant-terrain LOD quality | binary Exact Only/Composed today; Tactical [`320`](../tactical/320-cross-platform-lod-quality-presets.md) defines shared Off/Low/Medium/High semantics, live persistence, optional independent fog, and different unset defaults selected by platform profile |
 | Ambient occlusion | absent as a player control; first define the renderer-quality effect |
 | Brightness/gamma | absent; distinguish a player-facing calibrated range from the fullbright debug toggle |
 | Clouds | absent system/control |
