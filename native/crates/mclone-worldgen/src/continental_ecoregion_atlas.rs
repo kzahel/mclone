@@ -20,7 +20,7 @@ use crate::levelgen::{
 use crate::terrain_preview::preview_forest_intent;
 
 pub const CONTINENTAL_ECOREGION_ATLAS_SCHEMA_REVISION: &str =
-    "mclone-continental-ecoregion-atlas-v5";
+    "mclone-continental-ecoregion-atlas-v6";
 pub const CONTINENTAL_ECOREGION_ATLAS_DEFAULT_SAMPLES_ACROSS: u32 = 256;
 pub const CONTINENTAL_ECOREGION_ATLAS_MAX_SAMPLES: usize = 262_144;
 pub const CONTINENTAL_ECOREGION_ATLAS_NONE: u8 = u8::MAX;

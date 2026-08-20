@@ -18,8 +18,12 @@ stripe.
 The corrected atlas returned to Human Review A and was accepted on 2026-08-20.
 The reviewer found the wooded route geometry visibly inorganic and broad-map
 panning too slow. Those are required presentation/realization follow-ups, not
-a rejection of the macro grammar. The current production generator remains a
-visible control, not a protected output target.**
+a rejection of the macro grammar. Both follow-ups are now implemented: the
+atlas retains and moves its accepted raster during coalesced rebuilds, and
+plan revision 5 realizes stable routes as curved, asymmetric, variably wide,
+locally interrupted paths. The next product gate is a World Explorer
+realization of the accepted candidate. The current production generator
+remains a visible control, not a protected output target.**
 
 Topic: `continental-ecoregion-planning`
 
@@ -137,27 +141,26 @@ Landed on 2026-08-20 in shared `mclone-worldgen` ownership:
   `/tmp/mclone-continental-ecoregion/receipt.json` by default.
 
 The pinned native/Wasm witness is
-`cd1a8638630df83d4fc5b9f642da9e9dbbbdd06fd1169558a98e9621cf2ef925`.
+`4e69ce0b3c1814b8901f848752221fcc28ca0f18b714fb5b7135664de06536f8`.
 It covers three seeds on plane and cylinder through 11,301 exact comparisons:
 whole versus split windows, randomized point traversal, direct coarse
 projection, owner/work caps, zero exact-chunk work, periodic lifts, and four
 independent native threads. The dedicated Wasm test produces the same
 witness through `wasm-bindgen-test-runner`.
 
-The complete Review A macOS `release` receipt at
-`/tmp/mclone-continental-ecoregion/receipt-v8.json` measured the corrected
-plan:
+The complete post-review macOS `release` receipt at
+`/tmp/mclone-continental-ecoregion/receipt-v9.json` measured plan revision 5:
 
 | Query | Observed time |
 |---|---:|
-| continental point | 296 ns/sample |
-| province point | 430 ns/sample |
-| ecoregion point | 524 ns/sample |
-| mosaic point | 581 ns/sample |
-| 65,536-block, 256x256 candidate plan | 68.1 ms total / 1,039 ns per sample |
-| 131,072-block, 256x256 candidate plan | 56.8 ms total / 867 ns per sample |
-| 65,536-block candidate + complete control, cold / warm | 192.5 / 192.8 ms |
-| 131,072-block candidate + complete control, cold / warm | 189.0 / 188.3 ms |
+| continental point | 313 ns/sample |
+| province point | 739 ns/sample |
+| ecoregion point | 857 ns/sample |
+| mosaic point | 907 ns/sample |
+| 65,536-block, 256x256 candidate plan | 80.7 ms total / 1,231 ns per sample |
+| 131,072-block, 256x256 candidate plan | 67.1 ms total / 1,023 ns per sample |
+| 65,536-block candidate + complete control, cold / warm | 204.9 / 206.1 ms |
+| 131,072-block candidate + complete control, cold / warm | 198.6 / 198.1 ms |
 
 These timings are descriptive, not yet a budget, and exclude canvas drawing.
 The equal 256x256 cost at the two extents demonstrates direct coarse sampling:
@@ -367,10 +370,12 @@ ecology or production authority:
    interrupted route geometry.
 
 The first is a representation/cache concern: it must not change geography.
-The second is a realization correction: route identity and connectivity stay
-canonical while forest cores, clearings, passes, wetland opportunity, and
-continental story shape their visible course. Neither correction authorizes a
-migration simulator or a production-profile switch.
+The second is a realization correction: route identity stays canonical while
+forest cores, clearings, passes, wetland opportunity, and continental story
+shape its visible continuity. The sampled habitat graph may change when a
+route pinches or is interrupted and must therefore remain measured evidence,
+not identity. Neither correction authorizes a migration simulator or a
+production-profile switch.
 
 The interaction correction is implemented without a semantic cache. During
 pan and zoom, Terrain Lab immediately translates/scales the last accepted
@@ -387,6 +392,30 @@ offset. The inspected in-motion capture is
 `/tmp/mclone-terrain-lab-desktop-chrome-ecoregion-retained-pan.png`. A full
 atlas still recompiles after settling; bounded tile/overlap reuse remains an
 optional measured optimization rather than a correctness dependency.
+
+Plan schema `mclone-continental-ecoregion-plan-v5` implements the route
+realization correction without replacing route IDs or types. Each continent's
+main route follows four deterministic story-shaped anchors. Three quadratic
+branches attach near the first, middle, and last quarter of the main course,
+choose asymmetric sides and reaches, and no longer form complete crossbars.
+Route-specific low-frequency displacement moves the center line, while local
+cover, moisture, water, relief, and clearing opportunity vary its width and
+visible continuity. Woodland passes break strongly through large clearings;
+wetland chains form more intermittent stepping stones; riparian spines remain
+the most continuous; open-range links widen and narrow with local openness.
+The route remains a stable planning fact even where its realized influence is
+weak. Atlas schema `mclone-continental-ecoregion-atlas-v6` transfers the new
+realization.
+
+In the inspected desktop-aspect 131 km atlas, the unchanged descriptive graph
+rule observes 252 habitat patches, 147 realized route-mediated links, a
+largest network of 55 patches, and 35.3% of patches touching at least one
+other patch. That is lower than the visually over-connected ladder's 44.7%
+but remains above the initial stripe's roughly one quarter. It is not a
+quality threshold or animal-migration proof. The inspected route and evidence
+captures retain the paths listed above. The browser measured 244.1 ms for the
+settled candidate-plus-control compile and 10.4 ms to draw; gestures do not
+wait for either operation because they use the retained raster.
 
 ## Candidate Plan Revision 2
 

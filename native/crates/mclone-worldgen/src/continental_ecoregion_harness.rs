@@ -13,7 +13,7 @@ use crate::continental_ecoregion::{
 pub const CONTINENTAL_ECOREGION_HARNESS_SCHEMA_REVISION: &str =
     "mclone-continental-ecoregion-harness-v1";
 pub const CONTINENTAL_ECOREGION_WITNESS_SHA256: &str =
-    "cd1a8638630df83d4fc5b9f642da9e9dbbbdd06fd1169558a98e9621cf2ef925";
+    "4e69ce0b3c1814b8901f848752221fcc28ca0f18b714fb5b7135664de06536f8";
 pub const CONTINENTAL_ECOREGION_CORPUS_SEEDS: [i64; 3] = [12_345, 8_675_309, -98_765];
 pub const CONTINENTAL_ECOREGION_CORPUS_PERIOD_BLOCKS: i32 = 196_608;
 

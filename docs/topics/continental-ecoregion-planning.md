@@ -31,8 +31,13 @@ now permitted while those corrections remain explicit.
 Terrain Lab now implements the interaction correction by moving the retained
 accepted raster immediately and coalescing complete Worker rebuilds behind a
 100 ms settle window. No cache affects plan facts or checksums; bounded atlas
-tile reuse remains optional future performance work. Anchor-responsive route
-geometry is the remaining accepted Review A correction.
+tile reuse remains optional future performance work. Plan revision 5 also
+completes the accepted route correction: deterministic story-shaped anchors,
+asymmetric branches, route-specific displacement, variable width, and local
+ecological interruptions replace the visible ladder without changing stable
+route identities. The 131 km sampled graph now links 35.3% of habitat patches;
+that remains descriptive rather than a target. World Explorer realization is
+the next product gate.
 Mclone should combine
 top-down continental and ecoregional planning with bottom-up procedural
 realization so the Overworld contains large, recognizable, causally related

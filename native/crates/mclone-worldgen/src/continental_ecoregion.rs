@@ -12,7 +12,7 @@ use sha2::{Digest, Sha256};
 
 use crate::noise::{SeedDomain, ValueNoise2d};
 
-pub const CONTINENTAL_ECOREGION_SCHEMA_REVISION: &str = "mclone-continental-ecoregion-plan-v4";
+pub const CONTINENTAL_ECOREGION_SCHEMA_REVISION: &str = "mclone-continental-ecoregion-plan-v5";
 pub const CONTINENTAL_ECOREGION_DIMENSION_ID: &str = "mclone:overworld";
 pub const CONTINENTAL_ECOREGION_STORED_PROFILE: &str =
     "mclone-overworld-v1-control-field-revision-21";
@@ -589,7 +589,8 @@ impl ContinentalEcoregionPlan {
             return LandscapePointQuery { sample, work };
         }
 
-        let province = self.province_sample(world_x, world_z, continent, &mut work);
+        let route = self.habitat_route_sample(world_x, world_z, continent);
+        let province = self.province_sample(world_x, world_z, continent, route, &mut work);
         sample.province = Some(province);
         if detail == LandscapePlanDetail::Province {
             return LandscapePointQuery { sample, work };
@@ -602,7 +603,7 @@ impl ContinentalEcoregionPlan {
         }
 
         sample.mosaic =
-            Some(self.mosaic_sample(world_x, world_z, continent, province, ecoregion, &mut work));
+            Some(self.mosaic_sample(world_x, world_z, province, ecoregion, route, &mut work));
         LandscapePointQuery { sample, work }
     }
 
@@ -739,6 +740,7 @@ impl ContinentalEcoregionPlan {
         world_x: i32,
         world_z: i32,
         continent: ContinentalDistrictSample,
+        route: HabitatRouteSample,
         work: &mut PlanConstructionCounts,
     ) -> ProvincePlanSample {
         let site = self.nearest_site(
@@ -764,7 +766,6 @@ impl ContinentalEcoregionPlan {
         let along = (dx * axis_x + dz * axis_z) / 32_000.0;
         let across = (-dx * axis_z + dz * axis_x) / 24_000.0;
         let kind = province_kind(continent.story, along, across, id_hash);
-        let corridor = self.habitat_route_sample(world_x, world_z, continent);
         ProvincePlanSample {
             id,
             continent_id: continent.id,
@@ -772,9 +773,9 @@ impl ContinentalEcoregionPlan {
             core_weight: site.core_weight as f32,
             relief: province_relief(kind),
             major_water: match kind {
-                PhysiographicProvinceKind::RiverLowland => corridor.weight.max(0.45),
-                PhysiographicProvinceKind::LakeBasin => (0.55 + corridor.weight * 0.35).min(1.0),
-                _ => corridor.weight * 0.65,
+                PhysiographicProvinceKind::RiverLowland => route.weight.max(0.45),
+                PhysiographicProvinceKind::LakeBasin => (0.55 + route.weight * 0.35).min(1.0),
+                _ => route.weight * 0.65,
             } as f32,
         }
     }
@@ -847,9 +848,9 @@ impl ContinentalEcoregionPlan {
         &self,
         world_x: i32,
         world_z: i32,
-        continent: ContinentalDistrictSample,
         province: ProvincePlanSample,
         ecoregion: EcoregionPlanSample,
+        route: HabitatRouteSample,
         work: &mut PlanConstructionCounts,
     ) -> LandscapeMosaicSample {
         let canonical_x = self.descriptor.topology.canonical_world_x(world_x);
@@ -912,7 +913,6 @@ impl ContinentalEcoregionPlan {
 
         work.local_field_evaluations += 2;
         let local_variation = self.fields.local_openness.sample(canonical_x, world_z) * 0.08;
-        let corridor = self.habitat_route_sample(world_x, world_z, continent);
         let (clearing_influence, clearing_id, clearing_cause) = best
             .filter(|(influence, _, _)| *influence > 0.0)
             .map_or((0.0, None, None), |(influence, id, cause)| {
@@ -921,7 +921,7 @@ impl ContinentalEcoregionPlan {
         let clearing_core = smoothstep(0.35, 0.82, clearing_influence);
         let clearing_shoulder =
             (smoothstep(0.02, 0.55, clearing_influence) - clearing_core).max(0.0);
-        let openness =
+        let mut openness =
             (f64::from(ecoregion.base_openness) + clearing_influence * 0.72 + local_variation)
                 .clamp(0.0, 1.0);
         let forest_affinity = match ecoregion.kind {
@@ -930,11 +930,32 @@ impl ContinentalEcoregionPlan {
             EcoregionKind::QuietTransition => 0.58,
             _ => 0.28,
         };
-        let forest_core = (f64::from(ecoregion.base_canopy)
+        let mut forest_core = (f64::from(ecoregion.base_canopy)
             * forest_affinity
             * (1.0 - clearing_influence)
             * (0.72 + f64::from(ecoregion.core_weight) * 0.28))
             .clamp(0.0, 1.0);
+        let corridor = (route.weight
+            * habitat_route_context(
+                route.kind,
+                ecoregion,
+                province,
+                clearing_influence,
+                local_variation,
+            ))
+        .clamp(0.0, 1.0);
+        match route.kind {
+            HabitatRouteKind::WoodlandPass => {
+                forest_core = forest_core.max(corridor * (0.82 - clearing_influence * 0.38));
+            }
+            HabitatRouteKind::RiparianSpine => {
+                forest_core = forest_core.max(corridor * 0.42);
+            }
+            HabitatRouteKind::OpenRangeLink => {
+                openness = openness.max(corridor * 0.88);
+            }
+            HabitatRouteKind::WetlandChain => {}
+        }
         let wetland_affinity = match ecoregion.kind {
             EcoregionKind::ConnectedWetland => 1.0,
             EcoregionKind::RiparianWoodland => 0.72,
@@ -942,8 +963,17 @@ impl ContinentalEcoregionPlan {
         };
         let wetland = (wetland_affinity
             * f64::from(ecoregion.moisture)
-            * f64::from(province.major_water.max(corridor.weight as f32)))
+            * f64::from(province.major_water.max(corridor as f32)))
         .clamp(0.0, 1.0);
+        let wetland = match route.kind {
+            HabitatRouteKind::WetlandChain => wetland.max(
+                corridor
+                    * (0.55 + f64::from(ecoregion.moisture) * 0.45)
+                    * (1.0 - clearing_influence * 0.22),
+            ),
+            HabitatRouteKind::RiparianSpine => wetland.max(corridor * 0.48),
+            _ => wetland,
+        };
         let local_cell_x = canonical_x.div_euclid(256);
         let local_cell_z = world_z.div_euclid(256);
         let local_fingerprint = coordinate_hash(
@@ -962,9 +992,9 @@ impl ContinentalEcoregionPlan {
             openness: openness as f32,
             forest_core: forest_core as f32,
             wetland: wetland as f32,
-            corridor: corridor.weight as f32,
-            corridor_id: (corridor.weight > 0.0).then_some(corridor.id),
-            corridor_kind: (corridor.weight > 0.0).then_some(corridor.kind),
+            corridor: corridor as f32,
+            corridor_id: (corridor > 0.0).then_some(route.id),
+            corridor_kind: (corridor > 0.0).then_some(route.kind),
             local_fingerprint,
         }
     }
@@ -1054,32 +1084,29 @@ impl ContinentalEcoregionPlan {
         let along = dx * f64::from(continent.axis_x) + dz * f64::from(continent.axis_z);
         let across = -dx * f64::from(continent.axis_z) + dz * f64::from(continent.axis_x);
         let warp = self.fields.corridor_warp.sample(canonical_x, world_z);
+        let position = RoutePoint { along, across };
+        let main_curve = main_habitat_route_curve(continent);
         let main_kind = main_habitat_route_kind(continent.story);
         let main_id = habitat_route_id(continent, 0);
-        let main_cross = across - warp * 1_600.0;
-        let main_width = habitat_route_half_width(main_kind);
-        let main_length = 1.0 - smoothstep(24_000.0, 31_000.0, along.abs());
+        let main_distance = cubic_route_distance(
+            warped_route_position(position, warp, main_id.hash),
+            main_curve,
+        );
         let mut best = HabitatRouteSample {
             id: main_id,
             kind: main_kind,
-            weight: ((1.0 - main_cross.abs() / main_width).clamp(0.0, 1.0) * main_length)
-                .clamp(0.0, 1.0),
+            weight: habitat_route_weight(main_distance, main_kind, warp, main_id.hash),
         };
 
         for slot in 1..=3 {
-            let anchor = match slot {
-                1 => -13_000.0,
-                2 => 0.0,
-                _ => 13_000.0,
-            };
             let kind = branch_habitat_route_kind(continent.story, slot);
             let id = habitat_route_id(continent, slot);
-            let branch_along = along - anchor - warp * 900.0 * if slot == 2 { -1.0 } else { 1.0 };
-            let branch_width = habitat_route_half_width(kind) * 0.82;
-            let branch_length = 1.0 - smoothstep(17_000.0, 24_000.0, across.abs());
-            let weight = ((1.0 - branch_along.abs() / branch_width).clamp(0.0, 1.0)
-                * branch_length)
-                .clamp(0.0, 1.0);
+            let branch_curve = branch_habitat_route_curve(continent, slot, main_curve);
+            let branch_distance = quadratic_route_distance(
+                warped_route_position(position, warp, id.hash),
+                branch_curve,
+            );
+            let weight = habitat_route_weight(branch_distance, kind, warp, id.hash) * 0.94;
             if weight > best.weight || (weight == best.weight && id.hash < best.id.hash) {
                 best = HabitatRouteSample { id, kind, weight };
             }
@@ -1106,6 +1133,12 @@ struct HabitatRouteSample {
     id: LandscapeFeatureId,
     kind: HabitatRouteKind,
     weight: f64,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct RoutePoint {
+    along: f64,
+    across: f64,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -1350,6 +1383,192 @@ fn habitat_route_half_width(kind: HabitatRouteKind) -> f64 {
         HabitatRouteKind::WoodlandPass => 1_300.0,
         HabitatRouteKind::OpenRangeLink => 2_100.0,
     }
+}
+
+fn main_habitat_route_curve(continent: ContinentalDistrictSample) -> [RoutePoint; 4] {
+    let hash = habitat_route_id(continent, 0).hash;
+    let bend = match continent.story {
+        ContinentalStory::RiverValley | ContinentalStory::LakeDistrict => 8_500.0,
+        ContinentalStory::Escarpment => 6_000.0,
+        ContinentalStory::OpenHighland => 7_200.0,
+    };
+    [
+        RoutePoint {
+            along: -30_000.0 + signed_hash_unit(hash, 5) * 1_800.0,
+            across: signed_hash_unit(hash, 13) * 2_800.0,
+        },
+        RoutePoint {
+            along: -11_000.0 + signed_hash_unit(hash, 21) * 3_800.0,
+            across: signed_hash_unit(hash, 29) * bend,
+        },
+        RoutePoint {
+            along: 11_000.0 + signed_hash_unit(hash, 37) * 3_800.0,
+            across: signed_hash_unit(hash, 45) * bend,
+        },
+        RoutePoint {
+            along: 30_000.0 + signed_hash_unit(hash, 53) * 1_800.0,
+            across: signed_hash_unit(hash, 61) * 2_800.0,
+        },
+    ]
+}
+
+fn branch_habitat_route_curve(
+    continent: ContinentalDistrictSample,
+    slot: u8,
+    main_curve: [RoutePoint; 4],
+) -> [RoutePoint; 3] {
+    let hash = habitat_route_id(continent, slot).hash;
+    let base_progress = match slot {
+        1 => 0.25,
+        2 => 0.50,
+        _ => 0.75,
+    };
+    let start = cubic_route_point(
+        main_curve,
+        (base_progress + signed_hash_unit(hash, 7) * 0.055).clamp(0.08, 0.92),
+    );
+    let side = match slot {
+        1 => -1.0,
+        2 => 1.0,
+        _ if hash & 1 == 0 => -1.0,
+        _ => 1.0,
+    };
+    let reach = 12_000.0 + hash_unit(hash, 19) * 11_000.0;
+    let end = RoutePoint {
+        along: start.along + signed_hash_unit(hash, 35) * 7_000.0,
+        across: start.across + side * reach,
+    };
+    let control = RoutePoint {
+        along: (start.along + end.along) * 0.5 + signed_hash_unit(hash, 47) * 5_500.0,
+        across: start.across + side * reach * (0.28 + hash_unit(hash, 57) * 0.32),
+    };
+    [start, control, end]
+}
+
+fn habitat_route_weight(
+    distance: f64,
+    kind: HabitatRouteKind,
+    local_warp: f64,
+    route_hash: u64,
+) -> f64 {
+    let width_variation = 0.50 + unit_field(local_warp) * 0.70;
+    let authored_variation = 0.90 + hash_unit(route_hash, 27) * 0.20;
+    let longitudinal_texture = 0.92 + unit_field(local_warp) * 0.08;
+    (1.0 - distance / (habitat_route_half_width(kind) * width_variation * authored_variation))
+        .clamp(0.0, 1.0)
+        * longitudinal_texture.min(1.0)
+}
+
+fn habitat_route_context(
+    kind: HabitatRouteKind,
+    ecoregion: EcoregionPlanSample,
+    province: ProvincePlanSample,
+    clearing_influence: f64,
+    local_variation: f64,
+) -> f64 {
+    let moisture = f64::from(ecoregion.moisture);
+    let canopy = f64::from(ecoregion.base_canopy);
+    let openness = f64::from(ecoregion.base_openness);
+    let water = f64::from(province.major_water);
+    let suitability = match kind {
+        HabitatRouteKind::RiparianSpine => 0.52 + moisture * 0.26 + water * 0.22,
+        HabitatRouteKind::WetlandChain => 0.44 + moisture * 0.32 + water * 0.24,
+        HabitatRouteKind::WoodlandPass => 0.48 + canopy * 0.38 + f64::from(province.relief) * 0.14,
+        HabitatRouteKind::OpenRangeLink => 0.50 + openness * 0.38 + (1.0 - canopy) * 0.12,
+    };
+    let interruption = match kind {
+        HabitatRouteKind::WoodlandPass => 1.0 - smoothstep(0.42, 0.86, clearing_influence) * 0.80,
+        HabitatRouteKind::RiparianSpine | HabitatRouteKind::WetlandChain => {
+            1.0 - smoothstep(0.60, 0.92, clearing_influence) * 0.28
+        }
+        HabitatRouteKind::OpenRangeLink => 1.0,
+    };
+    let local_patch = unit_field((local_variation / 0.08).clamp(-1.0, 1.0));
+    let continuity = match kind {
+        HabitatRouteKind::RiparianSpine => 0.68 + smoothstep(0.16, 0.84, local_patch) * 0.32,
+        HabitatRouteKind::WetlandChain => 0.18 + smoothstep(0.30, 0.72, local_patch) * 0.82,
+        HabitatRouteKind::WoodlandPass => 0.12 + smoothstep(0.26, 0.76, local_patch) * 0.88,
+        HabitatRouteKind::OpenRangeLink => 0.42 + smoothstep(0.20, 0.80, local_patch) * 0.58,
+    };
+    (suitability * interruption * continuity).clamp(0.0, 1.0)
+}
+
+fn warped_route_position(position: RoutePoint, local_warp: f64, route_hash: u64) -> RoutePoint {
+    let along_direction = if route_hash & 2 == 0 { 1.0 } else { -1.0 };
+    let across_direction = if route_hash & 4 == 0 { 1.0 } else { -1.0 };
+    RoutePoint {
+        along: position.along
+            + local_warp * along_direction * (550.0 + hash_unit(route_hash, 11) * 650.0),
+        across: position.across
+            + local_warp * across_direction * (1_650.0 + hash_unit(route_hash, 33) * 1_100.0),
+    }
+}
+
+fn cubic_route_distance(position: RoutePoint, curve: [RoutePoint; 4]) -> f64 {
+    let mut previous = curve[0];
+    let mut distance = f64::INFINITY;
+    for segment in 1..=16 {
+        let next = cubic_route_point(curve, f64::from(segment) / 16.0);
+        distance = distance.min(route_segment_distance(position, previous, next));
+        previous = next;
+    }
+    distance
+}
+
+fn quadratic_route_distance(position: RoutePoint, curve: [RoutePoint; 3]) -> f64 {
+    let mut previous = curve[0];
+    let mut distance = f64::INFINITY;
+    for segment in 1..=10 {
+        let next = quadratic_route_point(curve, f64::from(segment) / 10.0);
+        distance = distance.min(route_segment_distance(position, previous, next));
+        previous = next;
+    }
+    distance
+}
+
+fn cubic_route_point(curve: [RoutePoint; 4], progress: f64) -> RoutePoint {
+    let inverse = 1.0 - progress;
+    RoutePoint {
+        along: inverse.powi(3) * curve[0].along
+            + 3.0 * inverse.powi(2) * progress * curve[1].along
+            + 3.0 * inverse * progress.powi(2) * curve[2].along
+            + progress.powi(3) * curve[3].along,
+        across: inverse.powi(3) * curve[0].across
+            + 3.0 * inverse.powi(2) * progress * curve[1].across
+            + 3.0 * inverse * progress.powi(2) * curve[2].across
+            + progress.powi(3) * curve[3].across,
+    }
+}
+
+fn quadratic_route_point(curve: [RoutePoint; 3], progress: f64) -> RoutePoint {
+    let inverse = 1.0 - progress;
+    RoutePoint {
+        along: inverse.powi(2) * curve[0].along
+            + 2.0 * inverse * progress * curve[1].along
+            + progress.powi(2) * curve[2].along,
+        across: inverse.powi(2) * curve[0].across
+            + 2.0 * inverse * progress * curve[1].across
+            + progress.powi(2) * curve[2].across,
+    }
+}
+
+fn route_segment_distance(position: RoutePoint, start: RoutePoint, end: RoutePoint) -> f64 {
+    let along = end.along - start.along;
+    let across = end.across - start.across;
+    let length_squared = along * along + across * across;
+    if length_squared == 0.0 {
+        return (position.along - start.along).hypot(position.across - start.across);
+    }
+    let progress = (((position.along - start.along) * along
+        + (position.across - start.across) * across)
+        / length_squared)
+        .clamp(0.0, 1.0);
+    (position.along - (start.along + along * progress))
+        .hypot(position.across - (start.across + across * progress))
+}
+
+fn signed_hash_unit(hash: u64, shift: u32) -> f64 {
+    hash_unit(hash, shift) * 2.0 - 1.0
 }
 
 fn habitat_route_id(continent: ContinentalDistrictSample, slot: u8) -> LandscapeFeatureId {
@@ -1659,6 +1878,15 @@ mod tests {
         assert_eq!((spine.owner_x, spine.owner_z), (-2, 7));
         assert_ne!(spine, branch);
         assert_eq!(spine, habitat_route_id(continent, 0));
+
+        let main = main_habitat_route_curve(continent);
+        let left_branch = branch_habitat_route_curve(continent, 1, main);
+        let right_branch = branch_habitat_route_curve(continent, 2, main);
+        assert_eq!(cubic_route_distance(main[0], main), 0.0);
+        assert_eq!(quadratic_route_distance(left_branch[0], left_branch), 0.0);
+        assert_eq!(quadratic_route_distance(right_branch[0], right_branch), 0.0);
+        assert!(left_branch[2].across < left_branch[0].across);
+        assert!(right_branch[2].across > right_branch[0].across);
     }
 
     #[test]

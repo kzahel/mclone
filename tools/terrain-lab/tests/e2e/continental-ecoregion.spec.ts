@@ -1,7 +1,7 @@
 import { expect, test, type Locator } from "@playwright/test";
 
 const WITNESS_SHA256 =
-  "cd1a8638630df83d4fc5b9f642da9e9dbbbdd06fd1169558a98e9621cf2ef925";
+  "4e69ce0b3c1814b8901f848752221fcc28ca0f18b714fb5b7135664de06536f8";
 
 test("continental ecoregion atlas is direct, layered, and inspectable", async ({
   page,
@@ -30,7 +30,7 @@ test("continental ecoregion atlas is direct, layered, and inspectable", async ({
   await expect(shell).toHaveAttribute("data-ecoregion-step", "256");
   await expect(shell).toHaveAttribute(
     "data-ecoregion-atlas-schema",
-    "mclone-continental-ecoregion-atlas-v5",
+    "mclone-continental-ecoregion-atlas-v6",
   );
   await expect(shell).toHaveAttribute("data-ecoregion-exact-chunks", "0");
   await expect(shell).toHaveAttribute(
