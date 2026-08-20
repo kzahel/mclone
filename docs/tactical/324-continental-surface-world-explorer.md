@@ -1,10 +1,10 @@
 # Tactical 324: Continental Surface World Explorer
 
-Status: **in progress 2026-08-20. Phases 1-4 are complete: the shared broad
-surface and explicit native/browser World Explorer source are drawable with
-source-qualified cover, causal arid contrast, and zero exact or
-production-vegetation work. Continue through six journeys, then stop at Human
-Review B.**
+Status: **implementation complete and awaiting Human Review B as of
+2026-08-20. The shared broad surface, explicit native/browser World Explorer
+source, source-qualified cover, causal arid contrast, and six deterministic
+review journeys are drawable with zero exact or production-vegetation work.
+Production remains unchanged.**
 
 Topic: `continental-ecoregion-planning`
 
@@ -269,15 +269,21 @@ geography.
   the same typed product. Candidate jobs never construct or query the
   production forest-plan cache; production and candidate vegetation source
   fingerprints are distinct.
-- At the seed-12,345 cover checkpoint, native retained 473 instances in 48
-  ready vegetation tiles for 45,408 bytes. The worker spent 4.5 ms compiling
-  the complete settled coverage while all exact counters remained zero.
-  Headed WebGPU retained the same source contract through movement and
-  reported 1,229 records at the second site.
-- Individual proxy geometry draws only at views of 2,048 blocks or closer.
-  Broader views retain the records and use continuous forest/open/wetland
-  surface cover, avoiding a rectangular near-record island in continental
-  overview pixels.
+- Human Review B uses one stable 24-block global proxy lattice across every
+  candidate review record spacing. The same source-qualified carrier reaches
+  spacing 16 and all 80 vegetation tiles, while production candidate cache
+  requests remain zero.
+- Individual proxy geometry draws only at views of 768 blocks or closer;
+  broader views use continuous forest/open/wetland surface cover. Two rejected
+  review attempts informed that boundary: a short-reach spacing-4 carrier
+  exposed a roughly kilometre-square vegetation island, while rank-thinning
+  independently at each spacing exposed camera-centred density rings. The
+  shared global lattice removes both presentation artifacts without making
+  camera distance a world-generation input.
+- Across the six final habitat frames the fixed carrier retained 11,033 to
+  33,927 records. Native and browser compile the same records through the
+  ordinary coordinator, all exact counters remain zero, and no production
+  forest-plan cache is queried.
 
 ### Phase 4: Arid Rain-Shadow Contrast — complete
 
@@ -307,9 +313,49 @@ geography.
   sample on the review host. The headed browser atlas test and native
   World Explorer map/oblique captures passed and were visually inspected.
 
-Phase 5 is next: publish the six deterministic journey receipts and matched
-native/deployed-browser review package without adding exact chunks or changing
-the production default.
+### Phase 5: Human Review B Package — complete
+
+- `mclone-worldgen` selects six sites with one direct 131,072-block scan at a
+  512-block step. The scan visits 66,049 samples, constructs no exact chunks,
+  density volumes, or feature batches, and measured 170.7 ms total / 2,584 ns
+  per sample on the review host. Selected centres remain at least 16,384
+  blocks apart.
+- The catalog schema is `mclone-continental-surface-journeys-v1`; its canonical
+  hash is
+  `f9ec52923b051081fc31c6cb610e62e01180625023b2f5189281c1c012001c6f`.
+  Native, Wasm, CLI, and browser selectors use the same catalog:
+
+  | Journey | Centre | Heading | Span | Sequence summary |
+  |---|---:|---:|---:|---|
+  | coast-to-wooded-interior | -13,824 / 9,216 | 0 / -1 | 16,384 | ocean coast to rolling interior and upland |
+  | clearing-between-forest-cores | -30,720 / 10,752 | 1 / 0 | 12,288 | upland edge into a broad rolling clearing |
+  | long-forest-edge | 26,112 / -57,344 | 1 / 1 | 23,168 | long rolling/upland forest-edge traverse |
+  | connected-water-country | 15,360 / -13,312 | 1 / 1 | 23,168 | lake to land, lake, and river country |
+  | quiet-rolling-interior | -50,688 / -56,832 | 0 / 1 | 16,384 | continuous quiet rolling interior |
+  | upland-to-arid-basin | 4,096 / 28,160 | -1 / 1 | 20,272 | upland through rolling land to rain shadow |
+
+- Each review selector publishes matched 65,536-block locator, 16,384-block
+  overview, 8,192-block oblique, and 512-block habitat frames. The browser
+  adds a deterministic 1,024-block fly step. Native captured 24 frames and
+  the headed Chrome/WebGPU lane captured 30; all were visually inspected.
+- All six sites filled 160 terrain slots and 80 candidate vegetation tiles
+  with no pending work. Native cold completion was 2.09-2.49 seconds, coarse
+  readiness 47-53 ms, vegetation compilation 52-54 ms, and resident memory
+  134.4-136.6 MB including 133,344,028 fixed terrain bytes. Exact chunks and
+  production vegetation-cache requests remained zero.
+- The six final habitat and fly frames are materially distinct. The clearing
+  reads as meadow enclosed by forest, the quiet interior preserves open
+  negative space, the arid basin is sparse, and connected water is clearest
+  in its broader sequence. No repeated camera-shaped vegetation boundary
+  remains. This is implementation evidence, not the Human Review B decision.
+- The ordinary all-target suites pass with 454 worldgen tests (one ignored),
+  144 terrain-view tests (one ignored), and 14 World Explorer application and
+  ownership-lock tests. Formatting passes. Production
+  `mclone-overworld-v1`, exact chunks, and the new-world default are unchanged.
+- The exact pushed implementation revision is `83b9a310e304`; the review UI is
+  published under `https://mclone.kzahel.com/explore/`. Final deployment
+  verification is recorded at handoff after the documentation commit is
+  pushed and the same code bundle is republished from that exact revision.
 
 ## Non-Goals
 

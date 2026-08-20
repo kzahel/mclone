@@ -36,13 +36,13 @@ completes the accepted route correction: deterministic story-shaped anchors,
 asymmetric branches, route-specific displacement, variable width, and local
 ecological interruptions replace the visible ladder without changing stable
 route identities. The 131 km sampled graph now links 35.3% of habitat patches;
-that remains descriptive rather than a target. World Explorer realization is
-the next product gate. Tactical
+that remains descriptive rather than a target. World Explorer realization
+became the next product gate. Tactical
 [`324`](../tactical/324-continental-surface-world-explorer.md) now owns that
 implementation: five composable terrain-character families, one shared named
 candidate source, six review journeys, and a stop at Human Review B before
 exact chunks or production integration.
-Its first four milestones are now implemented. The shared surface sampler
+All five milestones are now implemented. The shared surface sampler
 publishes four drawable temperate families, explicit water and substrate,
 stable plan identities, and zero exact work under one native/Wasm witness.
 World Explorer native and browser accept the explicit
@@ -60,8 +60,12 @@ drainage permanence. A rejected first image exposed owner-shaped desert slabs;
 the corrected point-continuous climate crosses district ownership without a
 cliff and realizes dry basins, failed drainage, washes, sparse cover, and
 limited exposed substrate. Terrain Lab exposes those causes directly while
-the candidate remains disconnected from production exact chunks. Six selected
-journeys remain before Human Review B.
+the candidate remains disconnected from production exact chunks. A bounded
+131 km scan now publishes six deterministic, mutually separated journeys for
+coast, clearing, forest edge, connected water, quiet interior, and
+upland-to-arid-basin review. Native and browser World Explorer expose matched
+locator, overview, oblique, habitat, and fly frames from the same catalog.
+Human Review B now owns the accept, revise, or reject decision.
 Mclone should combine
 top-down continental and ecoregional planning with bottom-up procedural
 realization so the Overworld contains large, recognizable, causally related
@@ -358,6 +362,42 @@ bounded campaign. It should:
    `mclone-overworld-v1` revision, narrow the mechanism, or reject it.
 8. If the temperate proof succeeds, add an arid rain-shadow/desert province as
    the first strong contrast rather than multiplying nominal biome labels.
+
+## Human Review B Candidate
+
+Tactical
+[`324`](../tactical/324-continental-surface-world-explorer.md) completed the
+broad three-dimensional candidate without connecting it to exact chunks or
+changing the product default. The canonical
+`mclone-continental-surface-journeys-v1` catalog hash is
+`f9ec52923b051081fc31c6cb610e62e01180625023b2f5189281c1c012001c6f`.
+It selects these six review stories:
+
+| Journey | Dominant travel story |
+|---|---|
+| coast-to-wooded-interior | ocean coast through rolling woodland to upland |
+| clearing-between-forest-cores | broad meadow/open country enclosed by forest |
+| long-forest-edge | extended rolling/upland forest-edge traverse |
+| connected-water-country | lake, intervening land, second lake, and river |
+| quiet-rolling-interior | ordinary open rolling country with negative space |
+| upland-to-arid-basin | upland descent through rolling land into rain shadow |
+
+Selection is one direct 131,072-block scan at a 512-block step: 66,049
+samples, at least 16,384 blocks between selected centres, 170.7 ms total on
+the review host, and zero exact chunks, density volumes, or feature batches.
+Native and browser selectors consume the same catalog, and the candidate uses
+one global source-qualified proxy-tree lattice rather than production forest
+facts. Review caught and removed both a kilometre-square short-reach proxy
+island and camera-centred density rings before this gate. Individual proxy
+geometry is now local to 768-block views; continuous candidate cover carries
+forest/open/wetland structure at broader scales.
+
+The interactive candidate is at
+`https://mclone.kzahel.com/explore/?journey=coast-to-wooded-interior` and accepts
+any journey label from the table. Production field revision 21 remains the
+A/B control and `mclone-overworld-v1` remains unchanged. Human Review B must
+now choose accept, a named revision, or rejection before any bounded exact-site
+probe or production integration.
 
 ## Acceptance
 

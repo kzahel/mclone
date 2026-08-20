@@ -1129,15 +1129,13 @@ coordinates rather than a locally executable numeric profile.
 
 ## Next Work
 
-The overriding next product campaign is the bounded continental/ecoregional
-exploration in
-[`continental-ecoregion-planning.md`](continental-ecoregion-planning.md).
-Keep field revision 21 as an A/B control, not a protected output target. The
-first proof should expose direct continental and province facts, authored
-ecoregion identity, large clearings/forest structure, major water and habitat
-connectivity in Terrain Lab, then review navigable oblique and journey views
-in World Explorer. Do not require it to promote Tactical 272/273's
-disappointing schematic terrain. After review, a focused tactical may change
+The bounded continental/ecoregional exploration in
+[`continental-ecoregion-planning.md`](continental-ecoregion-planning.md) now
+has a disconnected broad-surface candidate and six deterministic World
+Explorer review journeys. It is stopped at Human Review B. Keep field revision
+21 as the active production control and do not connect candidate exact chunks
+or change `mclone-overworld-v1` until that decision. An accepted result may
+authorize a bounded exact-site probe; a later focused tactical may then change
 production fields, landforms, water, climate, biome/surface/vegetation
 selection, ecology inputs, fixtures, and coarse summaries together.
 
