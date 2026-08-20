@@ -11,9 +11,10 @@ transition, clearing, recurrence, and habitat-connectivity distributions are
 also complete. Decomposed land/ocean, climate, biome, forest-openness, height,
 and water controls now pass and have been pixel-reviewed. Human Review A
 selected “revise” on 2026-08-20: retain the continental, province, ecoregion,
-and clearing candidate while tightening and authoring transition shoulders
-and replacing the single continental corridor band with a real route
-network. Implementation is active on those named corrections. Arid expansion
+and clearing candidate. The first correction is implemented: typed,
+adjacency-aware shoulders replace the generic transition band. Replacing the
+single continental corridor band with a real route network is now active.
+Arid expansion
 and World Explorer realization remain gated until the corrected atlas returns
 to review. The current production generator remains a visible control, not a
 protected output target.**
@@ -313,6 +314,23 @@ Return to Review A with the same 65 km and 131 km maps, transition
 distributions, habitat graph, production control, fixed-cost receipt, and
 browser evidence. Do not tune an acceptance threshold into the generator:
 the corrected maps and graph remain evidence for a human decision.
+
+Plan schema `mclone-continental-ecoregion-plan-v3` implements the first
+correction. Every ecoregion sample names its unlike transition peer and the
+adjacency rule's complete ecotone width. Same-kind owner boundaries no longer
+paint a false transition. Unlike neighbors receive an authored 0.8-2.6 km
+width, and cover plus climate interpolate continuously to their shared
+boundary. Atlas schema `mclone-continental-ecoregion-atlas-v4` transfers those
+facts directly instead of estimating width from horizontal and vertical
+raster runs.
+
+The inspected desktop-aspect 131 km evidence now reports a 1.8 km median and
+2.2 km p90 authored transition width. The transition map is
+`/tmp/mclone-terrain-lab-desktop-chrome-ecoregion-transitions-131km.png`; the
+matched composed map and evidence card retain their existing `/tmp` paths.
+The fixed atlas still requests 50,944 direct samples at 512-block spacing and
+constructs zero exact chunks. Habitat connectivity remains intentionally
+unchanged for the next correction.
 
 ## Candidate Plan Revision 2
 

@@ -629,6 +629,10 @@ function EcoregionInspector({
   const worldZ = metadata.minZ + row * metadata.sampleStepBlocks;
   const province = labelAt(metadata.provinceKinds, response.provinceKind[index]!);
   const ecoregion = labelAt(metadata.ecoregionKinds, response.ecoregionKind[index]!);
+  const transitionPeer = labelAt(
+    metadata.ecoregionKinds,
+    response.transitionPeerKind[index]!,
+  );
   const clearing = labelAt(metadata.clearingCauses, response.clearingCause[index]!);
   if (isProductionLayer(layer)) {
     const biome = PRODUCTION_BIOME_LABELS[response.productionBiomeKind[index]!]!;
@@ -678,6 +682,9 @@ function EcoregionInspector({
         }</dd></div>
         <div><dt>Clearing / transition</dt><dd>{percent(response.clearingCore[index]!)} / {
           percent(response.transition[index]!)
+        }</dd></div>
+        <div><dt>Ecotone peer / width</dt><dd>{transitionPeer ?? "—"} / {
+          formatDistance(response.transitionWidthBlocks[index]!)
         }</dd></div>
         <div><dt>Wetland / corridor</dt><dd>{percent(response.wetland[index]!)} / {
           percent(response.corridor[index]!)

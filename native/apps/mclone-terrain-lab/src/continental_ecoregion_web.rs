@@ -87,6 +87,20 @@ impl TerrainLabContinentalEcoregionCompiler {
         Ok(Uint16Array::from(self.atlas()?.transition.as_slice()))
     }
 
+    #[wasm_bindgen(js_name = transitionPeerKind)]
+    pub fn transition_peer_kind(&self) -> Result<Uint8Array, JsValue> {
+        Ok(Uint8Array::from(
+            self.atlas()?.transition_peer_kind.as_slice(),
+        ))
+    }
+
+    #[wasm_bindgen(js_name = transitionWidthBlocks)]
+    pub fn transition_width_blocks(&self) -> Result<Uint16Array, JsValue> {
+        Ok(Uint16Array::from(
+            self.atlas()?.transition_width_blocks.as_slice(),
+        ))
+    }
+
     pub fn openness(&self) -> Result<Uint16Array, JsValue> {
         Ok(Uint16Array::from(self.atlas()?.openness.as_slice()))
     }

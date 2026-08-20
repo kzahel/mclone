@@ -12,7 +12,7 @@ use sha2::{Digest, Sha256};
 
 use crate::noise::{SeedDomain, ValueNoise2d};
 
-pub const CONTINENTAL_ECOREGION_SCHEMA_REVISION: &str = "mclone-continental-ecoregion-plan-v2";
+pub const CONTINENTAL_ECOREGION_SCHEMA_REVISION: &str = "mclone-continental-ecoregion-plan-v3";
 pub const CONTINENTAL_ECOREGION_DIMENSION_ID: &str = "mclone:overworld";
 pub const CONTINENTAL_ECOREGION_STORED_PROFILE: &str =
     "mclone-overworld-v1-control-field-revision-21";
@@ -242,7 +242,7 @@ impl PhysiographicProvinceKind {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[repr(u8)]
 #[serde(rename_all = "kebab-case")]
 pub enum EcoregionKind {
@@ -338,8 +338,10 @@ pub struct EcoregionPlanSample {
     pub id: LandscapeFeatureId,
     pub province_id: LandscapeFeatureId,
     pub kind: EcoregionKind,
+    pub transition_peer_kind: Option<EcoregionKind>,
     pub core_weight: f32,
     pub transition_weight: f32,
+    pub transition_width_blocks: f32,
     pub base_openness: f32,
     pub base_canopy: f32,
     pub moisture: f32,
@@ -768,25 +770,45 @@ impl ContinentalEcoregionPlan {
             0,
             id_hash,
         );
-        work.local_field_evaluations += 2;
-        let climate_x = owner_center_coordinate(site.owner_x, ECOREGION_CELL_BLOCKS);
-        let climate_z = owner_center_coordinate(site.owner_z, ECOREGION_CELL_BLOCKS);
-        let moisture = unit_field(self.fields.moisture.sample(climate_x, climate_z));
-        let temperature =
-            (0.5 + self.fields.temperature.sample(climate_x, climate_z) * 0.16).clamp(0.25, 0.75);
+        work.local_field_evaluations += 4;
+        let (moisture, temperature) = self.ecoregion_climate(site.owner_x, site.owner_z);
         let kind = ecoregion_kind(province.kind, moisture, temperature, id_hash);
+        let peer_id_hash = stable_mix64(site.second_hash ^ province.id.hash.rotate_left(23));
+        let (peer_moisture, peer_temperature) =
+            self.ecoregion_climate(site.second_owner_x, site.second_owner_z);
+        let peer_kind =
+            ecoregion_kind(province.kind, peer_moisture, peer_temperature, peer_id_hash);
+        let transition_width_blocks = ecoregion_transition_width_blocks(kind, peer_kind);
+        let transition_weight = if transition_width_blocks == 0.0 {
+            0.0
+        } else {
+            (1.0 - site.boundary_distance_blocks / (transition_width_blocks * 0.5)).clamp(0.0, 1.0)
+        };
+        let blend = transition_weight * 0.5;
         let (base_openness, base_canopy) = ecoregion_cover(kind);
+        let (peer_openness, peer_canopy) = ecoregion_cover(peer_kind);
         EcoregionPlanSample {
             id,
             province_id: province.id,
             kind,
-            core_weight: site.core_weight as f32,
-            transition_weight: (1.0 - site.core_weight) as f32,
-            base_openness,
-            base_canopy,
-            moisture: moisture as f32,
-            temperature: temperature as f32,
+            transition_peer_kind: (kind != peer_kind).then_some(peer_kind),
+            core_weight: (1.0 - transition_weight) as f32,
+            transition_weight: transition_weight as f32,
+            transition_width_blocks: transition_width_blocks as f32,
+            base_openness: lerp_f32(base_openness, peer_openness, blend as f32),
+            base_canopy: lerp_f32(base_canopy, peer_canopy, blend as f32),
+            moisture: lerp_f64(moisture, peer_moisture, blend) as f32,
+            temperature: lerp_f64(temperature, peer_temperature, blend) as f32,
         }
+    }
+
+    fn ecoregion_climate(&self, owner_x: i32, owner_z: i32) -> (f64, f64) {
+        let climate_x = owner_center_coordinate(owner_x, ECOREGION_CELL_BLOCKS);
+        let climate_z = owner_center_coordinate(owner_z, ECOREGION_CELL_BLOCKS);
+        let moisture = unit_field(self.fields.moisture.sample(climate_x, climate_z));
+        let temperature =
+            (0.5 + self.fields.temperature.sample(climate_x, climate_z) * 0.16).clamp(0.25, 0.75);
+        (moisture, temperature)
     }
 
     fn mosaic_sample(
@@ -926,7 +948,7 @@ impl ContinentalEcoregionPlan {
         let base_owner_x = canonical_x.div_euclid(scale);
         let base_owner_z = world_z.div_euclid(scale);
         let mut nearest: Option<(f64, NearestSite)> = None;
-        let mut second_distance = f64::INFINITY;
+        let mut second: Option<(f64, NearestSite)> = None;
         for offset_z in -LOCAL_OWNER_RADIUS..=LOCAL_OWNER_RADIUS {
             for offset_x in -LOCAL_OWNER_RADIUS..=LOCAL_OWNER_RADIUS {
                 match level {
@@ -956,24 +978,33 @@ impl ContinentalEcoregionPlan {
                     center_z,
                     hash,
                     core_weight: 0.0,
+                    boundary_distance_blocks: 0.0,
+                    second_owner_x: 0,
+                    second_owner_z: 0,
+                    second_hash: 0,
                 };
-                match nearest {
-                    None => nearest = Some((distance, site)),
-                    Some((nearest_distance, nearest_site))
-                        if distance < nearest_distance
-                            || (distance == nearest_distance && hash < nearest_site.hash) =>
-                    {
-                        second_distance = nearest_distance;
-                        nearest = Some((distance, site));
-                    }
-                    Some(_) if distance < second_distance => second_distance = distance,
-                    Some(_) => {}
+                if nearest.is_none_or(|(nearest_distance, nearest_site)| {
+                    distance < nearest_distance
+                        || (distance == nearest_distance && hash < nearest_site.hash)
+                }) {
+                    second = nearest;
+                    nearest = Some((distance, site));
+                } else if second.is_none_or(|(second_distance, second_site)| {
+                    distance < second_distance
+                        || (distance == second_distance && hash < second_site.hash)
+                }) {
+                    second = Some((distance, site));
                 }
             }
         }
         let (nearest_distance, mut site) = nearest.expect("site neighborhood is non-empty");
+        let (second_distance, second_site) = second.expect("site neighborhood has a peer");
         site.core_weight =
             ((second_distance - nearest_distance) / (f64::from(scale) * 0.48)).clamp(0.0, 1.0);
+        site.boundary_distance_blocks = (second_distance - nearest_distance) * 0.5;
+        site.second_owner_x = second_site.owner_x;
+        site.second_owner_z = second_site.owner_z;
+        site.second_hash = second_site.hash;
         site
     }
 
@@ -1026,6 +1057,10 @@ struct NearestSite {
     center_z: i64,
     hash: u64,
     core_weight: f64,
+    boundary_distance_blocks: f64,
+    second_owner_x: i32,
+    second_owner_z: i32,
+    second_hash: u64,
 }
 
 fn validate_window(request: LandscapeWindowRequest) -> Result<(), ContinentalEcoregionError> {
@@ -1151,6 +1186,44 @@ fn ecoregion_cover(kind: EcoregionKind) -> (f32, f32) {
         EcoregionKind::ExposedUpland => (0.80, 0.18),
         EcoregionKind::QuietTransition => (0.54, 0.50),
     }
+}
+
+fn ecoregion_transition_width_blocks(left: EcoregionKind, right: EcoregionKind) -> f64 {
+    use EcoregionKind::{
+        BroadMeadow, ConnectedWetland, ExposedUpland, MixedWoodland, OldForestCore,
+        QuietTransition, RiparianWoodland,
+    };
+    if left == right {
+        return 0.0;
+    }
+    let pair = if left < right {
+        (left, right)
+    } else {
+        (right, left)
+    };
+    match pair {
+        (OldForestCore, BroadMeadow) => 800.0,
+        (BroadMeadow, MixedWoodland) | (OldForestCore, MixedWoodland) => 1_100.0,
+        (OldForestCore, RiparianWoodland) | (RiparianWoodland, MixedWoodland) => 1_400.0,
+        (BroadMeadow, ConnectedWetland)
+        | (OldForestCore, ConnectedWetland)
+        | (ConnectedWetland, MixedWoodland)
+        | (RiparianWoodland, ConnectedWetland) => 2_600.0,
+        (BroadMeadow, ExposedUpland) => 1_600.0,
+        (MixedWoodland, ExposedUpland)
+        | (OldForestCore, ExposedUpland)
+        | (RiparianWoodland, ExposedUpland) => 2_200.0,
+        (_, QuietTransition) => 1_800.0,
+        _ => 1_400.0,
+    }
+}
+
+fn lerp_f32(left: f32, right: f32, amount: f32) -> f32 {
+    left + (right - left) * amount
+}
+
+fn lerp_f64(left: f64, right: f64, amount: f64) -> f64 {
+    left + (right - left) * amount
 }
 
 fn clearing_enabled(kind: EcoregionKind, hash: u64) -> bool {
@@ -1314,8 +1387,12 @@ fn hash_sample(digest: &mut Sha256, sample: &LandscapePlanSample) {
         hash_id(digest, ecoregion.id);
         hash_id(digest, ecoregion.province_id);
         digest.update([ecoregion.kind as u8]);
+        hash_option(digest, ecoregion.transition_peer_kind, |digest, kind| {
+            digest.update([kind as u8]);
+        });
         hash_float(digest, ecoregion.core_weight);
         hash_float(digest, ecoregion.transition_weight);
+        hash_float(digest, ecoregion.transition_width_blocks);
         hash_float(digest, ecoregion.base_openness);
         hash_float(digest, ecoregion.base_canopy);
         hash_float(digest, ecoregion.moisture);
@@ -1402,6 +1479,38 @@ mod tests {
         assert_eq!(province.work.mosaic_owner_evaluations, 0);
         assert_eq!(province.work.local_field_evaluations, 0);
         assert_eq!(province.work.exact_chunks, 0);
+    }
+
+    #[test]
+    fn ecotone_widths_are_typed_by_the_adjacent_ecoregions() {
+        assert_eq!(
+            ecoregion_transition_width_blocks(
+                EcoregionKind::BroadMeadow,
+                EcoregionKind::BroadMeadow,
+            ),
+            0.0
+        );
+        assert_eq!(
+            ecoregion_transition_width_blocks(
+                EcoregionKind::BroadMeadow,
+                EcoregionKind::OldForestCore,
+            ),
+            800.0
+        );
+        assert_eq!(
+            ecoregion_transition_width_blocks(
+                EcoregionKind::ConnectedWetland,
+                EcoregionKind::BroadMeadow,
+            ),
+            2_600.0
+        );
+        assert_eq!(
+            ecoregion_transition_width_blocks(
+                EcoregionKind::QuietTransition,
+                EcoregionKind::ExposedUpland,
+            ),
+            1_800.0
+        );
     }
 
     #[test]

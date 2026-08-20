@@ -1,7 +1,7 @@
 import { expect, test, type Locator } from "@playwright/test";
 
 const WITNESS_SHA256 =
-  "612a102fcc909274f029f1a31a6cdfaa348b53536adcb87893e91308ec1e4405";
+  "8f16305aa2f4db5ae365caa4ece3af6ee68aceded88bc7f877b4db7ee42e0742";
 
 test("continental ecoregion atlas is direct, layered, and inspectable", async ({
   page,
@@ -30,7 +30,7 @@ test("continental ecoregion atlas is direct, layered, and inspectable", async ({
   await expect(shell).toHaveAttribute("data-ecoregion-step", "256");
   await expect(shell).toHaveAttribute(
     "data-ecoregion-atlas-schema",
-    "mclone-continental-ecoregion-atlas-v3",
+    "mclone-continental-ecoregion-atlas-v4",
   );
   await expect(shell).toHaveAttribute("data-ecoregion-exact-chunks", "0");
   await expect(shell).toHaveAttribute(
@@ -149,6 +149,17 @@ test("reviews 131 km against the current production control", async ({
     path: "/tmp/mclone-terrain-lab-desktop-chrome-ecoregion-131km.png",
   });
 
+  await page.getByLabel("Continental plan layer").selectOption("transition");
+  await expect(shell).toHaveAttribute("data-ecoregion-layer", "transition");
+  await stage.screenshot({
+    path: "/tmp/mclone-terrain-lab-desktop-chrome-ecoregion-transitions-131km.png",
+  });
+  const transitionMedian = Number(
+    await shell.getAttribute("data-ecoregion-transition-median"),
+  );
+  expect(transitionMedian).toBeGreaterThanOrEqual(800);
+  expect(transitionMedian).toBeLessThanOrEqual(2_600);
+
   await page.getByLabel("Continental plan layer").selectOption(
     "production-control",
   );
@@ -171,8 +182,6 @@ test("reviews 131 km against the current production control", async ({
   );
   expect(candidateComponents).toBeGreaterThan(10);
   expect(controlComponents).toBeGreaterThan(candidateComponents * 3);
-  expect(Number(await shell.getAttribute("data-ecoregion-transition-median")))
-    .toBeGreaterThan(0);
   expect(Number(await shell.getAttribute("data-ecoregion-clearing-count")))
     .toBeGreaterThan(10);
   expect(Number(await shell.getAttribute("data-ecoregion-clearing-isolation-p90")))

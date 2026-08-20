@@ -17,6 +17,10 @@ selected a named revision on 2026-08-20: retain the candidate hierarchy and
 clearings, author adjacency-specific ecotones, and replace the single corridor
 band with a typed spine-and-branch habitat network. Arid expansion and World
 Explorer realization remain gated until the corrected atlas returns to review.
+The ecotone correction is implemented in plan revision 3: same-kind owner
+boundaries disappear, unlike neighbors carry explicit 0.8-2.6 km widths, and
+cover/climate blend continuously to their boundary. The route-network
+correction is the active next slice.
 Mclone should combine
 top-down continental and ecoregional planning with bottom-up procedural
 realization so the Overworld contains large, recognizable, causally related

@@ -20,7 +20,7 @@ use crate::levelgen::{
 use crate::terrain_preview::preview_forest_intent;
 
 pub const CONTINENTAL_ECOREGION_ATLAS_SCHEMA_REVISION: &str =
-    "mclone-continental-ecoregion-atlas-v3";
+    "mclone-continental-ecoregion-atlas-v4";
 pub const CONTINENTAL_ECOREGION_ATLAS_DEFAULT_SAMPLES_ACROSS: u32 = 256;
 pub const CONTINENTAL_ECOREGION_ATLAS_MAX_SAMPLES: usize = 262_144;
 pub const CONTINENTAL_ECOREGION_ATLAS_NONE: u8 = u8::MAX;
@@ -202,7 +202,9 @@ pub struct ContinentalEcoregionAtlas {
     pub continent_story: Vec<u8>,
     pub province_kind: Vec<u8>,
     pub ecoregion_kind: Vec<u8>,
+    pub transition_peer_kind: Vec<u8>,
     pub transition: Vec<u16>,
+    pub transition_width_blocks: Vec<u16>,
     pub openness: Vec<u16>,
     pub forest_core: Vec<u16>,
     pub clearing_core: Vec<u16>,
@@ -337,7 +339,9 @@ pub fn compile_continental_ecoregion_atlas(
         continent_story: arrays.continent_story,
         province_kind: arrays.province_kind,
         ecoregion_kind: arrays.ecoregion_kind,
+        transition_peer_kind: arrays.transition_peer_kind,
         transition: arrays.transition,
+        transition_width_blocks: arrays.transition_width_blocks,
         openness: arrays.openness,
         forest_core: arrays.forest_core,
         clearing_core: arrays.clearing_core,
@@ -367,7 +371,9 @@ struct AtlasArrays {
     continent_story: Vec<u8>,
     province_kind: Vec<u8>,
     ecoregion_kind: Vec<u8>,
+    transition_peer_kind: Vec<u8>,
     transition: Vec<u16>,
+    transition_width_blocks: Vec<u16>,
     openness: Vec<u16>,
     forest_core: Vec<u16>,
     clearing_core: Vec<u16>,
@@ -398,7 +404,9 @@ impl AtlasArrays {
             continent_story: Vec::with_capacity(capacity),
             province_kind: Vec::with_capacity(capacity),
             ecoregion_kind: Vec::with_capacity(capacity),
+            transition_peer_kind: Vec::with_capacity(capacity),
             transition: Vec::with_capacity(capacity),
+            transition_width_blocks: Vec::with_capacity(capacity),
             openness: Vec::with_capacity(capacity),
             forest_core: Vec::with_capacity(capacity),
             clearing_core: Vec::with_capacity(capacity),
@@ -444,9 +452,22 @@ impl AtlasArrays {
                 .ecoregion
                 .map_or(CONTINENTAL_ECOREGION_ATLAS_NONE, |fact| fact.kind as u8),
         );
+        self.transition_peer_kind.push(
+            sample
+                .ecoregion
+                .and_then(|fact| fact.transition_peer_kind)
+                .map_or(CONTINENTAL_ECOREGION_ATLAS_NONE, |kind| kind as u8),
+        );
         self.transition.push(quantize_unit(
             sample.ecoregion.map_or(0.0, |fact| fact.transition_weight),
         ));
+        self.transition_width_blocks.push(
+            sample
+                .ecoregion
+                .map_or(0.0, |fact| fact.transition_width_blocks)
+                .round()
+                .clamp(0.0, f32::from(u16::MAX)) as u16,
+        );
         self.openness.push(quantize_unit(
             sample.mosaic.map_or(0.0, |fact| fact.openness),
         ));
@@ -613,9 +634,7 @@ fn atlas_metrics(
         ),
         transition_width_blocks: transition_width_distribution(
             &arrays.transition,
-            columns,
-            rows,
-            step_blocks,
+            &arrays.transition_width_blocks,
         ),
         clearing_plans: clearing_plan_distribution(arrays, columns, rows, step_blocks),
         regional_signature_recurrence_blocks: regional_signature_recurrence_distribution(
@@ -681,51 +700,13 @@ struct SampledFeatureGeometry {
 
 fn transition_width_distribution(
     transition: &[u16],
-    columns: u32,
-    rows: u32,
-    step_blocks: u32,
+    transition_width_blocks: &[u16],
 ) -> QuantityDistribution {
-    let mask = transition
-        .iter()
-        .map(|value| *value >= 13_107)
-        .collect::<Vec<_>>();
-    let mut horizontal_runs = vec![0_u32; mask.len()];
-    for row in 0..rows as usize {
-        let mut column = 0_usize;
-        while column < columns as usize {
-            let start = column;
-            while column < columns as usize && mask[row * columns as usize + column] {
-                column += 1;
-            }
-            let length = (column - start) as u32;
-            for member in start..column {
-                horizontal_runs[row * columns as usize + member] = length;
-            }
-            column += usize::from(column == start);
-        }
-    }
-    let mut vertical_runs = vec![0_u32; mask.len()];
-    for column in 0..columns as usize {
-        let mut row = 0_usize;
-        while row < rows as usize {
-            let start = row;
-            while row < rows as usize && mask[row * columns as usize + column] {
-                row += 1;
-            }
-            let length = (row - start) as u32;
-            for member in start..row {
-                vertical_runs[member * columns as usize + column] = length;
-            }
-            row += usize::from(row == start);
-        }
-    }
-    let widths = mask
+    let widths = transition
         .iter()
         .enumerate()
-        .filter(|(_, active)| **active)
-        .map(|(index, _)| {
-            u64::from(horizontal_runs[index].min(vertical_runs[index])) * u64::from(step_blocks)
-        })
+        .filter(|(_, weight)| **weight >= 13_107)
+        .map(|(index, _)| u64::from(transition_width_blocks[index]))
         .collect();
     quantity_distribution(widths)
 }
@@ -1549,7 +1530,8 @@ mod tests {
         );
         let metrics = &atlas.metadata.metrics;
         assert!(metrics.transition_width_blocks.observation_count > 0);
-        assert!(metrics.transition_width_blocks.median > 0);
+        assert!((800..=2_600).contains(&metrics.transition_width_blocks.median));
+        assert!(metrics.transition_width_blocks.maximum <= 2_600);
         assert!(metrics.clearing_plans.clearing_count > 0);
         assert_eq!(
             metrics.clearing_plans.clearing_count,

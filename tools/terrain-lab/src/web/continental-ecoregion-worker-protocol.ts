@@ -157,7 +157,9 @@ export interface ContinentalEcoregionWorkerSummary {
   continentStory: Uint8Array;
   provinceKind: Uint8Array;
   ecoregionKind: Uint8Array;
+  transitionPeerKind: Uint8Array;
   transition: Uint16Array;
+  transitionWidthBlocks: Uint16Array;
   openness: Uint16Array;
   forestCore: Uint16Array;
   clearingCore: Uint16Array;
