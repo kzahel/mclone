@@ -157,6 +157,7 @@ function stableState(state) {
     ...stable,
     frontier: {
       ...frontier,
+      exactGeneration: 0,
       preparationMicros: 0,
     },
   };
