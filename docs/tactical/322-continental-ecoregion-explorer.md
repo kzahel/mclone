@@ -6,9 +6,10 @@ grammar, native/Wasm canonical corpus, fixed-cost Terrain Lab atlas, initial
 distribution and journey metrics, and desktop/phone browser evidence now
 pass. Pixel review rejected the first cellular composition and produced the
 larger-scale Revision 2 candidate. Same-coordinate 65 km and 131 km atlases
-now include a direct current-production field-revision-21 control. Human
-Review A is not open yet: the remaining transition, clearing, recurrence, and
-habitat-connectivity metric gaps come next. Human Review A selects the atlas
+now include a direct current-production field-revision-21 control. Sampled
+transition, clearing, recurrence, and habitat-connectivity distributions are
+also complete. Human Review A is not open yet: decomposed production-control
+maps and the final review handoff come next. Human Review A selects the atlas
 grammar before World Explorer realization, and Human Review B selects whether
 the candidate deserves production integration. The current production
 generator remains a visible control, not a protected output target.**
@@ -225,6 +226,37 @@ Focused browser acceptance proves that selecting the control does not rebuild
 or mutate the candidate receipt, labels its independent topology and revision,
 keeps exact-chunk work at zero, and exercises both 65 km and 131 km review
 extents.
+
+### Review distributions and habitat graph
+
+Atlas schema `mclone-continental-ecoregion-atlas-v2` closes the remaining
+initial distribution gaps without adding browser-owned geography:
+
+- transition width is the smaller horizontal/vertical sampled span through
+  every transition-band sample;
+- clearing area, boundary length, and center-to-center isolation aggregate by
+  stable planned clearing identity rather than by canvas color;
+- regional recurrence measures the nearest distinct ecoregion-instance center
+  with the same continent-story, province-kind, and ecoregion-kind signature;
+  and
+- habitat patches are typed open, forest, or wetland components, while
+  connected corridor components supply explicit graph edges between patches.
+
+Every quantity is descriptive at the receipt's declared sample spacing. It is
+not exact polygon geometry, an animal migration simulation, or an automated
+quality score. The square 131 km native receipt reports a 4,096-block median
+and 19,968-block p90 transition span; 140 clearings with 2.36 km² median area,
+4,864-block median isolation, and 7,168-block median edge length; and a
+4,220-block median / 7,210-block p90 regional recurrence distance. Its habitat
+graph has 374 typed patches, 787 links, a largest connected network of 58
+patches, and only 27.0% of patches linked to another patch.
+
+The desktop-aspect 131 km browser evidence independently reports 113 planned
+clearings, 4.1 km median transition width, 4.2 km median recurrence, and 24.4%
+connected habitat patches. The inspected card is
+`/tmp/mclone-terrain-lab-desktop-chrome-ecoregion-metrics-131km.png`. The low
+connected fraction is a candidate concern to present at Human Review A, not a
+passing mark hidden by the broad union-mask component count.
 
 ## Candidate Plan Revision 2
 

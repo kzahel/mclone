@@ -28,6 +28,10 @@ test("continental ecoregion atlas is direct, layered, and inspectable", async ({
   await expect(shell).toHaveAttribute("data-ecoregion-witness", WITNESS_SHA256);
   await expect(shell).toHaveAttribute("data-ecoregion-topology", "plane");
   await expect(shell).toHaveAttribute("data-ecoregion-step", "256");
+  await expect(shell).toHaveAttribute(
+    "data-ecoregion-atlas-schema",
+    "mclone-continental-ecoregion-atlas-v2",
+  );
   await expect(shell).toHaveAttribute("data-ecoregion-exact-chunks", "0");
   await expect(shell).toHaveAttribute(
     "data-ecoregion-production-unchanged",
@@ -159,11 +163,32 @@ test("reviews 131 km against the current production control", async ({
   );
   expect(candidateComponents).toBeGreaterThan(10);
   expect(controlComponents).toBeGreaterThan(candidateComponents * 3);
+  expect(Number(await shell.getAttribute("data-ecoregion-transition-median")))
+    .toBeGreaterThan(0);
+  expect(Number(await shell.getAttribute("data-ecoregion-clearing-count")))
+    .toBeGreaterThan(10);
+  expect(Number(await shell.getAttribute("data-ecoregion-clearing-isolation-p90")))
+    .toBeGreaterThan(1_000);
+  expect(Number(await shell.getAttribute("data-ecoregion-recurrence-median")))
+    .toBeGreaterThan(1_000);
+  expect(Number(await shell.getAttribute("data-ecoregion-habitat-patches")))
+    .toBeGreaterThan(10);
+  const connectedHabitatFraction = Number(
+    await shell.getAttribute("data-ecoregion-habitat-connected-fraction"),
+  );
+  expect(connectedHabitatFraction).toBeGreaterThan(0);
+  expect(connectedHabitatFraction).toBeLessThanOrEqual(1);
   await expect.poll(() => canvasVisualSignature(canvas)).not.toBe(candidateVisual);
   await expect(page.getByTestId("continental-ecoregion-legend"))
     .toContainText("Current production · field 21");
   await expect(page.getByTestId("continental-ecoregion-evidence"))
     .toContainText("mclone-overworld-v1-fields-21");
+  await expect(page.getByTestId("continental-ecoregion-evidence"))
+    .toContainText("Regional recurrence median / p90");
+  await page.getByTestId("continental-ecoregion-evidence").screenshot({
+    path:
+      "/tmp/mclone-terrain-lab-desktop-chrome-ecoregion-metrics-131km.png",
+  });
   await stage.screenshot({
     path:
       "/tmp/mclone-terrain-lab-desktop-chrome-ecoregion-production-control-131km.png",

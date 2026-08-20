@@ -388,6 +388,7 @@ export function App(): React.JSX.Element {
       data-runtime-exact-complete={runtimeReport?.exactComplete ? "true" : "false"}
       data-plan-ready={planReport ? "true" : "false"}
       data-ecoregion-ready={ecoregionReport ? "true" : "false"}
+      data-ecoregion-atlas-schema={ecoregionReport?.metadata.receiptSchema ?? ""}
       data-ecoregion-layer={state.ecoregionLayer}
       data-ecoregion-topology={ecoregionReport?.topology ?? ""}
       data-ecoregion-compile-ms={ecoregionReport?.compileMs ?? ""}
@@ -423,6 +424,24 @@ export function App(): React.JSX.Element {
       }
       data-ecoregion-control-ocean-fraction={
         ecoregionReport?.metadata.productionControlMetrics.oceanFraction ?? ""
+      }
+      data-ecoregion-transition-median={
+        ecoregionReport?.metadata.metrics.transitionWidthBlocks.median ?? ""
+      }
+      data-ecoregion-clearing-count={
+        ecoregionReport?.metadata.metrics.clearingPlans.clearingCount ?? ""
+      }
+      data-ecoregion-clearing-isolation-p90={
+        ecoregionReport?.metadata.metrics.clearingPlans.centerIsolationBlocks.p90 ?? ""
+      }
+      data-ecoregion-recurrence-median={
+        ecoregionReport?.metadata.metrics.regionalSignatureRecurrenceBlocks.median ?? ""
+      }
+      data-ecoregion-habitat-patches={
+        ecoregionReport?.metadata.metrics.habitatConnectivity.patchCount ?? ""
+      }
+      data-ecoregion-habitat-connected-fraction={
+        ecoregionReport?.metadata.metrics.habitatConnectivity.connectedPatchFraction ?? ""
       }
       data-plan-build-ms={planReport?.buildMs ?? ""}
       data-plan-transfer-bytes={planReport?.transferBytes ?? 0}
@@ -2088,6 +2107,48 @@ function ContinentalEcoregionEvidence({
           <dd>{(metrics.quietSpaceFraction * 100).toFixed(1)}% / {
             (metrics.transitionFraction * 100).toFixed(1)
           }%</dd>
+        </div>
+        <div>
+          <dt>Transition width median / p90</dt>
+          <dd>{formatDistance(metrics.transitionWidthBlocks.median)} / {
+            formatDistance(metrics.transitionWidthBlocks.p90)
+          }</dd>
+        </div>
+        <div>
+          <dt>Planned clearings</dt>
+          <dd>{formatInteger(metrics.clearingPlans.clearingCount)} · median {
+            (metrics.clearingPlans.areaSquareMeters.median / 1_000_000).toFixed(2)
+          } km²</dd>
+        </div>
+        <div>
+          <dt>Clearing isolation median / p90</dt>
+          <dd>{formatDistance(metrics.clearingPlans.centerIsolationBlocks.median)} / {
+            formatDistance(metrics.clearingPlans.centerIsolationBlocks.p90)
+          }</dd>
+        </div>
+        <div>
+          <dt>Clearing edge median / p90</dt>
+          <dd>{formatDistance(metrics.clearingPlans.edgeLengthBlocks.median)} / {
+            formatDistance(metrics.clearingPlans.edgeLengthBlocks.p90)
+          }</dd>
+        </div>
+        <div>
+          <dt>Regional recurrence median / p90</dt>
+          <dd>{formatDistance(metrics.regionalSignatureRecurrenceBlocks.median)} / {
+            formatDistance(metrics.regionalSignatureRecurrenceBlocks.p90)
+          }</dd>
+        </div>
+        <div>
+          <dt>Habitat graph</dt>
+          <dd>{formatInteger(metrics.habitatConnectivity.patchCount)} patches · {
+            formatInteger(metrics.habitatConnectivity.graphEdgeCount)
+          } links</dd>
+        </div>
+        <div>
+          <dt>Connected habitat</dt>
+          <dd>{(metrics.habitatConnectivity.connectedPatchFraction * 100).toFixed(1)}% · max {
+            formatInteger(metrics.habitatConnectivity.largestNetworkPatches)
+          } patches</dd>
         </div>
         <div>
           <dt>Plan work</dt>

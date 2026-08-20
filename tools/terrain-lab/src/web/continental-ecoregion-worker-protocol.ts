@@ -37,6 +37,33 @@ export interface EcoregionJourneyReceipt {
   longestDwellBlocks: number;
 }
 
+export interface QuantityDistribution {
+  observationCount: number;
+  minimum: number;
+  median: number;
+  p90: number;
+  maximum: number;
+}
+
+export interface ClearingPlanDistribution {
+  clearingCount: number;
+  coveredSamples: number;
+  areaSquareMeters: QuantityDistribution;
+  centerIsolationBlocks: QuantityDistribution;
+  edgeLengthBlocks: QuantityDistribution;
+}
+
+export interface HabitatConnectivityMetrics {
+  patchCount: number;
+  corridorComponentCount: number;
+  bridgingCorridorCount: number;
+  graphEdgeCount: number;
+  networkCount: number;
+  isolatedPatchCount: number;
+  largestNetworkPatches: number;
+  connectedPatchFraction: number;
+}
+
 export interface ContinentalEcoregionAtlasMetrics {
   landFraction: number;
   oceanFraction: number;
@@ -49,6 +76,10 @@ export interface ContinentalEcoregionAtlasMetrics {
   clearingComponents: ComponentDistribution;
   habitatNetworkComponents: ComponentDistribution;
   ecoregionComponents: ComponentDistribution;
+  transitionWidthBlocks: QuantityDistribution;
+  clearingPlans: ClearingPlanDistribution;
+  regionalSignatureRecurrenceBlocks: QuantityDistribution;
+  habitatConnectivity: HabitatConnectivityMetrics;
   provinceKindCounts: number[];
   ecoregionKindCounts: number[];
   clearingCauseCounts: number[];

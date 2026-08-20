@@ -18,7 +18,7 @@ use crate::levelgen::{
 };
 
 pub const CONTINENTAL_ECOREGION_ATLAS_SCHEMA_REVISION: &str =
-    "mclone-continental-ecoregion-atlas-v1";
+    "mclone-continental-ecoregion-atlas-v2";
 pub const CONTINENTAL_ECOREGION_ATLAS_DEFAULT_SAMPLES_ACROSS: u32 = 256;
 pub const CONTINENTAL_ECOREGION_ATLAS_MAX_SAMPLES: usize = 262_144;
 pub const CONTINENTAL_ECOREGION_ATLAS_NONE: u8 = u8::MAX;
@@ -79,6 +79,39 @@ pub struct JourneyReceipt {
     pub longest_dwell_blocks: u32,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuantityDistribution {
+    pub observation_count: u32,
+    pub minimum: u64,
+    pub median: u64,
+    pub p90: u64,
+    pub maximum: u64,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClearingPlanDistribution {
+    pub clearing_count: u32,
+    pub covered_samples: u32,
+    pub area_square_meters: QuantityDistribution,
+    pub center_isolation_blocks: QuantityDistribution,
+    pub edge_length_blocks: QuantityDistribution,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HabitatConnectivityMetrics {
+    pub patch_count: u32,
+    pub corridor_component_count: u32,
+    pub bridging_corridor_count: u32,
+    pub graph_edge_count: u32,
+    pub network_count: u32,
+    pub isolated_patch_count: u32,
+    pub largest_network_patches: u32,
+    pub connected_patch_fraction: f32,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ContinentalEcoregionAtlasMetrics {
@@ -93,6 +126,10 @@ pub struct ContinentalEcoregionAtlasMetrics {
     pub clearing_components: ComponentDistribution,
     pub habitat_network_components: ComponentDistribution,
     pub ecoregion_components: ComponentDistribution,
+    pub transition_width_blocks: QuantityDistribution,
+    pub clearing_plans: ClearingPlanDistribution,
+    pub regional_signature_recurrence_blocks: QuantityDistribution,
+    pub habitat_connectivity: HabitatConnectivityMetrics,
     pub province_kind_counts: Vec<u32>,
     pub ecoregion_kind_counts: Vec<u32>,
     pub clearing_cause_counts: Vec<u32>,
@@ -542,6 +579,19 @@ fn atlas_metrics(
             step_blocks,
             Some(CONTINENTAL_ECOREGION_ATLAS_NONE),
         ),
+        transition_width_blocks: transition_width_distribution(
+            &arrays.transition,
+            columns,
+            rows,
+            step_blocks,
+        ),
+        clearing_plans: clearing_plan_distribution(arrays, columns, rows, step_blocks),
+        regional_signature_recurrence_blocks: regional_signature_recurrence_distribution(
+            arrays,
+            columns,
+            step_blocks,
+        ),
+        habitat_connectivity: habitat_connectivity_metrics(arrays, columns, rows),
         province_kind_counts,
         ecoregion_kind_counts,
         clearing_cause_counts,
@@ -579,6 +629,380 @@ fn production_control_metrics(
         ),
         biome_kind_counts,
         journeys: production_journey_receipts(arrays, columns, rows, step_blocks),
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct SampledFeatureGeometry {
+    samples: u32,
+    boundary_edges: u32,
+    column_sum: u64,
+    row_sum: u64,
+}
+
+fn transition_width_distribution(
+    transition: &[u16],
+    columns: u32,
+    rows: u32,
+    step_blocks: u32,
+) -> QuantityDistribution {
+    let mask = transition
+        .iter()
+        .map(|value| *value >= 13_107)
+        .collect::<Vec<_>>();
+    let mut horizontal_runs = vec![0_u32; mask.len()];
+    for row in 0..rows as usize {
+        let mut column = 0_usize;
+        while column < columns as usize {
+            let start = column;
+            while column < columns as usize && mask[row * columns as usize + column] {
+                column += 1;
+            }
+            let length = (column - start) as u32;
+            for member in start..column {
+                horizontal_runs[row * columns as usize + member] = length;
+            }
+            column += usize::from(column == start);
+        }
+    }
+    let mut vertical_runs = vec![0_u32; mask.len()];
+    for column in 0..columns as usize {
+        let mut row = 0_usize;
+        while row < rows as usize {
+            let start = row;
+            while row < rows as usize && mask[row * columns as usize + column] {
+                row += 1;
+            }
+            let length = (row - start) as u32;
+            for member in start..row {
+                vertical_runs[member * columns as usize + column] = length;
+            }
+            row += usize::from(row == start);
+        }
+    }
+    let widths = mask
+        .iter()
+        .enumerate()
+        .filter(|(_, active)| **active)
+        .map(|(index, _)| {
+            u64::from(horizontal_runs[index].min(vertical_runs[index])) * u64::from(step_blocks)
+        })
+        .collect();
+    quantity_distribution(widths)
+}
+
+fn clearing_plan_distribution(
+    arrays: &AtlasArrays,
+    columns: u32,
+    rows: u32,
+    step_blocks: u32,
+) -> ClearingPlanDistribution {
+    let mut clearings = BTreeMap::<u32, SampledFeatureGeometry>::new();
+    for index in 0..arrays.clearing_id.len() {
+        let clearing_id = arrays.clearing_id[index];
+        if clearing_id == 0 || arrays.clearing_core[index] < 13_107 {
+            continue;
+        }
+        let column = index % columns as usize;
+        let row = index / columns as usize;
+        let geometry = clearings.entry(clearing_id).or_default();
+        geometry.samples += 1;
+        geometry.column_sum += column as u64;
+        geometry.row_sum += row as u64;
+        geometry.boundary_edges += four_neighbor_slots(index, columns, rows)
+            .into_iter()
+            .filter(|neighbor| {
+                neighbor.is_none_or(|neighbor| {
+                    arrays.clearing_id[neighbor] != clearing_id
+                        || arrays.clearing_core[neighbor] < 13_107
+                })
+            })
+            .count() as u32;
+    }
+    let area_per_sample = u64::from(step_blocks).pow(2);
+    let areas = clearings
+        .values()
+        .map(|geometry| u64::from(geometry.samples) * area_per_sample)
+        .collect();
+    let edges = clearings
+        .values()
+        .map(|geometry| u64::from(geometry.boundary_edges) * u64::from(step_blocks))
+        .collect();
+    let geometries = clearings.values().copied().collect::<Vec<_>>();
+    let isolations = nearest_matching_distances(&geometries, step_blocks, |_, _| true);
+    ClearingPlanDistribution {
+        clearing_count: clearings.len() as u32,
+        covered_samples: clearings.values().map(|geometry| geometry.samples).sum(),
+        area_square_meters: quantity_distribution(areas),
+        center_isolation_blocks: quantity_distribution(isolations),
+        edge_length_blocks: quantity_distribution(edges),
+    }
+}
+
+fn regional_signature_recurrence_distribution(
+    arrays: &AtlasArrays,
+    columns: u32,
+    step_blocks: u32,
+) -> QuantityDistribution {
+    let mut instances = BTreeMap::<u32, ((u8, u8, u8), SampledFeatureGeometry)>::new();
+    for index in 0..arrays.ecoregion_id.len() {
+        let ecoregion_id = arrays.ecoregion_id[index];
+        if ecoregion_id == 0 || arrays.ecoregion_kind[index] == CONTINENTAL_ECOREGION_ATLAS_NONE {
+            continue;
+        }
+        let signature = (
+            arrays.continent_story[index],
+            arrays.province_kind[index],
+            arrays.ecoregion_kind[index],
+        );
+        let (_, geometry) = instances
+            .entry(ecoregion_id)
+            .or_insert((signature, SampledFeatureGeometry::default()));
+        let column = index % columns as usize;
+        let row = index / columns as usize;
+        geometry.samples += 1;
+        geometry.column_sum += column as u64;
+        geometry.row_sum += row as u64;
+    }
+    let values = instances.values().copied().collect::<Vec<_>>();
+    let geometries = values
+        .iter()
+        .map(|(_, geometry)| *geometry)
+        .collect::<Vec<_>>();
+    let distances = nearest_matching_distances(&geometries, step_blocks, |left, right| {
+        values[left].0 == values[right].0
+    });
+    quantity_distribution(distances)
+}
+
+fn habitat_connectivity_metrics(
+    arrays: &AtlasArrays,
+    columns: u32,
+    rows: u32,
+) -> HabitatConnectivityMetrics {
+    let habitat_kind = arrays
+        .openness
+        .iter()
+        .zip(&arrays.forest_core)
+        .zip(&arrays.wetland)
+        .map(|((open, forest), wetland)| {
+            if *wetland >= 19_661 {
+                3_u8
+            } else if *open >= 39_321 {
+                1
+            } else if *forest >= 32_768 {
+                2
+            } else {
+                0
+            }
+        })
+        .collect::<Vec<_>>();
+    let mut patch_labels = vec![u32::MAX; habitat_kind.len()];
+    let mut patch_count = 0_u32;
+    for start in 0..habitat_kind.len() {
+        if habitat_kind[start] == 0 || patch_labels[start] != u32::MAX {
+            continue;
+        }
+        let kind = habitat_kind[start];
+        patch_labels[start] = patch_count;
+        let mut queue = VecDeque::from([start]);
+        while let Some(index) = queue.pop_front() {
+            for neighbor in four_neighbors(index, columns, rows) {
+                if habitat_kind[neighbor] == kind && patch_labels[neighbor] == u32::MAX {
+                    patch_labels[neighbor] = patch_count;
+                    queue.push_back(neighbor);
+                }
+            }
+        }
+        patch_count += 1;
+    }
+
+    let corridor_mask = arrays
+        .corridor
+        .iter()
+        .map(|value| *value >= 16_384)
+        .collect::<Vec<_>>();
+    let mut corridor_visited = vec![false; corridor_mask.len()];
+    let mut corridor_component_count = 0_u32;
+    let mut bridging_corridor_count = 0_u32;
+    let mut graph_edges = BTreeSet::<(u32, u32)>::new();
+    for start in 0..corridor_mask.len() {
+        if !corridor_mask[start] || corridor_visited[start] {
+            continue;
+        }
+        corridor_component_count += 1;
+        corridor_visited[start] = true;
+        let mut queue = VecDeque::from([start]);
+        let mut touched_patches = BTreeSet::new();
+        while let Some(index) = queue.pop_front() {
+            for sample in std::iter::once(index).chain(four_neighbors(index, columns, rows)) {
+                if patch_labels[sample] != u32::MAX {
+                    touched_patches.insert(patch_labels[sample]);
+                }
+            }
+            for neighbor in four_neighbors(index, columns, rows) {
+                if corridor_mask[neighbor] && !corridor_visited[neighbor] {
+                    corridor_visited[neighbor] = true;
+                    queue.push_back(neighbor);
+                }
+            }
+        }
+        if touched_patches.len() >= 2 {
+            bridging_corridor_count += 1;
+        }
+        let touched = touched_patches.into_iter().collect::<Vec<_>>();
+        for left in 0..touched.len() {
+            for right in left + 1..touched.len() {
+                graph_edges.insert((touched[left], touched[right]));
+            }
+        }
+    }
+
+    let mut parents = (0..patch_count).collect::<Vec<_>>();
+    let mut degrees = vec![0_u32; patch_count as usize];
+    for &(left, right) in &graph_edges {
+        union_sets(&mut parents, left, right);
+        degrees[left as usize] += 1;
+        degrees[right as usize] += 1;
+    }
+    let mut network_sizes = BTreeMap::<u32, u32>::new();
+    for patch in 0..patch_count {
+        let root = find_set(&mut parents, patch);
+        *network_sizes.entry(root).or_default() += 1;
+    }
+    let isolated_patch_count = degrees.iter().filter(|degree| **degree == 0).count() as u32;
+    HabitatConnectivityMetrics {
+        patch_count,
+        corridor_component_count,
+        bridging_corridor_count,
+        graph_edge_count: graph_edges.len() as u32,
+        network_count: network_sizes.len() as u32,
+        isolated_patch_count,
+        largest_network_patches: network_sizes.values().copied().max().unwrap_or(0),
+        connected_patch_fraction: if patch_count == 0 {
+            0.0
+        } else {
+            (patch_count - isolated_patch_count) as f32 / patch_count as f32
+        },
+    }
+}
+
+fn nearest_matching_distances(
+    geometries: &[SampledFeatureGeometry],
+    step_blocks: u32,
+    matches: impl Fn(usize, usize) -> bool,
+) -> Vec<u64> {
+    let mut distances = Vec::new();
+    for left in 0..geometries.len() {
+        let nearest = (0..geometries.len())
+            .filter(|right| *right != left && matches(left, *right))
+            .map(|right| centroid_distance_blocks(geometries[left], geometries[right], step_blocks))
+            .min();
+        if let Some(distance) = nearest {
+            distances.push(distance);
+        }
+    }
+    distances
+}
+
+fn centroid_distance_blocks(
+    left: SampledFeatureGeometry,
+    right: SampledFeatureGeometry,
+    step_blocks: u32,
+) -> u64 {
+    if left.samples == 0 || right.samples == 0 {
+        return 0;
+    }
+    let denominator = u128::from(left.samples) * u128::from(right.samples);
+    let delta_column = (u128::from(left.column_sum) * u128::from(right.samples))
+        .abs_diff(u128::from(right.column_sum) * u128::from(left.samples));
+    let delta_row = (u128::from(left.row_sum) * u128::from(right.samples))
+        .abs_diff(u128::from(right.row_sum) * u128::from(left.samples));
+    let numerator = integer_square_root(
+        delta_column
+            .saturating_mul(delta_column)
+            .saturating_add(delta_row.saturating_mul(delta_row)),
+    );
+    u64::try_from(numerator.saturating_mul(u128::from(step_blocks)) / denominator)
+        .unwrap_or(u64::MAX)
+}
+
+fn quantity_distribution(mut values: Vec<u64>) -> QuantityDistribution {
+    values.sort_unstable();
+    QuantityDistribution {
+        observation_count: values.len() as u32,
+        minimum: values.first().copied().unwrap_or(0),
+        median: percentile_u64(&values, 0.5),
+        p90: percentile_u64(&values, 0.9),
+        maximum: values.last().copied().unwrap_or(0),
+    }
+}
+
+fn percentile_u64(values: &[u64], percentile: f64) -> u64 {
+    if values.is_empty() {
+        return 0;
+    }
+    let index = ((values.len() - 1) as f64 * percentile).round() as usize;
+    values[index]
+}
+
+fn integer_square_root(value: u128) -> u128 {
+    if value < 2 {
+        return value;
+    }
+    let mut low = 1_u128;
+    let mut high = value / 2 + 1;
+    while low <= high {
+        let middle = low + (high - low) / 2;
+        if middle <= value / middle {
+            low = middle + 1;
+        } else {
+            high = middle - 1;
+        }
+    }
+    high
+}
+
+fn four_neighbor_slots(index: usize, columns: u32, rows: u32) -> [Option<usize>; 4] {
+    let columns = columns as usize;
+    let rows = rows as usize;
+    let column = index % columns;
+    let row = index / columns;
+    [
+        column.checked_sub(1).map(|next| row * columns + next),
+        (column + 1 < columns).then_some(index + 1),
+        row.checked_sub(1).map(|next| next * columns + column),
+        (row + 1 < rows).then_some(index + columns),
+    ]
+}
+
+fn four_neighbors(index: usize, columns: u32, rows: u32) -> impl Iterator<Item = usize> {
+    four_neighbor_slots(index, columns, rows)
+        .into_iter()
+        .flatten()
+}
+
+fn find_set(parents: &mut [u32], node: u32) -> u32 {
+    let parent = parents[node as usize];
+    if parent == node {
+        node
+    } else {
+        let root = find_set(parents, parent);
+        parents[node as usize] = root;
+        root
+    }
+}
+
+fn union_sets(parents: &mut [u32], left: u32, right: u32) {
+    let left_root = find_set(parents, left);
+    let right_root = find_set(parents, right);
+    if left_root != right_root {
+        let (minimum, maximum) = if left_root < right_root {
+            (left_root, right_root)
+        } else {
+            (right_root, left_root)
+        };
+        parents[maximum as usize] = minimum;
     }
 }
 
@@ -1068,6 +1492,29 @@ mod tests {
         assert_eq!(
             atlas.metadata.production_control_revision,
             MCLONE_OVERWORLD_FIELD_REVISION
+        );
+        let metrics = &atlas.metadata.metrics;
+        assert!(metrics.transition_width_blocks.observation_count > 0);
+        assert!(metrics.transition_width_blocks.median > 0);
+        assert!(metrics.clearing_plans.clearing_count > 0);
+        assert_eq!(
+            metrics.clearing_plans.clearing_count,
+            metrics.clearing_plans.area_square_meters.observation_count
+        );
+        assert_eq!(
+            metrics.clearing_plans.clearing_count,
+            metrics.clearing_plans.edge_length_blocks.observation_count
+        );
+        assert!(
+            metrics
+                .regional_signature_recurrence_blocks
+                .observation_count
+                > 0
+        );
+        assert!(metrics.habitat_connectivity.patch_count > 0);
+        assert!(
+            metrics.habitat_connectivity.graph_edge_count
+                <= metrics.habitat_connectivity.patch_count.pow(2)
         );
     }
 

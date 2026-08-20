@@ -6,11 +6,14 @@ Status: **Accepted product direction as of 2026-08-20. Tactical
 [`322`](../tactical/322-continental-ecoregion-explorer.md) is authorized to
 build the first Rust-owned plan atlas and gate a World Explorer realization.
 Its disconnected shared plan, native/Wasm exact harness, fixed-cost Terrain
-Lab atlas, and paired field-revision-21 control now pass at both 65 km and
-131 km. The first pixel review rejected a cellular composition; Revision 2
-increases the ecoregion and clearing hierarchy and is the active candidate.
-Transition, clearing, recurrence, and habitat-connectivity distributions are
-the remaining evidence slice before Human Review A. Mclone should combine
+Lab atlas, paired field-revision-21 control, and sampled transition, clearing,
+recurrence, and habitat-graph distributions now pass at both 65 km and 131 km.
+The first pixel review rejected a cellular composition; Revision 2 increases
+the ecoregion and clearing hierarchy and is the active candidate. Its current
+habitat graph links only about one quarter of typed patches, which is explicit
+review evidence rather than an inferred failure or success. Decomposed
+production-control maps and the final handoff remain before Human Review A.
+Mclone should combine
 top-down continental and ecoregional planning with bottom-up procedural
 realization so the Overworld contains large, recognizable, causally related
 places rather than more labels over the same local terrain fabric. The first

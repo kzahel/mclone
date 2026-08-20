@@ -9,7 +9,8 @@ use mclone_worldgen::continental_ecoregion::{
     LandscapeWindowRequest,
 };
 use mclone_worldgen::continental_ecoregion_atlas::{
-    ContinentalEcoregionAtlasRequest, compile_continental_ecoregion_atlas,
+    ClearingPlanDistribution, ContinentalEcoregionAtlasRequest, HabitatConnectivityMetrics,
+    QuantityDistribution, compile_continental_ecoregion_atlas,
 };
 use mclone_worldgen::continental_ecoregion_harness::{
     CONTINENTAL_ECOREGION_HARNESS_SCHEMA_REVISION, run_continental_ecoregion_suite,
@@ -71,6 +72,10 @@ struct AtlasTiming {
     production_control_exact_chunks: u64,
     candidate_ecoregion_components: u32,
     production_control_biome_components: u32,
+    transition_width_blocks: QuantityDistribution,
+    clearing_plans: ClearingPlanDistribution,
+    regional_signature_recurrence_blocks: QuantityDistribution,
+    habitat_connectivity: HabitatConnectivityMetrics,
 }
 
 #[derive(Debug, Serialize)]
@@ -265,6 +270,13 @@ fn atlas_timings() -> Result<Vec<AtlasTiming>, String> {
                 .production_control_metrics
                 .biome_components
                 .component_count,
+            transition_width_blocks: atlas.metadata.metrics.transition_width_blocks,
+            clearing_plans: atlas.metadata.metrics.clearing_plans.clone(),
+            regional_signature_recurrence_blocks: atlas
+                .metadata
+                .metrics
+                .regional_signature_recurrence_blocks,
+            habitat_connectivity: atlas.metadata.metrics.habitat_connectivity,
         });
     }
     Ok(timings)
