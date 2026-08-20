@@ -1162,7 +1162,7 @@ mod tests {
     }
 
     #[test]
-    fn radius_thirty_two_is_reported_format_invalid_before_snapshot_packing() {
+    fn radius_thirty_two_fits_every_shared_exact_format() {
         let receipt = terrain_frontier_format_capacity(&square(32, ChunkPos::new(0, 0))).unwrap();
         assert_eq!(
             (
@@ -1185,10 +1185,18 @@ mod tests {
             ),
             (276, 276)
         );
-        assert!(!receipt.mask_valid);
-        assert!(!receipt.boundary_valid);
-        assert!(!receipt.transition_valid);
-        assert!(!receipt.all_valid);
+        assert!(receipt.mask_valid);
+        assert!(receipt.boundary_valid);
+        assert!(receipt.transition_valid);
+        assert!(receipt.all_valid);
+        assert_eq!(
+            ExactPaintedCoverageSnapshot::new(source(), 1, square(32, ChunkPos::new(0, 0)))
+                .unwrap()
+                .packed_mask()
+                .unwrap()
+                .painted_chunks,
+            4_225
+        );
     }
 
     #[test]

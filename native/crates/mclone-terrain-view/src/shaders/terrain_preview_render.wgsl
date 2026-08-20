@@ -151,7 +151,7 @@ fn exact_chunk_masked(chunk: vec2<i32>) -> bool {
         || local.y >= exact_coverage.origin_size.w {
         return false;
     }
-    let bit = u32(local.y) * 64u + u32(local.x);
+    let bit = u32(local.y) * 65u + u32(local.x);
     return (exact_coverage_words[bit / 32u] & (1u << (bit % 32u))) != 0u;
 }
 

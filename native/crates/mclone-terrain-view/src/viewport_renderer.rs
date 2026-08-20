@@ -6352,6 +6352,8 @@ mod tests {
         }
 
         let shader = super::super::TERRAIN_PREVIEW_RENDER_WGSL;
+        assert!(shader.contains("u32(local.y) * 65u"));
+        assert!(super::super::TERRAIN_PREVIEW_TREE_WGSL.contains("u32(local.y) * 65u"));
         assert!(shader.contains("let cell_index = vertex_index / 6u;"));
         assert!(shader.contains("let appearance_transition_weight = exact_transition_weight"));
         assert!(shader.contains("var exact_boundary_profile: texture_2d<u32>;"));

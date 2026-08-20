@@ -3,11 +3,17 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use mclone_core::{ChunkPos, HorizontalTopology};
 use mclone_worldgen::terrain_preview::TerrainPreviewProfile;
 
-pub const TERRAIN_EXACT_COVERAGE_MAX_CHUNKS_PER_AXIS: u32 = 64;
+/// Largest exact-painted span admitted by the shared composition formats.
+///
+/// Desktop's legal radius 32 view is 65 chunks wide. Keep the mask,
+/// transition field, boundary profile, and shader row stride derived from
+/// this one bound so a legal exact view cannot outrun one of its ownership
+/// representations.
+pub const TERRAIN_EXACT_COVERAGE_MAX_CHUNKS_PER_AXIS: u32 = 65;
 pub const TERRAIN_EXACT_COVERAGE_WORD_COUNT: usize = (TERRAIN_EXACT_COVERAGE_MAX_CHUNKS_PER_AXIS
     as usize
     * TERRAIN_EXACT_COVERAGE_MAX_CHUNKS_PER_AXIS as usize)
-    / u32::BITS as usize;
+    .div_ceil(u32::BITS as usize);
 pub const TERRAIN_EXACT_COVERAGE_MASK_BYTES: u64 =
     (TERRAIN_EXACT_COVERAGE_WORD_COUNT * size_of::<u32>()) as u64;
 pub const TERRAIN_EXACT_TRANSITION_BLOCKS_PER_TEXEL: u32 = 4;
@@ -1398,6 +1404,9 @@ mod tests {
         )
         .unwrap_err();
         assert!(error.contains("outside exact coverage"));
-        assert_eq!(TERRAIN_EXACT_BOUNDARY_MAX_BYTES, 4 * 1024 * 1024);
+        assert_eq!(
+            TERRAIN_EXACT_BOUNDARY_MAX_BYTES,
+            u64::from(TERRAIN_EXACT_BOUNDARY_MAX_BLOCKS_PER_AXIS).pow(2) * 4
+        );
     }
 }
