@@ -40,14 +40,16 @@ the scene. See
 [`topics/playable-showcases.md`](topics/playable-showcases.md) for the recipe,
 live-instantiation, and anti-sprawl contract.
 
-The procedural-horizon game integration remains an explicit review option.
-For a local `mclone-overworld-v1` session, add
-`terrainPresentation=composed`; `exact-only` is the protected default and
-control. The hosted PH-4 review links are:
+The procedural-horizon game integration is the shared Distant Terrain quality
+setting. For a local `mclone-overworld-v1` session, use
+`terrainLodQuality=off|low|medium|high`; Web defaults to Medium only when no
+explicit preference or launch override exists. The legacy
+`terrainPresentation` query remains an Off/High compatibility alias. Current
+review links are:
 
 ```text
-https://mclone.kzahel.com/play/?startInWorld=1&generationProfile=mclone-overworld-v1&terrainPresentation=composed
-https://mclone.kzahel.com/play/?startInWorld=1&generationProfile=mclone-overworld-v1&terrainPresentation=exact-only
+https://mclone.kzahel.com/play/?startInWorld=1&generationProfile=mclone-overworld-v1&terrainLodQuality=high
+https://mclone.kzahel.com/play/?startInWorld=1&generationProfile=mclone-overworld-v1&terrainLodQuality=off
 ```
 
 ## Runtime Ownership
@@ -147,8 +149,8 @@ pnpm native:web:serve
 # Validate the interactive browser app with Playwright screenshots in /tmp.
 pnpm native:web:app-smoke
 
-# On a phone viewport, toggle Terrain Horizon to Composed through the shared
-# Graphics UI, inspect pixels, reload, and verify the persisted choice/pixels.
+# On a phone viewport, toggle Distant Terrain from Off to Low through the
+# shared Graphics UI, inspect pixels, reload, and verify the persisted choice.
 pnpm native:web:terrain-horizon-smoke
 
 # Compile and capture the first playable showcase locally, then verify the

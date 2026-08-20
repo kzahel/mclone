@@ -3,7 +3,7 @@
 Topic: `lod`
 
 Status: canonical current terminology and document-routing entry point as of
-2026-08-17. Detailed implementation status remains in
+2026-08-20. Detailed implementation status remains in
 [`procedural-horizon-clipmap.md`](procedural-horizon-clipmap.md); this page does
 not duplicate its execution ledger.
 
@@ -14,7 +14,7 @@ procedural-horizon geometry-clipmap system in `mclone-terrain-view`. It was
 first proven in World Explorer and is now consumed by World Explorer, Terrain
 Lab, and the live game.
 
-The player-facing settings name for the same system is **Terrain Horizon**.
+The player-facing settings name for the same system is **Distant Terrain**.
 World Explorer is a standalone host and proof surface, not the implementation
 owner and not a separate generation of the LOD system. A request for the
 "World Explorer LOD" therefore routes to the current shared system unless the
@@ -27,7 +27,7 @@ Use these names consistently:
 | Term | Meaning and route |
 |---|---|
 | **LOD**, **LOD system**, **current LOD** | Current procedural-horizon geometry clipmap; read [`procedural-horizon-clipmap.md`](procedural-horizon-clipmap.md). |
-| **Terrain Horizon** | Player-facing name for the current LOD composition setting. |
+| **Distant Terrain** | Player-facing name for the current Off/Low/Medium/High LOD quality setting. |
 | **World Explorer** | Standalone native/browser consumer and proof host over the shared system. |
 | **retired chunk-based Far LOD**, **legacy/old LOD**, or **`LodTileKey` system** | Deleted chunk-granular experiment; read [`far-lod.md`](far-lod.md) only for removal boundaries and historical lessons. |
 | **vanilla terrain LOD sampler** | Java 1.17.1 presentation sampler used by Terrain Lab; read [`vanilla-terrain-lod.md`](vanilla-terrain-lod.md). |
@@ -61,11 +61,12 @@ hosting responsibilities.
 Current detailed status, limitations, evidence, and next work live in
 [`procedural-horizon-clipmap.md`](procedural-horizon-clipmap.md). In particular,
 that topic records the supported local `mclone-overworld-v1` source, the live
-`Terrain Horizon: Exact Only / Composed` control, platform coverage, and the
-sole direct exact-to-smooth frontier. Human Review 1 accepted that direction,
-and the former spacing-one voxel shell plus its capture comparison are deleted.
-Full-frame XR multiview shares the same terrain contract but remains an opt-in
-diagnostic path rather than the default.
+`Distant Terrain: Off / Low / Medium / High` control, platform defaults,
+physical Quest evidence, and the sole direct exact-to-smooth frontier. Human
+Review 1 accepted that direction, and the former spacing-one voxel shell plus
+its capture comparison are deleted. Full-frame XR multiview shares the same
+terrain contract but remains an opt-in diagnostic path rather than the
+default.
 
 ## Historical Routes
 

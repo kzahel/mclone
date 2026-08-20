@@ -2,11 +2,11 @@
 
 Topic: `graphics-video-settings`
 
-Status: active product and implementation ledger. The first live flat-screen
-graphics page, SteamOS automatic presentation profile, and first
-schema-versioned graphics preference are implemented. Selectable output modes,
-adjustable GUI scale, persistence for the other live rows, and most
-renderer-quality controls are not.
+Status: active product and implementation ledger. The live shared Graphics
+page, SteamOS automatic presentation profile, schema-versioned graphics
+preferences, and cross-platform Distant Terrain quality presets are
+implemented. Selectable output modes, adjustable GUI scale, persistence for
+the other live rows, and most renderer-quality controls are not.
 
 ## Scope
 
@@ -34,7 +34,7 @@ baseline.
 
 ## Current Product Behavior
 
-The shared Graphics page currently exposes eight rows:
+The shared Graphics page currently exposes ten rows:
 
 | Setting | Current behavior | Runtime owner | Durable? |
 |---|---|---|---|
@@ -43,7 +43,8 @@ The shared Graphics page currently exposes eight rows:
 | World Scale | Live `Auto`, 50%, 67%, 75%, or 100% selection | shared typed action, desktop `HostEffects`, native flat surface | no; relaunch returns to `Auto` |
 | Section Occlusion | Live on/off renderer option | shared settings controller and scene/render host | no |
 | Leaf Detail | Live `Blocky` / `Bushy`; changes derived active-pack leaf geometry through a transactional asset epoch | shared catalog/compiler, settings controller, and scene | yes; schema-1 machine-local graphics preference |
-| Distant Terrain | Live `Exact Only` / `Composed`; Tactical [`320`](../tactical/320-cross-platform-lod-quality-presets.md) plans its replacement with shared Off/Low/Medium/High LOD presets and platform-profile defaults | shared terrain-view, settings controller, and scene | yes; schema-1 machine-local graphics preference |
+| Distant Terrain | Live `Off` / `Low` / `Medium` / `High`; presets have identical bounds on all hosts, while an unset choice resolves through the platform profile | shared terrain-view, settings controller, and scene | yes; schema-1 machine-local graphics preference |
+| Fog | Opens the independent Off/Classic/Natural/Ground Haze controls and color/visibility tuning; LOD quality neither enables nor rewrites fog | shared render fog contract, settings controller, and scene | yes; schema-1 machine-local graphics preference |
 | Render Distance | Live chunk-distance slider | shared settings controller and scene/runtime | no |
 | Frame Pacing | Live VSync / Max FPS / Uncapped cycle when supported | shared action and platform cadence/surface host | no |
 | FPS Cap | Live discrete cap cycle when supported | shared action and platform cadence host | no |
@@ -52,6 +53,24 @@ The current rows are real controls, not menu placeholders. Capability profiles
 may disable a row on a host which cannot implement it. Output and world
 resolution deliberately remain disabled facts until real video-mode selection
 exists.
+
+The accepted Distant Terrain descriptors are Off with zero levels/slots, Low
+with 6 levels and 96 slots, Medium with 8 levels and 128 slots, and High with
+10 levels and 160 slots. Low/Medium/High keep four-by-four tiles and render
+stride one; proxy vegetation uses 1/2/4 clipmap levels respectively. Native
+desktop defaults High; SteamOS, Web, and desktop OpenXR default Medium; flat
+Android and Android XR default Low. These defaults apply only while the
+stored preference is unset. Explicit stored and launch choices keep the same
+meaning on every platform.
+
+The Android-XR default follows matched physical Quest 3 evidence rather than
+a platform-specific descriptor. Reversed fog-off RD5 orbit repeats measured
+Low at `71.83 / 71.87 FPS` with positive average headroom, Medium at
+`70.52 / 70.45 FPS`, and High at `63.98 / 63.78 FPS`. A final rebuilt APK
+with no override resolved to Low and submitted `71.86 FPS`; the same binary's
+explicit High control submitted `64.07 FPS`. Tactical
+[`320`](../tactical/320-cross-platform-lod-quality-presets.md) records the
+complete app-work, GPU, draw, residency, pixel, and validation receipts.
 
 The separate Display page currently owns player model, first-person body, and
 crosshair visibility. Those are presentation/gameplay preferences rather than
@@ -114,9 +133,9 @@ when a panel is reopened rather than becoming a durable preference.
 
 ### Conclusion
 
-Mclone has feature-specific settings-persistence building blocks and now has a
-schema-1 graphics-preference codec. Its first and currently only field is Leaf
-Detail. Other graphics, movement, display, debug, frame-pacing, and audio
+Mclone has feature-specific settings-persistence building blocks and a
+schema-1 graphics-preference codec. It stores Leaf Detail, Distant Terrain,
+and Fog. Other graphics, movement, display, debug, frame-pacing, and audio
 choices remain runtime state unless called out below.
 
 The implemented model is deliberately feature-specific: shared Rust owns typed
@@ -129,7 +148,7 @@ semantics in a launcher.
 
 | Domain | Shared contract | Native storage | Browser storage | Actual save wiring |
 |---|---|---|---|---|
-| Graphics preferences | schema-1 `ClientGraphicsPreferences`, currently `Leaf Detail: Blocky/Bushy` | atomic `preferences/graphics-preferences.v1.json`, with an environment path override | `mclone.graphics.preferences.v1` in `localStorage` | loaded by desktop flat/XR, flat Android, Android XR, and web; saved only after a successful catalog/asset-epoch change |
+| Graphics preferences | schema-1 `ClientGraphicsPreferences`: Leaf Detail, optional explicit Distant Terrain preset, and Fog | atomic `preferences/graphics-preferences.v1.json`, with an environment path override | `mclone.graphics.preferences.v1` in `localStorage` | loaded by desktop flat/XR, flat Android, Android XR, and web; saved only after the relevant live scene/catalog effect succeeds |
 | Input preferences | schema-1 `ClientInputPreferences`: touch sensitivity/mode plus semantic controller preferences | atomic `preferences/input-preferences.v1.json`, with an environment path override | `mclone.input.preferences.v1` plus synchronized legacy touch keys in `localStorage` | loaded by desktop flat/XR, flat Android, Android XR, and web; touch changes are saved by flat Android and web |
 | Asset-pack selection | schema-1 logical pack-id set with availability reconciliation | atomic `preferences/asset-packs.v1.json`, with an environment path override | `mclone.assetPacks.v1` in `localStorage` | saved only after a successful asset-epoch apply; restored by interactive native and web hosts which configure pack discovery |
 | Local player profile | schema-1 stable local UUID, display name, and creation time | atomic `preferences/player-profile.v1.json`, with an environment path override | `mclone.playerProfile.v1` in `localStorage` | loaded or created at client/session startup; explicit identity reset replaces it |
@@ -190,9 +209,8 @@ world.
 they do not choose graphics defaults, validate ranges, or interpret enum
 values.
 
-Schema 1 deliberately began with only the working Leaf Detail effect. Expand
-it only with controls whose live effect and capability contract are complete.
-Likely next fields are:
+Schema 1 expands only with controls whose live effect and capability contract
+are complete. Likely next fields are:
 
 - world render scale mode;
 - render distance;
@@ -297,7 +315,7 @@ inventory is:
 | GUI scale | automatic only; add an Auto plus explicit logical-scale control |
 | UI render resolution | native only; keep native default and evaluate optional Match World mode |
 | Overall graphics quality preset | absent; do not conflate the focused distant-terrain LOD presets in Tactical [`320`](../tactical/320-cross-platform-lod-quality-presets.md) with a future bundle that also rewrites leaves, grass, world resolution, actors, or effects; manual edits to a later broad bundle should report Custom |
-| Distant-terrain LOD quality | binary Exact Only/Composed today; Tactical [`320`](../tactical/320-cross-platform-lod-quality-presets.md) defines shared Off/Low/Medium/High semantics, live persistence, optional independent fog, and different unset defaults selected by platform profile |
+| Distant-terrain LOD quality | complete in Tactical [`320`](../tactical/320-cross-platform-lod-quality-presets.md): shared Off/Low/Medium/High semantics, live accepted-effect persistence, optional independent fog, and different unset defaults selected by platform profile |
 | Ambient occlusion | absent as a player control; first define the renderer-quality effect |
 | Brightness/gamma | absent; distinguish a player-facing calibrated range from the fullbright debug toggle |
 | Clouds | absent system/control |

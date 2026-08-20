@@ -11,21 +11,23 @@ ordinary sessions use smooth spacing-one geometry, a generation-cached
 32-block appearance field, focus-connected irregular exact admission, and a
 measured exact-profile perimeter connector. Human Review 1 accepted that
 direction; the former spacing-one voxel shell, shader branches, diagnostics,
-selector, and A/B harness are deleted rather than retained as a fallback. As
-of 2026-08-11, the shared
-in-game Graphics screen exposes
-`Terrain Horizon: Exact Only / Composed` as a live session control. The same
-UI action, settings reducer, and scene effect serve desktop, browser, flat
-Android, and ordinary per-eye XR. Full-frame multiview terrain and vegetation
-also share the composed contract; multiview remains an opt-in diagnostic path
-rather than the default because its accepted Quest comparison regressed on
-GPU. The control is available only for a local
-`mclone-overworld-v1` source; remote and incompatible-profile sessions show
-the row as unavailable and project inherited state back to exact-only.
-Native, browser-Wasm, flat-Android APK, and Android-XR APK builds pass. Tactical
-313's direct-only deletion build also passes an inspected physical Pixel 7a
-flat-client frame and physical Quest 3 ordinary OpenXR plus full-frame
-multiview proof.
+selector, and A/B harness are deleted rather than retained as a fallback.
+Tactical
+[`320`](../tactical/320-cross-platform-lod-quality-presets.md) is complete as
+of 2026-08-20. The shared in-game Graphics screen exposes
+`Distant Terrain: Off / Low / Medium / High`; the same typed action,
+preference, settings reducer, and scene effect serve desktop, browser, flat
+Android, and ordinary per-eye XR. All non-Off qualities use the same
+stride-one four-by-four geometry clipmap with six, eight, or ten levels and a
+separately bounded proxy-vegetation reach. Live changes reconfigure that
+engine in place and reuse common level, admission, GPU-pool, and vegetation
+state. Full-frame multiview terrain and vegetation share the same preset
+contract; multiview remains an opt-in diagnostic path because its accepted
+Quest comparison regressed on GPU. The control is available only for a local
+`mclone-overworld-v1` source; remote and incompatible-profile sessions retain
+the desired choice, show it as unavailable, and project the effective state
+to Off. Native, browser-Wasm, flat-Android APK, Android-XR APK, synthetic
+stereo, AVD, and physical Quest gates pass.
 
 The 2026-08-13 phone-browser black-frame regression is resolved. XR
 multiview support had added `@builtin(view_index)` entry points to the same
@@ -57,7 +59,7 @@ smoke reaches 49 exact columns, all ten drawn levels, 23 drawn horizon tiles,
 and 37,750/38,735 distinct interior colors in its 780-by-1688 captures.
 
 This is the current system meant by unqualified **LOD** or **LOD system** in
-project discussion. **Terrain Horizon** is its player-facing settings name.
+project discussion. **Distant Terrain** is its player-facing settings name.
 World Explorer was its first proof host and remains a consumer, but the shared
 implementation owner is `mclone-terrain-view`. The canonical terminology and
 document routes live in [`lod.md`](lod.md). The deleted chunk-granular system
@@ -122,9 +124,10 @@ removal boundary for the rejected chunk-based Far LOD system. Tactical
 all-client Graphics control, runtime preference, and default
 per-eye XR projection reach. Full-frame multiview terrain and vegetation are
 now implemented and physically accepted on Quest 3 standalone plus Linux
-Vulkan/WiVRn. The live mode remains an experimental diagnostic choice rather
-than the default because the matched Quest RD5 composed workload regresses on
-GPU.
+Vulkan/WiVRn. Distant terrain is now a normal quality setting with bounded
+platform defaults; only the full-frame multiview render path remains an
+experimental diagnostic choice because its matched Quest workload regresses
+on GPU.
 Focused coordinating Tactical
 [`280`](../tactical/280-xr-multiview-render-path-workstream.md) now owns
 procedural-horizon multiview, safe live XR path selection, interactive
@@ -294,14 +297,16 @@ coverage from the active draw store's traversal-ready columns, exact
 opaque/cutout terrain establishes the ordinary reversed-Z depth, and the
 shared procedural backdrop
 loads and extends the same target before actors and translucent terrain. The
-player-facing opt-in is `Graphics -> Terrain Horizon -> Composed`, with
-`terrainPresentation=composed` / `--terrain-presentation composed` retained
-as explicit developer inputs. Composition is currently restricted to local
-`mclone-overworld-v1`; exact-only remains allocation-free by default. A stored
-Composed choice reads `Composed (Unavailable)` while an incompatible world is
-active instead of silently pretending that composition is live. Schema-one
-preferences written by the briefly used `experimental` label migrate to
-`composed` when read.
+current player-facing control is `Graphics -> Distant Terrain -> Off / Low /
+Medium / High`, with `terrainLodQuality` / `--terrain-lod-quality` as the
+canonical launch-only inputs. The former `terrainPresentation` /
+`--terrain-presentation` inputs remain deprecated Off/High compatibility
+aliases. Composition is restricted to local `mclone-overworld-v1`; Off is
+allocation-free. A stored non-Off choice reads, for example,
+`Medium (Unavailable)` while an incompatible world is active instead of
+silently pretending that composition is live. Legacy Exact Only migrates to
+explicit Off, while legacy Composed or Experimental migrates to explicit
+High.
 Native low-angle and elevated captures show the exact foreground silhouette
 correctly occluding the surrounding procedural terrain. Native thread and
 browser Worker executors now feed the same vegetation coordinator; exact
@@ -417,12 +422,24 @@ fog/far-culled. Average 72-Hz budget is only `0.497ms` away, while p95 needs
 
 Tactical
 [`320`](../tactical/320-cross-platform-lod-quality-presets.md) therefore keeps
-this shared clipmap and plans player-facing Off/Low/Medium/High bounds rather
-than another terrain system. Preset semantics remain identical across native,
-Web, Android, and XR clients; only the unset default varies by shared platform
-profile. Fog remains an independent optional setting. Initial Low/Medium
-experiments reduce ring count and proxy-vegetation reach at stride one, while
-High preserves the ten-level full-quality control.
+this shared clipmap and completes player-facing Off/Low/Medium/High bounds
+rather than another terrain system. Preset semantics remain identical across
+native, Web, Android, and XR clients; only the unset default varies by shared
+platform profile. Fog remains an independent optional setting. Low, Medium,
+and High use six, eight, and ten terrain levels plus one, two, and four proxy
+vegetation levels respectively, all at stride one. Their fixed residency is
+96, 128, and 160 tiles.
+
+Matched forward/reverse physical Quest 3 fog-off orbit runs establish Low as
+the standalone Android-XR default. Low submitted `71.83 / 71.87 FPS` with
+`12.671 / 12.649ms` average app work and `4.8% / 2.0%` over-period frames;
+Medium submitted `70.52 / 70.45 FPS` and spent `45.6% / 46.8%` of frames over
+budget; High submitted `63.98 / 63.78 FPS` and spent more than 93% over
+budget. A no-override rebuilt APK resolved to Low and measured `71.86 FPS`,
+`1.246ms` average headroom, and `6.786ms` Meta app GPU against High's
+`64.07 FPS`, `-1.561ms`, and `8.185ms`. Native desktop defaults High;
+SteamOS, Web, and desktop OpenXR default Medium; flat Android and Android XR
+default Low. An explicit stored or launch choice still wins.
 Canonical exact generation and live authoritative render sections remain
 different truth-source adapters.
 

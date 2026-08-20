@@ -1,6 +1,6 @@
 # Tactical 320: Cross-Platform LOD Quality Presets
 
-Status: planned 2026-08-20; ready for implementation
+Status: completed and accepted 2026-08-20
 
 Topic: `procedural-horizon-clipmap`
 
@@ -315,50 +315,50 @@ level counts, vegetation ranges, or a browser-only fallback.
 
 ### Slice 1: preset and evidence contract
 
-- [ ] Add the shared preset enum, descriptor table, validation, labels, and
+- [x] Add the shared preset enum, descriptor table, validation, labels, and
       platform-profile default resolver.
-- [ ] Pin Off/Low/Medium/High semantic tests, including current High parity.
-- [ ] Add per-level terrain/vegetation and resolved-bound diagnostics.
-- [ ] Harden the Quest settled gate so required actor/horizon pipelines are
+- [x] Pin Off/Low/Medium/High semantic tests, including current High parity.
+- [x] Add per-level terrain/vegetation and resolved-bound diagnostics.
+- [x] Harden the Quest settled gate so required actor/horizon pipelines are
       warm before performance sampling.
 
 ### Slice 2: preference, menu, and all-client wiring
 
-- [ ] Replace the binary shared Graphics row with the four-value preset row.
-- [ ] Add unset-versus-explicit preference state and legacy migration.
-- [ ] Preserve source-unavailable desired/effective reporting.
-- [ ] Restore, apply, persist, reload, and Factory Reset the same choice on
+- [x] Replace the binary shared Graphics row with the four-value preset row.
+- [x] Add unset-versus-explicit preference state and legacy migration.
+- [x] Preserve source-unavailable desired/effective reporting.
+- [x] Restore, apply, persist, reload, and Factory Reset the same choice on
       desktop, Web, flat Android, desktop XR, and Android XR.
-- [ ] Add the canonical CLI/Web startup override and retain legacy aliases.
+- [x] Add the canonical CLI/Web startup override and retain legacy aliases.
 
 ### Slice 3: bounded live reconfiguration
 
-- [ ] Reconfigure shared clipmap level count without duplicating the full
+- [x] Reconfigure shared clipmap level count without duplicating the full
       engine or invalidating unchanged common levels.
-- [ ] Coordinate terrain, proxy vegetation, exact coverage, projection reach,
+- [x] Coordinate terrain, proxy vegetation, exact coverage, projection reach,
       and mono/per-eye/multiview render targets at one frame boundary.
-- [ ] Bound/cancel obsolete vegetation work and release retired resources.
-- [ ] Keep the prior accepted preset active on allocation or apply failure.
+- [x] Bound/cancel obsolete vegetation work and release retired resources.
+- [x] Keep the prior accepted preset active on allocation or apply failure.
 
 ### Slice 4: optional-fog and fog-off presentation
 
-- [ ] Prove every preset with Fog Off and confirm the fog preference is
+- [x] Prove every preset with Fog Off and confirm the fog preference is
       unchanged by preset transitions.
-- [ ] Retain conservative fog-derived far culling only when an independently
+- [x] Retain conservative fog-derived far culling only when an independently
       selected mode reaches an opaque boundary.
-- [ ] Inspect outer edges at ground, hill, flight, stereo, and wrapped-topology
+- [x] Inspect outer edges at ground, hill, flight, stereo, and wrapped-topology
       views; correct shared closure or raise an inadequate bound rather than
       forcing haze.
-- [ ] Prove exact and proxy ownership across the shorter vegetation boundary.
+- [x] Prove exact and proxy ownership across the shorter vegetation boundary.
 
 ### Slice 5: platform defaults and performance decision
 
-- [ ] Resolve an unset preference through each typed platform profile.
-- [ ] Measure Low/Medium/High using one exact build and identical scene inputs
+- [x] Resolve an unset preference through each typed platform profile.
+- [x] Measure Low/Medium/High using one exact build and identical scene inputs
       on the affected performance targets.
-- [ ] Select final defaults only from accepted pixels, startup/movement cost,
+- [x] Select final defaults only from accepted pixels, startup/movement cost,
       steady frame evidence, and memory bounds.
-- [ ] Record the accepted descriptor table and defaults in the living LOD and
+- [x] Record the accepted descriptor table and defaults in the living LOD and
       graphics-settings topics.
 
 ## Validation Matrix
@@ -407,26 +407,86 @@ must not be worse than the current full-quality path. Web and flat Android
 defaults must remain responsive through startup and live switching; desktop
 High must preserve current accepted full-quality appearance.
 
-## Human Review Gate
+## Completion Evidence
 
-Before binding final preset semantics and defaults, provide side-by-side
-Off/Low/Medium/High captures and live toggles with fog disabled. Review must
-answer:
+The accepted descriptors keep a four-by-four ring, base spacing one, and
+render stride one at every non-Off quality:
 
-- Does Low still read as distant continuous terrain rather than a nearby
-  finite plate?
-- Does Medium preserve the broad landscape value which justified the feature?
-- Are terrain edge, tree fade, connector, water, and exact/proxy transitions
-  stable during movement?
-- Is High visually identical to the current full-quality composed path?
-- Are the proposed native, Web, Android, desktop-XR, and Quest defaults honest
-  for their measured cost?
-- Does changing LOD leave the selected Fog mode and appearance untouched?
+| Preset | Levels | Resident slots | Proxy vegetation levels |
+|---|---:|---:|---:|
+| Off | 0 | 0 | 0 |
+| Low | 6 | 96 | 1 |
+| Medium | 8 | 128 | 2 |
+| High | 10 | 160 | 4 |
 
-Do not make a lower preset the default merely because it reaches 72 Hz if the
-fog-off boundary is visibly broken. Equally, do not retain an unnecessarily
-large outer reach when a smaller accepted preset is visually indistinguishable
-at ordinary play altitude.
+Native fixed-resource diagnostics measured approximately `81.6 MiB` for Low,
+`107.4 MiB` for Medium, and `133.2 MiB` for High. Off constructs no horizon.
+Live non-Off changes reuse common clipmap levels, admission state, GPU pools,
+and compatible vegetation; lowering retires outer work, while raising admits
+new levels under the existing bounded queues. Persistence commits only after
+the scene accepts the effect.
+
+Two physical Quest 3 fog-off RD5 orbit sequences used the same release APK,
+world, pose, 72 Hz target, scale 1.0, foveation Off, normal actors, and
+ordinary dual-per-eye renderer. The second sequence reversed the first one's
+quality order:
+
+| Preset | Submitted FPS | App work avg / p95 | Over period | Drawn terrain / proxy trees |
+|---|---:|---:|---:|---:|
+| Off | `72.00 / 72.00` | `6.129 / 7.071ms`; `6.123 / 7.086ms` | `0.0% / 0.0%` | `0 / 0` |
+| Low | `71.83 / 71.87` | `12.671 / 13.878ms`; `12.649 / 13.662ms` | `4.8% / 2.0%` | `47 / 87` |
+| Medium | `70.52 / 70.45` | `13.947 / 15.275ms`; `13.960 / 15.318ms` | `45.6% / 46.8%` | `51 / 342` |
+| High | `63.98 / 63.78` | `15.489 / 16.988ms`; `15.534 / 17.134ms` | `94.4% / 93.7%` | `55 / 612` |
+
+A final rebuilt-APK run with no LOD override resolved the Android XR profile
+to Low and measured `71.86 FPS`, `12.643 / 13.649ms` average/p95 app work,
+`1.246ms` average headroom, `2.3%` over-period frames, and `6.786ms` Meta app
+GPU. The matched explicit High control measured `64.07 FPS`,
+`15.450 / 17.015ms`, `-1.561ms` average headroom, `91.4%` over-period frames,
+and `8.185ms` Meta app GPU. The six-level Low preset is therefore the accepted
+standalone Quest default. Medium remains available as a player choice and as
+the unset Web, SteamOS, and desktop-OpenXR default.
+
+The final unset defaults are:
+
+| Platform profile | Default |
+|---|---|
+| Native desktop flat | High |
+| SteamOS / handheld native | Medium |
+| Browser / WebGPU | Medium |
+| Flat Android | Low |
+| Desktop OpenXR | Medium |
+| Android XR / standalone Quest | Low |
+
+Fog remained explicitly Off throughout the native and Quest preset captures.
+No preset changed that preference, no forced haze or clear-color terrain hole
+was observed, and every device diagnostic reported zero fog/far-culled tiles.
+Opaque-fog culling remains an optional independent nearer bound.
+
+Acceptance also includes the full terrain-view, UI, and scene library suites;
+native, Wasm, desktop-XR, flat-Android, and Android-XR compilation; headed
+WebGPU menu switch plus persisted reload; inspected native fog-off captures;
+an inspected synthetic-stereo frame; an inspected flat-Android AVD frame; and
+inspected physical Quest captures. The AVD used a freshly generated ignored
+development archive because an unrelated tracked asset lock was stale; this
+tactical did not rewrite that lock.
+
+## Human Review Result
+
+The inspected native Off/Low/Medium/High fog-off captures, headed WebGPU live
+toggle/reload captures, synthetic stereo frame, AVD frame, and physical Quest
+captures accept the final preset family and defaults:
+
+- Low reads as continuous distant terrain without a nearby finite plate,
+  forced haze, or visible clear-color boundary at the accepted views.
+- Medium preserves broader landscape reach but does not meet the standalone
+  Quest frame target.
+- terrain edges, tree range transitions, connectors, water, and exact/proxy
+  ownership remain stable through the accepted static and moving lanes;
+- High preserves the former full-quality descriptor and appearance;
+- native, Web, Android, desktop-XR, and Quest defaults match their measured
+  cost without changing preset semantics; and
+- changing LOD leaves the selected Fog mode and appearance untouched.
 
 ## Explicit Non-Goals
 
@@ -444,18 +504,18 @@ at ordinary play altitude.
 
 ## Completion Checklist
 
-- [ ] Replace the binary horizon setting with shared Off/Low/Medium/High
+- [x] Replace the binary horizon setting with shared Off/Low/Medium/High
       presets on every first-class client.
-- [ ] Preserve platform-independent preset semantics and select only the
+- [x] Preserve platform-independent preset semantics and select only the
       unset default per platform profile.
-- [ ] Migrate legacy preferences and preserve explicit player/launch
+- [x] Migrate legacy preferences and preserve explicit player/launch
       precedence.
-- [ ] Apply and persist presets live without restart or unbounded duplicate
+- [x] Apply and persist presets live without restart or unbounded duplicate
       resources.
-- [ ] Keep Fog independent and accept every preset with Fog Off.
-- [ ] Bound terrain residency, projection, rendering, and proxy vegetation
+- [x] Keep Fog independent and accept every preset with Fog Off.
+- [x] Bound terrain residency, projection, rendering, and proxy vegetation
       through one shared descriptor.
-- [ ] Pass native, WebGPU, flat Android, per-eye, synthetic-stereo, multiview,
+- [x] Pass native, WebGPU, flat Android, per-eye, synthetic-stereo, multiview,
       and physical Quest gates.
-- [ ] Record final preset descriptors, platform defaults, pixels, and
+- [x] Record final preset descriptors, platform defaults, pixels, and
       performance evidence in the living topics.
