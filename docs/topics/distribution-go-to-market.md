@@ -3,15 +3,15 @@
 Topic: `distribution-go-to-market`
 
 Status: **current product direction recorded 2026-07-22 and reconciled with
-the cross-ecosystem structure-publishing thesis 2026-08-20; commercial model,
-pricing, launch order, and storefront approvals remain open.** Steam should be
-the preferred PC purchase and discovery surface, not a channel from which
-Mclone steers customers away. A first-party direct edition should provide a
-real no-Steam option. The leading commercial candidate is a free trial or demo
-plus paid ownership in channels that use entitlements, while a complete free
-direct edition with paid supporter/store editions remains an explicit
-alternative. Web's commercial access model remains open without reducing its
-full-client product scope.
+the cross-ecosystem structure-publishing thesis and automated build-reel
+acquisition loop 2026-08-20; commercial model, pricing, launch order, and
+storefront approvals remain open.** Steam should be the preferred PC purchase
+and discovery surface, not a channel from which Mclone steers customers away.
+A first-party direct edition should provide a real no-Steam option. The leading
+commercial candidate is a free trial or demo plus paid ownership in channels
+that use entitlements, while a complete free direct edition with paid
+supporter/store editions remains an explicit alternative. Web's commercial
+access model remains open without reducing its full-client product scope.
 
 Last reconciled: **2026-08-20**.
 
@@ -330,7 +330,7 @@ client without an install; whether that session begins with full, guest, or
 trial entitlement is a commercial policy rather than a different client:
 
 ```text
-search / creator video / shared build / store discovery
+search / construction reel / creator video / shared build / store discovery
                          |
                          v
                 first-party landing page
@@ -495,6 +495,10 @@ advertising assumptions:
   wishlist/release notification.
 - **World loop:** memorable seed/settlement/challenge -> player attempts it ->
   screenshot, video, or world share -> another player starts.
+- **Build-reel loop:** accepted semantic structure -> deterministic staged
+  construction reveal + hero views -> short-form view/share -> exact catalogue
+  page -> Java/Bedrock artifact or optional Mclone play -> attributable use and
+  another media variant.
 - **Build loop:** searchable structure/build guide -> interactive preview ->
   download a validated Java/Bedrock artifact or optionally open in Mclone ->
   build, modify, and share through the chosen ecosystem.
@@ -511,6 +515,8 @@ or headset sensor data. Sharing must be explicit and privacy-scoped.
 Track a small funnel by channel rather than celebrating aggregate downloads:
 
 - landing-page source -> Steam wishlist, direct trial, web play, or Quest page;
+- construction-reel impression -> completion/replay/save/share -> catalogue
+  click -> guide use, target artifact download, or deliberate Mclone open;
 - demo/trial entry or install -> successful first launch;
 - first launch -> first world entered and first meaningful build/craft action;
 - first world -> second session, D1, D7, and four-week return;

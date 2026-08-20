@@ -12,9 +12,9 @@ have been removed after exact parity. The aggregate deployment stages the
 catalogue under `/structures/`, and all closeout gates pass. In-browser block
 editing is indefinitely deferred.**
 
-Last reconciled: **2026-08-20** (clarified that later Java/Bedrock target
-compilers consume the canonical record without reopening this completed
-vertical slice).
+Last reconciled: **2026-08-20** (clarified that later Java/Bedrock target and
+build-reel compilers consume the canonical record without reopening this
+completed vertical slice).
 
 ## Current Implementation
 
@@ -220,6 +220,7 @@ structure.ts
             -> baked preview mesh
             -> material/layer/marker metadata
             -> deterministic thumbnails and review receipts
+            -> downstream target and build-reel compiler inputs
 ```
 
 The public catalogue should normally load the baked mesh, not initialize the
@@ -242,7 +243,7 @@ Rust build-time compilation should:
 - bake final preview illumination/AO into vertex data where practical;
 - split solid, cutout, and translucent primitives honestly;
 - preserve named vertical layers and components as independently hideable mesh
-  groups;
+  groups with stable identities that downstream reveal recipes may reference;
 - emit dimensions, bounds, material counts, markers, source hash, compiler
   version, atlas hash, and mesh hash in a manifest; and
 - be deterministic or explicitly account for any non-byte-deterministic
@@ -342,6 +343,11 @@ records should feed those systems without owning them.
   proof and belong to the cross-ecosystem product direction in
   [`structure-catalogue-product.md`](structure-catalogue-product.md). They do
   not reopen the completed read-only first proof.
+- Automated construction-reveal planning, video capture, social publishing,
+  or platform-specific camera adapters. These later consumers may reuse the
+  exact canonical record and baked group identities, but their product contract
+  belongs to [`structure-catalogue-product.md`](structure-catalogue-product.md)
+  and does not expand the completed catalogue proof.
 - Terrain grading, settlement planning, entities, machinery, and simulation.
 
 These are not hidden requirements for the first website and should not inflate

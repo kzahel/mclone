@@ -141,10 +141,11 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
   and the later native Steam Input path
 - `structure-catalogue-product` — brainstorm-stage cross-ecosystem structure
   publishing, creator, growth, and economy vision: rights-clean semantic builds
-  can feed web guides, Java/Bedrock artifacts, and optional Mclone play;
-  co-branded storefronts and licensed human examples support distribution and
-  an AI quality ladder of skill, retrieval, evals, and eventual training;
-  does not reopen the read-only first proof
+  can feed web guides, Java/Bedrock artifacts, optional Mclone play, and
+  deterministic construction-reveal media; co-branded storefronts and licensed
+  human examples support distribution and an AI quality ladder of skill,
+  retrieval, evals, and eventual training; does not reopen the read-only first
+  proof
 - `procedural-structure-starts` — reusable vanilla-shaped placement, start,
   bounding-box, reference, and clipped-piece machinery, first exercised by
   bounded terrain-affecting Mclone streams

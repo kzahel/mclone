@@ -3,13 +3,14 @@
 Topic: `structure-catalogue-product`
 
 Status: **product/growth/economy vision recorded 2026-07-21 and expanded
-2026-08-20 into a cross-ecosystem structure-publishing thesis;
-brainstorm-stage. This is not an accepted implementation direction and
-reserves no tactical. It records where the public build catalogue could go
-once the read-only Structure Lab catalogue exists, and it deliberately does
-not reopen or weaken [`structure-lab.md`](structure-lab.md)'s read-only first
-proof. Nothing here is a commitment to build; it is a captured north-star so
-the near-term architecture is not chosen in a way that forecloses it.**
+2026-08-20 into a cross-ecosystem structure-publishing thesis and automated
+construction-reveal acquisition system; brainstorm-stage. This is not an
+accepted implementation direction and reserves no tactical. It records where
+the public build catalogue could go once the read-only Structure Lab catalogue
+exists, and it deliberately does not reopen or weaken
+[`structure-lab.md`](structure-lab.md)'s read-only first proof. Nothing here is
+a commitment to build; it is a captured north-star so the near-term
+architecture is not chosen in a way that forecloses it.**
 
 Last reconciled: **2026-08-20**.
 
@@ -22,7 +23,8 @@ customers of the catalogue rather than leads waiting to be converted. Mclone
 is the most interactive supported destination and a zero-install option, not a
 forced handoff. The topic covers cross-target publication, co-branded creator
 storefronts, the licensed human-authored quality corpus, growth/distribution,
-and the credit economy that funds bespoke AI authoring.
+the deterministic build-reel compiler, and the credit economy that funds
+bespoke AI authoring.
 
 It does **not** own:
 
@@ -32,6 +34,11 @@ It does **not** own:
 - concrete Java/Bedrock file encoders, target block-state mappings, add-on
   packaging, compatibility testing, or commercial approval — this topic
   records their product requirement but not their implementation owner;
+- concrete video rendering, encoding, audio mixing, render-farm operation,
+  native-Minecraft capture automation, or social-network publishing — this
+  topic owns the build-reel product and receipt contract, while a future
+  tactical must route implementation through the appropriate shared renderer,
+  capture, asset, and platform-adapter owners;
 - the play/warm-handoff machinery that makes "walk into a build" possible —
   that reuses [`embedded-worlds.md`](embedded-worlds.md) and
   [`web-scene-host-adoption.md`](web-scene-host-adoption.md);
@@ -70,6 +77,11 @@ AI authoring changes the shape of the product:
 - **On-demand authoring expands the catalogue** from user requests and
   refinements, while editorial acceptance and licensed human work prevent an
   infinite low-quality feed.
+- **Every accepted build can manufacture its own acquisition media.** The
+  semantic structure is also the source for a repeatable construction reveal,
+  cinematic hero views, thumbnails, and partner-branded social variants. The
+  downloadable structure and the video that attracts attention cannot drift
+  apart because both compile from the same accepted source.
 
 Everything below serves that inversion.
 
@@ -109,6 +121,10 @@ record. Several are things a screenshot catalogue structurally cannot do.
 - **Real-engine context for free.** Day/night preview, biome backdrop swap, a
   figure for scale, golden-hour lighting — all native because it is an actual
   renderer.
+- **Build-reel compiler.** Named components, build layers, a deterministic
+  camera path, and a reviewed shot grammar turn each accepted build into a
+  satisfying short-form construction reveal. This is a product output and
+  acquisition surface, not discretionary launch marketing.
 - **Survival-friendliness metadata.** Filter by buildable-in-survival, material
   rarity, and estimated time.
 
@@ -124,7 +140,7 @@ licensed semantic structure
   +-- Minecraft Java structure/schematic or world artifact
   +-- Minecraft Bedrock structure/add-on or world artifact
   +-- Mclone runtime structure and playable-world destination
-  +-- deterministic thumbnail, turntable, and social-video assets
+  +-- deterministic build reel, cutdowns, thumbnails, and hero assets
 ```
 
 The canonical record stays target-neutral where the concept is genuinely
@@ -168,9 +184,10 @@ web client. Neither path is a decoy for the other.
 - **Shareable deep links** into a build, a walk-through, or a "spawn into this
   world" — Discord/Reddit/TikTok-native, each share a demo link into the
   engine.
-- **Auto-generated video/GIF/OG cards.** The Asset Lab already does
-  deterministic Playwright capture; reuse it to emit a turntable + walk-through
-  clip per build. Free social assets at scale.
+- **Auto-generated build reels/GIF/OG cards.** Compile a semantic construction
+  reveal, hero views, and destination-specific calls to action for every
+  accepted build. This repeatable media format is the primary social
+  acquisition candidate, not merely a thumbnail convenience.
 - **Embeddable "walk this build" iframe** places the engine on other MC
   blogs/wikis — parasitic distribution.
 - **Request queue → agents fill it.** People request builds; agents author
@@ -178,6 +195,76 @@ web client. Neither path is a decoy for the other.
   fresh landing pages, not an automatic right to publish model output.
 - **Cadence and community loops** — build-of-the-day, seasonal drops, "beat
   this base" challenges — agent-supported and editorially reviewed.
+
+## Build-Reel Compiler And Social Acquisition
+
+An accepted structure should produce its own acquisition media as routinely as
+it produces a material list or preview mesh. The product is not merely a
+downloadable build with occasional promotional videos. It is a build source
+whose deterministic publication pipeline can continuously emit polished,
+scroll-stopping construction reveals.
+
+A representative Sereyka vertical clip reviewed on 2026-08-20 lasted about
+forty seconds. It opened with a footprint/title hook, moved through repeated
+cinematic shots in which architectural subassemblies appeared in satisfying
+stages, finished the castle through several module reveals, and ended on hero
+views plus build-guide and download calls to action. The public clip does not
+identify its capture stack. Replay Mod camera paths, Minecraft scripting,
+successive world states, shaders, and ordinary video editing are plausible
+ingredients, not verified facts about Sereyka's workflow.
+
+The durable product contract is independent of that private toolchain:
+
+```text
+accepted canonical structure
+  + semantic components and vertical layers
+  + target, creator, and storefront identity
+  -> deterministic reveal recipe
+       + construction phases and stable within-phase ordering
+       + camera spline, framing, timing, lighting, and environment
+       + title, attribution, destination, and call-to-action slots
+  -> renderer or target capture adapter
+  -> vertical reel + cutdowns + hero stills + thumbnail/OG assets
+  -> media receipt tied to the exact structure and destination hashes
+```
+
+The compiler should preserve these principles:
+
+- **Reveal semantic construction, not only Y slices.** A useful default story
+  is site/footprint, foundation, structural frame, walls and openings, roof,
+  trim, interior, landscaping, and lighting. Named modules such as a porch,
+  tower, wing, or gate may become their own beats. Vertical-layer reveal is a
+  valid fallback, not the whole visual language.
+- **Use a small reviewed shot grammar.** A short needs a first-second hook,
+  readable construction beats with camera parallax, one or two moments of
+  completion, clean hero coverage, and a concise destination action. A
+  repeatable grammar matters more than inventing every clip from scratch.
+- **Keep the recipe target-neutral.** The same construction and shot intent
+  may drive the baked web catalogue, a first-party Mclone renderer, or a later
+  Java/Bedrock capture adapter. Mclone rendering offers scalable automation;
+  native Minecraft capture may offer greater authenticity to Minecraft
+  audiences. They are complementary outputs when both are supportable.
+- **Represent the footage honestly.** A first-party render may be labeled a
+  preview render, but it must not be presented as literal Java or Bedrock
+  footage. Every visible structure phase must resolve to the same accepted
+  build and declared target substitutions; generic AI-video imagery is not a
+  trustworthy product preview.
+- **Use AI as a director before using it as a pixel generator.** Rules can
+  establish the first reveal and camera recipes. Later, an agent can select
+  semantic beats, propose paths, vary hooks, and rank deterministic renders
+  against measured performance. Reproducible engine pixels keep the advertised
+  artifact exact while AI supplies taste and iteration.
+- **Ship a complete media bundle.** Normal outputs should include a primary
+  9:16 construction reel, shorter cutdowns, hero stills, catalogue thumbnails,
+  OG cards, creator/co-brand variants, and manifests for source, render,
+  attribution, font, audio, and destination-link provenance.
+
+The smallest proof should use one already accepted structure, its existing
+named components and vertical groups, one declarative reveal/camera recipe,
+and deterministic vertical capture. It should prove that the result is
+visually compelling before adding automatic camera planning, learned shot
+selection, a render farm, native-Minecraft capture adapters, or high-volume
+publishing.
 
 ## Co-Branded Creator Storefronts
 
@@ -189,6 +276,7 @@ catalogue and service while giving a partner a credible branded entry point:
 creator domain or subdomain
   -> creator theme, profile, collections, and attribution
   -> central catalogue, compatibility artifacts, accounts, and checkout
+  -> co-branded reels, deep links, and ready-to-publish media bundles
   -> referral commission and/or licensed-content compensation
 ```
 
@@ -220,6 +308,12 @@ copy uncritically:
   Litematic/world downloads, and subscription access;
 - its Java mod and Bedrock add-ons advertise catalogue browsing, hologram
   preview, placement, build-along layers, and automated construction;
+- its short-form content uses a repeatable footprint, staged construction
+  reveal, cinematic hero-view, and catalogue-call-to-action format; the exact
+  Minecraft capture, camera, shader, and editing toolchain is not public;
+- its About page self-reports more than 700 million views, 31 million likes,
+  and 1.3 million followers across its content and channels; these remain
+  first-party marketing claims rather than independent audience evidence;
 - its creator page invites both build submissions and promotional videos while
   keeping income and payout details private; and
 - its terms describe affiliate commissions and partner domains as marketing
@@ -378,11 +472,12 @@ derivative accounting.
 
 The moat is the *integration*, not any single piece: a licensed creator
 network, a rights-clean human quality corpus, an AI pipeline that authors and
-revises on demand, a deterministic semantic format, cross-target compilers,
-and an in-browser engine that can walk or play the result. A competitor can
-bolt an LLM onto "generate a schematic," but reproducing reviewed semantic
-source + Java/Bedrock/Mclone publication + correct guides + optional playable
-continuation is the hard part.
+revises on demand, a deterministic semantic format, a build-reel compiler,
+cross-target compilers, and an in-browser engine that can walk or play the
+result. A competitor can bolt an LLM onto "generate a schematic," but
+reproducing reviewed semantic source + acquisition media + Java/Bedrock/Mclone
+publication + correct guides + optional playable continuation is the hard
+part.
 
 The compounding advantage is **quality and usage evidence ordinary screenshot
 catalogues cannot get**: not only views or downloads, but whether people walked
@@ -419,6 +514,14 @@ do not silently convert private play into training data.
   parity, or Minecraft block identity authoritative for Mclone. Structures and
   examples must be original or explicitly licensed; public artifacts may not
   redistribute extracted reference assets.
+- **Acquisition media must remain truthful.** The reel, guide, preview,
+  download, and playable destination must identify the same structure revision
+  and target mapping. Do not use generative-video spectacle that advertises a
+  building the customer cannot obtain, and do not label first-party Mclone
+  renders as native Minecraft capture.
+- **Media provenance matters too.** Fonts, music, sound effects, shaders,
+  textures, creator identity, target branding, and footage all need rights and
+  attribution receipts appropriate to commercial short-form distribution.
 - **Commercial Minecraft integration needs current policy review.** The
   Minecraft usage guidelines, EULA, trademark rules, mod constraints, Bedrock
   creator terms, Marketplace path, and target technical limits must be checked
@@ -445,7 +548,18 @@ do not silently convert private play into training data.
 
 - What is the smallest flagship worth building first: cross-target publication
   for one excellent build, walk-through + build-along, the programmatic-SEO
-  page engine, or prompt-to-playable-world?
+  page engine, the build-reel compiler, or prompt-to-playable-world?
+- Can the existing baked GLB groups produce the first professional vertical
+  construction reveal, or does the quality bar require the shared Mclone
+  renderer from the first proof?
+- What minimal component/phase metadata lets a reveal read architecturally
+  without turning video direction into a second structure-authoring surface?
+- Which target-neutral camera and reveal recipe can drive both first-party
+  rendering and later Java/Bedrock capture adapters without promising visual
+  identity those targets cannot reproduce?
+- Which reel completion, replay, save/share, click-through, catalogue use,
+  artifact download, and Mclone-open measures distinguish entertaining views
+  from useful acquisition?
 - Which initial Java and Bedrock artifacts are both technically supportable and
   commercially acceptable, and which target/version receipts prove them?
 - What semantic palette and compatibility classes preserve a coherent design
@@ -490,6 +604,11 @@ Checked 2026-08-20:
 
 - [Sereyka Builds](https://sereyka.com/) — central catalogue, price, guides,
   downloads, and public product shape.
+- [Sereyka About](https://sereyka.com/about) — first-party description of the
+  layer-guide product and self-reported cross-channel audience totals.
+- [Representative Sereyka construction reveal](https://www.tiktok.com/@sereykamc/video/7642036261586291990)
+  — reviewed shot structure and call-to-action sequence; not evidence of the
+  private capture or editing toolchain.
 - [Sereyka mod and Bedrock add-on page](https://sereyka.com/mod) — advertised
   Java/Bedrock installation, hologram, placement, layer, and auto-builder
   paths.
@@ -508,6 +627,13 @@ Checked 2026-08-20:
   — official `.mcstructure`, import, placement, and API evidence.
 - [Minecraft Partner Program](https://www.minecraft.net/en-us/partner) —
   official Bedrock Marketplace publication route.
+- [Replay Mod documentation](https://www.replaymod.com/docs/) — Java-side
+  precedent for smooth keyframed camera paths and direct video rendering; not
+  evidence that Sereyka uses it.
+- [Minecraft Bedrock Editor Camera Tool](https://learn.microsoft.com/en-us/minecraft/creator/documents/bedrockeditor/editorcameratool?view=minecraft-bedrock-stable)
+  and [Free Camera Script API tutorial](https://learn.microsoft.com/en-us/minecraft/creator/documents/camerasystem/freecamerascriptapitutorial?view=minecraft-bedrock-stable)
+  — official spline-camera and scripted-flyover capabilities; not evidence of
+  Sereyka's implementation.
 - [OpenAI Skills API](https://developers.openai.com/api/reference/go/resources/skills),
   [fine-tuning API](https://developers.openai.com/api/reference/resources/fine_tuning),
   and [evals API](https://developers.openai.com/api/reference/resources/evals)

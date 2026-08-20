@@ -11,7 +11,8 @@ prices, reviews, and video availability must be rechecked before commercial
 decisions.
 
 Last reconciled: **2026-08-20** (added Sereyka's cross-edition catalogue,
-creator, co-brand, and in-game fulfillment evidence).
+creator, co-brand, in-game fulfillment, and construction-reveal acquisition
+evidence).
 
 ## Scope
 
@@ -880,7 +881,7 @@ active.
 | [Roblox](https://www.roblox.com/) | Massive cross-device identity, social graph, discovery, creator economy, user-made experiences, and low-friction joining | [Creator/discovery overview search](https://www.youtube.com/results?search_query=Roblox+creator+discovery+platform+overview+2026) |
 | [Planet Minecraft](https://www.planetminecraft.com/) | Community skins, maps, builds, packs, servers, discovery, contests, and downloadable artifacts | Review category pages, ranking, previews, attribution, and handoff friction |
 | [GrabCraft](https://www.grabcraft.com/) | Screenshot-led structure catalogue, layer plans, material lists, and search acquisition | Review how quickly a visitor can understand and reproduce one build |
-| [Sereyka Builds](https://sereyka.com/) | Social-video-led structure subscription with interactive 3D layers, material lists, Java/Bedrock downloads, a Java mod and Bedrock add-ons for hologram/placement/automated construction, creator submissions, affiliate attribution, and co-branded partner domains | Follow one build from creator video to free preview, paid artifact, Java/Bedrock fulfillment, and the [Rafaela co-branded storefront](https://rafaelabuilds.com/); distinguish public claims from independently verified audience or revenue evidence |
+| [Sereyka Builds](https://sereyka.com/) | Social-video-led structure subscription with polished vertical footprint-to-construction reveals, cinematic hero views, interactive 3D layers, material lists, Java/Bedrock downloads, a Java mod and Bedrock add-ons for hologram/placement/automated construction, creator submissions, affiliate attribution, and co-branded partner domains | Follow one build from short-form hook through staged semantic/module reveals, guide CTA, free preview, paid artifact, Java/Bedrock fulfillment, and the [Rafaela co-branded storefront](https://rafaelabuilds.com/); distinguish observed footage and public claims from an unverified private capture stack, audience, or revenue evidence |
 | [Modrinth](https://modrinth.com/) / [CurseForge](https://www.curseforge.com/minecraft) | Mod and modpack discovery, dependency/version management, creators, distribution, and compatibility expectations | Follow one user from search result to a working multiplayer-compatible pack |
 
 ### Historical Lineage And Control Cases
@@ -1028,6 +1029,7 @@ This is a question ledger, not a commitment list:
 | A complete open stack creates trust, preservation, and unlimited total conversions | Luanti, Terasology, Veloren; contrast Vintage Story and Hytale | Can all first-party clients, server, tools, protocols, gameplay data, and original content be legally rebuilt and forked while official releases remain the easiest trusted product? | Product licensing/governance decision; then release, asset, server, and mod contracts |
 | Open source and good mods solve different jobs | Factorio, Luanti, Vintage Story, Teardown, cyubeVR | What stable package API, discovery flow, sandbox, dependency model, and server-delivery contract lets an ordinary player benefit without forking the engine? | Future shared content/mod platform contract |
 | A build page becomes playable immediately | No exact peer in the reviewed set | Can a catalogue page enter the actual web client quickly enough to outperform video or screenshots? | [`structure-catalogue-product.md`](structure-catalogue-product.md) |
+| A semantic build can manufacture its own acquisition media | Sereyka | Can named components, deterministic construction phases, a reusable camera grammar, and exact destination receipts produce a professional vertical reel for every accepted build without manual Minecraft capture or generative-video drift? | [`structure-catalogue-product.md`](structure-catalogue-product.md) |
 | One structure service can respect several game endpoints | Sereyka | Can one rights-clean semantic source publish honest web guides, Java/Bedrock artifacts, and an optional Mclone walk-through without treating Minecraft users as failed conversions? | [`structure-catalogue-product.md`](structure-catalogue-product.md) |
 | Co-branded storefronts let creators distribute without operating the platform | Sereyka / Rafaela Builds | Which creator-owned theme, domain, attribution, affiliate, catalogue-license, and training-license boundaries feel authentic while keeping the central merchant and operator explicit? | [`structure-catalogue-product.md`](structure-catalogue-product.md) and [`distribution-go-to-market.md`](distribution-go-to-market.md) |
 | Friends can return without the world owner | LEGO Fortnite Odyssey, dedicated servers | Which host topology gives small groups durable convenience without mandatory central hosting? | Multiplayer and browser-hosted session topics |
