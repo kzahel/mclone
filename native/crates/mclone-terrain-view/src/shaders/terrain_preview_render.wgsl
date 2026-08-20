@@ -47,6 +47,12 @@ const TERRAIN_HORIZON_DIAGNOSTIC_OCCLUSION: u32 = 6u;
 const TERRAIN_HORIZON_DIAGNOSTIC_WATER: u32 = 7u;
 const TERRAIN_HORIZON_DIAGNOSTIC_TEXTURE: u32 = 8u;
 const TERRAIN_HORIZON_DIAGNOSTIC_FRONTIER_SUPPORT: u32 = 9u;
+const TERRAIN_HORIZON_DIAGNOSTIC_FRONTIER_HYBRID_PROOF: u32 = 10u;
+const TERRAIN_FRONTIER_SUPPORT_TILE_CAPACITY: u32 = 32u;
+const TERRAIN_FRONTIER_PROOF_CONNECTOR_FLAG: u32 = 0x00000100u;
+const TERRAIN_FRONTIER_PROOF_CONNECTOR_WATER_FLAG: u32 = 0x00000200u;
+const TERRAIN_FRONTIER_PROOF_CONNECTOR_FALLBACK_FLAG: u32 = 0x00000400u;
+const TERRAIN_FRONTIER_PROOF_CONNECTOR_OUTER_FLAG: u32 = 0x00000800u;
 // The shared exact-distance field reaches 32 blocks. Restrict water's
 // exact-like appearance to its nearest quarter so the handoff remains a small
 // procedural-side halo rather than a broad second water domain.
@@ -105,6 +111,16 @@ var exact_transition_sampler: sampler;
 @group(2) @binding(4)
 var exact_boundary_profile: texture_2d<u32>;
 
+struct TerrainFrontierSupportTile {
+    tile_x: i32,
+    tile_z: i32,
+    enabled: u32,
+    padding: u32,
+};
+
+@group(2) @binding(5)
+var<storage, read> frontier_support_tiles: array<TerrainFrontierSupportTile>;
+
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) color: vec3<f32>,
@@ -153,6 +169,19 @@ fn exact_frontier_adjacent(world_xz: vec2<f32>) -> bool {
         || (local.x >= 16.0 - band && exact_chunk_masked(chunk + vec2<i32>(1, 0)))
         || (local.y < band && exact_chunk_masked(chunk + vec2<i32>(0, -1)))
         || (local.y >= 16.0 - band && exact_chunk_masked(chunk + vec2<i32>(0, 1)));
+}
+
+fn frontier_support_tile_selected(world_xz: vec2<f32>) -> bool {
+    let tile = vec2<i32>(floor(world_xz / 64.0));
+    for (var index = 0u; index < TERRAIN_FRONTIER_SUPPORT_TILE_CAPACITY; index += 1u) {
+        let support = frontier_support_tiles[index];
+        if support.enabled != 0u
+            && support.tile_x == tile.x
+            && support.tile_z == tile.y {
+            return true;
+        }
+    }
+    return false;
 }
 
 fn exact_transition_weight(world_xz: vec2<f32>) -> f32 {
@@ -918,7 +947,7 @@ fn terrain_vertex(
     return out;
 }
 
-fn exact_connector_vertex(
+fn exact_connector_vertex_legacy(
     vertex_index: u32,
     cell_world_xz: vec2<i32>,
     side: u32,
@@ -1030,6 +1059,161 @@ fn exact_connector_vertex(
     );
     out.side_surface = 1u;
     return out;
+}
+
+fn frontier_proof_height(local_blocks: vec2<f32>) -> f32 {
+    let cells = i32(params.origin_spacing_cells.w);
+    let spacing = f32(params.origin_spacing_cells.z);
+    let sample_position = clamp(
+        local_blocks / spacing,
+        vec2<f32>(0.0),
+        vec2<f32>(f32(cells)),
+    );
+    let cell = vec2<i32>(min(floor(sample_position), vec2<f32>(f32(cells - 1))));
+    let fraction = sample_position - vec2<f32>(cell);
+    let h00 = terrain_horizon_geometry_height(cell.x, cell.y, cells, 1, 0u);
+    let h01 = terrain_horizon_geometry_height(cell.x, cell.y + 1, cells, 1, 0u);
+    let h10 = terrain_horizon_geometry_height(cell.x + 1, cell.y, cells, 1, 0u);
+    let h11 = terrain_horizon_geometry_height(cell.x + 1, cell.y + 1, cells, 1, 0u);
+    if fraction.x + fraction.y <= 1.0 {
+        return h00 + (h10 - h00) * fraction.x + (h01 - h00) * fraction.y;
+    }
+    return h11
+        + (h01 - h11) * (1.0 - fraction.x)
+        + (h10 - h11) * (1.0 - fraction.y);
+}
+
+fn frontier_proof_connector_vertex(
+    vertex_index: u32,
+    cell_world_xz: vec2<i32>,
+    side_kind: u32,
+    view_index: u32,
+) -> VertexOutput {
+    let side = side_kind & 3u;
+    let water = (side_kind & TERRAIN_FRONTIER_PROOF_CONNECTOR_WATER_FLAG) != 0u;
+    let outer = (side_kind & TERRAIN_FRONTIER_PROOF_CONNECTOR_OUTER_FLAG) != 0u;
+    let corner = grid_corner(vertex_index % 6u);
+    let edge_t = f32(corner.x);
+    var exact_block = vec2<i32>(cell_world_xz.x - 1, cell_world_xz.y);
+    var world_x = f32(cell_world_xz.x) + 0.001;
+    var world_z = f32(cell_world_xz.y) + 1.0 - edge_t;
+    var light = 0.6;
+    if side == 1u {
+        exact_block = vec2<i32>(cell_world_xz.x + 1, cell_world_xz.y);
+        world_x = f32(cell_world_xz.x) + 0.999;
+        world_z = f32(cell_world_xz.y) + edge_t;
+    } else if side == 2u {
+        exact_block = vec2<i32>(cell_world_xz.x, cell_world_xz.y - 1);
+        world_x = f32(cell_world_xz.x) + edge_t;
+        world_z = f32(cell_world_xz.y) + 0.001;
+        light = 0.8;
+    } else if side == 3u {
+        exact_block = vec2<i32>(cell_world_xz.x, cell_world_xz.y + 1);
+        world_x = f32(cell_world_xz.x) + 1.0 - edge_t;
+        world_z = f32(cell_world_xz.y) + 0.999;
+        light = 0.8;
+    }
+
+    let cells = i32(params.origin_spacing_cells.w);
+    let spacing = f32(params.origin_spacing_cells.z);
+    let origin = vec2<f32>(params.origin_spacing_cells.xy);
+    let world_xz = vec2<f32>(world_x, world_z);
+    let local_blocks = world_xz - origin;
+    let procedural_y = frontier_proof_height(local_blocks) + 1.0;
+    let nearest_sample = vec2<i32>(clamp(
+        round(local_blocks / spacing),
+        vec2<f32>(0.0),
+        vec2<f32>(f32(cells)),
+    ));
+    let sample_index = u32(nearest_sample.y) * params.layer_samples_size.y
+        + u32(nearest_sample.x);
+    let sample = selected_sample(sample_index, 0u);
+    let reference = reference_samples[sample_index];
+    let gpu = gpu_samples[sample_index];
+    let packed = exact_boundary_column(exact_block);
+    let owner_footprint = cells * params.origin_spacing_cells.z;
+    let local_cell = cell_world_xz - params.origin_spacing_cells.xy;
+    let owned_cell = all(local_cell >= vec2<i32>(0))
+        && all(local_cell < vec2<i32>(owner_footprint));
+    let typed_boundary = exact_boundary_valid(packed)
+        && exact_boundary_water(packed) == water;
+    let connector_valid = owned_cell && (outer || typed_boundary);
+    let exact_y = exact_boundary_top_y(packed);
+    let water_y = max(exact_y, 64.0);
+    let boundary_y = select(exact_y, water_y, water);
+    let bottom_y = select(min(procedural_y, boundary_y), -64.0, outer);
+    let top_y = select(max(procedural_y, boundary_y), procedural_y, outer);
+    let world_y = mix(bottom_y, top_y, f32(corner.y));
+    let world_position = vec3<f32>(world_x, world_y, world_z);
+    var material = terrain_material(sample);
+    if water {
+        material = 2u;
+    } else if !outer && (packed & 0x02000000u) != 0u {
+        material = (packed >> 16u) & 0xffu;
+    }
+
+    var out: VertexOutput;
+    out.position = terrain_clip_position(world_position, 0u, view_index);
+    if !connector_valid {
+        out.position = vec4<f32>(2.0, 2.0, 2.0, 1.0);
+    }
+    out.color = sample_color(sample, reference, gpu, light);
+    out.world_xz = world_position.xz;
+    out.light = light;
+    out.material = material;
+    out.textured = select(
+        0u,
+        1u,
+        params.layer_samples_size.x == 0u && preview_profile() == 0u,
+    );
+    out.river = vec4<f32>(
+        sample.hydrology.x,
+        sample.hydrology.w,
+        sample.hydrology.y,
+        sample.terrain.x,
+    );
+    out.semantics = vec4<f32>(
+        sample.hydrology_detail.x,
+        sample.hydrology_detail.y,
+        sample.semantics.x,
+        select(0.0, sample.forest_summary.x, params.content_stage_flags.x >= 4u),
+    );
+    out.world_position = vec4<f32>(
+        world_position,
+        exact_transition_weight(world_position.xz),
+    );
+    out.biome = u32(round(sample.semantics.y));
+    out.surface_y = sample.terrain.x;
+    out.view_index = view_index;
+    out.world_uv = select(
+        vec2<f32>(world_z, -world_y),
+        vec2<f32>(world_x, -world_y),
+        side >= 2u,
+    );
+    out.side_surface = 1u;
+    return out;
+}
+
+fn exact_connector_vertex(
+    vertex_index: u32,
+    cell_world_xz: vec2<i32>,
+    side_kind: u32,
+    view_index: u32,
+) -> VertexOutput {
+    if (side_kind & TERRAIN_FRONTIER_PROOF_CONNECTOR_FLAG) != 0u {
+        return frontier_proof_connector_vertex(
+            vertex_index,
+            cell_world_xz,
+            side_kind,
+            view_index,
+        );
+    }
+    return exact_connector_vertex_legacy(
+        vertex_index,
+        cell_world_xz,
+        side_kind,
+        view_index,
+    );
 }
 
 fn apply_material_texture(
@@ -1166,6 +1350,12 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
         && input.world_xz.y < f32(params.clipmap_inner_bounds.w) {
         discard;
     }
+    let horizon_diagnostic = params.multiview_options.y;
+    if horizon_diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_FRONTIER_HYBRID_PROOF
+        && u32(params.origin_spacing_cells.z) > 1u
+        && frontier_support_tile_selected(input.world_xz) {
+        discard;
+    }
     let exact_painted = exact_chunk_painted(input.world_xz);
     if exact_coverage.mode_count_generation.x == 1u
         && exact_painted {
@@ -1180,7 +1370,6 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let river_anti_alias = max(fwidth(input.river.x), blocks_per_pixel * 0.35);
     let pool_anti_alias = max(fwidth(input.semantics.y), 0.01);
     let physical_channel_edge = max(fwidth(input.river.z), 0.001);
-    let horizon_diagnostic = params.multiview_options.y;
     let albedo_diagnostic = horizon_diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_ALBEDO;
     let environmental_illumination = full_sky_environmental_illumination();
     var color = input.color;

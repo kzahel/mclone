@@ -61,6 +61,17 @@ pub struct SceneTerrainViewDiagnostics {
     pub exact_connector_segments: u32,
     pub exact_connector_vertex_count: u32,
     pub exact_connector_bytes: u64,
+    pub frontier_support_allocated_tiles: u32,
+    pub frontier_support_ready_tiles: u32,
+    pub frontier_support_pending_tiles: u32,
+    pub frontier_support_drawn_tiles: u32,
+    pub frontier_support_dispatches: u32,
+    pub frontier_support_dispatches_total: u64,
+    pub frontier_support_resource_bytes: u64,
+    pub frontier_support_vertex_count: u32,
+    pub frontier_proof_connector_segments: u32,
+    pub frontier_proof_connector_vertex_count: u32,
+    pub frontier_proof_connector_bytes: u64,
     pub exact_transition_preparation_micros: u64,
     pub exact_transition_payload_bytes: u64,
     pub exact_boundary_preparation_micros: u64,
@@ -650,6 +661,20 @@ impl SceneTerrainViewState {
         self.diagnostics.exact_connector_segments = stats.exact_connector_segments;
         self.diagnostics.exact_connector_vertex_count = stats.exact_connector_vertex_count;
         self.diagnostics.exact_connector_bytes = stats.exact_connector_bytes;
+        self.diagnostics.frontier_support_allocated_tiles = stats.frontier_support_allocated_tiles;
+        self.diagnostics.frontier_support_ready_tiles = stats.frontier_support_ready_tiles;
+        self.diagnostics.frontier_support_pending_tiles = stats.frontier_support_pending_tiles;
+        self.diagnostics.frontier_support_drawn_tiles = stats.frontier_support_drawn_tiles;
+        self.diagnostics.frontier_support_dispatches = stats.frontier_support_dispatches;
+        self.diagnostics.frontier_support_dispatches_total =
+            stats.frontier_support_dispatches_total;
+        self.diagnostics.frontier_support_resource_bytes = stats.frontier_support_resource_bytes;
+        self.diagnostics.frontier_support_vertex_count = stats.frontier_support_vertex_count;
+        self.diagnostics.frontier_proof_connector_segments =
+            stats.frontier_proof_connector_segments;
+        self.diagnostics.frontier_proof_connector_vertex_count =
+            stats.frontier_proof_connector_vertex_count;
+        self.diagnostics.frontier_proof_connector_bytes = stats.frontier_proof_connector_bytes;
         self.diagnostics.exact_transition_preparation_micros =
             stats.exact_transition_preparation_micros;
         self.diagnostics.exact_transition_payload_bytes = stats.exact_transition_payload_bytes;

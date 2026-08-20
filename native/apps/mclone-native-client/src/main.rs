@@ -228,6 +228,19 @@ fn main() -> Result<()> {
                         "connectorInstanceBytes": topology.connector_instance_bytes,
                         "connectorVertices": topology.connector_vertices,
                     });
+                    let frontier_proof_gpu = serde_json::json!({
+                        "allocatedSupportTiles": terrain.frontier_support_allocated_tiles,
+                        "readySupportTiles": terrain.frontier_support_ready_tiles,
+                        "pendingSupportTiles": terrain.frontier_support_pending_tiles,
+                        "drawnSupportTiles": terrain.frontier_support_drawn_tiles,
+                        "supportDispatches": terrain.frontier_support_dispatches,
+                        "supportDispatchesTotal": terrain.frontier_support_dispatches_total,
+                        "supportResourceBytes": terrain.frontier_support_resource_bytes,
+                        "supportVertexCount": terrain.frontier_support_vertex_count,
+                        "connectorSegments": terrain.frontier_proof_connector_segments,
+                        "connectorVertexCount": terrain.frontier_proof_connector_vertex_count,
+                        "connectorBytes": terrain.frontier_proof_connector_bytes,
+                    });
                     serde_json::json!({
                         "enabled": true,
                         "lodPreset": terrain.lod_preset.startup_label(),
@@ -255,6 +268,7 @@ fn main() -> Result<()> {
                         "exactBoundaryPayloadBytes": terrain.exact_boundary_payload_bytes,
                         "frontier": frontier_state,
                         "frontierTopology": frontier_topology,
+                        "frontierProofGpu": frontier_proof_gpu,
                         "drawnTreeTiles": terrain.drawn_tree_tiles,
                         "drawnTreeTilesByLevel": terrain.drawn_tree_tiles_by_level,
                         "drawnTreeInstances": terrain.drawn_tree_instances,

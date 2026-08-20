@@ -440,10 +440,11 @@ pub enum TerrainHorizonDiagnostic {
     Water = 7,
     Texture = 8,
     FrontierSupport = 9,
+    FrontierHybridProof = 10,
 }
 
 impl TerrainHorizonDiagnostic {
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 11] = [
         Self::Natural,
         Self::OwnershipLevel,
         Self::Topology,
@@ -454,6 +455,7 @@ impl TerrainHorizonDiagnostic {
         Self::Water,
         Self::Texture,
         Self::FrontierSupport,
+        Self::FrontierHybridProof,
     ];
 
     pub const fn label(self) -> &'static str {
@@ -468,6 +470,7 @@ impl TerrainHorizonDiagnostic {
             Self::Water => "water",
             Self::Texture => "texture",
             Self::FrontierSupport => "frontier-support",
+            Self::FrontierHybridProof => "frontier-hybrid-proof",
         }
     }
 
