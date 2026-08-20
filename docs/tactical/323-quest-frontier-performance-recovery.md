@@ -1,7 +1,7 @@
 # Tactical 323: Quest Frontier Performance Recovery
 
-Status: implementation authorized 2026-08-20; baseline attribution in
-progress.
+Status: implementation authorized 2026-08-20; matched physical baseline
+complete and constant-time suppression in progress.
 
 Topics: `procedural-horizon-clipmap`, `performance`,
 `quest-frontier-performance`
@@ -84,6 +84,39 @@ coordinates. The representation must:
 Add CPU lookup fixtures and shader-validation coverage. Compare native pixels
 before and after, then measure the same preferred Quest lane.
 
+## Phase 0 Evidence
+
+Commit `1d38a647` exposes the existing frontier diagnostic as an Android-XR
+launch-only control without changing product defaults. One release APK then
+ran the requested alternating Quest 3 matrix at RD8, 72 Hz, 1680-by-1760 per
+eye, render scale 1, foveation Off, fixed daylight, and the production per-eye
+frame-overlap path:
+
+| Lane | App work p50 / p95 | Thread CPU p50 | Blocked p50 | App GPU | Over-period |
+|---|---:|---:|---:|---:|---:|
+| exact / Off | `6.342 / 7.073ms` | `4.219ms` | `2.120ms` | `3.024ms` | `0.0%` |
+| preferred A | `15.072 / 18.633ms` | `6.880ms` | `8.154ms` | `9.089ms` | `66.8%` |
+| forced bounded fallback | `15.228 / 18.937ms` | `6.643ms` | `8.505ms` | `10.029ms` | `67.9%` |
+| preferred B | `15.232 / 18.789ms` | `6.921ms` | `8.237ms` | `9.526ms` | `66.4%` |
+
+All Low lanes settled with 96 ready slots, 289 exact columns, six drawn
+levels, 47 regular terrain tiles, zero exact-center-not-ready frames, and no
+pending vegetation work. The preferred repeat differs by only `0.160ms` at
+p50 and `0.156ms` at p95. Fallback removes almost the entire preferred fine
+belt but does not improve work or GPU time. That rules out support generation
+and makes full support geometry an unlikely first-order explanation. The
+common per-fragment 32-record suppression scan and shared material work are
+the supported first targets.
+
+Raw evidence:
+
+```text
+/tmp/mclone-t323-baseline-exact.txt
+/tmp/mclone-t323-baseline-preferred-a.txt
+/tmp/mclone-t323-baseline-fallback.txt
+/tmp/mclone-t323-baseline-preferred-b.txt
+```
+
 ## Phase 2: Inactive Transition Shading
 
 Avoid evaluating the exact-side material response when transition weight is
@@ -128,7 +161,7 @@ foveation level or any other quality tradeoff.
 
 ## Completion Gate
 
-- [ ] Matched exact/preferred/fallback/preferred Quest baseline is recorded.
+- [x] Matched exact/preferred/fallback/preferred Quest baseline is recorded.
 - [ ] Constant-time suppression is implemented, validated, and measured.
 - [ ] Zero-weight transition shading is eliminated and pixel-validated.
 - [ ] Support submission is compacted without weakening the certificate.
@@ -138,4 +171,3 @@ foveation level or any other quality tradeoff.
 - [ ] Living clipmap and performance topics contain the settled result.
 - [ ] The worktree is clean and implementation commits share the topic
       trailers.
-
