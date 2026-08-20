@@ -402,6 +402,28 @@ export function App(): React.JSX.Element {
       data-ecoregion-production-unchanged={
         ecoregionReport?.productionTerrainUnchanged ? "true" : "false"
       }
+      data-ecoregion-control-revision={
+        ecoregionReport?.metadata.productionControlRevision ?? ""
+      }
+      data-ecoregion-control-checksum={
+        ecoregionReport?.metadata.productionControlSha256 ?? ""
+      }
+      data-ecoregion-control-exact-chunks={
+        ecoregionReport?.metadata.productionControlWork.exactChunks ?? ""
+      }
+      data-ecoregion-components={
+        ecoregionReport?.metadata.metrics.ecoregionComponents.componentCount ?? ""
+      }
+      data-ecoregion-control-biome-components={
+        ecoregionReport?.metadata.productionControlMetrics.biomeComponents.componentCount
+          ?? ""
+      }
+      data-ecoregion-control-land-fraction={
+        ecoregionReport?.metadata.productionControlMetrics.landFraction ?? ""
+      }
+      data-ecoregion-control-ocean-fraction={
+        ecoregionReport?.metadata.productionControlMetrics.oceanFraction ?? ""
+      }
       data-plan-build-ms={planReport?.buildMs ?? ""}
       data-plan-transfer-bytes={planReport?.transferBytes ?? 0}
       data-plan-checksum={planReport?.checksum ?? ""}
@@ -1277,6 +1299,9 @@ export function App(): React.JSX.Element {
                     <option value="clearings">Planned clearings</option>
                     <option value="water">Water, wetland & riparian relation</option>
                     <option value="habitat">Habitat structure & corridors</option>
+                    <option value="production-control">
+                      Current production · field 21
+                    </option>
                   </select>
                 </label>
                 <p className="controlNote">
@@ -2077,6 +2102,36 @@ function ContinentalEcoregionEvidence({
         <div>
           <dt>Native/Wasm witness</dt>
           <dd>{report.witnessSha256.slice(0, 16)}…</dd>
+        </div>
+        <div>
+          <dt>Production control</dt>
+          <dd>{metadata.productionControlRevision} · {
+            metadata.productionControlWork.exactChunks
+          } chunks</dd>
+        </div>
+        <div>
+          <dt>Control land / ocean</dt>
+          <dd>{(metadata.productionControlMetrics.landFraction * 100).toFixed(1)}% / {
+            (metadata.productionControlMetrics.oceanFraction * 100).toFixed(1)
+          }%</dd>
+        </div>
+        <div>
+          <dt>Candidate ecoregions</dt>
+          <dd>{formatInteger(metrics.ecoregionComponents.componentCount)} · max {
+            metrics.ecoregionComponents.maximumAreaSquareKm.toFixed(1)
+          } km²</dd>
+        </div>
+        <div>
+          <dt>Control biome components</dt>
+          <dd>{formatInteger(
+            metadata.productionControlMetrics.biomeComponents.componentCount,
+          )} · max {
+            metadata.productionControlMetrics.biomeComponents.maximumAreaSquareKm.toFixed(1)
+          } km²</dd>
+        </div>
+        <div>
+          <dt>Control checksum</dt>
+          <dd>{metadata.productionControlSha256.slice(0, 16)}…</dd>
         </div>
       </dl>
       <details className="pointReceiptDetails">

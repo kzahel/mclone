@@ -8,6 +8,9 @@ use mclone_worldgen::continental_ecoregion::{
     ContinentalEcoregionDescriptor, ContinentalEcoregionPlan, LandscapePlanDetail,
     LandscapeWindowRequest,
 };
+use mclone_worldgen::continental_ecoregion_atlas::{
+    ContinentalEcoregionAtlasRequest, compile_continental_ecoregion_atlas,
+};
 use mclone_worldgen::continental_ecoregion_harness::{
     CONTINENTAL_ECOREGION_HARNESS_SCHEMA_REVISION, run_continental_ecoregion_suite,
 };
@@ -56,12 +59,29 @@ struct WindowTiming {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+struct AtlasTiming {
+    blocks_across: u32,
+    sample_step_blocks: u32,
+    sample_count: u32,
+    elapsed_ns: u128,
+    nanoseconds_per_sample: u128,
+    candidate_sha256: String,
+    production_control_sha256: String,
+    candidate_exact_chunks: u64,
+    production_control_exact_chunks: u64,
+    candidate_ecoregion_components: u32,
+    production_control_biome_components: u32,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct RunReceipt {
     receipt_schema: &'static str,
     run: RunMetadata,
     suite: mclone_worldgen::continental_ecoregion_harness::ContinentalEcoregionSuiteReceipt,
     direct_timings: Vec<DirectTiming>,
     window_timings: Vec<WindowTiming>,
+    atlas_timings: Vec<AtlasTiming>,
     artifact_path: String,
 }
 
@@ -108,6 +128,7 @@ fn run() -> Result<(), String> {
         },
         direct_timings: direct_timings()?,
         window_timings: window_timings()?,
+        atlas_timings: atlas_timings()?,
         suite,
         artifact_path: output.display().to_string(),
     };
@@ -135,6 +156,12 @@ fn run() -> Result<(), String> {
             timing.sample_step_blocks,
             timing.elapsed_ns,
             timing.nanoseconds_per_sample
+        );
+    }
+    for timing in &receipt.atlas_timings {
+        println!(
+            "{}-block candidate+control atlas: {} ns ({} ns/sample)",
+            timing.blocks_across, timing.elapsed_ns, timing.nanoseconds_per_sample
         );
     }
     Ok(())
@@ -205,6 +232,39 @@ fn window_timings() -> Result<Vec<WindowTiming>, String> {
                 .count() as u32,
             semantic_sha256: window.semantic_sha256,
             work: window.work,
+        });
+    }
+    Ok(timings)
+}
+
+fn atlas_timings() -> Result<Vec<AtlasTiming>, String> {
+    let mut timings = Vec::new();
+    for blocks_across in [65_536_u32, 131_072] {
+        let request = ContinentalEcoregionAtlasRequest::plane(12_345, 0, 0, blocks_across);
+        let started = Instant::now();
+        let atlas =
+            compile_continental_ecoregion_atlas(request).map_err(|error| error.to_string())?;
+        let elapsed_ns = started.elapsed().as_nanos();
+        timings.push(AtlasTiming {
+            blocks_across,
+            sample_step_blocks: atlas.metadata.sample_step_blocks,
+            sample_count: atlas.metadata.sample_count,
+            elapsed_ns,
+            nanoseconds_per_sample: elapsed_ns / u128::from(atlas.metadata.sample_count),
+            candidate_sha256: atlas.metadata.semantic_sha256,
+            production_control_sha256: atlas.metadata.production_control_sha256,
+            candidate_exact_chunks: atlas.metadata.work.exact_chunks,
+            production_control_exact_chunks: atlas.metadata.production_control_work.exact_chunks,
+            candidate_ecoregion_components: atlas
+                .metadata
+                .metrics
+                .ecoregion_components
+                .component_count,
+            production_control_biome_components: atlas
+                .metadata
+                .production_control_metrics
+                .biome_components
+                .component_count,
         });
     }
     Ok(timings)

@@ -29,7 +29,8 @@ export type ContinentalEcoregionLayer =
   | "openness"
   | "clearings"
   | "water"
-  | "habitat";
+  | "habitat"
+  | "production-control";
 export type SemanticTerrainSubstrate = "flat" | "quiet";
 export type SemanticTerrainFeatures = "range" | "basin" | "combined";
 export type SemanticTerrainCorrection = "regional" | "local";
@@ -235,6 +236,7 @@ const ECOREGION_LAYERS = new Set<ContinentalEcoregionLayer>([
   "clearings",
   "water",
   "habitat",
+  "production-control",
 ]);
 const SEMANTIC_SUBSTRATES = new Set<SemanticTerrainSubstrate>(["flat", "quiet"]);
 const SEMANTIC_FEATURES = new Set<SemanticTerrainFeatures>([

@@ -138,6 +138,56 @@ impl TerrainLabContinentalEcoregionCompiler {
     pub fn clearing_id(&self) -> Result<Uint32Array, JsValue> {
         Ok(Uint32Array::from(self.atlas()?.clearing_id.as_slice()))
     }
+
+    #[wasm_bindgen(js_name = productionLand)]
+    pub fn production_land(&self) -> Result<Uint16Array, JsValue> {
+        Ok(Uint16Array::from(self.atlas()?.production_land.as_slice()))
+    }
+
+    #[wasm_bindgen(js_name = productionSurfaceY)]
+    pub fn production_surface_y(&self) -> Result<Int16Array, JsValue> {
+        Ok(Int16Array::from(
+            self.atlas()?.production_surface_y.as_slice(),
+        ))
+    }
+
+    #[wasm_bindgen(js_name = productionTemperature)]
+    pub fn production_temperature(&self) -> Result<Int16Array, JsValue> {
+        Ok(Int16Array::from(
+            self.atlas()?.production_temperature.as_slice(),
+        ))
+    }
+
+    #[wasm_bindgen(js_name = productionMoisture)]
+    pub fn production_moisture(&self) -> Result<Int16Array, JsValue> {
+        Ok(Int16Array::from(
+            self.atlas()?.production_moisture.as_slice(),
+        ))
+    }
+
+    #[wasm_bindgen(js_name = productionRelief)]
+    pub fn production_relief(&self) -> Result<Int16Array, JsValue> {
+        Ok(Int16Array::from(self.atlas()?.production_relief.as_slice()))
+    }
+
+    #[wasm_bindgen(js_name = productionRuggedness)]
+    pub fn production_ruggedness(&self) -> Result<Int16Array, JsValue> {
+        Ok(Int16Array::from(
+            self.atlas()?.production_ruggedness.as_slice(),
+        ))
+    }
+
+    #[wasm_bindgen(js_name = productionWater)]
+    pub fn production_water(&self) -> Result<Uint16Array, JsValue> {
+        Ok(Uint16Array::from(self.atlas()?.production_water.as_slice()))
+    }
+
+    #[wasm_bindgen(js_name = productionBiomeKind)]
+    pub fn production_biome_kind(&self) -> Result<Uint8Array, JsValue> {
+        Ok(Uint8Array::from(
+            self.atlas()?.production_biome_kind.as_slice(),
+        ))
+    }
 }
 
 #[wasm_bindgen(js_name = continentalEcoregionSuiteSha256)]
@@ -169,7 +219,7 @@ fn parse_topology(value: &str) -> Result<ContinentalEcoregionTopology, JsValue> 
             })
         }
         "cylinder-x" | "cylinder-x-6144" => Err(js_error(format!(
-            "the 6,144-block proof cylinder is smaller than the Revision 1 minimum of {MIN_SUPPORTED_CYLINDER_BLOCKS} blocks"
+            "the 6,144-block proof cylinder is smaller than the Revision 2 minimum of {MIN_SUPPORTED_CYLINDER_BLOCKS} blocks"
         ))),
         other => Err(js_error(format!(
             "unsupported continental atlas topology {other:?}; expected plane or cylinder-x-196608"

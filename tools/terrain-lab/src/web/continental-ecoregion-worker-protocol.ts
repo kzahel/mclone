@@ -48,6 +48,7 @@ export interface ContinentalEcoregionAtlasMetrics {
   wetlandComponents: ComponentDistribution;
   clearingComponents: ComponentDistribution;
   habitatNetworkComponents: ComponentDistribution;
+  ecoregionComponents: ComponentDistribution;
   provinceKindCounts: number[];
   ecoregionKindCounts: number[];
   clearingCauseCounts: number[];
@@ -63,6 +64,21 @@ export interface PlanConstructionCounts {
   mosaicOwnerEvaluations: number;
   localFieldEvaluations: number;
   exactChunks: number;
+}
+
+export interface ProductionControlWork {
+  requestedSamples: number;
+  fieldSamples: number;
+  exactChunks: number;
+}
+
+export interface ProductionControlMetrics {
+  landFraction: number;
+  oceanFraction: number;
+  landComponents: ComponentDistribution;
+  biomeComponents: ComponentDistribution;
+  biomeKindCounts: number[];
+  journeys: EcoregionJourneyReceipt[];
 }
 
 export interface ContinentalEcoregionAtlasMetadata {
@@ -84,6 +100,11 @@ export interface ContinentalEcoregionAtlasMetadata {
   sampleCount: number;
   semanticSha256: string;
   work: PlanConstructionCounts;
+  productionControlRevision: string;
+  productionControlTopology: string;
+  productionControlSha256: string;
+  productionControlWork: ProductionControlWork;
+  productionControlMetrics: ProductionControlMetrics;
   continentStories: string[];
   provinceKinds: string[];
   ecoregionKinds: string[];
@@ -114,6 +135,14 @@ export interface ContinentalEcoregionWorkerSummary {
   provinceId: Uint32Array;
   ecoregionId: Uint32Array;
   clearingId: Uint32Array;
+  productionLand: Uint16Array;
+  productionSurfaceY: Int16Array;
+  productionTemperature: Int16Array;
+  productionMoisture: Int16Array;
+  productionRelief: Int16Array;
+  productionRuggedness: Int16Array;
+  productionWater: Uint16Array;
+  productionBiomeKind: Uint8Array;
 }
 
 export interface ContinentalEcoregionWorkerError {

@@ -71,6 +71,26 @@ const CLEARING_COLORS = [
   [117, 176, 140],
   [179, 163, 104],
 ] as const;
+const PRODUCTION_BIOME_COLORS = [
+  [23, 75, 105],
+  [192, 177, 119],
+  [42, 132, 150],
+  [203, 218, 218],
+  [48, 94, 79],
+  [176, 151, 77],
+  [65, 116, 66],
+  [147, 174, 91],
+] as const;
+const PRODUCTION_BIOME_LABELS = [
+  "ocean",
+  "shore",
+  "river",
+  "snowy alpine",
+  "cool wet conifer",
+  "warm dry steppe",
+  "temperate woodland",
+  "temperate meadow",
+] as const;
 
 export function ContinentalEcoregionCanvas({
   state,
@@ -345,10 +365,18 @@ export function ContinentalEcoregionCanvas({
         <div className="canvasTopline" aria-hidden="true">
           <span className="canvasBadge primary">
             {response
-              ? updating ? "updating plan · frame retained" : "continental plan ready"
+              ? updating
+                ? "updating plan · frame retained"
+                : state.ecoregionLayer === "production-control"
+                  ? "production control ready"
+                  : "continental plan ready"
               : "planning 65–131 km geography"}
           </span>
-          <span className="canvasBadge">candidate · production unchanged</span>
+          <span className="canvasBadge">
+            {state.ecoregionLayer === "production-control"
+              ? "field 21 · unbounded plane"
+              : "candidate · production unchanged"}
+          </span>
           <span className="canvasBadge">{layerLabel(state.ecoregionLayer)}</span>
           <span className="canvasBadge">
             {response
@@ -357,7 +385,11 @@ export function ContinentalEcoregionCanvas({
           </span>
         </div>
         {response && selectedIndex !== undefined ? (
-          <EcoregionInspector response={response} index={selectedIndex} />
+          <EcoregionInspector
+            response={response}
+            index={selectedIndex}
+            layer={state.ecoregionLayer}
+          />
         ) : null}
         <div className="canvasHint">
           Drag to pan · wheel or pinch to zoom · tap a plan sample to inspect
@@ -427,6 +459,23 @@ function sampleColor(
   response: ContinentalEcoregionWorkerSummary,
   index: number,
 ): [number, number, number] {
+  if (layer === "production-control") {
+    const base = palette(
+      PRODUCTION_BIOME_COLORS,
+      response.productionBiomeKind[index]!,
+    );
+    const surface = Math.max(0, Math.min(1,
+      (response.productionSurfaceY[index]! - 48) / 88,
+    ));
+    const ruggedness = signedUnit(response.productionRuggedness[index]!);
+    let color = mix([31, 50, 45], base, 0.72 + surface * 0.18);
+    color = mix(color, [225, 222, 181], ruggedness * 0.22);
+    return mix(
+      color,
+      [45, 151, 167],
+      response.productionWater[index]! / 65_535 * 0.62,
+    );
+  }
   const land = response.land[index]! / 65_535;
   if (land < 0.5) {
     const shelf = Math.max(0, Math.min(1,
@@ -514,9 +563,11 @@ function drawCoordinateGrid(
 function EcoregionInspector({
   response,
   index,
+  layer,
 }: {
   response: ContinentalEcoregionWorkerSummary;
   index: number;
+  layer: ContinentalEcoregionLayer;
 }): React.JSX.Element {
   const { metadata } = response;
   const column = index % metadata.columns;
@@ -526,6 +577,38 @@ function EcoregionInspector({
   const province = labelAt(metadata.provinceKinds, response.provinceKind[index]!);
   const ecoregion = labelAt(metadata.ecoregionKinds, response.ecoregionKind[index]!);
   const clearing = labelAt(metadata.clearingCauses, response.clearingCause[index]!);
+  if (layer === "production-control") {
+    const biome = PRODUCTION_BIOME_LABELS[response.productionBiomeKind[index]!]!;
+    return (
+      <div className="ecoregionInspector" data-testid="continental-ecoregion-inspector">
+        <div>
+          <span>{formatInteger(worldX)}, {formatInteger(worldZ)}</span>
+          <strong>{biome}</strong>
+        </div>
+        <p>{metadata.productionControlRevision} · {metadata.productionControlTopology}</p>
+        <dl>
+          <div><dt>Surface</dt><dd>{response.productionSurfaceY[index]} m</dd></div>
+          <div><dt>Continental / water</dt><dd>{encodedSignedPercent(
+            response.productionLand[index]!,
+          )} / {
+            percent(response.productionWater[index]!)
+          }</dd></div>
+          <div><dt>Temperature</dt><dd>{signedPercent(
+            response.productionTemperature[index]!,
+          )}</dd></div>
+          <div><dt>Moisture</dt><dd>{signedPercent(
+            response.productionMoisture[index]!,
+          )}</dd></div>
+          <div><dt>Relief</dt><dd>{signedPercent(
+            response.productionRelief[index]!,
+          )}</dd></div>
+          <div><dt>Ruggedness</dt><dd>{signedPercent(
+            response.productionRuggedness[index]!,
+          )}</dd></div>
+        </dl>
+      </div>
+    );
+  }
   return (
     <div className="ecoregionInspector" data-testid="continental-ecoregion-inspector">
       <div>
@@ -570,15 +653,22 @@ function EcoregionLegend({
         label,
         color: CLEARING_COLORS[index]!,
       }))
-      : response?.metadata.ecoregionKinds.map((label, index) => ({
-        label,
-        color: ECOREGION_COLORS[index]!,
-      }));
+      : layer === "production-control"
+        ? PRODUCTION_BIOME_LABELS.map((label, index) => ({
+          label,
+          color: PRODUCTION_BIOME_COLORS[index]!,
+        }))
+        : response?.metadata.ecoregionKinds.map((label, index) => ({
+          label,
+          color: ECOREGION_COLORS[index]!,
+        }));
   return (
     <div className="ecoregionLegend" data-testid="continental-ecoregion-legend">
       <strong>{layerLabel(layer)}</strong>
       <div>
-        <span><i style={{ background: "rgb(21 61 82)" }} /> ocean</span>
+        {layer === "production-control"
+          ? null
+          : <span><i style={{ background: "rgb(21 61 82)" }} /> ocean</span>}
         {(entries ?? []).map((entry) => (
           <span key={entry.label}>
             <i style={{ background: rgb(entry.color) }} />
@@ -620,6 +710,7 @@ function layerLabel(layer: ContinentalEcoregionLayer): string {
     clearings: "Planned clearings",
     water: "Water, wetland & riparian relation",
     habitat: "Habitat structure & corridors",
+    "production-control": "Current production · field 21",
   }[layer];
 }
 
@@ -629,6 +720,20 @@ function labelAt(labels: string[], index: number): string | undefined {
 
 function percent(value: number): string {
   return `${Math.round(value / 65_535 * 100)}%`;
+}
+
+function signedUnit(value: number): number {
+  return Math.max(0, Math.min(1, value / 32_767 * 0.5 + 0.5));
+}
+
+function signedPercent(value: number): string {
+  const normalized = value / 32_767;
+  return `${normalized >= 0 ? "+" : "−"}${Math.round(Math.abs(normalized) * 100)}%`;
+}
+
+function encodedSignedPercent(value: number): string {
+  const normalized = value / 65_535 * 2 - 1;
+  return `${normalized >= 0 ? "+" : "−"}${Math.round(Math.abs(normalized) * 100)}%`;
 }
 
 function formatDistance(blocks: number): string {

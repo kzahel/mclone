@@ -68,6 +68,14 @@ self.onmessage = (
         provinceId: compiler.provinceId(),
         ecoregionId: compiler.ecoregionId(),
         clearingId: compiler.clearingId(),
+        productionLand: compiler.productionLand(),
+        productionSurfaceY: compiler.productionSurfaceY(),
+        productionTemperature: compiler.productionTemperature(),
+        productionMoisture: compiler.productionMoisture(),
+        productionRelief: compiler.productionRelief(),
+        productionRuggedness: compiler.productionRuggedness(),
+        productionWater: compiler.productionWater(),
+        productionBiomeKind: compiler.productionBiomeKind(),
       };
       if (request.revision === activeRevision) {
         post(response);
@@ -106,6 +114,14 @@ function post(response: ContinentalEcoregionWorkerResponse): void {
       response.provinceId.buffer,
       response.ecoregionId.buffer,
       response.clearingId.buffer,
+      response.productionLand.buffer,
+      response.productionSurfaceY.buffer,
+      response.productionTemperature.buffer,
+      response.productionMoisture.buffer,
+      response.productionRelief.buffer,
+      response.productionRuggedness.buffer,
+      response.productionWater.buffer,
+      response.productionBiomeKind.buffer,
     ],
   });
 }

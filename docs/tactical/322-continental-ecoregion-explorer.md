@@ -5,12 +5,13 @@ disconnected shared Rust plan, bounded direct queries, typed temperate
 grammar, native/Wasm canonical corpus, fixed-cost Terrain Lab atlas, initial
 distribution and journey metrics, and desktop/phone browser evidence now
 pass. Pixel review rejected the first cellular composition and produced the
-larger-scale Revision 2 candidate. Human Review A is not open yet: paired
-production-control captures, 131 km review evidence, and the remaining metric
-gaps come next. Human Review A selects the atlas grammar before World Explorer
-realization, and Human Review B selects whether the candidate deserves
-production integration. The current production generator remains a visible
-control, not a protected output target.**
+larger-scale Revision 2 candidate. Same-coordinate 65 km and 131 km atlases
+now include a direct current-production field-revision-21 control. Human
+Review A is not open yet: the remaining transition, clearing, recurrence, and
+habitat-connectivity metric gaps come next. Human Review A selects the atlas
+grammar before World Explorer realization, and Human Review B selects whether
+the candidate deserves production integration. The current production
+generator remains a visible control, not a protected output target.**
 
 Topic: `continental-ecoregion-planning`
 
@@ -135,22 +136,25 @@ projection, owner/work caps, zero exact-chunk work, periodic lifts, and four
 independent native threads. The dedicated Wasm test produces the same
 witness through `wasm-bindgen-test-runner`.
 
-The pixel-reviewed Revision 2 macOS `release` receipt at
-`/tmp/mclone-continental-ecoregion/receipt-v3.json` measured:
+The paired-control Revision 2 macOS `release` receipt at
+`/tmp/mclone-continental-ecoregion/receipt-v4.json` measured:
 
 | Query | Observed time |
 |---|---:|
-| continental point | 447 ns/sample |
-| province point | 543 ns/sample |
-| ecoregion point | 639 ns/sample |
-| mosaic point | 688 ns/sample |
-| 65,536-block, 256x256 mosaic atlas | 60.8 ms total / 928 ns per sample |
-| 131,072-block, 256x256 mosaic atlas | 50.8 ms total / 775 ns per sample |
+| continental point | 292 ns/sample |
+| province point | 388 ns/sample |
+| ecoregion point | 488 ns/sample |
+| mosaic point | 530 ns/sample |
+| 65,536-block, 256x256 candidate plan | 62.0 ms total / 946 ns per sample |
+| 131,072-block, 256x256 candidate plan | 51.6 ms total / 787 ns per sample |
+| 65,536-block, 256x256 candidate + production control | 88.8 ms total / 1,354 ns per sample |
+| 131,072-block, 256x256 candidate + production control | 80.5 ms total / 1,228 ns per sample |
 
 These timings are descriptive, not yet a budget, and exclude canvas drawing.
 The equal 256x256 cost at the two extents demonstrates direct coarse sampling:
 the 131 km atlas changes sample spacing rather than generating a larger hidden
-fine plan. The same windows contain 58,159 land / 7,377 ocean and 42,736 land /
+fine plan. Both the candidate and control report zero exact-chunk work. The
+same candidate windows contain 58,159 land / 7,377 ocean and 42,736 land /
 22,800 ocean samples respectively, so this receipt exercises actual
 land-ocean organization rather than an all-land regional palette.
 
@@ -189,6 +193,38 @@ It verifies the pinned witness, zero exact chunks, production-disconnected
 status, typed inspection, layer-only redraws, deterministic reload, and a
 bounded 256-sample horizontal resolution. Rust ownership tests forbid browser
 code from gaining continental, ecoregion, or clearing-owner policy.
+
+### Paired field-revision-21 control
+
+The atlas now calls the existing `McloneOverworldSampler` at exactly the same
+seed, coordinates, and sample spacing as the candidate. Shared Rust publishes
+signed continentalness, surface height, temperature, moisture, relief,
+ruggedness, water, and the ordinary production biome recipe. It also publishes
+a separate checksum, land/ocean and component distributions, journey runs,
+and work counts. A focused equivalence test locks those arrays to the existing
+production terrain-preview reference grid; this is a consumer of production
+worldgen, not a browser reconstruction or a second generator.
+
+The control remains `mclone-overworld-v1-fields-21` on the unbounded plane
+when the candidate switches topology. Both sides compile 65,536 direct samples
+and zero exact chunks. At 131,072 blocks, the candidate has 101 connected
+ecoregion-kind components while current production has 15,963 connected
+biome-kind components. At 65,536 blocks the corresponding counts are 51 and
+9,417. The counts are not a quality score, but they quantify the visible
+failure motivating this work: production is dominated by small recurring
+patches rather than region-scale ecological identities.
+
+The inspected matched 131 km captures are:
+
+- `/tmp/mclone-terrain-lab-desktop-chrome-ecoregion-131km.png`; and
+- `/tmp/mclone-terrain-lab-desktop-chrome-ecoregion-production-control-131km.png`.
+
+The control UI capture is
+`/tmp/mclone-terrain-lab-desktop-chrome-ecoregion-production-control-131km-ui.png`.
+Focused browser acceptance proves that selecting the control does not rebuild
+or mutate the candidate receipt, labels its independent topology and revision,
+keeps exact-chunk work at zero, and exercises both 65 km and 131 km review
+extents.
 
 ## Candidate Plan Revision 2
 
