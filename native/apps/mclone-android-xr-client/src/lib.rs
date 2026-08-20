@@ -5,9 +5,17 @@
 #[cfg(test)]
 const ANDROID_XR_LOCAL_ARG_FLAGS: &[&str] = &[
     "--adaptive-chunk-publication-budget",
+    "--celestial-horizon-glow",
+    "--celestial-moon",
+    "--celestial-moonlight",
+    "--celestial-stars",
+    "--celestial-sun",
+    "--celestial-sun-halo",
     "--frame-accounting",
     "--menu",
     "--multiview-proof",
+    "--moon-phase",
+    "--moon-phase-source",
     "--perf-chunk-view-churn",
     "--perf-churn-interval-seconds",
     "--perf-churn-offset-chunks",
@@ -26,6 +34,7 @@ const ANDROID_XR_LOCAL_ARG_FLAGS: &[&str] = &[
     "--sky-terrain-multiview-perf",
     "--terrain-multiview-perf",
     "--terrain-multiview-proof",
+    "--terrain-horizon-diagnostic",
     "--start-in-world",
     "--xr-debug-ui",
     "--xr-display-refresh-rate",
@@ -109,12 +118,12 @@ mod android {
     use mclone_render_session::EngineCameraSnapshot;
     use mclone_scene::{
         MAX_XR_RENDER_DISTANCE, McloneSceneHost, McloneSceneHostOptions,
-        SceneTerrainViewDiagnostics, XrControllerInputRouter, XrDebugUiScreen,
-        XrFrameLocomotionAutomation, XrFramePipelineHostTiming, XrSceneFrameTarget,
-        XrStartupViewPose, XrTerrainEyeTarget, XrTerrainMultiviewTarget, XrUnderwaterDetectionMode,
-        record_xr_frame_pipeline, record_xr_frame_pipeline_with_peer_threads,
-        single_view_host_options, xr_frame_pipeline_accounting_config,
-        xr_frame_pipeline_peer_threads,
+        SceneTerrainViewDiagnostics, TerrainHorizonDiagnostic, XrControllerInputRouter,
+        XrDebugUiScreen, XrFrameLocomotionAutomation, XrFramePipelineHostTiming,
+        XrSceneFrameTarget, XrStartupViewPose, XrTerrainEyeTarget, XrTerrainMultiviewTarget,
+        XrUnderwaterDetectionMode, record_xr_frame_pipeline,
+        record_xr_frame_pipeline_with_peer_threads, single_view_host_options,
+        xr_frame_pipeline_accounting_config, xr_frame_pipeline_peer_threads,
     };
     use mclone_season::{
         CelestialDebugSettings, CelestialStarDensity, LunarPhase, MoonPhaseSource,
@@ -363,6 +372,7 @@ mod android {
         xr_foveation: AndroidXrFoveation,
         xr_render_scale: f32,
         xr_display_refresh_rate: Option<f32>,
+        terrain_horizon_diagnostic: TerrainHorizonDiagnostic,
     }
 
     impl Default for AndroidXrStartupOptions {
@@ -403,6 +413,7 @@ mod android {
                 xr_foveation: AndroidXrFoveation::Off,
                 xr_render_scale: ANDROID_XR_DEFAULT_RENDER_SCALE,
                 xr_display_refresh_rate: None,
+                terrain_horizon_diagnostic: TerrainHorizonDiagnostic::Natural,
             }
         }
     }
@@ -786,6 +797,13 @@ mod android {
                 }
                 "--terrain-multiview-perf" => {
                     options.terrain_multiview_perf = true;
+                }
+                "--terrain-horizon-diagnostic" => {
+                    let value = parse_next_string(&mut argv, "--terrain-horizon-diagnostic")?;
+                    options.terrain_horizon_diagnostic =
+                        TerrainHorizonDiagnostic::parse_label(&value).ok_or_else(|| {
+                            anyhow::anyhow!("unsupported --terrain-horizon-diagnostic `{value}`")
+                        })?;
                 }
                 "--sky-terrain-multiview-perf" => {
                     options.sky_terrain_multiview_perf = true;
@@ -1563,6 +1581,10 @@ mod android {
             startup_options.xr_foveation.label()
         );
         log::info!(
+            "Android XR terrain horizon diagnostic: {}",
+            startup_options.terrain_horizon_diagnostic.label()
+        );
+        log::info!(
             "Android XR render scale: {:.3}",
             startup_options.xr_render_scale
         );
@@ -1649,6 +1671,7 @@ mod android {
             startup_options.xr_foveation,
             startup_options.xr_render_scale,
             startup_options.xr_display_refresh_rate,
+            startup_options.terrain_horizon_diagnostic,
         ) {
             report_android_xr_failure(&app, &error);
         }
@@ -1690,6 +1713,7 @@ mod android {
         xr_foveation: AndroidXrFoveation,
         xr_render_scale: f32,
         xr_display_refresh_rate: Option<f32>,
+        terrain_horizon_diagnostic: TerrainHorizonDiagnostic,
     ) -> Result<()> {
         let controller_preferences =
             match mclone_app_runtime::input_preferences::load_native_input_preferences(
@@ -2023,6 +2047,7 @@ mod android {
                 render_options,
                 celestial_debug,
                 client_entry.clone(),
+                terrain_horizon_diagnostic,
             )
             .context("initialize Android XR terrain multiview proof runtime")?;
             terrain.set_display_refresh_hz(display_refresh.current_rate);
@@ -2048,6 +2073,7 @@ mod android {
                 render_options,
                 celestial_debug,
                 client_entry.clone(),
+                terrain_horizon_diagnostic,
             )
             .context("initialize Android XR terrain multiview perf runtime")?;
             terrain.set_display_refresh_hz(display_refresh.current_rate);
@@ -2109,6 +2135,7 @@ mod android {
                 render_options,
                 celestial_debug,
                 client_entry.clone(),
+                terrain_horizon_diagnostic,
             )
             .context("initialize Android XR stereo-array terrain runtime")?;
             let terrain_summary = terrain.frame_summary();
@@ -2233,6 +2260,7 @@ mod android {
             render_options,
             celestial_debug,
             client_entry,
+            terrain_horizon_diagnostic,
         )
         .context("initialize Android XR terrain runtime")?;
         let terrain_summary = terrain.frame_summary();
@@ -2320,6 +2348,7 @@ mod android {
         render_options: TexturedSectionRenderOptions,
         celestial_debug: CelestialDebugSettings,
         entry: ClientEntryResolution,
+        terrain_horizon_diagnostic: TerrainHorizonDiagnostic,
     ) -> Result<AndroidXrTerrainState> {
         let AndroidXrRuntimeAssets {
             mesh_assets,
@@ -2351,6 +2380,7 @@ mod android {
         )
         .context("initialize Android XR session-free scene host")?;
         terrain.set_celestial_debug_settings(celestial_debug);
+        terrain.set_terrain_horizon_diagnostic(terrain_horizon_diagnostic);
         if let Some(registry) = mclone_app_runtime::prepared_assets::AssetPackSourceRegistry::discover_native_with_reference(
             mclone_assets::SharedAssetSource::new(
                 load_asset_source().context("reload Android XR reference source for asset-pack discovery")?,
