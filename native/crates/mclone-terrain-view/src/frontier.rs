@@ -224,6 +224,7 @@ pub struct TerrainFrontierPlan {
     observer_blocks: [i64; 2],
     segments: Vec<TerrainFrontierSegment>,
     desired_fine_tiles: BTreeSet<TerrainFrontierFineTileKey>,
+    resident_fine_tiles: BTreeSet<TerrainFrontierFineTileKey>,
     missing_fine_tiles: BTreeSet<TerrainFrontierFineTileKey>,
     receipt: TerrainFrontierPlanReceipt,
 }
@@ -256,6 +257,7 @@ impl TerrainFrontierPlan {
                 observer_blocks,
                 segments: Vec::new(),
                 desired_fine_tiles: BTreeSet::new(),
+                resident_fine_tiles: BTreeSet::new(),
                 missing_fine_tiles: BTreeSet::new(),
                 receipt: TerrainFrontierPlanReceipt {
                     enabled: true,
@@ -315,6 +317,7 @@ impl TerrainFrontierPlan {
             observer_blocks,
             segments,
             desired_fine_tiles,
+            resident_fine_tiles,
             missing_fine_tiles,
             receipt,
         })
@@ -338,6 +341,10 @@ impl TerrainFrontierPlan {
 
     pub fn desired_fine_tiles(&self) -> &BTreeSet<TerrainFrontierFineTileKey> {
         &self.desired_fine_tiles
+    }
+
+    pub fn resident_fine_tiles(&self) -> &BTreeSet<TerrainFrontierFineTileKey> {
+        &self.resident_fine_tiles
     }
 
     pub fn missing_fine_tiles(&self) -> &BTreeSet<TerrainFrontierFineTileKey> {

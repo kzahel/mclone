@@ -11,6 +11,7 @@ mod clipmap;
 mod composition;
 mod engine;
 mod frontier;
+mod frontier_topology;
 mod horizon_admission;
 mod lod;
 #[cfg(not(target_arch = "wasm32"))]
@@ -88,6 +89,12 @@ pub use frontier::{
     TerrainFrontierPlanReceipt, TerrainFrontierPlanState, TerrainFrontierPresentationIdentity,
     TerrainFrontierSegment, terrain_frontier_format_capacity,
     terrain_frontier_presentation_identity,
+};
+pub use frontier_topology::{
+    TERRAIN_FRONTIER_PROOF_FINE_TILE_CAPACITY, TerrainFrontierProofClosure,
+    TerrainFrontierProofOuterEdge, TerrainFrontierProofSegment, TerrainFrontierTopologyProof,
+    TerrainFrontierTopologyProofOptions, TerrainFrontierTopologyProofReceipt,
+    TerrainFrontierTopologyProofState,
 };
 pub use lod::{
     TERRAIN_LOD_HIGH_LEVEL_COUNT, TERRAIN_LOD_LOW_LEVEL_COUNT, TERRAIN_LOD_MEDIUM_LEVEL_COUNT,
