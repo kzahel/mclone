@@ -258,6 +258,60 @@ test("reviews 131 km against the current production control", async ({
   expect(pageErrors).toEqual([]);
 });
 
+test("moves the retained atlas while a pan rebuild is coalesced", async ({
+  page,
+}, testInfo) => {
+  const pageErrors: string[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  page.on("console", (message) => {
+    if (message.type() === "error") {
+      pageErrors.push(message.text());
+    }
+  });
+  await page.goto(
+    "/terrain/?profile=mclone-overworld-v1&seed=12345&x=0&z=0"
+      + "&blocks=131072&panes=ecoregion&view=map"
+      + "&ecoregionTopology=plane&ecoregionLayer=composed",
+    { waitUntil: "networkidle" },
+  );
+
+  const shell = page.locator(".appShell");
+  const stage = page.getByTestId("continental-ecoregion-stage");
+  const canvas = stage.locator("canvas");
+  await expect(shell).toHaveAttribute("data-ecoregion-ready", "true");
+  const initialChecksum = await shell.getAttribute("data-ecoregion-checksum");
+  const initialVisual = await canvasVisualSignature(canvas);
+  const bounds = await stage.boundingBox();
+  expect(bounds).toBeTruthy();
+  const pointerX = bounds!.x + bounds!.width * 0.45;
+  const pointerY = bounds!.y + Math.min(bounds!.height * 0.45, 320);
+  await page.mouse.move(pointerX, pointerY);
+  await page.mouse.down();
+  for (let step = 1; step <= 8; step += 1) {
+    await page.mouse.move(pointerX + step * 8, pointerY + step * 3);
+    await page.waitForTimeout(25);
+  }
+  await expect(stage).toHaveAttribute("data-render-ready", "true");
+  await expect(stage).toHaveAttribute("data-render-updating", "true");
+  await expect(stage).toHaveAttribute("data-retained-frame-shifted", "true");
+  await expect(shell).toHaveAttribute(
+    "data-ecoregion-checksum",
+    initialChecksum ?? "",
+  );
+  expect(await canvasVisualSignature(canvas)).not.toBe(initialVisual);
+  await stage.screenshot({
+    path:
+      `/tmp/mclone-terrain-lab-${testInfo.project.name}-ecoregion-retained-pan.png`,
+  });
+
+  await page.mouse.up();
+  await expect(stage).toHaveAttribute("data-render-updating", "false");
+  await expect(stage).toHaveAttribute("data-retained-frame-shifted", "false");
+  await expect.poll(() => shell.getAttribute("data-ecoregion-checksum"))
+    .not.toBe(initialChecksum);
+  expect(pageErrors).toEqual([]);
+});
+
 async function canvasVisualSignature(canvas: Locator): Promise<number> {
   return canvas.evaluate((element) => {
     const surface = element as HTMLCanvasElement;

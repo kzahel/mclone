@@ -28,6 +28,11 @@ panning and less regular, anchor-responsive route realization. These are
 follow-up representation and geometry corrections, not another rejection of
 the continental hierarchy. Arid contrast and World Explorer realization are
 now permitted while those corrections remain explicit.
+Terrain Lab now implements the interaction correction by moving the retained
+accepted raster immediately and coalescing complete Worker rebuilds behind a
+100 ms settle window. No cache affects plan facts or checksums; bounded atlas
+tile reuse remains optional future performance work. Anchor-responsive route
+geometry is the remaining accepted Review A correction.
 Mclone should combine
 top-down continental and ecoregional planning with bottom-up procedural
 realization so the Overworld contains large, recognizable, causally related

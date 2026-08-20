@@ -372,6 +372,22 @@ canonical while forest cores, clearings, passes, wetland opportunity, and
 continental story shape their visible course. Neither correction authorizes a
 migration simulator or a production-profile switch.
 
+The interaction correction is implemented without a semantic cache. During
+pan and zoom, Terrain Lab immediately translates/scales the last accepted
+raster in world coordinates and keeps its exact receipt visible. Candidate
+plus production-control reconstruction waits for a 100 ms interaction-settle
+window; intermediate view changes replace one pending request rather than
+forming a queue. Raster pixels are rebuilt only when the accepted semantic
+checksum or selected layer changes.
+
+Focused browser acceptance held an eight-step 131 km pan open for 200 ms. The
+canvas changed on the retained frame while the exact checksum stayed fixed,
+then one settled Worker result replaced it and cleared the retained-frame
+offset. The inspected in-motion capture is
+`/tmp/mclone-terrain-lab-desktop-chrome-ecoregion-retained-pan.png`. A full
+atlas still recompiles after settling; bounded tile/overlap reuse remains an
+optional measured optimization rather than a correctness dependency.
+
 ## Candidate Plan Revision 2
 
 Revision 2 is deliberately a concrete authored grammar, not a generic planning

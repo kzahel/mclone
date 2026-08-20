@@ -22,6 +22,15 @@ interface CanvasSize {
   dpr: number;
 }
 
+interface AtlasViewport {
+  minX: number;
+  minZ: number;
+  blocksAcross: number;
+  blocksTall: number;
+}
+
+const INTERACTION_SETTLE_MS = 100;
+
 export interface ContinentalEcoregionReport {
   schema: string;
   witnessSha256: string;
@@ -113,6 +122,7 @@ export function ContinentalEcoregionCanvas({
 }: ContinentalEcoregionCanvasProps): React.JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rasterRef = useRef<HTMLCanvasElement | undefined>(undefined);
+  const rasterKeyRef = useRef("");
   const stageRef = useRef<HTMLDivElement>(null);
   const workerRef = useRef<Worker | undefined>(undefined);
   const revisionRef = useRef(0);
@@ -120,8 +130,11 @@ export function ContinentalEcoregionCanvas({
   const pendingQueryRef = useRef<ContinentalEcoregionWorkerQuery | undefined>(
     undefined,
   );
-  const pendingFrameRef = useRef(0);
+  const pendingTimerRef = useRef(0);
+  const pendingDueAtRef = useRef(0);
+  const responseRef = useRef<ContinentalEcoregionWorkerSummary | undefined>(undefined);
   const postPendingQueryRef = useRef<() => void>(() => undefined);
+  const schedulePendingQueryRef = useRef<(delayMs: number) => void>(() => undefined);
   const [response, setResponse] = useState<ContinentalEcoregionWorkerSummary>();
   const [updating, setUpdating] = useState(false);
   const [navigationReady, setNavigationReady] = useState(false);
@@ -140,8 +153,25 @@ export function ContinentalEcoregionCanvas({
       return;
     }
     pendingQueryRef.current = undefined;
+    pendingDueAtRef.current = 0;
     inFlightRevisionRef.current = query.revision;
     worker.postMessage(query);
+  };
+  schedulePendingQueryRef.current = (delayMs: number): void => {
+    if (pendingTimerRef.current !== 0) {
+      window.clearTimeout(pendingTimerRef.current);
+      pendingTimerRef.current = 0;
+    }
+    const boundedDelay = Math.max(0, delayMs);
+    pendingDueAtRef.current = performance.now() + boundedDelay;
+    if (boundedDelay === 0) {
+      postPendingQueryRef.current();
+      return;
+    }
+    pendingTimerRef.current = window.setTimeout(() => {
+      pendingTimerRef.current = 0;
+      postPendingQueryRef.current();
+    }, boundedDelay);
   };
   const navigationState = useMemo<TerrainLabState>(
     () => ({ ...state, view: "map" }),
@@ -223,15 +253,15 @@ export function ContinentalEcoregionCanvas({
       if (next.type === "error") {
         onError(next.message);
       } else {
+        responseRef.current = next;
         setResponse(next);
       }
       const hasPending = pendingQueryRef.current !== undefined;
       setUpdating(hasPending);
-      if (hasPending && pendingFrameRef.current === 0) {
-        pendingFrameRef.current = window.requestAnimationFrame(() => {
-          pendingFrameRef.current = 0;
-          postPendingQueryRef.current();
-        });
+      if (hasPending) {
+        schedulePendingQueryRef.current(
+          Math.max(0, pendingDueAtRef.current - performance.now()),
+        );
       }
     };
     worker.onerror = (event): void => {
@@ -240,13 +270,15 @@ export function ContinentalEcoregionCanvas({
       onError(event.message || "Continental/ecoregion Worker failed.");
     };
     return () => {
-      if (pendingFrameRef.current !== 0) {
-        window.cancelAnimationFrame(pendingFrameRef.current);
+      if (pendingTimerRef.current !== 0) {
+        window.clearTimeout(pendingTimerRef.current);
+        pendingTimerRef.current = 0;
       }
       worker.terminate();
       workerRef.current = undefined;
       inFlightRevisionRef.current = undefined;
       pendingQueryRef.current = undefined;
+      responseRef.current = undefined;
     };
   }, [onError]);
 
@@ -292,7 +324,15 @@ export function ContinentalEcoregionCanvas({
     setUpdating(true);
     setSelectedIndex(undefined);
     onReport(undefined);
-    postPendingQueryRef.current();
+    const published = responseRef.current;
+    const canRetain = published?.metadata.seed === state.seed
+      && published.metadata.topology === state.ecoregionTopology;
+    if (!canRetain && published) {
+      responseRef.current = undefined;
+      rasterKeyRef.current = "";
+      setResponse(undefined);
+    }
+    schedulePendingQueryRef.current(canRetain ? INTERACTION_SETTLE_MS : 0);
   }, [
     canvasSize.cssHeight,
     canvasSize.cssWidth,
@@ -319,9 +359,11 @@ export function ContinentalEcoregionCanvas({
       context,
       canvasSize,
       rasterRef,
+      rasterKeyRef,
       state.ecoregionLayer,
       response,
       selectedIndex,
+      requestedAtlasViewport(state, canvasSize),
     );
     if (response) {
       onReport({
@@ -345,6 +387,9 @@ export function ContinentalEcoregionCanvas({
     onReport,
     response,
     selectedIndex,
+    state.blocksAcross,
+    state.centerX,
+    state.centerZ,
     state.ecoregionLayer,
   ]);
 
@@ -357,6 +402,15 @@ export function ContinentalEcoregionCanvas({
         data-render-ready={response ? "true" : "false"}
         data-render-updating={updating ? "true" : "false"}
         data-semantic-sha256={response?.metadata.semanticSha256 ?? ""}
+        data-retained-frame-shifted={response
+          && (response.metadata.centerX !== state.centerX
+            || response.metadata.centerZ !== state.centerZ
+            || response.metadata.blocksAcross !== requestedAtlasViewport(
+              state,
+              canvasSize,
+            ).blocksAcross)
+          ? "true"
+          : "false"}
         tabIndex={0}
         aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight"
         onPointerDown={navigation.onPointerDown}
@@ -415,9 +469,11 @@ function drawAtlas(
   context: CanvasRenderingContext2D,
   canvas: CanvasSize,
   rasterRef: React.MutableRefObject<HTMLCanvasElement | undefined>,
+  rasterKeyRef: React.MutableRefObject<string>,
   layer: ContinentalEcoregionLayer,
   response: ContinentalEcoregionWorkerSummary | undefined,
   selectedIndex: number | undefined,
+  viewport: AtlasViewport,
 ): void {
   context.setTransform(1, 0, 0, 1, 0, 0);
   context.fillStyle = "#071214";
@@ -439,24 +495,46 @@ function drawAtlas(
   if (!rasterContext) {
     return;
   }
-  const image = rasterContext.createImageData(columns, rows);
-  for (let index = 0; index < response.metadata.sampleCount; index += 1) {
-    const color = sampleColor(layer, response, index);
-    const offset = index * 4;
-    image.data[offset] = color[0];
-    image.data[offset + 1] = color[1];
-    image.data[offset + 2] = color[2];
-    image.data[offset + 3] = 255;
+  const rasterKey = `${response.metadata.semanticSha256}:${layer}`;
+  if (rasterKeyRef.current !== rasterKey) {
+    const image = rasterContext.createImageData(columns, rows);
+    for (let index = 0; index < response.metadata.sampleCount; index += 1) {
+      const color = sampleColor(layer, response, index);
+      const offset = index * 4;
+      image.data[offset] = color[0];
+      image.data[offset + 1] = color[1];
+      image.data[offset + 2] = color[2];
+      image.data[offset + 3] = 255;
+    }
+    rasterContext.putImageData(image, 0, 0);
+    rasterKeyRef.current = rasterKey;
   }
-  rasterContext.putImageData(image, 0, 0);
+  const destinationX = (response.metadata.minX - viewport.minX)
+    / viewport.blocksAcross * canvas.width;
+  const destinationY = (response.metadata.minZ - viewport.minZ)
+    / viewport.blocksTall * canvas.height;
+  const destinationWidth = response.metadata.blocksAcross
+    / viewport.blocksAcross * canvas.width;
+  const destinationHeight = response.metadata.blocksTall
+    / viewport.blocksTall * canvas.height;
   context.imageSmoothingEnabled = false;
-  context.drawImage(raster, 0, 0, canvas.width, canvas.height);
-  drawCoordinateGrid(context, canvas, response.metadata);
+  context.drawImage(
+    raster,
+    destinationX,
+    destinationY,
+    destinationWidth,
+    destinationHeight,
+  );
+  drawCoordinateGrid(context, canvas, viewport);
   if (selectedIndex !== undefined) {
     const column = selectedIndex % columns;
     const row = Math.floor(selectedIndex / columns);
-    const x = (column + 0.5) / columns * canvas.width;
-    const y = (row + 0.5) / rows * canvas.height;
+    const worldX = response.metadata.minX
+      + (column + 0.5) * response.metadata.sampleStepBlocks;
+    const worldZ = response.metadata.minZ
+      + (row + 0.5) * response.metadata.sampleStepBlocks;
+    const x = (worldX - viewport.minX) / viewport.blocksAcross * canvas.width;
+    const y = (worldZ - viewport.minZ) / viewport.blocksTall * canvas.height;
     context.strokeStyle = "rgba(255, 246, 191, 0.96)";
     context.lineWidth = Math.max(1.5, canvas.dpr * 1.5);
     context.beginPath();
@@ -593,30 +671,48 @@ function productionSampleColor(
 function drawCoordinateGrid(
   context: CanvasRenderingContext2D,
   canvas: CanvasSize,
-  metadata: ContinentalEcoregionAtlasMetadata,
+  viewport: AtlasViewport,
 ): void {
-  const spacing = metadata.blocksAcross >= 100_000 ? 25_000 : 10_000;
+  const spacing = viewport.blocksAcross >= 100_000 ? 25_000 : 10_000;
   context.strokeStyle = "rgba(229, 240, 232, 0.13)";
   context.fillStyle = "rgba(238, 244, 240, 0.62)";
   context.lineWidth = Math.max(1, canvas.dpr * 0.75);
   context.font = `${9 * canvas.dpr}px "DM Mono", monospace`;
-  const firstX = Math.ceil(metadata.minX / spacing) * spacing;
-  for (let worldX = firstX; worldX < metadata.minX + metadata.blocksAcross; worldX += spacing) {
-    const x = (worldX - metadata.minX) / metadata.blocksAcross * canvas.width;
+  const firstX = Math.ceil(viewport.minX / spacing) * spacing;
+  for (let worldX = firstX; worldX < viewport.minX + viewport.blocksAcross; worldX += spacing) {
+    const x = (worldX - viewport.minX) / viewport.blocksAcross * canvas.width;
     context.beginPath();
     context.moveTo(x, 0);
     context.lineTo(x, canvas.height);
     context.stroke();
     context.fillText(`${worldX / 1_000} km`, x + 4 * canvas.dpr, 58 * canvas.dpr);
   }
-  const firstZ = Math.ceil(metadata.minZ / spacing) * spacing;
-  for (let worldZ = firstZ; worldZ < metadata.minZ + metadata.blocksTall; worldZ += spacing) {
-    const y = (worldZ - metadata.minZ) / metadata.blocksTall * canvas.height;
+  const firstZ = Math.ceil(viewport.minZ / spacing) * spacing;
+  for (let worldZ = firstZ; worldZ < viewport.minZ + viewport.blocksTall; worldZ += spacing) {
+    const y = (worldZ - viewport.minZ) / viewport.blocksTall * canvas.height;
     context.beginPath();
     context.moveTo(0, y);
     context.lineTo(canvas.width, y);
     context.stroke();
   }
+}
+
+function requestedAtlasViewport(
+  state: TerrainLabState,
+  canvas: CanvasSize,
+): AtlasViewport {
+  const columns = 256;
+  const aspectRatio = canvas.cssWidth / Math.max(canvas.cssHeight, 1);
+  const rows = Math.max(1, Math.ceil(columns / aspectRatio));
+  const sampleStepBlocks = Math.max(1, Math.ceil(state.blocksAcross / columns));
+  const blocksAcross = columns * sampleStepBlocks;
+  const blocksTall = rows * sampleStepBlocks;
+  return {
+    minX: state.centerX - Math.floor(blocksAcross / 2),
+    minZ: state.centerZ - Math.floor(blocksTall / 2),
+    blocksAcross,
+    blocksTall,
+  };
 }
 
 function EcoregionInspector({
