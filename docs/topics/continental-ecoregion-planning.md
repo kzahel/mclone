@@ -37,7 +37,11 @@ asymmetric branches, route-specific displacement, variable width, and local
 ecological interruptions replace the visible ladder without changing stable
 route identities. The 131 km sampled graph now links 35.3% of habitat patches;
 that remains descriptive rather than a target. World Explorer realization is
-the next product gate.
+the next product gate. Tactical
+[`324`](../tactical/324-continental-surface-world-explorer.md) now owns that
+implementation: five composable terrain-character families, one shared named
+candidate source, six review journeys, and a stop at Human Review B before
+exact chunks or production integration.
 Mclone should combine
 top-down continental and ecoregional planning with bottom-up procedural
 realization so the Overworld contains large, recognizable, causally related
