@@ -4,8 +4,8 @@ Status: Human Reviews A1, A2, and B accepted 2026-08-20. Phase 1 diagnostic
 frontier planning is complete at revisions `328757c3` through `cd9706e3`.
 Human Review A2 selected bounded Hybrid D. Phase 2's isolated topology proof
 is complete at revisions `0a119f30` through `76dda6e9`. Human Review B
-accepted its topology and pixels; Phase 3 ordinary-product admission is now
-authorized.
+accepted its topology and pixels. Phase 3 ordinary-product admission and its
+static/streaming evidence are complete; Human Review C is ready.
 
 Topic: `procedural-horizon-clipmap`
 
@@ -782,6 +782,53 @@ honestly until Phase 3 owns a persistent admission lifecycle. They are enough
 for Human Review B to judge the topology, fallback character, and bounded
 steady draw expansion before authorizing that integration.
 
+## Phase 3 Live Admission Results
+
+The accepted hybrid is now the ordinary composition path, including
+`Natural`. Each non-empty exact generation and each newly committed clipmap
+presentation first receives a complete zero-tile, resolution-aware fallback
+certificate in the same render submission. Terrain discard, typed land/water
+closures, the regular vegetation owner, mono/per-eye/multiview consumption,
+and the immutable procedural presentation therefore agree before pixels are
+submitted. The preferred 32-tile spacing-one generation compiles behind that
+certificate at four dispatches per frame. Only after every selected tile is
+ready do its suppression set, support draws, and connector ownership publish
+together. A newer exact or clipmap epoch drops stale pending work while the
+new synchronous fallback remains complete.
+
+The support layer deliberately owns no second proxy-vegetation product. The
+regular clipmap vegetation presentation remains the one procedural tree
+owner across both base and support terrain, while exact-owned complete tree
+records continue to be removed by the same exact coverage generation. This
+avoids duplicate or disappearing trees during a fine-support promotion.
+
+Desktop's legal radius 32 now fits a shared 65-by-65 exact format. The mask
+uses 133 words with a 65-chunk row stride; the transition and boundary
+formats derive their 276-texel and 1,040-block maxima from the same bound.
+The explicit exhaustion policy is the tested zero-fine-capacity certificate:
+every solid and water segment uses its actual bordering coarse triangle,
+without allocation, suppression, an unsupported segment, or a sky crack.
+
+The matched product review campaign is in
+[`/tmp/mclone-t321-phase3`](/tmp/mclone-t321-phase3) with its machine-readable
+[`receipt.json`](/tmp/mclone-t321-phase3/receipt.json). The natural RD2 view
+certifies 320 segments using the resident finest ring and allocates no support
+tile. The natural RD8 view commits 20 support tiles (11.21 MB), certifies all
+1,088 land/water segments, and draws eight visible support tiles. The forced
+one-tile RD8 diagnostic certifies the same 1,088 segments with 1,024 fallback
+segments. All three settled with no pending vegetation or frontier work and
+were inspected without a sky crack.
+
+A command-driven headed traversal report at
+[`/tmp/mclone-t321-phase3-motion.json`](/tmp/mclone-t321-phase3-motion.json)
+moved the camera 130.68 blocks over 240 presented frames. It crossed three
+committed clipmap presentations and 138 exact generations under active
+streaming. Every frame carried a complete certificate: 188 frames retained a
+synchronous fallback while preferred work coalesced and 52 used a preferred
+certificate. There were no skipped or reconfigured surface frames. This is
+objective ownership evidence; Human Review C remains the acceptance point for
+the inspected static pixels and motion character.
+
 ## Adversarial Evidence Matrix
 
 The architecture and selected implementation must cover the cross-product
@@ -857,13 +904,13 @@ topology before it becomes the ordinary composition path.
 
 ### Phase 3: Generation-coherent live admission
 
-- [ ] Integrate the selected support plan with requested, staged, and
+- [x] Integrate the selected support plan with requested, staged, and
       committed procedural presentations.
-- [ ] Gate exact generation changes on a complete composition certificate;
+- [x] Gate exact generation changes on a complete composition certificate;
       coalesce stale support work and retain the prior complete owner.
-- [ ] Apply the same immutable plan to terrain discard, connector geometry,
+- [x] Apply the same immutable plan to terrain discard, connector geometry,
       water, vegetation, mono, per-eye, and multiview rendering.
-- [ ] Give support exhaustion and legal-capacity mismatch one explicit tested
+- [x] Give support exhaustion and legal-capacity mismatch one explicit tested
       policy.
 
 Gate -- Human Review C: accept static and streaming exact-to-LOD transitions
@@ -1012,3 +1059,13 @@ Human Review B accepted the bounded hybrid topology and its preferred and
 forced-fallback pixels on 2026-08-20. Phase 3 is authorized to replace the
 diagnostic-only lifecycle with generation-coherent ordinary-product
 admission.
+
+Phase 3 completed 2026-08-20 at revisions `0a0f9101` through `b515b5ad`.
+All legal exact formats now cover radius 32. Ordinary composition installs a
+complete synchronous coarse certificate for each exact/procedural epoch,
+coalesces preferred work behind it, and atomically promotes a ready fine
+support generation. Shared and per-frame receipts expose that lifecycle.
+Matched RD2/RD8 product captures, a forced-exhaustion capture, and a
+240-frame continuous traversal pass. Human Review C evidence is ready; the
+user's request to proceed end to end authorizes continuing Phase 4 without an
+additional implementation pause but does not pre-record visual acceptance.

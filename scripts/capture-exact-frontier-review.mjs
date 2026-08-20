@@ -148,42 +148,41 @@ function validateState(capture, state) {
     return "vegetation did not settle without failures";
   }
   const gpu = state.frontierProofGpu;
-  if (capture.diagnostic === "natural") {
-    if (gpu?.allocatedSupportTiles !== 0
-        || gpu?.readySupportTiles !== 0
-        || gpu?.connectorSegments !== 0
-        || gpu?.supportResourceBytes !== 0
-        || gpu?.connectorBytes !== 0) {
-      return `natural path retained proof resources: ${JSON.stringify(gpu)}`;
-    }
-  } else {
-    if (gpu?.allocatedSupportTiles !== state.frontierTopology.selectedSupportTiles
-        || gpu?.readySupportTiles !== gpu?.allocatedSupportTiles
-        || gpu?.pendingSupportTiles !== 0
-        || gpu?.supportResourceBytes !== state.frontierTopology.activeSupportResourceBytes
-        || gpu?.connectorSegments === 0
-        || gpu?.connectorBytes === 0) {
-      return `hybrid proof GPU receipt is incomplete: ${JSON.stringify(gpu)}`;
-    }
-    if (capture.renderDistance === 2 && gpu.allocatedSupportTiles !== 0) {
-      return "RD2 unexpectedly allocated sparse support outside the resident fine ring";
-    }
-    if (capture.renderDistance === 8
-        && capture.diagnostic === "frontier-hybrid-proof"
-        && (gpu.allocatedSupportTiles !== 20
-          || gpu.supportDispatchesTotal < 20
-          || gpu.drawnSupportTiles === 0)) {
-      return `RD8 did not commit and draw its 20-tile support belt: ${JSON.stringify(gpu)}`;
-    }
-    if (capture.diagnostic === "frontier-hybrid-fallback-proof"
-        && (gpu.allocatedSupportTiles !== 1
-          || gpu.supportDispatchesTotal < 1
-          || state.frontierTopology.supportPoolCapacity !== 1
-          || state.frontierTopology.rejectedSupportTiles === 0
-          || (state.frontierTopology.fallbackSolidSegments
-            + state.frontierTopology.fallbackWaterSegments) === 0)) {
-      return `forced proof did not exercise the bounded fallback: ${JSON.stringify(state.frontierTopology)}`;
-    }
+  if (state.frontierAdmission?.complete !== true
+      || state.frontierAdmission?.state !== "preferred"
+      || state.frontierAdmission?.exactGeneration
+        !== state.frontierTopology.exactGeneration
+      || state.frontierAdmission?.pendingSupportTiles !== 0
+      || state.frontierAdmission?.activeSupportTiles
+        !== state.frontierTopology.selectedSupportTiles) {
+    return `ordinary frontier admission is incomplete: ${JSON.stringify(state.frontierAdmission)}`;
+  }
+  if (gpu?.allocatedSupportTiles !== state.frontierTopology.selectedSupportTiles
+      || gpu?.readySupportTiles !== gpu?.allocatedSupportTiles
+      || gpu?.pendingSupportTiles !== 0
+      || gpu?.supportResourceBytes !== state.frontierTopology.activeSupportResourceBytes
+      || gpu?.connectorSegments === 0
+      || gpu?.connectorBytes === 0) {
+    return `hybrid frontier GPU receipt is incomplete: ${JSON.stringify(gpu)}`;
+  }
+  if (capture.renderDistance === 2 && gpu.allocatedSupportTiles !== 0) {
+    return "RD2 unexpectedly allocated sparse support outside the resident fine ring";
+  }
+  if (capture.renderDistance === 8
+      && capture.diagnostic === "natural"
+      && (gpu.allocatedSupportTiles !== 20
+        || gpu.supportDispatchesTotal < 20
+        || gpu.drawnSupportTiles === 0)) {
+    return `RD8 did not commit and draw its 20-tile support belt: ${JSON.stringify(gpu)}`;
+  }
+  if (capture.diagnostic === "frontier-hybrid-fallback-proof"
+      && (gpu.allocatedSupportTiles !== 1
+        || gpu.supportDispatchesTotal < 1
+        || state.frontierTopology.supportPoolCapacity !== 1
+        || state.frontierTopology.rejectedSupportTiles === 0
+        || (state.frontierTopology.fallbackSolidSegments
+          + state.frontierTopology.fallbackWaterSegments) === 0)) {
+    return `forced proof did not exercise the bounded fallback: ${JSON.stringify(state.frontierTopology)}`;
   }
   return null;
 }
@@ -201,6 +200,7 @@ function stableState(state) {
     exactConnectorVertexCount: _exactConnectorVertexCount,
     exactConnectorBytes: _exactConnectorBytes,
     frontierProofGpu: _frontierProofGpu,
+    frontierAdmission: _frontierAdmission,
     frontier,
     frontierTopology: _frontierTopology,
     ...stable
@@ -260,11 +260,9 @@ const views = {
   },
 };
 const campaign = [
-  { name: "rd2-low-natural", renderDistance: 2, view: "low", diagnostic: "natural" },
-  { name: "rd2-low-hybrid", renderDistance: 2, view: "low", diagnostic: "frontier-hybrid-proof" },
-  { name: "rd8-elevated-natural", renderDistance: 8, view: "elevated", diagnostic: "natural" },
-  { name: "rd8-elevated-hybrid", renderDistance: 8, view: "elevated", diagnostic: "frontier-hybrid-proof" },
-  { name: "rd8-elevated-fallback", renderDistance: 8, view: "elevated", diagnostic: "frontier-hybrid-fallback-proof" },
+  { name: "rd2-low-product", renderDistance: 2, view: "low", diagnostic: "natural" },
+  { name: "rd8-elevated-product", renderDistance: 8, view: "elevated", diagnostic: "natural" },
+  { name: "rd8-elevated-forced-fallback", renderDistance: 8, view: "elevated", diagnostic: "frontier-hybrid-fallback-proof" },
 ];
 const results = [];
 
@@ -331,8 +329,8 @@ for (const [index, capture] of campaign.entries()) {
 for (const renderDistance of [2, 8]) {
   const pair = results.filter((capture) => capture.renderDistance === renderDistance);
   const natural = pair.find((capture) => capture.diagnostic === "natural");
-  if (!natural || pair.length < 2) {
-    fail(`RD${renderDistance} is missing its natural comparison`);
+  if (!natural) {
+    fail(`RD${renderDistance} is missing its natural product capture`);
   }
   for (const proof of pair.filter((capture) => capture !== natural)) {
     if (JSON.stringify(natural.stableState) !== JSON.stringify(proof.stableState)) {
@@ -345,9 +343,9 @@ for (const renderDistance of [2, 8]) {
 }
 
 const receipt = {
-  schema: "mclone-exact-frontier-review-v2",
+  schema: "mclone-exact-frontier-review-v3",
   tactical: 321,
-  tacticalPhase: 2,
+  tacticalPhase: 3,
   revision: run("git", ["rev-parse", "HEAD"], { capture: true }),
   generatedAt: new Date().toISOString(),
   outputDirectory: options.output,
@@ -361,7 +359,7 @@ const receipt = {
       "view-settled startup",
       `${options.width}x${options.height} output`,
     ],
-    variedAxes: ["exact render distance 2 versus 8", "natural, full hybrid, and forced fallback proof"],
+    variedAxes: ["exact render distance 2 versus 8", "ordinary product versus forced fallback"],
     diagnosticLegend: {
       fineSupport: "selected spacing-one procedural tiles outside the exact frontier",
       coarseSuppression: "base clipmap horizontal fragments beneath committed support are discarded",
