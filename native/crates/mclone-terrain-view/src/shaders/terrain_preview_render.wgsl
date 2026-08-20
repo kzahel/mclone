@@ -1395,89 +1395,7 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let side_surface = input.side_surface != 0u;
     let display_material = input.material;
     if input.textured != 0u && display_material < 256u {
-        var far_color = color;
-        var far_albedo = albedo;
-        if input.material < 256u {
-            far_color = apply_material_texture(
-                far_color,
-                input.material,
-                false,
-                input.world_uv,
-                material_dx,
-                material_dy,
-                material_blocks_per_pixel,
-                0.0,
-            );
-            if albedo_diagnostic {
-                far_albedo = apply_material_texture(
-                    far_albedo,
-                    input.material,
-                    false,
-                    input.world_uv,
-                    material_dx,
-                    material_dy,
-                    material_blocks_per_pixel,
-                    0.0,
-                );
-            }
-        }
-        var near_color = far_color;
-        var near_albedo = far_albedo;
-        var appearance_weight = input.world_position.w;
-        if display_material == 2u {
-            let water_tint = surface_water_tint(input);
-            let exact_water_albedo = apply_material_texture(
-                water_tint.rgb,
-                display_material,
-                false,
-                input.world_uv,
-                material_dx,
-                material_dy,
-                material_blocks_per_pixel,
-                1.0,
-            );
-            // The procedural heightfield stays opaque. Approximate the exact
-            // translucent result by composing its active-pack water sample
-            // over the existing depth-aware procedural water response.
-            near_color = mix(far_color, exact_water_albedo, water_tint.a);
-            near_albedo = mix(far_albedo, exact_water_albedo, water_tint.a);
-            appearance_weight = smoothstep(
-                TERRAIN_EXACT_WATER_TRANSITION_MIN_WEIGHT,
-                1.0,
-                appearance_weight,
-            );
-        } else {
-            near_color = surface_tint(input, display_material, side_surface)
-                * input.light;
-            near_color = apply_material_texture(
-                near_color,
-                display_material,
-                side_surface,
-                input.world_uv,
-                material_dx,
-                material_dy,
-                material_blocks_per_pixel,
-                1.0,
-            );
-            if albedo_diagnostic {
-                near_albedo = apply_material_texture(
-                    surface_tint(input, display_material, side_surface),
-                    display_material,
-                    side_surface,
-                    input.world_uv,
-                    material_dx,
-                    material_dy,
-                    material_blocks_per_pixel,
-                    1.0,
-                );
-            }
-        }
-        color = mix(far_color, near_color, appearance_weight);
-        if albedo_diagnostic {
-            albedo = mix(far_albedo, near_albedo, appearance_weight);
-        }
-    } else if input.textured != 0u && input.material < 256u {
-        color = apply_material_texture(
+        let far_color = apply_material_texture(
             color,
             input.material,
             false,
@@ -1487,9 +1405,10 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
             material_blocks_per_pixel,
             0.0,
         );
+        var far_albedo = albedo;
         if albedo_diagnostic {
-            albedo = apply_material_texture(
-                albedo,
+            far_albedo = apply_material_texture(
+                far_albedo,
                 input.material,
                 false,
                 input.world_uv,
@@ -1498,6 +1417,67 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
                 material_blocks_per_pixel,
                 0.0,
             );
+        }
+        var appearance_weight = input.world_position.w;
+        if display_material == 2u {
+            appearance_weight = smoothstep(
+                TERRAIN_EXACT_WATER_TRANSITION_MIN_WEIGHT,
+                1.0,
+                appearance_weight,
+            );
+        }
+        color = far_color;
+        albedo = far_albedo;
+        if appearance_weight > 0.0 {
+            var near_color = far_color;
+            var near_albedo = far_albedo;
+            if display_material == 2u {
+                let water_tint = surface_water_tint(input);
+                let exact_water_albedo = apply_material_texture(
+                    water_tint.rgb,
+                    display_material,
+                    false,
+                    input.world_uv,
+                    material_dx,
+                    material_dy,
+                    material_blocks_per_pixel,
+                    1.0,
+                );
+                // The procedural heightfield stays opaque. Approximate the
+                // exact translucent result by composing its active-pack water
+                // sample over the depth-aware procedural water response.
+                near_color = mix(far_color, exact_water_albedo, water_tint.a);
+                near_albedo = mix(far_albedo, exact_water_albedo, water_tint.a);
+            } else {
+                near_color = surface_tint(input, display_material, side_surface)
+                    * input.light;
+                near_color = apply_material_texture(
+                    near_color,
+                    display_material,
+                    side_surface,
+                    input.world_uv,
+                    material_dx,
+                    material_dy,
+                    material_blocks_per_pixel,
+                    1.0,
+                );
+                if albedo_diagnostic {
+                    near_albedo = apply_material_texture(
+                        surface_tint(input, display_material, side_surface),
+                        display_material,
+                        side_surface,
+                        input.world_uv,
+                        material_dx,
+                        material_dy,
+                        material_blocks_per_pixel,
+                        1.0,
+                    );
+                }
+            }
+            color = mix(far_color, near_color, appearance_weight);
+            if albedo_diagnostic {
+                albedo = mix(far_albedo, near_albedo, appearance_weight);
+            }
         }
     }
     if input.textured != 0u

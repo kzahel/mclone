@@ -6783,6 +6783,8 @@ mod tests {
         assert!(shader.contains("material_uses_grass_tint(input.material, false)"));
         assert!(shader.contains("full_sky_environmental_illumination()"));
         assert!(shader.contains("if display_material == 2u"));
+        assert!(shader.contains("if appearance_weight > 0.0"));
+        assert!(!shader.contains("} else if input.textured != 0u && input.material < 256u"));
         assert!(shader.contains("exact_transition_weight(world_position.xz)"));
     }
 
