@@ -885,6 +885,8 @@ impl McloneSceneHost {
             leaf_detail: game_leaf_detail(self.mesh_assets.catalog.leaf_detail()),
             grass_detail: game_grass_detail(self.render_options.grass_detail),
             terrain_lod_preset: self.terrain_lod_preset_preference(),
+            terrain_lod_effective_preset: self.applied_terrain_lod_preset(),
+            terrain_lod_applying: self.terrain_lod_applying(),
             terrain_lod_available: self.terrain_lod_supported(),
             fog: self.fog_settings,
             season_preview: self.season_preview,

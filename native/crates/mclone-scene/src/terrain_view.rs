@@ -8,12 +8,12 @@ use mclone_blocks::{BlockFluidKind, block_fluid_kind};
 use mclone_core::{ChunkPos, HorizontalTopology, TerrainLodPreset};
 use mclone_render::color_profile::RenderColorProfile;
 use mclone_terrain_view::{
-    ExactPaintedCoverageSnapshot, TerrainCompositionSourceIdentity, TerrainExactBoundaryColumn,
-    TerrainExactBoundaryProfile, TerrainExactCoverageMode, TerrainHorizonDiagnostic,
-    TerrainHorizonFrameStats, TerrainHorizonPresentation, TerrainHorizonRenderTarget,
-    TerrainLodPresetDescriptor, TerrainPreparedExactFrame, TerrainPreviewCamera,
-    TerrainPreviewMaterialAtlas, TerrainPreviewMaterialTable, TerrainPreviewView,
-    TerrainVegetationExecutor, TerrainViewEngine, TerrainViewEngineConfig,
+    ExactPaintedCoverageSnapshot, TERRAIN_LOD_HIGH_LEVEL_COUNT, TerrainCompositionSourceIdentity,
+    TerrainExactBoundaryColumn, TerrainExactBoundaryProfile, TerrainExactCoverageMode,
+    TerrainHorizonDiagnostic, TerrainHorizonFrameStats, TerrainHorizonPresentation,
+    TerrainHorizonRenderTarget, TerrainLodPresetDescriptor, TerrainPreparedExactFrame,
+    TerrainPreviewCamera, TerrainPreviewMaterialAtlas, TerrainPreviewMaterialTable,
+    TerrainPreviewView, TerrainVegetationExecutor, TerrainViewEngine, TerrainViewEngineConfig,
     TerrainViewSourceIdentity, terrain_exact_exposed_boundary_blocks,
     terrain_exact_player_connected_chunks,
 };
@@ -42,6 +42,9 @@ pub(crate) fn default_scene_terrain_vegetation_executor_factory()
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct SceneTerrainViewDiagnostics {
+    pub lod_preset: TerrainLodPreset,
+    pub lod_level_count: u32,
+    pub vegetation_max_sample_spacing: u32,
     pub source_generation: u64,
     pub coverage_generation: u64,
     pub exact_column_count: u32,
@@ -50,6 +53,7 @@ pub struct SceneTerrainViewDiagnostics {
     pub ready_slots: u32,
     pub drawn_levels: u32,
     pub drawn_tiles: u32,
+    pub drawn_tiles_by_level: [u32; TERRAIN_LOD_HIGH_LEVEL_COUNT as usize],
     pub vertex_count: u32,
     pub fixed_resident_bytes: u64,
     pub resident_bytes: u64,
@@ -63,6 +67,8 @@ pub struct SceneTerrainViewDiagnostics {
     pub far_culled_tiles: u32,
     pub drawn_tree_tiles: u32,
     pub drawn_tree_instances: u32,
+    pub drawn_tree_tiles_by_level: [u32; TERRAIN_LOD_HIGH_LEVEL_COUNT as usize],
+    pub drawn_tree_instances_by_level: [u32; TERRAIN_LOD_HIGH_LEVEL_COUNT as usize],
     pub target_ready: bool,
     pub tree_instance_count: u32,
     pub pending_vegetation_tiles: u32,
@@ -152,6 +158,11 @@ impl SceneTerrainViewState {
             anchor: [0.0, 0.0],
             diagnostic: TerrainHorizonDiagnostic::Natural,
             diagnostics: SceneTerrainViewDiagnostics {
+                lod_preset: lod.preset,
+                lod_level_count: clipmap.level_count,
+                vegetation_max_sample_spacing: lod
+                    .vegetation_max_sample_spacing
+                    .expect("validated enabled LOD retains a vegetation bound"),
                 source_generation: source.generation(),
                 coverage_generation,
                 ..Default::default()
@@ -228,6 +239,29 @@ impl SceneTerrainViewState {
             self.ready_columns.clone(),
             source_changed || coverage_changed,
         ))
+    }
+
+    pub(crate) fn reconfigure_lod(
+        &mut self,
+        device: &wgpu::Device,
+        descriptor: TerrainLodPresetDescriptor,
+    ) -> Result<bool> {
+        let changed = self
+            .engine
+            .reconfigure_lod(device, descriptor)
+            .map_err(anyhow::Error::msg)?;
+        if changed {
+            let descriptor = descriptor.validated().map_err(anyhow::Error::msg)?;
+            self.diagnostics.lod_preset = descriptor.preset;
+            self.diagnostics.lod_level_count = descriptor
+                .clipmap
+                .expect("enabled LOD descriptor remains enabled")
+                .level_count;
+            self.diagnostics.vegetation_max_sample_spacing = descriptor
+                .vegetation_max_sample_spacing
+                .expect("enabled LOD descriptor retains vegetation");
+        }
+        Ok(changed)
     }
 
     pub(crate) fn exact_coverage(&self) -> &ExactPaintedCoverageSnapshot {
@@ -344,6 +378,23 @@ impl McloneSceneHost {
         }
     }
 
+    pub fn applied_terrain_lod_preset(&self) -> TerrainLodPreset {
+        if !self.terrain_lod_supported() || !self.terrain_lod_preset_preference.horizon_enabled() {
+            TerrainLodPreset::Off
+        } else {
+            self.terrain_view
+                .as_ref()
+                .map_or(TerrainLodPreset::Off, |state| {
+                    state.diagnostics().lod_preset
+                })
+        }
+    }
+
+    pub fn terrain_lod_applying(&self) -> bool {
+        self.terrain_lod_supported()
+            && self.applied_terrain_lod_preset() != self.terrain_lod_preset_preference
+    }
+
     pub(crate) fn terrain_projection_far_distance(&self, ordinary_far_distance: f32) -> f32 {
         scene_terrain_projection_far_distance(
             self.effective_terrain_lod_preset(),
@@ -356,9 +407,18 @@ impl McloneSceneHost {
             return Ok(());
         }
         self.terrain_lod_preset_preference = presentation;
-        self.terrain_lod_persisted_preference = Some(presentation);
-        self.reset_terrain_view();
-        self.persist_graphics_preferences();
+        if !presentation.horizon_enabled() {
+            self.reset_terrain_view();
+            self.terrain_lod_persisted_preference = Some(presentation);
+            self.terrain_lod_pending_persistence = None;
+            self.persist_graphics_preferences();
+        } else if !self.terrain_lod_supported() {
+            self.terrain_lod_persisted_preference = Some(presentation);
+            self.terrain_lod_pending_persistence = None;
+            self.persist_graphics_preferences();
+        } else {
+            self.terrain_lod_pending_persistence = Some(presentation);
+        }
         log::info!(
             "terrain horizon preference set to {}; active={}",
             presentation.label(),
@@ -376,6 +436,9 @@ impl McloneSceneHost {
         let effective_preset = self.effective_terrain_lod_preset();
         if !effective_preset.horizon_enabled() {
             self.reset_terrain_view();
+            if !self.terrain_lod_supported() {
+                self.commit_pending_terrain_lod_preference();
+            }
             return Ok(false);
         }
         let world = self.active_world.id;
@@ -415,6 +478,14 @@ impl McloneSceneHost {
         }
         self.terrain_view
             .as_mut()
+            .expect("enabled terrain view was initialized")
+            .reconfigure_lod(
+                device,
+                TerrainLodPresetDescriptor::for_preset(effective_preset),
+            )?;
+        self.commit_pending_terrain_lod_preference();
+        self.terrain_view
+            .as_mut()
             .expect("composed terrain view was initialized")
             .set_diagnostic(self.terrain_horizon_diagnostic);
         let (admitted_columns, coverage_changed) = self
@@ -444,6 +515,31 @@ impl McloneSceneHost {
             .draw
             .set_traversal_ready_columns_with_context(&admitted_columns, false);
         Ok(true)
+    }
+
+    fn commit_pending_terrain_lod_preference(&mut self) {
+        let Some(preset) = self.terrain_lod_pending_persistence.take() else {
+            return;
+        };
+        self.terrain_lod_persisted_preference = Some(preset);
+        self.persist_graphics_preferences();
+    }
+
+    pub(crate) fn reset_terrain_lod_preference_to_platform_default(&mut self) {
+        self.terrain_lod_persisted_preference = None;
+        self.terrain_lod_pending_persistence = None;
+        if self.active_world.scene.startup.terrain_lod_preset_explicit {
+            return;
+        }
+        self.terrain_lod_preset_preference = self
+            .active_world
+            .scene
+            .startup
+            .graphics_platform_profile
+            .default_terrain_lod_preset();
+        if !self.terrain_lod_preset_preference.horizon_enabled() {
+            self.reset_terrain_view();
+        }
     }
 
     pub fn terrain_view_diagnostics(&self) -> Option<SceneTerrainViewDiagnostics> {
@@ -533,6 +629,7 @@ impl SceneTerrainViewState {
         self.diagnostics.ready_slots = stats.ready_slots;
         self.diagnostics.drawn_levels = stats.drawn_levels;
         self.diagnostics.drawn_tiles = stats.drawn_tiles;
+        self.diagnostics.drawn_tiles_by_level = stats.drawn_tiles_by_level;
         self.diagnostics.vertex_count = stats.vertex_count;
         self.diagnostics.fixed_resident_bytes = stats.fixed_resident_bytes;
         self.diagnostics.resident_bytes = stats.resident_bytes;
@@ -547,6 +644,8 @@ impl SceneTerrainViewState {
         self.diagnostics.far_culled_tiles = stats.far_culled_tiles;
         self.diagnostics.drawn_tree_tiles = stats.drawn_tree_tiles;
         self.diagnostics.drawn_tree_instances = stats.drawn_tree_instances;
+        self.diagnostics.drawn_tree_tiles_by_level = stats.drawn_tree_tiles_by_level;
+        self.diagnostics.drawn_tree_instances_by_level = stats.drawn_tree_instances_by_level;
         self.diagnostics.target_ready = stats.target_ready;
         self.diagnostics.tree_instance_count = stats.tree_instance_count;
         self.diagnostics.pending_vegetation_tiles = stats.pending_vegetation_tiles;

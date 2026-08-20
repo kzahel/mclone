@@ -110,6 +110,55 @@ impl TerrainHorizonAdmission {
         self.ready.fill(false);
     }
 
+    /// Resize outer resource pools without disturbing common level ownership.
+    pub fn resize_levels(
+        &mut self,
+        level_count: u32,
+        slots_per_level: u32,
+    ) -> Result<bool, String> {
+        let pool_len = slots_per_level
+            .checked_add(TERRAIN_HORIZON_STAGING_SLOTS_PER_LEVEL)
+            .ok_or("terrain horizon level resource count overflow")?;
+        if self
+            .levels
+            .first()
+            .is_some_and(|level| level.pool_len != pool_len)
+        {
+            return Err("terrain horizon level resize cannot change pool width".to_owned());
+        }
+        let old_level_count = self.levels.len() as u32;
+        if old_level_count == level_count {
+            return Ok(false);
+        }
+        let resource_slots = level_count
+            .checked_mul(pool_len)
+            .ok_or("terrain horizon resource count overflow")?;
+        self.logical_slots = level_count
+            .checked_mul(slots_per_level)
+            .ok_or("terrain horizon logical slot count overflow")?;
+        if level_count < old_level_count {
+            self.levels.truncate(level_count as usize);
+            self.assignments.truncate(resource_slots as usize);
+            self.ready.truncate(resource_slots as usize);
+            self.generations.truncate(resource_slots as usize);
+        } else {
+            self.levels
+                .extend(
+                    (old_level_count..level_count).map(|level| TerrainHorizonLevelAdmission {
+                        pool_start: level * pool_len,
+                        pool_len,
+                        terrain_committed: None,
+                        terrain_staged: None,
+                        vegetation_committed: None,
+                    }),
+                );
+            self.assignments.resize(resource_slots as usize, None);
+            self.ready.resize(resource_slots as usize, false);
+            self.generations.resize(resource_slots as usize, 0);
+        }
+        Ok(true)
+    }
+
     pub fn begin_transition(
         &mut self,
         requested: &[TerrainClipmapLevelSnapshot],
@@ -513,5 +562,33 @@ mod tests {
         assert!(admission.terrain_presentations().is_empty());
         assert!(admission.vegetation_presentations().is_empty());
         assert_eq!(admission.resource_slots(), 69);
+    }
+
+    #[test]
+    fn outer_pool_resize_preserves_common_committed_levels() {
+        let mut clipmap = clipmap();
+        let initial = clipmap.update_center(12, -34);
+        let mut admission = TerrainHorizonAdmission::new(3, 16).unwrap();
+        let (_, resources) = admission
+            .begin_transition(&clipmap.levels(), &initial.rebased_levels)
+            .unwrap();
+        ready_all(&mut admission, &resources);
+        admission.commit_ready_vegetation(|_| true);
+        let committed = admission.terrain_presentations();
+
+        assert!(admission.resize_levels(2, 16).unwrap());
+        assert_eq!(admission.terrain_presentations(), committed[..2]);
+        assert_eq!(admission.resource_slots(), 46);
+
+        clipmap.reconfigure_level_count(2).unwrap();
+        clipmap.reconfigure_level_count(4).unwrap();
+        assert!(admission.resize_levels(4, 16).unwrap());
+        let update = clipmap.update_center(12, -34);
+        let (_, entering) = admission
+            .begin_transition(&clipmap.levels(), &update.rebased_levels)
+            .unwrap();
+        assert_eq!(admission.terrain_presentations(), committed[..2]);
+        assert_eq!(entering.len(), 32);
+        assert!(entering.iter().all(|resource| resource.tile.level >= 2));
     }
 }

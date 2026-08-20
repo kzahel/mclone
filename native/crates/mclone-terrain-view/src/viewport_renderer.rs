@@ -25,12 +25,13 @@ use super::{
     BoundedRepresentationOwnershipSnapshot, ExactPaintedCoverageSnapshot, McloneTreeOccurrenceId,
     McloneTreeOwnershipCandidate, TERRAIN_EXACT_BOUNDARY_MAX_BLOCKS_PER_AXIS,
     TERRAIN_EXACT_COVERAGE_MASK_BYTES, TERRAIN_EXACT_FRONTIER_TREE_INSET_BLOCKS,
-    TERRAIN_EXACT_TRANSITION_MAX_TEXELS_PER_AXIS, TERRAIN_PREVIEW_DEPTH_FORMAT,
-    TERRAIN_PREVIEW_SAMPLE_BYTES, TERRAIN_PREVIEW_UNIFORM_BYTES, TERRAIN_PREVIEW_WORKGROUP_AXIS,
-    TerrainClipmap, TerrainClipmapConfig, TerrainClipmapDiagnostics, TerrainClipmapTile,
-    TerrainCompositionSourceIdentity, TerrainExactBoundaryProfile, TerrainExactCoverageMask,
-    TerrainExactCoverageMode, TerrainExactTransitionField, TerrainHorizonPresentation,
-    TerrainPreviewCamera, TerrainPreviewDrawOptions, TerrainPreviewLayer, TerrainPreviewSource,
+    TERRAIN_EXACT_TRANSITION_MAX_TEXELS_PER_AXIS, TERRAIN_LOD_HIGH_LEVEL_COUNT,
+    TERRAIN_PREVIEW_DEPTH_FORMAT, TERRAIN_PREVIEW_SAMPLE_BYTES, TERRAIN_PREVIEW_UNIFORM_BYTES,
+    TERRAIN_PREVIEW_WORKGROUP_AXIS, TerrainClipmap, TerrainClipmapConfig,
+    TerrainClipmapDiagnostics, TerrainClipmapTile, TerrainCompositionSourceIdentity,
+    TerrainExactBoundaryProfile, TerrainExactCoverageMask, TerrainExactCoverageMode,
+    TerrainExactTransitionField, TerrainHorizonPresentation, TerrainPreviewCamera,
+    TerrainPreviewDrawOptions, TerrainPreviewLayer, TerrainPreviewSource,
     TerrainPreviewSplitLayout, TerrainVegetationCoordinator, TerrainVegetationCoordinatorState,
     TerrainVegetationDesiredTile, TerrainVegetationExecutor, TerrainVegetationExecutorKind,
     TerrainVegetationSlotToken, TerrainViewportPlan, TerrainViewportTileId,
@@ -272,11 +273,14 @@ pub struct TerrainHorizonFrameStats {
     pub dispatched_refills_total: u64,
     pub drawn_levels: u32,
     pub drawn_tiles: u32,
+    pub drawn_tiles_by_level: [u32; TERRAIN_LOD_HIGH_LEVEL_COUNT as usize],
     pub inner_hole_culled_tiles: u32,
     pub frustum_culled_tiles: u32,
     pub far_culled_tiles: u32,
     pub drawn_tree_tiles: u32,
     pub drawn_tree_instances: u32,
+    pub drawn_tree_tiles_by_level: [u32; TERRAIN_LOD_HIGH_LEVEL_COUNT as usize],
+    pub drawn_tree_instances_by_level: [u32; TERRAIN_LOD_HIGH_LEVEL_COUNT as usize],
     pub exact_connector_segments: u32,
     pub exact_connector_vertex_count: u32,
     pub vertex_count: u32,
@@ -3480,6 +3484,110 @@ impl TerrainHorizonRenderer {
         self.clipmap.diagnostics()
     }
 
+    /// Resize only the clipmap's outer levels and proxy-tree bound.
+    ///
+    /// Presets keep tile width, base spacing, and render stride stable, so
+    /// common resource pools and their committed products retain identity.
+    pub fn reconfigure_lod(
+        &mut self,
+        device: &wgpu::Device,
+        config: TerrainClipmapConfig,
+        vegetation_max_sample_spacing: u32,
+    ) -> Result<bool, String> {
+        let config = config.validate()?;
+        let current = self.clipmap.config();
+        if config.tiles_per_axis != current.tiles_per_axis
+            || config.base_sample_spacing != current.base_sample_spacing
+        {
+            return Err(
+                "live terrain LOD reconfiguration may change only the outer level bound".to_owned(),
+            );
+        }
+        if !vegetation_max_sample_spacing.is_power_of_two()
+            || vegetation_max_sample_spacing < config.base_sample_spacing
+            || vegetation_max_sample_spacing > TERRAIN_PREVIEW_MAX_TREE_RECORD_SAMPLE_SPACING
+        {
+            return Err(format!(
+                "terrain horizon vegetation spacing {vegetation_max_sample_spacing} is outside the proven record range"
+            ));
+        }
+        if config == current && vegetation_max_sample_spacing == self.vegetation_max_sample_spacing
+        {
+            return Ok(false);
+        }
+
+        let mut next_clipmap = self.clipmap.clone();
+        next_clipmap.reconfigure_level_count(config.level_count)?;
+        let mut next_admission = self.admission.clone();
+        next_admission.resize_levels(config.level_count, config.slots_per_level())?;
+
+        let mut added_slots = Vec::new();
+        if config.level_count > current.level_count {
+            let horizon_normal_height_byte_len = terrain_horizon_normal_height_byte_len()?;
+            let resource_slots_per_level = config
+                .slots_per_level()
+                .checked_add(TERRAIN_HORIZON_STAGING_SLOTS_PER_LEVEL)
+                .ok_or("terrain horizon resource slots per level overflow")?;
+            added_slots.reserve(
+                config
+                    .level_count
+                    .saturating_sub(current.level_count)
+                    .saturating_mul(resource_slots_per_level) as usize,
+            );
+            for level in current.level_count..config.level_count {
+                for resource in 0..resource_slots_per_level {
+                    added_slots.push(TerrainViewportGpuTile::new_gpu_only(
+                        device,
+                        &self.renderer.compute_layout,
+                        &self.renderer.render_layout,
+                        self.renderer.sample_byte_len,
+                        horizon_normal_height_byte_len,
+                        TerrainViewportTileId {
+                            profile: TerrainPreviewProfile::McloneOverworldV1,
+                            seed: 0,
+                            tile_x: (resource % config.tiles_per_axis) as i32,
+                            tile_z: (resource / config.tiles_per_axis) as i32,
+                            sample_spacing: config.sample_spacing(level),
+                            content_stage: TerrainPreviewContentStage::Cover,
+                            surface_quality: TerrainPreviewSurfaceQuality::Inferred,
+                        },
+                    )?);
+                }
+            }
+        }
+
+        self.clipmap = next_clipmap;
+        self.admission = next_admission;
+        self.pending
+            .retain(|resource| resource.tile.level < config.level_count);
+        if config.level_count < current.level_count {
+            self.slots
+                .truncate(self.admission.resource_slots() as usize);
+        } else {
+            self.slots.extend(added_slots);
+        }
+        debug_assert_eq!(self.slots.len(), self.admission.resource_slots() as usize);
+        self.visible_terrain_slots.resize(self.slots.len(), false);
+        self.visible_vegetation_slots
+            .resize(self.slots.len(), false);
+        self.vegetation_max_sample_spacing = vegetation_max_sample_spacing;
+        for slot in &mut self.slots {
+            if slot.request.request().sample_spacing > vegetation_max_sample_spacing {
+                slot.clear_vegetation();
+            }
+        }
+        self.refresh_after_lod_reconfiguration()?;
+        Ok(true)
+    }
+
+    fn refresh_after_lod_reconfiguration(&mut self) -> Result<(), String> {
+        if self.admission.has_staged_levels() {
+            self.refresh_vegetation_desired(self.requested_center_x, self.requested_center_z)
+        } else {
+            self.schedule_requested_transition()
+        }
+    }
+
     pub fn set_view(
         &mut self,
         seed: i64,
@@ -4048,9 +4156,12 @@ impl TerrainHorizonRenderer {
 
         let mut drawn_levels = 0_u32;
         let mut drawn_tiles = 0_u32;
+        let mut drawn_tiles_by_level = [0_u32; TERRAIN_LOD_HIGH_LEVEL_COUNT as usize];
         let mut drawn_exact_connector_segments = 0_u32;
         let mut drawn_tree_tiles = 0_u32;
         let mut drawn_tree_instances = 0_u32;
+        let mut drawn_tree_tiles_by_level = [0_u32; TERRAIN_LOD_HIGH_LEVEL_COUNT as usize];
+        let mut drawn_tree_instances_by_level = [0_u32; TERRAIN_LOD_HIGH_LEVEL_COUNT as usize];
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("mclone_terrain_horizon_render_pass"),
@@ -4106,6 +4217,10 @@ impl TerrainHorizonRenderer {
                         0..1,
                     );
                     drawn_tiles = drawn_tiles.saturating_add(1);
+                    if let Some(count) = drawn_tiles_by_level.get_mut(level.snapshot.level as usize)
+                    {
+                        *count = count.saturating_add(1);
+                    }
                     level_drawn = true;
                 }
                 if level_drawn {
@@ -4179,6 +4294,16 @@ impl TerrainHorizonRenderer {
                     drawn_tree_tiles = drawn_tree_tiles.saturating_add(1);
                     drawn_tree_instances =
                         drawn_tree_instances.saturating_add(slot.tree_instance_count);
+                    if let Some(count) =
+                        drawn_tree_tiles_by_level.get_mut(level.snapshot.level as usize)
+                    {
+                        *count = count.saturating_add(1);
+                    }
+                    if let Some(count) =
+                        drawn_tree_instances_by_level.get_mut(level.snapshot.level as usize)
+                    {
+                        *count = count.saturating_add(slot.tree_instance_count);
+                    }
                 }
             }
         }
@@ -4375,11 +4500,14 @@ impl TerrainHorizonRenderer {
             dispatched_refills_total: self.dispatched_refills_total,
             drawn_levels,
             drawn_tiles,
+            drawn_tiles_by_level,
             inner_hole_culled_tiles,
             frustum_culled_tiles,
             far_culled_tiles,
             drawn_tree_tiles,
             drawn_tree_instances,
+            drawn_tree_tiles_by_level,
+            drawn_tree_instances_by_level,
             exact_connector_segments: drawn_exact_connector_segments,
             exact_connector_vertex_count,
             vertex_count,
@@ -4528,7 +4656,7 @@ impl TerrainHorizonRenderer {
             self.vegetation_coordinator = Some(TerrainVegetationCoordinator::new(
                 executor,
                 source,
-                desired.len(),
+                maximum_terrain_vegetation_desired_tiles(self.clipmap.config())?,
             )?);
         }
         self.vegetation_coordinator
@@ -4976,6 +5104,24 @@ fn terrain_horizon_tile_id(
         content_stage,
         surface_quality: TerrainPreviewSurfaceQuality::Inferred,
     }
+}
+
+fn maximum_terrain_vegetation_desired_tiles(config: TerrainClipmapConfig) -> Result<usize, String> {
+    let ratio = TERRAIN_PREVIEW_MAX_TREE_RECORD_SAMPLE_SPACING
+        .checked_div(config.base_sample_spacing)
+        .ok_or("terrain vegetation base spacing is zero")?;
+    let record_level_count = ratio
+        .checked_ilog2()
+        .ok_or("terrain vegetation record level range is empty")?
+        .saturating_add(1)
+        .min(config.level_count);
+    usize::try_from(
+        config
+            .slots_per_level()
+            .checked_mul(record_level_count)
+            .ok_or("terrain vegetation desired-tile bound overflow")?,
+    )
+    .map_err(|_| "terrain vegetation desired-tile bound exceeds usize".to_owned())
 }
 
 fn terrain_horizon_vegetation_source(

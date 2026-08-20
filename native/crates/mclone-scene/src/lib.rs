@@ -1299,6 +1299,7 @@ pub struct McloneSceneHost {
     graphics_preference_error: Option<String>,
     terrain_lod_preset_preference: TerrainLodPreset,
     terrain_lod_persisted_preference: Option<TerrainLodPreset>,
+    terrain_lod_pending_persistence: Option<TerrainLodPreset>,
     fog_settings: GameFogSettings,
     pending_leaf_detail: Option<mclone_mesh::LeafDetail>,
     pending_restored_asset_pack_selection:

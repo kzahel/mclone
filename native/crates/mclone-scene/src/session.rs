@@ -474,6 +474,7 @@ impl McloneSceneHost {
                 scene.startup.terrain_lod_preset,
             ),
             terrain_lod_persisted_preference: None,
+            terrain_lod_pending_persistence: None,
             fog_settings: GameFogSettings::default(),
             pending_leaf_detail: None,
             pending_restored_asset_pack_selection: None,
@@ -692,6 +693,7 @@ impl McloneSceneHost {
                 scene.startup.terrain_lod_preset,
             ),
             terrain_lod_persisted_preference: None,
+            terrain_lod_pending_persistence: None,
             fog_settings: GameFogSettings::default(),
             pending_leaf_detail: None,
             pending_restored_asset_pack_selection: None,
@@ -992,6 +994,7 @@ impl McloneSceneHost {
                 scene.startup.terrain_lod_preset,
             ),
             terrain_lod_persisted_preference: None,
+            terrain_lod_pending_persistence: None,
             fog_settings: GameFogSettings::default(),
             pending_leaf_detail: None,
             pending_restored_asset_pack_selection: None,
@@ -1660,6 +1663,7 @@ impl McloneSceneHost {
     }
 
     pub(crate) fn apply_local_data_effect(&mut self, effect: ClientExperienceLocalDataEffect) {
+        let factory_reset = effect == ClientExperienceLocalDataEffect::FactoryReset;
         let result = match effect {
             ClientExperienceLocalDataEffect::ClearRebuildableCache => {
                 self.status_overlay =
@@ -1700,6 +1704,9 @@ impl McloneSceneHost {
 
         match result {
             Ok((profile, message)) => {
+                if factory_reset {
+                    self.reset_terrain_lod_preference_to_platform_default();
+                }
                 self.storage_profile_ui = StorageProfileUiState::available(
                     profile.id.as_bytes(),
                     &profile.display_name,

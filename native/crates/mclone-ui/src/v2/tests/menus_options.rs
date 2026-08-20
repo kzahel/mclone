@@ -599,6 +599,21 @@ fn graphics_options_show_and_cycle_distant_terrain_quality() {
             .and_then(|widget| widget.value.as_deref()),
         Some("Medium (Unavailable)")
     );
+
+    let applying = GameUiRenderState {
+        terrain_lod_available: true,
+        terrain_lod_applying: true,
+        terrain_lod_effective_preset: TerrainLodPreset::High,
+        ..state
+    };
+    surface.set_render_state(applying);
+    assert_eq!(
+        surface
+            .layout()
+            .widget(UI_V2_OPTIONS_TERRAIN_PRESENTATION)
+            .and_then(|widget| widget.value.as_deref()),
+        Some("Medium (Applying)")
+    );
 }
 
 #[test]

@@ -133,6 +133,9 @@ fn main() -> Result<()> {
                 |terrain| {
                     serde_json::json!({
                         "enabled": true,
+                        "lodPreset": terrain.lod_preset.startup_label(),
+                        "lodLevelCount": terrain.lod_level_count,
+                        "vegetationMaxSampleSpacing": terrain.vegetation_max_sample_spacing,
                         "sourceGeneration": terrain.source_generation,
                         "coverageGeneration": terrain.coverage_generation,
                         "exactColumnCount": terrain.exact_column_count,
@@ -141,6 +144,7 @@ fn main() -> Result<()> {
                         "readySlots": terrain.ready_slots,
                         "drawnLevels": terrain.drawn_levels,
                         "drawnTiles": terrain.drawn_tiles,
+                        "drawnTilesByLevel": terrain.drawn_tiles_by_level,
                         "vertexCount": terrain.vertex_count,
                         "fixedResidentBytes": terrain.fixed_resident_bytes,
                         "residentBytes": terrain.resident_bytes,
@@ -150,7 +154,9 @@ fn main() -> Result<()> {
                         "exactTransitionPreparationMicros": terrain.exact_transition_preparation_micros,
                         "exactTransitionPayloadBytes": terrain.exact_transition_payload_bytes,
                         "drawnTreeTiles": terrain.drawn_tree_tiles,
+                        "drawnTreeTilesByLevel": terrain.drawn_tree_tiles_by_level,
                         "drawnTreeInstances": terrain.drawn_tree_instances,
+                        "drawnTreeInstancesByLevel": terrain.drawn_tree_instances_by_level,
                         "targetReady": terrain.target_ready,
                         "treeInstanceCount": terrain.tree_instance_count,
                         "pendingVegetationTiles": terrain.pending_vegetation_tiles,

@@ -3616,6 +3616,21 @@ impl WebSceneHost {
             }
             if let Some(terrain) = host.terrain_view_diagnostics() {
                 report_set_bool(&object, "terrainViewActive", true)?;
+                report_set_string(
+                    &object,
+                    "terrainViewLodPreset",
+                    terrain.lod_preset.startup_label(),
+                )?;
+                report_set_number(
+                    &object,
+                    "terrainViewLodLevelCount",
+                    f64::from(terrain.lod_level_count),
+                )?;
+                report_set_number(
+                    &object,
+                    "terrainViewVegetationMaxSampleSpacing",
+                    f64::from(terrain.vegetation_max_sample_spacing),
+                )?;
                 report_set_number(
                     &object,
                     "terrainViewSourceGeneration",
@@ -3643,6 +3658,11 @@ impl WebSceneHost {
                     terrain.drawn_levels as f64,
                 )?;
                 report_set_number(&object, "terrainViewDrawnTiles", terrain.drawn_tiles as f64)?;
+                report_set_number_array(
+                    &object,
+                    "terrainViewDrawnTilesByLevel",
+                    &terrain.drawn_tiles_by_level,
+                )?;
                 report_set_bool(&object, "terrainViewTargetReady", terrain.target_ready)?;
                 report_set_number(
                     &object,
@@ -3673,6 +3693,16 @@ impl WebSceneHost {
                     &object,
                     "terrainViewVegetationCompletedJobs",
                     terrain.vegetation_completed_jobs as f64,
+                )?;
+                report_set_number_array(
+                    &object,
+                    "terrainViewDrawnTreeTilesByLevel",
+                    &terrain.drawn_tree_tiles_by_level,
+                )?;
+                report_set_number_array(
+                    &object,
+                    "terrainViewDrawnTreeInstancesByLevel",
+                    &terrain.drawn_tree_instances_by_level,
                 )?;
                 report_set_number(
                     &object,
@@ -6304,6 +6334,20 @@ fn report_set_number(object: &js_sys::Object, key: &str, value: f64) -> Result<(
 
 fn report_set_string(object: &js_sys::Object, key: &str, value: &str) -> Result<(), String> {
     js_sys::Reflect::set(object, &JsValue::from_str(key), &JsValue::from_str(value))
+        .map(|_| ())
+        .map_err(|error| format!("failed to set report field {key}: {error:?}"))
+}
+
+fn report_set_number_array(
+    object: &js_sys::Object,
+    key: &str,
+    values: &[u32],
+) -> Result<(), String> {
+    let array = js_sys::Array::new_with_length(values.len() as u32);
+    for (index, value) in values.iter().enumerate() {
+        array.set(index as u32, JsValue::from_f64(f64::from(*value)));
+    }
+    js_sys::Reflect::set(object, &JsValue::from_str(key), &array)
         .map(|_| ())
         .map_err(|error| format!("failed to set report field {key}: {error:?}"))
 }

@@ -2,8 +2,9 @@ use crate::{
     BoundedRepresentationOwnershipSnapshot, McloneTreeOccurrenceId,
     TERRAIN_HORIZON_MAX_PROVEN_RENDER_CELL_STRIDE, TerrainClipmap, TerrainClipmapConfig,
     TerrainExactCoverageMode, TerrainHorizonFrameStats, TerrainHorizonPresentation,
-    TerrainHorizonRenderTarget, TerrainHorizonRenderer, TerrainPreparedExactFrame,
-    TerrainPreviewMaterialAtlas, TerrainVegetationExecutor, TerrainViewSourceIdentity,
+    TerrainHorizonRenderTarget, TerrainHorizonRenderer, TerrainLodPresetDescriptor,
+    TerrainPreparedExactFrame, TerrainPreviewMaterialAtlas, TerrainVegetationExecutor,
+    TerrainViewSourceIdentity,
 };
 use mclone_render_color::{RenderColorProfile, RenderTargetColorTransform};
 use mclone_worldgen::terrain_preview::{
@@ -158,6 +159,35 @@ impl TerrainViewEngine {
 
     pub const fn config(&self) -> TerrainViewEngineConfig {
         self.config
+    }
+
+    /// Apply an enabled preset without replacing common inner resources.
+    pub fn reconfigure_lod(
+        &mut self,
+        device: &wgpu::Device,
+        descriptor: TerrainLodPresetDescriptor,
+    ) -> Result<bool, String> {
+        let descriptor = descriptor.validated()?;
+        let clipmap = descriptor
+            .clipmap
+            .ok_or("terrain-view engine cannot reconfigure to LOD Off in place")?;
+        if descriptor.render_cell_stride != self.config.render_cell_stride {
+            return Err(
+                "live terrain LOD reconfiguration cannot change render cell stride".to_owned(),
+            );
+        }
+        let vegetation_max_sample_spacing = descriptor
+            .vegetation_max_sample_spacing
+            .ok_or("enabled terrain LOD descriptor has no vegetation bound")?;
+        let changed =
+            self.renderer
+                .reconfigure_lod(device, clipmap, vegetation_max_sample_spacing)?;
+        if changed {
+            self.config.clipmap = clipmap;
+            self.config.vegetation_max_sample_spacing = vegetation_max_sample_spacing;
+            self.last_stats = None;
+        }
+        Ok(changed)
     }
 
     pub fn resize(&mut self, device: &wgpu::Device, width: u32, height: u32) {

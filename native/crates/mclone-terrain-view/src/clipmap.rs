@@ -257,9 +257,52 @@ impl TerrainClipmap {
 
     pub fn origins_settled(&self) -> bool {
         self.levels.iter().all(|level| {
-            level.origin_tile_x == level.requested_origin_tile_x
+            level.initialized
+                && level.origin_tile_x == level.requested_origin_tile_x
                 && level.origin_tile_z == level.requested_origin_tile_z
         })
+    }
+
+    /// Resize only the outer level bound while retaining common level state.
+    pub fn reconfigure_level_count(&mut self, level_count: u32) -> Result<bool, String> {
+        let next = TerrainClipmapConfig {
+            level_count,
+            ..self.config
+        }
+        .validate()?;
+        if next == self.config {
+            return Ok(false);
+        }
+        let old_level_count = self.config.level_count;
+        if level_count < old_level_count {
+            self.levels.truncate(level_count as usize);
+        } else {
+            self.levels
+                .extend(
+                    (old_level_count..level_count).map(|level| TerrainClipmapLevelState {
+                        level,
+                        sample_spacing: next.sample_spacing(level),
+                        requested_origin_tile_x: 0,
+                        requested_origin_tile_z: 0,
+                        origin_tile_x: 0,
+                        origin_tile_z: 0,
+                        initialized: false,
+                    }),
+                );
+        }
+        self.config = next;
+        self.valid_slots = self.valid_slots.min(next.allocation_slots());
+        self.pending_refills = 0;
+        self.last_refills = 0;
+        self.retained_tiles = self
+            .levels
+            .iter()
+            .filter(|level| level.initialized)
+            .count()
+            .try_into()
+            .unwrap_or(u32::MAX)
+            .saturating_mul(next.slots_per_level());
+        Ok(true)
     }
 
     pub fn update_center(&mut self, center_x: i32, center_z: i32) -> TerrainClipmapUpdate {
@@ -474,6 +517,26 @@ mod tests {
             base_sample_spacing: 1,
         })
         .unwrap()
+    }
+
+    #[test]
+    fn level_reconfiguration_retains_common_origins_and_initializes_only_new_levels() {
+        let mut clipmap = small();
+        clipmap.update_center(321, -654);
+        let initial = clipmap.levels();
+
+        assert!(clipmap.reconfigure_level_count(2).unwrap());
+        assert_eq!(clipmap.config().allocation_slots(), 32);
+        assert_eq!(clipmap.levels(), initial[..2]);
+        assert!(clipmap.origins_settled());
+
+        assert!(clipmap.reconfigure_level_count(4).unwrap());
+        assert_eq!(clipmap.levels()[..2], initial[..2]);
+        assert!(!clipmap.origins_settled());
+        let update = clipmap.update_center(321, -654);
+        assert_eq!(update.rebased_levels, vec![3, 2]);
+        assert_eq!(update.refills.len(), 32);
+        assert!(clipmap.origins_settled());
     }
 
     #[test]

@@ -4657,6 +4657,13 @@ fn options_category_rows(
                                 crate::TerrainLodPreset::High => "High (Unavailable)",
                                 crate::TerrainLodPreset::Off => "Off",
                             }
+                        } else if state.terrain_lod_applying {
+                            match state.terrain_lod_preset {
+                                crate::TerrainLodPreset::Off => "Off (Applying)",
+                                crate::TerrainLodPreset::Low => "Low (Applying)",
+                                crate::TerrainLodPreset::Medium => "Medium (Applying)",
+                                crate::TerrainLodPreset::High => "High (Applying)",
+                            }
                         } else {
                             state.terrain_lod_preset.label()
                         },
