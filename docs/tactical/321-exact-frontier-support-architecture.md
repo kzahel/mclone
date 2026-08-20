@@ -1,10 +1,11 @@
 # Tactical 321: Exact Frontier Support Architecture
 
-Status: Human Reviews A1 and A2 accepted 2026-08-20. Phase 1 diagnostic
+Status: Human Reviews A1, A2, and B accepted 2026-08-20. Phase 1 diagnostic
 frontier planning is complete at revisions `328757c3` through `cd9706e3`.
 Human Review A2 selected bounded Hybrid D. Phase 2's isolated topology proof
-is complete at revisions `0a119f30` through `76dda6e9` and is stopped at
-Human Review B. Ordinary product geometry remains unchanged.
+is complete at revisions `0a119f30` through `76dda6e9`. Human Review B
+accepted its topology and pixels; Phase 3 ordinary-product admission is now
+authorized.
 
 Topic: `procedural-horizon-clipmap`
 
@@ -1007,4 +1008,7 @@ or coarse owner, and closes every support outer edge with a skirt. Matched
 RD2 and RD8 natural/proof pixels plus a forced one-tile RD8 exhaustion view
 pass their receipt contract and visual inspection. Ordinary composition still
 uses the pre-proof geometry path and reports zero dynamic proof resources.
-Work is stopped at Human Review B; Phase 3 is not authorized.
+Human Review B accepted the bounded hybrid topology and its preferred and
+forced-fallback pixels on 2026-08-20. Phase 3 is authorized to replace the
+diagnostic-only lifecycle with generation-coherent ordinary-product
+admission.
