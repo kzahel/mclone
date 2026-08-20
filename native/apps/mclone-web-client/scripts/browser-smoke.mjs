@@ -85,18 +85,32 @@ if (terrainPresentation && !["exact-only", "composed"].includes(terrainPresentat
     `--terrain-presentation requires exact-only or composed; got ${terrainPresentation}`,
   );
 }
+const terrainLodQualityArgIndex = process.argv.indexOf("--terrain-lod-quality");
+const terrainLodQuality = terrainLodQualityArgIndex >= 0
+  ? String(process.argv[terrainLodQualityArgIndex + 1] ?? "")
+  : "";
+if (terrainLodQuality && !["off", "low", "medium", "high"].includes(terrainLodQuality)) {
+  throw new Error(
+    `--terrain-lod-quality requires off, low, medium, or high; got ${terrainLodQuality}`,
+  );
+}
+if (terrainPresentation && terrainLodQuality) {
+  throw new Error("use only one of --terrain-lod-quality or legacy --terrain-presentation");
+}
+const requestedTerrainLodQuality = terrainLodQuality
+  || (terrainPresentation === "exact-only" ? "off" : terrainPresentation === "composed" ? "high" : "");
 const terrainCompositionProbe = process.argv.includes("--terrain-composition-probe")
   || process.env.MCLONE_NATIVE_WEB_TERRAIN_COMPOSITION_PROBE === "1";
 const terrainHorizonProbe = process.argv.includes("--terrain-horizon-probe")
   || process.env.MCLONE_NATIVE_WEB_TERRAIN_HORIZON_PROBE === "1";
 const seasonalAppearanceProbe = process.argv.includes("--seasonal-appearance-probe")
   || process.env.MCLONE_NATIVE_WEB_SEASONAL_APPEARANCE_PROBE === "1";
-if (terrainCompositionProbe && terrainPresentation !== "composed") {
-  throw new Error("--terrain-composition-probe requires --terrain-presentation composed");
+if (terrainCompositionProbe && requestedTerrainLodQuality !== "high") {
+  throw new Error("--terrain-composition-probe requires --terrain-lod-quality high");
 }
-if (terrainHorizonProbe && terrainPresentation) {
+if (terrainHorizonProbe && requestedTerrainLodQuality) {
   throw new Error(
-    "--terrain-horizon-probe starts exact-only and requires no --terrain-presentation override",
+    "--terrain-horizon-probe supplies its own Off baseline and requires no LOD override",
   );
 }
 // The composition probe deliberately runs the full shared quality tier. Keep
@@ -121,11 +135,11 @@ if ((terrainCompositionProbe || terrainHorizonProbe || seasonalAppearanceProbe) 
 }
 if (
   seasonalAppearanceProbe
-  && (generationProfile !== "mclone-overworld-v1" || terrainPresentation !== "exact-only")
+  && (generationProfile !== "mclone-overworld-v1" || requestedTerrainLodQuality !== "off")
 ) {
   throw new Error(
     "--seasonal-appearance-probe requires --generation-profile mclone-overworld-v1 "
-      + "and --terrain-presentation exact-only",
+      + "and --terrain-lod-quality off",
   );
 }
 for (const [label, value] of [
@@ -870,8 +884,10 @@ async function run() {
         startupParameters.set("renderDistance", String(renderDistance));
       }
       if (starterContent) startupParameters.set("starterContent", starterContent);
-      if (terrainPresentation) {
-        startupParameters.set("terrainPresentation", terrainPresentation);
+      if (terrainHorizonProbe) {
+        startupParameters.set("terrainLodQuality", "off");
+      } else if (requestedTerrainLodQuality) {
+        startupParameters.set("terrainLodQuality", requestedTerrainLodQuality);
       }
       if (terrainCompositionProbe || terrainHorizonProbe || seasonalAppearanceProbe) {
         startupParameters.set("qualityCapture", "1");
@@ -3397,7 +3413,7 @@ async function run() {
         }));
         if (initial.terrainViewActive !== false) {
           throw new Error(
-            `terrain horizon probe did not start exact-only: ${JSON.stringify(initial)}`,
+            `distant-terrain probe did not start Off: ${JSON.stringify(initial)}`,
           );
         }
         const eye = /** @type {[number, number, number]} */ (
@@ -3427,8 +3443,8 @@ async function run() {
           || probe.toggleResult?.terrainViewDrawnTiles <= 0
           || probe.reloadResult?.terrainViewActive !== true
           || probe.reloadResult?.terrainViewDrawnTiles <= 0
-          || probe.storedPresentation !== "composed"
-          || probe.reloadedStoredPresentation !== "composed"
+          || probe.storedPreset !== "low"
+          || probe.reloadedStoredPreset !== "low"
         ) {
           throw new Error(`browser terrain-horizon probe failed:\n${JSON.stringify({
             pageErrors,
@@ -11720,8 +11736,8 @@ function summarizeSeasonalAppearanceRenderResult(result) {
 }
 
 /**
- * Exercise the shared Graphics row from its exact-only default, prove that the
- * composed renderer produces pixels, then reload without a query override and
+ * Exercise the shared Graphics row from an explicit Off baseline, prove that
+ * Low produces distant-terrain pixels, then reload without a query override and
  * prove that the stored preference restores the same renderer.
  *
  * @param {Page} page
@@ -11756,7 +11772,7 @@ async function runTerrainHorizonRegressionProbe(
             globalThis.localStorage?.getItem("mclone.graphics.preferences.v1") ?? "null",
           );
           return stored?.schema === 1
-            && stored?.preferences?.terrainPresentation === "composed";
+            && stored?.preferences?.terrainLodPreset === "low";
         } catch {
           return false;
         }
@@ -11774,12 +11790,12 @@ async function runTerrainHorizonRegressionProbe(
       stored: globalThis.localStorage?.getItem("mclone.graphics.preferences.v1") ?? null,
     }));
     throw new Error(
-      `Terrain Horizon row did not persist after its UI tap; screenshot=${diagnosticPath}; `
+      `Distant Terrain row did not persist after its UI tap; screenshot=${diagnosticPath}; `
         + `${error instanceof Error ? error.message : String(error)}\n`
         + JSON.stringify(diagnostic, null, 2),
     );
   }
-  const storedPresentation = await readStoredTerrainPresentation(page);
+  const storedPreset = await readStoredTerrainLodPreset(page);
   await page.evaluate(() => globalThis.__mcloneWebApp?.closeNativeUi?.());
   const toggleProof = await captureTerrainHorizonFrame(
     page,
@@ -11804,7 +11820,7 @@ async function runTerrainHorizonRegressionProbe(
       `terrain horizon preference reload failed to boot: ${JSON.stringify(reloadedBootState)}`,
     );
   }
-  const reloadedStoredPresentation = await readStoredTerrainPresentation(page);
+  const reloadedStoredPreset = await readStoredTerrainLodPreset(page);
   const reloadProof = await captureTerrainHorizonFrame(
     page,
     canvas,
@@ -11813,8 +11829,8 @@ async function runTerrainHorizonRegressionProbe(
     reloadScreenshotPath,
   );
   return {
-    storedPresentation,
-    reloadedStoredPresentation,
+    storedPreset,
+    reloadedStoredPreset,
     toggleResult: summarizeTerrainHorizonResult(toggleProof.result),
     togglePixels: toggleProof.pixels,
     reloadResult: summarizeTerrainHorizonResult(reloadProof.result),
@@ -11827,10 +11843,13 @@ function summarizeTerrainHorizonResult(result) {
   if (result == null) return null;
   return {
     terrainViewActive: result.terrainViewActive,
+    terrainViewLodPreset: result.terrainViewLodPreset,
+    terrainViewLodLevelCount: result.terrainViewLodLevelCount,
     terrainViewTargetReady: result.terrainViewTargetReady,
     terrainViewExactColumnCount: result.terrainViewExactColumnCount,
     terrainViewDrawnLevels: result.terrainViewDrawnLevels,
     terrainViewDrawnTiles: result.terrainViewDrawnTiles,
+    terrainViewDrawnTilesByLevel: result.terrainViewDrawnTilesByLevel,
     terrainViewTreeInstanceCount: result.terrainViewTreeInstanceCount,
     terrainViewVegetationSubmittedJobs: result.terrainViewVegetationSubmittedJobs,
     terrainViewVegetationCompletedJobs: result.terrainViewVegetationCompletedJobs,
@@ -11838,12 +11857,12 @@ function summarizeTerrainHorizonResult(result) {
 }
 
 /** @param {Page} page */
-async function readStoredTerrainPresentation(page) {
+async function readStoredTerrainLodPreset(page) {
   return page.evaluate(() => {
     try {
       return JSON.parse(
         globalThis.localStorage?.getItem("mclone.graphics.preferences.v1") ?? "null",
-      )?.preferences?.terrainPresentation ?? null;
+      )?.preferences?.terrainLodPreset ?? null;
     } catch {
       return null;
     }

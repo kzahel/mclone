@@ -33,7 +33,7 @@ ORBIT_SPEED="${MCLONE_ANDROID_XR_PERF_ORBIT_SPEED:-4.3}"
 FLIGHT_SPEED="${MCLONE_ANDROID_XR_PERF_FLIGHT_SPEED:-34.4}"
 SAMPLE_MODE="${MCLONE_ANDROID_XR_PERSISTED_SAMPLE_MODE:-orbit}"
 GENERATION_PROFILE="${MCLONE_ANDROID_XR_GENERATION_PROFILE:-mclone-overworld-v1}"
-TERRAIN_PRESENTATION="${MCLONE_ANDROID_XR_TERRAIN_PRESENTATION:-exact-only}"
+TERRAIN_LOD_QUALITY="${MCLONE_ANDROID_XR_TERRAIN_LOD_QUALITY:-${MCLONE_ANDROID_XR_TERRAIN_PRESENTATION:-off}}"
 RENDER_COMPILE_WORKERS="${MCLONE_ANDROID_XR_RENDER_COMPILE_WORKERS:-2}"
 RENDER_COMPLETED_RESULT_ACCEPT_BUDGET="${MCLONE_ANDROID_XR_RENDER_COMPLETED_RESULT_ACCEPT_BUDGET:-2}"
 RENDER_SECTION_UPLOAD_BUDGET="${MCLONE_ANDROID_XR_RENDER_SECTION_UPLOAD_BUDGET:-16}"
@@ -74,8 +74,11 @@ Options:
   --render-distance N
   --generation-profile PROFILE
                      Generation profile used for both launches.
+  --terrain-lod-quality PRESET
+                     Distant-terrain quality used for both launches:
+                     off, low, medium, or high.
   --terrain-presentation MODE
-                     Terrain presentation used for both launches.
+                     Deprecated exact-only/composed compatibility alias.
   --sample-mode MODE Reopen sample mode: orbit or flight.
   --perf-orbit-speed N
                      Orbit speed in blocks per second.
@@ -201,9 +204,9 @@ while [[ $# -gt 0 ]]; do
             GENERATION_PROFILE="$2"
             shift 2
             ;;
-        --terrain-presentation)
+        --terrain-lod-quality|--terrain-presentation)
             require_arg "$1" "${2:-}"
-            TERRAIN_PRESENTATION="$2"
+            TERRAIN_LOD_QUALITY="$2"
             shift 2
             ;;
         --sample-mode)
@@ -254,11 +257,17 @@ case "$SAMPLE_MODE" in
         mclone_die "--sample-mode must be 'orbit' or 'flight'"
         ;;
 esac
-case "$TERRAIN_PRESENTATION" in
-    exact-only|composed)
+case "$TERRAIN_LOD_QUALITY" in
+    off|low|medium|high)
+        ;;
+    exact-only)
+        TERRAIN_LOD_QUALITY=off
+        ;;
+    composed)
+        TERRAIN_LOD_QUALITY=high
         ;;
     *)
-        mclone_die "--terrain-presentation must be 'exact-only' or 'composed'"
+        mclone_die "--terrain-lod-quality must be off, low, medium, or high"
         ;;
 esac
 
@@ -293,8 +302,8 @@ scene_args=(
     --render-distance "$RENDER_DISTANCE"
     --app-arg --generation-profile
     --app-arg "$GENERATION_PROFILE"
-    --app-arg --terrain-presentation
-    --app-arg "$TERRAIN_PRESENTATION"
+    --app-arg --terrain-lod-quality
+    --app-arg "$TERRAIN_LOD_QUALITY"
     --render-compile-workers "$RENDER_COMPILE_WORKERS"
     --day-time "$DAY_TIME"
     --freeze-time
