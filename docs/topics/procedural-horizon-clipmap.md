@@ -38,17 +38,40 @@ chunk exact window while the exact mask and boundary formats currently permit
 only a 64-chunk span. Tactical
 [`321`](../tactical/321-exact-frontier-support-architecture.md) now owns the
 architecture-first response. Its Phase 0 audit and Human Review A1 are
-accepted; diagnostic-only frontier planning is now in progress. The audit
-establishes that radius 4 is the largest square always
+accepted. Phase 1 diagnostic planning is complete and stopped at Human Review
+A2; no support candidate changes ordinary geometry yet. The audit establishes
+that radius 4 is the largest square always
 contained by the current finest ring, radius 3 is the largest with a direct
 spacing-one neighbor in every tile phase, and radius 2 is the largest with the
 complete 32-block finest-level halo. It also finds that periodic-coordinate
 lifting, exact eviction, independently committed clipmap levels, water, and
 vegetation must participate in the same per-edge composition certificate;
 connector geometry alone cannot establish the missing invariant. No candidate
-or diagnostic API is yet part of the product contract. Completion must
-consolidate the selected architecture, budgets, admission lifecycle, and
-accepted limitations back into this topic.
+is yet part of the product geometry contract.
+
+The shared diagnostic `TerrainFrontierPlan` now classifies every directed
+exact boundary block edge against one complete committed clipmap presentation,
+reports solid, water, missing-profile, spacing, current closure, format
+capacity, and hypothetical candidate costs, and preserves a topology-aware
+observer-local lift. It is cached by exact generation and presentation
+identity, remains off the readiness/admission path, and adds no candidate
+resources. A matched seed-12345 campaign classifies all 320 RD2 edges beside
+spacing one, with 277 solid connectors and 43 uncertified water edges. The
+same site at RD8 classifies all 1,088 edges beside spacing two, with 896
+unsupported solid edges, 192 uncertified water edges, and no connector. The
+inspected `frontier-support` diagnostic shows the corresponding green and
+magenta frontiers.
+
+Candidate projections make bounded Hybrid D the current recommendation for
+Human Review A2: prefer a sparse spacing-one belt, but require an explicit
+resolution-aware and water-aware fallback when its pool is exhausted. At RD8,
+a complete 6-by-6 finest extent costs 13.45 MB added while a 32-tile sparse
+belt needs 20 new tiles / 11.21 MB. At compact legal RD31, complete expansion
+costs 188.37 MB and the sparse belt needs all 128 hypothetical slots / 71.76
+MB. A legal 63-by-63 comb requests 308 new sparse tiles and rejects 180 at that
+cap, proving that sparse support alone is not a worst-case policy. Completion
+must consolidate the selected topology, budgets, admission lifecycle, and
+accepted limitations back into this topic after the remaining human gates.
 
 The 2026-08-13 phone-browser black-frame regression is resolved. XR
 multiview support had added `@builtin(view_index)` entry points to the same

@@ -1,8 +1,9 @@
 # Tactical 321: Exact Frontier Support Architecture
 
-Status: Human Review A1 accepted 2026-08-20; Phase 1 diagnostic frontier
-planning is in progress. No candidate geometry implementation is authorized
-before Human Review A2.
+Status: Human Review A1 accepted 2026-08-20. Phase 1 diagnostic frontier
+planning is complete at revisions `328757c3` through `cd9706e3` and is
+awaiting Human Review A2. No candidate geometry implementation is authorized
+before that review selects a direction.
 
 Topic: `procedural-horizon-clipmap`
 
@@ -591,6 +592,120 @@ unit, format-scope requirements, or the retention model. Accepting A1
 authorizes diagnostic planning only; it does not select the eventual geometry
 candidate.
 
+## Phase 1 Diagnostic Results
+
+Phase 1 adds a renderer-neutral `TerrainFrontierPlan` in
+`mclone-terrain-view`. It consumes one exact coverage and boundary generation,
+one complete committed clipmap presentation, the horizontal topology, and an
+observer-local coordinate lift. Its directed block-edge segments retain
+canonical exact coordinates, lifted coordinates, edge direction, solid/water/
+missing-profile classification, bordering procedural level and spacing,
+procedural owner count, and current closure. The plan also derives a stable
+presentation identity, format-capacity receipt, hypothetical fine-support
+keys, and costs for Candidates A, B, and C.
+
+The live renderer caches this diagnostic plan by exact generation and
+committed presentation. It invalidates on an exact, boundary, topology, or
+relevant periodic-observer change. Planning failure produces an explicit
+`invalid` receipt and increments a failure counter; it does not fail or gate
+ordinary rendering. `target_ready`, clipmap admission, exact admission,
+procedural discard, connectors, water, vegetation, and draw geometry are
+unchanged in this phase.
+
+The new `frontier-support` presentation leaves exact terrain natural, renders
+unrelated procedural terrain near-black, marks spacing-one procedural
+frontier terrain green, and marks spacing-two-or-coarser frontier terrain
+magenta. Both ordinary and full-frame multiview shaders validate with the new
+selector. The capture lane requires natural and diagnostic variants to have
+identical settled semantic state after normalizing process-local generation
+and timing values.
+
+### Objective matrix
+
+The focused terrain-view suite now contains 133 tests, of which 132 pass and
+one native-GPU preview remains intentionally ignored without an adapter. The
+frontier subset proves:
+
+- all 16 two-axis chunk phases at exact radius 2 and a 16-phase sweep for
+  radii 2, 5, 8, and 13;
+- radius-31 candidate bounds and explicit radius-32 mask, boundary, and
+  transition rejection before dense snapshot packing;
+- L, staircase, ring-with-hole, corridor/comb, growth, eviction, disconnected
+  island rejection, missing profile, and water classifications;
+- negative coordinates, plane ownership, and compact observer-local lifting
+  across a cylinder seam;
+- stable presentation identity for sub-tile motion and a changed identity at
+  a 64-block clipmap rebase;
+- distinct exact generations and source-reset identity; and
+- deterministic sparse-pool exhaustion, including a legal 63-by-63-chunk
+  comb which requests 308 additional fine tiles, admits the 128-tile
+  diagnostic cap, and rejects 180.
+
+Existing clipmap and composition tests continue to cover chunk motion,
+teleport, delayed readiness, exact connected admission, atomic growth and
+eviction, toroidal slot reuse, and synthetic multiview ownership. Because the
+plan has no view input, mono, per-eye, and multiview submission consume one
+immutable diagnostic classification rather than preparing separate topology.
+
+### Matched capture evidence
+
+The final native campaign was generated at revision `e21e93d9` with seed
+`12345`, focus chunk `(0, 0)`, frozen noon, the Original pack, vanilla color
+profile, High distant terrain, and 1,024-by-576 output. All four captures
+settled on the first attempt. The complete machine-readable
+[receipt](/tmp/mclone-t321-phase1/receipt.json) and its natural and diagnostic
+PNGs are in the [review directory](/tmp/mclone-t321-phase1) on the review
+host.
+
+| Exact radius and view | Exposed edges | Bordering spacing | Existing closure | Boundary prep | Frontier prep |
+|---|---:|---:|---:|---:|---:|
+| RD2 low | 320 | 320 at spacing 1 | 277 solid connectors; 43 water edges uncertified | 424–475 us | 51–52 us |
+| RD8 elevated | 1,088 | 1,088 at spacing 2 | 0 connectors; 896 solid and 192 water edges unclosed | 1,371–1,460 us | 244–264 us |
+
+Boundary preparation is now measured independently from the existing
+transition-field preparation. The same captures measured 30 us for the RD2
+transition and 180–196 us for RD8, versus the larger live-column scan and
+dense boundary packing costs above. RD2 uploaded a 25,600-byte boundary
+rectangle containing 316 valid columns; RD8 uploaded 295,936 bytes containing
+1,084 valid columns. The four duplicated directed corner edges explain why
+frontier edge counts exceed unique boundary columns by four.
+
+Inspected diagnostic pixels agree with the receipts. RD2 shows a green land
+frontier, while RD8 shows a continuous magenta land frontier. The corresponding
+natural captures preserve the existing product pixels and expose the same
+high-distance risk without any diagnostic geometry affecting them. Water is
+not silently counted as closed in either case; its separate unresolved count
+is an important input to the selected topology proof.
+
+### Candidate cost ledger
+
+Candidate costs describe requirements, not allocations made by Phase 1:
+
+| Fixture | A: complete finest extent | B: sparse 32-block belt | C: resolution-aware solid connector |
+|---|---:|---:|---:|
+| RD2 capture | no added resources | no added tiles | 277 segments / 3,324 bytes; 43 water edges unresolved |
+| RD8 capture | 6x6 logical extent plus 11 staging; 13.45 MB added | 32 desired, 12 resident, 20 added; 11.21 MB required | 896 segments / 10,752 bytes / 5,376 vertices; 192 water edges unresolved |
+| Compact RD31 square | 18x18 logical extent plus 35 staging; 188.37 MB added | 128 desired and added; 71.76 MB required, exactly the diagnostic cap | 4,032 segments / 48,384 bytes / 24,192 vertices |
+| Legal 63x63 comb | same 18x18 extent and 188.37 MB added | 324 desired, 16 resident, 308 additional; 180 rejected by the cap | 63,552 segments / 762,624 bytes / 381,312 vertices |
+
+The data rules out Candidate A as the shared primary solution: its simple
+topology purchases correctness with an unacceptable worst-case fixed-resource
+increase. Candidate B preserves the desired spacing-one character and is
+reasonable for RD8, but a compact legal RD31 square consumes all 128
+hypothetical support slots and a legal comb proves that perimeter support can
+degenerate toward area cost. Candidate C is dramatically cheaper and closes
+arbitrary solid edges, but deliberately places coarse topology beside exact
+blocks and does not yet solve water.
+
+Phase 1 therefore recommends Candidate D: a bounded hybrid. Prefer a sparse
+spacing-one belt for the ordinary exact frontier, give it explicit base
+suppression and an aligned outer stitch, and use a separately accepted
+resolution-aware closure when the fine pool is exhausted. The Phase 2 proof
+must include a typed water/coast closure and must retain or reduce exact
+admission if neither preferred nor fallback closure can certify every edge.
+The support-pool size, fallback pixels, and water topology remain Human Review
+A2 decisions; the measurements do not authorize choosing them implicitly.
+
 ## Adversarial Evidence Matrix
 
 The architecture and selected implementation must cover the cross-product
@@ -634,15 +749,15 @@ missing-invariant diagnosis before instrumentation changes its public shape.
 
 ### Phase 1: Diagnostic frontier plan
 
-- [ ] Implement renderer-neutral boundary classification and capacity
+- [x] Implement renderer-neutral boundary classification and capacity
       receipts without changing ordinary geometry or ownership.
-- [ ] Expose unsupported edges, bordering levels, hypothetical candidate
+- [x] Expose unsupported edges, bordering levels, hypothetical candidate
       support sets, and candidate memory/draw estimates.
-- [ ] Add the adversarial shape, phase, render-distance, motion, and topology
+- [x] Add the adversarial shape, phase, render-distance, motion, and topology
       objective matrix.
-- [ ] Capture matched natural and diagnostic pixels at low and high exact
+- [x] Capture matched natural and diagnostic pixels at low and high exact
       render distances and verify the receipts against inspected seams.
-- [ ] Measure boundary-profile preparation separately from the existing
+- [x] Measure boundary-profile preparation separately from the existing
       transition-field timing.
 
 Gate -- Human Review A2: review the measured frontier distribution, common
@@ -797,3 +912,11 @@ inputs, invariants, lifecycle, and failure states of a renderer-neutral
 frontier plan and complete composition certificate. Human Review A1 is
 accepted. Phase 1 may change diagnostic APIs and presentations but not ordinary
 terrain geometry or ownership.
+
+Phase 1 completed 2026-08-20 at revisions `328757c3` through `cd9706e3`.
+The shared planner, live cached receipts, separate boundary timing,
+adversarial objective matrix, and matched natural/diagnostic capture lane pass.
+Inspected pixels and receipts prove the RD2 spacing-one case and the RD8
+spacing-two failure without changing ordinary geometry. Candidate cost
+evidence recommends bounded Hybrid D, but implementation is stopped at Human
+Review A2 as required.
