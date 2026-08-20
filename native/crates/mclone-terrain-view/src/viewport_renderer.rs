@@ -4230,11 +4230,26 @@ impl TerrainHorizonRenderer {
         }
         let support = self.build_frontier_support(device, queue, &fallback)?;
         debug_assert!(support.committed);
+        self.commit_frontier_support(queue, support)?;
+        self.frontier_fallback_commits = self.frontier_fallback_commits.saturating_add(1);
+        Ok(())
+    }
+
+    fn commit_frontier_support(
+        &mut self,
+        queue: &wgpu::Queue,
+        support: TerrainFrontierSupportGpuProof,
+    ) -> Result<(), String> {
         self.renderer
             .exact_coverage
             .set_frontier_support_tiles(queue, &support.identity.selected_tiles)?;
+        // Connector buffers are tile-owned. An epoch switch must release
+        // invisible slots from the prior epoch instead of waiting for those
+        // slots to become visible and refresh lazily.
+        for slot in &mut self.slots {
+            slot.clear_frontier_proof_connectors();
+        }
         self.frontier_support = Some(support);
-        self.frontier_fallback_commits = self.frontier_fallback_commits.saturating_add(1);
         Ok(())
     }
 
@@ -4784,10 +4799,7 @@ impl TerrainHorizonRenderer {
                 .frontier_support_pending
                 .take()
                 .expect("checked committed frontier support remains pending");
-            self.renderer
-                .exact_coverage
-                .set_frontier_support_tiles(queue, &support.identity.selected_tiles)?;
-            self.frontier_support = Some(support);
+            self.commit_frontier_support(queue, support)?;
             self.frontier_preferred_commits = self.frontier_preferred_commits.saturating_add(1);
         }
         let committed_support_tiles = self
