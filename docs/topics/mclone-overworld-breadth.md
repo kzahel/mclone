@@ -2,7 +2,7 @@
 
 Topic: `mclone-overworld-breadth`
 
-Status: active 2026-07-27. This is the original Mclone Overworld breadth
+Status: active, updated 2026-08-20. This is the original Mclone Overworld breadth
 ledger: vanilla Minecraft 1.17.1 supplies a measured reference vocabulary,
 while Mclone owns its regional recipes, distribution, terrain geometry, and
 visual identity. Tactical
@@ -20,10 +20,15 @@ plan. Tactical 264 has implemented the first ordinary inland fabric and
 passed its objective gates. Human Review A found it improved but still
 structurally scalar and disconnected from water. Tactical 265 selects a
 bounded hybrid landform planner, and Tactical 267 now implements the fixed
-research-only comparison. It is paused at Human Review B before new breadth
-families or production integration. Tactical 277 separately makes the current
-cow/chicken natural-spawn habitat consume Mclone's generated biome payload;
-the richer original ecology vocabulary remains open.
+research-only comparison. Its structural lessons remain useful, but Human
+Review R1 on the subsequent semantic multiscale reconstruction found the
+terrain slightly disappointing and did not select it for production. The
+accepted 2026-08-20 direction now treats breadth as continental and
+ecoregional authorship rather than a longer list of biome IDs. The first proof
+may lead to substantial production integration after Terrain Lab and World
+Explorer review. Tactical 277 separately makes the current cow/chicken
+natural-spawn habitat consume Mclone's generated biome payload; the richer
+original ecology vocabulary remains open.
 
 ## Scope
 
@@ -161,6 +166,37 @@ persisted biome ID. Climate, landform, surface recipe, ecology, and landmark
 selectors may combine without multiplying nominal biome keys unnecessarily.
 Biome identity remains explicit wherever tint, ambience, spawning, protocol,
 or persistence needs it.
+
+## Continental And Ecoregional Breadth
+
+The regional recipe ledger is now an ingredient catalogue, not the complete
+distribution model. The accepted product direction in
+[`continental-ecoregion-planning.md`](continental-ecoregion-planning.md)
+introduces three higher-order identities:
+
+- a continent or broad province establishes land/ocean, principal relief,
+  climate and geological context;
+- an ecoregion instance selects one dominant compatible landform, water,
+  surface, vegetation, ambience, landmark, and habitat story; and
+- a landscape mosaic establishes large clearings, forest cores/edges,
+  wetlands, burns, dunes, corridors, refuges, and negative space inside that
+  story.
+
+This should create many memorable places from roughly 12-18 strong authored
+archetypes and compatible variants rather than hundreds of nearest-parameter
+rows. A desert must become more than a hot/dry material threshold over the
+same hills; candidates include rain-shadow dune basins, gravel plateaus,
+salt-flat drainage interiors, and other causally different arid compositions.
+A forest must become more than tree density; ancient cores, kilometre-scale
+clearings, riparian openings, windthrow, burn succession, and forest-edge
+habitat should have explicit meso-scale identity.
+
+Regional variation should preserve dominant cores, explicit shoulders and
+ecotones, controlled direct adjacencies, signature spacing, and long ordinary
+or quiet reaches. “One of everything near spawn” is not breadth. The same
+biome ID may occur in several ecoregion instances when their landform,
+hydrology, geology, vegetation structure, history, and ecology make them
+meaningfully different.
 
 ## Breadth Beyond Biome Names
 
@@ -314,12 +350,12 @@ For geology specifically, retain these obligations:
 
 Cross-system order now lives in
 [`mclone-macro-landscape-planning.md`](mclone-macro-landscape-planning.md).
-That direction now places ordinary inland landform fabric between the first
-coast implementation and major-water/geology campaigns. Tactical 263 grounds
-the correction; Tactical 264 implements the first scalar candidate; Tactical
-265 selects the bounded hybrid successor without requiring a generic
-composite review product. Within the breadth ledger, retain this content
-order:
+The accepted 2026-08-20 continental/ecoregional campaign now precedes broad
+palette multiplication and the major geology campaign. Tactical 263 grounds
+the ordinary-land correction; Tactical 264 implements the first scalar
+candidate; Tacticals 265-273 preserve useful planning and exact-invariance
+research without selecting their schematic terrain. Within the breadth
+ledger, retain this content order:
 
 1. Complete Human Review 2 for Tactical 223's bounded steppe-scale
    correction.
@@ -350,8 +386,18 @@ order:
    - cold plan, five-iteration cached query, memory, far-summary, topology,
      sink, spill, cycle, contour, coast-arrival, and journey evidence is
      complete; and
-   - the work is stopped at Human Review B before production integration.
-5. Add the first 3D-geology tactical before broad caves:
+   - retain the structural and invariant lessons without promoting this or the
+     later slightly disappointing multiscale terrain shapes.
+5. Establish continental and ecoregional composition:
+   - review 32-128-km landmass/province facts, 1-12-km ecoregion instances,
+     and meso-scale landscape mosaics in Terrain Lab and World Explorer;
+   - prove a temperate forest/open-land province with kilometre-scale
+     clearings, coherent water, habitat connectivity, and negative space;
+   - keep LOD as a measured downstream consumer rather than the organizing
+     purpose; and
+   - after review, permit a substantial production revision rather than
+     preserving field revision 21.
+6. Add the first 3D-geology tactical before broad caves:
    - baseline and map the current heightfield limitation;
    - derive a small semantic formation-intent selector from existing macro,
      climate, ruggedness, ridge, and water facts;
@@ -360,12 +406,12 @@ order:
    - compare a small regional density modifier for cliff shelves/overhangs;
    - select the reusable mechanism only after all three are rendered and
      measured.
-6. Expand hot/dry and wet/humid regional corners as coordinated surface,
+7. Expand hot/dry and wet/humid regional corners as coordinated surface,
    vegetation, clutter, and landmark bundles with explicit transition
    shoulders.
-7. Add ocean-climate families and climate-aware water treatment.
-8. Add independent caves, strata, ores, and underground landmarks.
-9. Grow authored and procedural structures on the resulting regional
+8. Add ocean-climate families and climate-aware water treatment.
+9. Add independent caves, strata, ores, and underground landmarks.
+10. Grow authored and procedural structures on the resulting regional
    vocabulary.
 
 ## Evidence Required Per Family
@@ -385,6 +431,7 @@ Every live family should eventually record:
 
 ## Related
 
+- [`continental-ecoregion-planning.md`](continental-ecoregion-planning.md)
 - [`mclone-macro-landscape-planning.md`](mclone-macro-landscape-planning.md)
 - [`mclone-overworld-generation.md`](mclone-overworld-generation.md)
 - [`still-life-and-tectonic-reference.md`](still-life-and-tectonic-reference.md)

@@ -140,11 +140,17 @@ series implements the same concern, normally reuse the document slug in its
   and negative space through explicit scales, precedence, bounded plans,
   scale- and topology-aware sampling, selective volumetric terrain, and
   composite review evidence.
+- [`continental-ecoregion-planning.md`](continental-ecoregion-planning.md):
+  accepted product direction for combining lazy top-down continental,
+  physiographic, ecoregional, and landscape-mosaic plans with bottom-up
+  procedural realization; begins in Terrain Lab and World Explorer, allows
+  substantial Mclone Overworld changes after review, and treats LOD as a
+  downstream consumer rather than the design center.
 - [`multiscale-terrain-representation.md`](multiscale-terrain-representation.md):
-  active research direction and tailored precedent survey for combining
-  deterministic semantic coarse-to-fine plans, direct generative LOD, and
-  selective 3D density without making camera scale part of terrain identity
-  or sacrificing cheap continental queries.
+  narrowed research record for the technically valid but visually
+  disappointing first semantic coarse-to-fine reconstruction; preserves
+  exact identity, direct-query, cache-independence, and selective-3D lessons
+  without selecting its terrain shapes or making LOD the worldgen driver.
 - [`deterministic-streamed-landscape-planning.md`](deterministic-streamed-landscape-planning.md):
   active falsifiable research methodology for deciding whether relational
   macro plans can remain exactly independent of request, travel, scheduling,

@@ -177,6 +177,32 @@ predator remains can advertise a population without filling the active entity
 budget. Population scarcity, local depletion, recolonization, and deliberate
 reintroduction can create goals that uniform respawning cannot.
 
+### Macro habitat geography precedes migration
+
+The accepted continental/ecoregional direction in
+[`continental-ecoregion-planning.md`](continental-ecoregion-planning.md)
+adds a larger terrain contract above local habitat fitness. Continents,
+physiographic provinces, ecoregion instances, and landscape mosaics should
+publish connected seasonal ranges, major open country and clearings, forest
+cores and edges, water access, passes, crossings, refuges, stopovers,
+bottlenecks, and barriers where a real creature or population consumer needs
+them.
+
+The landed 64-by-64-block wildlife cells remain useful local initial-
+realization and resource-accounting units. They must not become the author of
+continental population distribution or migration routes. Terrain may land
+stable route and habitat-network facts before there is an unloaded migration
+simulation. A future herd or population-summary lifecycle remains separate
+from durable individuals and may not reroll, teleport, or replace a creature
+that has already materialized.
+
+Large clearings are especially valuable shared facts: forage and open sight
+lines can serve deer and rabbits, flowering cover can serve bees, nearby
+forest edges provide escape and squirrel habitat, and wet connections can
+serve mallards. Vegetation, resources, animal decisions, terrain review, and
+eventual distant presentation should consume one planned clearing rather than
+derive incompatible local thresholds.
+
 ## Persistence Decision
 
 A normal materialized creature in a persistent world becomes durable
@@ -664,6 +690,10 @@ notes, and zero browser-world records. The temporary play link is
   without making all fox behavior orbit a permanent home pointer.
 - Explore compact unloaded population summaries only after individual durable
   entities are correct; do not use them to weaken visible-entity continuity.
+- Let the continental/ecoregional terrain campaign establish stable seasonal
+  range and corridor facts before implementing long-distance migration. Keep
+  64-block cells as local realization/resource units rather than treating
+  them as the macro population geography.
 - Feed animal paths, grazing sites, nests, and water access back into terrain
   and structure planning as evidence-bearing landscape history.
 - If tracking becomes a real player mechanic, replace the existing raised
@@ -699,6 +729,9 @@ notes, and zero browser-world records. The temporary play link is
   links and enforced live-instantiation evidence
 - [`mclone-overworld-breadth.md`](mclone-overworld-breadth.md): original
   terrain/ecology breadth ledger
+- [`continental-ecoregion-planning.md`](continental-ecoregion-planning.md):
+  continental, ecoregional, landscape-mosaic, clearing, and habitat-network
+  planning direction above local ecology
 - [`wildlife-ecology-state-model.md`](wildlife-ecology-state-model.md): durable
   animal knowledge, availability semantics, social memory, spatial patterns,
   and candidate species pressure tests

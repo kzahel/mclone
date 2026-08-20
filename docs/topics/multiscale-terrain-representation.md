@@ -2,17 +2,21 @@
 
 Topic: `multiscale-terrain-representation`
 
-Status: **Active research direction at Human Review R1 as of 2026-07-27.
-Tactical 272's semantic parent/child witness and Tactical 273's first isolated
-terrain reconstruction are complete. Parent, regional, and local range/basin
-courses now produce exact continuous terrain over flat or quiet substrates in
-a permanent, pannable Terrain Lab view. The pinned suite passes native and
-Wasm traversal, partition, thread, tile-boundary, and periodic-topology
-checks. Production Mclone terrain remains a primarily two-dimensional
-heightfield at field revision 21 and consumes none of these facts, surfaces,
-or water masks. Human review must now decide whether either schematic family
-deserves another isolated revision or a frozen-foundation trial. This topic
-does not select a production planner or authorize production integration.**
+Status: **Narrowed research record after Human Review R1 on 2026-08-20.
+Tactical 272's semantic parent/child witness and Tactical 273's isolated
+terrain reconstruction remain technically successful: their pinned suites
+pass native/Wasm traversal, partition, thread, tile-boundary, cache, and
+periodic-topology checks, and parent/regional queries do not construct hidden
+children. Human review found the resulting schematic range/basin terrain
+slightly disappointing and did not select either family, a frozen-foundation
+trial, or multiscale reconstruction as the product worldgen direction.
+Production Mclone terrain remains field revision 21 and consumes none of
+these facts. Preserve the exact identity, direct coarse-query,
+cache-independence, topology, and selective-3D lessons; route the accepted
+continental/ecoregional product direction through
+[`continental-ecoregion-planning`](continental-ecoregion-planning.md).
+LOD is a downstream consumer and performance obligation, not the reason to
+choose Mclone's geography.**
 
 ## Scope
 
@@ -33,6 +37,13 @@ valuable together:
    transitions; and
 3. distant products query direct coarse facts and conservative summaries
    instead of evaluating the detailed generator at sparsely separated points.
+
+Human Review R1 answered only the first composition attempt. It did not reject
+top-down planning, cheap broad queries, semantic summaries, or selective 3D
+terrain. It rejected promotion of these particular schematic parent/child
+range and basin courses and the assumption that one multiscale representation
+should organize geography primarily to satisfy LOD. Future product work may
+reuse the mechanisms independently or choose a different representation.
 
 This is not the owner of:
 
@@ -242,6 +253,14 @@ carve within localized correction areas. It does not establish that the
 schematic corridors compose into natural geography. Independent stamp-like
 forms, basin meaning, owner-boundary character, and the value of the quiet
 substrate remain subjective review questions.
+
+Human Review R1 subsequently found the result technically clear but slightly
+disappointing as terrain. The isolated axes and compact corrections remain too
+schematic to establish the authored continental, physiographic, ecoregional,
+clearing, hydrological, and ecological composition now sought for Mclone
+Overworld. No additional Revision 1 shape iteration or production trial is
+selected. Keep the pane as an inspectable research artifact and use the
+accepted mechanisms only when a future concrete product plan needs them.
 
 ## Candidate Representation Stack
 
@@ -548,12 +567,16 @@ Record whether concepts or code are reusable, the domain and finiteness
 assumptions, what is actually stable across scale, and what the source does
 not prove.
 
-## Current Non-Decisions
+## Current Decisions
 
-- Do not select Candidate B, C, or their composition from the structural atlas
-  alone.
-- Do not promote either reconstructed Revision 1 family merely because its
-  invariants pass; its geometry is intentionally schematic.
+- Do not promote either reconstructed Revision 1 family; Human Review R1 did
+  not find its schematic terrain compelling enough for another isolated
+  revision or frozen-foundation trial.
+- Do not require the continental/ecoregional direction to use parent/child
+  terrain courses or to organize world generation around LOD.
+- Preserve direct coarse queries, exact parent identity, containment,
+  topology, native/Wasm equivalence, and cache-independent reconstruction as
+  reusable mechanisms rather than a selected terrain design.
 - Do not add universal 3D noise to production terrain.
 - Do not call a sparse exact point sampler semantic LOD.
 - Do not allow camera scale to affect exact world generation.
@@ -583,24 +606,20 @@ not prove.
 | Veloren | complete coarse geology/erosion stage | downstream local generation consumes saved facts | local caves and reshaping | finite precomputed world | production-style coarse-to-local precedent |
 | drainage-aware DEM generalization | no; simplifies complete fine data | preserves drainage better than filtering | none | finite source DEM | suggests topology metrics, not a generator |
 | Tactical 272 Revision 1 witness | yes; parent and regional queries stop directly | exact parent identity, containment, continuity, and explicit sink propagation | none | bounded owners on plane/cylinder; finite canonical torus | mechanism succeeds on native/Wasm and remains inspectable in Planner atlas |
-| Tactical 273 semantic terrain sandbox | yes; each requested course reconstructs directly and counts its work | exact identity plus bounded parent-to-regional and regional-to-local surface corrections | none; continuous heightfield only | pannable plane/cylinder/torus viewports | native/Wasm invariants and interactive cost pass; await subjective family/shape review |
+| Tactical 273 semantic terrain sandbox | yes; each requested course reconstructs directly and counts its work | exact identity plus bounded parent-to-regional and regional-to-local surface corrections | none; continuous heightfield only | pannable plane/cylinder/torus viewports | native/Wasm invariants and interactive cost pass; Human Review R1 found the terrain slightly disappointing and did not promote the shapes |
 
 ## Recommended Next Work
 
-1. Use the `Semantic terrain` Human Review R1 controls to judge flat and quiet
-   range, basin, and combined views independently of Mclone Overworld.
-2. Decide whether to advance range only, basin only, request another isolated
-   reconstruction, or stop while retaining the exact machinery.
-3. Keep production terrain disconnected. Compare the reconstructed influence
-   against both unchanged Mclone terrain and sparse exact sampling at 65,536,
-   131,072, and later 524,288 blocks.
-4. Add semantic metrics beside height error: feature identity, skyline,
-   coverage, endpoint continuity, coast/water relationship, and boundary
-   leakage.
-5. Re-run randomized point, tile, and chunk traversal; cold and warm caches;
-   serial and parallel schedules; alternate partitions; and plane, cylinder,
-   and torus seam cases after reconstruction.
-6. Only after one heightfield family earns this review, specify one bounded
-   selective-density family with an ordinary zero-query path.
-7. Review topology, skyline, coast, drainage, journey, performance, and
-   representation transitions before proposing any production integration.
+1. Preserve the Planner-atlas and Semantic-terrain panes as research evidence;
+   do not spend another tactical tuning Revision 1 without a new concrete
+   question.
+2. Begin the continental/ecoregional campaign in Terrain Lab and World
+   Explorer without requiring its plan to descend from this experiment.
+3. Reuse the pinned exact-invariance and direct-query suites when a concrete
+   continental, province, ecoregion, river, clearing, or formation plan gains
+   parent/child facts.
+4. Add coarse presentation summaries only after product geography exists and
+   only as downstream projections of that geography.
+5. Revisit selective 3D terrain separately when an accepted geological or
+   landform family establishes a bounded volumetric need and an ordinary
+   zero-query path.

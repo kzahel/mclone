@@ -38,6 +38,22 @@ Do not call that experiment simply "Far LOD" in current planning, because
 the current system also presents far terrain. The distinguishing property is
 its retired chunk-based identity.
 
+## Worldgen Product Boundary
+
+LOD does not choose Mclone's geography. The accepted continental and
+ecoregional direction is owned by
+[`continental-ecoregion-planning.md`](continental-ecoregion-planning.md) and
+is judged first through plan maps, regional three-dimensional exploration,
+and walking-scale places. The current clipmap is a downstream consumer that
+must present accepted terrain cheaply and consistently.
+
+Do not require a world-generation mechanism to adopt the visually
+disappointing Tactical 272/273 semantic terrain reconstruction merely because
+it provides direct parent/child LOD. Reuse direct coarse queries, conservative
+summaries, cache independence, and stable semantic identities where they help
+the accepted geography. Camera scale, clipmap residency, and requested LOD
+remain presentation inputs only.
+
 ## Current Ownership
 
 The shared implementation routes through:

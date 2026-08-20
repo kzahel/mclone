@@ -15,7 +15,11 @@ does not yet prove geographic quality or production cost. Candidate D,
 terrain reconstruction, and production terrain changes remain out of scope.
 Phase 3 now provides a freely pannable three-candidate Terrain Lab atlas with
 Rust-owned canonical queries, periodic lifts, caches, and native/Wasm
-witnesses. It is waiting at Human Review R1 before any reconstruction.**
+witnesses. It is waiting at Human Review R1 before any reconstruction. The
+accepted 2026-08-20 continental/ecoregional product direction does not depend
+on selecting one of these candidates: this work supplies falsification
+invariants and bounded mechanism options, not a gate that forces Mclone to
+keep field revision 21 or promote a disappointing terrain representation.**
 
 ## Purpose
 
@@ -45,6 +49,10 @@ plus bounded deterministic features is a successful outcome.
 - [`mclone-macro-landscape-planning.md`](mclone-macro-landscape-planning.md)
   owns the desired landscape vocabulary, cross-system precedence, scale
   hierarchy, and visual-quality questions.
+- [`continental-ecoregion-planning.md`](continental-ecoregion-planning.md)
+  owns the accepted product direction for continental scale, authored
+  ecoregion instances, landscape mosaics, habitat networks, first exploration,
+  and the permission to revise production terrain substantially after review.
 - This topic owns whether a streamed relational plan can satisfy exact
   determinism, boundary continuity, topology, bounded execution, caching,
   reconstruction, and evidence standards.
@@ -647,6 +655,7 @@ produce enough of the same geographic relationships to justify its cost?
 | 2026-07-27 | Tactical 270 Phase 2, commits `e7158125`, `4b1dce70`, and `473f071c`, 315 exact comparisons | Advance separate shared-hierarchy and bounded-graph mechanisms to structural atlases; do not infer quality, compose Candidate D, or integrate terrain |
 | 2026-07-27 | Tactical 270 Phase 3, commits `42bcbcd1`, `7e740278`, `edc18490`, and `95069d20`, native/Wasm witnesses plus desktop/phone torus-period captures | Atlas mechanisms are ready for Human Review R1; keep Candidate D, reconstruction, performance budgets, and production integration unauthorized |
 | 2026-08-20 | [Streams Reflowing 2.12.6 implementation study](streams-reflowing-reference.md) | Retain regional drainage plus compact reaches as quality evidence and study independent semantic current; do not adopt its finite persisted plate as the procedural-horizon random-access authority |
+| 2026-08-20 | Product review of continental/ecoregional direction and the slightly disappointing Tactical 272/273 multiscale terrain result | Begin a separate product-led terrain-exploration proof; reuse this harness and any bounded candidate that helps, but do not make current atlas selection or multiscale terrain promotion a prerequisite for substantial `mclone-overworld-v1` change |
 
 Add future experiment IDs, commits, commands, corpus locations, results, and
 decisions here or in the active tactical before relying on them.

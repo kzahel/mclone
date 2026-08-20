@@ -279,3 +279,6 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
 - `desktop-openxr-validation` — Windows VDXR and macOS/Linux WiVRn runtime
   bootstrap, headset-backed smoke evidence, Vulkan interop, and remaining
   desktop OpenXR hardware acceptance
+- `continental-ecoregion-planning` — top-down continental, physiographic,
+  ecoregional, and landscape-mosaic authorship with bottom-up realization,
+  ecology-scale habitat geography, and review-gated production integration

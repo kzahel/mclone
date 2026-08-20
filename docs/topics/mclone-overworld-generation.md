@@ -148,11 +148,23 @@ objects; analytic profiles reconstruct a continuous heightfield and support
 indexed point queries. Analytic-only planning and current-height watershed
 carving are retained as useful mechanisms but rejected as complete answers.
 No production generator, field revision, water, surface, profile, or
-compatibility identity changed during that research. Tactical 267 now
-implements the diagnostic hybrid prototype across the fixed plane/cylinder
-corpus and is paused at Human Review B. It changes no production owner or
-output. Review now precedes production integration, new surface or ecology
-interpretation, detailed fronts, compound water, geology, and 3D density.
+compatibility identity changed during that research. Tactical 267 implemented
+the diagnostic hybrid prototype across the fixed plane/cylinder corpus;
+subsequent streamed and multiscale experiments proved valuable exact
+invariants but did not select a production terrain representation. Human
+Review R1 on 2026-08-20 found the first schematic multiscale range/basin
+terrain slightly disappointing.
+
+The accepted next product direction now lives in
+[`continental-ecoregion-planning.md`](continental-ecoregion-planning.md): add
+true continental and physiographic scales, authored ecoregion instances,
+large clearings and landscape mosaics, and habitat/migration geography, then
+realize them through bottom-up procedural terrain. Begin with Rust-owned plan
+and three-dimensional review in Terrain Lab and World Explorer. LOD must
+remain fast, but it is a downstream consumer rather than the terrain-design
+driver. A successful review may authorize substantial production changes to
+`mclone-overworld-v1`; field revision 21 and disposable internal worlds are
+not compatibility constraints.
 
 ## Scope
 
@@ -1117,6 +1129,18 @@ coordinates rather than a locally executable numeric profile.
 
 ## Next Work
 
+The overriding next product campaign is the bounded continental/ecoregional
+exploration in
+[`continental-ecoregion-planning.md`](continental-ecoregion-planning.md).
+Keep field revision 21 as an A/B control, not a protected output target. The
+first proof should expose direct continental and province facts, authored
+ecoregion identity, large clearings/forest structure, major water and habitat
+connectivity in Terrain Lab, then review navigable oblique and journey views
+in World Explorer. Do not require it to promote Tactical 272/273's
+disappointing schematic terrain. After review, a focused tactical may change
+production fields, landforms, water, climate, biome/surface/vegetation
+selection, ecology inputs, fixtures, and coarse summaries together.
+
 Field revision 12 owns the first complete bounded valley stream: reusable
 procedural starts and references, a 48-96-block monotonic plan, clipped
 continuous valley terrain, fixed-point water stencils, and matching synthetic
@@ -1246,10 +1270,11 @@ Internal inspection finds a material reduction in scalar-ring noise and
 clearer regional axes and water relationships. It also retains stepped or
 parallel raster tendencies in some divide groups, smooth/sculpted compact
 profiles, subtle macro-scale local detail, and an intentionally incomplete
-landform grammar. The slice is stopped at Human Review B. Do not begin
-production extraction, surface/ecology interpretation, detailed
-plateaus/escarpments, basin-lake realization, compound water, geology, or
-broad 3D density before that review.
+landform grammar. Later review retained its structural lessons without
+selecting this prototype or the subsequent schematic multiscale
+reconstruction for production. New production work is gated by the focused
+continental/ecoregional terrain-exploration review, not by further promotion
+of those exact shapes.
 
 The
 [`still-life-and-tectonic-reference.md`](still-life-and-tectonic-reference.md)
@@ -1262,6 +1287,7 @@ place of the existing stream contracts.
 
 ## Related
 
+- [`continental-ecoregion-planning.md`](continental-ecoregion-planning.md)
 - [`mclone-macro-landscape-planning.md`](mclone-macro-landscape-planning.md)
 - [`world-generation-profiles.md`](world-generation-profiles.md)
 - [`starter-farmstead-settlement.md`](starter-farmstead-settlement.md)

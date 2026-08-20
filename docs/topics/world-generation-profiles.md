@@ -39,6 +39,14 @@ gameplay. It is already the product default; there is no future parity fork to
 wait for. Minecraft Java 1.17.1 and the stored `overworld` profile are optional
 comparative/legacy surfaces, not a reference lock on product work.
 
+The accepted continental/ecoregional direction lives in
+[`continental-ecoregion-planning.md`](continental-ecoregion-planning.md).
+Its first exploration may change `mclone-overworld-v1` substantially. If
+continental, province, ecoregion, landscape-mosaic, or migration scales become
+world-selectable rather than one profile revision's constants, introduce a
+persisted world-scale descriptor here before production depends on them. A
+world-scale choice is generation identity, not an LOD or client preference.
+
 The first alternate generators are intentionally smaller:
 
 - flat grass proves a seed-independent, target-only procedural generator;
@@ -236,7 +244,7 @@ Dispositions mean:
 | `flat-grass-v1` | `internal-mutable` | Layers, biome, seed use, label, tag, planning shape, and implementation may change in place | It is an internal proof generator with no shipped worlds or external consumers | Update focused fixtures/tests/docs and discard or migrate affected internal worlds |
 | `small-island-v1` | `internal-mutable` | Noise, terrain shape, materials, biomes, spawn, decoration, dependencies, label, tag, and implementation may change in place | It is an internal proving ground; current fingerprints protect accidental drift but do not prohibit intentional improvement | Update fingerprints, seam/order tests, captures, docs, and discard or migrate affected internal worlds |
 | `authored-only` missing-void behavior | `internal-mutable` | Missing-chunk semantics and identity may change after auditing authored scenarios | No shipped consumer exists, although lobby/preview fixtures rely on the current void contract | Update persistence, embedded-world, catalog, and no-worldgen scenario coverage together |
-| `mclone-overworld-v1` | `internal-mutable` | Identity, tag, fields, seed domains, terrain, biome/surface/decoration rules, spawn, dependency plan, fixtures, and implementation may change in place | It is live only in internal builds; no shipped or named retained world requires current output | Update fingerprints, field maps, cards, tests, docs, and discard or explicitly migrate affected internal worlds |
+| `mclone-overworld-v1` | `internal-mutable` | Identity, tag, fields, seed domains, world-scale facts, supported topology periods, terrain, biome/surface/decoration rules, spawn, ecology inputs, dependency plan, fixtures, and implementation may change in place | It is live only in internal builds; no shipped or named retained world requires current output | Update fingerprints, field/ecoregion maps, cards, tests, docs, and discard or explicitly migrate affected internal worlds |
 | `intro-homestead-v1` starter overlay | `internal-mutable` | Starter descriptor, scout revision, fit thresholds, score ordering, plan schema, promoted content, and materialization may change before a release freeze | It is an explicit identity orthogonal to the base profile. The seed-`0` compact composition is internally accepted and Tactical 291 intentionally replaces its decorative garden with working promoted content, but no shipped consumer requires the prior checksum | Keep pure-base fingerprints unchanged; update scout/plan witnesses, promoted-content and clipped-placement tests, review maps, starter/plan codecs, and discard or explicitly migrate affected internal overlay worlds |
 | `topology-probe-v1` | `internal-mutable` | Identity, binary tag 8, minimum period, diagnostic terrain, plan geometry, materials, and fixtures may change in place | It is a hidden executable conformance instrument with no shipped or named retained world | Update exact conformance fixtures, worker/persistence tests, tactical evidence, and discard affected internal probe worlds |
 | `alpha-v1` | `internal-mutable` | Profile shape, winter option, feature subset, planning shape, fixtures, and output may change while preserving or explicitly revising the documented Alpha flavor/parity boundary | It is live only in internal builds; no shipped or named retained world requires current output. Alpha v1.1.2_01 stage receipts constrain the close-parity core but do not make the whole profile a historical compatibility promise | Re-run the Alpha oracle hashes, mapping/order tests, scheduler/worker/persistence tests, temperate and winter captures, workspace tests, and web build; update fixtures/docs and discard or explicitly migrate affected internal worlds |
@@ -439,6 +447,14 @@ eight chunks; it rejects finite axes and Z-only periodic worlds. Reference
 Overworld, Small Island, Alpha, and Beta still reject
 bounded or periodic topology during dimension registration. Canonical runtime
 wrapping alone does not make a planar field periodic.
+
+The 384-chunk/6,144-block Mclone cylinder is a conformance proof rather than a
+continental size target. The ordinary product default remains the unbounded
+plane. Preserve small cylinders for probes or deliberately compact profiles;
+review larger continental and ecological scales before selecting any serious
+large-cylinder period. Merely accepting a larger topology value is
+insufficient: the stored profile/world-scale identity, periodic fields,
+plans, habitat networks, features, summaries, and fixtures must all agree.
 
 Current `mclone-overworld-v1` support is:
 

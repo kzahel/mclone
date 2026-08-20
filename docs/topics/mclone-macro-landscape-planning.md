@@ -2,7 +2,7 @@
 
 Topic: `mclone-macro-landscape-planning`
 
-Status: **Active design direction as of 2026-07-27. The original Mclone
+Status: **Active design direction, updated 2026-08-20. The original Mclone
 Overworld has useful independent terrain, climate, bathymetry, river,
 wetland, surface, and bounded-stream facts, but it does not yet have a
 holistic macro landscape plan that coordinates their topology, precedence,
@@ -28,10 +28,20 @@ problem: an absolute location must not change when requested through another
 window, path, region order, cache state, Worker, or topology lift. The focused
 [`deterministic-streamed-landscape-planning`](deterministic-streamed-landscape-planning.md)
 topic and Tactical 270 now own that falsifiable feasibility research. No
-production planner or terrain change is authorized. The companion
+production planner has been selected by that work. Product review on
+2026-08-20 nevertheless accepted a broader continental/ecoregional planning
+direction and explicitly permits a later reviewed tactical to change
+production Mclone Overworld substantially rather than preserving field
+revision 21. The focused
+[`continental-ecoregion-planning`](continental-ecoregion-planning.md) topic
+owns that product-scale authoring direction and its first terrain-exploration
+proof. The companion
 [`multiscale-terrain-representation`](multiscale-terrain-representation.md)
-topic owns the narrower composition of direct semantic LOD, the cheap
-heightfield spine, and sparse 3D terrain.**
+topic now remains a narrowed research record: its exact machinery is useful,
+but Human Review R1 found its first terrain reconstruction slightly
+disappointing and did not select it as the product form. LOD remains a
+downstream consumer and performance obligation, not the organizing purpose of
+macro world generation.**
 
 The motivating July 2026 visual review found four related regional-scale
 weaknesses:
@@ -49,12 +59,14 @@ show why terrain, hydrology, geology, ecology, and landmarks need a shared
 eagle-eye plan before local blocks and decoration make the result expensive
 to reinterpret.
 
-A companion performance review adds another requirement: Mclone should gain
-volumetric terrain selectively without losing the cheap, broad sampling that
-makes Terrain Lab and World Explorer useful. Geographic extent, sample
-resolution, semantic fidelity, and exact 3D realization are separate costs.
-The planning contract must state which representation is authoritative at
-each scale rather than making every distant sample perform exact chunk work.
+A companion performance review supplies a downstream constraint rather than
+the product purpose: Mclone should gain richer planned and selectively
+volumetric terrain without losing the cheap, broad sampling that makes Terrain
+Lab and World Explorer useful. Geographic extent, sample resolution, semantic
+fidelity, and exact 3D realization are separate costs. First select compelling
+geography; then require maps, broad 3D review, LOD, and exact chunks to consume
+appropriate representations without making distant samples perform exact
+chunk work.
 
 ## Scope
 
@@ -82,8 +94,12 @@ It deliberately does not replace:
   representations, boundary experiments, reference ledger, and fallback for
   a relational planner;
 - [`multiscale-terrain-representation.md`](multiscale-terrain-representation.md),
-  which owns direct generative LOD, the tailored precedent survey, and
-  selective 3D composition;
+  which records the narrowed direct-generative-LOD and selective-3D research,
+  including the first reconstruction's non-promotion;
+- [`continental-ecoregion-planning.md`](continental-ecoregion-planning.md),
+  which owns the accepted continental, physiographic, ecoregional, clearing,
+  habitat-network, world-scale, and first terrain-exploration product
+  direction;
 - [`mclone-overworld-generation.md`](mclone-overworld-generation.md), which
   owns current implementation truth, field revisions, mechanism boundaries,
   performance receipts, and tactical history;
@@ -160,10 +176,11 @@ storage formats.
 
 | Scale | Approximate span | Owns | Examples |
 |---|---:|---|---|
-| world / continental | 2-8 km and larger | dominant land/ocean organization and broad climatic/geological provinces | continents, ocean basins, major ranges, broad arid or humid belts |
-| macro / regional | 512-2,048 blocks | connected landscape systems and major regional identity | mountain systems, drainage basins, major rivers, coast families, plateaus, large forests |
-| meso / landform | 64-512 blocks | recognizable places and transitions within a region | tributaries, ponds, coves, passes, gorges, tors, groves, clearings, deltas |
-| local / walking | 8-96 blocks | bounded features, surface response, and navigational detail | boulders, riffles, bank rocks, small ruins, tree groups, springs, fords |
+| world / continental | 32-128 km and larger | dominant land/ocean organization and broad climatic/geological provinces | continents, ocean basins, principal ranges, broad arid or humid belts |
+| macro / physiographic province | 4-32 km | connected landscape systems and major regional identity | mountain systems, drainage basins, plateaus, lowlands, rain shadows |
+| regional / ecoregion | 1-12 km | authored ecological and visual identity inside accepted geography | ancient forest, lake country, open steppe, desert basin, alpine district |
+| meso / landscape mosaic | 128 blocks-3 km | recognizable places and transitions within a region | tributaries, ponds, coves, passes, groves, large clearings, burns, dunes, deltas |
+| local / walking | 8-256 blocks | bounded features, surface response, and navigational detail | boulders, riffles, bank rocks, small ruins, tree groups, springs, fords |
 | block / material | 1-16 blocks | final discretization and texture | substrate patches, ledges, individual plants, gravel bars, snow and soil depth |
 
 The boundaries overlap deliberately. A river may be selected at macro scale,
@@ -175,6 +192,13 @@ confluence, or island.
 Every decision should be made at the coarsest scale that honestly owns it.
 This keeps topology stable and prevents local noise from impersonating
 landscape structure.
+
+These expanded scales supersede the earlier assumption that 2-8 km was
+sufficient continental authority. They do not require eager whole-world
+precomputation: direct coarse facts, canonical bounded plans, and optional
+caches may coexist. The product contract, authored ecoregion grammar,
+clearings, migration relationship, and first review campaign live in
+[`continental-ecoregion-planning.md`](continental-ecoregion-planning.md).
 
 ## Target Planning Flow
 
@@ -1150,18 +1174,18 @@ none is inferred from CPU compile time.
 
 | Concern | Current capability | Planning gap |
 |---|---|---|
-| raw macro fields | continentalness, relief, ruggedness, ridges, mountain detail, climate, bathymetry, water morphology, and continuous quiet/rolling/ridge-valley/basin/mountain intent derived without a new noise field | no pass, plateau, escarpment, high-basin, or planned terrain-corridor intent |
-| terrain | field-revision-21 remains production; Tactical 267 proves research-only hybrid envelopes, divergent divides, drainage, protected basins, quiet space, and indexed reconstruction across the fixed plane/cylinder corpus; Tactical 268 exposes the compact plane summary interactively in Terrain Lab | review accepts the structural promise but not production; Tactical 270 must prove or reject a window/path/order-independent streamed representation while retaining stepped/parallel raster, smooth-profile, limited-grammar, and query-cost alarms |
-| sampling/representation | cheap production CPU/GPU heightfield preview plus normalized receipts through roughly 500 km; research hybrid queries are local and measured, and a 128-block far summary retains envelope plus skeleton facts | no window/path/order-independent streamed plan, production cache, batching/GPU reconstruction, filtered spacing-2,048 review product, or sparse volumetric near/far contract |
+| raw macro fields | continentalness, relief, ruggedness, ridges, mountain detail, climate, bathymetry, water morphology, and continuous quiet/rolling/ridge-valley/basin/mountain intent derived without a new noise field | live largest bands are kilometre-scale rather than authored 32-128-km continental and 4-32-km physiographic authority; no pass, plateau, escarpment, high-basin, or planned terrain-corridor intent |
+| terrain | field-revision-21 remains production; Tactical 267 proves research-only hybrid envelopes, divergent divides, drainage, protected basins, quiet space, and indexed reconstruction across the fixed plane/cylinder corpus; Tactical 268 exposes the compact plane summary interactively in Terrain Lab | structural lessons survive, but neither that prototype nor the slightly disappointing Tactical 272/273 schematic terrain is selected; the continental/ecoregional exploration must compare a product-led successor and may revise production substantially |
+| sampling/representation | cheap production CPU/GPU heightfield preview plus normalized receipts through roughly 500 km; exact-invariance harnesses prove cache/window/schedule independence for research candidates, and direct parent queries can omit hidden children | no accepted product plan, direct continental/ecoregion summary, production cache/batching policy, or measured broad-preview path over the new geography; representation remains downstream of place quality |
 | coast | shared sandy/gravel/ordinary/rocky/cold intent; bounded geometry, locally feathered realization, cross-substrate snow, mixed banks; incoming field-revision-21 landform relief reaches water and can reduce redundant rocky lift; exact CPU/GPU and periodic-seam evidence | Human Review 2 found substantial improvement, and the new inherited-relief coast examples now need review; no marsh, frozen-ocean morphology, dunes, deltas, reefs, or sea caves |
 | major rivers | warped zero-contour corridor with width/depth/bank morphology and receiving-outlet correction | no persistent macro drainage topology, tributary hierarchy, or named major reaches |
 | streams | bounded 91-96-block valley-following source-to-river plan | one peaceful family, not a general network |
 | ponds/lakes | river-adjacent wetland pools and shared local lake mechanism | no closed-basin or spill-level plan |
 | islands/deltas | continental islands and accidental contour loops | no anabranch, braid, delta, lake-island, or compound-water family |
 | geology | exposed stone response and reusable local/structure mechanisms | no regional formation intent or live 3D formation family |
-| ecology | climate-aware conifer, alpine, steppe, meadow, and woodland recipes | limited coordinated transitions and no shared regional formation permissions |
+| ecology | climate-aware conifer, alpine, steppe, meadow, and woodland recipes plus local habitat fitness and 64-block initial-population/resource cells | no authored ecoregion instances, kilometre-scale clearings/forest mosaics, seasonal-range network, migration corridors, or continental population geography |
 | landmarks | bounded stream starts/pieces and generic structure architecture | no natural-landmark, route, claim, or cross-family arbitration layer |
-| review | production field maps, cards, receipts, fingerprints, exact chunks, Tactical 267 atlases/obliques/journeys/cost receipts, and the reviewed Tactical 268 fixed-domain Terrain Lab plan pane with independent overlays and cell inspection | Tactical 270 Research Review R0 is next; no streamed atlas, cylinder/torus interactive domains, envelope/coast-arrival/journey/reconstruction overlays, or production multi-system plan consumer exists |
+| review | production field maps, cards, receipts, fingerprints, exact chunks, Tactical 267 atlases/obliques/journeys/cost receipts, the reviewed Tactical 268 fixed-domain plan pane, and Tactical 270/272/273 exact research instruments | no product-led continental/ecoregion atlas, landscape-mosaic layers, 10-50-km journey review, habitat-connectivity view, or accepted production multi-system plan consumer exists |
 
 Do not hide these gaps by calling existing mechanisms “supported.” A shared
 lake feature does not make basin lakes live. A structure kernel does not make
@@ -1172,6 +1196,16 @@ drainage network.
 
 This sequence is a decision and evidence order, not a promise to implement
 every row before shipping any smaller improvement.
+
+The 2026-08-20 product direction adds one overriding next campaign before
+continuing the older mechanism-led sequence: execute the bounded
+continental/ecoregional exploration defined in
+[`continental-ecoregion-planning.md`](continental-ecoregion-planning.md).
+Keep revision 21 and the research planners as controls, prove compelling
+regions and journeys in Terrain Lab and World Explorer, and then permit a
+focused substantial production revision. The numbered history below remains
+useful sequencing and evidence context; it is not a requirement to promote
+the disappointing multiscale shapes or preserve current output first.
 
 1. **Preserve the measured cost contract**
    - Tactical 258 establishes explicit 65.5 km, 131 km, and roughly 500 km
@@ -1311,6 +1345,7 @@ advance.
 
 ## Related
 
+- [`continental-ecoregion-planning.md`](continental-ecoregion-planning.md)
 - [`mclone-overworld-generation.md`](mclone-overworld-generation.md)
 - [`mclone-overworld-breadth.md`](mclone-overworld-breadth.md)
 - [`world-generation-profiles.md`](world-generation-profiles.md)
