@@ -39,8 +39,8 @@ only a 64-chunk span. Tactical
 [`321`](../tactical/321-exact-frontier-support-architecture.md) now owns the
 architecture-first response. Its Phase 0 audit and Human Review A1 are
 accepted. Phase 1 diagnostic planning is complete, and Human Review A2
-accepted bounded Hybrid D on 2026-08-20. Phase 2 may build only an opt-in
-topology proof before Human Review B; no support candidate changes ordinary
+accepted bounded Hybrid D on 2026-08-20. Phase 2's opt-in topology proof is
+complete and awaits Human Review B; no support candidate changes ordinary
 geometry yet. The audit establishes
 that radius 4 is the largest square always
 contained by the current finest ring, radius 3 is the largest with a direct
@@ -74,6 +74,25 @@ MB. A legal 63-by-63 comb requests 308 new sparse tiles and rejects 180 at that
 cap, proving that sparse support alone is not a worst-case policy. Completion
 must consolidate the selected topology, budgets, admission lifecycle, and
 accepted limitations back into this topic after the remaining human gates.
+
+The Phase 2 proof makes that selected topology drawable without adopting it.
+`frontier-hybrid-proof` lazily compiles at most 32 spacing-one tiles, at four
+dispatches per frame, then atomically publishes the identical support and
+coarse-suppression sets. Each exact edge is owned by one preferred fine or
+resolution-aware coarse solid/water curtain. Every selected support outer edge
+has a block-segmented skirt back to the regular clipmap. The natural path
+allocates no dynamic proof resources and uses its prior geometry; a 512-byte
+fixed suppression-key buffer is the only common plumbing cost.
+
+At the matched RD8 review site the full proof selects 20 tiles, adds 11.24 MB
+resident work, and submits 202,848 additional visible vertices. A developer-
+only one-tile selector forces 832 solid and 192 water fallbacks at the same
+site, adds 0.57 MB and 3,168 visible vertices, and provides exhaustion pixels
+without changing the accepted 32-tile capacity. The inspected full and forced-
+fallback frames close the sky gap without a conspicuous wall. This proves the
+topology and bounded degradation only. Exact/support/base epoch retention,
+streaming coalescence, eviction, vegetation participation, and real frame-time
+cost remain Phase 3 work and are not authorized before Human Review B.
 
 The 2026-08-13 phone-browser black-frame regression is resolved. XR
 multiview support had added `@builtin(view_index)` entry points to the same

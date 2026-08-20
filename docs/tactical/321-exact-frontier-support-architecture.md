@@ -2,9 +2,9 @@
 
 Status: Human Reviews A1 and A2 accepted 2026-08-20. Phase 1 diagnostic
 frontier planning is complete at revisions `328757c3` through `cd9706e3`.
-Human Review A2 selected bounded Hybrid D; Phase 2's isolated topology proof
-is in progress. Ordinary product geometry remains unchanged before Human
-Review B.
+Human Review A2 selected bounded Hybrid D. Phase 2's isolated topology proof
+is complete at revisions `0a119f30` through `76dda6e9` and is stopped at
+Human Review B. Ordinary product geometry remains unchanged.
 
 Topic: `procedural-horizon-clipmap`
 
@@ -713,6 +713,74 @@ outer closure, a resolution-aware exhaustion fallback, and a typed water/coast
 closure. That proof remains opt-in and may not change ordinary composition
 before Human Review B accepts its topology and pixels.
 
+## Phase 2 Topology Proof Results
+
+The shared renderer now has an explicitly opt-in `frontier-hybrid-proof`
+presentation. It consumes the renderer-neutral topology proof and lazily
+allocates only its selected spacing-one support tiles. Support compilation is
+limited to four dispatches per frame. The coarse suppression table remains
+empty until every selected tile is ready; the complete set and its matching
+suppression set then publish together. Leaving the diagnostic immediately
+drops the support resources and proof connector buffers. Natural composition
+never allocates a support tile or proof connector and retains its existing
+geometry and draw path.
+
+Every exact segment is encoded into one buffer owned by either its active
+spacing-one tile or the one committed coarse tile selected by the fallback.
+Solid and water are separate flags. Preferred closures use the fine triangle;
+fallback closures evaluate the actual bordering coarse triangle rather than
+pretending that a spacing-one endpoint exists. Every exposed outer edge of a
+selected support tile receives one block-segmented vertical skirt owned by
+that tile. Base horizontal fragments beneath the complete support set are
+discarded, so exact, support, and base retain one horizontal owner.
+
+The proof is deliberately not a live admission implementation. It rebuilds
+from one settled committed clipmap presentation, has no retention or
+coalescing lifecycle, does not yet coordinate support vegetation, and is not
+available in ordinary product composition. A fixed 512-byte suppression-key
+buffer is present in the exact bind group on all paths; natural frames report
+zero dynamic proof resources. Phase 3 remains responsible for generation-
+coherent exact/support/base commits if Human Review B accepts these pixels.
+
+### Objective and pixel evidence
+
+The terrain-view suite now has 140 tests: 139 pass and one native-adapter test
+remains intentionally ignored. The topology and renderer tests cover solid,
+water, missing profile, finite world boundary, periodic lift, negative L/ring/
+comb shapes, pool exhaustion, one-owner connector assignment, outer closure,
+shader parsing, and mono/multiview shader construction. Shared terrain-view
+and scene owners also check for `wasm32-unknown-unknown`; the native client
+checks on its native target.
+
+The matched seed-12345 review campaign is in
+[`/tmp/mclone-t321-phase2`](/tmp/mclone-t321-phase2) with its machine-readable
+[`receipt.json`](/tmp/mclone-t321-phase2/receipt.json). All captures use the
+same frozen noon, Original pack, vanilla color profile, High distant-terrain
+preset, focus chunk `(0, 0)`, and 1,024-by-576 camera. Natural and proof
+variants retain identical settled clipmap, exact, and vegetation state after
+normalizing proof work and process-local generations.
+
+| Case | Support | Exact closure | Outer closure | Added resident bytes | Added submitted vertices |
+|---|---:|---:|---:|---:|---:|
+| RD2 natural to proof | 0 tiles | 277 solid + 43 water | none | 3,840 | 258 |
+| RD8 natural to 32-tile proof | 20 tiles, 8 visible | 896 solid + 192 water | 24 edges / 1,536 segments | 11,243,728 | 202,848 |
+| RD8 natural to forced one-tile fallback | 1 tile, offscreen | 64 preferred solid + 832 fallback solid + 192 fallback water | 3 edges / 192 segments | 570,020 | 3,168 |
+
+The normal RD8 proof compiles each of its 20 tiles once, consuming 11,212,240
+terrain-resource bytes. Its exact and outer connector buffers consume 31,488
+bytes. The forced-fallback selector exists only to expose exhaustion pixels
+at the same review site; it changes the proof cap to one without changing the
+accepted 32-tile design. Its inspected image uses 1,024 resolution-aware
+fallback segments and retains a coherent silhouette and water handoff without
+a sky crack or conspicuous wall. RD2 proves that the typed water closure can
+replace the solid-only connector without allocating sparse terrain.
+
+These measurements are submission and residency costs, not a claim of final
+GPU frame time. Product performance and streaming churn cannot be measured
+honestly until Phase 3 owns a persistent admission lifecycle. They are enough
+for Human Review B to judge the topology, fallback character, and bounded
+steady draw expansion before authorizing that integration.
+
 ## Adversarial Evidence Matrix
 
 The architecture and selected implementation must cover the cross-product
@@ -774,13 +842,13 @@ candidate implementation begins without this decision.
 
 ### Phase 2: Selected topology proof
 
-- [ ] Implement the smallest isolated proof of the selected support and outer
+- [x] Implement the smallest isolated proof of the selected support and outer
       closure topology in shared ownership.
-- [ ] Keep the ordinary product path unchanged until exact, support, and base
+- [x] Keep the ordinary product path unchanged until exact, support, and base
       ownership assertions pass.
-- [ ] Prove solid, water, hole, concave, negative-coordinate, and level-edge
+- [x] Prove solid, water, hole, concave, negative-coordinate, and level-edge
       cases with one complete owner and no unsupported segment.
-- [ ] Measure pool bytes, generated tiles, vertices, dispatches, uploads, and
+- [x] Measure pool bytes, generated tiles, vertices, dispatches, uploads, and
       steady draw cost against the committed baseline.
 
 Gate -- Human Review B: inspect matched exact/frontier pixels and accept the
@@ -931,3 +999,12 @@ Review A2 as required.
 Human Review A2 accepted bounded Hybrid D on 2026-08-20 and authorized the
 isolated Phase 2 topology proof. Ordinary geometry remains frozen until Human
 Review B.
+
+Phase 2 completed 2026-08-20 at revisions `0a119f30` through `76dda6e9`.
+The proof selects at most 32 sparse fine tiles, commits suppression only after
+all selected resources are ready, assigns one typed exact curtain to a fine
+or coarse owner, and closes every support outer edge with a skirt. Matched
+RD2 and RD8 natural/proof pixels plus a forced one-tile RD8 exhaustion view
+pass their receipt contract and visual inspection. Ordinary composition still
+uses the pre-proof geometry path and reports zero dynamic proof resources.
+Work is stopped at Human Review B; Phase 3 is not authorized.
