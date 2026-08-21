@@ -4,7 +4,7 @@ use mclone_worldgen::block::{
     GRASS_BLOCK, PODZOL, RawBlockId, has_fluid, is_air_like, material_blocks_motion,
 };
 use mclone_worldgen::continental_ecoregion::ContinentalEcoregionDescriptor;
-use mclone_worldgen::continental_surface::{ContinentalSurfacePlan, continental_surface_biome_id};
+use mclone_worldgen::continental_surface::ContinentalSurfacePlan;
 use mclone_worldgen::levelgen::{
     McloneOverworldSamplingTopology, TopologyProbeSource, beta_biome_id,
     mclone_overworld_biome_id_with_topology, mclone_overworld_spawn_chunk_with_topology,
@@ -101,10 +101,25 @@ pub fn find_safe_surface_spawn_for_loaded_descriptor(
             McloneOverworldSamplingTopology::from_horizontal_topology(topology)
                 .expect("Mclone spawn topology must pass profile admission")
         });
-    let continental_surface = (profile == WorldGenerationProfile::McloneOverworldV2).then(|| {
-        ContinentalSurfacePlan::new(ContinentalEcoregionDescriptor::plane(seed))
-            .expect("V2 spawn uses a valid unbounded continental surface")
-    });
+    if profile == WorldGenerationProfile::McloneOverworldV2 {
+        let continental_surface =
+            ContinentalSurfacePlan::new(ContinentalEcoregionDescriptor::plane(seed))
+                .expect("V2 spawn uses a valid unbounded continental surface");
+        return find_safe_surface_spawn_with_top_material(
+            center,
+            block_at,
+            |x, z| {
+                continental_surface
+                    .query_point(x, z)
+                    .sample
+                    .substrate
+                    .block_id()
+            },
+            chunk_ready,
+            SpawnColumnOrder::CenterFirst,
+            is_valid_continental_spawn_surface_block,
+        );
+    }
     let biome_source = OverworldBiomeSource::new(seed, false, false);
     find_safe_surface_spawn_with_column_order(
         center,
@@ -123,13 +138,7 @@ pub fn find_safe_surface_spawn_for_loaded_descriptor(
                 ))
             }
             WorldGenerationProfile::McloneOverworldV2 => {
-                get_layered_biome_by_id(continental_surface_biome_id(
-                    continental_surface
-                        .as_ref()
-                        .expect("V2 surface initialized above")
-                        .query_point(x, z)
-                        .sample,
-                ))
+                unreachable!("V2 spawn uses its exact substrate above")
             }
             WorldGenerationProfile::BetaV1 => get_layered_biome_by_id(beta_biome_id(seed, x, z)),
             WorldGenerationProfile::Overworld | WorldGenerationProfile::AuthoredOnly { .. } => {
@@ -206,10 +215,28 @@ pub(crate) enum SpawnColumnOrder {
 
 pub(crate) fn find_safe_surface_spawn_with_column_order(
     center: ChunkPos,
-    mut block_at: impl FnMut(BlockPos) -> Option<RawBlockId>,
+    block_at: impl FnMut(BlockPos) -> Option<RawBlockId>,
     mut biome_at: impl FnMut(i32, i32) -> BiomeDefinition,
+    chunk_ready: impl FnMut(ChunkPos) -> bool,
+    column_order: SpawnColumnOrder,
+) -> Option<Vec3d> {
+    find_safe_surface_spawn_with_top_material(
+        center,
+        block_at,
+        |x, z| overworld_surface_top_material(biome_at(x, z)),
+        chunk_ready,
+        column_order,
+        is_valid_spawn_surface_block,
+    )
+}
+
+fn find_safe_surface_spawn_with_top_material(
+    center: ChunkPos,
+    mut block_at: impl FnMut(BlockPos) -> Option<RawBlockId>,
+    mut top_material_at: impl FnMut(i32, i32) -> RawBlockId,
     mut chunk_ready: impl FnMut(ChunkPos) -> bool,
     column_order: SpawnColumnOrder,
+    valid_surface: fn(RawBlockId) -> bool,
 ) -> Option<Vec3d> {
     for chunk in initial_spawn_chunks(center) {
         if !chunk_ready(chunk) {
@@ -217,8 +244,10 @@ pub(crate) fn find_safe_surface_spawn_with_column_order(
         }
 
         for (x, z) in ordered_chunk_columns(chunk, column_order) {
-            let biome = biome_at(x, z);
-            if let Some(feet_y) = safe_feet_y_at_column(x, z, biome, &mut block_at) {
+            let top_material = top_material_at(x, z);
+            if let Some(feet_y) =
+                safe_feet_y_at_column(x, z, top_material, valid_surface, &mut block_at)
+            {
                 return Some(Vec3d::new(
                     x as f64 + 0.5,
                     f64::from(feet_y),
@@ -233,11 +262,11 @@ pub(crate) fn find_safe_surface_spawn_with_column_order(
 fn safe_feet_y_at_column(
     x: i32,
     z: i32,
-    biome: BiomeDefinition,
+    top_material: RawBlockId,
+    valid_surface: fn(RawBlockId) -> bool,
     block_at: &mut impl FnMut(BlockPos) -> Option<RawBlockId>,
 ) -> Option<i32> {
-    let top_material = overworld_surface_top_material(biome);
-    if !is_valid_spawn_surface_block(top_material) {
+    if !valid_surface(top_material) {
         return None;
     }
 
@@ -370,6 +399,10 @@ fn is_spawn_space(block: RawBlockId) -> bool {
 
 fn is_valid_spawn_surface_block(block: RawBlockId) -> bool {
     matches!(block, GRASS_BLOCK | PODZOL)
+}
+
+fn is_valid_continental_spawn_surface_block(block: RawBlockId) -> bool {
+    material_blocks_motion(block) && !has_fluid(block)
 }
 
 fn has_spawn_clearance(

@@ -4343,7 +4343,10 @@ impl RealmServer {
         mut chunk_ready: impl FnMut(ChunkPos) -> bool,
     ) -> Option<Vec3d> {
         let definition = &self.active_dimension.definition;
-        if definition.generation_profile == WorldGenerationProfile::McloneOverworldV1 {
+        if matches!(
+            definition.generation_profile,
+            WorldGenerationProfile::McloneOverworldV1 | WorldGenerationProfile::McloneOverworldV2
+        ) {
             return find_safe_surface_spawn_for_loaded_descriptor(
                 definition.seed,
                 definition.generation_profile,

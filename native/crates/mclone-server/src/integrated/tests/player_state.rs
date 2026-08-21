@@ -1150,6 +1150,38 @@ fn seed_zero_mclone_wild_start_arrives_on_the_profile_selected_inland_surface() 
 }
 
 #[test]
+fn mclone_v2_far_requested_view_arrives_on_the_loaded_mesa_surface() {
+    let seed = 12_345;
+    let profile = WorldGenerationProfile::McloneOverworldV2;
+    let definition = crate::DimensionDefinition::overworld(seed, profile);
+    let mut server = LocalRealmSession::local_integrated_with_world_store_and_dimension_definition(
+        definition,
+        Box::new(MemoryWorldStore::new()),
+    );
+    server.set_debug_passive_showcase_enabled(false);
+    server.initialize_world_metadata_blocking().unwrap();
+
+    let center = ChunkPos::new(-800, 2_880);
+    server.set_lighting_enabled(false);
+    let updates = server
+        .try_handle_command(ClientCommand::SetChunkView(ChunkView {
+            center,
+            render_distance: 0,
+            chunk_tracking_radius: 0,
+        }))
+        .unwrap();
+    assert!(
+        updates
+            .iter()
+            .all(|update| !matches!(update, ServerUpdate::PlayerPosition(_)))
+    );
+
+    let spawn = wait_for_initial_spawn_update(&mut server);
+    assert_eq!(BlockPos::containing(spawn.position).chunk_pos(), center);
+    assert!(server.player_pose_is_safe_spawn(spawn.position));
+}
+
+#[test]
 fn saved_player_pose_and_selected_slot_resume_for_stable_identity() {
     let seed = 12_345;
     let mut probe = LocalRealmSession::new(seed);
