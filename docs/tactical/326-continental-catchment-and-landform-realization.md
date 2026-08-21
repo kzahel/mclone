@@ -7,7 +7,10 @@ shared direct source. The reported crash still has not reproduced, including
 new high-range captures. Direct LOD queries now preserve eligible narrow-water
 crossings, exact agreement covers all five review sites, and an explicit
 confluence apron removes the hard three-way mound. Phase 4 owns movement,
-performance, browser evidence, deployment, and Human Review D packaging.**
+performance, browser evidence, deployment, and Human Review D packaging. A
+first Phase 4 contact sheet rejected the remaining radial summit silhouette;
+short asymmetric ridge blades and bounded face-scale relief now replace that
+dome before final packaging.**
 
 Topic: `continental-hydrography`
 Topic: `continental-ecoregion-planning`
@@ -327,6 +330,26 @@ In progress on 2026-08-21.
 - The cost-only surface contract is now `mclone-continental-surface-v8` with
   native/Wasm witness
   `255ecfc364ffb5908be17695aa70d4d178a74cd1c46dfedeccf0309857ff6554`.
+- The first sequential contact sheet passed exact/frontier ownership at every
+  site but exposed a smooth circular rock/snow summit. That image was rejected
+  rather than promoted to Human Review D. Peaks now use short asymmetric ridge
+  blades, an along-ridge crown, narrower cross-slopes, and materially stronger
+  bounded mid-scale face variation. The selected `(0, -2)` catchment retains
+  its lake and drainage sites while the pass neighborhood now measures about
+  142 blocks of relief and a 245-block summit roughly one kilometre away.
+- The mountain correction advances hydrography to
+  `mclone-continental-hydrography-v4`, the shared surface to
+  `mclone-continental-surface-v9`, detached exact lowering to revision 4, and
+  review selection to `mclone-continental-catchment-review-v2`. The final
+  surface witness is
+  `3a4d1d2ec10933e5bb9185b0dd2f3a6558980ceeb1079fde341c1f06fe63834c`;
+  five-site direct/exact agreement passes with semantic witness
+  `cb5d726db4e36a8af23e53f99b42e17b896e76aede6e802f13bf24c859f3791a`.
+- The sequential runner now builds its World Explorer executable explicitly;
+  the first draft's global Cargo `--bin` filters built only the worldgen
+  review binaries and could accidentally reuse an older Explorer executable.
+  Composed review frames use each site's authored oblique scale, while the
+  retained movement lane stays at 512 blocks for a visible exact frontier.
 
 ## Human Review D
 

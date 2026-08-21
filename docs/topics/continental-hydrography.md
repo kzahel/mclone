@@ -10,9 +10,11 @@ owns the first bounded mountain-to-lake catchment proof. Its directed graph,
 shared terrain/water realization, exact lowering, snow/rock summits, ecology
 semantics, conservative narrow-water LOD summaries, confluence aprons, and
 five deterministic review sites are implemented. Exact agreement now covers
-all five sites. Phase 4 owns movement, performance, browser evidence, and the
-Human Review D package. Production `mclone-overworld-v1` remains unchanged
-until that proof passes Human Review D.**
+all five sites. The first Phase 4 contact sheet rejected a residual radial
+summit; peaks now use short asymmetric ridge blades, along-ridge crowns, and
+bounded face-scale relief. Phase 4 owns final movement, performance, browser
+evidence, and the Human Review D package. Production `mclone-overworld-v1`
+remains unchanged until that proof passes Human Review D.**
 
 ## Motivation
 
@@ -129,6 +131,14 @@ The final surface combines relational profiles:
 
 Quiet lowlands remain an authored control. Not every surface should acquire a
 channel, ridge, or noisy micro-feature.
+
+The first realized range no longer treats a summit as Euclidean distance from
+one point. Four short typed ridge blades vary along their crowns, join the
+broader divide and descending branches, and admit stronger bounded 512- and
+96-block face form. The high side remains below the detached exact generator's
+vertical envelope. This is still an analytic first vocabulary rather than a
+general mountain grammar, but it removes the reviewed circular dome and
+concentric rock/snow cap without adding a raster or coordinate-specific fix.
 
 ## Water Surface And Shoreline Contract
 

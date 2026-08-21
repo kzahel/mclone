@@ -18,7 +18,7 @@ use crate::{
 };
 
 pub const CONTINENTAL_CATCHMENT_REVIEW_SCHEMA_REVISION: &str =
-    "mclone-continental-catchment-review-v1";
+    "mclone-continental-catchment-review-v2";
 const REVIEW_OWNER_MIN: i32 = -2;
 const REVIEW_OWNER_MAX: i32 = 1;
 
@@ -162,7 +162,8 @@ pub fn compile_continental_catchment_review(
             let catchment = hydrography.catchment_for_owner(owner_x, owner_z);
             let points = review_points(&catchment);
             let samples = points.map(|(_, point)| sample_local(&surface, &catchment, point));
-            let score = candidate_score(&catchment, &samples);
+            let summit_surface_y = review_summit_surface_y(&surface, &catchment);
+            let score = candidate_score(&catchment, &samples, summit_surface_y);
             let candidate = ReviewCandidate {
                 score,
                 catchment,
@@ -205,7 +206,8 @@ pub fn compile_continental_catchment_review(
     selected.samples = selected
         .points
         .map(|(_, point)| sample_local(&surface, &selected.catchment, point));
-    selected.score = candidate_score(&selected.catchment, &selected.samples);
+    let summit_surface_y = review_summit_surface_y(&surface, &selected.catchment);
+    selected.score = candidate_score(&selected.catchment, &selected.samples, summit_surface_y);
     if selected.score < 0.0 {
         return Err(format!(
             "bounded catchment review scan found no coherent land catchment; best score {}",
@@ -387,6 +389,7 @@ fn find_lake_shore_and_outlet_point(
 fn candidate_score(
     catchment: &ContinentalCatchment,
     samples: &[ContinentalSurfaceSample; 5],
+    summit_surface_y: f32,
 ) -> f32 {
     let same_owner = samples
         .iter()
@@ -402,6 +405,7 @@ fn candidate_score(
         })
         .count() as f32;
     let pass_relief = (samples[0].solid_surface_y - samples[4].solid_surface_y).clamp(-80.0, 120.0);
+    let summit_relief = (summit_surface_y - samples[4].solid_surface_y).clamp(-80.0, 200.0);
     let lake_bonus = if samples[3].lake_id == Some(catchment.lake_id) {
         12.0
     } else {
@@ -414,7 +418,37 @@ fn candidate_score(
     } else {
         -30.0
     };
-    same_owner * 4.0 + water_sites * 7.0 + pass_relief * 0.12 + lake_bonus + quiet_bonus
+    same_owner * 4.0
+        + water_sites * 7.0
+        + pass_relief * 0.04
+        + summit_relief * 0.18
+        + lake_bonus
+        + quiet_bonus
+}
+
+fn review_summit_surface_y(
+    surface: &ContinentalSurfacePlan,
+    catchment: &ContinentalCatchment,
+) -> f32 {
+    // Continental masking can retain either inner blade more strongly. Score
+    // the visible pair so catalog selection prefers a real summit beside the
+    // pass without encoding one seed-specific world coordinate.
+    [
+        CatchmentLocalPoint {
+            across: -950.0,
+            downstream: -10_950.0,
+            bed_y: 0.0,
+        },
+        CatchmentLocalPoint {
+            across: 975.0,
+            downstream: -10_775.0,
+            bed_y: 0.0,
+        },
+    ]
+    .into_iter()
+    .map(|point| sample_local(surface, catchment, point).solid_surface_y)
+    .max_by(f32::total_cmp)
+    .expect("the review summit pair is non-empty")
 }
 
 fn sample_relief(

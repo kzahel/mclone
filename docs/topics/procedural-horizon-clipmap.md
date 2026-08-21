@@ -440,6 +440,9 @@ carry realized signed channel distance and width instead of ecological-route
 pseudo-river values, and bounded coarse footprint queries conservatively
 retain eligible graph-owned crossings. This does not change the production
 GPU evaluator, `mclone-overworld-v1`, or the generic clipmap topology.
+The later summit-profile correction changes source values, not the reference
+layout: the detached source is now `mclone-continental-surface-v9` and exact
+lowering revision 4, while the shared reference-grid schema remains v11.
 
 Coordinating parent Tactical
 [`261`](../tactical/261-procedural-horizon-product-integration-roadmap.md)

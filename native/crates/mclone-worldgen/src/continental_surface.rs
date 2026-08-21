@@ -28,7 +28,7 @@ use crate::{
     noise::{SeedDomain, ValueNoise2d},
 };
 
-pub const CONTINENTAL_SURFACE_SCHEMA_REVISION: &str = "mclone-continental-surface-v8";
+pub const CONTINENTAL_SURFACE_SCHEMA_REVISION: &str = "mclone-continental-surface-v9";
 pub const CONTINENTAL_SURFACE_SOURCE_LABEL: &str = "continental-ecoregion-candidate-v1";
 pub const CONTINENTAL_SURFACE_FAMILY_COUNT: usize = 5;
 pub const CONTINENTAL_SURFACE_MAX_WINDOW_SAMPLES: usize = 262_144;
@@ -675,13 +675,21 @@ impl ContinentalSurfacePlan {
             let range_weight = f64::from(hydrography.range_weight) * hydro_land;
             let divide_weight = f64::from(hydrography.divide_weight) * hydro_land;
             let saddle_weight = f64::from(hydrography.saddle_weight) * hydro_land;
-            let peak_variation = ridge_form * 15.0 + local_form * 9.0 + walking_form * 3.0;
+            // Mid- and walking-scale form must materially shape a summit,
+            // not merely roughen a radial cap after the fact. Keep the high
+            // side bounded by exact terrain's vertical envelope while
+            // allowing deep shoulders and face notches.
+            let peak_variation =
+                (ridge_form * 8.0 + local_form * 34.0 + walking_form * 12.0).clamp(-42.0, 18.0);
             let mountain_target = lake_level
-                + 34.0
-                + range_weight * (120.0 + peak_variation)
-                + divide_weight * (1.0 - range_weight) * 22.0
-                - saddle_weight * 42.0;
-            let mountain_blend = range_weight.max(divide_weight * 0.72).clamp(0.0, 1.0);
+                + 32.0
+                + range_weight * (134.0 + peak_variation)
+                + divide_weight * (1.0 - range_weight) * 26.0
+                - saddle_weight * 48.0;
+            let mountain_blend = range_weight
+                .powf(0.72)
+                .max(divide_weight * 0.70)
+                .clamp(0.0, 1.0);
             solid_surface_y = lerp(
                 solid_surface_y,
                 solid_surface_y.max(mountain_target),
@@ -1107,11 +1115,13 @@ fn surface_substrate(
         }
         ContinentalSurfaceWaterKind::WetlandPool => ContinentalSurfaceSubstrate::CoarseSoil,
         ContinentalSurfaceWaterKind::None
-            if range_weight > 0.34 && surface_y > 204.0 + local_form * 9.0 =>
+            if range_weight > 0.42 && surface_y > 218.0 + local_form * 22.0 =>
         {
             ContinentalSurfaceSubstrate::Snow
         }
-        ContinentalSurfaceWaterKind::None if range_weight > 0.28 && surface_y > 164.0 => {
+        ContinentalSurfaceWaterKind::None
+            if range_weight > 0.34 && surface_y > 176.0 + local_form * 18.0 =>
+        {
             ContinentalSurfaceSubstrate::Stone
         }
         ContinentalSurfaceWaterKind::None if channel > 0.34 && drainage_permanence < 0.40 => {

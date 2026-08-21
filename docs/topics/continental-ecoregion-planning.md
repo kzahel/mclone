@@ -80,7 +80,11 @@ mountain travel can crash, broad uplands lack recognizable mountain form, and
 the candidate has no connected river/stream system. Tactical
 [`326`](../tactical/326-continental-catchment-and-landform-realization.md)
 therefore co-authors one bounded range-to-lake catchment through exact terrain
-and LOD before another production decision.
+and LOD before another production decision. Its directed drainage, varied
+lake, exact/LOD lowering, and ecology facts are implemented. A first final
+contact sheet rejected the remaining radial summit, so the active candidate
+now uses short asymmetric ridge peaks and bounded face-scale relief before
+the Human Review D package is rebuilt.
 Mclone should combine
 top-down continental and ecoregional planning with bottom-up procedural
 realization so the Overworld contains large, recognizable, causally related

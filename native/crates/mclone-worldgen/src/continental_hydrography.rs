@@ -12,7 +12,7 @@ use serde::Serialize;
 
 use crate::continental_ecoregion::{ContinentalEcoregionDescriptor, ContinentalEcoregionTopology};
 
-pub const CONTINENTAL_HYDROGRAPHY_SCHEMA_REVISION: &str = "mclone-continental-hydrography-v3";
+pub const CONTINENTAL_HYDROGRAPHY_SCHEMA_REVISION: &str = "mclone-continental-hydrography-v4";
 pub const CONTINENTAL_CATCHMENT_CELL_BLOCKS: i32 = 32_768;
 pub const CONTINENTAL_CATCHMENT_MAX_REACHES: usize = 8;
 pub const CONTINENTAL_CATCHMENT_MAX_NODES: usize = 11;
@@ -666,20 +666,28 @@ fn evaluate_catchment(
     let divide_weight = inverse_smoothstep(500.0, 3_600.0, divide_distance) * catchment_weight;
     let crest_weight = inverse_smoothstep(80.0, 460.0, divide_distance)
         * inverse_smoothstep(8_200.0, 11_500.0, local_across.abs());
+    // Summits are short asymmetric ridge blades rather than radial bumps.
+    // Their endpoints and narrower cross-slopes keep the four-peak range
+    // connected to the divide without producing circular volcanic domes.
     let peak_weight = [
-        (-5_200.0, -10_650.0, 760.0),
-        (-1_550.0, -11_100.0, 620.0),
-        (1_550.0, -10_850.0, 660.0),
-        (5_200.0, -9_900.0, 820.0),
+        ((-5_850.0, -10_900.0), (-4_450.0, -10_350.0), 480.0),
+        ((-1_450.0, -11_250.0), (-450.0, -10_650.0), 350.0),
+        ((400.0, -11_100.0), (1_550.0, -10_450.0), 370.0),
+        ((4_450.0, -10_400.0), (5_850.0, -9_450.0), 520.0),
     ]
     .into_iter()
-    .map(|(peak_across, peak_downstream, radius)| {
-        inverse_smoothstep(
-            radius * 0.04,
-            radius,
-            (local_across - peak_across).hypot(local_downstream - peak_downstream),
-        )
-    })
+    .map(
+        |((start_across, start_downstream), (end_across, end_downstream), radius)| {
+            let relation = line_segment_distance(
+                point,
+                CatchmentLocalPoint::new(start_across, start_downstream, 0.0),
+                CatchmentLocalPoint::new(end_across, end_downstream, 0.0),
+            );
+            let along_crown =
+                0.28 + 0.72 * (relation.progress * std::f64::consts::PI).sin().powf(0.72);
+            inverse_smoothstep(radius * 0.04, radius, relation.distance) * along_crown
+        },
+    )
     .fold(0.0_f64, f64::max);
     let branch_weight = [
         ((-5_200.0, -10_650.0), (-6_600.0, -2_700.0)),

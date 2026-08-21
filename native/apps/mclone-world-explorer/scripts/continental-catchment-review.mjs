@@ -26,7 +26,12 @@ if (!skipBuild) {
     "--bin", "mclone_continental_catchment_review",
     "--bin", "mclone_continental_catchment_exact_review",
     "--bin", "mclone_continental_catchment_perf",
+  ]);
+  run("cargo", [
+    "build",
+    "--manifest-path", path.join(nativeRoot, "Cargo.toml"),
     "-p", "mclone-world-explorer",
+    "--bin", "mclone-world-explorer",
   ]);
 }
 
@@ -104,7 +109,7 @@ if (!skipBrowser) {
       "--source", "continental",
       "--catchment-site", site.kind,
       "--composition", "composed",
-      "--blocks-across", "512",
+      "--blocks-across", site.reviewFrames.obliqueBlocks.toString(),
       "--exact-radius", exactRadius.toString(),
       "--yaw", site.reviewFrames.yawRadians.toString(),
       "--pitch", site.reviewFrames.pitchRadians.toString(),
@@ -155,7 +160,11 @@ function nativeFrames(site) {
       blocksAcross: site.reviewFrames.exactBlocks,
     },
     { label: "coverage", composition: "coverage", blocksAcross: 512 },
-    { label: "composed", composition: "composed", blocksAcross: 512 },
+    {
+      label: "composed",
+      composition: "composed",
+      blocksAcross: site.reviewFrames.obliqueBlocks,
+    },
     {
       label: "horizon",
       composition: "horizon",
