@@ -21,6 +21,9 @@ pub use continental_candidate::{
     ContinentalCandidateFeatureDependencyCache, ContinentalCandidateFeatureDependencyCacheReport,
     generate_continental_candidate_chunk, generate_continental_candidate_surface_chunk,
 };
+pub(crate) use continental_candidate::{
+    continental_candidate_stratum, quantized_continental_candidate_surface_y,
+};
 pub use feature_batch::{
     OverworldFeatureBatchResult, OverworldFeatureDependencyCache,
     OverworldFeatureDependencyCacheReport, generate_overworld_features_chunk,

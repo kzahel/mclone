@@ -231,7 +231,7 @@ fn write_candidate_column(
     local_z: i32,
     sample: ContinentalSurfaceSample,
 ) {
-    let surface_y = quantized_surface_y(sample);
+    let surface_y = quantized_continental_candidate_surface_y(sample);
     buffer.set_block_at_y(local_x, CANDIDATE_MIN_Y, local_z, BEDROCK);
     for y in (CANDIDATE_MIN_Y + 1)..=surface_y {
         let depth = surface_y - y;
@@ -239,7 +239,7 @@ fn write_candidate_column(
             local_x,
             y,
             local_z,
-            candidate_stratum(sample.substrate, depth),
+            continental_candidate_stratum(sample.substrate, depth),
         );
     }
 
@@ -254,11 +254,14 @@ fn write_candidate_column(
     }
 }
 
-fn quantized_surface_y(sample: ContinentalSurfaceSample) -> i32 {
+pub(crate) fn quantized_continental_candidate_surface_y(sample: ContinentalSurfaceSample) -> i32 {
     (sample.solid_surface_y.floor() as i32).clamp(CANDIDATE_MIN_Y + 1, CANDIDATE_MAX_SURFACE_Y)
 }
 
-fn candidate_stratum(substrate: ContinentalSurfaceSubstrate, depth: i32) -> RawBlockId {
+pub(crate) fn continental_candidate_stratum(
+    substrate: ContinentalSurfaceSubstrate,
+    depth: i32,
+) -> RawBlockId {
     match substrate {
         ContinentalSurfaceSubstrate::Grass if depth == 0 => GRASS_BLOCK,
         ContinentalSurfaceSubstrate::Grass if depth <= 3 => DIRT,
@@ -297,10 +300,10 @@ mod tests {
                         .surface()
                         .query_point(min_x + local_x, min_z + local_z)
                         .sample;
-                    let surface_y = quantized_surface_y(sample);
+                    let surface_y = quantized_continental_candidate_surface_y(sample);
                     assert_eq!(
                         chunk.block_at_y(local_x, surface_y, local_z).raw(),
-                        candidate_stratum(sample.substrate, 0)
+                        continental_candidate_stratum(sample.substrate, 0)
                     );
                     let expected_water_y = sample
                         .water_level_y
@@ -330,15 +333,15 @@ mod tests {
                 .surface()
                 .query_point(0, chunk_min_block_coord(-3) + local_z)
                 .sample;
-            let west_y = quantized_surface_y(west_sample);
-            let east_y = quantized_surface_y(east_sample);
+            let west_y = quantized_continental_candidate_surface_y(west_sample);
+            let east_y = quantized_continental_candidate_surface_y(east_sample);
             assert_eq!(
                 west.block_at_y(CHUNK_WIDTH - 1, west_y, local_z).raw(),
-                candidate_stratum(west_sample.substrate, 0)
+                continental_candidate_stratum(west_sample.substrate, 0)
             );
             assert_eq!(
                 east.block_at_y(0, east_y, local_z).raw(),
-                candidate_stratum(east_sample.substrate, 0)
+                continental_candidate_stratum(east_sample.substrate, 0)
             );
             assert!((west_sample.solid_surface_y - east_sample.solid_surface_y).abs() < 8.0);
         }
@@ -383,7 +386,11 @@ mod tests {
             assert_eq!(chunk.block_at_y(local_x, water_y, local_z).raw(), WATER);
             assert_eq!(
                 chunk
-                    .block_at_y(local_x, quantized_surface_y(neighbor), local_z)
+                    .block_at_y(
+                        local_x,
+                        quantized_continental_candidate_surface_y(neighbor),
+                        local_z,
+                    )
                     .raw(),
                 GRAVEL
             );
