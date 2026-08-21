@@ -1921,6 +1921,10 @@ impl StartupStreamingPerfReport {
         print_benchmark_metadata(benchmark_name, "  ", true);
         println!("  \"seed\": {},", self.options.scene.seed);
         println!(
+            "  \"generation_profile\": \"{}\",",
+            self.options.scene.world_generation_profile.label()
+        );
+        println!(
             "  \"render_distance\": {},",
             self.options.scene.render_distance
         );

@@ -43,6 +43,13 @@ understory, wet-refuge, crossing, and permanent-drainage facts. A dedicated
 layered jungle tree family is realized from the same stable records in exact
 chunks and procedural vegetation; V1's three tree families and generation
 path remain unchanged.
+The first matched release benchmark now exercises both profiles directly.
+Compact V2 target batches share one dependency region instead of replaying
+nine cloned dependencies per target. Temperate cold exact generation is
+matched on the reviewed host; dense-jungle cold exact is about 1.33 times V1
+and warm exact remains about 2.54 times V1. Exact-only live startup is matched,
+while V2 High Distant Terrain remains materially slower because its
+continental source is CPU-authored rather than GPU-native.
 Its deterministic spawn policy keeps the existing exact dry-surface gate and
 adds a 129-by-129-block sparse neighborhood survey, so the first locally safe
 chunk beside a dominant ocean is no longer accepted as the world entry region.

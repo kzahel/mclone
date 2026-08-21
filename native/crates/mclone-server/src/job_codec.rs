@@ -474,17 +474,8 @@ impl WorldGenerationExecutor {
                     .mclone_overworld_v2_cache
                     .as_mut()
                     .expect("V2 cache initialized above");
-                let mut chunks = BTreeMap::new();
-                let mut cache_report = GenerationCacheReport::default();
-                for target in targets.iter().copied() {
-                    let (chunk, report) = cache.generate_features_chunk(target.x, target.z);
-                    let report = GenerationCacheReport::from(report);
-                    cache_report.requested_dependency_chunks += report.requested_dependency_chunks;
-                    cache_report.cache_hits += report.cache_hits;
-                    cache_report.generated_dependency_chunks += report.generated_dependency_chunks;
-                    cache_report.retained_dependency_chunks = report.retained_dependency_chunks;
-                    chunks.insert(target, chunk);
-                }
+                let (chunks, report) = cache.generate_features_chunks(targets.iter().copied());
+                let cache_report = GenerationCacheReport::from(report);
                 Ok(WorldGenerationBatchResult {
                     chunks,
                     retained_dependencies: BTreeMap::new(),

@@ -17,7 +17,11 @@ clustered crowns, emergents, and understory without changing V1 records. The
 continental planner uses two bounded candidates per existing 24-block proxy
 cell only where continuous jungle-canopy facts permit them. Exact jungle
 logs/leaves and all procedural render paths consume those stable records;
-coarse levels remain summaries. Compiler source v3, `MCHV` wire v2, and
+complete near records remain through spacing 4, then stable-rank thinning
+retains half at spacing 8 and one eighth at spacing 16 before coarse summaries.
+The rejected spacing-4 cutoff left a visible circular forest edge; the tiered
+path retains a continuous canopy while reducing the reviewed jungle from
+`42,637` to `10,889` instances. Compiler source v3, `MCHV` wire v2, and
 canonical batch v4 carry four-family receipts.
 
 Native World Explorer composition review on 2026-07-26 proved that the first

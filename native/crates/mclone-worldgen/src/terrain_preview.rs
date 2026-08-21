@@ -38,9 +38,9 @@ pub const TERRAIN_PREVIEW_MAX_SAMPLE_SPACING: u32 = 1_024;
 pub const TERRAIN_PREVIEW_SAMPLE_FLOATS: usize = 32;
 pub const TERRAIN_PREVIEW_MAX_TREE_RECORD_SAMPLE_SPACING: u32 = 4;
 pub const CONTINENTAL_PROXY_MAX_TREE_RECORD_SAMPLE_SPACING: u32 = 16;
-pub const CONTINENTAL_PROXY_VEGETATION_REVISION: u16 = 4;
+pub const CONTINENTAL_PROXY_VEGETATION_REVISION: u16 = 5;
 pub const CONTINENTAL_PROXY_VEGETATION_SOURCE_REVISION: &str =
-    "mclone-continental-proxy-vegetation-v4";
+    "mclone-continental-proxy-vegetation-v5";
 
 pub(crate) const fn uses_continental_proxy_vegetation(profile: TerrainPreviewProfile) -> bool {
     matches!(
@@ -1513,6 +1513,19 @@ fn compile_continental_proxy_vegetation(
                 .to_owned(),
         );
     }
+    let surface = ContinentalSurfacePlan::new(ContinentalEcoregionDescriptor::new(
+        source.seed,
+        ContinentalEcoregionTopology::Plane,
+    ))
+    .map_err(|error| error.to_string())?;
+    compile_continental_proxy_vegetation_with_surface(request, &surface)
+}
+
+fn compile_continental_proxy_vegetation_with_surface(
+    request: ValidatedTerrainPreviewRequest,
+    surface: &ContinentalSurfacePlan,
+) -> Result<Vec<McloneTreeOccurrence>, String> {
+    let source = request.request();
     let footprint = i32::try_from(request.footprint_blocks())
         .map_err(|_| "continental proxy vegetation footprint exceeds i32")?;
     let max_x = request
@@ -1537,11 +1550,6 @@ fn compile_continental_proxy_vegetation(
         .min_z()
         .div_euclid(CONTINENTAL_PROXY_VEGETATION_CELL_BLOCKS);
     let max_cell_z = last_z.div_euclid(CONTINENTAL_PROXY_VEGETATION_CELL_BLOCKS);
-    let surface = ContinentalSurfacePlan::new(ContinentalEcoregionDescriptor::new(
-        source.seed,
-        ContinentalEcoregionTopology::Plane,
-    ))
-    .map_err(|error| error.to_string())?;
     let mut occurrences = Vec::new();
 
     for cell_x in min_cell_x..=max_cell_x {
@@ -1797,6 +1805,16 @@ pub fn continental_candidate_tree_records_intersecting(
     seed: i64,
     bounds: McloneVegetationBounds,
 ) -> Result<Vec<McloneTreeOccurrence>, String> {
+    let surface = ContinentalSurfacePlan::new(ContinentalEcoregionDescriptor::plane(seed))
+        .map_err(|error| error.to_string())?;
+    continental_candidate_tree_records_intersecting_with_surface(seed, bounds, &surface)
+}
+
+pub(crate) fn continental_candidate_tree_records_intersecting_with_surface(
+    seed: i64,
+    bounds: McloneVegetationBounds,
+    surface: &ContinentalSurfacePlan,
+) -> Result<Vec<McloneTreeOccurrence>, String> {
     const QUERY_TILE_BLOCKS: i32 = 96;
     let mut occurrences = Vec::new();
     let mut min_z = bounds.min_z;
@@ -1815,6 +1833,7 @@ pub fn continental_candidate_tree_records_intersecting(
                 seed,
                 McloneVegetationBounds::new(min_x, min_z, max_x, max_z)
                     .map_err(|error| error.to_string())?,
+                surface,
             )?);
             let Some(next_x) = max_x.checked_add(1) else {
                 break;
@@ -1834,6 +1853,7 @@ pub fn continental_candidate_tree_records_intersecting(
 fn continental_candidate_tree_records_intersecting_bounded(
     seed: i64,
     bounds: McloneVegetationBounds,
+    surface: &ContinentalSurfacePlan,
 ) -> Result<Vec<McloneTreeOccurrence>, String> {
     const MAX_CANDIDATE_TREE_RADIUS: i32 = 8;
     let expanded_min_x = bounds
@@ -1885,7 +1905,7 @@ fn continental_candidate_tree_records_intersecting_bounded(
         surface_quality: TerrainPreviewSurfaceQuality::Inferred,
     }
     .validate()?;
-    let mut occurrences = compile_continental_proxy_vegetation(request)?;
+    let mut occurrences = compile_continental_proxy_vegetation_with_surface(request, surface)?;
     occurrences.retain(|occurrence| occurrence.working_bounds.intersects_horizontal(bounds));
     Ok(occurrences)
 }
@@ -1954,8 +1974,13 @@ pub const fn terrain_preview_tree_record_admitted_for_profile(
     }
 }
 
-const fn continental_proxy_tree_record_admitted(sample_spacing: u32, _landmark_rank: u8) -> bool {
-    sample_spacing <= CONTINENTAL_PROXY_MAX_TREE_RECORD_SAMPLE_SPACING
+const fn continental_proxy_tree_record_admitted(sample_spacing: u32, landmark_rank: u8) -> bool {
+    match sample_spacing {
+        0..=4 => true,
+        5..=8 => landmark_rank >= 128,
+        9..=16 => landmark_rank >= 224,
+        _ => false,
+    }
 }
 
 fn preview_stream_plans(
@@ -2818,7 +2843,7 @@ mod tests {
     }
 
     #[test]
-    fn continental_proxy_vegetation_keeps_one_lattice_across_review_levels() {
+    fn continental_proxy_vegetation_keeps_near_lattice_and_thins_far_levels() {
         let request = |sample_spacing, cells_per_axis| TerrainPreviewRequest {
             profile: TerrainPreviewProfile::ContinentalEcoregionCandidate,
             center_x: -13_824,
@@ -2829,17 +2854,36 @@ mod tests {
             surface_quality: TerrainPreviewSurfaceQuality::Inferred,
             ..TerrainPreviewRequest::new(12_345, -13_824, 9_216, sample_spacing)
         };
-        let fine = TerrainPreviewVegetationProduct::compile(request(4, 64)).unwrap();
-        let middle = TerrainPreviewVegetationProduct::compile(request(8, 32)).unwrap();
-        let far = TerrainPreviewVegetationProduct::compile(request(16, 16)).unwrap();
+        let exact = TerrainPreviewVegetationProduct::compile(request(1, 128)).unwrap();
+        let middle = TerrainPreviewVegetationProduct::compile(request(2, 64)).unwrap();
+        let sparse = TerrainPreviewVegetationProduct::compile(request(4, 32)).unwrap();
+        let far = TerrainPreviewVegetationProduct::compile(request(8, 16)).unwrap();
+        let horizon = TerrainPreviewVegetationProduct::compile(request(16, 8)).unwrap();
+        let coarse = TerrainPreviewVegetationProduct::compile(request(32, 8)).unwrap();
 
-        for product in [&fine, &middle, &far] {
+        for product in [&exact, &middle, &sparse, &far, &horizon] {
             assert!(product.records_requested());
             assert!(!product.records_aggregated());
             assert!(!product.occurrences().is_empty());
         }
-        assert_eq!(fine.occurrences(), middle.occurrences());
-        assert_eq!(middle.occurrences(), far.occurrences());
+        assert_eq!(middle.occurrences(), exact.occurrences());
+        assert_eq!(sparse.occurrences(), exact.occurrences());
+        assert!(far.occurrences().len() < sparse.occurrences().len());
+        assert!(horizon.occurrences().len() < far.occurrences().len());
+        assert!(far.occurrences().iter().all(|occurrence| {
+            sparse
+                .occurrences()
+                .iter()
+                .any(|candidate| candidate.record.id == occurrence.record.id)
+        }));
+        assert!(horizon.occurrences().iter().all(|occurrence| {
+            far.occurrences()
+                .iter()
+                .any(|candidate| candidate.record.id == occurrence.record.id)
+        }));
+        assert!(!coarse.records_requested());
+        assert!(coarse.records_aggregated());
+        assert!(coarse.occurrences().is_empty());
         assert_eq!(
             terrain_preview_max_tree_record_sample_spacing(
                 TerrainPreviewProfile::ContinentalEcoregionCandidate,

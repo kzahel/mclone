@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use mclone_core::{CHUNK_WIDTH, ChunkPos, chunk_min_block_coord};
 
@@ -13,7 +13,7 @@ use crate::{
         continental_surface_biome_id,
     },
     feature::FeatureRegion,
-    terrain_preview::continental_candidate_tree_records_intersecting,
+    terrain_preview::continental_candidate_tree_records_intersecting_with_surface,
 };
 
 use super::{
@@ -26,6 +26,7 @@ const CANDIDATE_MIN_Y: i32 = 0;
 const CANDIDATE_HEIGHT: i32 = 256;
 const CANDIDATE_MAX_SURFACE_Y: i32 = CANDIDATE_HEIGHT - 2;
 const CANDIDATE_SURFACE_CACHE_MAX_CHUNKS: usize = 256;
+const CANDIDATE_BATCH_MAX_REGION_SLOTS: usize = 1_024;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct ContinentalCandidateFeatureDependencyCacheReport {
@@ -189,9 +190,12 @@ impl ContinentalCandidateFeatureDependencyCache {
             min_z + CHUNK_WIDTH - 1,
         )
         .expect("one exact chunk has representable vegetation bounds");
-        let occurrences =
-            continental_candidate_tree_records_intersecting(self.generator.seed(), bounds)
-                .expect("one exact chunk has a bounded candidate tree query");
+        let occurrences = continental_candidate_tree_records_intersecting_with_surface(
+            self.generator.seed(),
+            bounds,
+            self.generator.surface(),
+        )
+        .expect("one exact chunk has a bounded candidate tree query");
         let mut region = FeatureRegion::with_radii(chunk_x, chunk_z, 1, 1, buffers);
         realize_mclone_tree_occurrences(&mut region, &occurrences);
         let buffer = region
@@ -201,6 +205,143 @@ impl ContinentalCandidateFeatureDependencyCache {
             GeneratedChunk::from_mutable_buffer_with_biomes(buffer, target_biomes),
             report,
         )
+    }
+
+    /// Generate one bounded target batch while materializing each shared
+    /// surface dependency only once.
+    ///
+    /// Scheduler jobs commonly contain a compact square of targets. The old
+    /// V2 adapter replayed nine cloned dependency chunks and one vegetation
+    /// query separately for every target, even when all targets shared one
+    /// compiler session. Keep the single-target path for sparse or very broad
+    /// batches, where a rectangular `FeatureRegion` would retain excessive
+    /// empty slots.
+    pub fn generate_features_chunks(
+        &mut self,
+        targets: impl IntoIterator<Item = ChunkPos>,
+    ) -> (
+        BTreeMap<ChunkPos, GeneratedChunk>,
+        ContinentalCandidateFeatureDependencyCacheReport,
+    ) {
+        let targets = targets.into_iter().collect::<BTreeSet<_>>();
+        let Some(first_target) = targets.first().copied() else {
+            return (BTreeMap::new(), Default::default());
+        };
+        let target_min_x = targets.iter().map(|target| target.x).min().unwrap_or(0);
+        let target_max_x = targets.iter().map(|target| target.x).max().unwrap_or(0);
+        let target_min_z = targets.iter().map(|target| target.z).min().unwrap_or(0);
+        let target_max_z = targets.iter().map(|target| target.z).max().unwrap_or(0);
+        let region_slots = target_min_x
+            .checked_sub(1)
+            .zip(target_max_x.checked_add(1))
+            .zip(target_min_z.checked_sub(1))
+            .zip(target_max_z.checked_add(1))
+            .and_then(|(((min_x, max_x), min_z), max_z)| {
+                usize::try_from(i64::from(max_x) - i64::from(min_x) + 1)
+                    .ok()
+                    .and_then(|width| {
+                        usize::try_from(i64::from(max_z) - i64::from(min_z) + 1)
+                            .ok()
+                            .and_then(|height| width.checked_mul(height))
+                    })
+            });
+        if region_slots.is_none_or(|slots| slots > CANDIDATE_BATCH_MAX_REGION_SLOTS) {
+            let mut chunks = BTreeMap::new();
+            let mut aggregate = ContinentalCandidateFeatureDependencyCacheReport::default();
+            for target in targets {
+                let (chunk, report) = self.generate_features_chunk(target.x, target.z);
+                chunks.insert(target, chunk);
+                aggregate.requested_dependency_chunks += report.requested_dependency_chunks;
+                aggregate.cache_hits += report.cache_hits;
+                aggregate.generated_dependency_chunks += report.generated_dependency_chunks;
+                aggregate.retained_dependency_chunks = report.retained_dependency_chunks;
+            }
+            return (chunks, aggregate);
+        }
+
+        let dependency_positions = targets
+            .iter()
+            .flat_map(|target| {
+                (-1..=1).flat_map(move |offset_z| {
+                    (-1..=1).map(move |offset_x| {
+                        ChunkPos::new(target.x + offset_x, target.z + offset_z)
+                    })
+                })
+            })
+            .collect::<BTreeSet<_>>();
+        let mut report = ContinentalCandidateFeatureDependencyCacheReport {
+            requested_dependency_chunks: dependency_positions.len(),
+            ..Default::default()
+        };
+        let mut target_biomes = BTreeMap::new();
+        let mut buffers = Vec::with_capacity(dependency_positions.len());
+        for position in dependency_positions {
+            let chunk = if let Some(chunk) = self.surfaces.get(&position).cloned() {
+                report.cache_hits += 1;
+                self.touch(position);
+                chunk
+            } else {
+                report.generated_dependency_chunks += 1;
+                let chunk = self
+                    .generator
+                    .generate_surface_chunk(position.x, position.z);
+                self.surfaces.insert(position, chunk.clone());
+                self.touch(position);
+                chunk
+            };
+            if targets.contains(&position) {
+                target_biomes.insert(position, chunk.biomes().to_vec());
+            }
+            buffers.push(MutableChunkBlockBuffer::from_raw_parts_with_metadata(
+                chunk.chunk_x,
+                chunk.chunk_z,
+                chunk.min_y,
+                chunk.height,
+                chunk.blocks().to_vec(),
+                BTreeMap::new(),
+                Vec::new(),
+                Vec::new(),
+                true,
+            ));
+        }
+        self.evict();
+        report.retained_dependency_chunks = self.surfaces.len();
+
+        let bounds = super::McloneVegetationBounds::new(
+            chunk_min_block_coord(target_min_x),
+            chunk_min_block_coord(target_min_z),
+            chunk_min_block_coord(target_max_x) + CHUNK_WIDTH - 1,
+            chunk_min_block_coord(target_max_z) + CHUNK_WIDTH - 1,
+        )
+        .expect("a bounded continental target batch has representable vegetation bounds");
+        let occurrences = continental_candidate_tree_records_intersecting_with_surface(
+            self.generator.seed(),
+            bounds,
+            self.generator.surface(),
+        )
+        .expect("a bounded continental target batch has a valid tree query");
+        let mut region = FeatureRegion::with_radii(first_target.x, first_target.z, 1, 1, buffers);
+        for target in targets.iter().copied() {
+            region.set_center(target.x, target.z);
+            realize_mclone_tree_occurrences(&mut region, &occurrences);
+        }
+
+        let chunks = targets
+            .into_iter()
+            .map(|target| {
+                let buffer = region
+                    .remove_chunk(target.x, target.z)
+                    .expect("the continental batch retains every target buffer");
+                let biomes = target_biomes
+                    .remove(&target)
+                    .expect("the continental batch retains every target biome payload");
+                (
+                    target,
+                    GeneratedChunk::from_mutable_buffer_with_biomes(buffer, biomes),
+                )
+            })
+            .collect();
+        (chunks, report)
     }
 
     fn touch(&mut self, position: ChunkPos) {
@@ -299,6 +440,7 @@ mod tests {
     use crate::continental_surface::{
         ContinentalRegionalArchetype, ContinentalSurfaceWaterKind, MesaLandformKind,
     };
+    use crate::terrain_preview::continental_candidate_tree_records_intersecting;
 
     const SEED: i64 = 12_345;
 
@@ -474,5 +616,35 @@ mod tests {
         assert_eq!(first_report.generated_dependency_chunks, 9);
         assert_eq!(repeated_report.cache_hits, 9);
         assert_eq!(repeated_report.generated_dependency_chunks, 0);
+    }
+
+    #[test]
+    fn compact_batch_matches_single_target_generation_and_reordered_batch() {
+        let targets = [
+            ChunkPos::new(-866, 574),
+            ChunkPos::new(-865, 574),
+            ChunkPos::new(-866, 575),
+            ChunkPos::new(-865, 575),
+        ];
+        let mut singles_cache = ContinentalCandidateFeatureDependencyCache::new(SEED);
+        let singles = targets
+            .into_iter()
+            .map(|target| {
+                let (chunk, _) = singles_cache.generate_features_chunk(target.x, target.z);
+                (target, chunk)
+            })
+            .collect::<BTreeMap<_, _>>();
+
+        let mut batch_cache = ContinentalCandidateFeatureDependencyCache::new(SEED);
+        let (batch, batch_report) = batch_cache.generate_features_chunks(targets);
+        let mut reverse_cache = ContinentalCandidateFeatureDependencyCache::new(SEED);
+        let (reverse, reverse_report) =
+            reverse_cache.generate_features_chunks(targets.into_iter().rev());
+
+        assert_eq!(batch, singles);
+        assert_eq!(reverse, singles);
+        assert_eq!(batch_report.requested_dependency_chunks, 16);
+        assert_eq!(batch_report.generated_dependency_chunks, 16);
+        assert_eq!(reverse_report, batch_report);
     }
 }

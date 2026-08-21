@@ -79,6 +79,23 @@ instance path. Coarse levels continue to use forest summaries and do not
 enumerate continent-scale trees. The semantic vegetation compiler is v3,
 `MCHV` transport is v2, and canonical terrain batches are v4.
 
+The first V1/V2 live performance comparison isolates a material source-path
+gap. Exact-only startup is effectively matched, but High Distant Terrain V2
+still compiles its continental samples on CPU while V1 owns a GPU-native
+evaluator. On the matched M4 Pro run V2 reaches the full view in `1.968 s`
+versus V1's `1.393 s`, then experiences 17 large product-admission/render
+frames and a `298.50 ms` p99 versus `10.36 ms`. This is recorded performance
+debt, not parity. Compact exact generation batches have independently removed
+their redundant per-target dependency replay.
+
+Dense continental vegetation no longer enumerates every ordinary tree through
+the full spacing-16 hierarchy. Complete stable records remain through spacing
+4; spacing 8 retains a deterministic half and spacing 16 a deterministic
+eighth before summaries take over. At the reviewed jungle frame this reduces
+instances from `42,637` to `10,889` and vegetation compilation from
+`195.21 ms` to `42.11 ms` without the visibly empty spacing-4 cutoff rejected
+during pixel review.
+
 ## Regular Clipmap And Presets
 
 Every enabled level is a four-by-four toroidal grid of 64-cell terrain tiles.

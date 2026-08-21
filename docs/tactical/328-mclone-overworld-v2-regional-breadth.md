@@ -321,6 +321,42 @@ The final packaged live journey remains part of Phase 5.
   pixels, then stop at Human Review E.
 - Commit.
 
+Performance checkpoint on 2026-08-21: the new
+`mclone-overworld-profile-performance-v1` release harness compares matched V1
+and V2 surface, cold exact, warm exact, dependency, retained-memory, and block
+work. It exposed an avoidable V2 adapter cost: a compact 5-by-5 target batch
+was replaying nine cloned dependencies and one tree query separately for every
+target. V2 now materializes the shared 7-by-7 region and vegetation query once
+for a bounded compact batch. Single-target, batched, and reversed output are
+byte-identical; sparse or excessively broad batches retain the bounded old
+path.
+
+At seed `12345`, radius two, and three release iterations, the temperate
+25-chunk window measures V1/V2 cold exact at `134.01/132.57 ms`; V2 warm exact
+remains materially slower at `34.63 ms` versus `14.73 ms`. At the dense jungle
+window, V1/V2 cold exact is `114.12/151.31 ms` and warm exact is
+`15.30/38.84 ms`; V2 produces roughly twice as many non-air blocks there.
+This is bounded and playable, but is not performance parity.
+
+A matched live startup run isolates the larger remaining gap to the
+procedural horizon. With Distant Terrain Off, V1/V2 both reach the full exact
+view in about `1.385 s`, average about `2.4 ms`, and remain near `4 ms` p99.
+With High enabled, V1/V2 full-view readiness is `1.393/1.968 s` and initial
+render completion is `1.474/3.142 s`; V2 has 17 large terrain-product
+admission/render frames and `298.50 ms` p99 versus V1's `10.36 ms`. V2 still
+uses the CPU-authored continental source where V1 has a GPU-native evaluator.
+
+World Explorer's earlier all-tree policy also enumerated full dense forests
+through spacing 16. Stable tree identity is now complete through spacing 4,
+half-sampled by stable rank at spacing 8, and one-eighth sampled at spacing
+16 before coarse summaries take over. The reviewed jungle frame drops from
+`42,637` to `10,889` instances, from `4,093,152` to `1,045,344` vegetation
+bytes, and from `195.21` to `42.11 ms` vegetation compilation while retaining
+a continuous visible forest. Cold debug target readiness remains about seven
+seconds because CPU continental terrain compilation, not vegetation, now
+dominates. Retained movement and platform/package evidence follow in this
+phase.
+
 ## Automated Acceptance
 
 - V1 profile label, tag, generator, default status, fixtures, and ordinary
