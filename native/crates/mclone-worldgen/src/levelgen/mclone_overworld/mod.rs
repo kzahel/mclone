@@ -82,6 +82,7 @@ pub use terrain::{
     generate_mclone_overworld_surface_chunk_with_topology,
     generate_mclone_overworld_surface_chunks_with_topology,
 };
+pub(crate) use vegetation::realize_mclone_tree_occurrences;
 pub use vegetation::{
     MCLONE_FOREST_EDGE_SAMPLE_RADIUS_BLOCKS, MCLONE_FOREST_SUMMARY_FOOTPRINT_TAPS,
     MCLONE_OVERWORLD_GROVE_DOMAIN, MCLONE_OVERWORLD_GROVE_SCALE_BLOCKS,

@@ -253,6 +253,39 @@ The central exact ground is intentionally treeless at this gate. Phase 3 must
 realize and transfer ownership of the same stable candidate tree records; the
 empty square is not review-ready terrain.
 
+### Phase 3: Exact Candidate Cover
+
+Completed on 2026-08-21.
+
+- The stable global candidate lattice now exposes bounded whole-tree queries.
+  Large mesh-input regions partition into bounded queries, deduplicate by the
+  existing record identity, and include neighboring bases whose crowns cross
+  an exact boundary.
+- Candidate final-feature chunks clone immutable cached 3x3 surface
+  dependencies, realize the existing rounded broadleaf, layered conifer, and
+  forked acacia voxel archetypes, and return only the target chunk. The
+  256-chunk LRU affects work only; generation always starts from undecorated
+  shared surface blocks and remains request-order independent.
+- Canonical exact meshing queries those same records for separated natural
+  tree meshes. Existing exact/proxy ownership suppresses complete proxy
+  instances rather than clipping crowns at the frontier.
+- Inspected native composed frames at
+  `/tmp/mclone-continental-composed-clearing-cover.png`,
+  `/tmp/mclone-continental-composed-water-cover.png`, and
+  `/tmp/mclone-continental-composed-arid-cover.png`. The clearing admitted two
+  records with one exact and one proxy owner; the lake admitted none; the arid
+  site admitted nine with eight exact and one proxy owner. All three reported
+  zero missing exact or proxy records.
+- Exact generation at radius 4 increased from roughly 54-57 ms to 226-249 ms
+  after real feature dependencies and tree records. Meshing remained roughly
+  461-571 ms. Total capture readiness remained 3.01-3.33 seconds, still
+  dominated by incremental admission and candidate frontier churn rather than
+  tree geometry.
+
+No separate close-range ground-cover scatter was added. It is not needed to
+establish the terrain/tree ownership contract and would distract from the
+larger surface judgment.
+
 ## Non-Goals
 
 This tactical does not:

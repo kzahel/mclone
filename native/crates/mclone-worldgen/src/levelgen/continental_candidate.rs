@@ -1,4 +1,6 @@
-use mclone_core::{CHUNK_WIDTH, chunk_min_block_coord};
+use std::collections::{BTreeMap, VecDeque};
+
+use mclone_core::{CHUNK_WIDTH, ChunkPos, chunk_min_block_coord};
 
 use crate::{
     block::{BEDROCK, DIRT, GRASS_BLOCK, GRAVEL, RawBlockId, SAND, SANDSTONE, STONE, WATER},
@@ -7,19 +9,30 @@ use crate::{
         ContinentalSurfacePlan, ContinentalSurfaceSample, ContinentalSurfaceSubstrate,
         ContinentalSurfaceWaterKind,
     },
+    feature::FeatureRegion,
+    terrain_preview::continental_candidate_tree_records_intersecting,
 };
 
 use super::{
     BEACH_BIOME_ID, GeneratedChunk, MCLONE_OVERWORLD_FOREST_BIOME_ID,
     MCLONE_OVERWORLD_RIVER_BIOME_ID, MCLONE_OVERWORLD_SAVANNA_BIOME_ID,
     MCLONE_OVERWORLD_TAIGA_BIOME_ID, MutableChunkBlockBuffer, OCEAN_BIOME_ID, PLAINS_BIOME_ID,
-    chunk::sample_column_biome_payload,
+    chunk::sample_column_biome_payload, mclone_overworld::realize_mclone_tree_occurrences,
 };
 
-pub const CONTINENTAL_CANDIDATE_EXACT_REVISION: u16 = 1;
+pub const CONTINENTAL_CANDIDATE_EXACT_REVISION: u16 = 2;
 const CANDIDATE_MIN_Y: i32 = 0;
 const CANDIDATE_HEIGHT: i32 = 256;
 const CANDIDATE_MAX_SURFACE_Y: i32 = CANDIDATE_HEIGHT - 2;
+const CANDIDATE_SURFACE_CACHE_MAX_CHUNKS: usize = 256;
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ContinentalCandidateFeatureDependencyCacheReport {
+    pub requested_dependency_chunks: usize,
+    pub cache_hits: usize,
+    pub generated_dependency_chunks: usize,
+    pub retained_dependency_chunks: usize,
+}
 
 /// Detached exact lowering for the continental/ecoregional review source.
 ///
@@ -84,6 +97,134 @@ pub fn generate_continental_candidate_surface_chunk(
     chunk_z: i32,
 ) -> GeneratedChunk {
     ContinentalCandidateExactGenerator::new(seed).generate_surface_chunk(chunk_x, chunk_z)
+}
+
+/// Bounded immutable-surface cache for deterministic candidate tree
+/// realization. Feature writes always start from cloned surface chunks, so
+/// request order cannot feed already-decorated blocks back into generation.
+#[derive(Debug)]
+pub struct ContinentalCandidateFeatureDependencyCache {
+    generator: ContinentalCandidateExactGenerator,
+    surfaces: BTreeMap<ChunkPos, GeneratedChunk>,
+    lru: VecDeque<ChunkPos>,
+}
+
+impl ContinentalCandidateFeatureDependencyCache {
+    pub fn new(seed: i64) -> Self {
+        Self {
+            generator: ContinentalCandidateExactGenerator::new(seed),
+            surfaces: BTreeMap::new(),
+            lru: VecDeque::new(),
+        }
+    }
+
+    pub fn generator(&self) -> &ContinentalCandidateExactGenerator {
+        &self.generator
+    }
+
+    pub fn retained_chunk_count(&self) -> usize {
+        self.surfaces.len()
+    }
+
+    pub fn clear(&mut self) {
+        self.surfaces.clear();
+        self.lru.clear();
+    }
+
+    pub fn generate_features_chunk(
+        &mut self,
+        chunk_x: i32,
+        chunk_z: i32,
+    ) -> (
+        GeneratedChunk,
+        ContinentalCandidateFeatureDependencyCacheReport,
+    ) {
+        let target = ChunkPos::new(chunk_x, chunk_z);
+        let mut report = ContinentalCandidateFeatureDependencyCacheReport::default();
+        let mut buffers = Vec::with_capacity(9);
+        let mut target_biomes = Vec::new();
+        for offset_z in -1..=1 {
+            for offset_x in -1..=1 {
+                let position = ChunkPos::new(chunk_x + offset_x, chunk_z + offset_z);
+                report.requested_dependency_chunks += 1;
+                let chunk = if let Some(chunk) = self.surfaces.get(&position).cloned() {
+                    report.cache_hits += 1;
+                    self.touch(position);
+                    chunk
+                } else {
+                    report.generated_dependency_chunks += 1;
+                    let chunk = self
+                        .generator
+                        .generate_surface_chunk(position.x, position.z);
+                    self.surfaces.insert(position, chunk.clone());
+                    self.touch(position);
+                    chunk
+                };
+                if position == target {
+                    target_biomes = chunk.biomes().to_vec();
+                }
+                buffers.push(MutableChunkBlockBuffer::from_raw_parts_with_metadata(
+                    chunk.chunk_x,
+                    chunk.chunk_z,
+                    chunk.min_y,
+                    chunk.height,
+                    chunk.blocks().to_vec(),
+                    BTreeMap::new(),
+                    Vec::new(),
+                    Vec::new(),
+                    true,
+                ));
+            }
+        }
+        self.evict();
+        report.retained_dependency_chunks = self.surfaces.len();
+
+        let min_x = chunk_min_block_coord(chunk_x);
+        let min_z = chunk_min_block_coord(chunk_z);
+        let bounds = super::McloneVegetationBounds::new(
+            min_x,
+            min_z,
+            min_x + CHUNK_WIDTH - 1,
+            min_z + CHUNK_WIDTH - 1,
+        )
+        .expect("one exact chunk has representable vegetation bounds");
+        let occurrences =
+            continental_candidate_tree_records_intersecting(self.generator.seed(), bounds)
+                .expect("one exact chunk has a bounded candidate tree query");
+        let mut region = FeatureRegion::with_radii(chunk_x, chunk_z, 1, 1, buffers);
+        realize_mclone_tree_occurrences(&mut region, &occurrences);
+        let buffer = region
+            .remove_chunk(chunk_x, chunk_z)
+            .expect("the candidate feature region retains its target chunk");
+        (
+            GeneratedChunk::from_mutable_buffer_with_biomes(buffer, target_biomes),
+            report,
+        )
+    }
+
+    fn touch(&mut self, position: ChunkPos) {
+        self.lru.retain(|candidate| *candidate != position);
+        self.lru.push_back(position);
+    }
+
+    fn evict(&mut self) {
+        while self.surfaces.len() > CANDIDATE_SURFACE_CACHE_MAX_CHUNKS {
+            let Some(position) = self.lru.pop_front() else {
+                break;
+            };
+            self.surfaces.remove(&position);
+        }
+    }
+}
+
+pub fn generate_continental_candidate_chunk(
+    seed: i64,
+    chunk_x: i32,
+    chunk_z: i32,
+) -> GeneratedChunk {
+    ContinentalCandidateFeatureDependencyCache::new(seed)
+        .generate_features_chunk(chunk_x, chunk_z)
+        .0
 }
 
 fn write_candidate_column(
@@ -166,7 +307,7 @@ fn sample_index(local_x: i32, local_z: i32) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::block::AIR;
+    use crate::block::{ACACIA_LOG, AIR, OAK_LOG, SPRUCE_LOG};
 
     const SEED: i64 = 12_345;
 
@@ -274,5 +415,34 @@ mod tests {
                 GRAVEL
             );
         }
+    }
+
+    #[test]
+    fn final_chunks_realize_the_same_stable_candidate_tree_records() {
+        let bounds =
+            super::super::McloneVegetationBounds::new(-13_856, 9_184, -13_793, 9_247).unwrap();
+        let occurrences = continental_candidate_tree_records_intersecting(SEED, bounds).unwrap();
+        let base = occurrences
+            .first()
+            .expect("the established wooded review region has candidate trees")
+            .working_base()
+            .unwrap();
+        let chunk_x = base.x.div_euclid(CHUNK_WIDTH);
+        let chunk_z = base.z.div_euclid(CHUNK_WIDTH);
+        let surface = generate_continental_candidate_surface_chunk(SEED, chunk_x, chunk_z);
+        let mut cache = ContinentalCandidateFeatureDependencyCache::new(SEED);
+        let (first, first_report) = cache.generate_features_chunk(chunk_x, chunk_z);
+        let (repeated, repeated_report) = cache.generate_features_chunk(chunk_x, chunk_z);
+
+        let log_count = first.block_count(OAK_LOG)
+            + first.block_count(SPRUCE_LOG)
+            + first.block_count(ACACIA_LOG);
+        assert!(log_count > 0);
+        assert_ne!(first.blocks(), surface.blocks());
+        assert_eq!(first, repeated);
+        assert_eq!(first_report.requested_dependency_chunks, 9);
+        assert_eq!(first_report.generated_dependency_chunks, 9);
+        assert_eq!(repeated_report.cache_hits, 9);
+        assert_eq!(repeated_report.generated_dependency_chunks, 0);
     }
 }

@@ -1572,6 +1572,110 @@ fn compile_continental_proxy_vegetation(
     Ok(occurrences)
 }
 
+/// Return the stable candidate tree records whose whole-tree bounds intersect
+/// an exact horizontal region.
+///
+/// This deliberately reuses the proxy compiler's global lattice, identities,
+/// density decisions, and silhouettes. The expanded preview request discovers
+/// neighboring bases whose crowns cross the requested exact boundary, then the
+/// whole-tree bounds provide the final filter.
+pub fn continental_candidate_tree_records_intersecting(
+    seed: i64,
+    bounds: McloneVegetationBounds,
+) -> Result<Vec<McloneTreeOccurrence>, String> {
+    const QUERY_TILE_BLOCKS: i32 = 96;
+    let mut occurrences = Vec::new();
+    let mut min_z = bounds.min_z;
+    while min_z <= bounds.max_z {
+        let max_z = min_z
+            .checked_add(QUERY_TILE_BLOCKS - 1)
+            .unwrap_or(i32::MAX)
+            .min(bounds.max_z);
+        let mut min_x = bounds.min_x;
+        while min_x <= bounds.max_x {
+            let max_x = min_x
+                .checked_add(QUERY_TILE_BLOCKS - 1)
+                .unwrap_or(i32::MAX)
+                .min(bounds.max_x);
+            occurrences.extend(continental_candidate_tree_records_intersecting_bounded(
+                seed,
+                McloneVegetationBounds::new(min_x, min_z, max_x, max_z)
+                    .map_err(|error| error.to_string())?,
+            )?);
+            let Some(next_x) = max_x.checked_add(1) else {
+                break;
+            };
+            min_x = next_x;
+        }
+        let Some(next_z) = max_z.checked_add(1) else {
+            break;
+        };
+        min_z = next_z;
+    }
+    occurrences.sort_unstable();
+    occurrences.dedup();
+    Ok(occurrences)
+}
+
+fn continental_candidate_tree_records_intersecting_bounded(
+    seed: i64,
+    bounds: McloneVegetationBounds,
+) -> Result<Vec<McloneTreeOccurrence>, String> {
+    const MAX_CANDIDATE_TREE_RADIUS: i32 = 8;
+    let expanded_min_x = bounds
+        .min_x
+        .checked_sub(MAX_CANDIDATE_TREE_RADIUS)
+        .ok_or("continental candidate tree bounds overflow")?;
+    let expanded_min_z = bounds
+        .min_z
+        .checked_sub(MAX_CANDIDATE_TREE_RADIUS)
+        .ok_or("continental candidate tree bounds overflow")?;
+    let expanded_max_x = bounds
+        .max_x
+        .checked_add(MAX_CANDIDATE_TREE_RADIUS)
+        .ok_or("continental candidate tree bounds overflow")?;
+    let expanded_max_z = bounds
+        .max_z
+        .checked_add(MAX_CANDIDATE_TREE_RADIUS)
+        .ok_or("continental candidate tree bounds overflow")?;
+    let required_span = u32::try_from(
+        (i64::from(expanded_max_x) - i64::from(expanded_min_x) + 1)
+            .max(i64::from(expanded_max_z) - i64::from(expanded_min_z) + 1),
+    )
+    .map_err(|_| "continental candidate tree span exceeds u32")?;
+    let cells_per_axis = required_span.next_power_of_two().clamp(
+        TERRAIN_PREVIEW_MIN_CELLS_PER_AXIS,
+        TERRAIN_PREVIEW_MAX_CELLS_PER_AXIS,
+    );
+    if cells_per_axis < required_span {
+        return Err(format!(
+            "continental candidate tree query span {required_span} exceeds {} blocks",
+            TERRAIN_PREVIEW_MAX_CELLS_PER_AXIS
+        ));
+    }
+    let half = i32::try_from(cells_per_axis / 2)
+        .map_err(|_| "continental candidate tree half-span exceeds i32")?;
+    let request = TerrainPreviewRequest {
+        profile: TerrainPreviewProfile::ContinentalEcoregionCandidate,
+        seed,
+        center_x: expanded_min_x
+            .checked_add(half)
+            .ok_or("continental candidate tree center X overflow")?,
+        center_z: expanded_min_z
+            .checked_add(half)
+            .ok_or("continental candidate tree center Z overflow")?,
+        sample_spacing: 1,
+        cells_per_axis,
+        topology: McloneOverworldSamplingTopology::Unbounded,
+        content_stage: TerrainPreviewContentStage::Cover,
+        surface_quality: TerrainPreviewSurfaceQuality::Inferred,
+    }
+    .validate()?;
+    let mut occurrences = compile_continental_proxy_vegetation(request)?;
+    occurrences.retain(|occurrence| occurrence.working_bounds.intersects_horizontal(bounds));
+    Ok(occurrences)
+}
+
 fn continental_proxy_hash(seed: i64, cell_x: i32, cell_z: i32, lane: u64) -> u64 {
     let mut value =
         (seed as u64) ^ 0x6376_6567_7072_6f78 ^ lane.wrapping_mul(0x9e37_79b9_7f4a_7c15);
@@ -2432,6 +2536,23 @@ mod tests {
                 TerrainPreviewProfile::McloneOverworldV1,
             ),
             4
+        );
+    }
+
+    #[test]
+    fn continental_exact_tree_queries_partition_without_identity_duplicates() {
+        let bounds = McloneVegetationBounds::new(-13_920, 9_120, -13_729, 9_311).unwrap();
+        let occurrences = continental_candidate_tree_records_intersecting(12_345, bounds).unwrap();
+        assert!(!occurrences.is_empty());
+        assert!(
+            occurrences
+                .windows(2)
+                .all(|pair| pair[0].record.id != pair[1].record.id)
+        );
+        assert!(
+            occurrences
+                .iter()
+                .all(|occurrence| occurrence.working_bounds.intersects_horizontal(bounds))
         );
     }
 }

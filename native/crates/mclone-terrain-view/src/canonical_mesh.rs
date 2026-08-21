@@ -15,7 +15,9 @@ use mclone_worldgen::levelgen::{
     McloneOverworldSamplingTopology, McloneOverworldVegetationPlanCache, McloneTreeFamily,
     McloneTreeOccurrence, McloneVegetationBounds, McloneVegetationSource,
 };
-use mclone_worldgen::terrain_preview::TerrainPreviewProfile;
+use mclone_worldgen::terrain_preview::{
+    TerrainPreviewProfile, continental_candidate_tree_records_intersecting,
+};
 
 use super::{
     CanonicalTerrainChunk, CanonicalTerrainCompiler, CanonicalTerrainStage,
@@ -496,7 +498,6 @@ impl CanonicalMeshSession {
         input_positions: &BTreeSet<(i32, i32)>,
     ) -> Result<Vec<McloneTreeOccurrence>, String> {
         if self.natural_tree_presentation != CanonicalNaturalTreePresentation::Separated
-            || self.profile != TerrainPreviewProfile::McloneOverworldV1
             || self.stage != CanonicalTerrainStage::FinalFeatures
             || !self.visibility.vegetation
             || input_positions.is_empty()
@@ -539,20 +540,29 @@ impl CanonicalMeshSession {
             .and_then(|value| value.checked_mul(CHUNK_WIDTH))
             .and_then(|value| value.checked_sub(1))
             .ok_or("canonical natural-tree maximum Z overflow")?;
-        let source =
-            McloneVegetationSource::new(self.seed, McloneOverworldSamplingTopology::Unbounded);
-        let cache = self
-            .vegetation_cache
-            .get_or_insert_with(|| McloneOverworldVegetationPlanCache::new(source));
-        if !cache.matches(source) {
-            *cache = McloneOverworldVegetationPlanCache::new(source);
+        let bounds = McloneVegetationBounds::new(min_x, min_z, max_x, max_z)
+            .map_err(|error| error.to_string())?;
+        match self.profile {
+            TerrainPreviewProfile::McloneOverworldV1 => {
+                let source = McloneVegetationSource::new(
+                    self.seed,
+                    McloneOverworldSamplingTopology::Unbounded,
+                );
+                let cache = self
+                    .vegetation_cache
+                    .get_or_insert_with(|| McloneOverworldVegetationPlanCache::new(source));
+                if !cache.matches(source) {
+                    *cache = McloneOverworldVegetationPlanCache::new(source);
+                }
+                cache
+                    .tree_records_intersecting(bounds)
+                    .map_err(|error| error.to_string())
+            }
+            TerrainPreviewProfile::ContinentalEcoregionCandidate => {
+                continental_candidate_tree_records_intersecting(self.seed, bounds)
+            }
+            TerrainPreviewProfile::VanillaOverworld => Ok(Vec::new()),
         }
-        cache
-            .tree_records_intersecting(
-                McloneVegetationBounds::new(min_x, min_z, max_x, max_z)
-                    .map_err(|error| error.to_string())?,
-            )
-            .map_err(|error| error.to_string())
     }
 
     fn touch_raw(&mut self, position: (i32, i32)) {

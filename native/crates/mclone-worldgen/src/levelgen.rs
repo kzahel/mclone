@@ -18,7 +18,8 @@ pub use crate::biome::{ConstantBiomeSource, NoiseBiome, NoiseBiomeSource};
 pub use chunk::{GeneratedChunk, MutableChunkBlockBuffer, ScheduledTick};
 pub use continental_candidate::{
     CONTINENTAL_CANDIDATE_EXACT_REVISION, ContinentalCandidateExactGenerator,
-    generate_continental_candidate_surface_chunk,
+    ContinentalCandidateFeatureDependencyCache, ContinentalCandidateFeatureDependencyCacheReport,
+    generate_continental_candidate_chunk, generate_continental_candidate_surface_chunk,
 };
 pub use feature_batch::{
     OverworldFeatureBatchResult, OverworldFeatureDependencyCache,
