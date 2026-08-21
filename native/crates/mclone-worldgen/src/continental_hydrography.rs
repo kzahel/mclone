@@ -10,7 +10,7 @@ use serde::Serialize;
 
 use crate::continental_ecoregion::{ContinentalEcoregionDescriptor, ContinentalEcoregionTopology};
 
-pub const CONTINENTAL_HYDROGRAPHY_SCHEMA_REVISION: &str = "mclone-continental-hydrography-v2";
+pub const CONTINENTAL_HYDROGRAPHY_SCHEMA_REVISION: &str = "mclone-continental-hydrography-v3";
 pub const CONTINENTAL_CATCHMENT_CELL_BLOCKS: i32 = 32_768;
 pub const CONTINENTAL_CATCHMENT_MAX_REACHES: usize = 8;
 pub const CONTINENTAL_CATCHMENT_MAX_NODES: usize = 11;
@@ -193,6 +193,10 @@ pub struct ContinentalHydrographySample {
     pub saddle_weight: f32,
     pub valley_weight: f32,
     pub floodplain_weight: f32,
+    pub confluence_id: Option<HydrographyFeatureId>,
+    pub confluence_distance_blocks: f32,
+    pub confluence_weight: f32,
+    pub confluence_bed_y: Option<f32>,
     pub reach_id: Option<HydrographyFeatureId>,
     pub reach_slot: Option<u8>,
     pub reach_kind: Option<ContinentalReachKind>,
@@ -608,6 +612,35 @@ fn evaluate_catchment(
     let saddle_weight = inverse_smoothstep(0.0, 1_350.0, local_across.abs())
         * inverse_smoothstep(0.0, 1_100.0, divide_distance)
         * catchment_weight;
+    let confluences = [(3_usize, 0_u8, 120.0_f64), (5_usize, 1_u8, 220.0_f64)];
+    let nearest_confluence = confluences
+        .into_iter()
+        .map(|(node, slot, radius)| {
+            let distance = distance_to_node(point, catchment.nodes[node]);
+            (node, slot, radius, distance)
+        })
+        .min_by(|left, right| left.3.total_cmp(&right.3));
+    let (confluence_id, confluence_distance_blocks, confluence_weight, confluence_bed_y) =
+        nearest_confluence.map_or(
+            (None, f32::INFINITY, 0.0, None),
+            |(node, slot, radius, distance)| {
+                if distance >= radius {
+                    return (None, distance as f32, 0.0, None);
+                }
+                (
+                    Some(feature_id(
+                        HydrographyFeatureFamily::Confluence,
+                        catchment.owner_x,
+                        catchment.owner_z,
+                        slot,
+                        stable_mix64(catchment.id.hash ^ 0x636f_6e66_0000_0000 ^ u64::from(slot)),
+                    )),
+                    distance as f32,
+                    (inverse_smoothstep(radius * 0.28, radius, distance) * catchment_weight) as f32,
+                    Some(catchment.nodes[node].bed_y as f32),
+                )
+            },
+        );
 
     let mut nearest: Option<(usize, ReachDistance)> = None;
     let mut valley_weight = 0.0_f64;
@@ -762,6 +795,10 @@ fn evaluate_catchment(
         saddle_weight: saddle_weight as f32,
         valley_weight: (valley_weight * catchment_weight) as f32,
         floodplain_weight: (floodplain_weight * catchment_weight) as f32,
+        confluence_id,
+        confluence_distance_blocks,
+        confluence_weight,
+        confluence_bed_y,
         reach_id,
         reach_slot,
         reach_kind,

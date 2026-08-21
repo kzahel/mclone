@@ -434,6 +434,13 @@ sea level, submerged floor shape, exact columns, and persisted worlds remain
 unchanged; any residual pond-junction silhouette is a separately deferred
 hydrology geometry question.
 
+The detached continental candidate subsequently advanced the CPU reference
+grid to `mclone-terrain-preview-reference-grid-v11`. Candidate samples now
+carry realized signed channel distance and width instead of ecological-route
+pseudo-river values, and bounded coarse footprint queries conservatively
+retain eligible graph-owned crossings. This does not change the production
+GPU evaluator, `mclone-overworld-v1`, or the generic clipmap topology.
+
 Coordinating parent Tactical
 [`261`](../tactical/261-procedural-horizon-product-integration-roadmap.md)
 owns the global path into `mclone-scene`, exact/procedural arbitration,

@@ -18,7 +18,7 @@ use super::{
     mclone_overworld::realize_mclone_tree_occurrences,
 };
 
-pub const CONTINENTAL_CANDIDATE_EXACT_REVISION: u16 = 2;
+pub const CONTINENTAL_CANDIDATE_EXACT_REVISION: u16 = 3;
 const CANDIDATE_MIN_Y: i32 = 0;
 const CANDIDATE_HEIGHT: i32 = 256;
 const CANDIDATE_MAX_SURFACE_Y: i32 = CANDIDATE_HEIGHT - 2;

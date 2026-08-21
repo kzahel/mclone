@@ -28,7 +28,7 @@ use crate::{
     noise::{SeedDomain, ValueNoise2d},
 };
 
-pub const CONTINENTAL_SURFACE_SCHEMA_REVISION: &str = "mclone-continental-surface-v6";
+pub const CONTINENTAL_SURFACE_SCHEMA_REVISION: &str = "mclone-continental-surface-v7";
 pub const CONTINENTAL_SURFACE_SOURCE_LABEL: &str = "continental-ecoregion-candidate-v1";
 pub const CONTINENTAL_SURFACE_FAMILY_COUNT: usize = 5;
 pub const CONTINENTAL_SURFACE_MAX_WINDOW_SAMPLES: usize = 262_144;
@@ -238,6 +238,7 @@ pub struct ContinentalSurfaceSample {
     pub clearing_id: Option<LandscapeFeatureId>,
     pub route_id: Option<LandscapeFeatureId>,
     pub catchment_id: Option<HydrographyFeatureId>,
+    pub confluence_id: Option<HydrographyFeatureId>,
     pub reach_id: Option<HydrographyFeatureId>,
     pub lake_id: Option<HydrographyFeatureId>,
     pub family_weights: [f32; CONTINENTAL_SURFACE_FAMILY_COUNT],
@@ -272,6 +273,7 @@ pub struct ContinentalSurfaceSample {
     pub downstream_z: f32,
     pub floodplain: f32,
     pub riparian: f32,
+    pub confluence: f32,
     pub shore_intent: ContinentalShoreIntent,
 }
 
@@ -451,6 +453,16 @@ impl ContinentalSurfacePlan {
                 + ridge_form * 150.0
                 + local_form * 84.0
         });
+        let realized_channel_signed_distance = hydrography.map_or(1_000_000.0, |hydrography| {
+            f64::from(hydrography.channel_signed_distance_blocks)
+                + continental_channel_centerline_warp(hydrography, local_form, walking_form)
+        });
+        let realized_confluence_distance = hydrography.map_or(f64::INFINITY, |hydrography| {
+            (f64::from(hydrography.confluence_distance_blocks)
+                + local_form * 24.0
+                + walking_form * 7.0)
+                .max(0.0)
+        });
         let land = f64::from(plan.land_weight);
         let coast_weight = 1.0 - smoothstep(0.54, 0.92, land);
 
@@ -486,7 +498,7 @@ impl ContinentalSurfacePlan {
             0.0
         };
         let hydro_riparian = hydrography.map_or(0.0, |hydrography| {
-            if !hydrography.channel_distance_blocks.is_finite()
+            if !realized_channel_signed_distance.is_finite()
                 || hydrography.bankfull_width_blocks <= 0.0
             {
                 return 0.0;
@@ -494,7 +506,7 @@ impl ContinentalSurfacePlan {
             inverse_smoothstep(
                 f64::from(hydrography.bankfull_width_blocks) * 0.6,
                 f64::from(hydrography.bankfull_width_blocks) * 7.0 + 48.0,
-                f64::from(hydrography.channel_distance_blocks),
+                realized_channel_signed_distance.abs(),
             ) * hydro_land
         });
         let hydro_floodplain = hydrography.map_or(0.0, |hydrography| {
@@ -662,23 +674,7 @@ impl ContinentalSurfacePlan {
             );
 
             if let Some(bed_y) = hydrography.bed_y {
-                let meander_envelope = 4.0
-                    * f64::from(hydrography.reach_progress)
-                    * (1.0 - f64::from(hydrography.reach_progress));
-                let centerline_warp = (match hydrography.reach_kind {
-                    Some(ContinentalReachKind::Headwater) => local_form * 54.0 + walking_form * 9.0,
-                    Some(ContinentalReachKind::Tributary) => {
-                        local_form * 86.0 + walking_form * 14.0
-                    }
-                    Some(ContinentalReachKind::Trunk)
-                    | Some(ContinentalReachKind::LakeInlet)
-                    | Some(ContinentalReachKind::Outlet) => {
-                        local_form * 128.0 + walking_form * 20.0
-                    }
-                    None => 0.0,
-                }) * meander_envelope;
-                let signed_distance =
-                    f64::from(hydrography.channel_signed_distance_blocks) + centerline_warp;
+                let signed_distance = realized_channel_signed_distance;
                 let distance = signed_distance.abs();
                 let channel_half = f64::from(hydrography.channel_width_blocks) * 0.5;
                 let bankfull_half = f64::from(hydrography.bankfull_width_blocks) * 0.5;
@@ -714,6 +710,36 @@ impl ContinentalSurfacePlan {
                 let valley_blend =
                     (f64::from(hydrography.valley_weight) * hydro_land * 1.12).clamp(0.0, 1.0);
                 solid_surface_y = lerp(solid_surface_y, valley_target, valley_blend);
+            }
+
+            if let Some(confluence_bed_y) = hydrography.confluence_bed_y {
+                let apron_radius = match hydrography.confluence_id.map(|id| id.slot) {
+                    Some(0) => 120.0,
+                    Some(1) => 220.0,
+                    _ => 120.0,
+                };
+                let apron_progress = smoothstep(
+                    apron_radius * 0.08,
+                    apron_radius,
+                    realized_confluence_distance,
+                );
+                let apron_target = f64::from(confluence_bed_y)
+                    + 2.4
+                    + apron_progress * (3.5 + f64::from(hydrography.reach_order) * 0.35)
+                    + local_form * 1.6
+                    + walking_form * 0.65;
+                let apron_blend = (inverse_smoothstep(
+                    apron_radius * 0.18,
+                    apron_radius,
+                    realized_confluence_distance,
+                ) * hydro_land
+                    * 1.12)
+                    .clamp(0.0, 1.0);
+                solid_surface_y = lerp(
+                    solid_surface_y,
+                    solid_surface_y.min(apron_target),
+                    apron_blend,
+                );
             }
 
             let lake_distance = realized_lake_distance;
@@ -797,27 +823,11 @@ impl ContinentalSurfacePlan {
             0.0
         } else {
             hydrography.map_or(0.0, |hydrography| {
-                let meander_envelope = 4.0
-                    * f64::from(hydrography.reach_progress)
-                    * (1.0 - f64::from(hydrography.reach_progress));
-                let centerline_warp = (match hydrography.reach_kind {
-                    Some(ContinentalReachKind::Headwater) => local_form * 54.0 + walking_form * 9.0,
-                    Some(ContinentalReachKind::Tributary) => {
-                        local_form * 86.0 + walking_form * 14.0
-                    }
-                    Some(ContinentalReachKind::Trunk)
-                    | Some(ContinentalReachKind::LakeInlet)
-                    | Some(ContinentalReachKind::Outlet) => {
-                        local_form * 128.0 + walking_form * 20.0
-                    }
-                    None => 0.0,
-                }) * meander_envelope;
                 let edge_warp = micro_form * 0.75;
                 inverse_smoothstep(
                     f64::from(hydrography.channel_width_blocks) * 0.5 - 1.0,
                     f64::from(hydrography.channel_width_blocks) * 0.5 + 2.5,
-                    (f64::from(hydrography.channel_signed_distance_blocks) + centerline_warp).abs()
-                        + edge_warp,
+                    realized_channel_signed_distance.abs() + edge_warp,
                 ) * hydro_land
             })
         };
@@ -912,6 +922,7 @@ impl ContinentalSurfacePlan {
             clearing_id: mosaic.and_then(|mosaic| mosaic.clearing_id),
             route_id: mosaic.and_then(|mosaic| mosaic.corridor_id),
             catchment_id: hydrography.map(|hydrography| hydrography.catchment_id),
+            confluence_id: hydrography.and_then(|hydrography| hydrography.confluence_id),
             reach_id: hydrography.and_then(|hydrography| hydrography.reach_id),
             lake_id: hydrography.and_then(|hydrography| hydrography.lake_id),
             family_weights: family_weights.map(|weight| weight as f32),
@@ -942,18 +953,15 @@ impl ContinentalSurfacePlan {
             // Keep review receipts valid JSON even outside every bounded
             // catchment. The value is a deliberately unreachable finite
             // sentinel rather than IEEE infinity.
-            channel_signed_distance_blocks: hydrography.map_or(1_000_000.0, |hydrography| {
-                hydrography.channel_signed_distance_blocks
-            }),
-            channel_distance_blocks: hydrography.map_or(1_000_000.0, |hydrography| {
-                hydrography.channel_distance_blocks
-            }),
+            channel_signed_distance_blocks: realized_channel_signed_distance as f32,
+            channel_distance_blocks: realized_channel_signed_distance.abs() as f32,
             channel_width_blocks: hydrography
                 .map_or(0.0, |hydrography| hydrography.channel_width_blocks),
             downstream_x: hydrography.map_or(0.0, |hydrography| hydrography.downstream_x),
             downstream_z: hydrography.map_or(0.0, |hydrography| hydrography.downstream_z),
             floodplain: hydro_floodplain as f32,
             riparian: hydro_riparian as f32,
+            confluence: hydrography.map_or(0.0, |hydrography| hydrography.confluence_weight),
             shore_intent: hydrography.map_or(ContinentalShoreIntent::None, |hydrography| {
                 hydrography.shore_intent
             }),
@@ -1149,6 +1157,24 @@ fn unit_field(value: f64) -> f64 {
     (value * 0.5 + 0.5).clamp(0.0, 1.0)
 }
 
+fn continental_channel_centerline_warp(
+    hydrography: ContinentalHydrographySample,
+    local_form: f64,
+    walking_form: f64,
+) -> f64 {
+    let meander_envelope =
+        4.0 * f64::from(hydrography.reach_progress) * (1.0 - f64::from(hydrography.reach_progress));
+    let amplitude = match hydrography.reach_kind {
+        Some(ContinentalReachKind::Headwater) => local_form * 54.0 + walking_form * 9.0,
+        Some(ContinentalReachKind::Tributary) => local_form * 86.0 + walking_form * 14.0,
+        Some(ContinentalReachKind::Trunk)
+        | Some(ContinentalReachKind::LakeInlet)
+        | Some(ContinentalReachKind::Outlet) => local_form * 128.0 + walking_form * 20.0,
+        None => 0.0,
+    };
+    amplitude * meander_envelope
+}
+
 fn smoothstep(low: f64, high: f64, value: f64) -> f64 {
     let unit = ((value - low) / (high - low)).clamp(0.0, 1.0);
     unit * unit * (3.0 - 2.0 * unit)
@@ -1195,7 +1221,12 @@ fn semantic_sha256(
         ] {
             digest.update(id.map_or(0, |id| id.hash).to_le_bytes());
         }
-        for id in [sample.catchment_id, sample.reach_id, sample.lake_id] {
+        for id in [
+            sample.catchment_id,
+            sample.confluence_id,
+            sample.reach_id,
+            sample.lake_id,
+        ] {
             digest.update(id.map_or(0, |id| id.hash).to_le_bytes());
         }
         for weight in sample.family_weights {
@@ -1229,6 +1260,7 @@ fn semantic_sha256(
             sample.downstream_z,
             sample.floodplain,
             sample.riparian,
+            sample.confluence,
         ] {
             digest.update(value.to_bits().to_le_bytes());
         }

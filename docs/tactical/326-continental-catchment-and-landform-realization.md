@@ -1,11 +1,13 @@
 # Tactical 326: Continental Catchment And Landform Realization
 
-Status: **authorized 2026-08-21; Phases 0-2 implemented. One selected bounded
+Status: **authorized 2026-08-21; Phases 0-3 implemented. One selected bounded
 catchment now realizes ranges, valleys, snow/rock summits, ordered channels,
 one flat lake, varied shore intent, spill, and outlet in exact terrain and the
 shared direct source. The reported crash still has not reproduced, including
-new high-range captures. Phase 3 must correct the observed exact/LOD valley
-frontier seam and preserve narrow-water crossings before review packaging.**
+new high-range captures. Direct LOD queries now preserve eligible narrow-water
+crossings, exact agreement covers all five review sites, and an explicit
+confluence apron removes the hard three-way mound. Phase 4 owns movement,
+performance, browser evidence, deployment, and Human Review D packaging.**
 
 Topic: `continental-hydrography`
 Topic: `continental-ecoregion-planning`
@@ -277,6 +279,38 @@ Implemented on 2026-08-21.
   `8010fe5dbb1b6bb8ea344d1a003d4ff822ef7773c34121ca4f903c25ffce2ca6`;
   the integrated surface witness is
   `283e63b08aec8fcdbb32f3aea8cc89fabc7722afddec1b2e67818e84d6c8e55f`.
+
+### Phase 3: Exact, LOD, And Ecology Semantics
+
+Implemented on 2026-08-21.
+
+- The surface query now publishes the final locally warped signed channel
+  distance rather than the graph skeleton's pre-realization distance. Exact
+  beds, banks, water, riparian suitability, and LOD presentation therefore
+  use one centerline fact.
+- Coarse direct compilation retains ordinary point samples at spacing one.
+  For footprint spacings above one it may issue at most two perpendicular
+  direct probes when an eligible reach crosses between lattice vertices.
+  Headwaters retain water only through spacing 16, tributaries through 64,
+  and trunk, inlet, and outlet reaches through 256. Broader valley geometry
+  remains directly sampled after narrow water disappears.
+- The preview carrier now publishes actual signed distance, channel width,
+  channel influence, bank influence, and hydrology-derived riparian intent
+  instead of reusing the older ecological route scalar as pseudo-river data.
+- Matched horizon-only, exact-only, coverage, and composed confluence captures
+  showed the reported box in both terrain representations while frontier
+  ownership was complete and connector segments were zero. The cause was a
+  hard angular three-way valley join, not an exact/LOD seam. Stable confluence
+  identity, distance, floor, and ecology weight now drive one subtly warped
+  low apron shared by exact and LOD terrain.
+- A new five-site exact receipt compares 32,000 columns, 128,000 biome cells,
+  water, material, stable tree bases, and direct catchment, confluence, reach,
+  and lake identities. It passes with semantic witness
+  `08746e12b1b756e7a1efef3463a18805767a0fa135a0bff2982e34ac97031e15`.
+- The hydrography native/Wasm witness is now
+  `ba43bdf5a7d43292eddaa52aec9fd64d895433b2576ac1e3b23d1ff359e64cc1`;
+  the surface witness is
+  `0760b0f2bda0c798d21bee7be873f1255c30b28dbd863967046cd56f15f68c84`.
 
 ## Human Review D
 

@@ -1,5 +1,7 @@
 //! Deterministic direct-versus-exact evidence for continental review sites.
 
+use std::collections::BTreeSet;
+
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
@@ -9,6 +11,7 @@ use crate::{
     block::{
         ACACIA_LEAVES, ACACIA_LOG, AIR, OAK_LEAVES, OAK_LOG, SPRUCE_LEAVES, SPRUCE_LOG, WATER,
     },
+    continental_catchment_review::compile_continental_catchment_review,
     continental_ecoregion::ContinentalEcoregionDescriptor,
     continental_surface::{ContinentalSurfaceWaterKind, continental_surface_biome_id},
     continental_surface_journey::{
@@ -22,7 +25,9 @@ use crate::{
     terrain_preview::continental_candidate_tree_records_intersecting,
 };
 
-pub const CONTINENTAL_EXACT_REVIEW_SCHEMA_REVISION: &str = "mclone-continental-exact-review-v1";
+pub const CONTINENTAL_EXACT_REVIEW_SCHEMA_REVISION: &str = "mclone-continental-exact-review-v2";
+pub const CONTINENTAL_CATCHMENT_EXACT_REVIEW_SCHEMA_REVISION: &str =
+    "mclone-continental-catchment-exact-review-v1";
 pub const CONTINENTAL_EXACT_REVIEW_RADIUS_CHUNKS: i32 = 2;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -49,6 +54,11 @@ pub struct ContinentalExactSiteReceipt {
     pub owned_tree_bases: u32,
     pub tree_base_mismatches: u32,
     pub exact_tree_voxels: u32,
+    pub catchment_hashes: Vec<u64>,
+    pub confluence_hashes: Vec<u64>,
+    pub reach_hashes: Vec<u64>,
+    pub lake_hashes: Vec<u64>,
+    pub direct_semantic_sha256: String,
     pub feature_dependency_requests: u32,
     pub feature_dependency_cache_hits: u32,
     pub feature_dependency_chunks_generated: u32,
@@ -73,6 +83,19 @@ pub struct ContinentalExactReviewReceipt {
     pub candidate_exact_revision: u16,
     pub seed: i64,
     pub radius_chunks: i32,
+    pub suite_passed: bool,
+    pub semantic_sha256: String,
+    pub sites: Vec<ContinentalExactSiteReceipt>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContinentalCatchmentExactReviewReceipt {
+    pub schema_revision: &'static str,
+    pub candidate_exact_revision: u16,
+    pub seed: i64,
+    pub radius_chunks: i32,
+    pub catalog_semantic_sha256: String,
     pub suite_passed: bool,
     pub semantic_sha256: String,
     pub sites: Vec<ContinentalExactSiteReceipt>,
@@ -142,6 +165,44 @@ pub fn run_continental_exact_review(seed: i64) -> Result<ContinentalExactReviewR
     })
 }
 
+pub fn run_continental_catchment_exact_review(
+    seed: i64,
+) -> Result<ContinentalCatchmentExactReviewReceipt, String> {
+    let catalog =
+        compile_continental_catchment_review(ContinentalEcoregionDescriptor::plane(seed))?;
+    let generator = ContinentalCandidateExactGenerator::new(seed);
+    let mut feature_cache = ContinentalCandidateFeatureDependencyCache::new(seed);
+    let mut sites = Vec::with_capacity(catalog.sites.len());
+    for site in &catalog.sites {
+        sites.push(review_site(
+            site.kind.label(),
+            site.kind.label(),
+            site.center_x,
+            site.center_z,
+            &generator,
+            &mut feature_cache,
+        )?);
+    }
+    let suite_passed = sites.iter().all(ContinentalExactSiteReceipt::passed);
+    let canonical = serde_json::to_vec(&sites)
+        .map_err(|error| format!("serialize continental catchment exact sites: {error}"))?;
+    let semantic_sha256 = digest_bytes([
+        CONTINENTAL_CATCHMENT_EXACT_REVIEW_SCHEMA_REVISION.as_bytes(),
+        catalog.semantic_sha256.as_bytes(),
+        &canonical,
+    ]);
+    Ok(ContinentalCatchmentExactReviewReceipt {
+        schema_revision: CONTINENTAL_CATCHMENT_EXACT_REVIEW_SCHEMA_REVISION,
+        candidate_exact_revision: CONTINENTAL_CANDIDATE_EXACT_REVISION,
+        seed,
+        radius_chunks: CONTINENTAL_EXACT_REVIEW_RADIUS_CHUNKS,
+        catalog_semantic_sha256: catalog.semantic_sha256,
+        suite_passed,
+        semantic_sha256,
+        sites,
+    })
+}
+
 fn review_site(
     label: &'static str,
     journey: &'static str,
@@ -182,6 +243,11 @@ fn review_site(
     let mut feature_dependency_chunks_generated = 0_u32;
     let mut retained_feature_dependency_chunks = 0_u32;
     let mut exact_digest = Sha256::new();
+    let mut direct_digest = Sha256::new();
+    let mut catchment_hashes = BTreeSet::new();
+    let mut confluence_hashes = BTreeSet::new();
+    let mut reach_hashes = BTreeSet::new();
+    let mut lake_hashes = BTreeSet::new();
 
     for chunk_z in min_chunk_z..=max_chunk_z {
         for chunk_x in min_chunk_x..=max_chunk_x {
@@ -195,6 +261,34 @@ fn review_site(
                         .surface()
                         .query_point(min_x + local_x, min_z + local_z)
                         .sample;
+                    direct_digest.update(sample.world_x.to_le_bytes());
+                    direct_digest.update(sample.world_z.to_le_bytes());
+                    direct_digest.update(sample.solid_surface_y.to_bits().to_le_bytes());
+                    direct_digest.update(sample.display_surface_y.to_bits().to_le_bytes());
+                    direct_digest.update(
+                        sample
+                            .water_level_y
+                            .unwrap_or(f32::NAN)
+                            .to_bits()
+                            .to_le_bytes(),
+                    );
+                    direct_digest.update([
+                        sample.water_kind as u8,
+                        sample.substrate as u8,
+                        sample.reach_order,
+                    ]);
+                    for (id, set) in [
+                        (sample.catchment_id, &mut catchment_hashes),
+                        (sample.confluence_id, &mut confluence_hashes),
+                        (sample.reach_id, &mut reach_hashes),
+                        (sample.lake_id, &mut lake_hashes),
+                    ] {
+                        let hash = id.map_or(0, |id| id.hash);
+                        direct_digest.update(hash.to_le_bytes());
+                        if hash != 0 {
+                            set.insert(hash);
+                        }
+                    }
                     let expected_y = quantized_continental_candidate_surface_y(sample);
                     if sample.is_water() {
                         direct_water_columns += 1;
@@ -301,6 +395,11 @@ fn review_site(
         owned_tree_bases,
         tree_base_mismatches,
         exact_tree_voxels,
+        catchment_hashes: catchment_hashes.into_iter().collect(),
+        confluence_hashes: confluence_hashes.into_iter().collect(),
+        reach_hashes: reach_hashes.into_iter().collect(),
+        lake_hashes: lake_hashes.into_iter().collect(),
+        direct_semantic_sha256: digest_hex(direct_digest.finalize()),
         feature_dependency_requests,
         feature_dependency_cache_hits,
         feature_dependency_chunks_generated,
@@ -441,6 +540,35 @@ mod tests {
                 .sites
                 .iter()
                 .any(|site| site.owned_tree_bases > 0 && site.exact_tree_voxels > 0)
+        );
+    }
+
+    #[test]
+    fn five_catchment_sites_match_direct_exact_and_hydrology_facts() {
+        let receipt = run_continental_catchment_exact_review(12_345).unwrap();
+        assert!(receipt.suite_passed);
+        assert_eq!(receipt.sites.len(), 5);
+        assert!(receipt.sites.iter().all(|site| site.exact_chunks == 25));
+        assert!(receipt.sites.iter().all(|site| {
+            site.height_mismatches == 0
+                && site.material_mismatches == 0
+                && site.water_mismatches == 0
+                && site.biome_mismatches == 0
+                && site.tree_base_mismatches == 0
+                && !site.catchment_hashes.is_empty()
+                && !site.reach_hashes.is_empty()
+        }));
+        assert!(
+            receipt
+                .sites
+                .iter()
+                .any(|site| !site.confluence_hashes.is_empty())
+        );
+        assert!(
+            receipt
+                .sites
+                .iter()
+                .any(|site| !site.lake_hashes.is_empty())
         );
     }
 }

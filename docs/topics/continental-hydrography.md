@@ -8,10 +8,11 @@ rejected its water and landform realization as final. Tactical
 [`326`](../tactical/326-continental-catchment-and-landform-realization.md)
 owns the first bounded mountain-to-lake catchment proof. Its directed graph,
 shared terrain/water realization, exact lowering, snow/rock summits, ecology
-semantics, and five deterministic review sites are implemented. Phase 3 now
-owns conservative narrow-water LOD summaries and the observed valley frontier
-seam. Production `mclone-overworld-v1` remains unchanged until that proof
-passes Human Review D.**
+semantics, conservative narrow-water LOD summaries, confluence aprons, and
+five deterministic review sites are implemented. Exact agreement now covers
+all five sites. Phase 4 owns movement, performance, browser evidence, and the
+Human Review D package. Production `mclone-overworld-v1` remains unchanged
+until that proof passes Human Review D.**
 
 ## Motivation
 
@@ -165,6 +166,19 @@ clipmap. Neither representation reconstructs the other.
 
 Plan maps and graph overlays are diagnostics. Human terrain acceptance is
 based on exact and composed three-dimensional pixels.
+
+The first implementation keeps exact spacing as a literal point query. At
+coarser spacings, one eligible crossing may spend at most two bounded
+perpendicular point probes against the same surface source. Water visibility
+ends at spacing 16 for headwaters, 64 for tributaries, and 256 for trunk,
+inlet, and outlet reaches. This is a conservative footprint presentation fact,
+not a second channel or a mutation of exact terrain.
+
+Confluences are also explicit typed facts. Their stable identity, distance,
+floor, and ecology weight create a low, locally warped joining apron that
+prevents nearest-reach valley sectors from leaving a geometric mound between
+branches. Water occupancy remains owned by the realized reaches; the apron
+does not create a separate pool or river mask.
 
 ## Initial Review Domain
 

@@ -14,7 +14,7 @@ use crate::{
 pub const CONTINENTAL_HYDROGRAPHY_HARNESS_REVISION: &str =
     "mclone-continental-hydrography-harness-v1";
 pub const CONTINENTAL_HYDROGRAPHY_WITNESS_SHA256: &str =
-    "8010fe5dbb1b6bb8ea344d1a003d4ff822ef7773c34121ca4f903c25ffce2ca6";
+    "ba43bdf5a7d43292eddaa52aec9fd64d895433b2576ac1e3b23d1ff359e64cc1";
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]

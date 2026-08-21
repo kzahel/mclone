@@ -17,6 +17,7 @@ use crate::levelgen::{
 };
 use crate::{
     continental_ecoregion::{ContinentalEcoregionDescriptor, ContinentalEcoregionTopology},
+    continental_hydrography::ContinentalReachKind,
     continental_surface::{
         CONTINENTAL_SURFACE_SCHEMA_REVISION, ContinentalSurfacePlan, ContinentalSurfaceSample,
         ContinentalSurfaceSubstrate, ContinentalSurfaceWaterKind, ContinentalSurfaceWindowRequest,
@@ -28,7 +29,7 @@ use mclone_core::ChunkPos;
 use crate::placement::BlockPos;
 
 pub const TERRAIN_PREVIEW_REFERENCE_SCHEMA_REVISION: &str =
-    "mclone-terrain-preview-reference-grid-v10";
+    "mclone-terrain-preview-reference-grid-v11";
 pub const TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS: u32 = 64;
 pub const TERRAIN_PREVIEW_MIN_CELLS_PER_AXIS: u32 = 8;
 pub const TERRAIN_PREVIEW_MAX_CELLS_PER_AXIS: u32 = 128;
@@ -42,6 +43,7 @@ pub const CONTINENTAL_PROXY_VEGETATION_SOURCE_REVISION: &str =
     "mclone-continental-proxy-vegetation-v2";
 
 const CONTINENTAL_PROXY_VEGETATION_CELL_BLOCKS: i32 = 24;
+const CONTINENTAL_LOD_CROSSING_MAX_REFINEMENT_QUERIES: usize = 2;
 
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
 #[repr(u32)]
@@ -607,6 +609,14 @@ impl TerrainPreviewReferenceGrid {
                 source.sample_spacing,
             ))
             .map_err(|error| error.to_string())?;
+        let preview_surface_samples = surface_window
+            .samples
+            .iter()
+            .copied()
+            .map(|sample| {
+                continental_lod_representative_sample(&surface, sample, source.sample_spacing).0
+            })
+            .collect::<Vec<_>>();
         let mut samples = Vec::with_capacity(
             usize::try_from(request.sample_count())
                 .map_err(|_| "terrain preview sample count does not fit usize")?,
@@ -623,13 +633,12 @@ impl TerrainPreviewReferenceGrid {
                 )
                 .map_err(|_| "continental terrain preview sample index exceeds usize")?;
                 samples.push(continental_preview_sample(
-                    surface_window.samples[index],
+                    preview_surface_samples[index],
                     source.content_stage,
                 ));
             }
         }
-        let height_halo = surface_window
-            .samples
+        let height_halo = preview_surface_samples
             .iter()
             .map(|sample| sample.display_surface_y)
             .collect();
@@ -909,6 +918,87 @@ impl TerrainPreviewReferenceGrid {
     }
 }
 
+fn continental_lod_representative_sample(
+    surface: &ContinentalSurfacePlan,
+    sample: ContinentalSurfaceSample,
+    sample_spacing: u32,
+) -> (ContinentalSurfaceSample, usize) {
+    if sample_spacing <= 1 || sample.is_water() {
+        return (sample, 0);
+    }
+    let Some(reach_kind) = sample.reach_kind else {
+        return (sample, 0);
+    };
+    let maximum_spacing = match reach_kind {
+        ContinentalReachKind::Headwater => 16,
+        ContinentalReachKind::Tributary => 64,
+        ContinentalReachKind::Trunk
+        | ContinentalReachKind::LakeInlet
+        | ContinentalReachKind::Outlet => 256,
+    };
+    if sample_spacing > maximum_spacing {
+        return (sample, 0);
+    }
+
+    // A line can cross the center of a square lattice cell at just over 0.7
+    // sample spacings from all four corners. Treat the closest eligible
+    // lattice vertex as a conservative footprint representative, then query
+    // the shared source on its realized centerline. This is presentation
+    // coverage only: spacing-one samples remain exact point facts.
+    let channel_half = sample.channel_width_blocks * 0.5;
+    let crossing_radius = channel_half + sample_spacing as f32 * 0.72;
+    if !sample.channel_signed_distance_blocks.is_finite()
+        || sample.channel_signed_distance_blocks.abs() > crossing_radius
+    {
+        return (sample, 0);
+    }
+
+    let mut queries = 0;
+    let tangent_length = sample
+        .downstream_x
+        .hypot(sample.downstream_z)
+        .max(f32::EPSILON);
+    let tangent_x = sample.downstream_x / tangent_length;
+    let tangent_z = sample.downstream_z / tangent_length;
+    let signed = sample.channel_signed_distance_blocks;
+    let offset_x = (-signed * tangent_z).round() as i32;
+    let offset_z = (signed * tangent_x).round() as i32;
+    // The catchment-local basis can be either handedness in world space, so
+    // probe the two bounded perpendicular candidates instead of embedding an
+    // orientation assumption in the preview contract.
+    for direction in [1_i32, -1_i32]
+        .into_iter()
+        .take(CONTINENTAL_LOD_CROSSING_MAX_REFINEMENT_QUERIES)
+    {
+        let Some(center_x) = sample
+            .world_x
+            .checked_add(offset_x.saturating_mul(direction))
+        else {
+            continue;
+        };
+        let Some(center_z) = sample
+            .world_z
+            .checked_add(offset_z.saturating_mul(direction))
+        else {
+            continue;
+        };
+        if center_x == sample.world_x && center_z == sample.world_z {
+            continue;
+        }
+        let candidate = surface.query_point(center_x, center_z).sample;
+        queries += 1;
+        if candidate.water_kind == ContinentalSurfaceWaterKind::River {
+            return (candidate, queries);
+        }
+    }
+    (sample, queries)
+}
+
+fn smoothstep_f32(low: f32, high: f32, value: f32) -> f32 {
+    let unit = ((value - low) / (high - low)).clamp(0.0, 1.0);
+    unit * unit * (3.0 - 2.0 * unit)
+}
+
 fn continental_preview_sample(
     sample: ContinentalSurfaceSample,
     content_stage: TerrainPreviewContentStage,
@@ -919,7 +1009,21 @@ fn continental_preview_sample(
     let ocean = sample.water_kind == ContinentalSurfaceWaterKind::Ocean;
     let river = sample.water_kind == ContinentalSurfaceWaterKind::River;
     let wetland_pool = sample.water_kind == ContinentalSurfaceWaterKind::WetlandPool;
-    let river_influence = if river { sample.route.max(0.55) } else { 0.0 };
+    let channel_half = sample.channel_width_blocks * 0.5;
+    let channel_influence = if sample.reach_kind.is_some() {
+        1.0 - smoothstep_f32(
+            (channel_half - 1.0).max(0.0),
+            channel_half + 2.5,
+            sample.channel_distance_blocks,
+        )
+    } else {
+        0.0
+    };
+    let river_influence = if river {
+        channel_influence.max(0.55)
+    } else {
+        0.0
+    };
     let forest_coverage = if content_stage == TerrainPreviewContentStage::Cover
         && matches!(
             sample.substrate,
@@ -982,27 +1086,15 @@ fn continental_preview_sample(
         },
         ocean_water: f32::from(ocean),
         macro_surface_material: f32::from(sample.substrate.block_id()),
-        river_signed_distance: if river {
-            -sample.route.max(0.05) * 24.0
-        } else {
-            (1.0 - sample.route) * 64.0
-        },
-        channel_influence: river_influence,
-        bank_influence: if river {
-            (1.0 - river_influence) * sample.route
-        } else {
-            0.0
-        },
-        river_half_width: if river {
-            4.0 + sample.route * 18.0
-        } else {
-            0.0
-        },
+        river_signed_distance: sample.channel_signed_distance_blocks,
+        channel_influence,
+        bank_influence: (sample.riparian - channel_influence).max(0.0),
+        river_half_width: channel_half,
         wetland_influence: sample.wetland,
         wetland_pool_influence: if wetland_pool { 1.0 } else { 0.0 },
         submerged_outlet_influence: 0.0,
         visible_surface_material: f32::from(sample.visible_material()),
-        planned_stream_influence: river_influence,
+        planned_stream_influence: sample.riparian.max(river_influence),
         biome_recipe,
         landform_kind,
         surface_recipe,
@@ -2412,7 +2504,7 @@ mod tests {
         );
         assert_eq!(
             TERRAIN_PREVIEW_REFERENCE_SCHEMA_REVISION,
-            "mclone-terrain-preview-reference-grid-v10"
+            "mclone-terrain-preview-reference-grid-v11"
         );
         assert_eq!(
             TerrainPreviewProfile::VanillaOverworld.source_revision(),
@@ -2462,6 +2554,66 @@ mod tests {
                 forest_footprint_summaries: 0,
             }
         );
+    }
+
+    #[test]
+    fn continental_lod_crossing_summary_preserves_a_missed_trunk() {
+        let surface =
+            ContinentalSurfacePlan::new(ContinentalEcoregionDescriptor::plane(12_345)).unwrap();
+        let mut preserved = None;
+        let mut closest = None;
+        for world_z in (-49_920..=-49_152).step_by(32) {
+            for world_x in (18_048..=18_816).step_by(32) {
+                let direct = surface.query_point(world_x, world_z).sample;
+                if direct.water_kind == ContinentalSurfaceWaterKind::None
+                    && direct.reach_kind == Some(ContinentalReachKind::Trunk)
+                {
+                    if closest
+                        .as_ref()
+                        .is_none_or(|current: &ContinentalSurfaceSample| {
+                            direct.channel_distance_blocks < current.channel_distance_blocks
+                        })
+                    {
+                        closest = Some(direct);
+                    }
+                    let (representative, refinement_queries) =
+                        continental_lod_representative_sample(&surface, direct, 64);
+                    if representative.water_kind == ContinentalSurfaceWaterKind::River {
+                        preserved = Some((direct, representative, refinement_queries));
+                        break;
+                    }
+                }
+            }
+            if preserved.is_some() {
+                break;
+            }
+        }
+        let (direct, representative, refinement_queries) =
+            preserved.unwrap_or_else(|| {
+                panic!(
+                    "review trunk should cross a coarse footprint between point samples; closest={closest:?}"
+                )
+            });
+        assert_eq!(direct.water_kind, ContinentalSurfaceWaterKind::None);
+        assert_eq!(
+            representative.water_kind,
+            ContinentalSurfaceWaterKind::River
+        );
+        assert!(refinement_queries > 0);
+        assert!(refinement_queries <= CONTINENTAL_LOD_CROSSING_MAX_REFINEMENT_QUERIES);
+    }
+
+    #[test]
+    fn continental_spacing_one_remains_an_exact_point_fact() {
+        let surface =
+            ContinentalSurfacePlan::new(ContinentalEcoregionDescriptor::plane(12_345)).unwrap();
+        for (world_x, world_z) in [(18_470, -49_535), (24_795, -41_638), (11_328, -56_711)] {
+            let direct = surface.query_point(world_x, world_z).sample;
+            assert_eq!(
+                continental_lod_representative_sample(&surface, direct, 1),
+                (direct, 0)
+            );
+        }
     }
 
     #[test]
