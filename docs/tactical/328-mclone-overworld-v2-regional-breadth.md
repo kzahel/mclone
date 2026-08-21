@@ -201,6 +201,24 @@ passes.
 - Reach a real locally playable V2 world before adding the two new domains.
 - Commit.
 
+Implemented on 2026-08-21. The shared profile enum allocates JSON label
+`mclone-overworld-v2`, stable binary tag 9, the ordinary Mclone season policy,
+and target-only authoritative plans. Missing chunks run through a bounded
+continental dependency cache while worker results publish only requested
+chunks. The catalog displays V2 as experimental after V1 and leaves V1 as the
+default. Spawn selection, biome lookup, SQLite reopen, native and Web startup
+codecs, exact terrain compilation, proxy vegetation, scene admission, and the
+procedural horizon all retain the V2 identity.
+
+The first live capture exposed and then closed a source-classification defect:
+vegetation workers treated every non-candidate profile as V1 and attempted to
+unwrap a V1 forest cache for V2. Continental review and V2 identities now
+share the stateless proxy source explicitly; the wire round trip and live
+transport report zero failures. An inspected 1,280-by-720 native frame at seed
+`12345` shows a playable V2 spawn with exact terrain and two composed horizon
+levels. Focused profile, plan, spawn, worker, persistence, catalog, Web codec,
+preview, terrain-view, and scene tests pass, as does the workspace check.
+
 ### Phase 3: Mesa Desert Vertical Slice
 
 - Add stable regional archetype and formation identities, bounded influence,

@@ -174,7 +174,8 @@ impl CanonicalTerrainCompiler {
                         OverworldFeatureDependencyCache::new(),
                     )
                 }
-                TerrainPreviewProfile::ContinentalEcoregionCandidate => {
+                TerrainPreviewProfile::ContinentalEcoregionCandidate
+                | TerrainPreviewProfile::McloneOverworldV2 => {
                     CanonicalTerrainFeatureDependencies::Continental(
                         ContinentalCandidateFeatureDependencyCache::new(seed),
                     )
@@ -224,7 +225,8 @@ impl CanonicalTerrainCompiler {
                     TerrainPreviewProfile::VanillaOverworld => {
                         generate_overworld_surface_chunk(self.seed, chunk_x, chunk_z)
                     }
-                    TerrainPreviewProfile::ContinentalEcoregionCandidate => {
+                    TerrainPreviewProfile::ContinentalEcoregionCandidate
+                    | TerrainPreviewProfile::McloneOverworldV2 => {
                         match &self.feature_dependencies {
                             CanonicalTerrainFeatureDependencies::Continental(generator) => {
                                 generator
@@ -422,35 +424,33 @@ mod tests {
     #[test]
     fn candidate_surface_and_final_stages_use_the_detached_exact_lowering() {
         let seed = 12_345;
-        for (stage, direct) in [
-            (
-                CanonicalTerrainStage::Surface,
-                generate_continental_candidate_surface_chunk(seed, -17, 31),
-            ),
-            (
-                CanonicalTerrainStage::FinalFeatures,
-                generate_continental_candidate_chunk(seed, -17, 31),
-            ),
+        for profile in [
+            TerrainPreviewProfile::ContinentalEcoregionCandidate,
+            TerrainPreviewProfile::McloneOverworldV2,
         ] {
-            let mut compiler = CanonicalTerrainCompiler::new_with_profile(
-                TerrainPreviewProfile::ContinentalEcoregionCandidate,
-                seed,
-                stage,
-            );
-            let result = compiler.compile(-17, 31);
-            assert_eq!(
-                result.profile,
-                TerrainPreviewProfile::ContinentalEcoregionCandidate
-            );
-            assert_eq!(result.blocks, direct.blocks());
-            assert_eq!(result.biomes, direct.biomes());
-            assert_eq!(result.fingerprint, canonical_terrain_fingerprint(&direct));
-            if stage == CanonicalTerrainStage::Surface {
-                assert_eq!(result.dependency_cache, Default::default());
-            } else {
-                assert_eq!(result.dependency_cache.requested_dependency_chunks, 9);
-                assert_eq!(result.dependency_cache.generated_dependency_chunks, 9);
-                assert_eq!(result.dependency_cache.retained_dependency_chunks, 9);
+            for (stage, direct) in [
+                (
+                    CanonicalTerrainStage::Surface,
+                    generate_continental_candidate_surface_chunk(seed, -17, 31),
+                ),
+                (
+                    CanonicalTerrainStage::FinalFeatures,
+                    generate_continental_candidate_chunk(seed, -17, 31),
+                ),
+            ] {
+                let mut compiler = CanonicalTerrainCompiler::new_with_profile(profile, seed, stage);
+                let result = compiler.compile(-17, 31);
+                assert_eq!(result.profile, profile);
+                assert_eq!(result.blocks, direct.blocks());
+                assert_eq!(result.biomes, direct.biomes());
+                assert_eq!(result.fingerprint, canonical_terrain_fingerprint(&direct));
+                if stage == CanonicalTerrainStage::Surface {
+                    assert_eq!(result.dependency_cache, Default::default());
+                } else {
+                    assert_eq!(result.dependency_cache.requested_dependency_chunks, 9);
+                    assert_eq!(result.dependency_cache.generated_dependency_chunks, 9);
+                    assert_eq!(result.dependency_cache.retained_dependency_chunks, 9);
+                }
             }
         }
     }

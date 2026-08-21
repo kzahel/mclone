@@ -28,7 +28,12 @@ catalog, startup, dedicated, and integrated-runner entry points. Human Review
 D of the detached continental candidate has now explicitly retained this V1
 world as a selectable default while Tactical
 [`328`](../tactical/328-mclone-overworld-v2-regional-breadth.md) develops a
-separate experimental `mclone-overworld-v2`; the new profile is not yet live.
+separate experimental `mclone-overworld-v2`. V2 is now selectable and
+persisted through the ordinary catalog, integrated server, exact generation,
+spawn, SQLite reopen, terrain-view, scene, native, and Web startup contracts.
+Its shared display label remains experimental, its topology is currently the
+unbounded plane, and its exact output is the same continental source used by
+the procedural horizon. V1 remains the unchanged new-world default.
 Its deterministic spawn policy keeps the existing exact dry-surface gate and
 adds a 129-by-129-block sparse neighborhood survey, so the first locally safe
 chunk beside a dominant ocean is no longer accepted as the world entry region.

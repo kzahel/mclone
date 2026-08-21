@@ -285,6 +285,7 @@ fn generation_profile_tag(profile: WorldGenerationProfile) -> u8 {
         WorldGenerationProfile::BetaV1 => 6,
         WorldGenerationProfile::AuthoredOnly { .. } => 7,
         WorldGenerationProfile::TopologyProbeV1 => 8,
+        WorldGenerationProfile::McloneOverworldV2 => 9,
     }
 }
 
@@ -299,6 +300,7 @@ fn generation_profile_from_tag(tag: u8) -> Result<WorldGenerationProfile, String
         6 => Ok(WorldGenerationProfile::BetaV1),
         7 => Ok(WorldGenerationProfile::authored_only()),
         8 => Ok(WorldGenerationProfile::TopologyProbeV1),
+        9 => Ok(WorldGenerationProfile::McloneOverworldV2),
         _ => Err(format!(
             "integrated-server startup frame has unknown generation profile {tag}"
         )),
@@ -584,6 +586,18 @@ mod tests {
         assert_eq!(
             WebIntegratedServerStartupConfig::decode(&frame),
             Ok(expected)
+        );
+    }
+
+    #[test]
+    fn startup_profile_tag_nine_is_mclone_overworld_v2() {
+        assert_eq!(
+            generation_profile_tag(WorldGenerationProfile::McloneOverworldV2),
+            9
+        );
+        assert_eq!(
+            generation_profile_from_tag(9).unwrap(),
+            WorldGenerationProfile::McloneOverworldV2
         );
     }
 

@@ -20,6 +20,8 @@ pub enum WorldGenerationProfile {
     SmallIslandV1,
     #[serde(rename = "mclone-overworld-v1")]
     McloneOverworldV1,
+    #[serde(rename = "mclone-overworld-v2")]
+    McloneOverworldV2,
     #[serde(rename = "topology-probe-v1")]
     TopologyProbeV1,
     #[serde(rename = "alpha-v1")]
@@ -38,7 +40,9 @@ pub enum WorldGenerationProfile {
 impl WorldGenerationProfile {
     pub const fn season_calendar_policy(self) -> SeasonCalendarPolicy {
         match self {
-            Self::McloneOverworldV1 => SeasonCalendarPolicy::MCLONE_OVERWORLD_V1,
+            Self::McloneOverworldV1 | Self::McloneOverworldV2 => {
+                SeasonCalendarPolicy::MCLONE_OVERWORLD_V1
+            }
             Self::Overworld
             | Self::FlatGrassV1
             | Self::SmallIslandV1
@@ -72,6 +76,7 @@ impl WorldGenerationProfile {
             Self::FlatGrassV1 => "flat-grass-v1",
             Self::SmallIslandV1 => "small-island-v1",
             Self::McloneOverworldV1 => "mclone-overworld-v1",
+            Self::McloneOverworldV2 => "mclone-overworld-v2",
             Self::TopologyProbeV1 => "topology-probe-v1",
             Self::AlphaV1 { winter: false } => "alpha-v1",
             Self::AlphaV1 { winter: true } => "alpha-v1-winter",
@@ -88,6 +93,9 @@ impl WorldGenerationProfile {
             "mclone-overworld-v1" | "mclone_overworld_v1" | "mcloneOverworldV1" => {
                 Ok(Self::McloneOverworldV1)
             }
+            "mclone-overworld-v2" | "mclone_overworld_v2" | "mcloneOverworldV2" => {
+                Ok(Self::McloneOverworldV2)
+            }
             "topology-probe-v1" | "topology_probe_v1" | "topologyProbeV1" => {
                 Ok(Self::TopologyProbeV1)
             }
@@ -96,7 +104,7 @@ impl WorldGenerationProfile {
             "beta-v1" | "beta_v1" | "betaV1" => Ok(Self::BetaV1),
             "authored-only" | "authored_only" | "authoredOnly" => Ok(Self::authored_only()),
             value => Err(format!(
-                "world generation profile must be overworld, flat-grass-v1, small-island-v1, mclone-overworld-v1, topology-probe-v1, alpha-v1, beta-v1, or authored-only, got `{value}`"
+                "world generation profile must be overworld, flat-grass-v1, small-island-v1, mclone-overworld-v1, mclone-overworld-v2, topology-probe-v1, alpha-v1, beta-v1, or authored-only, got `{value}`"
             )),
         }
     }
@@ -107,6 +115,7 @@ impl WorldGenerationProfile {
             | Self::FlatGrassV1
             | Self::SmallIslandV1
             | Self::McloneOverworldV1
+            | Self::McloneOverworldV2
             | Self::TopologyProbeV1
             | Self::AlphaV1 { .. }
             | Self::BetaV1 => None,
@@ -144,6 +153,7 @@ impl WorldGenerationProfile {
             Self::FlatGrassV1 => ChunkGenerationPlan::target_only(targets),
             Self::SmallIslandV1 => ChunkGenerationPlan::small_island_features(targets),
             Self::McloneOverworldV1 => ChunkGenerationPlan::mclone_overworld_features(targets),
+            Self::McloneOverworldV2 => ChunkGenerationPlan::target_only(targets),
             Self::TopologyProbeV1 => {
                 ChunkGenerationPlan::feature_region(targets, 0, 1, ChunkStatus::Surface)
             }
@@ -166,6 +176,7 @@ impl WorldGenerationProfile {
             Self::AlphaV1 { winter: true } => 6,
             Self::BetaV1 => 7,
             Self::TopologyProbeV1 => 8,
+            Self::McloneOverworldV2 => 9,
         }
     }
 
@@ -180,6 +191,7 @@ impl WorldGenerationProfile {
             6 => Some(Self::alpha_v1(true)),
             7 => Some(Self::BetaV1),
             8 => Some(Self::TopologyProbeV1),
+            9 => Some(Self::McloneOverworldV2),
             _ => None,
         }
     }
@@ -426,6 +438,10 @@ mod tests {
             "mclone-overworld-v1"
         );
         assert_eq!(
+            WorldGenerationProfile::McloneOverworldV2.label(),
+            "mclone-overworld-v2"
+        );
+        assert_eq!(
             WorldGenerationProfile::TopologyProbeV1.label(),
             "topology-probe-v1"
         );
@@ -455,6 +471,10 @@ mod tests {
         assert_eq!(
             WorldGenerationProfile::parse_label("mclone-overworld-v1").unwrap(),
             WorldGenerationProfile::McloneOverworldV1
+        );
+        assert_eq!(
+            WorldGenerationProfile::parse_label("mclone-overworld-v2").unwrap(),
+            WorldGenerationProfile::McloneOverworldV2
         );
         assert_eq!(
             WorldGenerationProfile::parse_label("topology-probe-v1").unwrap(),
@@ -491,6 +511,10 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&WorldGenerationProfile::McloneOverworldV1).unwrap(),
             r#""mclone-overworld-v1""#
+        );
+        assert_eq!(
+            serde_json::to_string(&WorldGenerationProfile::McloneOverworldV2).unwrap(),
+            r#""mclone-overworld-v2""#
         );
         assert_eq!(
             serde_json::to_string(&WorldGenerationProfile::TopologyProbeV1).unwrap(),
@@ -539,6 +563,10 @@ mod tests {
         assert_eq!(
             WorldGenerationProfile::from_codec_tag(8),
             Some(WorldGenerationProfile::TopologyProbeV1)
+        );
+        assert_eq!(
+            WorldGenerationProfile::from_codec_tag(9),
+            Some(WorldGenerationProfile::McloneOverworldV2)
         );
     }
 
@@ -635,10 +663,20 @@ mod tests {
                 .validate_topology(HorizontalTopology::UNBOUNDED)
                 .is_ok()
         );
+        assert!(
+            WorldGenerationProfile::McloneOverworldV2
+                .validate_topology(HorizontalTopology::UNBOUNDED)
+                .is_ok()
+        );
+        assert!(
+            WorldGenerationProfile::McloneOverworldV2
+                .validate_topology(cylinder)
+                .is_err()
+        );
     }
 
     #[test]
-    fn only_mclone_overworld_selects_the_authoritative_season_calendar() {
+    fn both_mclone_overworlds_select_the_authoritative_season_calendar() {
         for profile in [
             WorldGenerationProfile::Overworld,
             WorldGenerationProfile::authored_only(),
@@ -657,6 +695,10 @@ mod tests {
         }
         assert_eq!(
             WorldGenerationProfile::McloneOverworldV1.season_calendar_policy(),
+            mclone_season::SeasonCalendarPolicy::MCLONE_OVERWORLD_V1
+        );
+        assert_eq!(
+            WorldGenerationProfile::McloneOverworldV2.season_calendar_policy(),
             mclone_season::SeasonCalendarPolicy::MCLONE_OVERWORLD_V1
         );
     }
@@ -714,6 +756,27 @@ mod tests {
         assert_eq!(plan.output_chunks().len(), 1);
         assert_eq!(plan.backend_work_chunks().len(), 9);
         assert_eq!(plan.prerequisites().len(), 25);
+    }
+
+    #[test]
+    fn mclone_overworld_v2_declares_only_authoritative_outputs() {
+        let descriptor =
+            WorldGenerationDescriptor::new(WorldGenerationProfile::McloneOverworldV2, 12_345);
+        let target = ChunkPos::new(-17, 31);
+        let plan = GenerationPlanRequest::new(descriptor, vec![target]).plan();
+
+        assert_eq!(
+            plan.output_chunks().iter().copied().collect::<Vec<_>>(),
+            [target]
+        );
+        assert_eq!(
+            plan.backend_work_chunks()
+                .iter()
+                .copied()
+                .collect::<Vec<_>>(),
+            [target]
+        );
+        assert!(plan.prerequisites().is_empty());
     }
 
     #[test]

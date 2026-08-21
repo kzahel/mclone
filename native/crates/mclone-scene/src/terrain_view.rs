@@ -120,6 +120,7 @@ impl SceneTerrainViewState {
         color_profile: RenderColorProfile,
         mesh_assets: &TexturedMeshAssets,
         world: WorldInstanceId,
+        profile: mclone_server::WorldGenerationProfile,
         seed: i64,
         topology: HorizontalTopology,
         lod: TerrainLodPresetDescriptor,
@@ -129,7 +130,7 @@ impl SceneTerrainViewState {
         let clipmap = lod
             .clipmap
             .context("cannot create a terrain-view engine for LOD Off")?;
-        let source = live_source(world, seed, topology)?;
+        let source = live_source(world, profile, seed, topology)?;
         let coverage_generation = 1;
         let coverage = ExactPaintedCoverageSnapshot::new(
             source.composition_source().map_err(anyhow::Error::msg)?,
@@ -193,6 +194,7 @@ impl SceneTerrainViewState {
     pub(crate) fn prepare(
         &mut self,
         world: WorldInstanceId,
+        profile: mclone_server::WorldGenerationProfile,
         seed: i64,
         topology: HorizontalTopology,
         focus: [f64; 3],
@@ -209,7 +211,7 @@ impl SceneTerrainViewState {
             || self.source.topology() != topology
         {
             self.world = world;
-            self.source = live_source(world, seed, topology)?;
+            self.source = live_source(world, profile, seed, topology)?;
             self.engine
                 .replace_source(self.source)
                 .map_err(anyhow::Error::msg)?;
@@ -387,12 +389,14 @@ impl McloneSceneHost {
     }
 
     pub fn terrain_lod_supported(&self) -> bool {
-        self.active_world.scene.world_generation_profile
-            == mclone_server::WorldGenerationProfile::McloneOverworldV1
-            && self.active_world.runtime.as_ref().map_or_else(
-                || self.active_world.scene.startup.remote_addr.is_none(),
-                |runtime| runtime.host_mode() == SingleViewHostMode::LocalIntegrated,
-            )
+        matches!(
+            self.active_world.scene.world_generation_profile,
+            mclone_server::WorldGenerationProfile::McloneOverworldV1
+                | mclone_server::WorldGenerationProfile::McloneOverworldV2
+        ) && self.active_world.runtime.as_ref().map_or_else(
+            || self.active_world.scene.startup.remote_addr.is_none(),
+            |runtime| runtime.host_mode() == SingleViewHostMode::LocalIntegrated,
+        )
     }
 
     pub(crate) fn effective_terrain_lod_preset(&self) -> TerrainLodPreset {
@@ -467,6 +471,7 @@ impl McloneSceneHost {
             return Ok(false);
         }
         let world = self.active_world.id;
+        let profile = self.active_world.scene.world_generation_profile;
         let seed = self.active_world.scene.seed;
         let topology = self
             .active_world
@@ -496,6 +501,7 @@ impl McloneSceneHost {
                     self.render_options.color_profile,
                     &self.mesh_assets,
                     world,
+                    profile,
                     seed,
                     topology,
                     TerrainLodPresetDescriptor::for_preset(effective_preset),
@@ -531,7 +537,7 @@ impl McloneSceneHost {
             .terrain_view
             .as_mut()
             .expect("composed terrain view was initialized")
-            .prepare(world, seed, topology, focus, ready_columns)?;
+            .prepare(world, profile, seed, topology, focus, ready_columns)?;
         if coverage_changed {
             let coverage = self
                 .terrain_view
@@ -774,14 +780,27 @@ impl SceneTerrainViewState {
 
 fn live_source(
     world: WorldInstanceId,
+    profile: mclone_server::WorldGenerationProfile,
     seed: i64,
     topology: HorizontalTopology,
 ) -> Result<TerrainViewSourceIdentity> {
     if world.get() == 0 {
         bail!("live terrain-view world generation must be non-zero");
     }
+    let preview_profile = match profile {
+        mclone_server::WorldGenerationProfile::McloneOverworldV1 => {
+            TerrainPreviewProfile::McloneOverworldV1
+        }
+        mclone_server::WorldGenerationProfile::McloneOverworldV2 => {
+            TerrainPreviewProfile::McloneOverworldV2
+        }
+        _ => bail!(
+            "world profile {} has no live distant-terrain source",
+            profile.label()
+        ),
+    };
     TerrainViewSourceIdentity::live(
-        TerrainCompositionSourceIdentity::new(TerrainPreviewProfile::McloneOverworldV1, seed),
+        TerrainCompositionSourceIdentity::new(preview_profile, seed),
         topology,
         world.get(),
         1,
@@ -911,6 +930,7 @@ mod tests {
     fn live_source_uses_world_identity_as_generation() {
         let source = live_source(
             WorldInstanceId::new(17),
+            mclone_server::WorldGenerationProfile::McloneOverworldV2,
             -98_765,
             HorizontalTopology::UNBOUNDED,
         )
@@ -922,6 +942,10 @@ mod tests {
             mclone_terrain_view::TerrainViewTruthRole::LiveAuthoritative
         );
         assert_eq!(source.composition_source().unwrap().seed, -98_765);
+        assert_eq!(
+            source.composition_source().unwrap().profile,
+            TerrainPreviewProfile::McloneOverworldV2
+        );
     }
 
     #[test]

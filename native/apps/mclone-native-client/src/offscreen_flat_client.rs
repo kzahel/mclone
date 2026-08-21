@@ -2177,7 +2177,11 @@ pub(crate) fn seasonal_appearance_receipt_json(
     Ok(serde_json::to_string(&serde_json::json!({
         "schema": 2,
         "profile": profile.label(),
-        "supported": profile == mclone_server::WorldGenerationProfile::McloneOverworldV1,
+        "supported": matches!(
+            profile,
+            mclone_server::WorldGenerationProfile::McloneOverworldV1
+                | mclone_server::WorldGenerationProfile::McloneOverworldV2
+        ),
         "enabled": settings.evaluation_enabled(),
         "solarEnabled": settings.enabled,
         "appearanceEnabled": settings.appearance_enabled,

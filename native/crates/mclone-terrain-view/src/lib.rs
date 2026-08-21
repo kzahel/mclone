@@ -689,7 +689,8 @@ pub fn terrain_preview_focus_y_for_profile(
                 .sample(world_x, world_z)
                 .display_y as f32;
         }
-        mclone_worldgen::terrain_preview::TerrainPreviewProfile::ContinentalEcoregionCandidate => {
+        mclone_worldgen::terrain_preview::TerrainPreviewProfile::ContinentalEcoregionCandidate
+        | mclone_worldgen::terrain_preview::TerrainPreviewProfile::McloneOverworldV2 => {
             return mclone_worldgen::continental_surface::ContinentalSurfacePlan::new(
                 mclone_worldgen::continental_ecoregion::ContinentalEcoregionDescriptor::plane(seed),
             )
@@ -1573,6 +1574,7 @@ fn viewport_uniform_bytes_for_request_with_presentation(
             mclone_worldgen::terrain_preview::TerrainPreviewProfile::McloneOverworldV1 => 0,
             mclone_worldgen::terrain_preview::TerrainPreviewProfile::VanillaOverworld => 1,
             mclone_worldgen::terrain_preview::TerrainPreviewProfile::ContinentalEcoregionCandidate => 4,
+            mclone_worldgen::terrain_preview::TerrainPreviewProfile::McloneOverworldV2 => 4,
         } | ((source.surface_quality as u32) << 1),
     ] {
         bytes.extend_from_slice(&word.to_le_bytes());

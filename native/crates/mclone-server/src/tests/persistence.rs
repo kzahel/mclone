@@ -893,3 +893,60 @@ fn mclone_climate_biome_chunk_roundtrips_sqlite_across_reopen() {
     reopened.shutdown_persistence().unwrap();
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn mclone_overworld_v2_chunk_and_profile_roundtrip_sqlite() {
+    let root = unique_temp_dir("mclone_overworld_v2_sqlite_reopen");
+    let seed = 12_345;
+    let profile = WorldGenerationProfile::McloneOverworldV2;
+    let center = crate::initial_spawn_center_for_profile(seed, profile);
+    let definition = DimensionDefinition::overworld(seed, profile);
+    let interest = ChunkView {
+        center,
+        render_distance: 0,
+        chunk_tracking_radius: 0,
+    };
+
+    let first_snapshot = {
+        let mut server =
+            LocalRealmSession::try_with_threaded_sqlite_world_dir_dimension_definition_and_player_chunk_tracking_policy(
+                definition.clone(),
+                &root,
+                PlayerChunkTrackingPolicy::default(),
+            )
+            .unwrap();
+        server.set_lighting_enabled(false);
+        let updates =
+            try_handle_command_and_poll(&mut server, ClientCommand::SetChunkView(interest.clone()))
+                .unwrap();
+        let snapshot = snapshot_update_for(&updates, center)
+            .expect("generated V2 spawn chunk is published")
+            .clone();
+        assert_eq!(server.scheduler().world_generation_profile(), profile);
+        server.shutdown_persistence().unwrap();
+        snapshot
+    };
+
+    let mut reopened =
+        LocalRealmSession::try_with_threaded_sqlite_world_dir_dimension_definition_and_player_chunk_tracking_policy(
+            definition,
+            &root,
+            PlayerChunkTrackingPolicy::default(),
+        )
+        .unwrap();
+    reopened.set_lighting_enabled(false);
+    let updates =
+        try_handle_command_and_poll(&mut reopened, ClientCommand::SetChunkView(interest)).unwrap();
+    let reopened_snapshot =
+        snapshot_update_for(&updates, center).expect("stored V2 spawn chunk is republished");
+
+    assert_eq!(reopened.scheduler().world_generation_profile(), profile);
+    assert_eq!(reopened_snapshot, &first_snapshot);
+    assert_eq!(
+        reopened.scheduler().holder(center).unwrap().residency(),
+        ChunkResidency::LoadedFromStore
+    );
+    reopened.shutdown_persistence().unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}

@@ -558,7 +558,8 @@ impl CanonicalMeshSession {
                     .tree_records_intersecting(bounds)
                     .map_err(|error| error.to_string())
             }
-            TerrainPreviewProfile::ContinentalEcoregionCandidate => {
+            TerrainPreviewProfile::ContinentalEcoregionCandidate
+            | TerrainPreviewProfile::McloneOverworldV2 => {
                 continental_candidate_tree_records_intersecting(self.seed, bounds)
             }
             TerrainPreviewProfile::VanillaOverworld => Ok(Vec::new()),

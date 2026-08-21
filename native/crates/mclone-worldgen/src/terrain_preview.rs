@@ -42,6 +42,14 @@ pub const CONTINENTAL_PROXY_VEGETATION_REVISION: u16 = 2;
 pub const CONTINENTAL_PROXY_VEGETATION_SOURCE_REVISION: &str =
     "mclone-continental-proxy-vegetation-v2";
 
+pub(crate) const fn uses_continental_proxy_vegetation(profile: TerrainPreviewProfile) -> bool {
+    matches!(
+        profile,
+        TerrainPreviewProfile::ContinentalEcoregionCandidate
+            | TerrainPreviewProfile::McloneOverworldV2
+    )
+}
+
 const CONTINENTAL_PROXY_VEGETATION_CELL_BLOCKS: i32 = 24;
 const CONTINENTAL_LOD_CROSSING_MAX_REFINEMENT_QUERIES: usize = 2;
 
@@ -78,6 +86,7 @@ pub enum TerrainPreviewProfile {
     McloneOverworldV1,
     ContinentalEcoregionCandidate,
     VanillaOverworld,
+    McloneOverworldV2,
 }
 
 impl TerrainPreviewProfile {
@@ -86,6 +95,7 @@ impl TerrainPreviewProfile {
             Self::McloneOverworldV1 => "mclone-overworld-v1",
             Self::ContinentalEcoregionCandidate => "continental-ecoregion-candidate-v1",
             Self::VanillaOverworld => "overworld",
+            Self::McloneOverworldV2 => "mclone-overworld-v2",
         }
     }
 
@@ -94,6 +104,7 @@ impl TerrainPreviewProfile {
             Self::McloneOverworldV1 => MCLONE_OVERWORLD_FIELD_REVISION,
             Self::ContinentalEcoregionCandidate => CONTINENTAL_SURFACE_SCHEMA_REVISION,
             Self::VanillaOverworld => VANILLA_OVERWORLD_LOD_REVISION,
+            Self::McloneOverworldV2 => CONTINENTAL_SURFACE_SCHEMA_REVISION,
         }
     }
 
@@ -103,9 +114,10 @@ impl TerrainPreviewProfile {
             "continental-ecoregion-candidate-v1" | "continental" | "candidate" => {
                 Ok(Self::ContinentalEcoregionCandidate)
             }
+            "mclone-overworld-v2" | "mclone-v2" => Ok(Self::McloneOverworldV2),
             "overworld" | "vanilla" | "vanilla-1.17.1" => Ok(Self::VanillaOverworld),
             other => Err(format!(
-                "terrain preview profile must be mclone-overworld-v1, \
+                "terrain preview profile must be mclone-overworld-v1, mclone-overworld-v2, \
                  continental-ecoregion-candidate-v1, or overworld, got {other:?}"
             )),
         }
@@ -534,9 +546,8 @@ impl TerrainPreviewReferenceGrid {
     pub fn compile(request: TerrainPreviewRequest) -> Result<Self, String> {
         match request.profile {
             TerrainPreviewProfile::McloneOverworldV1 => Self::compile_mclone(request),
-            TerrainPreviewProfile::ContinentalEcoregionCandidate => {
-                Self::compile_continental(request)
-            }
+            TerrainPreviewProfile::ContinentalEcoregionCandidate
+            | TerrainPreviewProfile::McloneOverworldV2 => Self::compile_continental(request),
             TerrainPreviewProfile::VanillaOverworld => {
                 let mut sampler = VanillaOverworldLodSampler::new(request.seed);
                 Self::compile_with_vanilla_sampler(request, &mut sampler)
@@ -555,7 +566,11 @@ impl TerrainPreviewReferenceGrid {
         request: TerrainPreviewRequest,
         halo_radius: u32,
     ) -> Result<(Self, Vec<f32>), String> {
-        if request.profile != TerrainPreviewProfile::ContinentalEcoregionCandidate {
+        if !matches!(
+            request.profile,
+            TerrainPreviewProfile::ContinentalEcoregionCandidate
+                | TerrainPreviewProfile::McloneOverworldV2
+        ) {
             return Err(format!(
                 "continental terrain preview compiler cannot compile profile {}",
                 request.profile.label()
@@ -1288,6 +1303,7 @@ impl TerrainPreviewVegetationProduct {
             source.profile,
             TerrainPreviewProfile::McloneOverworldV1
                 | TerrainPreviewProfile::ContinentalEcoregionCandidate
+                | TerrainPreviewProfile::McloneOverworldV2
         ) && source.content_stage == TerrainPreviewContentStage::Cover;
         let records_requested = summary_available
             && terrain_preview_requests_tree_records_for_profile(
@@ -1305,7 +1321,7 @@ impl TerrainPreviewVegetationProduct {
             });
         }
 
-        if source.profile == TerrainPreviewProfile::ContinentalEcoregionCandidate {
+        if uses_continental_proxy_vegetation(source.profile) {
             let occurrences = compile_continental_proxy_vegetation(request)?;
             return Ok(Self {
                 request,
@@ -1412,6 +1428,7 @@ impl TerrainPreviewVegetationProduct {
             source.profile,
             TerrainPreviewProfile::McloneOverworldV1
                 | TerrainPreviewProfile::ContinentalEcoregionCandidate
+                | TerrainPreviewProfile::McloneOverworldV2
         ) && source.content_stage == TerrainPreviewContentStage::Cover;
         let expected_records = expected_summary
             && terrain_preview_requests_tree_records_for_profile(
@@ -1794,7 +1811,8 @@ pub const fn terrain_preview_requests_tree_records(sample_spacing: u32) -> bool 
 
 pub const fn terrain_preview_max_tree_record_sample_spacing(profile: TerrainPreviewProfile) -> u32 {
     match profile {
-        TerrainPreviewProfile::ContinentalEcoregionCandidate => {
+        TerrainPreviewProfile::ContinentalEcoregionCandidate
+        | TerrainPreviewProfile::McloneOverworldV2 => {
             CONTINENTAL_PROXY_MAX_TREE_RECORD_SAMPLE_SPACING
         }
         TerrainPreviewProfile::McloneOverworldV1 | TerrainPreviewProfile::VanillaOverworld => {
@@ -1825,7 +1843,8 @@ pub const fn terrain_preview_tree_record_admitted_for_profile(
     landmark_rank: u8,
 ) -> bool {
     match profile {
-        TerrainPreviewProfile::ContinentalEcoregionCandidate => {
+        TerrainPreviewProfile::ContinentalEcoregionCandidate
+        | TerrainPreviewProfile::McloneOverworldV2 => {
             continental_proxy_tree_record_admitted(sample_spacing, landmark_rank)
         }
         TerrainPreviewProfile::McloneOverworldV1 | TerrainPreviewProfile::VanillaOverworld => {
@@ -2563,6 +2582,33 @@ mod tests {
                 forest_intent_evaluations: 0,
                 forest_footprint_summaries: 0,
             }
+        );
+    }
+
+    #[test]
+    fn mclone_overworld_v2_preview_promotes_the_continental_source() {
+        let request = |profile| TerrainPreviewRequest {
+            profile,
+            cells_per_axis: 16,
+            content_stage: TerrainPreviewContentStage::Cover,
+            ..TerrainPreviewRequest::new(12_345, 18_470, -49_535, 64)
+        };
+        let candidate = TerrainPreviewReferenceGrid::compile(request(
+            TerrainPreviewProfile::ContinentalEcoregionCandidate,
+        ))
+        .unwrap();
+        let v2 =
+            TerrainPreviewReferenceGrid::compile(request(TerrainPreviewProfile::McloneOverworldV2))
+                .unwrap();
+
+        assert_eq!(v2.samples(), candidate.samples());
+        assert_eq!(
+            TerrainPreviewProfile::McloneOverworldV2.source_revision(),
+            CONTINENTAL_SURFACE_SCHEMA_REVISION
+        );
+        assert_eq!(
+            TerrainPreviewProfile::parse_label("mclone-overworld-v2").unwrap(),
+            TerrainPreviewProfile::McloneOverworldV2
         );
     }
 

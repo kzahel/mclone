@@ -92,7 +92,13 @@ a product world. Tactical
 [`328`](../tactical/328-mclone-overworld-v2-regional-breadth.md) now owns
 regional/LOD continuity, a selectable persisted `mclone-overworld-v2`, and
 mesa-desert plus humid-jungle province-scale vertical slices. V1 remains
-selectable and default.
+selectable and default. The continuity correction and profile promotion are
+now implemented. V2 is a real shared server/persistence/live-scene world with
+binary tag 9 and an unbounded-plane topology contract; the detached candidate
+identity remains only as a review alias for the same exact surface. A native
+live frame proves exact chunks and the procedural horizon compose under the
+V2 identity, including the independently dispatched continental vegetation
+source. Mesa-desert and humid-jungle breadth remain the active work.
 Mclone should combine
 top-down continental and ecoregional planning with bottom-up procedural
 realization so the Overworld contains large, recognizable, causally related

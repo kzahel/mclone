@@ -13,7 +13,7 @@ use crate::terrain_preview::TERRAIN_PREVIEW_MAX_CELLS_PER_AXIS;
 use crate::terrain_preview::{
     CONTINENTAL_PROXY_VEGETATION_SOURCE_REVISION, TerrainPreviewContentStage,
     TerrainPreviewProfile, TerrainPreviewRequest, TerrainPreviewSurfaceQuality,
-    TerrainPreviewVegetationProduct,
+    TerrainPreviewVegetationProduct, uses_continental_proxy_vegetation,
 };
 
 pub const TERRAIN_VEGETATION_COMPILER_SOURCE_REVISION: &str =
@@ -172,7 +172,7 @@ impl TerrainVegetationCompilerSession {
         if self.source != Some(source) {
             self.install_source(source, self.source.is_some());
         }
-        let product = if source.profile == TerrainPreviewProfile::ContinentalEcoregionCandidate {
+        let product = if uses_continental_proxy_vegetation(source.profile) {
             TerrainPreviewVegetationProduct::compile(request)
         } else {
             let cache = self
@@ -975,9 +975,8 @@ impl<'a> FrameReader<'a> {
 const fn vegetation_revision(profile: TerrainPreviewProfile) -> &'static str {
     match profile {
         TerrainPreviewProfile::McloneOverworldV1 => MCLONE_OVERWORLD_VEGETATION_REVISION,
-        TerrainPreviewProfile::ContinentalEcoregionCandidate => {
-            CONTINENTAL_PROXY_VEGETATION_SOURCE_REVISION
-        }
+        TerrainPreviewProfile::ContinentalEcoregionCandidate
+        | TerrainPreviewProfile::McloneOverworldV2 => CONTINENTAL_PROXY_VEGETATION_SOURCE_REVISION,
         TerrainPreviewProfile::VanillaOverworld => "no-terrain-preview-vegetation",
     }
 }
@@ -1039,6 +1038,7 @@ const fn profile_tag(profile: TerrainPreviewProfile) -> u8 {
         TerrainPreviewProfile::McloneOverworldV1 => 1,
         TerrainPreviewProfile::VanillaOverworld => 2,
         TerrainPreviewProfile::ContinentalEcoregionCandidate => 3,
+        TerrainPreviewProfile::McloneOverworldV2 => 4,
     }
 }
 
@@ -1047,6 +1047,7 @@ fn profile_from_tag(tag: u8) -> Result<TerrainPreviewProfile, String> {
         1 => Ok(TerrainPreviewProfile::McloneOverworldV1),
         2 => Ok(TerrainPreviewProfile::VanillaOverworld),
         3 => Ok(TerrainPreviewProfile::ContinentalEcoregionCandidate),
+        4 => Ok(TerrainPreviewProfile::McloneOverworldV2),
         other => Err(format!("MCHV terrain profile tag {other} is invalid")),
     }
 }
@@ -1214,8 +1215,8 @@ mod tests {
     }
 
     #[test]
-    fn candidate_compiler_uses_proxy_records_without_a_production_cache() {
-        let request = TerrainPreviewRequest {
+    fn continental_profiles_use_proxy_records_without_a_v1_cache() {
+        let candidate_request = TerrainPreviewRequest {
             profile: TerrainPreviewProfile::ContinentalEcoregionCandidate,
             seed: 12_345,
             center_x: -13_824,
@@ -1226,35 +1227,49 @@ mod tests {
             content_stage: TerrainPreviewContentStage::Cover,
             surface_quality: TerrainPreviewSurfaceQuality::Inferred,
         };
-        let source = TerrainVegetationSourceIdentity::for_request(request).unwrap();
         let production_source =
             TerrainVegetationSourceIdentity::for_request(TerrainPreviewRequest {
                 profile: TerrainPreviewProfile::McloneOverworldV1,
-                ..request
+                ..candidate_request
             })
             .unwrap();
-        let mut session = TerrainVegetationCompilerSession::new(source);
-        let product = session.compile(source, request).unwrap();
+        for (profile, request) in [
+            (
+                TerrainPreviewProfile::ContinentalEcoregionCandidate,
+                candidate_request,
+            ),
+            (
+                TerrainPreviewProfile::McloneOverworldV2,
+                TerrainPreviewRequest {
+                    profile: TerrainPreviewProfile::McloneOverworldV2,
+                    ..candidate_request
+                },
+            ),
+        ] {
+            let source = TerrainVegetationSourceIdentity::for_request(request).unwrap();
+            let mut session = TerrainVegetationCompilerSession::new(source);
+            let product = session.compile(source, request).unwrap();
 
-        assert!(!product.occurrences().is_empty());
-        assert!(session.cache.is_none());
-        assert_eq!(session.report().cell_requests, 0);
-        assert_ne!(
-            source.vegetation_plan_revision,
-            production_source.vegetation_plan_revision
-        );
+            assert!(!product.occurrences().is_empty(), "profile={profile:?}");
+            assert!(session.cache.is_none(), "profile={profile:?}");
+            assert_eq!(session.report().cell_requests, 0, "profile={profile:?}");
+            assert_ne!(
+                source.vegetation_plan_revision,
+                production_source.vegetation_plan_revision
+            );
 
-        let (_, job) = identities();
-        let frame = MchvFrame::Completed {
-            job,
-            source,
-            product,
-            compile_micros: 17,
-        };
-        assert_eq!(
-            decode_mchv_frame(&encode_mchv_frame(&frame).unwrap()).unwrap(),
-            frame
-        );
+            let (_, job) = identities();
+            let frame = MchvFrame::Completed {
+                job,
+                source,
+                product,
+                compile_micros: 17,
+            };
+            assert_eq!(
+                decode_mchv_frame(&encode_mchv_frame(&frame).unwrap()).unwrap(),
+                frame
+            );
+        }
     }
 
     #[test]

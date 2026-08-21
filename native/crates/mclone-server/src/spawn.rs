@@ -3,6 +3,8 @@ use mclone_worldgen::biome::{BiomeDefinition, OverworldBiomeSource, get_layered_
 use mclone_worldgen::block::{
     GRASS_BLOCK, PODZOL, RawBlockId, has_fluid, is_air_like, material_blocks_motion,
 };
+use mclone_worldgen::continental_ecoregion::ContinentalEcoregionDescriptor;
+use mclone_worldgen::continental_surface::{ContinentalSurfacePlan, continental_surface_biome_id};
 use mclone_worldgen::levelgen::{
     McloneOverworldSamplingTopology, TopologyProbeSource, beta_biome_id,
     mclone_overworld_biome_id_with_topology, mclone_overworld_spawn_chunk_with_topology,
@@ -38,6 +40,7 @@ pub fn initial_spawn_center_for_descriptor(
             McloneOverworldSamplingTopology::from_horizontal_topology(topology)
                 .expect("Mclone spawn topology must pass profile admission"),
         ),
+        WorldGenerationProfile::McloneOverworldV2 => continental_overworld_spawn_chunk(seed),
         WorldGenerationProfile::TopologyProbeV1 => TopologyProbeSource::new(seed, topology)
             .expect("topology probe spawn topology must pass profile admission")
             .origin_chunk(),
@@ -83,6 +86,7 @@ pub fn find_safe_surface_spawn_for_loaded_descriptor(
         WorldGenerationProfile::FlatGrassV1
             | WorldGenerationProfile::SmallIslandV1
             | WorldGenerationProfile::McloneOverworldV1
+            | WorldGenerationProfile::McloneOverworldV2
             | WorldGenerationProfile::TopologyProbeV1
             | WorldGenerationProfile::AlphaV1 { .. }
             | WorldGenerationProfile::BetaV1
@@ -97,6 +101,10 @@ pub fn find_safe_surface_spawn_for_loaded_descriptor(
             McloneOverworldSamplingTopology::from_horizontal_topology(topology)
                 .expect("Mclone spawn topology must pass profile admission")
         });
+    let continental_surface = (profile == WorldGenerationProfile::McloneOverworldV2).then(|| {
+        ContinentalSurfacePlan::new(ContinentalEcoregionDescriptor::plane(seed))
+            .expect("V2 spawn uses a valid unbounded continental surface")
+    });
     let biome_source = OverworldBiomeSource::new(seed, false, false);
     find_safe_surface_spawn_with_column_order(
         center,
@@ -114,6 +122,15 @@ pub fn find_safe_surface_spawn_for_loaded_descriptor(
                     z,
                 ))
             }
+            WorldGenerationProfile::McloneOverworldV2 => {
+                get_layered_biome_by_id(continental_surface_biome_id(
+                    continental_surface
+                        .as_ref()
+                        .expect("V2 surface initialized above")
+                        .query_point(x, z)
+                        .sample,
+                ))
+            }
             WorldGenerationProfile::BetaV1 => get_layered_biome_by_id(beta_biome_id(seed, x, z)),
             WorldGenerationProfile::Overworld | WorldGenerationProfile::AuthoredOnly { .. } => {
                 biome_source.get_block_position_biome_definition(seed, x, z)
@@ -122,6 +139,47 @@ pub fn find_safe_surface_spawn_for_loaded_descriptor(
         chunk_ready,
         column_order,
     )
+}
+
+fn continental_overworld_spawn_chunk(seed: i64) -> ChunkPos {
+    const SAMPLE_STRIDE_CHUNKS: i32 = 32;
+    const MAX_SAMPLE_RADIUS: i32 = 128;
+
+    let surface = ContinentalSurfacePlan::new(ContinentalEcoregionDescriptor::plane(seed))
+        .expect("V2 spawn uses a valid unbounded continental surface");
+    let accept = |sample_x: i32, sample_z: i32| {
+        let chunk = ChunkPos::new(
+            sample_x.saturating_mul(SAMPLE_STRIDE_CHUNKS),
+            sample_z.saturating_mul(SAMPLE_STRIDE_CHUNKS),
+        );
+        let sample = surface
+            .query_point(chunk.min_block_x() + 8, chunk.min_block_z() + 8)
+            .sample;
+        (!sample.is_water() && sample.solid_surface_y >= 63.0).then_some(chunk)
+    };
+
+    if let Some(chunk) = accept(0, 0) {
+        return chunk;
+    }
+    for radius in 1..=MAX_SAMPLE_RADIUS {
+        for x in -radius..=radius {
+            if let Some(chunk) = accept(x, -radius) {
+                return chunk;
+            }
+            if let Some(chunk) = accept(x, radius) {
+                return chunk;
+            }
+        }
+        for z in (-radius + 1)..radius {
+            if let Some(chunk) = accept(-radius, z) {
+                return chunk;
+            }
+            if let Some(chunk) = accept(radius, z) {
+                return chunk;
+            }
+        }
+    }
+    ChunkPos::new(0, 0)
 }
 
 #[cfg(test)]
@@ -341,7 +399,8 @@ mod tests {
     use mclone_worldgen::block::{AIR, GRASS_BLOCK, OAK_LEAVES, STONE, WATER};
     use mclone_worldgen::levelgen::{generate_alpha_chunk, generate_beta_chunk};
     use mclone_worldgen::levelgen::{
-        generate_mclone_overworld_chunk, generate_mclone_overworld_chunk_with_topology,
+        generate_continental_candidate_chunk, generate_mclone_overworld_chunk,
+        generate_mclone_overworld_chunk_with_topology,
     };
 
     use super::*;
@@ -432,6 +491,50 @@ mod tests {
                     .0,
                 GRASS_BLOCK
             );
+        }
+    }
+
+    #[test]
+    fn mclone_overworld_v2_selects_a_stable_loaded_dry_spawn() {
+        for seed in [12_345, -98_765, 8_675_309] {
+            let profile = WorldGenerationProfile::McloneOverworldV2;
+            let center = initial_spawn_center_for_profile(seed, profile);
+            assert_eq!(center, initial_spawn_center_for_profile(seed, profile));
+            let chunk = generate_continental_candidate_chunk(seed, center.x, center.z);
+            let spawn = find_safe_surface_spawn_for_loaded_profile(
+                seed,
+                profile,
+                center,
+                |pos| {
+                    (pos.chunk_pos() == center).then(|| {
+                        chunk
+                            .block_at_y(
+                                pos.x - center.min_block_x(),
+                                pos.y,
+                                pos.z - center.min_block_z(),
+                            )
+                            .0
+                    })
+                },
+                |pos| pos == center,
+            )
+            .unwrap_or_else(|| panic!("seed {seed} had no safe V2 spawn in {center:?}"));
+            let floor = BlockPos::new(
+                spawn.x.floor() as i32,
+                spawn.y.floor() as i32 - 1,
+                spawn.z.floor() as i32,
+            );
+            assert_eq!(floor.chunk_pos(), center);
+            assert!(matches!(
+                chunk
+                    .block_at_y(
+                        floor.x - center.min_block_x(),
+                        floor.y,
+                        floor.z - center.min_block_z()
+                    )
+                    .0,
+                GRASS_BLOCK | PODZOL
+            ));
         }
     }
 

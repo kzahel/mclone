@@ -53,9 +53,11 @@ boundary facts, and consumes one frame summary. Apps choose platform defaults,
 create surfaces or swapchains, translate input, and present; they do not own
 LOD geometry or seam policy.
 
-The only supported product source is a reconstructible local
-`mclone-overworld-v1` world with matching profile, seed, topology, exact
-generation, and procedural source identity. Remote sessions and incompatible
+Supported product sources are reconstructible local `mclone-overworld-v1`
+and experimental `mclone-overworld-v2` worlds with matching profile, seed,
+topology, exact generation, and procedural source identity. V2 promotes the
+former detached continental candidate through the same terrain-view and
+scene composition path; it does not alias V1. Remote sessions and incompatible
 generation profiles project the effective setting to Off while retaining the
 user's desired preference.
 

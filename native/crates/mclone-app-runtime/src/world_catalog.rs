@@ -26,8 +26,9 @@ pub const NATIVE_WORLD_BACKEND_LABEL: &str = "native-sqlite";
 /// Product choice for newly created local worlds.
 pub const DEFAULT_LOCAL_WORLD_GENERATION_PROFILE: WorldGenerationProfile =
     WorldGenerationProfile::McloneOverworldV1;
-pub const LOCAL_WORLD_PROCEDURAL_GENERATION_PROFILES: [WorldGenerationProfile; 7] = [
+pub const LOCAL_WORLD_PROCEDURAL_GENERATION_PROFILES: [WorldGenerationProfile; 8] = [
     WorldGenerationProfile::McloneOverworldV1,
+    WorldGenerationProfile::McloneOverworldV2,
     WorldGenerationProfile::Overworld,
     WorldGenerationProfile::FlatGrassV1,
     WorldGenerationProfile::SmallIslandV1,
@@ -46,6 +47,7 @@ pub const fn local_world_generation_profile_display_name(
         WorldGenerationProfile::FlatGrassV1 => "Flat Grass",
         WorldGenerationProfile::SmallIslandV1 => "Small Island",
         WorldGenerationProfile::McloneOverworldV1 => "Mclone Overworld",
+        WorldGenerationProfile::McloneOverworldV2 => "Mclone Overworld V2 (Experimental)",
         WorldGenerationProfile::TopologyProbeV1 => "Topology Probe",
         WorldGenerationProfile::AlphaV1 { winter: false } => "Alpha (Temperate)",
         WorldGenerationProfile::AlphaV1 { winter: true } => "Alpha (Winter)",
@@ -58,7 +60,8 @@ pub const fn next_local_world_generation_profile(
     profile: WorldGenerationProfile,
 ) -> WorldGenerationProfile {
     match profile {
-        WorldGenerationProfile::McloneOverworldV1 => WorldGenerationProfile::Overworld,
+        WorldGenerationProfile::McloneOverworldV1 => WorldGenerationProfile::McloneOverworldV2,
+        WorldGenerationProfile::McloneOverworldV2 => WorldGenerationProfile::Overworld,
         WorldGenerationProfile::Overworld => WorldGenerationProfile::FlatGrassV1,
         WorldGenerationProfile::FlatGrassV1 => WorldGenerationProfile::SmallIslandV1,
         WorldGenerationProfile::SmallIslandV1 => WorldGenerationProfile::alpha_v1(false),
@@ -1200,6 +1203,7 @@ mod tests {
             LOCAL_WORLD_PROCEDURAL_GENERATION_PROFILES,
             [
                 WorldGenerationProfile::McloneOverworldV1,
+                WorldGenerationProfile::McloneOverworldV2,
                 WorldGenerationProfile::Overworld,
                 WorldGenerationProfile::FlatGrassV1,
                 WorldGenerationProfile::SmallIslandV1,
@@ -1225,6 +1229,10 @@ mod tests {
             "Mclone Overworld"
         );
         assert_eq!(
+            local_world_generation_profile_display_name(WorldGenerationProfile::McloneOverworldV2),
+            "Mclone Overworld V2 (Experimental)"
+        );
+        assert_eq!(
             local_world_generation_profile_display_name(WorldGenerationProfile::TopologyProbeV1),
             "Topology Probe"
         );
@@ -1242,6 +1250,10 @@ mod tests {
         );
         assert_eq!(
             next_local_world_generation_profile(WorldGenerationProfile::McloneOverworldV1),
+            WorldGenerationProfile::McloneOverworldV2
+        );
+        assert_eq!(
+            next_local_world_generation_profile(WorldGenerationProfile::McloneOverworldV2),
             WorldGenerationProfile::Overworld
         );
         assert_eq!(
