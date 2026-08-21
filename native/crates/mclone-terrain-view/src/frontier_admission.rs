@@ -9,6 +9,7 @@ use super::TerrainFrontierPresentationIdentity;
 pub enum TerrainFrontierAdmissionState {
     #[default]
     Disabled,
+    Warming,
     SynchronousFallback,
     PreparingPreferred,
     Preferred,
@@ -19,6 +20,7 @@ impl TerrainFrontierAdmissionState {
     pub const fn label(self) -> &'static str {
         match self {
             Self::Disabled => "disabled",
+            Self::Warming => "warming",
             Self::SynchronousFallback => "synchronous-fallback",
             Self::PreparingPreferred => "preparing-preferred",
             Self::Preferred => "preferred",
@@ -90,11 +92,14 @@ impl TerrainFrontierAdmissionTracker {
     pub fn receipt(
         self,
         exact_frontier_required: bool,
+        warming: bool,
         active: Option<TerrainFrontierAdmissionResource>,
         pending: Option<TerrainFrontierAdmissionResource>,
     ) -> TerrainFrontierAdmissionReceipt {
         let state = if !exact_frontier_required {
             TerrainFrontierAdmissionState::Disabled
+        } else if warming {
+            TerrainFrontierAdmissionState::Warming
         } else if active.is_none_or(|resource| !resource.committed) {
             TerrainFrontierAdmissionState::Rejected
         } else if pending.is_some() {
@@ -144,6 +149,13 @@ mod tests {
         assert!(!TerrainFrontierAdmissionReceipt::default().complete());
         assert!(
             !TerrainFrontierAdmissionReceipt {
+                state: TerrainFrontierAdmissionState::Warming,
+                ..Default::default()
+            }
+            .complete()
+        );
+        assert!(
+            !TerrainFrontierAdmissionReceipt {
                 state: TerrainFrontierAdmissionState::Rejected,
                 ..Default::default()
             }
@@ -172,19 +184,30 @@ mod tests {
         let mut tracker = TerrainFrontierAdmissionTracker::default();
         tracker.record_fallback_commit();
         assert_eq!(
-            tracker.receipt(true, Some(fallback), None).state,
+            tracker.receipt(true, false, Some(fallback), None).state,
             TerrainFrontierAdmissionState::SynchronousFallback
         );
         tracker.record_coalesced_generation();
         assert_eq!(
-            tracker.receipt(true, Some(fallback), Some(preferred)).state,
+            tracker
+                .receipt(true, false, Some(fallback), Some(preferred))
+                .state,
             TerrainFrontierAdmissionState::PreparingPreferred
         );
         tracker.record_preferred_commit();
-        let receipt = tracker.receipt(true, Some(preferred), None);
+        let receipt = tracker.receipt(true, false, Some(preferred), None);
         assert_eq!(receipt.state, TerrainFrontierAdmissionState::Preferred);
         assert_eq!(receipt.fallback_commits, 1);
         assert_eq!(receipt.preferred_commits, 1);
         assert_eq!(receipt.coalesced_generations, 1);
+    }
+
+    #[test]
+    fn tracker_projects_incomplete_cold_start_as_warming() {
+        let tracker = TerrainFrontierAdmissionTracker::default();
+        let receipt = tracker.receipt(true, true, None, None);
+
+        assert_eq!(receipt.state, TerrainFrontierAdmissionState::Warming);
+        assert!(!receipt.complete());
     }
 }

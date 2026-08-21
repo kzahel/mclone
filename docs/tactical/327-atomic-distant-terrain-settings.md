@@ -98,18 +98,20 @@ the same typed staging and Apply/Cancel actions.
 
 ### Phase 1: Atomic Renderer And Scene Admission
 
-- Treat missing procedural coverage during bounded cold preparation as
+- [x] Treat missing procedural coverage during bounded cold preparation as
   nonfatal warming, submit no procedural terrain/tree/connectors for that
   unsafe frame, and continue bounded clipmap work.
-- Keep genuinely invalid exact profiles or settled incomplete topology as
+- [x] Keep genuinely invalid exact profiles or settled incomplete topology as
   errors.
-- Track applied separately from desired/configured. Do not persist an enabled
+- [x] Track applied separately from desired/configured. Do not persist an enabled
   request until diagnostics prove a complete drawable target.
-- Contain construction or reconfiguration rejection, roll back to the prior
+- [x] Contain construction or reconfiguration rejection, roll back to the prior
   applied value, and expose the failure without ending the frame loop.
-- Add focused terrain-view and scene regressions for cold exact coverage,
-  enabled-to-enabled reuse, rollback, and persistence timing.
-- Commit.
+- [x] Add focused terrain-view and scene regressions for cold-frontier
+  classification and drawable-target acceptance. The selector/reducer phase
+  adds rollback and accepted-effect persistence coverage at its shared
+  boundary.
+- [x] Commit.
 
 ### Phase 2: Shared Staged Selector
 

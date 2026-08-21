@@ -4459,6 +4459,7 @@ impl TerrainHorizonRenderer {
     fn frontier_admission_receipt(
         &self,
         exact_frontier_required: bool,
+        warming: bool,
     ) -> TerrainFrontierAdmissionReceipt {
         let resource = |support: &TerrainFrontierSupportGpu| TerrainFrontierAdmissionResource {
             committed: support.committed,
@@ -4469,6 +4470,7 @@ impl TerrainHorizonRenderer {
         };
         self.frontier_admission.receipt(
             exact_frontier_required,
+            warming,
             self.frontier_support.as_ref().map(resource),
             self.frontier_support_pending.as_ref().map(resource),
         )
@@ -4877,12 +4879,21 @@ impl TerrainHorizonRenderer {
                 .is_some_and(|coverage| !coverage.chunks().is_empty());
         let exact_frontier_certifiable = exact_frontier_required
             && self.frontier_topology_receipt.state == TerrainFrontierTopologyState::Complete;
+        let frontier_warming = exact_frontier_warming(
+            exact_frontier_required,
+            exact_frontier_certifiable,
+            terrain_levels.is_empty(),
+            !self.pending.is_empty(),
+            self.admission.has_staged_levels(),
+        );
         if exact_frontier_required && !exact_frontier_certifiable {
             self.disable_frontier_support(queue)?;
-            return Err(format!(
-                "exact terrain generation {} has no complete frontier certificate",
-                self.renderer.exact_coverage.mask.generation,
-            ));
+            if !frontier_warming {
+                return Err(format!(
+                    "exact terrain generation {} has no complete frontier certificate",
+                    self.renderer.exact_coverage.mask.generation,
+                ));
+            }
         }
         if exact_frontier_certifiable {
             self.ensure_frontier_fallback(device, queue)?;
@@ -5007,92 +5018,97 @@ impl TerrainHorizonRenderer {
                     support.connector_instances.as_slice(),
                 )
             });
-        for level in &terrain_levels {
-            let inner_hole = finer_level_bounds(&terrain_levels, level.snapshot.level);
-            for resource in &level.tiles {
-                match terrain_horizon_tile_visibility_for_views(
-                    resource.tile,
-                    inner_hole,
-                    0.0,
-                    far_culls,
-                    render_view_overrides,
-                    uniform_presentation,
-                ) {
-                    TerrainHorizonTileVisibility::Visible => {}
-                    TerrainHorizonTileVisibility::InnerHole => {
-                        inner_hole_culled_tiles = inner_hole_culled_tiles.saturating_add(1);
-                        continue;
+        if !frontier_warming {
+            for level in &terrain_levels {
+                let inner_hole = finer_level_bounds(&terrain_levels, level.snapshot.level);
+                for resource in &level.tiles {
+                    match terrain_horizon_tile_visibility_for_views(
+                        resource.tile,
+                        inner_hole,
+                        0.0,
+                        far_culls,
+                        render_view_overrides,
+                        uniform_presentation,
+                    ) {
+                        TerrainHorizonTileVisibility::Visible => {}
+                        TerrainHorizonTileVisibility::InnerHole => {
+                            inner_hole_culled_tiles = inner_hole_culled_tiles.saturating_add(1);
+                            continue;
+                        }
+                        TerrainHorizonTileVisibility::Frustum => {
+                            frustum_culled_tiles = frustum_culled_tiles.saturating_add(1);
+                            continue;
+                        }
+                        TerrainHorizonTileVisibility::Far => {
+                            far_culled_tiles = far_culled_tiles.saturating_add(1);
+                            continue;
+                        }
                     }
-                    TerrainHorizonTileVisibility::Frustum => {
-                        frustum_culled_tiles = frustum_culled_tiles.saturating_add(1);
-                        continue;
-                    }
-                    TerrainHorizonTileVisibility::Far => {
-                        far_culled_tiles = far_culled_tiles.saturating_add(1);
-                        continue;
-                    }
-                }
-                self.visible_terrain_slots[resource.resource_slot as usize] = true;
-                let view_mask = terrain_horizon_tile_view_mask(
-                    resource.tile,
-                    inner_hole,
-                    0.0,
-                    far_culls,
-                    render_view_overrides,
-                    uniform_presentation,
-                );
-                let slot_index = resource.resource_slot as usize;
-                let outer_edge_flags = terrain_horizon_outer_edge_flags(
-                    level,
-                    resource.tile,
-                    self.clipmap.config().level_count,
-                );
-                let slot = &mut self.slots[slot_index];
-                slot.refresh_exact_connectors(
-                    device,
-                    queue,
-                    exact_connector_generation,
-                    &exact_connector_instances,
-                );
-                if let Some((generation, frontier_presentation, connectors)) = frontier_connectors {
-                    slot.refresh_frontier_connectors(
+                    self.visible_terrain_slots[resource.resource_slot as usize] = true;
+                    let view_mask = terrain_horizon_tile_view_mask(
+                        resource.tile,
+                        inner_hole,
+                        0.0,
+                        far_culls,
+                        render_view_overrides,
+                        uniform_presentation,
+                    );
+                    let slot_index = resource.resource_slot as usize;
+                    let outer_edge_flags = terrain_horizon_outer_edge_flags(
+                        level,
+                        resource.tile,
+                        self.clipmap.config().level_count,
+                    );
+                    let slot = &mut self.slots[slot_index];
+                    slot.refresh_exact_connectors(
                         device,
                         queue,
-                        generation,
-                        frontier_presentation,
-                        connectors,
+                        exact_connector_generation,
+                        &exact_connector_instances,
+                    );
+                    if let Some((generation, frontier_presentation, connectors)) =
+                        frontier_connectors
+                    {
+                        slot.refresh_frontier_connectors(
+                            device,
+                            queue,
+                            generation,
+                            frontier_presentation,
+                            connectors,
+                        );
+                    }
+                    queue.write_buffer(
+                        &slot.uniform_buffer,
+                        0,
+                        &terrain_horizon_uniform_bytes(
+                            slot.request,
+                            width,
+                            height,
+                            options,
+                            presentation.camera,
+                            uniform_presentation,
+                            focus_y,
+                            inner_hole,
+                            outer_edge_flags,
+                            view_mask,
+                            render_view_overrides,
+                            presentation.sky_darken,
+                            presentation.fog,
+                            presentation.diagnostic,
+                        ),
                     );
                 }
-                queue.write_buffer(
-                    &slot.uniform_buffer,
-                    0,
-                    &terrain_horizon_uniform_bytes(
-                        slot.request,
-                        width,
-                        height,
-                        options,
-                        presentation.camera,
-                        uniform_presentation,
-                        focus_y,
-                        inner_hole,
-                        outer_edge_flags,
-                        view_mask,
-                        render_view_overrides,
-                        presentation.sky_darken,
-                        presentation.fog,
-                        presentation.diagnostic,
-                    ),
-                );
             }
         }
         let mut frontier_support_visible = self
             .frontier_support
             .as_ref()
             .map_or_else(Vec::new, |support| vec![false; support.tiles.len()]);
-        if let Some(support) = self
-            .frontier_support
-            .as_mut()
-            .filter(|support| support.committed)
+        if !frontier_warming
+            && let Some(support) = self
+                .frontier_support
+                .as_mut()
+                .filter(|support| support.committed)
         {
             for (index, support_tile) in support.tiles.iter_mut().enumerate() {
                 let clipmap_tile = TerrainClipmapTile {
@@ -5154,56 +5170,58 @@ impl TerrainHorizonRenderer {
             != TerrainPreviewProfile::ContinentalEcoregionCandidate
             || presentation.width_blocks.max(presentation.height_blocks)
                 <= CONTINENTAL_PROXY_TREE_MAX_VIEW_BLOCKS;
-        for level in &vegetation_levels {
-            if !candidate_proxy_geometry_visible {
-                continue;
-            }
-            if level.snapshot.sample_spacing > self.vegetation_max_sample_spacing {
-                continue;
-            }
-            let inner_hole = finer_level_bounds(&vegetation_levels, level.snapshot.level);
-            for resource in &level.tiles {
-                if terrain_horizon_tile_visibility_for_views(
-                    resource.tile,
-                    inner_hole,
-                    TERRAIN_HORIZON_TREE_CULL_MARGIN_BLOCKS,
-                    far_culls,
-                    render_view_overrides,
-                    uniform_presentation,
-                ) != TerrainHorizonTileVisibility::Visible
-                {
+        if !frontier_warming {
+            for level in &vegetation_levels {
+                if !candidate_proxy_geometry_visible {
                     continue;
                 }
-                self.visible_vegetation_slots[resource.resource_slot as usize] = true;
-                let view_mask = terrain_horizon_tile_view_mask(
-                    resource.tile,
-                    inner_hole,
-                    TERRAIN_HORIZON_TREE_CULL_MARGIN_BLOCKS,
-                    far_culls,
-                    render_view_overrides,
-                    uniform_presentation,
-                );
-                let slot = &self.slots[resource.resource_slot as usize];
-                queue.write_buffer(
-                    &slot.tree_uniform_buffer,
-                    0,
-                    &terrain_horizon_uniform_bytes(
-                        slot.request,
-                        width,
-                        height,
-                        options,
-                        presentation.camera,
-                        uniform_presentation,
-                        focus_y,
+                if level.snapshot.sample_spacing > self.vegetation_max_sample_spacing {
+                    continue;
+                }
+                let inner_hole = finer_level_bounds(&vegetation_levels, level.snapshot.level);
+                for resource in &level.tiles {
+                    if terrain_horizon_tile_visibility_for_views(
+                        resource.tile,
                         inner_hole,
-                        0,
-                        view_mask,
+                        TERRAIN_HORIZON_TREE_CULL_MARGIN_BLOCKS,
+                        far_culls,
                         render_view_overrides,
-                        presentation.sky_darken,
-                        presentation.fog,
-                        presentation.diagnostic,
-                    ),
-                );
+                        uniform_presentation,
+                    ) != TerrainHorizonTileVisibility::Visible
+                    {
+                        continue;
+                    }
+                    self.visible_vegetation_slots[resource.resource_slot as usize] = true;
+                    let view_mask = terrain_horizon_tile_view_mask(
+                        resource.tile,
+                        inner_hole,
+                        TERRAIN_HORIZON_TREE_CULL_MARGIN_BLOCKS,
+                        far_culls,
+                        render_view_overrides,
+                        uniform_presentation,
+                    );
+                    let slot = &self.slots[resource.resource_slot as usize];
+                    queue.write_buffer(
+                        &slot.tree_uniform_buffer,
+                        0,
+                        &terrain_horizon_uniform_bytes(
+                            slot.request,
+                            width,
+                            height,
+                            options,
+                            presentation.camera,
+                            uniform_presentation,
+                            focus_y,
+                            inner_hole,
+                            0,
+                            view_mask,
+                            render_view_overrides,
+                            presentation.sky_darken,
+                            presentation.fog,
+                            presentation.diagnostic,
+                        ),
+                    );
+                }
             }
         }
 
@@ -5651,7 +5669,8 @@ impl TerrainHorizonRenderer {
             && vegetation_settled
             && (!exact_frontier_required
                 || (frontier_certificate_active && self.frontier_support_pending.is_none()));
-        let frontier_admission = self.frontier_admission_receipt(exact_frontier_required);
+        let frontier_admission =
+            self.frontier_admission_receipt(exact_frontier_required, frontier_warming);
         Ok(TerrainHorizonFrameStats {
             revision: self.clipmap.diagnostics().revision,
             allocation_slots,
@@ -6148,6 +6167,18 @@ fn terrain_horizon_tile_visibility_for_views(
     } else {
         TerrainHorizonTileVisibility::Frustum
     }
+}
+
+fn exact_frontier_warming(
+    exact_frontier_required: bool,
+    exact_frontier_certifiable: bool,
+    terrain_levels_empty: bool,
+    refills_pending: bool,
+    levels_staged: bool,
+) -> bool {
+    exact_frontier_required
+        && !exact_frontier_certifiable
+        && (terrain_levels_empty || refills_pending || levels_staged)
 }
 
 fn terrain_horizon_tile_visibility(
@@ -7180,6 +7211,16 @@ mod tests {
 
         assert!(!terrain_horizon_tile_beyond_distance(near, camera, 32.0));
         assert!(terrain_horizon_tile_beyond_distance(far, camera, 32.0));
+    }
+
+    #[test]
+    fn incomplete_exact_frontier_is_nonfatal_only_while_work_remains() {
+        assert!(exact_frontier_warming(true, false, true, false, false));
+        assert!(exact_frontier_warming(true, false, false, true, false));
+        assert!(exact_frontier_warming(true, false, false, false, true));
+        assert!(!exact_frontier_warming(true, false, false, false, false));
+        assert!(!exact_frontier_warming(true, true, false, true, true));
+        assert!(!exact_frontier_warming(false, false, true, true, true));
     }
 
     #[test]

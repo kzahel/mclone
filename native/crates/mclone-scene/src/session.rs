@@ -473,8 +473,10 @@ impl McloneSceneHost {
             terrain_lod_preset_preference: game_terrain_lod_preset(
                 scene.startup.terrain_lod_preset,
             ),
+            terrain_lod_applied_preset: TerrainLodPreset::Off,
             terrain_lod_persisted_preference: None,
             terrain_lod_pending_persistence: None,
+            terrain_lod_apply_error: None,
             fog_settings: GameFogSettings::default(),
             pending_leaf_detail: None,
             pending_restored_asset_pack_selection: None,
@@ -692,8 +694,10 @@ impl McloneSceneHost {
             terrain_lod_preset_preference: game_terrain_lod_preset(
                 scene.startup.terrain_lod_preset,
             ),
+            terrain_lod_applied_preset: TerrainLodPreset::Off,
             terrain_lod_persisted_preference: None,
             terrain_lod_pending_persistence: None,
+            terrain_lod_apply_error: None,
             fog_settings: GameFogSettings::default(),
             pending_leaf_detail: None,
             pending_restored_asset_pack_selection: None,
@@ -993,8 +997,10 @@ impl McloneSceneHost {
             terrain_lod_preset_preference: game_terrain_lod_preset(
                 scene.startup.terrain_lod_preset,
             ),
+            terrain_lod_applied_preset: TerrainLodPreset::Off,
             terrain_lod_persisted_preference: None,
             terrain_lod_pending_persistence: None,
+            terrain_lod_apply_error: None,
             fog_settings: GameFogSettings::default(),
             pending_leaf_detail: None,
             pending_restored_asset_pack_selection: None,

@@ -272,6 +272,7 @@ impl SceneTerrainViewState {
             .map_err(anyhow::Error::msg)?;
         if changed {
             let descriptor = descriptor.validated().map_err(anyhow::Error::msg)?;
+            self.diagnostics.target_ready = false;
             self.diagnostics.lod_preset = descriptor.preset;
             self.diagnostics.lod_level_count = descriptor
                 .clipmap
@@ -403,20 +404,20 @@ impl McloneSceneHost {
     }
 
     pub fn applied_terrain_lod_preset(&self) -> TerrainLodPreset {
-        if !self.terrain_lod_supported() || !self.terrain_lod_preset_preference.horizon_enabled() {
+        if !self.terrain_lod_supported() {
             TerrainLodPreset::Off
         } else {
-            self.terrain_view
-                .as_ref()
-                .map_or(TerrainLodPreset::Off, |state| {
-                    state.diagnostics().lod_preset
-                })
+            self.terrain_lod_applied_preset
         }
     }
 
     pub fn terrain_lod_applying(&self) -> bool {
         self.terrain_lod_supported()
-            && self.applied_terrain_lod_preset() != self.terrain_lod_preset_preference
+            && self.terrain_lod_applied_preset != self.terrain_lod_preset_preference
+    }
+
+    pub fn terrain_lod_apply_error(&self) -> Option<&str> {
+        self.terrain_lod_apply_error.as_deref()
     }
 
     pub(crate) fn terrain_projection_far_distance(&self, ordinary_far_distance: f32) -> f32 {
@@ -430,6 +431,7 @@ impl McloneSceneHost {
         if presentation == self.terrain_lod_preset_preference {
             return Ok(());
         }
+        self.terrain_lod_apply_error = None;
         self.terrain_lod_preset_preference = presentation;
         if !presentation.horizon_enabled() {
             self.reset_terrain_view();
@@ -458,11 +460,9 @@ impl McloneSceneHost {
         focus: [f64; 3],
     ) -> Result<bool> {
         let effective_preset = self.effective_terrain_lod_preset();
+        self.accept_ready_terrain_lod_preset(effective_preset);
         if !effective_preset.horizon_enabled() {
             self.reset_terrain_view();
-            if !self.terrain_lod_supported() {
-                self.commit_pending_terrain_lod_preference();
-            }
             return Ok(false);
         }
         let world = self.active_world.id;
@@ -480,34 +480,48 @@ impl McloneSceneHost {
             .ready_columns()
             .clone();
         if self.terrain_view.is_none() {
-            let vegetation_executor = self
-                .terrain_vegetation_executor_factory
-                .as_ref()
-                .map(|factory| factory())
-                .transpose()
-                .map_err(anyhow::Error::msg)
-                .context("construct scene terrain vegetation executor")?;
-            self.terrain_view = Some(SceneTerrainViewState::new(
-                device,
-                queue,
-                self.color_format,
-                self.render_options.color_profile,
-                &self.mesh_assets,
-                world,
-                seed,
-                topology,
-                TerrainLodPresetDescriptor::for_preset(effective_preset),
-                vegetation_executor,
-            )?);
+            let terrain_view = (|| -> Result<SceneTerrainViewState> {
+                let vegetation_executor = self
+                    .terrain_vegetation_executor_factory
+                    .as_ref()
+                    .map(|factory| factory())
+                    .transpose()
+                    .map_err(anyhow::Error::msg)
+                    .context("construct scene terrain vegetation executor")?;
+                SceneTerrainViewState::new(
+                    device,
+                    queue,
+                    self.color_format,
+                    self.render_options.color_profile,
+                    &self.mesh_assets,
+                    world,
+                    seed,
+                    topology,
+                    TerrainLodPresetDescriptor::for_preset(effective_preset),
+                    vegetation_executor,
+                )
+            })();
+            match terrain_view {
+                Ok(terrain_view) => self.terrain_view = Some(terrain_view),
+                Err(error) => {
+                    self.reject_pending_terrain_lod_preset(error);
+                    return Ok(false);
+                }
+            }
         }
-        self.terrain_view
+        if let Err(error) = self
+            .terrain_view
             .as_mut()
             .expect("enabled terrain view was initialized")
             .reconfigure_lod(
                 device,
                 TerrainLodPresetDescriptor::for_preset(effective_preset),
-            )?;
-        self.commit_pending_terrain_lod_preference();
+            )
+        {
+            let fallback_enabled = self.terrain_lod_applied_preset.horizon_enabled();
+            self.reject_pending_terrain_lod_preset(error);
+            return Ok(fallback_enabled);
+        }
         self.terrain_view
             .as_mut()
             .expect("composed terrain view was initialized")
@@ -543,10 +557,42 @@ impl McloneSceneHost {
         Ok(true)
     }
 
-    fn commit_pending_terrain_lod_preference(&mut self) {
-        let Some(preset) = self.terrain_lod_pending_persistence.take() else {
+    fn accept_ready_terrain_lod_preset(&mut self, effective_preset: TerrainLodPreset) {
+        let ready = self.terrain_view.as_ref().is_some_and(|state| {
+            terrain_lod_ready_for_acceptance(state.diagnostics(), effective_preset)
+        });
+        if !ready {
+            return;
+        }
+        self.terrain_lod_applied_preset = effective_preset;
+        self.commit_pending_terrain_lod_preference(effective_preset);
+    }
+
+    fn reject_pending_terrain_lod_preset(&mut self, error: anyhow::Error) {
+        let rejected = self.terrain_lod_preset_preference;
+        let fallback = self.terrain_lod_applied_preset;
+        let message = format!(
+            "Could not apply {} distant terrain detail; kept {}: {error:#}",
+            rejected.label(),
+            fallback.label(),
+        );
+        log::error!("{message}");
+        self.terrain_lod_preset_preference = fallback;
+        self.terrain_lod_pending_persistence = None;
+        self.terrain_lod_apply_error = Some(message);
+        if !fallback.horizon_enabled() {
+            self.reset_terrain_view();
+        }
+    }
+
+    fn commit_pending_terrain_lod_preference(&mut self, accepted: TerrainLodPreset) {
+        let Some(preset) = self.terrain_lod_pending_persistence else {
             return;
         };
+        if preset != accepted {
+            return;
+        }
+        self.terrain_lod_pending_persistence = None;
         self.terrain_lod_persisted_preference = Some(preset);
         self.persist_graphics_preferences();
     }
@@ -554,6 +600,7 @@ impl McloneSceneHost {
     pub(crate) fn reset_terrain_lod_preference_to_platform_default(&mut self) {
         self.terrain_lod_persisted_preference = None;
         self.terrain_lod_pending_persistence = None;
+        self.terrain_lod_apply_error = None;
         if self.active_world.scene.startup.terrain_lod_preset_explicit {
             return;
         }
@@ -582,6 +629,7 @@ impl McloneSceneHost {
     }
 
     pub(crate) fn reset_terrain_view(&mut self) {
+        self.terrain_lod_applied_preset = TerrainLodPreset::Off;
         if let Some(mut terrain_view) = self.terrain_view.take() {
             terrain_view.shutdown();
             let ready_columns = self
@@ -733,6 +781,13 @@ fn floor_f64_to_i32(value: f64) -> i32 {
     }
 }
 
+fn terrain_lod_ready_for_acceptance(
+    diagnostics: SceneTerrainViewDiagnostics,
+    requested: TerrainLodPreset,
+) -> bool {
+    requested.horizon_enabled() && diagnostics.target_ready && diagnostics.lod_preset == requested
+}
+
 fn terrain_exact_center_ready(ready_columns: &BTreeSet<ChunkPos>, focus: [f64; 3]) -> bool {
     let center =
         ChunkPos::from_block_coords(floor_f64_to_i32(focus[0]), floor_f64_to_i32(focus[2]));
@@ -877,5 +932,34 @@ mod tests {
         assert!(low > 1_084.0);
         assert!(medium > low);
         assert!(high > medium);
+    }
+
+    #[test]
+    fn lod_acceptance_requires_the_requested_preset_to_be_fully_ready() {
+        let ready_low = SceneTerrainViewDiagnostics {
+            lod_preset: TerrainLodPreset::Low,
+            target_ready: true,
+            ..Default::default()
+        };
+
+        assert!(terrain_lod_ready_for_acceptance(
+            ready_low,
+            TerrainLodPreset::Low
+        ));
+        assert!(!terrain_lod_ready_for_acceptance(
+            ready_low,
+            TerrainLodPreset::Medium
+        ));
+        assert!(!terrain_lod_ready_for_acceptance(
+            SceneTerrainViewDiagnostics {
+                target_ready: false,
+                ..ready_low
+            },
+            TerrainLodPreset::Low
+        ));
+        assert!(!terrain_lod_ready_for_acceptance(
+            ready_low,
+            TerrainLodPreset::Off
+        ));
     }
 }
