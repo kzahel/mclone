@@ -12,7 +12,7 @@ const journeys = [
   "long-forest-edge",
   "connected-water-country",
   "quiet-rolling-interior",
-  "upland-to-arid-basin",
+  "mesa-desert",
 ];
 const frames = [
   ["locator", "map", "65536"],

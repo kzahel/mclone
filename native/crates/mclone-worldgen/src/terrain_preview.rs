@@ -38,9 +38,9 @@ pub const TERRAIN_PREVIEW_MAX_SAMPLE_SPACING: u32 = 1_024;
 pub const TERRAIN_PREVIEW_SAMPLE_FLOATS: usize = 32;
 pub const TERRAIN_PREVIEW_MAX_TREE_RECORD_SAMPLE_SPACING: u32 = 4;
 pub const CONTINENTAL_PROXY_MAX_TREE_RECORD_SAMPLE_SPACING: u32 = 16;
-pub const CONTINENTAL_PROXY_VEGETATION_REVISION: u16 = 2;
+pub const CONTINENTAL_PROXY_VEGETATION_REVISION: u16 = 3;
 pub const CONTINENTAL_PROXY_VEGETATION_SOURCE_REVISION: &str =
-    "mclone-continental-proxy-vegetation-v2";
+    "mclone-continental-proxy-vegetation-v3";
 
 pub(crate) const fn uses_continental_proxy_vegetation(profile: TerrainPreviewProfile) -> bool {
     matches!(
@@ -1076,9 +1076,15 @@ fn continental_preview_sample(
         (_, ContinentalSurfaceSubstrate::Stone) => 8.0,
         (_, ContinentalSurfaceSubstrate::Snow) => 8.0,
         (_, ContinentalSurfaceSubstrate::Grass) => 5.0,
-        (_, ContinentalSurfaceSubstrate::Sand) => 1.0,
+        (_, ContinentalSurfaceSubstrate::Sand | ContinentalSurfaceSubstrate::RedSand) => 1.0,
         (_, ContinentalSurfaceSubstrate::Gravel) => 6.0,
         (_, ContinentalSurfaceSubstrate::CoarseSoil) => 6.0,
+        (
+            _,
+            ContinentalSurfaceSubstrate::Terracotta
+            | ContinentalSurfaceSubstrate::OrangeTerracotta
+            | ContinentalSurfaceSubstrate::RedTerracotta,
+        ) => 8.0,
     };
     let base_surface_y = MCLONE_OVERWORLD_SEA_LEVEL as f32 + sample.continental_height;
     TerrainPreviewSample {

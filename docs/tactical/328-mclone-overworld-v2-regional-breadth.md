@@ -233,6 +233,30 @@ preview, terrain-view, and scene tests pass, as does the workspace check.
 - Capture and inspect exact, composed, broad horizon, and live-game pixels.
 - Commit.
 
+Implemented on 2026-08-21 through the shared continental surface, exact
+generator, terrain preview, and deterministic journey contracts. Stable
+8,192-block formation cells now realize bounded asymmetric tables and buttes
+with caprock, upper and lower escarpments, benches, aprons, dry washes,
+alluvial fans, basin flats, and dune pockets. One regional archetype and one
+formation identity carry the same causal facts into material strata,
+open-range, shade-refuge, crossing, and ephemeral-drainage semantics. Exact
+columns lower red sand, red sandstone, and layered terracotta from the same
+surface classification used by every procedural LOD level.
+
+The first broad capture exposed a second representation defect: categorically
+dithering red sand and coarse soil with a continuous 4,096-block field caused
+different clipmap lattices to display large material bands. Mesa ground now
+uses an authored transition-soil to red-sand sequence, reserving distinct
+materials for typed landforms. A permanent 16,384-block cross-LOD scan proves
+formation, archetype, and landform identity at 16, 64, 256, and 1,024-block
+spacing. Inspected 16,384-block map, 8,192-block oblique, and 512-block
+composed captures show one coherent red-sand province, raised mesa geometry,
+and exact layered strata without the rejected categorical bands. The updated
+surface-suite witness is
+`46e0388f147e4efbbd8a190c1b621f97f374bcaf621e1a862f5626ceaeea448f`.
+The shared V2 live path was already proven in Phase 2; the final packaged live
+journey is part of Phase 5.
+
 ### Phase 4: Humid Jungle Vertical Slice
 
 - Add stable humid-jungle regional and canopy identities with one

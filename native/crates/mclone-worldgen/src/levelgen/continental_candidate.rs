@@ -3,7 +3,10 @@ use std::collections::{BTreeMap, VecDeque};
 use mclone_core::{CHUNK_WIDTH, ChunkPos, chunk_min_block_coord};
 
 use crate::{
-    block::{BEDROCK, DIRT, GRASS_BLOCK, GRAVEL, RawBlockId, SAND, SANDSTONE, STONE, WATER},
+    block::{
+        BEDROCK, DIRT, GRASS_BLOCK, GRAVEL, ORANGE_TERRACOTTA, RED_SAND, RED_SANDSTONE,
+        RED_TERRACOTTA, RawBlockId, SAND, SANDSTONE, STONE, TERRACOTTA, WATER,
+    },
     continental_ecoregion::ContinentalEcoregionDescriptor,
     continental_surface::{
         ContinentalSurfacePlan, ContinentalSurfaceSample, ContinentalSurfaceSubstrate,
@@ -18,7 +21,7 @@ use super::{
     mclone_overworld::realize_mclone_tree_occurrences,
 };
 
-pub const CONTINENTAL_CANDIDATE_EXACT_REVISION: u16 = 4;
+pub const CONTINENTAL_CANDIDATE_EXACT_REVISION: u16 = 5;
 const CANDIDATE_MIN_Y: i32 = 0;
 const CANDIDATE_HEIGHT: i32 = 256;
 const CANDIDATE_MAX_SURFACE_Y: i32 = CANDIDATE_HEIGHT - 2;
@@ -269,9 +272,18 @@ pub(crate) fn continental_candidate_stratum(
         ContinentalSurfaceSubstrate::CoarseSoil if depth <= 3 => DIRT,
         ContinentalSurfaceSubstrate::Sand if depth <= 4 => SAND,
         ContinentalSurfaceSubstrate::Sand if depth <= 7 => SANDSTONE,
+        ContinentalSurfaceSubstrate::RedSand if depth <= 4 => RED_SAND,
+        ContinentalSurfaceSubstrate::RedSand if depth <= 8 => RED_SANDSTONE,
         ContinentalSurfaceSubstrate::Gravel if depth <= 2 => GRAVEL,
         ContinentalSurfaceSubstrate::Stone if depth == 0 => STONE,
         ContinentalSurfaceSubstrate::Snow if depth == 0 => substrate.block_id(),
+        ContinentalSurfaceSubstrate::Terracotta if depth <= 2 => TERRACOTTA,
+        ContinentalSurfaceSubstrate::Terracotta if depth <= 7 => ORANGE_TERRACOTTA,
+        ContinentalSurfaceSubstrate::OrangeTerracotta if depth <= 3 => ORANGE_TERRACOTTA,
+        ContinentalSurfaceSubstrate::OrangeTerracotta if depth <= 8 => TERRACOTTA,
+        ContinentalSurfaceSubstrate::RedTerracotta if depth <= 2 => RED_TERRACOTTA,
+        ContinentalSurfaceSubstrate::RedTerracotta if depth <= 5 => ORANGE_TERRACOTTA,
+        ContinentalSurfaceSubstrate::RedTerracotta if depth <= 10 => TERRACOTTA,
         _ => STONE,
     }
 }
@@ -284,7 +296,9 @@ fn sample_index(local_x: i32, local_z: i32) -> usize {
 mod tests {
     use super::*;
     use crate::block::{ACACIA_LOG, AIR, OAK_LOG, SPRUCE_LOG};
-    use crate::continental_surface::ContinentalSurfaceWaterKind;
+    use crate::continental_surface::{
+        ContinentalRegionalArchetype, ContinentalSurfaceWaterKind, MesaLandformKind,
+    };
 
     const SEED: i64 = 12_345;
 
@@ -345,6 +359,36 @@ mod tests {
                 continental_candidate_stratum(east_sample.substrate, 0)
             );
             assert!((west_sample.solid_surface_y - east_sample.solid_surface_y).abs() < 8.0);
+        }
+    }
+
+    #[test]
+    fn mesa_desert_exact_column_realizes_layered_shared_strata() {
+        let generator = ContinentalCandidateExactGenerator::new(SEED);
+        let world_x = 11_264;
+        let world_z = 36_352;
+        let sample = generator.surface().query_point(world_x, world_z).sample;
+        assert_eq!(
+            sample.regional_archetype,
+            ContinentalRegionalArchetype::MesaDesert
+        );
+        assert!(matches!(
+            sample.mesa_landform,
+            MesaLandformKind::CaprockTable | MesaLandformKind::Butte
+        ));
+        assert_eq!(sample.substrate, ContinentalSurfaceSubstrate::RedTerracotta);
+
+        let chunk_x = world_x.div_euclid(CHUNK_WIDTH);
+        let chunk_z = world_z.div_euclid(CHUNK_WIDTH);
+        let local_x = world_x.rem_euclid(CHUNK_WIDTH);
+        let local_z = world_z.rem_euclid(CHUNK_WIDTH);
+        let surface_y = quantized_continental_candidate_surface_y(sample);
+        let chunk = generator.generate_surface_chunk(chunk_x, chunk_z);
+        for depth in 0..=10 {
+            assert_eq!(
+                chunk.block_at_y(local_x, surface_y - depth, local_z).raw(),
+                continental_candidate_stratum(sample.substrate, depth)
+            );
         }
     }
 

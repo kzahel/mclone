@@ -8,7 +8,10 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 use crate::{
-    block::{COARSE_DIRT, GRASS_BLOCK, GRAVEL, SAND, SNOW_BLOCK, STONE},
+    block::{
+        COARSE_DIRT, GRASS_BLOCK, GRAVEL, ORANGE_TERRACOTTA, RED_SAND, RED_TERRACOTTA, SAND,
+        SNOW_BLOCK, STONE, TERRACOTTA,
+    },
     continental_ecoregion::{
         ContinentalEcoregionDescriptor, ContinentalEcoregionError, ContinentalEcoregionPlan,
         ContinentalEcoregionTopology, HabitatRouteKind, LandscapeFeatureId, LandscapePlanDetail,
@@ -28,7 +31,7 @@ use crate::{
     noise::{GradientNoise2d, SeedDomain},
 };
 
-pub const CONTINENTAL_SURFACE_SCHEMA_REVISION: &str = "mclone-continental-surface-v10";
+pub const CONTINENTAL_SURFACE_SCHEMA_REVISION: &str = "mclone-continental-surface-v11";
 pub const CONTINENTAL_SURFACE_SOURCE_LABEL: &str = "continental-ecoregion-candidate-v1";
 pub const CONTINENTAL_SURFACE_FAMILY_COUNT: usize = 5;
 pub const CONTINENTAL_SURFACE_MAX_WINDOW_SAMPLES: usize = 262_144;
@@ -40,6 +43,8 @@ const SHORE_FORM_DOMAIN: SeedDomain = SeedDomain::new(0x6373_7572_7368_6f31);
 const LOCAL_FORM_DOMAIN: SeedDomain = SeedDomain::new(0x6373_7572_6c6f_6331);
 const WALKING_FORM_DOMAIN: SeedDomain = SeedDomain::new(0x6373_7572_7761_6c31);
 const MICRO_FORM_DOMAIN: SeedDomain = SeedDomain::new(0x6373_7572_6d69_6331);
+const MESA_FORMATION_HASH_DOMAIN: u64 = 0x6373_6d65_7361_6631;
+const MESA_FORMATION_CELL_BLOCKS: i32 = 8_192;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[repr(u8)]
@@ -106,6 +111,10 @@ pub enum ContinentalSurfaceSubstrate {
     Stone,
     Snow,
     CoarseSoil,
+    RedSand,
+    Terracotta,
+    OrangeTerracotta,
+    RedTerracotta,
 }
 
 impl ContinentalSurfaceSubstrate {
@@ -117,6 +126,10 @@ impl ContinentalSurfaceSubstrate {
             Self::Stone => STONE,
             Self::Snow => SNOW_BLOCK,
             Self::CoarseSoil => COARSE_DIRT,
+            Self::RedSand => RED_SAND,
+            Self::Terracotta => TERRACOTTA,
+            Self::OrangeTerracotta => ORANGE_TERRACOTTA,
+            Self::RedTerracotta => RED_TERRACOTTA,
         }
     }
 
@@ -128,6 +141,70 @@ impl ContinentalSurfaceSubstrate {
             Self::Stone => "stone",
             Self::Snow => "snow",
             Self::CoarseSoil => "coarse-soil",
+            Self::RedSand => "red-sand",
+            Self::Terracotta => "terracotta",
+            Self::OrangeTerracotta => "orange-terracotta",
+            Self::RedTerracotta => "red-terracotta",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq, Serialize)]
+#[repr(u8)]
+#[serde(rename_all = "kebab-case")]
+pub enum ContinentalRegionalArchetype {
+    #[default]
+    TemperateCatchment,
+    MesaDesert,
+    HumidJungle,
+}
+
+impl ContinentalRegionalArchetype {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::TemperateCatchment => "temperate-catchment",
+            Self::MesaDesert => "mesa-desert",
+            Self::HumidJungle => "humid-jungle",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContinentalFormationId {
+    pub cell_x: i32,
+    pub cell_z: i32,
+    pub hash: u64,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq, Serialize)]
+#[repr(u8)]
+#[serde(rename_all = "kebab-case")]
+pub enum MesaLandformKind {
+    #[default]
+    None,
+    CaprockTable,
+    Escarpment,
+    Bench,
+    Butte,
+    DryWash,
+    AlluvialFan,
+    BasinFlat,
+    DunePocket,
+}
+
+impl MesaLandformKind {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::CaprockTable => "caprock-table",
+            Self::Escarpment => "escarpment",
+            Self::Bench => "bench",
+            Self::Butte => "butte",
+            Self::DryWash => "dry-wash",
+            Self::AlluvialFan => "alluvial-fan",
+            Self::BasinFlat => "basin-flat",
+            Self::DunePocket => "dune-pocket",
         }
     }
 }
@@ -241,8 +318,24 @@ pub struct ContinentalSurfaceSample {
     pub confluence_id: Option<HydrographyFeatureId>,
     pub reach_id: Option<HydrographyFeatureId>,
     pub lake_id: Option<HydrographyFeatureId>,
+    pub formation_id: Option<ContinentalFormationId>,
     pub family_weights: [f32; CONTINENTAL_SURFACE_FAMILY_COUNT],
     pub dominant_family: TerrainCharacterFamily,
+    pub regional_archetype: ContinentalRegionalArchetype,
+    pub regional_archetype_weight: f32,
+    pub mesa_landform: MesaLandformKind,
+    pub mesa_caprock: f32,
+    pub mesa_escarpment: f32,
+    pub mesa_bench: f32,
+    pub mesa_butte: f32,
+    pub dry_wash: f32,
+    pub alluvial_fan: f32,
+    pub basin_flat: f32,
+    pub dune_pocket: f32,
+    pub open_range_habitat: f32,
+    pub shade_refuge_habitat: f32,
+    pub crossing_habitat: f32,
+    pub ephemeral_drainage: f32,
     pub continental_height: f32,
     pub province_height: f32,
     pub hydrologic_height: f32,
@@ -342,6 +435,22 @@ struct ContinentalSurfaceFields {
     local_form: GradientNoise2d,
     walking_form: GradientNoise2d,
     micro_form: GradientNoise2d,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct MesaFormationSample {
+    formation_id: Option<ContinentalFormationId>,
+    regional_weight: f64,
+    height: f64,
+    support: f64,
+    caprock: f64,
+    escarpment: f64,
+    bench: f64,
+    butte: f64,
+    dry_wash: f64,
+    alluvial_fan: f64,
+    basin_flat: f64,
+    dune_pocket: f64,
 }
 
 impl ContinentalSurfaceFields {
@@ -662,6 +771,31 @@ impl ContinentalSurfacePlan {
             arid_weight,
         ]);
         let dominant_family = dominant_family(family_weights);
+        let mesa_desert_weight = (smoothstep(0.62, 0.80, aridity)
+            * smoothstep(0.46, 0.72, leeward_exposure)
+            * land
+            * (1.0 - fluvial_weight * 0.55)
+            * lerp(0.72, 1.0, smoothstep(0.04, 0.52, province_core)))
+        .clamp(0.0, 1.0);
+        let mesa = mesa_formation_sample(
+            self.descriptor,
+            world_x,
+            world_z,
+            mesa_desert_weight,
+            ridge_form,
+            basin_form,
+        );
+        let regional_archetype = if mesa_desert_weight >= 0.34 {
+            ContinentalRegionalArchetype::MesaDesert
+        } else {
+            ContinentalRegionalArchetype::TemperateCatchment
+        };
+        let regional_archetype_weight =
+            if regional_archetype == ContinentalRegionalArchetype::MesaDesert {
+                mesa_desert_weight
+            } else {
+                1.0 - mesa_desert_weight
+            };
 
         let inland = (f64::from(plan.inland_distance_blocks).max(0.0) / 18_000.0).clamp(0.0, 1.0);
         let continental_height = if land < 0.5 {
@@ -688,7 +822,8 @@ impl ContinentalSurfacePlan {
         });
         let arid_shelf_height =
             -unit_field(basin_form) * 7.5 + ridge_form.abs().powf(1.25) * 9.0 + macro_roll * 2.2;
-        let province_height = lerp(base_province_height, arid_shelf_height, arid_weight * 0.72);
+        let province_height =
+            lerp(base_province_height, arid_shelf_height, arid_weight * 0.84) + mesa.height;
 
         let clearing = mosaic.map_or(0.0, |mosaic| f64::from(mosaic.clearing_core));
         let openness = mosaic.map_or(0.0, |mosaic| f64::from(mosaic.openness));
@@ -710,15 +845,18 @@ impl ContinentalSurfacePlan {
         let micro_amplitude = 0.55 + upland_weight * 1.25 + arid_weight * 0.75;
         let micro_quieting =
             (1.0 - clearing * 0.72 - wetland * 0.58).clamp(0.18, 1.0) * hydro_quieting;
-        let local_height = local_form * local_amplitude * broad_quieting
-            + walking_form * walking_amplitude * walking_quieting
+        let mesa_top_quieting =
+            (1.0 - mesa.caprock * 0.88 - mesa.basin_flat * 0.72).clamp(0.08, 1.0);
+        let local_height = local_form * local_amplitude * broad_quieting * mesa_top_quieting
+            + walking_form * walking_amplitude * walking_quieting * (1.0 - mesa.caprock * 0.74)
             + micro_form * micro_amplitude * micro_quieting;
 
         let mut hydrologic_height = 0.0;
         let mut water_level_y = None;
         let mut water_kind = ContinentalSurfaceWaterKind::None;
         let sea_level = f64::from(MCLONE_OVERWORLD_SEA_LEVEL);
-        let land_surface = sea_level + continental_height + province_height + local_height;
+        let land_surface = sea_level + continental_height + province_height + local_height
+            - mesa.dry_wash * (1.5 + mesa.alluvial_fan * 2.5);
         let ocean_floor = sea_level + continental_height;
         let coast_blend = smoothstep(0.42, 0.62, land);
         let mut solid_surface_y = lerp(ocean_floor, land_surface, coast_blend);
@@ -968,7 +1106,7 @@ impl ContinentalSurfacePlan {
         water_level_y = water_level_y.map(|water| water.clamp(2.0, 252.0));
         let display_surface_y =
             water_level_y.map_or(solid_surface_y, |water| water.max(solid_surface_y));
-        let substrate = surface_substrate(
+        let base_substrate = surface_substrate(
             water_kind,
             dominant_family,
             upland_weight,
@@ -986,6 +1124,20 @@ impl ContinentalSurfacePlan {
             }),
             realized_lake_distance,
         );
+        let substrate = mesa_surface_substrate(water_kind, mesa, base_substrate);
+        let mesa_landform = mesa_landform_kind(mesa);
+        let open_range_habitat = (mesa_desert_weight
+            * openness.max(0.72)
+            * (1.0 - mesa.escarpment * 0.88)
+            * (1.0 - mesa.dry_wash * 0.35))
+            .clamp(0.0, 1.0);
+        let shade_refuge_habitat =
+            (mesa_desert_weight * mesa.escarpment * (0.48 + leeward_exposure * 0.52))
+                .clamp(0.0, 1.0);
+        let crossing_habitat =
+            (open_range_habitat * (1.0 - mesa.caprock * 0.55) * (1.0 - mesa.alluvial_fan * 0.18))
+                .clamp(0.0, 1.0);
+        let ephemeral_drainage = (mesa.dry_wash * (1.0 - drainage_permanence)).clamp(0.0, 1.0);
         let forest_edge = (forest_core * (1.0 - forest_core) * 4.0).clamp(0.0, 1.0);
         let (temperature, moisture) = ecoregion.map_or((0.5, 0.5), |ecoregion| {
             (
@@ -1006,8 +1158,24 @@ impl ContinentalSurfacePlan {
             confluence_id: hydrography.and_then(|hydrography| hydrography.confluence_id),
             reach_id: hydrography.and_then(|hydrography| hydrography.reach_id),
             lake_id: hydrography.and_then(|hydrography| hydrography.lake_id),
+            formation_id: mesa.formation_id,
             family_weights: family_weights.map(|weight| weight as f32),
             dominant_family,
+            regional_archetype,
+            regional_archetype_weight: regional_archetype_weight as f32,
+            mesa_landform,
+            mesa_caprock: mesa.caprock as f32,
+            mesa_escarpment: mesa.escarpment as f32,
+            mesa_bench: mesa.bench as f32,
+            mesa_butte: mesa.butte as f32,
+            dry_wash: mesa.dry_wash as f32,
+            alluvial_fan: mesa.alluvial_fan as f32,
+            basin_flat: mesa.basin_flat as f32,
+            dune_pocket: mesa.dune_pocket as f32,
+            open_range_habitat: open_range_habitat as f32,
+            shade_refuge_habitat: shade_refuge_habitat as f32,
+            crossing_habitat: crossing_habitat as f32,
+            ephemeral_drainage: ephemeral_drainage as f32,
             continental_height: continental_height as f32,
             province_height: province_height as f32,
             hydrologic_height: hydrologic_height as f32,
@@ -1131,6 +1299,283 @@ fn river_water_level(plan: &LandscapePlanSample, topology: ContinentalEcoregionT
     let dz = (i64::from(plan.world_z) - continent.center_z) as f64;
     let along = dx * f64::from(continent.axis_x) + dz * f64::from(continent.axis_z);
     (sea_level + 8.0 - along / 5_500.0).clamp(sea_level + 1.0, sea_level + 15.0)
+}
+
+fn mesa_formation_sample(
+    descriptor: ContinentalEcoregionDescriptor,
+    world_x: i32,
+    world_z: i32,
+    regional_weight: f64,
+    ridge_form: f64,
+    basin_form: f64,
+) -> MesaFormationSample {
+    if regional_weight <= 0.001 {
+        return MesaFormationSample::default();
+    }
+
+    let canonical_x = match descriptor.topology {
+        ContinentalEcoregionTopology::Plane => world_x,
+        ContinentalEcoregionTopology::CylinderX { period_blocks } => {
+            world_x.rem_euclid(period_blocks)
+        }
+    };
+    let base_cell_x = canonical_x.div_euclid(MESA_FORMATION_CELL_BLOCKS);
+    let base_cell_z = world_z.div_euclid(MESA_FORMATION_CELL_BLOCKS);
+    let periodic_cells = match descriptor.topology {
+        ContinentalEcoregionTopology::Plane => None,
+        ContinentalEcoregionTopology::CylinderX { period_blocks } => {
+            Some(period_blocks / MESA_FORMATION_CELL_BLOCKS)
+        }
+    };
+    let mut sample = MesaFormationSample::default();
+    sample.regional_weight = regional_weight;
+    let drainage_weight = regional_weight.powf(0.25);
+    let mut ownership_score = f64::NEG_INFINITY;
+
+    for offset_z in -1..=1 {
+        for offset_x in -1..=1 {
+            let cell_x = base_cell_x + offset_x;
+            let cell_z = base_cell_z + offset_z;
+            let identity_cell_x = periodic_cells.map_or(cell_x, |cells| cell_x.rem_euclid(cells));
+            let hash = mesa_coordinate_hash(descriptor.seed, identity_cell_x, cell_z);
+            let center_x = f64::from(
+                cell_x
+                    .saturating_mul(MESA_FORMATION_CELL_BLOCKS)
+                    .saturating_add(MESA_FORMATION_CELL_BLOCKS / 2),
+            ) + mesa_signed_hash_unit(hash, 7) * 1_350.0;
+            let center_z = f64::from(
+                cell_z
+                    .saturating_mul(MESA_FORMATION_CELL_BLOCKS)
+                    .saturating_add(MESA_FORMATION_CELL_BLOCKS / 2),
+            ) + mesa_signed_hash_unit(hash, 23) * 1_350.0;
+            let dx = f64::from(canonical_x) - center_x;
+            let dz = f64::from(world_z) - center_z;
+            let angle = mesa_hash_unit(hash, 39) * std::f64::consts::TAU;
+            let axis_x = angle.cos();
+            let axis_z = angle.sin();
+            let along = dx * axis_x + dz * axis_z;
+            let across = -dx * axis_z + dz * axis_x;
+            let is_butte = mesa_hash_unit(hash, 51) < 0.26;
+            let radius_along = if is_butte {
+                760.0 + mesa_hash_unit(hash, 11) * 620.0
+            } else {
+                1_650.0 + mesa_hash_unit(hash, 11) * 1_250.0
+            };
+            let radius_across = if is_butte {
+                620.0 + mesa_hash_unit(hash, 29) * 460.0
+            } else {
+                1_080.0 + mesa_hash_unit(hash, 29) * 1_050.0
+            };
+            let asymmetric_along = if along >= 0.0 {
+                along / (radius_along * 1.18)
+            } else {
+                along / (radius_along * 0.86)
+            };
+            let base_radial =
+                (asymmetric_along * asymmetric_along + (across / radius_across).powi(2)).sqrt();
+            let polar = (across / radius_across).atan2(asymmetric_along);
+            let edge_phase = mesa_hash_unit(hash, 3) * std::f64::consts::TAU;
+            let edge_variation = (polar * 3.0 + edge_phase).sin() * 0.075
+                + (polar * 5.0 - edge_phase * 0.73).sin() * 0.038
+                + ridge_form * 0.055;
+            let radial = base_radial + edge_variation;
+            let caprock = inverse_smoothstep(0.53, 0.64, radial);
+            let upper_escarpment =
+                smoothstep(0.50, 0.60, radial) * inverse_smoothstep(0.69, 0.78, radial);
+            let bench = smoothstep(0.66, 0.74, radial) * inverse_smoothstep(0.88, 0.98, radial);
+            let lower_escarpment =
+                smoothstep(0.86, 0.94, radial) * inverse_smoothstep(1.06, 1.18, radial);
+            let support = inverse_smoothstep(1.12, 1.42, radial);
+            let butte = if is_butte {
+                inverse_smoothstep(0.36, 1.08, radial)
+            } else {
+                0.0
+            };
+            let caprock_lift = if is_butte { 34.0 } else { 49.0 };
+            let bench_lift = if is_butte { 13.0 } else { 22.0 };
+            let apron_lift = if is_butte { 3.0 } else { 6.0 };
+            let formation_height = caprock_lift * inverse_smoothstep(0.57, 0.64, radial)
+                + bench_lift * inverse_smoothstep(0.91, 1.00, radial)
+                + apron_lift * inverse_smoothstep(1.20, 1.42, radial);
+
+            let wash_angle = angle
+                + 0.58
+                + mesa_signed_hash_unit(hash, 17) * 0.42
+                + if along >= 0.0 { 0.12 } else { -0.12 };
+            let drainage_slot_x = (descriptor.seed as i32).rem_euclid(2);
+            let drainage_slot_z = ((descriptor.seed >> 1) as i32).rem_euclid(2);
+            let main_wash_enabled = identity_cell_x.rem_euclid(2) == drainage_slot_x
+                && cell_z.rem_euclid(2) == drainage_slot_z;
+            let branch_wash_enabled = main_wash_enabled && mesa_hash_unit(hash, 35) < 0.32;
+            let wash = if main_wash_enabled {
+                mesa_wash_influence(dx, dz, wash_angle, radius_along, hash)
+            } else {
+                0.0
+            };
+            let branch = if branch_wash_enabled {
+                mesa_wash_influence(
+                    dx,
+                    dz,
+                    wash_angle + mesa_signed_hash_unit(hash, 47).signum() * 0.52,
+                    radius_along * 0.82,
+                    hash.rotate_left(19),
+                ) * 0.72
+            } else {
+                0.0
+            };
+            let dry_wash = wash.max(branch);
+            let fan = if main_wash_enabled {
+                mesa_alluvial_fan_influence(dx, dz, wash_angle, radius_along, hash)
+            } else {
+                0.0
+            }
+            .max(if branch_wash_enabled {
+                mesa_alluvial_fan_influence(
+                    dx,
+                    dz,
+                    wash_angle + mesa_signed_hash_unit(hash, 47).signum() * 0.52,
+                    radius_along * 0.82,
+                    hash.rotate_left(19),
+                ) * 0.72
+            } else {
+                0.0
+            });
+            let formation_id = ContinentalFormationId {
+                cell_x: identity_cell_x,
+                cell_z,
+                hash,
+            };
+            let candidate_score = support.max(dry_wash * 0.92).max(fan * 0.84);
+            if candidate_score > ownership_score {
+                ownership_score = candidate_score;
+                sample.formation_id = Some(formation_id);
+            }
+            sample.height = sample.height.max(formation_height * regional_weight);
+            sample.support = sample.support.max(support * regional_weight);
+            sample.caprock = sample.caprock.max(caprock * regional_weight);
+            sample.escarpment = sample
+                .escarpment
+                .max(upper_escarpment.max(lower_escarpment) * regional_weight);
+            sample.bench = sample.bench.max(bench * regional_weight);
+            sample.butte = sample.butte.max(butte * regional_weight);
+            sample.dry_wash = sample.dry_wash.max(dry_wash * drainage_weight);
+            sample.alluvial_fan = sample.alluvial_fan.max(fan * drainage_weight);
+        }
+    }
+
+    sample.basin_flat = (regional_weight
+        * (1.0 - sample.support * 0.86)
+        * smoothstep(0.54, 0.80, unit_field(basin_form)))
+    .clamp(0.0, 1.0);
+    sample.dune_pocket = (sample.basin_flat
+        * smoothstep(0.46, 0.78, unit_field(-ridge_form))
+        * (1.0 - sample.dry_wash * 0.92)
+        * (1.0 - sample.alluvial_fan * 0.68))
+        .clamp(0.0, 1.0);
+    if ownership_score < 0.02 || regional_weight < 0.12 {
+        sample.formation_id = None;
+    }
+    sample
+}
+
+fn mesa_wash_influence(dx: f64, dz: f64, angle: f64, source_radius: f64, hash: u64) -> f64 {
+    let direction_x = angle.cos();
+    let direction_z = angle.sin();
+    let along = dx * direction_x + dz * direction_z;
+    let across = -dx * direction_z + dz * direction_x;
+    let start = source_radius * 0.54;
+    let end = source_radius + 2_900.0 + mesa_hash_unit(hash, 31) * 1_350.0;
+    let progress = ((along - start) / (end - start)).clamp(0.0, 1.0);
+    let meander = (progress * std::f64::consts::TAU * 1.35
+        + mesa_hash_unit(hash, 13) * std::f64::consts::TAU)
+        .sin()
+        * (72.0 + progress * 210.0)
+        + mesa_signed_hash_unit(hash, 57) * progress.powi(2) * 820.0;
+    let width = 30.0 + progress * (72.0 + mesa_hash_unit(hash, 43) * 64.0);
+    inverse_smoothstep(width, width + 50.0, (across - meander).abs())
+        * smoothstep(start - 180.0, start + 180.0, along)
+        * inverse_smoothstep(end - 220.0, end + 260.0, along)
+}
+
+fn mesa_alluvial_fan_influence(dx: f64, dz: f64, angle: f64, source_radius: f64, hash: u64) -> f64 {
+    let direction_x = angle.cos();
+    let direction_z = angle.sin();
+    let along = dx * direction_x + dz * direction_z;
+    let across = (-dx * direction_z + dz * direction_x).abs();
+    let fan_start = source_radius + 1_950.0 + mesa_hash_unit(hash, 31) * 900.0;
+    let fan_length = 1_050.0 + mesa_hash_unit(hash, 21) * 1_150.0;
+    let progress = ((along - fan_start) / fan_length).clamp(0.0, 1.0);
+    let width = 75.0 + progress * (420.0 + mesa_hash_unit(hash, 55) * 380.0);
+    inverse_smoothstep(width * 0.72, width, across)
+        * smoothstep(fan_start - 120.0, fan_start + 180.0, along)
+        * inverse_smoothstep(fan_start + fan_length * 0.78, fan_start + fan_length, along)
+}
+
+fn mesa_surface_substrate(
+    water: ContinentalSurfaceWaterKind,
+    mesa: MesaFormationSample,
+    fallback: ContinentalSurfaceSubstrate,
+) -> ContinentalSurfaceSubstrate {
+    if water != ContinentalSurfaceWaterKind::None {
+        return fallback;
+    }
+    if mesa.dry_wash > 0.28 {
+        ContinentalSurfaceSubstrate::Gravel
+    } else if mesa.alluvial_fan > 0.42 {
+        ContinentalSurfaceSubstrate::CoarseSoil
+    } else if mesa.butte > 0.42 || mesa.caprock > 0.48 {
+        ContinentalSurfaceSubstrate::RedTerracotta
+    } else if mesa.escarpment > 0.28 {
+        ContinentalSurfaceSubstrate::OrangeTerracotta
+    } else if mesa.bench > 0.30 {
+        ContinentalSurfaceSubstrate::Terracotta
+    } else if mesa.dune_pocket > 0.30 || mesa.basin_flat > 0.54 || mesa.regional_weight > 0.46 {
+        ContinentalSurfaceSubstrate::RedSand
+    } else if mesa.regional_weight > 0.28 {
+        ContinentalSurfaceSubstrate::CoarseSoil
+    } else {
+        fallback
+    }
+}
+
+fn mesa_landform_kind(mesa: MesaFormationSample) -> MesaLandformKind {
+    if mesa.dry_wash > 0.42 {
+        MesaLandformKind::DryWash
+    } else if mesa.alluvial_fan > 0.42 {
+        MesaLandformKind::AlluvialFan
+    } else if mesa.butte > 0.38 {
+        MesaLandformKind::Butte
+    } else if mesa.caprock > 0.42 {
+        MesaLandformKind::CaprockTable
+    } else if mesa.escarpment > 0.30 {
+        MesaLandformKind::Escarpment
+    } else if mesa.bench > 0.32 {
+        MesaLandformKind::Bench
+    } else if mesa.dune_pocket > 0.32 {
+        MesaLandformKind::DunePocket
+    } else if mesa.basin_flat > 0.42 {
+        MesaLandformKind::BasinFlat
+    } else {
+        MesaLandformKind::None
+    }
+}
+
+fn mesa_coordinate_hash(seed: i64, cell_x: i32, cell_z: i32) -> u64 {
+    let mut value = (seed as u64)
+        ^ MESA_FORMATION_HASH_DOMAIN
+        ^ (cell_x as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15)
+        ^ (cell_z as u64).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    value = (value ^ (value >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    value = (value ^ (value >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    value ^ (value >> 31)
+}
+
+fn mesa_hash_unit(hash: u64, shift: u32) -> f64 {
+    f64::from(((hash.rotate_right(shift) >> 40) & 0x00ff_ffff) as u32) / f64::from(0x00ff_ffff_u32)
+}
+
+fn mesa_signed_hash_unit(hash: u64, shift: u32) -> f64 {
+    mesa_hash_unit(hash, shift) * 2.0 - 1.0
 }
 
 fn surface_substrate(
@@ -1316,6 +1761,14 @@ fn semantic_sha256(
         ] {
             digest.update(id.map_or(0, |id| id.hash).to_le_bytes());
         }
+        if let Some(formation) = sample.formation_id {
+            digest.update([1]);
+            digest.update(formation.cell_x.to_le_bytes());
+            digest.update(formation.cell_z.to_le_bytes());
+            digest.update(formation.hash.to_le_bytes());
+        } else {
+            digest.update([0]);
+        }
         for weight in sample.family_weights {
             digest.update(weight.to_bits().to_le_bytes());
         }
@@ -1328,6 +1781,19 @@ fn semantic_sha256(
             sample.solid_surface_y,
             sample.display_surface_y,
             sample.water_level_y.unwrap_or(f32::NAN),
+            sample.regional_archetype_weight,
+            sample.mesa_caprock,
+            sample.mesa_escarpment,
+            sample.mesa_bench,
+            sample.mesa_butte,
+            sample.dry_wash,
+            sample.alluvial_fan,
+            sample.basin_flat,
+            sample.dune_pocket,
+            sample.open_range_habitat,
+            sample.shade_refuge_habitat,
+            sample.crossing_habitat,
+            sample.ephemeral_drainage,
             sample.openness,
             sample.forest_core,
             sample.forest_edge,
@@ -1354,6 +1820,8 @@ fn semantic_sha256(
         digest.update([
             sample.water_kind as u8,
             sample.substrate as u8,
+            sample.regional_archetype as u8,
+            sample.mesa_landform as u8,
             sample.reach_kind.map_or(u8::MAX, |kind| kind as u8),
             sample.reach_order,
             sample.shore_intent as u8,
@@ -1427,6 +1895,11 @@ mod tests {
             assert_eq!(base.family_weights, lifted.family_weights);
             assert_eq!(base.water_kind, lifted.water_kind);
             assert_eq!(base.substrate, lifted.substrate);
+            assert_eq!(base.formation_id, lifted.formation_id);
+            assert_eq!(base.regional_archetype, lifted.regional_archetype);
+            assert_eq!(base.mesa_landform, lifted.mesa_landform);
+            assert_eq!(base.mesa_caprock, lifted.mesa_caprock);
+            assert_eq!(base.dry_wash, lifted.dry_wash);
             assert_eq!(base.continent_id, lifted.continent_id);
             assert_eq!(base.province_id, lifted.province_id);
             assert_eq!(base.ecoregion_id, lifted.ecoregion_id);
@@ -1482,6 +1955,154 @@ mod tests {
             sample.dominant_family,
             TerrainCharacterFamily::AridRainShadow
         );
+    }
+
+    #[test]
+    fn mesa_desert_is_one_causal_landform_material_and_habitat_bundle() {
+        let surface =
+            ContinentalSurfacePlan::new(ContinentalEcoregionDescriptor::plane(12_345)).unwrap();
+        let broad = surface
+            .query_window(ContinentalSurfaceWindowRequest::new(
+                -65_536, -65_536, 257, 257, 512,
+            ))
+            .unwrap();
+        let mesa = broad
+            .samples
+            .iter()
+            .copied()
+            .filter(|sample| {
+                sample.regional_archetype == ContinentalRegionalArchetype::MesaDesert
+                    && sample.formation_id.is_some_and(|formation| {
+                        formation.cell_x.rem_euclid(2) == 12_345_i32.rem_euclid(2)
+                            && formation.cell_z.rem_euclid(2)
+                                == ((12_345_i64 >> 1) as i32).rem_euclid(2)
+                    })
+            })
+            .max_by(|left, right| {
+                (left.mesa_caprock + left.mesa_butte)
+                    .total_cmp(&(right.mesa_caprock + right.mesa_butte))
+            })
+            .expect("bounded review scan contains a mesa-desert formation");
+
+        assert!(
+            mesa.regional_archetype_weight > 0.55,
+            "selected mesa sample={mesa:?}"
+        );
+        assert!(mesa.formation_id.is_some());
+        assert!(mesa.mesa_caprock.max(mesa.mesa_butte) > 0.55);
+        assert!(matches!(
+            mesa.substrate,
+            ContinentalSurfaceSubstrate::RedTerracotta
+                | ContinentalSurfaceSubstrate::OrangeTerracotta
+                | ContinentalSurfaceSubstrate::Terracotta
+        ));
+        assert!(mesa.open_range_habitat > 0.35);
+        assert!(mesa.crossing_habitat > 0.20);
+        assert!(mesa.drainage_permanence < 0.42);
+
+        let local = surface
+            .query_window(ContinentalSurfaceWindowRequest::new(
+                mesa.world_x - 8_192,
+                mesa.world_z - 8_192,
+                257,
+                257,
+                64,
+            ))
+            .unwrap();
+        let wash = local
+            .samples
+            .iter()
+            .copied()
+            .max_by(|left, right| left.dry_wash.total_cmp(&right.dry_wash))
+            .unwrap();
+        let fan = local
+            .samples
+            .iter()
+            .copied()
+            .max_by(|left, right| left.alluvial_fan.total_cmp(&right.alluvial_fan))
+            .unwrap();
+        let refuge = local
+            .samples
+            .iter()
+            .copied()
+            .max_by(|left, right| {
+                left.shade_refuge_habitat
+                    .total_cmp(&right.shade_refuge_habitat)
+            })
+            .unwrap();
+        assert!(wash.dry_wash > 0.42, "strongest wash={wash:?}");
+        assert!(wash.ephemeral_drainage > 0.36);
+        assert_eq!(wash.mesa_landform, MesaLandformKind::DryWash);
+        assert!(fan.alluvial_fan > 0.24, "strongest fan={fan:?}");
+        assert!(refuge.shade_refuge_habitat > 0.32);
+
+        for exact in local.samples.iter().step_by(257) {
+            for spacing in [16, 64, 256, 1_024] {
+                let lod = surface
+                    .query_lod_window(ContinentalSurfaceWindowRequest::new(
+                        exact.world_x,
+                        exact.world_z,
+                        1,
+                        1,
+                        spacing,
+                    ))
+                    .unwrap()
+                    .samples[0];
+                if exact.regional_archetype == ContinentalRegionalArchetype::MesaDesert
+                    || lod.regional_archetype == ContinentalRegionalArchetype::MesaDesert
+                {
+                    assert_eq!(lod.substrate, exact.substrate);
+                    assert_eq!(lod.mesa_landform, exact.mesa_landform);
+                }
+            }
+        }
+
+        for spacing in [1, 4, 16, 64, 256, 1_024] {
+            let lod = surface
+                .query_lod_window(ContinentalSurfaceWindowRequest::new(
+                    mesa.world_x,
+                    mesa.world_z,
+                    1,
+                    1,
+                    spacing,
+                ))
+                .unwrap()
+                .samples[0];
+            assert_eq!(lod.formation_id, mesa.formation_id);
+            assert_eq!(lod.regional_archetype, mesa.regional_archetype);
+            assert_eq!(lod.mesa_landform, mesa.mesa_landform);
+            assert!((lod.solid_surface_y - mesa.solid_surface_y).abs() < 9.0);
+        }
+    }
+
+    #[test]
+    fn mesa_broad_identity_is_lod_stable() {
+        let surface =
+            ContinentalSurfacePlan::new(ContinentalEcoregionDescriptor::plane(12_345)).unwrap();
+        for spacing in [16, 64, 256, 1_024] {
+            let mut maximum_height_delta = 0.0_f32;
+            for z in (46_080 - 8_192..=46_080 + 8_192).step_by(256) {
+                for x in (-12_800 - 8_192..=-12_800 + 8_192).step_by(256) {
+                    let exact = surface.query_point(x, z).sample;
+                    let lod = surface
+                        .query_lod_window(ContinentalSurfaceWindowRequest::new(x, z, 1, 1, spacing))
+                        .unwrap()
+                        .samples[0];
+                    assert_eq!(exact.regional_archetype, lod.regional_archetype);
+                    assert_eq!(exact.formation_id, lod.formation_id);
+                    assert_eq!(exact.mesa_landform, lod.mesa_landform);
+                    if exact.water_kind == lod.water_kind {
+                        assert_eq!(exact.substrate, lod.substrate);
+                    }
+                    maximum_height_delta = maximum_height_delta
+                        .max((exact.solid_surface_y - lod.solid_surface_y).abs());
+                }
+            }
+            assert!(
+                maximum_height_delta < 14.0,
+                "spacing {spacing}: {maximum_height_delta}"
+            );
+        }
     }
 
     #[test]

@@ -116,8 +116,8 @@ pub fn run_continental_exact_review(seed: i64) -> Result<ContinentalExactReviewR
         .find(|checkpoint| checkpoint.water_kind != ContinentalSurfaceWaterKind::None)
         .ok_or_else(|| "connected-water journey has no water-owning checkpoint".to_owned())?;
     let arid = catalog
-        .journey(ContinentalSurfaceJourneyKind::UplandToAridBasin)
-        .ok_or_else(|| "missing upland-to-arid journey".to_owned())?;
+        .journey(ContinentalSurfaceJourneyKind::MesaDesert)
+        .ok_or_else(|| "missing mesa-desert journey".to_owned())?;
 
     let generator = ContinentalCandidateExactGenerator::new(seed);
     let water_review = select_water_bank_review_point(

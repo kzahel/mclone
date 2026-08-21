@@ -8,14 +8,15 @@ use crate::{
         ContinentalEcoregionDescriptor, ContinentalEcoregionError, LandscapeFeatureId,
     },
     continental_surface::{
-        CONTINENTAL_SURFACE_FAMILY_COUNT, ContinentalSurfaceConstructionCounts,
-        ContinentalSurfacePlan, ContinentalSurfaceSample, ContinentalSurfaceSubstrate,
-        ContinentalSurfaceWaterKind, ContinentalSurfaceWindowRequest, TerrainCharacterFamily,
+        CONTINENTAL_SURFACE_FAMILY_COUNT, ContinentalRegionalArchetype,
+        ContinentalSurfaceConstructionCounts, ContinentalSurfacePlan, ContinentalSurfaceSample,
+        ContinentalSurfaceSubstrate, ContinentalSurfaceWaterKind, ContinentalSurfaceWindowRequest,
+        MesaLandformKind, TerrainCharacterFamily,
     },
 };
 
 pub const CONTINENTAL_SURFACE_JOURNEY_SCHEMA_REVISION: &str =
-    "mclone-continental-surface-journeys-v1";
+    "mclone-continental-surface-journeys-v2";
 pub const CONTINENTAL_SURFACE_JOURNEY_SCAN_BLOCKS: u32 = 131_072;
 pub const CONTINENTAL_SURFACE_JOURNEY_SCAN_STEP_BLOCKS: u32 = 512;
 pub const CONTINENTAL_SURFACE_JOURNEY_SCAN_SAMPLES_PER_AXIS: u32 = 257;
@@ -31,7 +32,7 @@ pub enum ContinentalSurfaceJourneyKind {
     LongForestEdge,
     ConnectedWaterCountry,
     QuietRollingInterior,
-    UplandToAridBasin,
+    MesaDesert,
 }
 
 impl ContinentalSurfaceJourneyKind {
@@ -41,7 +42,7 @@ impl ContinentalSurfaceJourneyKind {
         Self::LongForestEdge,
         Self::ConnectedWaterCountry,
         Self::QuietRollingInterior,
-        Self::UplandToAridBasin,
+        Self::MesaDesert,
     ];
 
     pub const fn label(self) -> &'static str {
@@ -51,7 +52,7 @@ impl ContinentalSurfaceJourneyKind {
             Self::LongForestEdge => "long-forest-edge",
             Self::ConnectedWaterCountry => "connected-water-country",
             Self::QuietRollingInterior => "quiet-rolling-interior",
-            Self::UplandToAridBasin => "upland-to-arid-basin",
+            Self::MesaDesert => "mesa-desert",
         }
     }
 
@@ -62,7 +63,7 @@ impl ContinentalSurfaceJourneyKind {
             Self::LongForestEdge => "Long forest-edge traverse",
             Self::ConnectedWaterCountry => "Connected river, wetland, and lake country",
             Self::QuietRollingInterior => "Quiet rolling ordinary interior",
-            Self::UplandToAridBasin => "Upland descending into arid basin",
+            Self::MesaDesert => "Mesa desert tables, escarpments, washes, and basin",
         }
     }
 
@@ -120,6 +121,12 @@ pub struct ContinentalJourneyCheckpoint {
     pub forest_core: f32,
     pub wetland: f32,
     pub aridity: f32,
+    pub regional_archetype: ContinentalRegionalArchetype,
+    pub mesa_landform: MesaLandformKind,
+    pub mesa_caprock: f32,
+    pub mesa_escarpment: f32,
+    pub dry_wash: f32,
+    pub alluvial_fan: f32,
     pub plan: ContinentalJourneyPlanIdentity,
 }
 
@@ -395,16 +402,49 @@ fn journey_score(
                 - water_penalty * 2.0
                 - center.aridity * 0.5
         }
-        ContinentalSurfaceJourneyKind::UplandToAridBasin => {
-            let descent =
-                (start.solid_surface_y - late_end.solid_surface_y).clamp(0.0, 96.0) / 48.0;
-            family(start, TerrainCharacterFamily::UplandAndEscarpment) * 2.0
-                + family(inner_start, TerrainCharacterFamily::UplandAndEscarpment)
-                + family(late_end, TerrainCharacterFamily::AridRainShadow) * 2.2
-                + family(inner_end, TerrainCharacterFamily::AridRainShadow)
-                + late_end.leeward_exposure
-                + late_end.aridity
-                + descent
+        ContinentalSurfaceJourneyKind::MesaDesert => {
+            let points = [start, inner_start, center, inner_end, late_end, end];
+            let mesa = points
+                .iter()
+                .map(|sample| {
+                    sample.mesa_caprock
+                        + sample.mesa_escarpment
+                        + sample.mesa_bench * 0.5
+                        + sample.mesa_butte * 0.8
+                })
+                .fold(0.0_f32, f32::max);
+            let centered_mesa = center.mesa_caprock * 0.35
+                + center.mesa_escarpment * 2.4
+                + center.mesa_bench * 0.55
+                + center.mesa_butte * 0.8;
+            let drainage = points
+                .iter()
+                .map(|sample| sample.dry_wash.max(sample.alluvial_fan))
+                .fold(0.0_f32, f32::max);
+            let high = points
+                .iter()
+                .map(|sample| sample.solid_surface_y)
+                .fold(f32::NEG_INFINITY, f32::max);
+            let low = points
+                .iter()
+                .map(|sample| sample.solid_surface_y)
+                .fold(f32::INFINITY, f32::min);
+            family(center, TerrainCharacterFamily::AridRainShadow) * 1.6
+                + points
+                    .iter()
+                    .map(|sample| {
+                        f32::from(
+                            sample.regional_archetype == ContinentalRegionalArchetype::MesaDesert,
+                        ) * sample.regional_archetype_weight
+                    })
+                    .sum::<f32>()
+                    / points.len() as f32
+                    * 2.4
+                + mesa * 2.8
+                + centered_mesa * 4.2
+                + drainage * 1.6
+                + ((high - low) / 54.0).clamp(0.0, 1.5)
+                + center.aridity * 0.6
         }
     }
 }
@@ -417,7 +457,7 @@ fn build_receipt(
     let (dx, dz) = DIRECTIONS[selected.direction_index];
     let (start_step, end_step) = match kind {
         ContinentalSurfaceJourneyKind::ClearingBetweenForestCores => (-8, 16),
-        ContinentalSurfaceJourneyKind::UplandToAridBasin => (-16, 12),
+        ContinentalSurfaceJourneyKind::MesaDesert => (-16, 16),
         _ => (-JOURNEY_HALF_STEPS, JOURNEY_HALF_STEPS),
     };
     let sequence = (start_step..=end_step)
@@ -472,6 +512,12 @@ fn build_receipt(
             forest_core: sample.forest_core,
             wetland: sample.wetland,
             aridity: sample.aridity,
+            regional_archetype: sample.regional_archetype,
+            mesa_landform: sample.mesa_landform,
+            mesa_caprock: sample.mesa_caprock,
+            mesa_escarpment: sample.mesa_escarpment,
+            dry_wash: sample.dry_wash,
+            alluvial_fan: sample.alluvial_fan,
             plan: (*sample).into(),
         })
         .collect::<Vec<_>>();
@@ -625,10 +671,13 @@ mod tests {
             rolling.family_weight_mean[TerrainCharacterFamily::RollingInterior as usize] > 0.45
         );
         let arid = catalog
-            .journey(ContinentalSurfaceJourneyKind::UplandToAridBasin)
+            .journey(ContinentalSurfaceJourneyKind::MesaDesert)
             .unwrap();
-        assert!(arid.family_weight_max[TerrainCharacterFamily::UplandAndEscarpment as usize] > 0.4);
-        assert!(arid.family_weight_max[TerrainCharacterFamily::AridRainShadow as usize] > 0.35);
+        assert!(arid.checkpoints.iter().any(|point| {
+            point.regional_archetype == ContinentalRegionalArchetype::MesaDesert
+                && point.mesa_landform != MesaLandformKind::None
+                && point.aridity > 0.68
+        }));
     }
 
     #[test]

@@ -98,7 +98,13 @@ binary tag 9 and an unbounded-plane topology contract; the detached candidate
 identity remains only as a review alias for the same exact surface. A native
 live frame proves exact chunks and the procedural horizon compose under the
 V2 identity, including the independently dispatched continental vegetation
-source. Mesa-desert and humid-jungle breadth remain the active work.
+source. The mesa-desert slice is now implemented: stable formation cells
+create tables, buttes, stepped escarpments, washes, fans, basin flats,
+layered exact strata, and ecology-facing open-range/refuge/crossing facts from
+one causal surface record. Broad cross-LOD scans preserve regional and formation
+identity through 1,024-block sampling. Pixel review also rejected and removed
+categorical material dithering that had turned a smooth 4 km field into
+clipmap-aligned color bands. Humid jungle is the remaining breadth slice.
 Mclone should combine
 top-down continental and ecoregional planning with bottom-up procedural
 realization so the Overworld contains large, recognizable, causally related
@@ -465,8 +471,11 @@ climate, water, and relief effects through symmetric neutral bands. Local
 clearing and vegetation lattices are absolute-coordinate facts, not child
 hashes of an ecoregion owner. Broad plan and surface noise uses warped gradient
 fields, and the procedural preview filters sub-grid surface frequencies by LOD
-spacing while spacing one remains exact. The next step is the separately
-persisted `mclone-overworld-v2` integration; V1 remains default and unchanged.
+spacing while spacing one remains exact. The separately persisted
+`mclone-overworld-v2` integration and the first mesa-desert archetype are now
+live; V1 remains default and unchanged. The next content step is a humid-jungle
+archetype using the same direct, spacing-stable regional contract rather than
+another nearest-biome label.
 
 ## Acceptance
 

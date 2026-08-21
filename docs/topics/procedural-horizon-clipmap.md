@@ -61,6 +61,15 @@ scene composition path; it does not alias V1. Remote sessions and incompatible
 generation profiles project the effective setting to Off while retaining the
 user's desired preference.
 
+The continental source filters only frequencies below each display lattice;
+regional archetype, formation, water, and typed landform identities remain
+direct world-coordinate facts at every level. Categorical surface materials
+must likewise follow broad authored regions or typed formations. Dithering a
+material decision with a continuous field can alias differently at adjacent
+clipmap spacings even when same-coordinate samples agree, producing visible
+ring-sized bands; the mesa-desert slice removed that pattern and protects its
+broad identity with a 16,384-block cross-LOD scan.
+
 ## Regular Clipmap And Presets
 
 Every enabled level is a four-by-four toroidal grid of 64-cell terrain tiles.

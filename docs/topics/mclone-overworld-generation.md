@@ -34,6 +34,10 @@ spawn, SQLite reopen, terrain-view, scene, native, and Web startup contracts.
 Its shared display label remains experimental, its topology is currently the
 unbounded plane, and its exact output is the same continental source used by
 the procedural horizon. V1 remains the unchanged new-world default.
+V2's first additional regional archetype is a mesa desert with formation-owned
+tables, stepped escarpments, washes, fans, red-sand basins, exact terracotta
+strata, and ecology-facing habitat facts. Its broad identities remain stable
+through coarse procedural sampling; humid jungle is the next archetype.
 Its deterministic spawn policy keeps the existing exact dry-surface gate and
 adds a 129-by-129-block sparse neighborhood survey, so the first locally safe
 chunk beside a dominant ocean is no longer accepted as the world entry region.
