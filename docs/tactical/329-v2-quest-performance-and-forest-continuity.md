@@ -1,9 +1,9 @@
 # Tactical 329: V2 Quest Performance And Forest Continuity
 
-Status: **active 2026-08-21. Tactical committed before implementation. The
-matched physical Quest baseline identifies an invalid settle gate, a 12.6x V2
-cold-convergence gap, and forest coverage that collapses when proxy-tree
-records stop.**
+Status: **implemented to Human Review F on 2026-08-21. V1 remains the default;
+V2 retains forest mass beyond individual proxies, reaches a complete Low/RD8
+Quest view at V1-scale cold-settle time, and remains experimental pending
+human pixel review.**
 
 Topic: `procedural-horizon-clipmap`
 Topic: `continental-ecoregion-planning`
@@ -300,3 +300,61 @@ harness now emits a separate compact `PERF_HORIZON_READINESS` receipt with the
 expected/start/latest exact footprint and the exact-center unavailable-frame
 count. Moving acceptance uses that compact receipt rather than inferring
 readiness from a truncated diagnostic.
+
+## Final Quest A/B
+
+The final release APK used the baseline Quest 3 configuration unchanged:
+72 Hz, `1680x1760` per eye, foveation Off, per-eye frame overlap, Low Distant
+Terrain, RD8, seed `12345`, and the humid-jungle center near
+`(10240, -54784)`. Every lane began with all 289 requested exact columns, an
+exact-ready center, all 96 horizon slots, and drained bounded work.
+
+| Lane | Cold settle | App-work p50 / p95 | Over period | Meta app GPU |
+|---|---:|---:|---:|---:|
+| V1 stationary | `10.003 s` | `10.850 / 12.119 ms` | `0.4%` | `5.617 ms` |
+| V2 stationary | `10.004 s` | `9.803 / 12.761 ms` | `2.2%` | `6.562 ms` |
+| V1 settled orbit | `10.001 s` | `9.926 / 10.499 ms` | `0.7%` | not sampled |
+| V2 settled orbit | `10.005 s` | `8.396 / 8.957 ms` | `1.7%` | not sampled |
+
+V2 stationary p95 is 5.3% above the matched V1 control and meets the 10%
+target. Cold convergence falls from `133.748 s` to `10.004 s`, meeting the 2x
+target at effectively 1.00x V1. The V2 canopy accounts for 33 visible tiles,
+8,448 cells, and 101,376 submitted vertices at this view. It creates no
+vegetation jobs or instance bytes; V1 reports zero canopy work.
+
+Both stationary samples contain one approximately 9.5-second process-local
+render stall. V2 also records four consecutive `83-85 ms` CPU encoding frames
+after that event, which raises its long-sample p99 to `82.554 ms`. A separate
+ten-second V2 repeat measured `8.924 / 9.660 ms` p50/p95 and only `0.2%` over
+period, so the cluster remains an explicit transition/driver tail rather than
+a hidden stable percentile. Both moving repeats report zero
+exact-center-unavailable frames. Their compact receipts end with 289 exact
+columns and a ready exact center, but a transiently unready moved horizon
+target; retained moving convergence and the shared large stall remain the
+next performance owners.
+
+## Cross-Platform And Pixel Receipt
+
+- `mclone-worldgen`: 480 passed, one ignored; its Wasm hydrography witness and
+  supporting binary tests also pass.
+- `mclone-terrain-view`: 153 passed, one native-adapter test ignored. This
+  includes WGSL validation, mono/multiview contracts, the fixed canopy budget,
+  and the native off-thread compiler.
+- `mclone-scene`: all 185 library tests pass, including exact-center and full
+  requested-view readiness. One unrelated source-shape integration lock still
+  expects `cow_figure_id()` in a fixture that now intentionally uses the red
+  squirrel figure; it is recorded but not broadened into this terrain slice.
+- Android XR release builds through `pnpm native:android-xr:apk`; all physical
+  sessions restore the headset to its prior asleep, charging state.
+- Chrome/Metal WebGPU probing passes. Browser Worker exact composition reaches
+  all 25 exact chunks, all 160 procedural slots, and all 80 vegetation
+  products at the humid jungle. The inspected jungle frame retains a broad
+  forest mass; the matched mesa frame has zero exact/proxy tree records and no
+  visible false canopy.
+
+Review artifacts remain outside the repository under `/tmp`, including
+`mclone-v2-canopy-faceted-mid.png`,
+`mclone-world-explorer-web-desktop-continental-humid-jungle-composed-review.png`,
+`mclone-world-explorer-web-desktop-continental-mesa-desert-composed-review.png`,
+the matching JSON receipts, the Quest logs/summaries, and
+`mclone-quest-v2-low-rd8-final.png`.

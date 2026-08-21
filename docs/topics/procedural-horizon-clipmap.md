@@ -79,14 +79,16 @@ instance path. Coarse levels continue to use forest summaries and do not
 enumerate continent-scale trees. The semantic vegetation compiler is v3,
 `MCHV` transport is v2, and canonical terrain batches are v4.
 
-The first V1/V2 live performance comparison isolates a material source-path
-gap. Exact-only startup is effectively matched, but High Distant Terrain V2
-still compiles its continental samples on CPU while V1 owns a GPU-native
-evaluator. On the matched M4 Pro run V2 reaches the full view in `1.968 s`
-versus V1's `1.393 s`, then experiences 17 large product-admission/render
-frames and a `298.50 ms` p99 versus `10.36 ms`. This is recorded performance
-debt, not parity. Compact exact generation batches have independently removed
-their redundant per-target dependency replay.
+The first V1/V2 live performance comparison isolated a material source-path
+gap before Tactical
+[`329`](../tactical/329-v2-quest-performance-and-forest-continuity.md).
+Exact-only startup was effectively matched, but High Distant Terrain V2
+compiled continental samples synchronously during render encoding while V1
+owned a GPU-native evaluator. On the matched M4 Pro run V2 reached the full
+view in `1.968 s` versus V1's `1.393 s`, then experienced 17 large
+product-admission/render frames and a `298.50 ms` p99 versus `10.36 ms`.
+Compact exact generation batches had independently removed their redundant
+per-target dependency replay.
 
 Dense continental vegetation no longer enumerates every ordinary tree through
 the full spacing-16 hierarchy. Complete stable records remain through spacing
@@ -96,11 +98,35 @@ instances from `42,637` to `10,889` and vegetation compilation from
 `195.21 ms` to `42.11 ms` without the visibly empty spacing-4 cutoff rejected
 during pixel review.
 
+V2 now consumes those already-resident forest summaries through a fixed
+`16 x 16` world-oriented canopy lattice per eligible tile after individual
+proxy-tree levels stop. Shared-coordinate fan corners, summary coverage,
+family, mean height, variation, and opening influence preserve forest volume
+and authored gaps without allocating canopy instances or resident buffers.
+The same pipeline supports mono, per-eye, and full-frame multiview. It is
+intentionally V2/candidate-only: enabling it for V1 caused an avoidable Quest
+control regression while V1 did not have the same giant-forest collapse.
+
 Retained movement is still incremental for both product sources. After the
 common 320-product High-preset cold fill, a 164-by-20-block move prepares 36
 entering-strip refills and returns all 160 logical slots to ready. V1 reaches
 the target in about `4.5 s`; the V2 jungle takes about `13.1 s`. This proves
 bounded retained topology, not equivalent compilation cost.
+
+Tactical 329 moves native CPU continental tile compilation into a bounded
+one-to-four-worker pool, rejects stale source/request/slot completions,
+coalesces preferred-frontier generations, and removes the speculative
+origin-centered cold fill. The browser retains a one-tile-per-frame inline
+fallback behind the same compiler/admission contract until terrain joins the
+common Web Worker payload protocol. On physical Quest 3 at Low/RD8, the
+corrected full-view gate now reaches all 289 exact columns in `10.004 s` for
+V2 versus `10.003 s` for V1, replacing the invalid earlier V2 result of
+`133.748 s`. Matched stationary app-work p95 is `12.761 ms` for V2 versus
+`12.119 ms` for V1, within the tactical's 10% target. Both corrected moving
+lanes started at 289 columns and reported zero exact-center-unavailable
+frames. One process-local roughly 9.5-second render stall still occurs in
+both profiles, and the final moving horizon target can be transiently unready;
+those are explicit remaining presentation-tail debts.
 
 Packaged live-game pixels expose one unresolved appearance contract at the
 exact frontier. Mesa exact chunks and their procedural continuation can differ

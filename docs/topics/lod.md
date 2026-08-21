@@ -110,6 +110,18 @@ queries remove shore/local/walking/micro detail below their representable
 footprint. This corrects diagonal alias grain in broad continental views
 without making the clipmap or camera scale an input to geography.
 
+Tactical
+[`329`](../tactical/329-v2-quest-performance-and-forest-continuity.md) adds the
+current V2-only coarse forest band and native CPU compilation policy. Forest
+summaries drive at most 256 world-oriented canopy cells per eligible resident
+tile after individual proxy-tree levels stop; no area-proportional tree
+records or buffers are introduced. Native V2 terrain compilation uses a
+bounded worker pool and generation-safe admission, while Web currently uses
+the same contract with a one-tile inline fallback. The corrected physical
+Quest Low/RD8 gate requires all 289 exact columns and now settles V2 in about
+the same ten seconds as V1. V1 remains the default and does not draw the new
+canopy.
+
 ## Historical Routes
 
 - [`far-lod.md`](far-lod.md) is the retirement record for the removed

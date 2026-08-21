@@ -32,8 +32,13 @@ an explicitly experimental unbounded-plane profile with stored binary tag 9;
 its mesa-desert and humid-jungle characteristic-domain slices are implemented
 beside the retained temperate catchment. Native packaged live-game review and
 shared/native/Wasm/Android/XR build boundaries are complete. Human Review E is
-pending with the exact/procedural appearance frontier and CPU-authored V2
-horizon cost recorded as revision candidates.**
+pending with the exact/procedural appearance frontier recorded as a revision
+candidate. Tactical
+[`329`](../tactical/329-v2-quest-performance-and-forest-continuity.md) moves
+native CPU-authored V2 horizon compilation off the render thread, restores
+complete Quest Low/RD8 cold settle to V1-scale timing, and adds a V2-only
+fixed-budget coarse canopy. Browser terrain compilation and transient render
+tails remain performance debts.**
 
 This topic owns the current truth and durable decisions for selectable,
 versioned world-generation profiles. Detailed refactoring and implementation

@@ -112,6 +112,17 @@ jungle tree family shares stable records between exact blocks and procedural
 proxies; its density and silhouette fade through continuous canopy facts
 rather than the categorical regional label. The first blanket-podzol and
 ordinary-lollipop-tree attempts were rejected during pixel review.
+Tactical
+[`329`](../tactical/329-v2-quest-performance-and-forest-continuity.md) now
+carries those continuous canopy facts beyond the individual-proxy cutoff with
+a fixed-budget, world-oriented coarse canopy. It preserves summary-authored
+openings and does not create visible forest in the zero-tree mesa review.
+Physical Quest Low/RD8 evidence reaches the complete V2 exact and horizon view
+in `10.004 s`, versus the prior invalid `133.748 s`, without reducing
+continental coverage. The remaining human questions are the visual
+proxy-to-canopy handoff, the existing exact/procedural material and water
+seams, and transient movement/render-tail behavior—not whether V2 is a real
+live-game world.
 Mclone should combine
 top-down continental and ecoregional planning with bottom-up procedural
 realization so the Overworld contains large, recognizable, causally related

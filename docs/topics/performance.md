@@ -15,6 +15,51 @@ counter requirements lives in
 Update this file whenever a performance slice changes the priority order,
 invalidates an older recommendation, or establishes a new baseline.
 
+## Mclone Overworld V2 Quest Recovery
+
+Tactical
+[`329`](../tactical/329-v2-quest-performance-and-forest-continuity.md)
+establishes the first honest matched V1/V2 Quest 3 baseline at Low Distant
+Terrain, RD8, 72 Hz, `1680x1760` per eye, render scale 1, foveation off, and
+the production per-eye frame-overlap path. Its settle gate requires all 289
+requested exact columns, an exact-ready center, a target-ready horizon, and
+drained terrain/vegetation queues. The earlier V2 moving result with only
+three exact columns is invalid.
+
+V2 was synchronously compiling up to 16 CPU-authored `69 x 69` horizon tiles
+inside render encoding, repeatedly rebuilding preferred frontier support, and
+performing an unused origin-centered cold fill. A bounded native worker pool,
+generation-safe result admission, frontier coalescing, and first-real-request
+planning reduce complete V2 cold settle from `133.748 s` to `10.004 s`; the
+matched V1 control is `10.003 s`. The Quest reports one available V2 horizon
+worker, 124 completed initial products, `5.769 s` aggregate worker CPU, and
+zero stale completions.
+
+| Lane | App work p50 / p95 | Over period | Meta app GPU |
+|---|---:|---:|---:|
+| V1 stationary | `10.850 / 12.119 ms` | `0.4%` | `5.617 ms` |
+| V2 stationary | `9.803 / 12.761 ms` | `2.2%` | `6.562 ms` |
+| V1 settled orbit | `9.926 / 10.499 ms` | `0.7%` | not sampled |
+| V2 settled orbit | `8.396 / 8.957 ms` | `1.7%` | not sampled |
+
+V2 stationary p95 is 5.3% over matched V1 and remains below the 13.889 ms
+period. A separate shorter V2 repeat measured `8.924 / 9.660 ms` p50/p95 and
+`0.2%` over period, so the longer lane's over-period increase is not treated
+as a stable canopy cost. Both long stationary lanes contain one roughly
+9.5-second renderer/runtime stall. V2 additionally has a four-frame
+`83-85 ms` CPU render-encoding cluster after that event; it raises p99 but not
+p95. Both corrected orbit lanes began at 289 exact columns and kept the exact
+center ready for every sampled frame, though their final horizon target was
+transiently unready while moving. These tails remain explicit performance
+debt.
+
+The V2-only coarse canopy draws a fixed 8,448 cells / 101,376 vertices across
+33 visible Low-preset tiles at the jungle view, adds no vegetation jobs or
+instance-upload bytes, and is absent from V1. Enabling it in V1 was rejected
+after a measured control regression. Browser terrain compilation still uses a
+one-tile inline fallback until the common Worker protocol owns the payload;
+the native worker result is not a claim that browser panning is fully solved.
+
 Tactical
 [`191`](../tactical/191-guarded-generation-planning-refactor.md) applies this
 topic's A/B and frame-tail rules to a behavior-preserving worldgen planning
