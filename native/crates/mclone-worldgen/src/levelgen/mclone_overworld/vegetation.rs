@@ -1151,7 +1151,7 @@ fn write_tree_block(
     assert!(
         tree_bounds_contains(occurrence.working_bounds, pos),
         "tree {:?} emitted ({}, {}, {}) outside {:?}",
-        occurrence.record.id,
+        occurrence.record,
         pos.x,
         pos.y,
         pos.z,

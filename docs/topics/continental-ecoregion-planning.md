@@ -451,6 +451,17 @@ threshold lake, habitat-derived pseudo-river, and crash behavior are not an
 acceptable terrain realization. The next proof is governed by
 [`continental-hydrography.md`](continental-hydrography.md) and Tactical 326.
 
+Human Review D retained the catchment mechanism but rejected visible planning
+joins and coarse diagonal/checkerboard grain. Tactical
+[`328`](../tactical/328-mclone-overworld-v2-regional-breadth.md) now keeps
+abstract owner identities discrete while blending their scalar cover,
+climate, water, and relief effects through symmetric neutral bands. Local
+clearing and vegetation lattices are absolute-coordinate facts, not child
+hashes of an ecoregion owner. Broad plan and surface noise uses warped gradient
+fields, and the procedural preview filters sub-grid surface frequencies by LOD
+spacing while spacing one remains exact. The next step is the separately
+persisted `mclone-overworld-v2` integration; V1 remains default and unchanged.
+
 ## Acceptance
 
 The direction succeeds only if review can identify and remember places, not

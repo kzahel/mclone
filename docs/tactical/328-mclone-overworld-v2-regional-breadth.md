@@ -164,6 +164,26 @@ roughly 12-18 strong archetypes without changing query or persistence shape.
 - Inspect pixels after the first content correction and first LOD correction.
 - Commit each independently useful correction.
 
+Implemented on 2026-08-21. The plan and surface broad fields now use periodic
+gradient noise rather than rectangular value interpolation; the realized
+surface also applies deterministic coordinate warps. Continental, province,
+and ecoregion scalar facts fade symmetrically through neutral ownership bands,
+while clearing candidates and local vegetation fingerprints remain stable in
+absolute space instead of being re-seeded by the winning region ID.
+
+The continental preview now has an explicit spacing-aware query. It preserves
+spacing-one exact facts and progressively removes shore, local, walking, and
+micro frequencies that cannot be represented by coarse clipmap lattices. A
+65,536-block inspected map capture changed from regular diagonal grain to
+smooth broad form without changing the clipmap's tile topology. The plan
+witness is `525e7ccc5c375473c16dcca466fe3ca0437793dd3db0e2f3366a016fd43628e6`;
+the exact surface witness is
+`4948cda1470da098c05911ea0b5885e65788fcc53fe013db36e37d9683cf7309`.
+The full 474-test `mclone-worldgen` suite exposed one pre-existing continental
+proxy acacia footprint under the newly selected content; its bound now matches
+the ordinary realizer's three-block branch reach, and the focused exact suite
+passes.
+
 ### Phase 2: Selectable Persisted V2
 
 - Add `mclone-overworld-v2` to the shared stored profile enum, stable binary

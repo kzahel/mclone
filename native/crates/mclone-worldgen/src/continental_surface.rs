@@ -25,10 +25,10 @@ use crate::{
         MCLONE_OVERWORLD_SNOWY_MOUNTAINS_BIOME_ID, MCLONE_OVERWORLD_TAIGA_BIOME_ID, OCEAN_BIOME_ID,
         PLAINS_BIOME_ID,
     },
-    noise::{SeedDomain, ValueNoise2d},
+    noise::{GradientNoise2d, SeedDomain},
 };
 
-pub const CONTINENTAL_SURFACE_SCHEMA_REVISION: &str = "mclone-continental-surface-v9";
+pub const CONTINENTAL_SURFACE_SCHEMA_REVISION: &str = "mclone-continental-surface-v10";
 pub const CONTINENTAL_SURFACE_SOURCE_LABEL: &str = "continental-ecoregion-candidate-v1";
 pub const CONTINENTAL_SURFACE_FAMILY_COUNT: usize = 5;
 pub const CONTINENTAL_SURFACE_MAX_WINDOW_SAMPLES: usize = 262_144;
@@ -335,23 +335,23 @@ pub struct ContinentalSurfaceWindow {
 
 #[derive(Clone, Copy, Debug)]
 struct ContinentalSurfaceFields {
-    macro_roll: ValueNoise2d,
-    ridge_form: ValueNoise2d,
-    basin_form: ValueNoise2d,
-    shore_form: ValueNoise2d,
-    local_form: ValueNoise2d,
-    walking_form: ValueNoise2d,
-    micro_form: ValueNoise2d,
+    macro_roll: GradientNoise2d,
+    ridge_form: GradientNoise2d,
+    basin_form: GradientNoise2d,
+    shore_form: GradientNoise2d,
+    local_form: GradientNoise2d,
+    walking_form: GradientNoise2d,
+    micro_form: GradientNoise2d,
 }
 
 impl ContinentalSurfaceFields {
     fn new(descriptor: ContinentalEcoregionDescriptor) -> Self {
         let field = |domain, scale| match descriptor.topology {
             ContinentalEcoregionTopology::Plane => {
-                ValueNoise2d::new(descriptor.seed, domain, scale)
+                GradientNoise2d::new(descriptor.seed, domain, scale)
             }
             ContinentalEcoregionTopology::CylinderX { period_blocks } => {
-                ValueNoise2d::new_periodic_x(descriptor.seed, domain, scale, period_blocks)
+                GradientNoise2d::new_periodic_x(descriptor.seed, domain, scale, period_blocks)
             }
         };
         Self {
@@ -395,7 +395,7 @@ impl ContinentalSurfacePlan {
             .plan
             .query_point(LandscapePlanDetail::Mosaic, world_x, world_z);
         let hydrography = self.hydrography.query_point(world_x, world_z);
-        let sample = self.realize(world_x, world_z, &plan.sample, hydrography.sample);
+        let sample = self.realize(world_x, world_z, &plan.sample, hydrography.sample, 1);
         let mut work = ContinentalSurfaceConstructionCounts::from_plan(plan.work);
         work.hydrography_owner_evaluations = u64::from(hydrography.work.owner_evaluations);
         work.hydrography_graph_constructions = u64::from(hydrography.work.graph_constructions);
@@ -407,6 +407,25 @@ impl ContinentalSurfacePlan {
     pub fn query_window(
         &self,
         request: ContinentalSurfaceWindowRequest,
+    ) -> Result<ContinentalSurfaceWindow, ContinentalEcoregionError> {
+        self.query_window_with_detail_spacing(request, 1)
+    }
+
+    /// Query a bounded preview window with frequencies smaller than the
+    /// requested display lattice progressively removed. This is presentation
+    /// filtering only: IDs, hydrology, and spacing-one exact facts retain the
+    /// canonical surface contract.
+    pub fn query_lod_window(
+        &self,
+        request: ContinentalSurfaceWindowRequest,
+    ) -> Result<ContinentalSurfaceWindow, ContinentalEcoregionError> {
+        self.query_window_with_detail_spacing(request, request.step_blocks)
+    }
+
+    fn query_window_with_detail_spacing(
+        &self,
+        request: ContinentalSurfaceWindowRequest,
+        detail_spacing: u32,
     ) -> Result<ContinentalSurfaceWindow, ContinentalEcoregionError> {
         validate_window(request)?;
         let sample_count = (request.width_samples as usize)
@@ -425,7 +444,13 @@ impl ContinentalSurfacePlan {
                 let hydrography =
                     self.hydrography
                         .query_point_cached(world_x, world_z, &mut hydrography_cache);
-                let sample = self.realize(world_x, world_z, &plan.sample, hydrography.sample);
+                let sample = self.realize(
+                    world_x,
+                    world_z,
+                    &plan.sample,
+                    hydrography.sample,
+                    detail_spacing,
+                );
                 let mut sample_work = ContinentalSurfaceConstructionCounts::from_plan(plan.work);
                 sample_work.hydrography_owner_evaluations =
                     u64::from(hydrography.work.owner_evaluations);
@@ -454,14 +479,44 @@ impl ContinentalSurfacePlan {
         world_z: i32,
         plan: &LandscapePlanSample,
         hydrography: Option<ContinentalHydrographySample>,
+        detail_spacing: u32,
     ) -> ContinentalSurfaceSample {
-        let macro_roll = self.fields.macro_roll.sample(world_x, world_z);
-        let ridge_form = self.fields.ridge_form.sample(world_x, world_z);
-        let basin_form = self.fields.basin_form.sample(world_x, world_z);
-        let shore_form = self.fields.shore_form.sample(world_x, world_z);
-        let local_form = self.fields.local_form.sample(world_x, world_z);
-        let walking_form = self.fields.walking_form.sample(world_x, world_z);
-        let micro_form = self.fields.micro_form.sample(world_x, world_z);
+        let sample_x = f64::from(world_x);
+        let sample_z = f64::from(world_z);
+        let macro_roll = self.fields.macro_roll.sample_at(sample_x, sample_z);
+        let cross_roll = self
+            .fields
+            .macro_roll
+            .sample_at(sample_x + 1_943.0, sample_z - 3_077.0);
+        let broad_x = sample_x + macro_roll * 1_650.0;
+        let broad_z = sample_z + cross_roll * 1_650.0;
+        let ridge_form = self.fields.ridge_form.sample_at(broad_x, broad_z);
+        let basin_form = self
+            .fields
+            .basin_form
+            .sample_at(broad_x - cross_roll * 920.0, broad_z + macro_roll * 920.0);
+        let shore_detail = lod_detail_weight(detail_spacing, 384.0, 1_536.0);
+        let local_detail = lod_detail_weight(detail_spacing, 64.0, 384.0);
+        let walking_detail = lod_detail_weight(detail_spacing, 8.0, 64.0);
+        let micro_detail = lod_detail_weight(detail_spacing, 2.0, 16.0);
+        let shore_form = self
+            .fields
+            .shore_form
+            .sample_at(broad_x + basin_form * 420.0, broad_z - ridge_form * 420.0)
+            * shore_detail;
+        let local_x = sample_x + ridge_form * 310.0 + basin_form * 170.0;
+        let local_z = sample_z + basin_form * 310.0 - ridge_form * 170.0;
+        let local_form = self.fields.local_form.sample_at(local_x, local_z) * local_detail;
+        let walking_form = self
+            .fields
+            .walking_form
+            .sample_at(sample_x + local_form * 72.0, sample_z + shore_form * 72.0)
+            * walking_detail;
+        let micro_form = self
+            .fields
+            .micro_form
+            .sample_at(sample_x + walking_form * 21.0, sample_z - local_form * 21.0)
+            * micro_detail;
         let realized_lake_distance = hydrography.map_or(f64::INFINITY, |hydrography| {
             f64::from(hydrography.lake_signed_distance_blocks)
                 + shore_form * 620.0
@@ -585,13 +640,16 @@ impl ContinentalSurfacePlan {
         let aridity = ecoregion.map_or(0.0, |ecoregion| f64::from(ecoregion.aridity));
         let drainage_permanence =
             ecoregion.map_or(1.0, |ecoregion| f64::from(ecoregion.drainage_permanence));
-        let arid_province_compatibility = province.map_or(0.0, |province| match province.kind {
-            PhysiographicProvinceKind::RiverLowland => 1.0,
-            PhysiographicProvinceKind::QuietBench => 0.94,
-            PhysiographicProvinceKind::RollingHills => 0.78,
-            PhysiographicProvinceKind::WoodedUpland => 0.48,
-            PhysiographicProvinceKind::RockyRidge => 0.42,
-            PhysiographicProvinceKind::LakeBasin => 0.22,
+        let arid_province_compatibility = province.map_or(0.0, |province| {
+            let owned = match province.kind {
+                PhysiographicProvinceKind::RiverLowland => 1.0,
+                PhysiographicProvinceKind::QuietBench => 0.94,
+                PhysiographicProvinceKind::RollingHills => 0.78,
+                PhysiographicProvinceKind::WoodedUpland => 0.48,
+                PhysiographicProvinceKind::RockyRidge => 0.42,
+                PhysiographicProvinceKind::LakeBasin => 0.22,
+            };
+            lerp(0.66, owned, province_identity)
         });
         let arid_weight = smoothstep(0.48, 0.78, aridity)
             * smoothstep(0.22, 0.72, leeward_exposure)
@@ -1205,6 +1263,10 @@ fn smoothstep(low: f64, high: f64, value: f64) -> f64 {
     unit * unit * (3.0 - 2.0 * unit)
 }
 
+fn lod_detail_weight(sample_spacing: u32, full_until: f64, absent_at: f64) -> f64 {
+    1.0 - smoothstep(full_until, absent_at, f64::from(sample_spacing))
+}
+
 fn inverse_smoothstep(inner: f64, outer: f64, distance: f64) -> f64 {
     1.0 - smoothstep(inner, outer, distance)
 }
@@ -1402,7 +1464,16 @@ mod tests {
     fn arid_rain_shadow_is_dry_open_and_sparsely_exposed() {
         let surface =
             ContinentalSurfacePlan::new(ContinentalEcoregionDescriptor::plane(12_345)).unwrap();
-        let sample = surface.query_point(32_768, 1_536).sample;
+        let sample = (-65_536..=65_536)
+            .step_by(1_024)
+            .flat_map(|z| (-65_536..=65_536).step_by(1_024).map(move |x| (x, z)))
+            .map(|(x, z)| surface.query_point(x, z).sample)
+            .filter(|sample| sample.dominant_family == TerrainCharacterFamily::AridRainShadow)
+            .max_by(|left, right| {
+                (left.aridity + left.leeward_exposure)
+                    .total_cmp(&(right.aridity + right.leeward_exposure))
+            })
+            .expect("bounded surface contains an authored arid rain shadow");
         assert!(sample.leeward_exposure > 0.70);
         assert!(sample.aridity > 0.75);
         assert!(sample.drainage_permanence < 0.35);

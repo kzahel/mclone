@@ -601,7 +601,7 @@ impl TerrainPreviewReferenceGrid {
         ))
         .map_err(|error| error.to_string())?;
         let surface_window = surface
-            .query_window(ContinentalSurfaceWindowRequest::new(
+            .query_lod_window(ContinentalSurfaceWindowRequest::new(
                 min_x,
                 min_z,
                 halo_samples_per_axis,
@@ -1611,8 +1611,11 @@ fn compile_continental_proxy_vegetation(
                 .checked_add(1)
                 .ok_or("continental proxy vegetation Y coordinate overflow")?;
             let base = BlockPos::new(world_x, base_y, world_z);
+            // Acacia branches can travel three blocks before placing their
+            // flat crown. Match the live tree realizer's complete footprint
+            // instead of clipping a newly selected proxy at the old +2 cap.
             let horizontal_radius =
-                i32::from(crown_radius) + i32::from(family == McloneTreeFamily::WarmDryAcacia) * 2;
+                i32::from(crown_radius) + i32::from(family == McloneTreeFamily::WarmDryAcacia) * 3;
             let max_y = base_y
                 .checked_add(i32::from(trunk_height))
                 .and_then(|value| value.checked_add(2))
@@ -2534,8 +2537,15 @@ mod tests {
         let validated = grid.request();
         let direct = ContinentalSurfacePlan::new(ContinentalEcoregionDescriptor::plane(12_345))
             .unwrap()
-            .query_point(validated.world_x(0).unwrap(), validated.world_z(0).unwrap())
-            .sample;
+            .query_lod_window(ContinentalSurfaceWindowRequest::new(
+                validated.world_x(0).unwrap(),
+                validated.world_z(0).unwrap(),
+                1,
+                1,
+                request.sample_spacing,
+            ))
+            .unwrap()
+            .samples[0];
         assert_eq!(grid.sample(0, 0).unwrap().surface_y, direct.solid_surface_y);
         assert_eq!(
             grid.sample(0, 0).unwrap().display_y,

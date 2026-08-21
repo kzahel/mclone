@@ -10,9 +10,9 @@ use std::fmt;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
-use crate::noise::{SeedDomain, ValueNoise2d};
+use crate::noise::{GradientNoise2d, SeedDomain};
 
-pub const CONTINENTAL_ECOREGION_SCHEMA_REVISION: &str = "mclone-continental-ecoregion-plan-v8";
+pub const CONTINENTAL_ECOREGION_SCHEMA_REVISION: &str = "mclone-continental-ecoregion-plan-v9";
 pub const CONTINENTAL_ECOREGION_DIMENSION_ID: &str = "mclone:overworld";
 pub const CONTINENTAL_ECOREGION_STORED_PROFILE: &str =
     "mclone-overworld-v1-control-field-revision-21";
@@ -354,6 +354,7 @@ pub struct ContinentalDistrictSample {
     pub prevailing_wind_x: f32,
     pub prevailing_wind_z: f32,
     pub rain_shadow_potential: f32,
+    pub core_weight: f32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
@@ -513,33 +514,33 @@ impl std::error::Error for ContinentalEcoregionError {}
 
 #[derive(Clone, Copy, Debug)]
 struct PlanFields {
-    continent_edge: ValueNoise2d,
-    moisture: ValueNoise2d,
-    temperature: ValueNoise2d,
-    corridor_warp: ValueNoise2d,
-    local_openness: ValueNoise2d,
-    owner_warp_x: ValueNoise2d,
-    owner_warp_z: ValueNoise2d,
+    continent_edge: GradientNoise2d,
+    moisture: GradientNoise2d,
+    temperature: GradientNoise2d,
+    corridor_warp: GradientNoise2d,
+    local_openness: GradientNoise2d,
+    owner_warp_x: GradientNoise2d,
+    owner_warp_z: GradientNoise2d,
 }
 
 impl PlanFields {
     fn new(descriptor: ContinentalEcoregionDescriptor) -> Self {
-        let value_noise = |domain, scale| match descriptor.topology {
+        let gradient_noise = |domain, scale| match descriptor.topology {
             ContinentalEcoregionTopology::Plane => {
-                ValueNoise2d::new(descriptor.seed, domain, scale)
+                GradientNoise2d::new(descriptor.seed, domain, scale)
             }
             ContinentalEcoregionTopology::CylinderX { period_blocks } => {
-                ValueNoise2d::new_periodic_x(descriptor.seed, domain, scale, period_blocks)
+                GradientNoise2d::new_periodic_x(descriptor.seed, domain, scale, period_blocks)
             }
         };
         Self {
-            continent_edge: value_noise(CONTINENT_EDGE_DOMAIN, 8_192),
-            moisture: value_noise(CLIMATE_MOISTURE_DOMAIN, 24_576),
-            temperature: value_noise(CLIMATE_TEMPERATURE_DOMAIN, 32_768),
-            corridor_warp: value_noise(CORRIDOR_WARP_DOMAIN, 8_192),
-            local_openness: value_noise(LOCAL_OPENNESS_DOMAIN, 1_024),
-            owner_warp_x: value_noise(OWNER_WARP_X_DOMAIN, 12_288),
-            owner_warp_z: value_noise(OWNER_WARP_Z_DOMAIN, 12_288),
+            continent_edge: gradient_noise(CONTINENT_EDGE_DOMAIN, 8_192),
+            moisture: gradient_noise(CLIMATE_MOISTURE_DOMAIN, 24_576),
+            temperature: gradient_noise(CLIMATE_TEMPERATURE_DOMAIN, 32_768),
+            corridor_warp: gradient_noise(CORRIDOR_WARP_DOMAIN, 8_192),
+            local_openness: gradient_noise(LOCAL_OPENNESS_DOMAIN, 1_024),
+            owner_warp_x: gradient_noise(OWNER_WARP_X_DOMAIN, 12_288),
+            owner_warp_z: gradient_noise(OWNER_WARP_Z_DOMAIN, 12_288),
         }
     }
 }
@@ -673,7 +674,7 @@ impl ContinentalEcoregionPlan {
                 let distance = ((along / site.radius_along).powi(2)
                     + (across / site.radius_across).powi(2))
                 .sqrt();
-                let edge_warp = self.fields.continent_edge.sample(canonical_x, world_z) * 0.13;
+                let edge_warp = self.fields.continent_edge.sample(canonical_x, world_z) * 0.24;
                 let score = if site.active {
                     1.0 - distance + edge_warp
                 } else {
@@ -704,6 +705,9 @@ impl ContinentalEcoregionPlan {
             let owner_interior = smoothstep(0.0, 0.18, score - second_score);
             lerp_f64(second_shadow, point_shadow, 0.5 + owner_interior * 0.5)
         });
+        let core_weight = second.map_or(1.0, |(second_score, _)| {
+            smoothstep(0.0, 0.18, score - second_score)
+        });
         ContinentalInternalSample {
             sample: ContinentalDistrictSample {
                 id: site.id,
@@ -715,6 +719,7 @@ impl ContinentalEcoregionPlan {
                 prevailing_wind_x: prevailing_wind_x as f32,
                 prevailing_wind_z: prevailing_wind_z as f32,
                 rain_shadow_potential: rain_shadow_potential as f32,
+                core_weight: core_weight as f32,
             },
             land_weight,
             inland_distance_blocks: (score * site.radius_along.min(site.radius_across)) as f32,
@@ -795,21 +800,45 @@ impl ContinentalEcoregionPlan {
         let along = (dx * axis_x + dz * axis_z) / 32_000.0;
         let across = (-dx * axis_z + dz * axis_x) / 24_000.0;
         let kind = province_kind(continent.story, along, across, id_hash);
-        let major_water = match kind {
-            PhysiographicProvinceKind::RiverLowland => route.weight.max(0.45),
-            PhysiographicProvinceKind::LakeBasin => (0.55 + route.weight * 0.35).min(1.0),
-            _ => route.weight * 0.65,
-        };
-        // Province identity remains discrete, but the district supplied a
-        // blended, query-position rain shadow so internal ownership polygons
-        // cannot become visible as climate boundaries.
-        let leeward_exposure = province_leeward_exposure(continent, kind, id_hash);
+        let peer_id_hash = stable_mix64(site.second_hash ^ continent.id.hash.rotate_left(19));
+        let peer_dx = (site.second_center_x - continent.center_x) as f64;
+        let peer_dz = (site.second_center_z - continent.center_z) as f64;
+        let peer_along = (peer_dx * axis_x + peer_dz * axis_z) / 32_000.0;
+        let peer_across = (-peer_dx * axis_z + peer_dz * axis_x) / 24_000.0;
+        let peer_kind = province_kind(continent.story, peer_along, peer_across, peer_id_hash);
+        // Region identity is intentionally discrete. Scalar terrain and
+        // ecology facts are symmetric blends with the nearest peer so an
+        // ownership bisector cannot become a visible content seam.
+        let owner_blend = 0.5 + site.core_weight * 0.5;
+        let major_water = lerp_f64(
+            province_major_water(peer_kind, route.weight),
+            province_major_water(kind, route.weight),
+            owner_blend,
+        );
+        let relief = lerp_f32(
+            province_relief(peer_kind),
+            province_relief(kind),
+            owner_blend as f32,
+        );
+        let leeward_exposure = lerp_f64(
+            province_leeward_exposure(continent, peer_kind, peer_id_hash),
+            province_leeward_exposure(continent, kind, id_hash),
+            owner_blend,
+        );
+        let continent_identity = smoothstep(0.0, 0.42, f64::from(continent.core_weight));
+        let major_water = lerp_f64(route.weight * 0.65, major_water, continent_identity);
+        let relief = lerp_f32(0.40, relief, continent_identity as f32);
+        let leeward_exposure = lerp_f64(
+            f64::from(continent.rain_shadow_potential) * 0.85,
+            leeward_exposure,
+            continent_identity,
+        );
         ProvincePlanSample {
             id,
             continent_id: continent.id,
             kind,
-            core_weight: site.core_weight as f32,
-            relief: province_relief(kind),
+            core_weight: (site.core_weight as f32).min(continent.core_weight),
+            relief,
             major_water: major_water as f32,
             leeward_exposure: leeward_exposure as f32,
         }
@@ -872,6 +901,10 @@ impl ContinentalEcoregionPlan {
         let (moisture, temperature) = self.climate_at(world_x, world_z);
         let aridity = ecoregion_aridity(province, moisture, temperature);
         let drainage = drainage_permanence(province, moisture, aridity);
+        let blended_openness = lerp_f32(base_openness, peer_openness, blend as f32);
+        let blended_canopy = lerp_f32(base_canopy, peer_canopy, blend as f32);
+        let (boundary_openness, boundary_canopy) = ecoregion_cover(EcoregionKind::QuietTransition);
+        let province_identity = smoothstep(0.0, 0.42, f64::from(province.core_weight)) as f32;
         EcoregionPlanSample {
             id,
             province_id: province.id,
@@ -880,8 +913,8 @@ impl ContinentalEcoregionPlan {
             core_weight: (1.0 - transition_weight) as f32,
             transition_weight: transition_weight as f32,
             transition_width_blocks: transition_width_blocks as f32,
-            base_openness: lerp_f32(base_openness, peer_openness, blend as f32),
-            base_canopy: lerp_f32(base_canopy, peer_canopy, blend as f32),
+            base_openness: lerp_f32(boundary_openness, blended_openness, province_identity),
+            base_canopy: lerp_f32(boundary_canopy, blended_canopy, province_identity),
             moisture: moisture as f32,
             temperature: temperature as f32,
             aridity: aridity as f32,
@@ -928,12 +961,12 @@ impl ContinentalEcoregionPlan {
                     .canonical_owner_x(raw_owner_x, MOSAIC_CELL_BLOCKS);
                 let hash = coordinate_hash(
                     self.descriptor.seed,
-                    MOSAIC_HASH_DOMAIN ^ ecoregion.id.hash,
+                    MOSAIC_HASH_DOMAIN,
                     owner_x,
                     owner_z,
                     0,
                 );
-                if !clearing_enabled(ecoregion.kind, hash) {
+                if !clearing_enabled(hash) {
                     continue;
                 }
                 let center_x = i64::from(raw_owner_x) * i64::from(MOSAIC_CELL_BLOCKS)
@@ -952,7 +985,7 @@ impl ContinentalEcoregionPlan {
                 let distance =
                     ((along / radius_along).powi(2) + (across / radius_across).powi(2)).sqrt();
                 let influence = (1.0 - distance).clamp(0.0, 1.0);
-                let id_hash = stable_mix64(hash ^ ecoregion.id.hash.rotate_left(31));
+                let id_hash = stable_mix64(hash);
                 let id = feature_id(
                     LandscapeFeatureFamily::Clearing,
                     owner_x,
@@ -1012,11 +1045,18 @@ impl ContinentalEcoregionPlan {
         let arid_cover = smoothstep(0.48, 0.84, f64::from(ecoregion.aridity));
         openness = openness.max(arid_cover * 0.92);
         forest_core *= 1.0 - arid_cover * 0.92;
-        let wetland_affinity = match ecoregion.kind {
-            EcoregionKind::ConnectedWetland => 1.0,
-            EcoregionKind::RiparianWoodland => 0.72,
-            _ => 0.22,
-        };
+        let owner_wetland_affinity = ecoregion_wetland_affinity(ecoregion.kind);
+        let peer_wetland_affinity = ecoregion
+            .transition_peer_kind
+            .map_or(owner_wetland_affinity, ecoregion_wetland_affinity);
+        let ecoregion_blend = f64::from(ecoregion.transition_weight) * 0.5;
+        let regional_wetland_affinity = lerp_f64(
+            owner_wetland_affinity,
+            peer_wetland_affinity,
+            ecoregion_blend,
+        );
+        let province_identity = smoothstep(0.0, 0.42, f64::from(province.core_weight));
+        let wetland_affinity = lerp_f64(0.22, regional_wetland_affinity, province_identity);
         let wetland = (wetland_affinity
             * f64::from(ecoregion.moisture)
             * f64::from(ecoregion.drainage_permanence)
@@ -1035,7 +1075,7 @@ impl ContinentalEcoregionPlan {
         let local_cell_z = world_z.div_euclid(256);
         let local_fingerprint = coordinate_hash(
             self.descriptor.seed,
-            LOCAL_HASH_DOMAIN ^ ecoregion.id.hash,
+            LOCAL_HASH_DOMAIN,
             local_cell_x,
             local_cell_z,
             0,
@@ -1109,6 +1149,8 @@ impl ContinentalEcoregionPlan {
                     boundary_distance_blocks: 0.0,
                     second_owner_x: 0,
                     second_owner_z: 0,
+                    second_center_x: 0,
+                    second_center_z: 0,
                     second_hash: 0,
                 };
                 if nearest.is_none_or(|(nearest_distance, nearest_site)| {
@@ -1132,6 +1174,8 @@ impl ContinentalEcoregionPlan {
         site.boundary_distance_blocks = (second_distance - nearest_distance) * 0.5;
         site.second_owner_x = second_site.owner_x;
         site.second_owner_z = second_site.owner_z;
+        site.second_center_x = second_site.center_x;
+        site.second_center_z = second_site.center_z;
         site.second_hash = second_site.hash;
         site
     }
@@ -1229,6 +1273,8 @@ struct NearestSite {
     boundary_distance_blocks: f64,
     second_owner_x: i32,
     second_owner_z: i32,
+    second_center_x: i64,
+    second_center_z: i64,
     second_hash: u64,
 }
 
@@ -1306,6 +1352,14 @@ fn province_relief(kind: PhysiographicProvinceKind) -> f32 {
         PhysiographicProvinceKind::WoodedUpland => 0.62,
         PhysiographicProvinceKind::RockyRidge => 0.92,
         PhysiographicProvinceKind::QuietBench => 0.32,
+    }
+}
+
+fn province_major_water(kind: PhysiographicProvinceKind, route_weight: f64) -> f64 {
+    match kind {
+        PhysiographicProvinceKind::RiverLowland => route_weight.max(0.45),
+        PhysiographicProvinceKind::LakeBasin => (0.55 + route_weight * 0.35).min(1.0),
+        _ => route_weight * 0.65,
     }
 }
 
@@ -1429,6 +1483,14 @@ fn ecoregion_cover(kind: EcoregionKind) -> (f32, f32) {
     }
 }
 
+fn ecoregion_wetland_affinity(kind: EcoregionKind) -> f64 {
+    match kind {
+        EcoregionKind::ConnectedWetland => 1.0,
+        EcoregionKind::RiparianWoodland => 0.72,
+        _ => 0.22,
+    }
+}
+
 fn ecoregion_transition_width_blocks(left: EcoregionKind, right: EcoregionKind) -> f64 {
     use EcoregionKind::{
         BroadMeadow, ConnectedWetland, ExposedUpland, MixedWoodland, OldForestCore,
@@ -1467,16 +1529,11 @@ fn lerp_f64(left: f64, right: f64, amount: f64) -> f64 {
     left + (right - left) * amount
 }
 
-fn clearing_enabled(kind: EcoregionKind, hash: u64) -> bool {
-    let threshold = match kind {
-        EcoregionKind::OldForestCore => 2,
-        EcoregionKind::RiparianWoodland => 2,
-        EcoregionKind::MixedWoodland => 3,
-        EcoregionKind::QuietTransition => 2,
-        EcoregionKind::BroadMeadow => 1,
-        EcoregionKind::ConnectedWetland | EcoregionKind::ExposedUpland => 1,
-    };
-    (hash & 15) < threshold
+fn clearing_enabled(hash: u64) -> bool {
+    // The candidate lattice must not be reselected when an abstract region
+    // owner changes. Ecoregion cover still controls whether a candidate reads
+    // as a dramatic clearing or only as local openness.
+    (hash & 15) < 2
 }
 
 fn clearing_cause(kind: EcoregionKind, hash: u64) -> ClearingCause {
@@ -1844,6 +1901,7 @@ fn hash_sample(digest: &mut Sha256, sample: &LandscapePlanSample) {
         hash_float(digest, continent.prevailing_wind_x);
         hash_float(digest, continent.prevailing_wind_z);
         hash_float(digest, continent.rain_shadow_potential);
+        hash_float(digest, continent.core_weight);
     });
     hash_option(digest, sample.province, |digest, province| {
         hash_id(digest, province.id);
@@ -2008,6 +2066,7 @@ mod tests {
             prevailing_wind_x: 0.0,
             prevailing_wind_z: -1.0,
             rain_shadow_potential: 0.0,
+            core_weight: 1.0,
         };
         assert_eq!(
             main_habitat_route_kind(continent.story),
@@ -2057,6 +2116,70 @@ mod tests {
                 assert_eq!(point.sample, window.samples[index]);
             }
         }
+    }
+
+    #[test]
+    fn regional_identity_boundaries_do_not_reset_cover_or_local_content() {
+        let plan = plan();
+        let mut province_crossings = 0_u32;
+        let mut ecoregion_crossings = 0_u32;
+        let mut max_openness_jump = 0.0_f32;
+        let mut max_canopy_jump = 0.0_f32;
+
+        for z in (-65_536..=65_536).step_by(512) {
+            for x in (-65_536..=65_536).step_by(512) {
+                let left = plan.query_point(LandscapePlanDetail::Mosaic, x, z).sample;
+                let right = plan
+                    .query_point(LandscapePlanDetail::Mosaic, x + 64, z)
+                    .sample;
+                let (Some(left_province), Some(right_province)) = (left.province, right.province)
+                else {
+                    continue;
+                };
+                let (Some(left_ecoregion), Some(right_ecoregion)) =
+                    (left.ecoregion, right.ecoregion)
+                else {
+                    continue;
+                };
+                let (Some(left_mosaic), Some(right_mosaic)) = (left.mosaic, right.mosaic) else {
+                    continue;
+                };
+
+                // Both points deliberately remain in one absolute 256-block
+                // content cell. Abstract region ownership must not reseed it.
+                assert_eq!(
+                    left_mosaic.local_fingerprint,
+                    right_mosaic.local_fingerprint
+                );
+                if left_province.id != right_province.id {
+                    province_crossings += 1;
+                }
+                if left_ecoregion.id != right_ecoregion.id {
+                    ecoregion_crossings += 1;
+                    max_openness_jump = max_openness_jump
+                        .max((left_ecoregion.base_openness - right_ecoregion.base_openness).abs());
+                    max_canopy_jump = max_canopy_jump
+                        .max((left_ecoregion.base_canopy - right_ecoregion.base_canopy).abs());
+                }
+            }
+        }
+
+        assert!(
+            province_crossings > 20,
+            "province crossings: {province_crossings}"
+        );
+        assert!(
+            ecoregion_crossings > 50,
+            "ecoregion crossings: {ecoregion_crossings}"
+        );
+        assert!(
+            max_openness_jump < 0.10,
+            "openness jumped {max_openness_jump} across a region identity"
+        );
+        assert!(
+            max_canopy_jump < 0.10,
+            "canopy jumped {max_canopy_jump} across a region identity"
+        );
     }
 
     #[test]

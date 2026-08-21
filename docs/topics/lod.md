@@ -101,6 +101,12 @@ fact is a stricter p95 lock. Tactical 327 makes live preset changes staged,
 direct, atomic, and recoverable without changing those preset meanings or
 defaults.
 
+Tactical 328 adds source-side frequency filtering for the continental
+candidate: spacing-one queries preserve exact terrain, while coarse preview
+queries remove shore/local/walking/micro detail below their representable
+footprint. This corrects diagonal alias grain in broad continental views
+without making the clipmap or camera scale an input to geography.
+
 ## Historical Routes
 
 - [`far-lod.md`](far-lod.md) is the retirement record for the removed
