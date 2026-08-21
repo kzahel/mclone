@@ -1,7 +1,8 @@
 # Tactical 326: Continental Catchment And Landform Realization
 
 Status: **authorized and implemented through Phase 4 on 2026-08-21; Human
-Review D is open. One selected bounded catchment now realizes ranges, valleys,
+Review D selected revise while retaining the mechanism. One selected bounded
+catchment now realizes ranges, valleys,
 snow/rock summits, ordered channels, one flat lake, varied shore intent, spill,
 and outlet in exact terrain and the shared direct source. The reported crash
 did not reproduce across the higher range or five cold-teleport and retained-
@@ -10,7 +11,10 @@ exact agreement covers all five review sites, and an explicit confluence apron
 removes the hard three-way mound. Native and headed-browser evidence is
 complete. The first Phase 4 contact sheet rejected a residual radial summit;
 the final package uses short asymmetric ridge blades and bounded face-scale
-relief. Production `mclone-overworld-v1` remains unchanged.**
+relief. Review retained the confluence, lake inlet, drainage, and continental
+hierarchy but rejected visible regional/LOD seams, excess flatness, narrow
+breadth, and unresolved live-game cost. Tactical 328 owns the revision.
+Production `mclone-overworld-v1` remains unchanged.**
 
 Topic: `continental-hydrography`
 Topic: `continental-ecoregion-planning`
@@ -317,7 +321,7 @@ Implemented on 2026-08-21.
 
 ### Phase 4: Movement, Performance, And Human Review D
 
-Implemented on 2026-08-21. Human Review D is open.
+Implemented on 2026-08-21. Human Review D selected revise.
 
 - Surface windows now retain a bounded query-local catchment cache. A
   21-by-21 tile halo reconstructs each intersecting graph once rather than
@@ -381,6 +385,15 @@ Implemented on 2026-08-21. Human Review D is open.
   judgment now owned by Human Review D.
 
 ## Human Review D
+
+Result on 2026-08-21: **revise while retaining the mechanism**. The tributary
+confluence and river entrance into the lake are promising. Visible regional
+joins, far-view crisscross/checkerboard patterns, extensive flat terrain with
+similar tree cover, missing mesa-desert and humid-jungle breadth, unresolved
+live-game integration, and unknown V1/V2 performance parity block acceptance.
+Tactical
+[`328`](328-mclone-overworld-v2-regional-breadth.md) owns the correction while
+preserving `mclone-overworld-v1` as selectable and default.
 
 Review the same five places in exact-only and composed exact-plus-LOD views.
 The decision is:

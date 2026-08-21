@@ -24,7 +24,11 @@ Flat Grass cylinder proof and
 entire accepted terrain, biome, surface, spawn, and vegetation pipeline now
 supports either the ordinary plane or the exact 6,144-block / 384-chunk
 X-periodic cylinder. Product world creation defaults to this profile across
-catalog, startup, dedicated, and integrated-runner entry points.
+catalog, startup, dedicated, and integrated-runner entry points. Human Review
+D of the detached continental candidate has now explicitly retained this V1
+world as a selectable default while Tactical
+[`328`](../tactical/328-mclone-overworld-v2-regional-breadth.md) develops a
+separate experimental `mclone-overworld-v2`; the new profile is not yet live.
 Its deterministic spawn policy keeps the existing exact dry-surface gate and
 adds a 129-by-129-block sparse neighborhood survey, so the first locally safe
 chunk beside a dominant ocean is no longer accepted as the world entry region.

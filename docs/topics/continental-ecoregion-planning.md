@@ -84,7 +84,15 @@ and LOD before another production decision. Its directed drainage, varied
 lake, exact/LOD lowering, and ecology facts are implemented. A first final
 contact sheet rejected the remaining radial summit, so the active candidate
 now uses short asymmetric ridge peaks and bounded face-scale relief before
-the Human Review D package is rebuilt.
+the Human Review D package is rebuilt. Human Review D on 2026-08-21 retained
+the confluence, lake inlet, catchment, and continental hierarchy but selected
+**revise**: visible regional joins and far-LOD crisscrossing remain, the first
+terrain vocabulary is too flat and temperate, and detached review is not yet
+a product world. Tactical
+[`328`](../tactical/328-mclone-overworld-v2-regional-breadth.md) now owns
+regional/LOD continuity, a selectable persisted `mclone-overworld-v2`, and
+mesa-desert plus humid-jungle province-scale vertical slices. V1 remains
+selectable and default.
 Mclone should combine
 top-down continental and ecoregional planning with bottom-up procedural
 realization so the Overworld contains large, recognizable, causally related

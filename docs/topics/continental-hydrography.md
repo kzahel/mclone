@@ -13,11 +13,13 @@ five deterministic review sites are implemented. Exact agreement, native
 movement, and headed-browser review now cover all five sites. The first Phase
 4 contact sheet rejected a residual radial summit; peaks now use short
 asymmetric ridge blades, along-ridge crowns, and bounded face-scale relief.
-Human Review D is open on the final package. It proves bounded correctness and
-survivability but not final visual authorship or acceptable panning latency:
-exact remeshing and synchronous clipmap filling remain measured performance
-debt. Production `mclone-overworld-v1` remains unchanged until this proof
-passes Human Review D and a separate integration slice is authorized.**
+Human Review D selected **revise while retaining the mechanism**: the
+confluence and lake inlet are promising, but regional seams, far-LOD grid
+patterns, excess flatness, narrow regional breadth, and unresolved live-game
+cost block production acceptance. Tactical
+[`328`](../tactical/328-mclone-overworld-v2-regional-breadth.md) owns those
+corrections and a selectable sibling `mclone-overworld-v2` integration.
+Production `mclone-overworld-v1` remains available and default.**
 
 ## Motivation
 

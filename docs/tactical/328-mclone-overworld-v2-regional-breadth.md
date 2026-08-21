@@ -1,0 +1,285 @@
+# Tactical 328: Mclone Overworld V2 Regional Breadth
+
+Status: **authorized 2026-08-21. Human Review D selected revise while retaining
+the continental catchment mechanism. Implementation is proceeding through
+regional continuity, LOD presentation correction, a selectable persisted
+`mclone-overworld-v2` profile, mesa-desert and humid-jungle vertical slices,
+and live-game review. `mclone-overworld-v1` remains selectable and the default.**
+
+Topic: `continental-ecoregion-planning`
+Topic: `world-generation-profiles`
+Topic: `procedural-horizon-clipmap`
+
+## Instruction Synthesis
+
+The continental catchment has started to cohere. Its tributary confluence and
+river entrance into the lake are promising and should be retained. Human
+review nevertheless finds visible joins between regional domains, a regular
+crisscross or checkerboard pattern at broad LOD scales, and too much terrain
+that reads as flat planes with similar trees. One temperate drainage proof is
+not the desired breadth: Mclone needs strongly characterized province-scale
+places such as a mesa desert and a dense humid jungle.
+
+Do not wholesale replace the existing Mclone Overworld while the new
+generator's visual and performance character is unresolved. Preserve
+`mclone-overworld-v1` as a selectable profile and keep it as the new-world
+default. Promote the detached continental candidate into a separate
+experimental `mclone-overworld-v2` identity, exercise it through the real
+shared game/server/persistence paths, compare its costs with V1, and stop at a
+human review before changing either default or compatibility posture.
+
+## Product Question
+
+Can the continental system become a real selectable game world with smooth
+regional joins, non-gridlike distant presentation, and at least three
+recognizably different province-scale stories, while preserving V1 and
+remaining bounded and responsive enough for streamed play?
+
+## Review D Decision
+
+Human Review D is **revise**.
+
+Retain:
+
+- bounded generative catchments and stable directed drainage;
+- the tributary-confluence, trunk, lake-inlet, spill, and outlet vocabulary;
+- one directly queryable source shared by exact chunks and procedural LOD;
+- continental, province, ecoregion, and landscape-mosaic scales; and
+- deterministic review-site selection rather than coordinate-specific
+  generation branches.
+
+Revise before production use:
+
+- discrete owner joins that remain visible in shape, tint, material, cover,
+  or subordinate feature layout;
+- regular far-view grid, triangle, tile, or level-transition patterns;
+- the narrow mostly temperate terrain and vegetation vocabulary;
+- synchronous exact/clipmap settling costs; and
+- the detached Explorer-only product boundary.
+
+## Profile Decision
+
+Allocate `mclone-overworld-v2` as a persisted, selectable sibling of
+`mclone-overworld-v1`.
+
+- V1 remains the default and retains its present generator path and visual
+  regression evidence.
+- V2 initially carries an experimental display label and may change under the
+  internal-unshipped compatibility ledger.
+- Each stored dimension owns one immutable profile identity during a session;
+  persistence hits continue to win over generation.
+- V2 uses the ordinary shared generator plan, scheduler, worker, biome,
+  feature, lighting, persistence, terrain-view, scene, and platform contracts.
+  No Explorer-only or app-local generator fork is permitted.
+- Remote clients continue to consume authoritative chunks. They need no V2
+  generator implementation unless they also host an integrated authority.
+- Making V2 the default, retiring V1, or promising cross-build V2 world
+  compatibility requires a later explicit decision.
+
+## Three Initial Characteristic Domains
+
+The first breadth proof contains three coherent province-scale stories. Their
+initial spans are approximately 8-30 km, with internal ecoregions and
+landscape mosaics rather than one homogeneous biome patch.
+
+### Temperate Mountain Catchment
+
+Retain and refine the Tactical 326 range, branching headwaters, tributary
+confluence, trunk/floodplain, lake, varied shore, spill, outlet, forest,
+meadow, wetland, and quiet-lowland vocabulary.
+
+### Mesa Desert
+
+Realize a warm dry leeward province as a causal bundle:
+
+- broad caprock tables, asymmetric escarpments, mesas, buttes, and stepped
+  benches rather than ordinary hills recolored with sand;
+- dry washes descending toward alluvial fans, gravel plains, dune or sandy
+  pockets, and occasional salt or closed-basin flats;
+- exposed layered substrates and slope-dependent caprock/talus response;
+- sparse clustered cover, open migration ground, shade/refuge opportunities,
+  and ephemeral drainage semantics; and
+- explicit ecotones to neighboring upland, savanna-like shoulder, riparian,
+  and quiet regions.
+
+### Humid Jungle
+
+Realize a warm wet windward or basin province as another causal bundle:
+
+- forested massifs, steep wet shoulders, sheltered lowlands, river galleries,
+  and locally bounded wet clearings rather than flat land with more trees;
+- dense multi-scale canopy with emergent crowns, understory/edge response,
+  and intentionally limited sightlines in cores;
+- high drainage permanence, wet soils, floodplain or marsh opportunities,
+  and clear river dependence;
+- coherent canopy gaps, disturbance history, refuge, and crossing semantics;
+  and
+- explicit ecotones to mixed forest, exposed upland, wetland, and quiet
+  regions.
+
+These are authored regional archetypes, not three new nearest-parameter biome
+IDs. Their landform, water, climate, substrate, vegetation structure, and
+ecology facts must agree. The architecture must permit later growth toward
+roughly 12-18 strong archetypes without changing query or persistence shape.
+
+## Ownership
+
+- `mclone-worldgen` owns V2 regional plans, adjacency/ecotone facts, direct
+  surfaces, exact lowering, biome/material/vegetation semantics, deterministic
+  witnesses, and profile-owned generation work.
+- `mclone-server` owns the stored V2 profile identity, authoritative
+  generation dispatch, spawn/admission, and persistence behavior.
+- `mclone-terrain-view` owns the shared V2 procedural source, mesh/normal/LOD
+  presentation correction, exact composition, and bounded performance facts.
+- `mclone-scene`, `mclone-app-runtime`, and `mclone-ui` own shared live-game
+  orchestration and profile selection. Platform apps remain adapters.
+- World Explorer and Terrain Lab own review selection and diagnostics only.
+
+## Phases And Commit Gates
+
+### Phase 0: Tactical And Baselines
+
+- Record Human Review D as revise in the tactical and living topics.
+- Allocate V2 as `planned-unallocated` in the compatibility safety ledger.
+- Preserve V1 as the default and define side-by-side review requirements.
+- Capture deterministic content-seam and far-LOD-pattern baselines with the
+  narrowest existing native and browser harnesses.
+- Commit the tactical before implementation.
+
+### Phase 1: Regional Continuity And LOD Presentation
+
+- Separate content seams from representation artifacts using exact-only,
+  horizon-only, composed, owner/transition, normal, and coverage evidence.
+- Make unlike neighboring regional owners publish one symmetric adjacency
+  fact and one pair-owned ecotone. The same coordinate must not depend on
+  which endpoint owner was selected first.
+- Remove discontinuous subordinate feature salts, biome/tint steps, material
+  steps, or cover layout at unintended owner joins. Preserve intentionally
+  sharp geological boundaries only when typed and visibly authored.
+- Prove bounded height and first-derivative behavior across sampled owner
+  boundaries and point/window/cache-reset equivalence.
+- Correct the regular far-view crisscross at its actual owner: sampling,
+  tessellation, normals, tile joins, or clipmap-level transition. Do not hide
+  it with added worldgen noise or weaken exact/LOD identity.
+- Inspect pixels after the first content correction and first LOD correction.
+- Commit each independently useful correction.
+
+### Phase 2: Selectable Persisted V2
+
+- Add `mclone-overworld-v2` to the shared stored profile enum, stable binary
+  tag, JSON label, local catalog, UI selection, startup descriptors,
+  dedicated-server CLI, Web startup transport, and reopen validation.
+- Route true missing chunks through the continental exact generator and its
+  typed dependency cache. Preserve persisted chunks and session-immutable
+  profile identity.
+- Add V2 spawn selection and compatible biome/top-material lookup without
+  borrowing V1 terrain facts.
+- Expose the same V2 identity to Distant Terrain and exact composition in the
+  live scene. V1 remains the default and unchanged.
+- Prove native/Wasm descriptor round trips, worker dispatch, target partition,
+  scheduler admission, SQLite/IndexedDB reopen, and exact/LOD source identity.
+- Reach a real locally playable V2 world before adding the two new domains.
+- Commit.
+
+### Phase 3: Mesa Desert Vertical Slice
+
+- Add stable regional archetype and formation identities, bounded influence,
+  direct point/window queries, and one deterministic review journey.
+- Realize caprock tables, escarpments, mesas/buttes, benches, washes, fans,
+  basin flats, substrate layers, and sparse clustered vegetation through
+  exact chunks and every LOD level.
+- Derive arid habitat, shade/refuge, crossing, water-permanence, and open-range
+  facts without implementing animal migration in this tactical.
+- Prove exact/LOD agreement, owner-boundary continuity, negative coordinates,
+  supported cylinder repetition, and live-game traversal.
+- Capture and inspect exact, composed, broad horizon, and live-game pixels.
+- Commit.
+
+### Phase 4: Humid Jungle Vertical Slice
+
+- Add stable humid-jungle regional and canopy identities with one
+  deterministic review journey.
+- Realize forested massifs/lowlands, wet drainage, river galleries, canopy
+  cores, emergents, understory/edges, and bounded gaps through exact chunks
+  and every LOD level.
+- Derive wet refuge, crossing, canopy-cover, clearing, and drainage-permanence
+  facts for later ecology consumers.
+- Prove exact/LOD agreement, whole-tree ownership, owner-boundary continuity,
+  negative coordinates, supported cylinder repetition, and live-game travel.
+- Capture and inspect exact, composed, broad horizon, and live-game pixels.
+- Commit.
+
+### Phase 5: Performance, Cross-Platform, And Human Review E
+
+- Compare V1 and V2 cold exact generation, dependency work, meshing,
+  vegetation, clipmap refill, retained movement, memory, and presented-frame
+  costs on the same host and view descriptors.
+- Correct obvious repeated or synchronous work without making caches semantic.
+  Do not claim parity where the evidence shows a material V2 cost.
+- Run affected shared suites and native/Wasm boundaries; build flat Android
+  and XR boundaries affected by the profile enum and shared source.
+- Create/reopen V1 and V2 through the real catalog. Require V1 to remain the
+  default and both profiles to remain selectable.
+- Package sequential native, headed-browser, and live-game review artifacts
+  outside the repository. Push and deploy the exact revision, verify public
+  pixels, then stop at Human Review E.
+- Commit.
+
+## Automated Acceptance
+
+- V1 profile label, tag, generator, default status, fixtures, and ordinary
+  missing-chunk output remain unchanged.
+- V2 has one stable stored identity across shared Rust, native, Web,
+  dedicated, Android, and XR boundaries.
+- Exact V2 chunks and procedural V2 samples agree on quantized height, water,
+  biome, top material, stable whole vegetation, and regional identities.
+- Unlike owner joins have symmetric adjacency identities and bounded ecotone
+  widths; reordered queries and either-side approaches agree.
+- Sampled unintended joins satisfy bounded height and slope continuity.
+- Exact-only output contains no candidate-domain step; horizon-only output
+  contains no regular checkerboard, diagonal, tile, or ring pattern accepted
+  merely as coarse terrain.
+- Mesa and jungle review domains each cover province-scale extents, have
+  multiple internal landscape stories, and remain distinguishable without a
+  diagnostic overlay.
+- Cold teleport and retained movement perform bounded work independent of
+  travel distance. Caches change cost only.
+- V2 worlds create, play, save, close, and reopen through ordinary authority
+  paths while V1 remains available and default.
+
+## Human Review E
+
+Review V1 beside the three V2 characteristic domains in exact, composed, and
+live-game views. The decision is:
+
+1. **accept** V2 as a continuing selectable experimental world and authorize
+   the next regional-archetype campaign;
+2. **revise** named seam, LOD, terrain, water, vegetation, performance, or
+   live-game behavior; or
+3. **reject** V2 promotion while retaining independently useful catchment,
+   adjacency, profile, or representation mechanisms.
+
+Acceptance does not make V2 the default or retire V1.
+
+## Non-Goals
+
+This tactical does not:
+
+- change the new-world default from V1;
+- retire, alias, or rewrite V1 worlds;
+- promise release-frozen V2 output or migrate external saves;
+- implement every intended regional archetype;
+- implement unloaded migration, population simulation, seasons, structures,
+  caves, full geology, sediment erosion, or dynamic floods;
+- solve arbitrary volumetric distant terrain; or
+- accept regular visual artifacts because metrics or exact/LOD hashes pass.
+
+## Related
+
+- [`326-continental-catchment-and-landform-realization.md`](326-continental-catchment-and-landform-realization.md)
+- [`../topics/continental-ecoregion-planning.md`](../topics/continental-ecoregion-planning.md)
+- [`../topics/continental-hydrography.md`](../topics/continental-hydrography.md)
+- [`../topics/world-generation-profiles.md`](../topics/world-generation-profiles.md)
+- [`../topics/mclone-overworld-generation.md`](../topics/mclone-overworld-generation.md)
+- [`../topics/lod.md`](../topics/lod.md)
+- [`../topics/procedural-horizon-clipmap.md`](../topics/procedural-horizon-clipmap.md)
