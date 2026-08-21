@@ -1,16 +1,16 @@
 # Tactical 326: Continental Catchment And Landform Realization
 
-Status: **authorized 2026-08-21; Phases 0-3 implemented. One selected bounded
-catchment now realizes ranges, valleys, snow/rock summits, ordered channels,
-one flat lake, varied shore intent, spill, and outlet in exact terrain and the
-shared direct source. The reported crash still has not reproduced, including
-new high-range captures. Direct LOD queries now preserve eligible narrow-water
-crossings, exact agreement covers all five review sites, and an explicit
-confluence apron removes the hard three-way mound. Phase 4 owns movement,
-performance, browser evidence, deployment, and Human Review D packaging. A
-first Phase 4 contact sheet rejected the remaining radial summit silhouette;
-short asymmetric ridge blades and bounded face-scale relief now replace that
-dome before final packaging.**
+Status: **authorized and implemented through Phase 4 on 2026-08-21; Human
+Review D is open. One selected bounded catchment now realizes ranges, valleys,
+snow/rock summits, ordered channels, one flat lake, varied shore intent, spill,
+and outlet in exact terrain and the shared direct source. The reported crash
+did not reproduce across the higher range or five cold-teleport and retained-
+movement lanes. Direct LOD queries preserve eligible narrow-water crossings,
+exact agreement covers all five review sites, and an explicit confluence apron
+removes the hard three-way mound. Native and headed-browser evidence is
+complete. The first Phase 4 contact sheet rejected a residual radial summit;
+the final package uses short asymmetric ridge blades and bounded face-scale
+relief. Production `mclone-overworld-v1` remains unchanged.**
 
 Topic: `continental-hydrography`
 Topic: `continental-ecoregion-planning`
@@ -317,7 +317,7 @@ Implemented on 2026-08-21.
 
 ### Phase 4: Movement, Performance, And Human Review D
 
-In progress on 2026-08-21.
+Implemented on 2026-08-21. Human Review D is open.
 
 - Surface windows now retain a bounded query-local catchment cache. A
   21-by-21 tile halo reconstructs each intersecting graph once rather than
@@ -350,6 +350,35 @@ In progress on 2026-08-21.
   review binaries and could accidentally reuse an older Explorer executable.
   Composed review frames use each site's authored oblique scale, while the
   retained movement lane stays at 512 blocks for a visible exact frontier.
+- The final clean package was generated from commit `bbd21699` and is indexed
+  at `/tmp/mclone-continental-catchment-review/review-index.json`. It contains
+  exact-only, coverage, composed, horizon, retained-movement, and headed-
+  browser evidence for all five deterministic sites. The catalog witness is
+  `0b15549f3d0bc26ebacbe3a99a7c5dd076523e650c462014f275428610edf418`.
+- Every native movement lane finished with 160 of 160 procedural slots ready,
+  121 of 121 exact chunks painted, zero pending work, and zero missing exact
+  or proxy tree owners. Cold composed captures took 6.19-6.64 seconds. The
+  retained lanes reached their first settled targets in 6.61-7.00 seconds;
+  their 24 commanded movement frames averaged 29-46 ms with 97-120 ms p95.
+  No panic, device loss, allocation failure, or buried camera reproduced.
+- The request-local performance witness measures raw graph construction at
+  about 31 ns, a direct surface point at about 1.87 us, and a cached 21-by-21
+  window at about 0.92 ms on the Apple M4 Pro debug lane. Cache-reset repeats
+  preserve identical samples, work, and semantic hashes.
+- The graph query is therefore not the remaining interaction bottleneck.
+  Retained exact work still accumulated about 0.73-0.92 seconds of generation
+  and 4.09-6.86 seconds of meshing, while synchronous clipmap/direct-source
+  fill also contributes to settling. This tactical proves bounded correctness
+  and survivability; it does not claim that panning responsiveness is solved.
+- All five local headed-browser captures used the real browser worker and
+  reached 160 of 160 procedural slots, 121 of 121 exact chunks, zero pending
+  refills, and zero missing tree owners. End-to-end readiness took 9.17-13.23
+  seconds. Native and browser composed pixels were inspected side by side.
+- The final package visibly distinguishes the ridge/pass and branching
+  headwaters, tributary confluence, wider trunk/floodplain, flat lake with
+  varied shore and outlet, and quiet lowland. The forms remain an analytic
+  first vocabulary rather than final production terrain, which is the visual
+  judgment now owned by Human Review D.
 
 ## Human Review D
 
