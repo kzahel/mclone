@@ -5640,6 +5640,22 @@ mod android {
             );
             let start_horizon = self.start_terrain_view.unwrap_or_default();
             let latest_horizon = self.latest_terrain_view.unwrap_or_default();
+            // Keep readiness in its own compact receipt. Android logcat may
+            // truncate the full horizon diagnostic before these late fields,
+            // which would make a moving probe's exact-center continuity
+            // impossible to audit from the pulled artifact.
+            log::info!(
+                "MCLONE_ANDROID_XR_PERF_HORIZON_READINESS expected_exact_columns={} start_target_ready={} start_exact_columns={} start_exact_center_ready={} latest_target_ready={} latest_exact_columns={} latest_exact_center_ready={} horizon_sample_frames={} exact_center_not_ready_frames={}",
+                android_xr_expected_exact_column_count(self.render_distance).unwrap_or(0),
+                start_horizon.target_ready,
+                start_horizon.exact_column_count,
+                start_horizon.exact_center_ready,
+                latest_horizon.target_ready,
+                latest_horizon.exact_column_count,
+                latest_horizon.exact_center_ready,
+                self.horizon_sample_frames,
+                self.exact_center_not_ready_frames,
+            );
             log::info!(
                 "MCLONE_ANDROID_XR_PERF_HORIZON expected_exact_columns={} start_active={} start_lod_preset={} start_lod_levels={} start_vegetation_max_sample_spacing={} start_target_ready={} start_ready_slots={} start_exact_columns={} start_exact_center_ready={} start_drawn_levels={} start_drawn_tiles={} start_drawn_tiles_by_level={} start_inner_hole_culled_tiles={} start_frustum_culled_tiles={} start_far_culled_tiles={} start_tree_instances={} start_drawn_tree_tiles={} start_drawn_tree_tiles_by_level={} start_drawn_tree_instances={} start_drawn_tree_instances_by_level={} start_drawn_canopy_tiles={} start_drawn_canopy_tiles_by_level={} start_drawn_canopy_cells={} start_drawn_canopy_cells_by_level={} start_drawn_canopy_vertices={} start_pending_vegetation_tiles={} start_vegetation_submitted_jobs={} start_vegetation_completed_jobs={} latest_active={} latest_lod_preset={} latest_lod_levels={} latest_vegetation_max_sample_spacing={} latest_target_ready={} latest_ready_slots={} latest_exact_columns={} latest_exact_center_ready={} horizon_sample_frames={} exact_center_not_ready_frames={} latest_drawn_levels={} latest_drawn_tiles={} latest_drawn_tiles_by_level={} latest_inner_hole_culled_tiles={} latest_frustum_culled_tiles={} latest_far_culled_tiles={} latest_tree_instances={} latest_drawn_tree_tiles={} latest_drawn_tree_tiles_by_level={} latest_drawn_tree_instances={} latest_drawn_tree_instances_by_level={} latest_drawn_canopy_tiles={} latest_drawn_canopy_tiles_by_level={} latest_drawn_canopy_cells={} latest_drawn_canopy_cells_by_level={} latest_drawn_canopy_vertices={} latest_pending_vegetation_tiles={} latest_vegetation_submitted_jobs={} latest_vegetation_completed_jobs={} latest_vegetation_transport_failures={} latest_vegetation_job_failures={}",
                 android_xr_expected_exact_column_count(self.render_distance).unwrap_or(0),

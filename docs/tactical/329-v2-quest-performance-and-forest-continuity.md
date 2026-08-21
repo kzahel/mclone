@@ -293,3 +293,10 @@ for V1 raised its stationary p95 from the pre-canopy `10.721 ms` baseline to
 V1 already has its accepted presentation. Canopy eligibility is therefore
 narrowed to V2/candidate so V1 remains a clean unchanged performance control;
 a rebuilt V1 repeat remains required before final A/B acceptance.
+
+The first corrected moving repeat revealed that Android logcat truncated the
+aggregate horizon line before its late exact-center continuity fields. The XR
+harness now emits a separate compact `PERF_HORIZON_READINESS` receipt with the
+expected/start/latest exact footprint and the exact-center unavailable-frame
+count. Moving acceptance uses that compact receipt rather than inferring
+readiness from a truncated diagnostic.
