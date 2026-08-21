@@ -679,6 +679,51 @@ fn graphics_options_stage_direct_distant_terrain_quality_before_apply() {
 }
 
 #[test]
+fn graphics_options_expose_every_distant_terrain_stop_directly() {
+    let mut surface = UiSurface::new();
+    surface.set_screen(Some(UiScreenId::OptionsCategory {
+        parent: GameOptionsParent::Pause,
+        category: GameOptionsCategory::Graphics,
+    }));
+    surface.set_scale(GuiScale::from_pixels(960, 540));
+
+    let presets = [
+        TerrainLodPreset::Off,
+        TerrainLodPreset::Low,
+        TerrainLodPreset::Medium,
+        TerrainLodPreset::High,
+    ];
+    for source in presets {
+        let state = GameUiRenderState {
+            terrain_lod_preset: source,
+            terrain_lod_staged_preset: source,
+            terrain_lod_effective_preset: source,
+            ..GameUiRenderState::default()
+        };
+        surface.set_render_state(state);
+        let slider = surface
+            .layout()
+            .widget(UI_V2_OPTIONS_TERRAIN_PRESENTATION)
+            .expect("terrain horizon slider")
+            .clone();
+
+        for (index, target) in presets.into_iter().enumerate() {
+            let fraction = index as f32 / (presets.len() - 1) as f32;
+            let point = Point {
+                x: slider.rect.x + 2.0 + (slider.rect.width - 4.0) * fraction,
+                y: slider.rect.y + slider.rect.height * 0.5,
+            };
+            assert!(surface.pointer_down(point, state));
+            assert_eq!(
+                surface.pointer_up(point, state).1,
+                Some(GameUiAction::StageTerrainLodPreset(target)),
+                "{source:?} could not address {target:?} directly"
+            );
+        }
+    }
+}
+
+#[test]
 fn graphics_options_open_the_fog_evaluation_submenu() {
     let mut surface = UiSurface::new();
     surface.set_screen(Some(UiScreenId::OptionsCategory {

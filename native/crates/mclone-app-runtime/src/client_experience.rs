@@ -2634,6 +2634,54 @@ mod tests {
     }
 
     #[test]
+    fn every_distant_terrain_preset_pair_stages_and_applies_directly() {
+        let presets = [
+            TerrainLodPreset::Off,
+            TerrainLodPreset::Low,
+            TerrainLodPreset::Medium,
+            TerrainLodPreset::High,
+        ];
+
+        for source in presets {
+            for target in presets {
+                if source == target {
+                    continue;
+                }
+
+                let mut state = ClientExperienceSettingsState::default();
+                state.terrain_lod_preset = source;
+                state.terrain_lod_effective_preset = source;
+                let mut settings = ClientExperienceSettingsController::new(state);
+
+                let staged = settings.apply_ui_action(
+                    GameUiAction::StageTerrainLodPreset(target),
+                    ClientExperienceSettingsProfile::default(),
+                );
+                assert!(
+                    staged.setting_effects.is_empty(),
+                    "{source:?} -> {target:?}"
+                );
+                assert_eq!(
+                    settings.state().terrain_lod_preset,
+                    source,
+                    "staging {source:?} -> {target:?} changed the requested preset"
+                );
+
+                let applied = settings.apply_ui_action(
+                    GameUiAction::ApplyTerrainLodPreset,
+                    ClientExperienceSettingsProfile::default(),
+                );
+                assert_eq!(
+                    applied.setting_effects,
+                    vec![ClientExperienceSettingEffect::SetTerrainLodPreset(target)],
+                    "{source:?} -> {target:?} did not emit exactly one direct effect"
+                );
+                assert_eq!(settings.state().terrain_lod_preset, target);
+            }
+        }
+    }
+
+    #[test]
     fn settings_clamp_render_distance_effects() {
         let mut settings = ClientExperienceSettingsController::new(ClientExperienceSettingsState {
             render_distance: 4,
