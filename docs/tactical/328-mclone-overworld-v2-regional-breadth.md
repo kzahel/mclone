@@ -271,6 +271,40 @@ journey is part of Phase 5.
 - Capture and inspect exact, composed, broad horizon, and live-game pixels.
 - Commit.
 
+Implemented on 2026-08-21 through the same shared continental surface,
+exact-column, semantic-tree, canonical-mesh, and terrain-view paths as the
+other V2 domains. Four continuous periodic-ready fields now shape an
+8,192-block forested massif, wet shoulders and sheltered lowlands, a
+2,048-block canopy, bounded 768-block gaps, and 192-block canopy clusters.
+The surface publishes stable 4,096-block canopy identities plus river-gallery,
+emergent, understory, wet-refuge, crossing, and permanent-drainage facts.
+Humid relief quiets the temperate catchment's radial range signal instead of
+stacking an unrelated mountain spine beneath the forest.
+
+The first exact/LOD lowering looked like an ordinary brown forest plantation.
+It was rejected: blanket podzol was removed, the ordinary tree proxy was not
+reused, and a categorical jungle boundary no longer gates the denser canopy
+lattice. A fourth `HumidJungleBroadleaf` family and `LayeredJungle` archetype
+now share stable records across exact jungle logs/leaves and the mono,
+per-eye, and multiview proxy shader. Normal crowns, tall emergents, low
+understory, two bounded candidates per 24-block cell, cluster-modulated
+density, and canopy-gap rejection produce one coherent but internally varied
+forest. The semantic compiler is v3, `MCHV` transport is v2, canonical terrain
+batches are v4, and family receipts cover all four families.
+
+The deterministic seven-journey catalog now includes a 16,384-block humid
+jungle traverse at seed `12345`, centered on `(10240, -54784)`. Direct tests
+cover the causal surface bundle, cross-LOD identity through 1,024-block
+spacing, negative coordinates, cylinder repetition, partition-independent
+whole-tree records, dense canopy, emergents, understory, and exact jungle
+voxels. Inspected 128-block exact/composed and 512-block composed captures
+show the layered tree family and clustered canopy; a 16,384-block map and
+oblique capture establish the province and drainage extent but intentionally
+do not count as individual-crown evidence. The updated surface-suite witness
+is
+`36a9e648fa15002f2428136258e665e1f414eb80b8dbcaa846f40aa2dc6b0cf5`.
+The final packaged live journey remains part of Phase 5.
+
 ### Phase 5: Performance, Cross-Platform, And Human Review E
 
 - Compare V1 and V2 cold exact generation, dependency work, meshing,

@@ -101,10 +101,17 @@ V2 identity, including the independently dispatched continental vegetation
 source. The mesa-desert slice is now implemented: stable formation cells
 create tables, buttes, stepped escarpments, washes, fans, basin flats,
 layered exact strata, and ecology-facing open-range/refuge/crossing facts from
-one causal surface record. Broad cross-LOD scans preserve regional and formation
-identity through 1,024-block sampling. Pixel review also rejected and removed
+one causal surface record. Broad cross-LOD scans preserve regional and
+formation identity through 1,024-block sampling. Pixel review also rejected and removed
 categorical material dithering that had turned a smooth 4 km field into
-clipmap-aligned color bands. Humid jungle is the remaining breadth slice.
+clipmap-aligned color bands. The humid-jungle slice is now implemented from
+another causal bundle: forested massif, wet shoulder, sheltered lowland,
+river gallery, canopy core, emergents, understory, bounded gaps, clustered
+density, refuge, crossing, and permanent-drainage facts. A dedicated layered
+jungle tree family shares stable records between exact blocks and procedural
+proxies; its density and silhouette fade through continuous canopy facts
+rather than the categorical regional label. The first blanket-podzol and
+ordinary-lollipop-tree attempts were rejected during pixel review.
 Mclone should combine
 top-down continental and ecoregional planning with bottom-up procedural
 realization so the Overworld contains large, recognizable, causally related
@@ -472,10 +479,10 @@ clearing and vegetation lattices are absolute-coordinate facts, not child
 hashes of an ecoregion owner. Broad plan and surface noise uses warped gradient
 fields, and the procedural preview filters sub-grid surface frequencies by LOD
 spacing while spacing one remains exact. The separately persisted
-`mclone-overworld-v2` integration and the first mesa-desert archetype are now
-live; V1 remains default and unchanged. The next content step is a humid-jungle
-archetype using the same direct, spacing-stable regional contract rather than
-another nearest-biome label.
+`mclone-overworld-v2` integration and the mesa-desert and humid-jungle
+archetypes are now live; V1 remains default and unchanged. The next gate is
+matched V1/V2 cost evidence and packaged live-game travel through all three
+V2 characteristic domains, not another regional label.
 
 ## Acceptance
 

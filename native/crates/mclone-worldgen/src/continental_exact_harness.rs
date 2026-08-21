@@ -9,7 +9,8 @@ use mclone_core::{CHUNK_WIDTH, chunk_min_block_coord};
 
 use crate::{
     block::{
-        ACACIA_LEAVES, ACACIA_LOG, AIR, OAK_LEAVES, OAK_LOG, SPRUCE_LEAVES, SPRUCE_LOG, WATER,
+        ACACIA_LEAVES, ACACIA_LOG, AIR, JUNGLE_LEAVES, JUNGLE_LOG, OAK_LEAVES, OAK_LOG,
+        SPRUCE_LEAVES, SPRUCE_LOG, WATER,
     },
     continental_catchment_review::compile_continental_catchment_review,
     continental_ecoregion::ContinentalEcoregionDescriptor,
@@ -25,7 +26,7 @@ use crate::{
     terrain_preview::continental_candidate_tree_records_intersecting,
 };
 
-pub const CONTINENTAL_EXACT_REVIEW_SCHEMA_REVISION: &str = "mclone-continental-exact-review-v2";
+pub const CONTINENTAL_EXACT_REVIEW_SCHEMA_REVISION: &str = "mclone-continental-exact-review-v3";
 pub const CONTINENTAL_CATCHMENT_EXACT_REVIEW_SCHEMA_REVISION: &str =
     "mclone-continental-catchment-exact-review-v1";
 pub const CONTINENTAL_EXACT_REVIEW_RADIUS_CHUNKS: i32 = 2;
@@ -118,6 +119,9 @@ pub fn run_continental_exact_review(seed: i64) -> Result<ContinentalExactReviewR
     let arid = catalog
         .journey(ContinentalSurfaceJourneyKind::MesaDesert)
         .ok_or_else(|| "missing mesa-desert journey".to_owned())?;
+    let jungle = catalog
+        .journey(ContinentalSurfaceJourneyKind::HumidJungle)
+        .ok_or_else(|| "missing humid-jungle journey".to_owned())?;
 
     let generator = ContinentalCandidateExactGenerator::new(seed);
     let water_review = select_water_bank_review_point(
@@ -135,6 +139,12 @@ pub fn run_continental_exact_review(seed: i64) -> Result<ContinentalExactReviewR
         ),
         ("water", water.kind.label(), water_review.0, water_review.1),
         ("arid", arid.kind.label(), arid.center_x, arid.center_z),
+        (
+            "jungle",
+            jungle.kind.label(),
+            jungle.center_x,
+            jungle.center_z,
+        ),
     ];
     let mut sites = Vec::with_capacity(site_specs.len());
     for (label, journey, center_x, center_z) in site_specs {
@@ -349,6 +359,7 @@ fn review_site(
                     McloneTreeArchetype::RoundedBroadleaf => OAK_LOG,
                     McloneTreeArchetype::LayeredConifer => SPRUCE_LOG,
                     McloneTreeArchetype::ForkedAcacia => ACACIA_LOG,
+                    McloneTreeArchetype::LayeredJungle => JUNGLE_LOG,
                 };
                 tree_base_mismatches += u32::from(
                     final_chunk
@@ -484,6 +495,8 @@ fn tree_voxel_count(chunk: &crate::levelgen::GeneratedChunk) -> usize {
         SPRUCE_LEAVES,
         ACACIA_LOG,
         ACACIA_LEAVES,
+        JUNGLE_LOG,
+        JUNGLE_LEAVES,
     ]
     .into_iter()
     .map(|block| chunk.block_count(block))
@@ -511,10 +524,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn three_review_sites_match_direct_surface_and_cover_facts() {
+    fn four_review_sites_match_direct_surface_and_cover_facts() {
         let receipt = run_continental_exact_review(12_345).unwrap();
         assert!(receipt.suite_passed);
-        assert_eq!(receipt.sites.len(), 3);
+        assert_eq!(receipt.sites.len(), 4);
         assert!(receipt.sites.iter().all(|site| site.exact_chunks == 25));
         assert!(
             receipt

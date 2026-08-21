@@ -108,6 +108,9 @@ fn family_color(family: u32, trunk: bool) -> vec3<f32> {
     if family == 3u {
         return vec3<f32>(0.37, 0.50, 0.16);
     }
+    if family == 4u {
+        return vec3<f32>(0.08, 0.34, 0.12);
+    }
     return vec3<f32>(0.16, 0.45, 0.20);
 }
 
@@ -183,6 +186,27 @@ fn tree_vertex(
             center.z += offset.y;
             center.y += select(0.0, -0.8, box_index == 2u);
             half_extent = vec3<f32>(crown_radius, 0.62, crown_radius);
+        } else if family == 4u {
+            let directions = array<vec2<f32>, 4>(
+                vec2<f32>(0.0, -1.0),
+                vec2<f32>(1.0, 0.0),
+                vec2<f32>(0.0, 1.0),
+                vec2<f32>(-1.0, 0.0),
+            );
+            let direction = directions[orientation];
+            if box_index == 2u {
+                center.x += direction.x * crown_radius * 0.34;
+                center.z += direction.y * crown_radius * 0.34;
+                center.y += crown_depth * 0.30;
+                half_extent = vec3<f32>(
+                    max(crown_radius * 0.74, 0.7),
+                    max(crown_depth * 0.30, 0.7),
+                    max(crown_radius * 0.74, 0.7),
+                );
+            } else {
+                center.y -= crown_depth * 0.08;
+                half_extent.y = max(crown_depth * 0.46, 0.8);
+            }
         } else if box_index == 2u {
             center.y += crown_depth * 0.32;
             half_extent = vec3<f32>(

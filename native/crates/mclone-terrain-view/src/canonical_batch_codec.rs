@@ -7,7 +7,7 @@ use mclone_worldgen::placement::BlockPos;
 use crate::CanonicalExactSurfaceColumn;
 
 const CANONICAL_BATCH_MAGIC: [u8; 4] = *b"MCTB";
-const CANONICAL_BATCH_VERSION: u16 = 3;
+const CANONICAL_BATCH_VERSION: u16 = 4;
 const CANONICAL_BATCH_HEADER_BYTES: usize = 72;
 const CANONICAL_BATCH_ADMISSION_HEADER_BYTES: usize = 28;
 const CANONICAL_BATCH_SURFACE_COLUMN_BYTES: usize = 4;
@@ -337,6 +337,7 @@ const fn tree_family_tag(family: McloneTreeFamily) -> u8 {
         McloneTreeFamily::TemperateBroadleaf => 0,
         McloneTreeFamily::CoolWetConifer => 1,
         McloneTreeFamily::WarmDryAcacia => 2,
+        McloneTreeFamily::HumidJungleBroadleaf => 3,
     }
 }
 
@@ -345,6 +346,7 @@ const fn tree_archetype_tag(archetype: McloneTreeArchetype) -> u8 {
         McloneTreeArchetype::RoundedBroadleaf => 0,
         McloneTreeArchetype::LayeredConifer => 1,
         McloneTreeArchetype::ForkedAcacia => 2,
+        McloneTreeArchetype::LayeredJungle => 3,
     }
 }
 
@@ -421,6 +423,7 @@ impl<'a> Decoder<'a> {
             0 => McloneTreeFamily::TemperateBroadleaf,
             1 => McloneTreeFamily::CoolWetConifer,
             2 => McloneTreeFamily::WarmDryAcacia,
+            3 => McloneTreeFamily::HumidJungleBroadleaf,
             other => {
                 return Err(format!(
                     "canonical natural-tree family tag {other} is invalid"
@@ -431,6 +434,7 @@ impl<'a> Decoder<'a> {
             0 => McloneTreeArchetype::RoundedBroadleaf,
             1 => McloneTreeArchetype::LayeredConifer,
             2 => McloneTreeArchetype::ForkedAcacia,
+            3 => McloneTreeArchetype::LayeredJungle,
             other => {
                 return Err(format!(
                     "canonical natural-tree archetype tag {other} is invalid"

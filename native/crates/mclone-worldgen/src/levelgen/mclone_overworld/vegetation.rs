@@ -5,8 +5,8 @@ use std::fmt;
 use mclone_core::{ChunkPos, block_to_chunk_coord};
 
 use crate::block::{
-    ACACIA_LEAVES, ACACIA_LOG, AIR, DIRT, OAK_LEAVES, OAK_LOG, RawBlockId, SPRUCE_LEAVES,
-    SPRUCE_LOG, is_leaves,
+    ACACIA_LEAVES, ACACIA_LOG, AIR, DIRT, JUNGLE_LEAVES, JUNGLE_LOG, OAK_LEAVES, OAK_LOG,
+    RawBlockId, SPRUCE_LEAVES, SPRUCE_LOG, is_leaves,
 };
 use crate::feature::FeatureRegion;
 use crate::levelgen::profile::FLAT_GRASS_HEIGHT;
@@ -75,6 +75,7 @@ pub enum McloneTreeFamily {
     TemperateBroadleaf,
     CoolWetConifer,
     WarmDryAcacia,
+    HumidJungleBroadleaf,
 }
 
 impl McloneTreeFamily {
@@ -83,6 +84,7 @@ impl McloneTreeFamily {
             Self::TemperateBroadleaf => "temperateBroadleaf",
             Self::CoolWetConifer => "coolWetConifer",
             Self::WarmDryAcacia => "warmDryAcacia",
+            Self::HumidJungleBroadleaf => "humidJungleBroadleaf",
         }
     }
 
@@ -91,6 +93,7 @@ impl McloneTreeFamily {
             Self::TemperateBroadleaf => 5,
             Self::CoolWetConifer => 4,
             Self::WarmDryAcacia => 7,
+            Self::HumidJungleBroadleaf => 4,
         }
     }
 }
@@ -100,6 +103,7 @@ pub enum McloneTreeArchetype {
     RoundedBroadleaf,
     LayeredConifer,
     ForkedAcacia,
+    LayeredJungle,
 }
 
 impl McloneTreeArchetype {
@@ -108,6 +112,7 @@ impl McloneTreeArchetype {
             Self::RoundedBroadleaf => "roundedBroadleaf",
             Self::LayeredConifer => "layeredConifer",
             Self::ForkedAcacia => "forkedAcacia",
+            Self::LayeredJungle => "layeredJungle",
         }
     }
 }
@@ -881,6 +886,9 @@ pub(crate) fn realize_mclone_tree_occurrences(
             McloneTreeArchetype::ForkedAcacia => {
                 realize_forked_acacia(region, *occurrence, &mut report);
             }
+            McloneTreeArchetype::LayeredJungle => {
+                realize_layered_jungle(region, *occurrence, &mut report);
+            }
         }
     }
     report
@@ -940,6 +948,123 @@ fn realize_rounded_broadleaf(
             OAK_LOG,
             report,
         );
+    }
+}
+
+fn realize_layered_jungle(
+    region: &mut FeatureRegion,
+    occurrence: McloneTreeOccurrence,
+    report: &mut McloneTreeRealizationReport,
+) {
+    let record = occurrence.record;
+    let base = occurrence
+        .working_base()
+        .expect("validated tree occurrence has a representable working base");
+    write_tree_block(
+        region,
+        occurrence,
+        BlockPos::new(base.x, base.y - 1, base.z),
+        DIRT,
+        report,
+    );
+
+    let trunk_height = i32::from(record.trunk_height);
+    let crown_radius = i32::from(record.crown_radius);
+    let crown_depth = i32::from(record.crown_depth).max(4);
+    let broad_trunk = crown_radius >= 6 && trunk_height >= 18;
+    for dy in 0..trunk_height {
+        write_tree_block(
+            region,
+            occurrence,
+            BlockPos::new(base.x, base.y + dy, base.z),
+            JUNGLE_LOG,
+            report,
+        );
+        if broad_trunk {
+            write_tree_block(
+                region,
+                occurrence,
+                BlockPos::new(base.x + 1, base.y + dy, base.z),
+                JUNGLE_LOG,
+                report,
+            );
+            write_tree_block(
+                region,
+                occurrence,
+                BlockPos::new(base.x, base.y + dy, base.z + 1),
+                JUNGLE_LOG,
+                report,
+            );
+            write_tree_block(
+                region,
+                occurrence,
+                BlockPos::new(base.x + 1, base.y + dy, base.z + 1),
+                JUNGLE_LOG,
+                report,
+            );
+        }
+    }
+
+    let crown_top_y = base.y + trunk_height + 1;
+    for layer in 0..=crown_depth {
+        let layer_radius = if layer == 0 {
+            1
+        } else if layer <= 2 {
+            (crown_radius - 2 + layer).min(crown_radius)
+        } else if layer + 2 >= crown_depth {
+            (crown_radius - (layer + 2 - crown_depth)).max(2)
+        } else {
+            crown_radius
+        };
+        let y = crown_top_y - layer;
+        for dz in -layer_radius..=layer_radius {
+            for dx in -layer_radius..=layer_radius {
+                let edge_depth = dx.abs() + dz.abs() - layer_radius;
+                if edge_depth > 2 {
+                    continue;
+                }
+                if edge_depth >= 1
+                    && (tree_voxel_hash(record.variant_seed, dx, -layer, dz) & 3) != 0
+                {
+                    continue;
+                }
+                if layer > 1
+                    && layer + 1 < crown_depth
+                    && dx.abs() < 2
+                    && dz.abs() < 2
+                    && (tree_voxel_hash(record.variant_seed.rotate_left(11), dx, layer, dz) & 7)
+                        == 0
+                {
+                    continue;
+                }
+                write_tree_leaf(
+                    region,
+                    occurrence,
+                    BlockPos::new(base.x + dx, y, base.z + dz),
+                    JUNGLE_LEAVES,
+                    report,
+                );
+            }
+        }
+    }
+
+    let branch_y = crown_top_y - crown_depth / 2;
+    let branch_length = (crown_radius / 2).max(2);
+    for turn in 0..4_u8 {
+        let direction = tree_direction((record.orientation + turn) & 3);
+        for step in 1..=branch_length {
+            write_tree_block(
+                region,
+                occurrence,
+                BlockPos::new(
+                    base.x + direction.0 * step,
+                    branch_y + step / 2,
+                    base.z + direction.1 * step,
+                ),
+                JUNGLE_LOG,
+                report,
+            );
+        }
     }
 }
 
@@ -1318,6 +1443,7 @@ const fn forest_family_index(family: McloneTreeFamily) -> usize {
         McloneTreeFamily::TemperateBroadleaf => 0,
         McloneTreeFamily::CoolWetConifer => 1,
         McloneTreeFamily::WarmDryAcacia => 2,
+        McloneTreeFamily::HumidJungleBroadleaf => 0,
     }
 }
 
@@ -1341,6 +1467,7 @@ fn candidate_supports_landform(
         McloneTreeFamily::TemperateBroadleaf => 0.65,
         McloneTreeFamily::CoolWetConifer => 0.85,
         McloneTreeFamily::WarmDryAcacia => 0.55,
+        McloneTreeFamily::HumidJungleBroadleaf => 0.72,
     };
     landform.slope <= maximum_slope
 }
@@ -1368,6 +1495,12 @@ fn resolve_silhouette(family: McloneTreeFamily, hash: u64) -> (McloneTreeArchety
             3,
             3,
         ),
+        McloneTreeFamily::HumidJungleBroadleaf => (
+            McloneTreeArchetype::LayeredJungle,
+            12 + (hash % 9) as u16,
+            5 + ((hash >> 8) % 3) as u16,
+            7 + ((hash >> 16) % 4) as u16,
+        ),
     }
 }
 
@@ -1380,14 +1513,15 @@ fn tree_bounds(
 ) -> Result<McloneTreeBounds, McloneVegetationError> {
     let horizontal_radius = match family {
         McloneTreeFamily::WarmDryAcacia => i32::from(crown_radius) + 3,
-        McloneTreeFamily::TemperateBroadleaf | McloneTreeFamily::CoolWetConifer => {
-            i32::from(crown_radius)
-        }
+        McloneTreeFamily::TemperateBroadleaf
+        | McloneTreeFamily::CoolWetConifer
+        | McloneTreeFamily::HumidJungleBroadleaf => i32::from(crown_radius),
     };
     let extra_height = match family {
         McloneTreeFamily::TemperateBroadleaf => 1,
         McloneTreeFamily::CoolWetConifer => 1,
         McloneTreeFamily::WarmDryAcacia => 2,
+        McloneTreeFamily::HumidJungleBroadleaf => 2,
     };
     let max_y = base
         .y
@@ -1400,7 +1534,9 @@ fn tree_bounds(
             .checked_add(i32::from(trunk_height))
             .and_then(|value| value.checked_sub(i32::from(crown_depth)))
             .map_or(base.y, |value| value.min(base.y)),
-        McloneTreeFamily::TemperateBroadleaf | McloneTreeFamily::WarmDryAcacia => base.y,
+        McloneTreeFamily::TemperateBroadleaf
+        | McloneTreeFamily::WarmDryAcacia
+        | McloneTreeFamily::HumidJungleBroadleaf => base.y,
     };
     let support_y = base
         .y
@@ -1807,12 +1943,18 @@ mod tests {
                 McloneTreeFamily::TemperateBroadleaf => 0_u8,
                 McloneTreeFamily::CoolWetConifer => 1_u8,
                 McloneTreeFamily::WarmDryAcacia => 2_u8,
+                McloneTreeFamily::HumidJungleBroadleaf => {
+                    panic!("V1 receipt unexpectedly contains a humid-jungle tree")
+                }
             };
             family_counts[usize::from(family)] += 1;
             let archetype = match record.archetype {
                 McloneTreeArchetype::RoundedBroadleaf => 0_u8,
                 McloneTreeArchetype::LayeredConifer => 1_u8,
                 McloneTreeArchetype::ForkedAcacia => 2_u8,
+                McloneTreeArchetype::LayeredJungle => {
+                    panic!("V1 receipt unexpectedly contains a layered-jungle tree")
+                }
             };
             for byte in record
                 .id

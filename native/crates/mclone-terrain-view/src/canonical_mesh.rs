@@ -7,9 +7,10 @@ use mclone_mesh::{
     pack_textured_render_sections,
 };
 use mclone_worldgen::block::{
-    ACACIA_LEAVES, ACACIA_LOG, AIR, BIRCH_LOG, BIRCH_LOG_X, BIRCH_LOG_Z, DARK_OAK_LOG, JUNGLE_LOG,
-    MUSHROOM_STEM, OAK_LEAVES, OAK_LOG, OAK_LOG_X, OAK_LOG_Z, RawBlockId, SPRUCE_LEAVES,
-    SPRUCE_LOG, SPRUCE_LOG_X, SPRUCE_LOG_Z, WATER, WATER_LEVEL_1, WATER_LEVEL_8,
+    ACACIA_LEAVES, ACACIA_LOG, AIR, BIRCH_LOG, BIRCH_LOG_X, BIRCH_LOG_Z, DARK_OAK_LOG,
+    JUNGLE_LEAVES, JUNGLE_LOG, MUSHROOM_STEM, OAK_LEAVES, OAK_LOG, OAK_LOG_X, OAK_LOG_Z,
+    RawBlockId, SPRUCE_LEAVES, SPRUCE_LOG, SPRUCE_LOG_X, SPRUCE_LOG_Z, WATER, WATER_LEVEL_1,
+    WATER_LEVEL_8,
 };
 use mclone_worldgen::levelgen::{
     McloneOverworldSamplingTopology, McloneOverworldVegetationPlanCache, McloneTreeFamily,
@@ -663,6 +664,7 @@ fn natural_tree_block_matches(family: McloneTreeFamily, block: RawBlockId) -> bo
         McloneTreeFamily::TemperateBroadleaf => matches!(block, OAK_LOG | OAK_LEAVES),
         McloneTreeFamily::CoolWetConifer => matches!(block, SPRUCE_LOG | SPRUCE_LEAVES),
         McloneTreeFamily::WarmDryAcacia => matches!(block, ACACIA_LOG | ACACIA_LEAVES),
+        McloneTreeFamily::HumidJungleBroadleaf => matches!(block, JUNGLE_LOG | JUNGLE_LEAVES),
     }
 }
 
@@ -821,6 +823,7 @@ mod tests {
                     McloneTreeFamily::TemperateBroadleaf => McloneTreeArchetype::RoundedBroadleaf,
                     McloneTreeFamily::CoolWetConifer => McloneTreeArchetype::LayeredConifer,
                     McloneTreeFamily::WarmDryAcacia => McloneTreeArchetype::ForkedAcacia,
+                    McloneTreeFamily::HumidJungleBroadleaf => McloneTreeArchetype::LayeredJungle,
                 },
                 trunk_height: 6,
                 crown_radius: 2,

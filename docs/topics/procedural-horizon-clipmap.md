@@ -70,6 +70,15 @@ clipmap spacings even when same-coordinate samples agree, producing visible
 ring-sized bands; the mesa-desert slice removed that pattern and protects its
 broad identity with a 16,384-block cross-LOD scan.
 
+The humid-jungle slice extends the same source with spacing-stable massif,
+wet-shoulder, lowland, river-gallery, canopy, gap, and habitat facts. Near and
+middle levels consume a fourth stable semantic tree family rather than
+relabeling the temperate broadleaf proxy. Its `LayeredJungle` silhouette is
+shared by exact realization and the existing mono, per-eye, and multiview
+instance path. Coarse levels continue to use forest summaries and do not
+enumerate continent-scale trees. The semantic vegetation compiler is v3,
+`MCHV` transport is v2, and canonical terrain batches are v4.
+
 ## Regular Clipmap And Presets
 
 Every enabled level is a four-by-four toroidal grid of 64-cell terrain tiles.

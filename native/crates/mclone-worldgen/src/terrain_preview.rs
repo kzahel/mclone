@@ -38,9 +38,9 @@ pub const TERRAIN_PREVIEW_MAX_SAMPLE_SPACING: u32 = 1_024;
 pub const TERRAIN_PREVIEW_SAMPLE_FLOATS: usize = 32;
 pub const TERRAIN_PREVIEW_MAX_TREE_RECORD_SAMPLE_SPACING: u32 = 4;
 pub const CONTINENTAL_PROXY_MAX_TREE_RECORD_SAMPLE_SPACING: u32 = 16;
-pub const CONTINENTAL_PROXY_VEGETATION_REVISION: u16 = 3;
+pub const CONTINENTAL_PROXY_VEGETATION_REVISION: u16 = 4;
 pub const CONTINENTAL_PROXY_VEGETATION_SOURCE_REVISION: &str =
-    "mclone-continental-proxy-vegetation-v3";
+    "mclone-continental-proxy-vegetation-v4";
 
 pub(crate) const fn uses_continental_proxy_vegetation(profile: TerrainPreviewProfile) -> bool {
     matches!(
@@ -1546,145 +1546,240 @@ fn compile_continental_proxy_vegetation(
 
     for cell_x in min_cell_x..=max_cell_x {
         for cell_z in min_cell_z..=max_cell_z {
-            let position_hash = continental_proxy_hash(source.seed, cell_x, cell_z, 0);
-            let landmark_rank =
-                (continental_proxy_hash(source.seed, cell_x, cell_z, 2) >> 56) as u8;
-            if !continental_proxy_tree_record_admitted(source.sample_spacing, landmark_rank) {
-                continue;
-            }
-            let inset = 2_i32;
-            let jitter_span = CONTINENTAL_PROXY_VEGETATION_CELL_BLOCKS - inset * 2;
-            let world_x = cell_x
-                .checked_mul(CONTINENTAL_PROXY_VEGETATION_CELL_BLOCKS)
-                .and_then(|value| {
-                    value.checked_add(inset + (position_hash as i32).rem_euclid(jitter_span))
-                })
-                .ok_or("continental proxy vegetation X coordinate overflow")?;
-            let world_z = cell_z
-                .checked_mul(CONTINENTAL_PROXY_VEGETATION_CELL_BLOCKS)
-                .and_then(|value| {
-                    value
-                        .checked_add(inset + ((position_hash >> 32) as i32).rem_euclid(jitter_span))
-                })
-                .ok_or("continental proxy vegetation Z coordinate overflow")?;
-            if world_x < request.min_x()
-                || world_x >= max_x
-                || world_z < request.min_z()
-                || world_z >= max_z
-            {
-                continue;
-            }
+            for candidate_slot in 0_u8..2 {
+                let slot_lane = u64::from(candidate_slot) * 16;
+                let position_hash = continental_proxy_hash(source.seed, cell_x, cell_z, slot_lane);
+                let landmark_rank =
+                    (continental_proxy_hash(source.seed, cell_x, cell_z, slot_lane + 2) >> 56)
+                        as u8;
+                if !continental_proxy_tree_record_admitted(source.sample_spacing, landmark_rank) {
+                    continue;
+                }
+                let inset = 2_i32;
+                let jitter_span = CONTINENTAL_PROXY_VEGETATION_CELL_BLOCKS - inset * 2;
+                let world_x = cell_x
+                    .checked_mul(CONTINENTAL_PROXY_VEGETATION_CELL_BLOCKS)
+                    .and_then(|value| {
+                        value.checked_add(inset + (position_hash as i32).rem_euclid(jitter_span))
+                    })
+                    .ok_or("continental proxy vegetation X coordinate overflow")?;
+                let world_z = cell_z
+                    .checked_mul(CONTINENTAL_PROXY_VEGETATION_CELL_BLOCKS)
+                    .and_then(|value| {
+                        value.checked_add(
+                            inset + ((position_hash >> 32) as i32).rem_euclid(jitter_span),
+                        )
+                    })
+                    .ok_or("continental proxy vegetation Z coordinate overflow")?;
+                if candidate_slot > 0 {
+                    let primary_hash = continental_proxy_hash(source.seed, cell_x, cell_z, 0);
+                    let primary_x = cell_x
+                        .checked_mul(CONTINENTAL_PROXY_VEGETATION_CELL_BLOCKS)
+                        .and_then(|value| {
+                            value.checked_add(inset + (primary_hash as i32).rem_euclid(jitter_span))
+                        })
+                        .ok_or("continental proxy vegetation X coordinate overflow")?;
+                    let primary_z = cell_z
+                        .checked_mul(CONTINENTAL_PROXY_VEGETATION_CELL_BLOCKS)
+                        .and_then(|value| {
+                            value.checked_add(
+                                inset + ((primary_hash >> 32) as i32).rem_euclid(jitter_span),
+                            )
+                        })
+                        .ok_or("continental proxy vegetation Z coordinate overflow")?;
+                    let dx = world_x - primary_x;
+                    let dz = world_z - primary_z;
+                    if dx * dx + dz * dz < 64 {
+                        continue;
+                    }
+                }
+                if world_x < request.min_x()
+                    || world_x >= max_x
+                    || world_z < request.min_z()
+                    || world_z >= max_z
+                {
+                    continue;
+                }
 
-            let sample = surface.query_point(world_x, world_z).sample;
-            if sample.is_water()
-                || !matches!(
-                    sample.substrate,
-                    ContinentalSurfaceSubstrate::Grass | ContinentalSurfaceSubstrate::CoarseSoil
+                let sample = surface.query_point(world_x, world_z).sample;
+                // Canopy structure fades through the humid-jungle ecotone.
+                // Do not clip the denser second lattice or jungle silhouette
+                // at the categorical review-label threshold.
+                let jungle_canopy = sample.canopy_core > 0.10
+                    || sample.emergent_canopy > 0.08
+                    || sample.river_gallery > 0.18;
+                if candidate_slot > 0 && !jungle_canopy {
+                    continue;
+                }
+                if sample.is_water()
+                    || !matches!(
+                        sample.substrate,
+                        ContinentalSurfaceSubstrate::Grass
+                            | ContinentalSurfaceSubstrate::CoarseSoil
+                    )
+                {
+                    continue;
+                }
+                let forest_structure = sample
+                    .forest_core
+                    .max(sample.forest_edge * 0.72)
+                    .max(sample.canopy_core * 0.96);
+                let arid_scrub = ((sample.aridity - 0.58).max(0.0) * 0.24)
+                    * (1.0 - sample.wetland)
+                    * (1.0 - sample.clearing * 0.45);
+                if forest_structure < 0.12 && arid_scrub < 0.02 {
+                    continue;
+                }
+                let mut density = (0.10 + sample.forest_core * 0.78 + sample.forest_edge * 0.30)
+                    * (1.0 - sample.clearing * 0.94)
+                    * (1.0 - sample.openness * 0.38)
+                    * (1.0 - sample.wetland * 0.38)
+                    + arid_scrub
+                    + sample.canopy_core * 0.22
+                    + sample.understory * 0.08;
+                if jungle_canopy {
+                    density *= 0.28 + sample.canopy_cluster * 1.45;
+                    density *= 0.72;
+                }
+                let admission_hash =
+                    continental_proxy_hash(source.seed, cell_x, cell_z, slot_lane + 1);
+                let admission = (admission_hash as u32) as f64 / f64::from(u32::MAX);
+                if admission >= f64::from(density.clamp(0.0, 0.92)) {
+                    continue;
+                }
+
+                let family = if jungle_canopy {
+                    McloneTreeFamily::HumidJungleBroadleaf
+                } else if sample.aridity > 0.68 && sample.temperature > 0.48 {
+                    McloneTreeFamily::WarmDryAcacia
+                } else if sample.moisture > 0.64 && sample.temperature < 0.58 {
+                    McloneTreeFamily::CoolWetConifer
+                } else {
+                    McloneTreeFamily::TemperateBroadleaf
+                };
+                let silhouette = continental_proxy_hash(source.seed, cell_x, cell_z, slot_lane + 3);
+                let jungle_emergent = sample.emergent_canopy > 0.24
+                    && u16::from(landmark_rank)
+                        < 22 + (sample.emergent_canopy.clamp(0.0, 1.0) * 54.0) as u16;
+                let jungle_understory =
+                    sample.understory > 0.48 && !jungle_emergent && ((silhouette >> 32) & 3) == 0;
+                let (archetype, trunk_height, crown_radius, crown_depth) = if jungle_canopy {
+                    if jungle_emergent {
+                        (
+                            McloneTreeArchetype::LayeredJungle,
+                            23 + (silhouette % 9) as u16,
+                            6 + ((silhouette >> 8) % 3) as u16,
+                            7 + ((silhouette >> 16) % 5) as u16,
+                        )
+                    } else if jungle_understory {
+                        (
+                            McloneTreeArchetype::LayeredJungle,
+                            6 + (silhouette % 5) as u16,
+                            4 + ((silhouette >> 8) % 2) as u16,
+                            4 + ((silhouette >> 16) % 3) as u16,
+                        )
+                    } else {
+                        (
+                            McloneTreeArchetype::LayeredJungle,
+                            11 + (silhouette % 9) as u16,
+                            7 + ((silhouette >> 8) % 2) as u16,
+                            6 + ((silhouette >> 16) % 4) as u16,
+                        )
+                    }
+                } else {
+                    match family {
+                        McloneTreeFamily::TemperateBroadleaf => (
+                            McloneTreeArchetype::RoundedBroadleaf,
+                            8 + (silhouette % 5) as u16,
+                            3 + ((silhouette >> 8) % 3) as u16,
+                            4 + ((silhouette >> 16) % 4) as u16,
+                        ),
+                        McloneTreeFamily::CoolWetConifer => (
+                            McloneTreeArchetype::LayeredConifer,
+                            11 + (silhouette % 7) as u16,
+                            3 + ((silhouette >> 8) % 3) as u16,
+                            7 + ((silhouette >> 16) % 5) as u16,
+                        ),
+                        McloneTreeFamily::WarmDryAcacia => (
+                            McloneTreeArchetype::ForkedAcacia,
+                            6 + (silhouette % 5) as u16,
+                            4 + ((silhouette >> 8) % 3) as u16,
+                            3 + ((silhouette >> 16) % 3) as u16,
+                        ),
+                        McloneTreeFamily::HumidJungleBroadleaf => (
+                            McloneTreeArchetype::LayeredJungle,
+                            11 + (silhouette % 9) as u16,
+                            6 + ((silhouette >> 8) % 3) as u16,
+                            6 + ((silhouette >> 16) % 4) as u16,
+                        ),
+                    }
+                };
+                let base_y = (sample.solid_surface_y.floor() as i32)
+                    .checked_add(1)
+                    .ok_or("continental proxy vegetation Y coordinate overflow")?;
+                let base = BlockPos::new(world_x, base_y, world_z);
+                // Acacia branches can travel three blocks before placing their
+                // flat crown. Match the live tree realizer's complete footprint
+                // instead of clipping a newly selected proxy at the old +2 cap.
+                let horizontal_radius = i32::from(crown_radius)
+                    + i32::from(family == McloneTreeFamily::WarmDryAcacia) * 3;
+                let max_y = base_y
+                    .checked_add(i32::from(trunk_height))
+                    .and_then(|value| value.checked_add(2))
+                    .ok_or("continental proxy vegetation height overflow")?;
+                let bounds = McloneTreeBounds::new(
+                    world_x
+                        .checked_sub(horizontal_radius)
+                        .ok_or("continental proxy vegetation bounds overflow")?,
+                    base_y
+                        .checked_sub(1)
+                        .ok_or("continental proxy vegetation bounds overflow")?,
+                    world_z
+                        .checked_sub(horizontal_radius)
+                        .ok_or("continental proxy vegetation bounds overflow")?,
+                    world_x
+                        .checked_add(horizontal_radius)
+                        .ok_or("continental proxy vegetation bounds overflow")?,
+                    max_y,
+                    world_z
+                        .checked_add(horizontal_radius)
+                        .ok_or("continental proxy vegetation bounds overflow")?,
                 )
-            {
-                continue;
+                .map_err(|error| error.to_string())?;
+                let record = McloneTreeRecord {
+                    id: McloneTreeId {
+                        planning_cell_x: cell_x,
+                        planning_cell_z: cell_z,
+                        candidate_slot,
+                        vegetation_revision: CONTINENTAL_PROXY_VEGETATION_REVISION,
+                    },
+                    canonical_base: base,
+                    family,
+                    archetype,
+                    trunk_height,
+                    crown_radius,
+                    crown_depth,
+                    orientation: (continental_proxy_hash(
+                        source.seed,
+                        cell_x,
+                        cell_z,
+                        slot_lane + 4,
+                    ) & 3) as u8,
+                    landmark_rank,
+                    variant_seed: continental_proxy_hash(
+                        source.seed,
+                        cell_x,
+                        cell_z,
+                        slot_lane + 5,
+                    ),
+                    bounds,
+                };
+                occurrences.push(McloneTreeOccurrence {
+                    record,
+                    x_lift: 0,
+                    working_bounds: bounds,
+                });
             }
-            let forest_structure = sample.forest_core.max(sample.forest_edge * 0.72);
-            let arid_scrub = ((sample.aridity - 0.58).max(0.0) * 0.24)
-                * (1.0 - sample.wetland)
-                * (1.0 - sample.clearing * 0.45);
-            if forest_structure < 0.12 && arid_scrub < 0.02 {
-                continue;
-            }
-            let density = (0.10 + sample.forest_core * 0.78 + sample.forest_edge * 0.30)
-                * (1.0 - sample.clearing * 0.94)
-                * (1.0 - sample.openness * 0.38)
-                * (1.0 - sample.wetland * 0.38)
-                + arid_scrub;
-            let admission_hash = continental_proxy_hash(source.seed, cell_x, cell_z, 1);
-            let admission = (admission_hash as u32) as f64 / f64::from(u32::MAX);
-            if admission >= f64::from(density.clamp(0.0, 0.92)) {
-                continue;
-            }
-
-            let family = if sample.aridity > 0.68 && sample.temperature > 0.48 {
-                McloneTreeFamily::WarmDryAcacia
-            } else if sample.moisture > 0.64 && sample.temperature < 0.58 {
-                McloneTreeFamily::CoolWetConifer
-            } else {
-                McloneTreeFamily::TemperateBroadleaf
-            };
-            let silhouette = continental_proxy_hash(source.seed, cell_x, cell_z, 3);
-            let (archetype, trunk_height, crown_radius, crown_depth) = match family {
-                McloneTreeFamily::TemperateBroadleaf => (
-                    McloneTreeArchetype::RoundedBroadleaf,
-                    8 + (silhouette % 5) as u16,
-                    3 + ((silhouette >> 8) % 3) as u16,
-                    4 + ((silhouette >> 16) % 4) as u16,
-                ),
-                McloneTreeFamily::CoolWetConifer => (
-                    McloneTreeArchetype::LayeredConifer,
-                    11 + (silhouette % 7) as u16,
-                    3 + ((silhouette >> 8) % 3) as u16,
-                    7 + ((silhouette >> 16) % 5) as u16,
-                ),
-                McloneTreeFamily::WarmDryAcacia => (
-                    McloneTreeArchetype::ForkedAcacia,
-                    6 + (silhouette % 5) as u16,
-                    4 + ((silhouette >> 8) % 3) as u16,
-                    3 + ((silhouette >> 16) % 3) as u16,
-                ),
-            };
-            let base_y = (sample.solid_surface_y.floor() as i32)
-                .checked_add(1)
-                .ok_or("continental proxy vegetation Y coordinate overflow")?;
-            let base = BlockPos::new(world_x, base_y, world_z);
-            // Acacia branches can travel three blocks before placing their
-            // flat crown. Match the live tree realizer's complete footprint
-            // instead of clipping a newly selected proxy at the old +2 cap.
-            let horizontal_radius =
-                i32::from(crown_radius) + i32::from(family == McloneTreeFamily::WarmDryAcacia) * 3;
-            let max_y = base_y
-                .checked_add(i32::from(trunk_height))
-                .and_then(|value| value.checked_add(2))
-                .ok_or("continental proxy vegetation height overflow")?;
-            let bounds = McloneTreeBounds::new(
-                world_x
-                    .checked_sub(horizontal_radius)
-                    .ok_or("continental proxy vegetation bounds overflow")?,
-                base_y
-                    .checked_sub(1)
-                    .ok_or("continental proxy vegetation bounds overflow")?,
-                world_z
-                    .checked_sub(horizontal_radius)
-                    .ok_or("continental proxy vegetation bounds overflow")?,
-                world_x
-                    .checked_add(horizontal_radius)
-                    .ok_or("continental proxy vegetation bounds overflow")?,
-                max_y,
-                world_z
-                    .checked_add(horizontal_radius)
-                    .ok_or("continental proxy vegetation bounds overflow")?,
-            )
-            .map_err(|error| error.to_string())?;
-            let record = McloneTreeRecord {
-                id: McloneTreeId {
-                    planning_cell_x: cell_x,
-                    planning_cell_z: cell_z,
-                    candidate_slot: 0,
-                    vegetation_revision: CONTINENTAL_PROXY_VEGETATION_REVISION,
-                },
-                canonical_base: base,
-                family,
-                archetype,
-                trunk_height,
-                crown_radius,
-                crown_depth,
-                orientation: (continental_proxy_hash(source.seed, cell_x, cell_z, 4) & 3) as u8,
-                landmark_rank,
-                variant_seed: continental_proxy_hash(source.seed, cell_x, cell_z, 5),
-                bounds,
-            };
-            occurrences.push(McloneTreeOccurrence {
-                record,
-                x_lift: 0,
-                working_bounds: bounds,
-            });
         }
     }
     occurrences.sort_unstable();
@@ -1915,6 +2010,7 @@ const fn forest_family_code(family: Option<McloneTreeFamily>) -> f32 {
         Some(McloneTreeFamily::TemperateBroadleaf) => 1.0,
         Some(McloneTreeFamily::CoolWetConifer) => 2.0,
         Some(McloneTreeFamily::WarmDryAcacia) => 3.0,
+        Some(McloneTreeFamily::HumidJungleBroadleaf) => 4.0,
     }
 }
 
@@ -2773,5 +2869,32 @@ mod tests {
                 .iter()
                 .all(|occurrence| occurrence.working_bounds.intersects_horizontal(bounds))
         );
+    }
+
+    #[test]
+    fn humid_jungle_records_share_one_dense_canopy_and_emergent_lattice() {
+        let bounds = McloneVegetationBounds::new(9_728, -55_296, 10_752, -54_272).unwrap();
+        let occurrences = continental_candidate_tree_records_intersecting(12_345, bounds).unwrap();
+        let surface =
+            ContinentalSurfacePlan::new(ContinentalEcoregionDescriptor::plane(12_345)).unwrap();
+        assert!(occurrences.len() > 500, "records={}", occurrences.len());
+        assert!(occurrences.iter().any(|occurrence| {
+            occurrence.record.family == McloneTreeFamily::HumidJungleBroadleaf
+                && occurrence.record.trunk_height >= 23
+                && occurrence.record.crown_radius >= 6
+        }));
+        assert!(occurrences.iter().any(|occurrence| {
+            occurrence.record.family == McloneTreeFamily::HumidJungleBroadleaf
+                && occurrence.record.trunk_height <= 10
+                && occurrence.record.crown_radius <= 5
+        }));
+        assert!(occurrences.iter().all(|occurrence| {
+            let base = occurrence.working_base().unwrap();
+            let sample = surface.query_point(base.x, base.z).sample;
+            sample.regional_archetype
+                == crate::continental_surface::ContinentalRegionalArchetype::HumidJungle
+                && occurrence.record.id.vegetation_revision == CONTINENTAL_PROXY_VEGETATION_REVISION
+                && occurrence.working_bounds.intersects_horizontal(bounds)
+        }));
     }
 }

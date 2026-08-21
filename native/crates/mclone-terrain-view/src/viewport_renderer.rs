@@ -360,7 +360,7 @@ pub struct TerrainHorizonVegetationServiceStats {
     pub vegetation_plan_revision: u64,
     pub product_revision: u32,
     pub record_hash: u64,
-    pub family_counts: [u32; 3],
+    pub family_counts: [u32; 4],
     pub record_count: u32,
     pub product_count: u32,
     pub executor_generation: u32,
@@ -6429,6 +6429,7 @@ fn tree_instance_bytes_filtered(
                 McloneTreeFamily::TemperateBroadleaf => 1.0,
                 McloneTreeFamily::CoolWetConifer => 2.0,
                 McloneTreeFamily::WarmDryAcacia => 3.0,
+                McloneTreeFamily::HumidJungleBroadleaf => 4.0,
             };
             let values = [
                 base.x as f32,

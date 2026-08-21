@@ -9,6 +9,17 @@ Tactical 245. PH-4 live-game composition was provisionally accepted on
 2026-07-27 with the exact/proxy overlap described below retained as a known
 limitation.
 
+Tactical
+[`328`](../tactical/328-mclone-overworld-v2-regional-breadth.md) extends the
+same semantic record and renderer boundary for experimental
+`mclone-overworld-v2`: `HumidJungleBroadleaf` and `LayeredJungle` add dense
+clustered crowns, emergents, and understory without changing V1 records. The
+continental planner uses two bounded candidates per existing 24-block proxy
+cell only where continuous jungle-canopy facts permit them. Exact jungle
+logs/leaves and all procedural render paths consume those stable records;
+coarse levels remain summaries. Compiler source v3, `MCHV` wire v2, and
+canonical batch v4 carry four-family receipts.
+
 Native World Explorer composition review on 2026-07-26 proved that the first
 chunk/fragment mask is not a valid exact/LOD tree handoff. One stable natural
 tree can appear as exact block geometry partly hidden by retained procedural

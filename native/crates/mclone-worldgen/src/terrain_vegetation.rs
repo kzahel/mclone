@@ -17,9 +17,9 @@ use crate::terrain_preview::{
 };
 
 pub const TERRAIN_VEGETATION_COMPILER_SOURCE_REVISION: &str =
-    "mclone-terrain-vegetation-compiler-v2";
+    "mclone-terrain-vegetation-compiler-v3";
 pub const TERRAIN_VEGETATION_PRODUCT_REVISION: u32 = 1;
-pub const MCHV_WIRE_VERSION: u16 = 1;
+pub const MCHV_WIRE_VERSION: u16 = 2;
 pub const MCHV_OCCURRENCE_BYTES: usize = 80;
 pub const MCHV_RESIDENT_RESULT_CAPACITY: usize = 256 * 1024;
 pub const MCHV_MAX_RESULT_CAPACITY: usize = 1024 * 1024;
@@ -244,7 +244,7 @@ impl Error for TerrainVegetationCompileError {}
 pub struct TerrainVegetationProductReceipt {
     pub source_fingerprint: u64,
     pub record_hash: u64,
-    pub family_counts: [u32; 3],
+    pub family_counts: [u32; 4],
     pub record_count: u32,
 }
 
@@ -252,7 +252,7 @@ pub struct TerrainVegetationProductReceipt {
 pub struct TerrainVegetationCoverageReceipt {
     pub source_fingerprint: u64,
     pub record_hash: u64,
-    pub family_counts: [u32; 3],
+    pub family_counts: [u32; 4],
     pub record_count: u32,
     pub product_count: u32,
 }
@@ -261,7 +261,7 @@ pub fn terrain_vegetation_product_receipt(
     source: TerrainVegetationSourceIdentity,
     product: &TerrainPreviewVegetationProduct,
 ) -> TerrainVegetationProductReceipt {
-    let mut family_counts = [0_u32; 3];
+    let mut family_counts = [0_u32; 4];
     let mut record_hash = FNV1A64_OFFSET;
     for occurrence in product.occurrences() {
         family_counts[family_index(occurrence.record.family)] =
@@ -291,7 +291,7 @@ pub fn terrain_vegetation_coverage_receipt<'a>(
     let mut source_bytes = FrameWriter::default();
     source_bytes.write_source(source);
     hash_bytes(&mut record_hash, &source_bytes.finish());
-    let mut family_counts = [0_u32; 3];
+    let mut family_counts = [0_u32; 4];
     let mut record_count = 0_u32;
     for product in &products {
         let mut request_bytes = FrameWriter::default();
@@ -855,7 +855,12 @@ impl<'a> FrameReader<'a> {
         };
         let encoded_source_fingerprint = self.read_u64()?;
         let encoded_record_hash = self.read_u64()?;
-        let encoded_family_counts = [self.read_u32()?, self.read_u32()?, self.read_u32()?];
+        let encoded_family_counts = [
+            self.read_u32()?,
+            self.read_u32()?,
+            self.read_u32()?,
+            self.read_u32()?,
+        ];
         let encoded_record_count = self.read_u32()?;
         let count = self.read_u32()? as usize;
         if count > MCHV_MAX_OCCURRENCES {
@@ -1108,6 +1113,7 @@ const fn family_tag(family: McloneTreeFamily) -> u8 {
         McloneTreeFamily::TemperateBroadleaf => 0,
         McloneTreeFamily::CoolWetConifer => 1,
         McloneTreeFamily::WarmDryAcacia => 2,
+        McloneTreeFamily::HumidJungleBroadleaf => 3,
     }
 }
 
@@ -1120,6 +1126,7 @@ fn family_from_tag(tag: u8) -> Result<McloneTreeFamily, String> {
         0 => Ok(McloneTreeFamily::TemperateBroadleaf),
         1 => Ok(McloneTreeFamily::CoolWetConifer),
         2 => Ok(McloneTreeFamily::WarmDryAcacia),
+        3 => Ok(McloneTreeFamily::HumidJungleBroadleaf),
         other => Err(format!("MCHV tree family tag {other} is invalid")),
     }
 }
@@ -1129,6 +1136,7 @@ const fn archetype_tag(archetype: McloneTreeArchetype) -> u8 {
         McloneTreeArchetype::RoundedBroadleaf => 0,
         McloneTreeArchetype::LayeredConifer => 1,
         McloneTreeArchetype::ForkedAcacia => 2,
+        McloneTreeArchetype::LayeredJungle => 3,
     }
 }
 
@@ -1137,6 +1145,7 @@ fn archetype_from_tag(tag: u8) -> Result<McloneTreeArchetype, String> {
         0 => Ok(McloneTreeArchetype::RoundedBroadleaf),
         1 => Ok(McloneTreeArchetype::LayeredConifer),
         2 => Ok(McloneTreeArchetype::ForkedAcacia),
+        3 => Ok(McloneTreeArchetype::LayeredJungle),
         other => Err(format!("MCHV tree archetype tag {other} is invalid")),
     }
 }
@@ -1448,7 +1457,7 @@ mod tests {
         wrong_magic[0] ^= 0xff;
         assert!(decode_mchv_frame(&wrong_magic).is_err());
         let mut wrong_version = encoded.clone();
-        wrong_version[4] = 2;
+        wrong_version[4] = 1;
         assert!(decode_mchv_frame(&wrong_version).is_err());
         let mut wrong_kind = encoded.clone();
         wrong_kind[6] = 99;
@@ -1491,6 +1500,6 @@ mod tests {
         };
         assert!(forged.validate_request(request).is_err());
         assert_ne!(forged.stable_fingerprint(), source.stable_fingerprint());
-        assert_eq!(MCHV_WIRE_VERSION, 1);
+        assert_eq!(MCHV_WIRE_VERSION, 2);
     }
 }

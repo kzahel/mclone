@@ -29,7 +29,9 @@ owns the next mountain/valley family. The creative terrain direction lives in
 new internal-unshipped `mclone-overworld-v2` sibling for the continental
 candidate while preserving V1 as selectable and default. V2 is now live as
 an explicitly experimental unbounded-plane profile with stored binary tag 9;
-its first two characteristic-domain slices remain in progress.**
+its mesa-desert and humid-jungle characteristic-domain slices are implemented
+beside the retained temperate catchment. Performance and packaged live-game
+review remain before Human Review E.**
 
 This topic owns the current truth and durable decisions for selectable,
 versioned world-generation profiles. Detailed refactoring and implementation

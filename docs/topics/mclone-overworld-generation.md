@@ -37,7 +37,12 @@ the procedural horizon. V1 remains the unchanged new-world default.
 V2's first additional regional archetype is a mesa desert with formation-owned
 tables, stepped escarpments, washes, fans, red-sand basins, exact terracotta
 strata, and ecology-facing habitat facts. Its broad identities remain stable
-through coarse procedural sampling; humid jungle is the next archetype.
+through coarse procedural sampling. Its second is a humid jungle with
+forested massif, wet-shoulder, lowland, river-gallery, canopy-gap, emergent,
+understory, wet-refuge, crossing, and permanent-drainage facts. A dedicated
+layered jungle tree family is realized from the same stable records in exact
+chunks and procedural vegetation; V1's three tree families and generation
+path remain unchanged.
 Its deterministic spawn policy keeps the existing exact dry-surface gate and
 adds a 129-by-129-block sparse neighborhood survey, so the first locally safe
 chunk beside a dominant ocean is no longer accepted as the world entry region.

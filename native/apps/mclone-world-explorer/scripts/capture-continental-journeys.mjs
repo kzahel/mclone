@@ -13,6 +13,7 @@ const journeys = [
   "connected-water-country",
   "quiet-rolling-interior",
   "mesa-desert",
+  "humid-jungle",
 ];
 const frames = [
   ["locator", "map", "65536"],

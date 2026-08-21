@@ -351,7 +351,7 @@ struct WebExplorerReport {
     vegetation_product_revision: u32,
     mchv_wire_version: u16,
     vegetation_record_hash: String,
-    vegetation_family_counts: [u32; 3],
+    vegetation_family_counts: [u32; 4],
     vegetation_record_count: u32,
     vegetation_product_count: u32,
     vegetation_executor_generation: u32,

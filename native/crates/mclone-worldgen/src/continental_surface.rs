@@ -23,15 +23,15 @@ use crate::{
         ContinentalReachKind, ContinentalShoreIntent, HydrographyFeatureId,
     },
     levelgen::{
-        BEACH_BIOME_ID, MCLONE_OVERWORLD_FOREST_BIOME_ID, MCLONE_OVERWORLD_RIVER_BIOME_ID,
-        MCLONE_OVERWORLD_SAVANNA_BIOME_ID, MCLONE_OVERWORLD_SEA_LEVEL,
-        MCLONE_OVERWORLD_SNOWY_MOUNTAINS_BIOME_ID, MCLONE_OVERWORLD_TAIGA_BIOME_ID, OCEAN_BIOME_ID,
-        PLAINS_BIOME_ID,
+        BEACH_BIOME_ID, MCLONE_OVERWORLD_FOREST_BIOME_ID, MCLONE_OVERWORLD_JUNGLE_BIOME_ID,
+        MCLONE_OVERWORLD_RIVER_BIOME_ID, MCLONE_OVERWORLD_SAVANNA_BIOME_ID,
+        MCLONE_OVERWORLD_SEA_LEVEL, MCLONE_OVERWORLD_SNOWY_MOUNTAINS_BIOME_ID,
+        MCLONE_OVERWORLD_TAIGA_BIOME_ID, OCEAN_BIOME_ID, PLAINS_BIOME_ID,
     },
     noise::{GradientNoise2d, SeedDomain},
 };
 
-pub const CONTINENTAL_SURFACE_SCHEMA_REVISION: &str = "mclone-continental-surface-v11";
+pub const CONTINENTAL_SURFACE_SCHEMA_REVISION: &str = "mclone-continental-surface-v12";
 pub const CONTINENTAL_SURFACE_SOURCE_LABEL: &str = "continental-ecoregion-candidate-v1";
 pub const CONTINENTAL_SURFACE_FAMILY_COUNT: usize = 5;
 pub const CONTINENTAL_SURFACE_MAX_WINDOW_SAMPLES: usize = 262_144;
@@ -43,8 +43,14 @@ const SHORE_FORM_DOMAIN: SeedDomain = SeedDomain::new(0x6373_7572_7368_6f31);
 const LOCAL_FORM_DOMAIN: SeedDomain = SeedDomain::new(0x6373_7572_6c6f_6331);
 const WALKING_FORM_DOMAIN: SeedDomain = SeedDomain::new(0x6373_7572_7761_6c31);
 const MICRO_FORM_DOMAIN: SeedDomain = SeedDomain::new(0x6373_7572_6d69_6331);
+const JUNGLE_MASSIF_DOMAIN: SeedDomain = SeedDomain::new(0x6373_6a75_6e67_6d31);
+const JUNGLE_CANOPY_DOMAIN: SeedDomain = SeedDomain::new(0x6373_6a75_6e67_6331);
+const JUNGLE_GAP_DOMAIN: SeedDomain = SeedDomain::new(0x6373_6a75_6e67_6731);
+const JUNGLE_CLUSTER_DOMAIN: SeedDomain = SeedDomain::new(0x6373_6a75_6e67_7431);
 const MESA_FORMATION_HASH_DOMAIN: u64 = 0x6373_6d65_7361_6631;
 const MESA_FORMATION_CELL_BLOCKS: i32 = 8_192;
+const JUNGLE_CANOPY_HASH_DOMAIN: u64 = 0x6373_6a75_6e67_6964;
+const JUNGLE_CANOPY_CELL_BLOCKS: i32 = 4_096;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[repr(u8)]
@@ -177,6 +183,14 @@ pub struct ContinentalFormationId {
     pub hash: u64,
 }
 
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContinentalCanopyId {
+    pub cell_x: i32,
+    pub cell_z: i32,
+    pub hash: u64,
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq, Serialize)]
 #[repr(u8)]
 #[serde(rename_all = "kebab-case")]
@@ -209,6 +223,32 @@ impl MesaLandformKind {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq, Serialize)]
+#[repr(u8)]
+#[serde(rename_all = "kebab-case")]
+pub enum JungleLandformKind {
+    #[default]
+    None,
+    ForestedMassif,
+    WetShoulder,
+    ShelteredLowland,
+    RiverGallery,
+    CanopyGap,
+}
+
+impl JungleLandformKind {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::ForestedMassif => "forested-massif",
+            Self::WetShoulder => "wet-shoulder",
+            Self::ShelteredLowland => "sheltered-lowland",
+            Self::RiverGallery => "river-gallery",
+            Self::CanopyGap => "canopy-gap",
+        }
+    }
+}
+
 /// Returns the compatible biome identifier shared by exact chunks and every
 /// procedural-horizon level for the detached continental candidate.
 ///
@@ -234,6 +274,11 @@ pub fn continental_surface_biome_id(sample: ContinentalSurfaceSample) -> i32 {
         }
         ContinentalSurfaceWaterKind::None if sample.aridity >= 0.62 => {
             MCLONE_OVERWORLD_SAVANNA_BIOME_ID
+        }
+        ContinentalSurfaceWaterKind::None
+            if sample.regional_archetype == ContinentalRegionalArchetype::HumidJungle =>
+        {
+            MCLONE_OVERWORLD_JUNGLE_BIOME_ID
         }
         ContinentalSurfaceWaterKind::None
             if sample.temperature <= 0.38 && sample.forest_core >= 0.28 =>
@@ -275,7 +320,7 @@ impl ContinentalSurfaceConstructionCounts {
             ecoregion_owner_evaluations: work.ecoregion_owner_evaluations,
             mosaic_owner_evaluations: work.mosaic_owner_evaluations,
             plan_field_evaluations: work.local_field_evaluations,
-            surface_field_evaluations: 7,
+            surface_field_evaluations: 11,
             hydrography_owner_evaluations: 0,
             hydrography_graph_constructions: 0,
             hydrography_reach_evaluations: 0,
@@ -319,6 +364,7 @@ pub struct ContinentalSurfaceSample {
     pub reach_id: Option<HydrographyFeatureId>,
     pub lake_id: Option<HydrographyFeatureId>,
     pub formation_id: Option<ContinentalFormationId>,
+    pub canopy_id: Option<ContinentalCanopyId>,
     pub family_weights: [f32; CONTINENTAL_SURFACE_FAMILY_COUNT],
     pub dominant_family: TerrainCharacterFamily,
     pub regional_archetype: ContinentalRegionalArchetype,
@@ -336,6 +382,19 @@ pub struct ContinentalSurfaceSample {
     pub shade_refuge_habitat: f32,
     pub crossing_habitat: f32,
     pub ephemeral_drainage: f32,
+    pub jungle_landform: JungleLandformKind,
+    pub jungle_massif: f32,
+    pub jungle_wet_shoulder: f32,
+    pub jungle_lowland: f32,
+    pub river_gallery: f32,
+    pub canopy_core: f32,
+    pub emergent_canopy: f32,
+    pub understory: f32,
+    pub canopy_gap: f32,
+    pub canopy_cluster: f32,
+    pub wet_refuge_habitat: f32,
+    pub jungle_crossing_habitat: f32,
+    pub permanent_drainage_habitat: f32,
     pub continental_height: f32,
     pub province_height: f32,
     pub hydrologic_height: f32,
@@ -435,6 +494,10 @@ struct ContinentalSurfaceFields {
     local_form: GradientNoise2d,
     walking_form: GradientNoise2d,
     micro_form: GradientNoise2d,
+    jungle_massif: GradientNoise2d,
+    jungle_canopy: GradientNoise2d,
+    jungle_gap: GradientNoise2d,
+    jungle_cluster: GradientNoise2d,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -451,6 +514,22 @@ struct MesaFormationSample {
     alluvial_fan: f64,
     basin_flat: f64,
     dune_pocket: f64,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct JungleRegionSample {
+    canopy_id: Option<ContinentalCanopyId>,
+    regional_weight: f64,
+    massif_height: f64,
+    massif: f64,
+    wet_shoulder: f64,
+    lowland: f64,
+    river_gallery: f64,
+    canopy_core: f64,
+    emergent_canopy: f64,
+    understory: f64,
+    canopy_gap: f64,
+    canopy_cluster: f64,
 }
 
 impl ContinentalSurfaceFields {
@@ -471,6 +550,10 @@ impl ContinentalSurfaceFields {
             local_form: field(LOCAL_FORM_DOMAIN, 512),
             walking_form: field(WALKING_FORM_DOMAIN, 96),
             micro_form: field(MICRO_FORM_DOMAIN, 32),
+            jungle_massif: field(JUNGLE_MASSIF_DOMAIN, 8_192),
+            jungle_canopy: field(JUNGLE_CANOPY_DOMAIN, 2_048),
+            jungle_gap: field(JUNGLE_GAP_DOMAIN, 768),
+            jungle_cluster: field(JUNGLE_CLUSTER_DOMAIN, 192),
         }
     }
 }
@@ -626,6 +709,22 @@ impl ContinentalSurfacePlan {
             .micro_form
             .sample_at(sample_x + walking_form * 21.0, sample_z - local_form * 21.0)
             * micro_detail;
+        let (jungle_massif_form, jungle_massif_dx, jungle_massif_dz) = self
+            .fields
+            .jungle_massif
+            .sample_with_derivative(broad_x, broad_z);
+        let jungle_canopy_form = self
+            .fields
+            .jungle_canopy
+            .sample_at(broad_x - basin_form * 360.0, broad_z + ridge_form * 360.0);
+        let jungle_gap_form = self.fields.jungle_gap.sample_at(
+            sample_x + jungle_canopy_form * 180.0,
+            sample_z - jungle_massif_form * 180.0,
+        );
+        let jungle_cluster_form = self.fields.jungle_cluster.sample_at(
+            sample_x + jungle_gap_form * 96.0,
+            sample_z - jungle_canopy_form * 96.0,
+        );
         let realized_lake_distance = hydrography.map_or(f64::INFINITY, |hydrography| {
             f64::from(hydrography.lake_signed_distance_blocks)
                 + shore_form * 620.0
@@ -634,7 +733,13 @@ impl ContinentalSurfacePlan {
         });
         let realized_channel_signed_distance = hydrography.map_or(1_000_000.0, |hydrography| {
             f64::from(hydrography.channel_signed_distance_blocks)
-                + continental_channel_centerline_warp(hydrography, local_form, walking_form)
+                + continental_channel_centerline_warp(
+                    hydrography,
+                    ridge_form,
+                    basin_form,
+                    local_form,
+                    walking_form,
+                )
         });
         let realized_confluence_distance = hydrography.map_or(f64::INFINITY, |hydrography| {
             (f64::from(hydrography.confluence_distance_blocks)
@@ -747,6 +852,12 @@ impl ContinentalSurfacePlan {
         let leeward_exposure =
             province.map_or(0.0, |province| f64::from(province.leeward_exposure));
         let aridity = ecoregion.map_or(0.0, |ecoregion| f64::from(ecoregion.aridity));
+        let (temperature, moisture) = ecoregion.map_or((0.5, 0.5), |ecoregion| {
+            (
+                f64::from(ecoregion.temperature),
+                f64::from(ecoregion.moisture),
+            )
+        });
         let drainage_permanence =
             ecoregion.map_or(1.0, |ecoregion| f64::from(ecoregion.drainage_permanence));
         let arid_province_compatibility = province.map_or(0.0, |province| {
@@ -785,17 +896,43 @@ impl ContinentalSurfacePlan {
             ridge_form,
             basin_form,
         );
-        let regional_archetype = if mesa_desert_weight >= 0.34 {
-            ContinentalRegionalArchetype::MesaDesert
-        } else {
-            ContinentalRegionalArchetype::TemperateCatchment
-        };
-        let regional_archetype_weight =
-            if regional_archetype == ContinentalRegionalArchetype::MesaDesert {
-                mesa_desert_weight
+        let humid_jungle_weight = (smoothstep(0.52, 0.72, moisture)
+            * smoothstep(0.42, 0.60, temperature)
+            * inverse_smoothstep(0.42, 0.74, leeward_exposure)
+            * land
+            * (1.0 - mesa_desert_weight * 0.92)
+            * lerp(0.78, 1.0, smoothstep(0.04, 0.52, province_core)))
+        .clamp(0.0, 1.0);
+        let jungle = jungle_region_sample(
+            self.descriptor,
+            world_x,
+            world_z,
+            humid_jungle_weight,
+            jungle_massif_form,
+            jungle_massif_dx,
+            jungle_massif_dz,
+            jungle_canopy_form,
+            jungle_gap_form,
+            jungle_cluster_form,
+            basin_form,
+            hydro_riparian,
+            mosaic.map_or(0.0, |mosaic| f64::from(mosaic.clearing_core)),
+        );
+        let regional_archetype =
+            if mesa_desert_weight >= 0.34 && mesa_desert_weight >= humid_jungle_weight {
+                ContinentalRegionalArchetype::MesaDesert
+            } else if humid_jungle_weight >= 0.34 {
+                ContinentalRegionalArchetype::HumidJungle
             } else {
-                1.0 - mesa_desert_weight
+                ContinentalRegionalArchetype::TemperateCatchment
             };
+        let regional_archetype_weight = match regional_archetype {
+            ContinentalRegionalArchetype::MesaDesert => mesa_desert_weight,
+            ContinentalRegionalArchetype::HumidJungle => humid_jungle_weight,
+            ContinentalRegionalArchetype::TemperateCatchment => {
+                1.0 - mesa_desert_weight.max(humid_jungle_weight)
+            }
+        };
 
         let inland = (f64::from(plan.inland_distance_blocks).max(0.0) / 18_000.0).clamp(0.0, 1.0);
         let continental_height = if land < 0.5 {
@@ -822,12 +959,21 @@ impl ContinentalSurfacePlan {
         });
         let arid_shelf_height =
             -unit_field(basin_form) * 7.5 + ridge_form.abs().powf(1.25) * 9.0 + macro_roll * 2.2;
-        let province_height =
-            lerp(base_province_height, arid_shelf_height, arid_weight * 0.84) + mesa.height;
+        let province_height = lerp(base_province_height, arid_shelf_height, arid_weight * 0.84)
+            + mesa.height
+            + jungle.massif_height;
 
-        let clearing = mosaic.map_or(0.0, |mosaic| f64::from(mosaic.clearing_core));
-        let openness = mosaic.map_or(0.0, |mosaic| f64::from(mosaic.openness));
-        let forest_core = mosaic.map_or(0.0, |mosaic| f64::from(mosaic.forest_core));
+        let planned_clearing = mosaic.map_or(0.0, |mosaic| f64::from(mosaic.clearing_core));
+        let planned_openness = mosaic.map_or(0.0, |mosaic| f64::from(mosaic.openness));
+        let planned_forest_core = mosaic.map_or(0.0, |mosaic| f64::from(mosaic.forest_core));
+        let clearing = planned_clearing.max(jungle.canopy_gap * 0.82);
+        let openness = lerp(
+            planned_openness,
+            0.06 + jungle.canopy_gap * 0.88,
+            jungle.regional_weight,
+        )
+        .max(jungle.canopy_gap * 0.78);
+        let forest_core = planned_forest_core.max(jungle.canopy_core);
         let route = mosaic.map_or(0.0, |mosaic| f64::from(mosaic.corridor));
         let hydro_quieting = hydrography.map_or(1.0, |hydrography| {
             (1.0 - f64::from(hydrography.valley_weight) * hydro_land * 0.62
@@ -838,8 +984,11 @@ impl ContinentalSurfacePlan {
         let broad_quieting = (1.0 - clearing * 0.58 - smoothstep(0.72, 1.0, openness) * 0.18)
             .clamp(0.28, 1.0)
             * hydro_quieting;
-        let walking_amplitude =
-            2.2 + rolling_weight * 2.0 + upland_weight * 4.5 + arid_weight * 2.8;
+        let walking_amplitude = 2.2
+            + rolling_weight * 2.0
+            + upland_weight * 4.5
+            + arid_weight * 2.8
+            + jungle.wet_shoulder * 3.2;
         let walking_quieting =
             (1.0 - clearing * 0.62 - wetland * 0.45).clamp(0.28, 1.0) * hydro_quieting;
         let micro_amplitude = 0.55 + upland_weight * 1.25 + arid_weight * 0.75;
@@ -868,8 +1017,11 @@ impl ContinentalSurfacePlan {
                     .lake_water_y
                     .unwrap_or(MCLONE_OVERWORLD_SEA_LEVEL as f32 + 7.0),
             );
-            let range_weight = f64::from(hydrography.range_weight) * hydro_land;
-            let divide_weight = f64::from(hydrography.divide_weight) * hydro_land;
+            let jungle_range_quieting = lerp(1.0, 0.06, jungle.regional_weight);
+            let range_weight =
+                f64::from(hydrography.range_weight) * hydro_land * jungle_range_quieting;
+            let divide_weight =
+                f64::from(hydrography.divide_weight) * hydro_land * jungle_range_quieting;
             let saddle_weight = f64::from(hydrography.saddle_weight) * hydro_land;
             // Mid- and walking-scale form must materially shape a summit,
             // not merely roughen a radial cap after the fact. Keep the high
@@ -1126,6 +1278,7 @@ impl ContinentalSurfacePlan {
         );
         let substrate = mesa_surface_substrate(water_kind, mesa, base_substrate);
         let mesa_landform = mesa_landform_kind(mesa);
+        let jungle_landform = jungle_landform_kind(jungle);
         let open_range_habitat = (mesa_desert_weight
             * openness.max(0.72)
             * (1.0 - mesa.escarpment * 0.88)
@@ -1138,13 +1291,18 @@ impl ContinentalSurfacePlan {
             (open_range_habitat * (1.0 - mesa.caprock * 0.55) * (1.0 - mesa.alluvial_fan * 0.18))
                 .clamp(0.0, 1.0);
         let ephemeral_drainage = (mesa.dry_wash * (1.0 - drainage_permanence)).clamp(0.0, 1.0);
+        let wet_refuge_habitat = (humid_jungle_weight
+            * jungle.canopy_core
+            * (0.54 + jungle.lowland * 0.24 + jungle.river_gallery * 0.22))
+            .clamp(0.0, 1.0);
+        let jungle_crossing_habitat = (humid_jungle_weight
+            * (jungle.canopy_gap * 0.68 + jungle.river_gallery * 0.52)
+            * (1.0 - jungle.massif * 0.48))
+            .clamp(0.0, 1.0);
+        let permanent_drainage_habitat =
+            (humid_jungle_weight * drainage_permanence * jungle.river_gallery.max(wetland * 0.72))
+                .clamp(0.0, 1.0);
         let forest_edge = (forest_core * (1.0 - forest_core) * 4.0).clamp(0.0, 1.0);
-        let (temperature, moisture) = ecoregion.map_or((0.5, 0.5), |ecoregion| {
-            (
-                f64::from(ecoregion.temperature),
-                f64::from(ecoregion.moisture),
-            )
-        });
 
         ContinentalSurfaceSample {
             world_x,
@@ -1159,6 +1317,7 @@ impl ContinentalSurfacePlan {
             reach_id: hydrography.and_then(|hydrography| hydrography.reach_id),
             lake_id: hydrography.and_then(|hydrography| hydrography.lake_id),
             formation_id: mesa.formation_id,
+            canopy_id: jungle.canopy_id,
             family_weights: family_weights.map(|weight| weight as f32),
             dominant_family,
             regional_archetype,
@@ -1176,6 +1335,19 @@ impl ContinentalSurfacePlan {
             shade_refuge_habitat: shade_refuge_habitat as f32,
             crossing_habitat: crossing_habitat as f32,
             ephemeral_drainage: ephemeral_drainage as f32,
+            jungle_landform,
+            jungle_massif: jungle.massif as f32,
+            jungle_wet_shoulder: jungle.wet_shoulder as f32,
+            jungle_lowland: jungle.lowland as f32,
+            river_gallery: jungle.river_gallery as f32,
+            canopy_core: jungle.canopy_core as f32,
+            emergent_canopy: jungle.emergent_canopy as f32,
+            understory: jungle.understory as f32,
+            canopy_gap: jungle.canopy_gap as f32,
+            canopy_cluster: jungle.canopy_cluster as f32,
+            wet_refuge_habitat: wet_refuge_habitat as f32,
+            jungle_crossing_habitat: jungle_crossing_habitat as f32,
+            permanent_drainage_habitat: permanent_drainage_habitat as f32,
             continental_height: continental_height as f32,
             province_height: province_height as f32,
             hydrologic_height: hydrologic_height as f32,
@@ -1299,6 +1471,107 @@ fn river_water_level(plan: &LandscapePlanSample, topology: ContinentalEcoregionT
     let dz = (i64::from(plan.world_z) - continent.center_z) as f64;
     let along = dx * f64::from(continent.axis_x) + dz * f64::from(continent.axis_z);
     (sea_level + 8.0 - along / 5_500.0).clamp(sea_level + 1.0, sea_level + 15.0)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn jungle_region_sample(
+    descriptor: ContinentalEcoregionDescriptor,
+    world_x: i32,
+    world_z: i32,
+    regional_weight: f64,
+    massif_form: f64,
+    massif_dx: f64,
+    massif_dz: f64,
+    canopy_form: f64,
+    gap_form: f64,
+    cluster_form: f64,
+    basin_form: f64,
+    riparian: f64,
+    planned_clearing: f64,
+) -> JungleRegionSample {
+    if regional_weight <= 0.001 {
+        return JungleRegionSample::default();
+    }
+
+    let canonical_x = match descriptor.topology {
+        ContinentalEcoregionTopology::Plane => world_x,
+        ContinentalEcoregionTopology::CylinderX { period_blocks } => {
+            world_x.rem_euclid(period_blocks)
+        }
+    };
+    let cell_x = canonical_x.div_euclid(JUNGLE_CANOPY_CELL_BLOCKS);
+    let cell_z = world_z.div_euclid(JUNGLE_CANOPY_CELL_BLOCKS);
+    let identity_cell_x = match descriptor.topology {
+        ContinentalEcoregionTopology::Plane => cell_x,
+        ContinentalEcoregionTopology::CylinderX { period_blocks } => {
+            cell_x.rem_euclid(period_blocks / JUNGLE_CANOPY_CELL_BLOCKS)
+        }
+    };
+    let hash = jungle_coordinate_hash(descriptor.seed, identity_cell_x, cell_z);
+    let massif_unit = unit_field(massif_form);
+    let canopy_unit = unit_field(canopy_form);
+    let slope_signal = ((massif_dx * 8_192.0).powi(2) + (massif_dz * 8_192.0).powi(2))
+        .sqrt()
+        .clamp(0.0, 1.0);
+    let massif = regional_weight * smoothstep(0.48, 0.82, massif_unit);
+    let wet_shoulder = regional_weight
+        * smoothstep(0.34, 0.52, massif_unit)
+        * inverse_smoothstep(0.72, 0.88, massif_unit)
+        * (0.42 + slope_signal * 0.58);
+    let lowland = regional_weight
+        * smoothstep(0.54, 0.80, unit_field(-massif_form))
+        * smoothstep(0.46, 0.76, unit_field(basin_form));
+    let river_gallery = (regional_weight * riparian.max(lowland * 0.28)).clamp(0.0, 1.0);
+    let canopy_gap = (regional_weight
+        * smoothstep(0.70, 0.90, unit_field(gap_form)).max(planned_clearing * 0.82)
+        * (1.0 - river_gallery * 0.62))
+        .clamp(0.0, 1.0);
+    let canopy_core = (regional_weight
+        * (0.72 + canopy_unit * 0.28)
+        * (1.0 - canopy_gap * 0.90)
+        * (0.82 + river_gallery * 0.18))
+        .clamp(0.0, 1.0);
+    let emergent_canopy = (regional_weight
+        * smoothstep(0.64, 0.88, canopy_unit)
+        * (1.0 - canopy_gap * 0.82)
+        * (0.72 + massif * 0.28))
+        .clamp(0.0, 1.0);
+    let understory = (regional_weight
+        * (0.66 + unit_field(-gap_form) * 0.34)
+        * (1.0 - canopy_gap * 0.58)
+        * (0.84 + lowland * 0.16))
+        .clamp(0.0, 1.0);
+    let canopy_cluster =
+        (regional_weight * unit_field(cluster_form) * (1.0 - canopy_gap * 0.72)).clamp(0.0, 1.0);
+
+    JungleRegionSample {
+        canopy_id: (regional_weight >= 0.12).then_some(ContinentalCanopyId {
+            cell_x: identity_cell_x,
+            cell_z,
+            hash,
+        }),
+        regional_weight,
+        massif_height: massif * 34.0 + wet_shoulder * 12.0 - lowland * 5.0,
+        massif,
+        wet_shoulder,
+        lowland,
+        river_gallery,
+        canopy_core,
+        emergent_canopy,
+        understory,
+        canopy_gap,
+        canopy_cluster,
+    }
+}
+
+fn jungle_coordinate_hash(seed: i64, cell_x: i32, cell_z: i32) -> u64 {
+    let mut value = (seed as u64)
+        ^ JUNGLE_CANOPY_HASH_DOMAIN
+        ^ (cell_x as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15)
+        ^ (cell_z as u64).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    value = (value ^ (value >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    value = (value ^ (value >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    value ^ (value >> 31)
 }
 
 fn mesa_formation_sample(
@@ -1560,6 +1833,22 @@ fn mesa_landform_kind(mesa: MesaFormationSample) -> MesaLandformKind {
     }
 }
 
+fn jungle_landform_kind(jungle: JungleRegionSample) -> JungleLandformKind {
+    if jungle.river_gallery > 0.46 {
+        JungleLandformKind::RiverGallery
+    } else if jungle.canopy_gap > 0.48 {
+        JungleLandformKind::CanopyGap
+    } else if jungle.massif > 0.48 {
+        JungleLandformKind::ForestedMassif
+    } else if jungle.wet_shoulder > 0.38 {
+        JungleLandformKind::WetShoulder
+    } else if jungle.lowland > 0.38 {
+        JungleLandformKind::ShelteredLowland
+    } else {
+        JungleLandformKind::None
+    }
+}
+
 fn mesa_coordinate_hash(seed: i64, cell_x: i32, cell_z: i32) -> u64 {
     let mut value = (seed as u64)
         ^ MESA_FORMATION_HASH_DOMAIN
@@ -1687,17 +1976,26 @@ fn unit_field(value: f64) -> f64 {
 
 fn continental_channel_centerline_warp(
     hydrography: ContinentalHydrographySample,
+    ridge_form: f64,
+    basin_form: f64,
     local_form: f64,
     walking_form: f64,
 ) -> f64 {
     let meander_envelope =
         4.0 * f64::from(hydrography.reach_progress) * (1.0 - f64::from(hydrography.reach_progress));
+    let broad_form = ridge_form * 0.72 + basin_form * 0.28;
     let amplitude = match hydrography.reach_kind {
-        Some(ContinentalReachKind::Headwater) => local_form * 54.0 + walking_form * 9.0,
-        Some(ContinentalReachKind::Tributary) => local_form * 86.0 + walking_form * 14.0,
+        Some(ContinentalReachKind::Headwater) => {
+            broad_form * 170.0 + local_form * 54.0 + walking_form * 9.0
+        }
+        Some(ContinentalReachKind::Tributary) => {
+            broad_form * 280.0 + local_form * 86.0 + walking_form * 14.0
+        }
         Some(ContinentalReachKind::Trunk)
         | Some(ContinentalReachKind::LakeInlet)
-        | Some(ContinentalReachKind::Outlet) => local_form * 128.0 + walking_form * 20.0,
+        | Some(ContinentalReachKind::Outlet) => {
+            broad_form * 420.0 + local_form * 128.0 + walking_form * 20.0
+        }
         None => 0.0,
     };
     amplitude * meander_envelope
@@ -1769,6 +2067,14 @@ fn semantic_sha256(
         } else {
             digest.update([0]);
         }
+        if let Some(canopy) = sample.canopy_id {
+            digest.update([1]);
+            digest.update(canopy.cell_x.to_le_bytes());
+            digest.update(canopy.cell_z.to_le_bytes());
+            digest.update(canopy.hash.to_le_bytes());
+        } else {
+            digest.update([0]);
+        }
         for weight in sample.family_weights {
             digest.update(weight.to_bits().to_le_bytes());
         }
@@ -1794,6 +2100,18 @@ fn semantic_sha256(
             sample.shade_refuge_habitat,
             sample.crossing_habitat,
             sample.ephemeral_drainage,
+            sample.jungle_massif,
+            sample.jungle_wet_shoulder,
+            sample.jungle_lowland,
+            sample.river_gallery,
+            sample.canopy_core,
+            sample.emergent_canopy,
+            sample.understory,
+            sample.canopy_gap,
+            sample.canopy_cluster,
+            sample.wet_refuge_habitat,
+            sample.jungle_crossing_habitat,
+            sample.permanent_drainage_habitat,
             sample.openness,
             sample.forest_core,
             sample.forest_edge,
@@ -1822,6 +2140,7 @@ fn semantic_sha256(
             sample.substrate as u8,
             sample.regional_archetype as u8,
             sample.mesa_landform as u8,
+            sample.jungle_landform as u8,
             sample.reach_kind.map_or(u8::MAX, |kind| kind as u8),
             sample.reach_order,
             sample.shore_intent as u8,
@@ -1860,7 +2179,7 @@ mod tests {
         let window = surface.query_window(request).unwrap();
         assert_eq!(window.samples.len(), 221);
         assert_eq!(window.work.requested_samples, 221);
-        assert_eq!(window.work.surface_field_evaluations, 221 * 7);
+        assert_eq!(window.work.surface_field_evaluations, 221 * 11);
         assert!(window.work.hydrography_graph_constructions > 0);
         assert!(window.work.hydrography_graph_constructions < 221 * 10);
         assert_eq!(window.work.exact_chunks, 0);
@@ -1900,6 +2219,11 @@ mod tests {
             assert_eq!(base.mesa_landform, lifted.mesa_landform);
             assert_eq!(base.mesa_caprock, lifted.mesa_caprock);
             assert_eq!(base.dry_wash, lifted.dry_wash);
+            assert_eq!(base.canopy_id, lifted.canopy_id);
+            assert_eq!(base.jungle_landform, lifted.jungle_landform);
+            assert_eq!(base.canopy_core, lifted.canopy_core);
+            assert_eq!(base.canopy_gap, lifted.canopy_gap);
+            assert_eq!(base.canopy_cluster, lifted.canopy_cluster);
             assert_eq!(base.continent_id, lifted.continent_id);
             assert_eq!(base.province_id, lifted.province_id);
             assert_eq!(base.ecoregion_id, lifted.ecoregion_id);
@@ -2102,6 +2426,92 @@ mod tests {
                 maximum_height_delta < 14.0,
                 "spacing {spacing}: {maximum_height_delta}"
             );
+        }
+    }
+
+    #[test]
+    fn humid_jungle_is_one_causal_relief_canopy_and_habitat_bundle() {
+        let surface =
+            ContinentalSurfacePlan::new(ContinentalEcoregionDescriptor::plane(12_345)).unwrap();
+        let broad = surface
+            .query_window(ContinentalSurfaceWindowRequest::new(
+                -65_536, -65_536, 257, 257, 512,
+            ))
+            .unwrap();
+        let jungle = broad
+            .samples
+            .iter()
+            .copied()
+            .filter(|sample| {
+                sample.regional_archetype == ContinentalRegionalArchetype::HumidJungle
+                    && sample.canopy_id.is_some()
+            })
+            .max_by(|left, right| {
+                (left.jungle_massif + left.canopy_core + left.emergent_canopy)
+                    .total_cmp(&(right.jungle_massif + right.canopy_core + right.emergent_canopy))
+            })
+            .expect("bounded review scan contains a humid-jungle massif");
+
+        assert!(jungle.regional_archetype_weight > 0.62, "jungle={jungle:?}");
+        assert!(jungle.jungle_massif > 0.52);
+        assert!(jungle.canopy_core > 0.52);
+        assert!(jungle.emergent_canopy > 0.36);
+        assert!(jungle.moisture > 0.62);
+        assert!(jungle.temperature > 0.48);
+        assert!(jungle.drainage_permanence > 0.46);
+        assert!(matches!(
+            jungle.substrate,
+            ContinentalSurfaceSubstrate::Grass | ContinentalSurfaceSubstrate::CoarseSoil
+        ));
+        assert_eq!(
+            continental_surface_biome_id(jungle),
+            MCLONE_OVERWORLD_JUNGLE_BIOME_ID
+        );
+
+        let local = surface
+            .query_window(ContinentalSurfaceWindowRequest::new(
+                jungle.world_x - 8_192,
+                jungle.world_z - 8_192,
+                257,
+                257,
+                64,
+            ))
+            .unwrap();
+        let strongest = |field: fn(&ContinentalSurfaceSample) -> f32| {
+            local
+                .samples
+                .iter()
+                .copied()
+                .max_by(|left, right| field(left).total_cmp(&field(right)))
+                .unwrap()
+        };
+        let gallery = strongest(|sample| sample.river_gallery);
+        let gap = strongest(|sample| sample.canopy_gap);
+        let lowland = strongest(|sample| sample.jungle_lowland);
+        let refuge = strongest(|sample| sample.wet_refuge_habitat);
+        assert!(gallery.river_gallery > 0.32, "gallery={gallery:?}");
+        assert!(gallery.permanent_drainage_habitat > 0.18);
+        assert!(gap.canopy_gap > 0.42, "gap={gap:?}");
+        assert!(gap.jungle_crossing_habitat > 0.16);
+        assert!(lowland.jungle_lowland > 0.34, "lowland={lowland:?}");
+        assert!(refuge.wet_refuge_habitat > 0.30);
+
+        for spacing in [16, 64, 256, 1_024] {
+            let lod = surface
+                .query_lod_window(ContinentalSurfaceWindowRequest::new(
+                    jungle.world_x,
+                    jungle.world_z,
+                    1,
+                    1,
+                    spacing,
+                ))
+                .unwrap()
+                .samples[0];
+            assert_eq!(lod.canopy_id, jungle.canopy_id);
+            assert_eq!(lod.regional_archetype, jungle.regional_archetype);
+            assert_eq!(lod.jungle_landform, jungle.jungle_landform);
+            assert_eq!(lod.substrate, jungle.substrate);
+            assert!((lod.solid_surface_y - jungle.solid_surface_y).abs() < 14.0);
         }
     }
 

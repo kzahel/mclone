@@ -11,12 +11,12 @@ use crate::{
         CONTINENTAL_SURFACE_FAMILY_COUNT, ContinentalRegionalArchetype,
         ContinentalSurfaceConstructionCounts, ContinentalSurfacePlan, ContinentalSurfaceSample,
         ContinentalSurfaceSubstrate, ContinentalSurfaceWaterKind, ContinentalSurfaceWindowRequest,
-        MesaLandformKind, TerrainCharacterFamily,
+        JungleLandformKind, MesaLandformKind, TerrainCharacterFamily,
     },
 };
 
 pub const CONTINENTAL_SURFACE_JOURNEY_SCHEMA_REVISION: &str =
-    "mclone-continental-surface-journeys-v2";
+    "mclone-continental-surface-journeys-v3";
 pub const CONTINENTAL_SURFACE_JOURNEY_SCAN_BLOCKS: u32 = 131_072;
 pub const CONTINENTAL_SURFACE_JOURNEY_SCAN_STEP_BLOCKS: u32 = 512;
 pub const CONTINENTAL_SURFACE_JOURNEY_SCAN_SAMPLES_PER_AXIS: u32 = 257;
@@ -33,16 +33,18 @@ pub enum ContinentalSurfaceJourneyKind {
     ConnectedWaterCountry,
     QuietRollingInterior,
     MesaDesert,
+    HumidJungle,
 }
 
 impl ContinentalSurfaceJourneyKind {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::CoastToWoodedInterior,
         Self::ClearingBetweenForestCores,
         Self::LongForestEdge,
         Self::ConnectedWaterCountry,
         Self::QuietRollingInterior,
         Self::MesaDesert,
+        Self::HumidJungle,
     ];
 
     pub const fn label(self) -> &'static str {
@@ -53,6 +55,7 @@ impl ContinentalSurfaceJourneyKind {
             Self::ConnectedWaterCountry => "connected-water-country",
             Self::QuietRollingInterior => "quiet-rolling-interior",
             Self::MesaDesert => "mesa-desert",
+            Self::HumidJungle => "humid-jungle",
         }
     }
 
@@ -64,6 +67,7 @@ impl ContinentalSurfaceJourneyKind {
             Self::ConnectedWaterCountry => "Connected river, wetland, and lake country",
             Self::QuietRollingInterior => "Quiet rolling ordinary interior",
             Self::MesaDesert => "Mesa desert tables, escarpments, washes, and basin",
+            Self::HumidJungle => "Humid jungle massif, wet lowland, gallery, and canopy",
         }
     }
 
@@ -121,12 +125,22 @@ pub struct ContinentalJourneyCheckpoint {
     pub forest_core: f32,
     pub wetland: f32,
     pub aridity: f32,
+    pub temperature: f32,
+    pub moisture: f32,
+    pub drainage_permanence: f32,
     pub regional_archetype: ContinentalRegionalArchetype,
     pub mesa_landform: MesaLandformKind,
     pub mesa_caprock: f32,
     pub mesa_escarpment: f32,
     pub dry_wash: f32,
     pub alluvial_fan: f32,
+    pub jungle_landform: JungleLandformKind,
+    pub jungle_massif: f32,
+    pub river_gallery: f32,
+    pub canopy_core: f32,
+    pub emergent_canopy: f32,
+    pub canopy_gap: f32,
+    pub canopy_cluster: f32,
     pub plan: ContinentalJourneyPlanIdentity,
 }
 
@@ -446,6 +460,54 @@ fn journey_score(
                 + ((high - low) / 54.0).clamp(0.0, 1.5)
                 + center.aridity * 0.6
         }
+        ContinentalSurfaceJourneyKind::HumidJungle => {
+            let points = [start, inner_start, center, inner_end, late_end, end];
+            let jungle_mean = points
+                .iter()
+                .map(|sample| {
+                    f32::from(
+                        sample.regional_archetype == ContinentalRegionalArchetype::HumidJungle,
+                    ) * sample.regional_archetype_weight
+                })
+                .sum::<f32>()
+                / points.len() as f32;
+            let canopy = points
+                .iter()
+                .map(|sample| sample.canopy_core)
+                .fold(0.0_f32, f32::max);
+            let emergent = points
+                .iter()
+                .map(|sample| sample.emergent_canopy)
+                .fold(0.0_f32, f32::max);
+            let gallery = points
+                .iter()
+                .map(|sample| sample.river_gallery)
+                .fold(0.0_f32, f32::max);
+            let gap = points
+                .iter()
+                .map(|sample| sample.canopy_gap)
+                .fold(0.0_f32, f32::max);
+            let high = points
+                .iter()
+                .map(|sample| sample.solid_surface_y)
+                .fold(f32::NEG_INFINITY, f32::max);
+            let low = points
+                .iter()
+                .map(|sample| sample.solid_surface_y)
+                .fold(f32::INFINITY, f32::min);
+            jungle_mean * 4.0
+                + canopy * 2.2
+                + emergent * 1.6
+                + center.emergent_canopy * 2.4
+                + center.jungle_massif * 2.4
+                + center.jungle_wet_shoulder * 1.4
+                + gallery * 1.2
+                + gap * 0.8
+                + center.canopy_cluster
+                + ((high - low) / 48.0).clamp(0.0, 1.5)
+                + center.moisture
+                + center.temperature * 0.5
+        }
     }
 }
 
@@ -457,7 +519,9 @@ fn build_receipt(
     let (dx, dz) = DIRECTIONS[selected.direction_index];
     let (start_step, end_step) = match kind {
         ContinentalSurfaceJourneyKind::ClearingBetweenForestCores => (-8, 16),
-        ContinentalSurfaceJourneyKind::MesaDesert => (-16, 16),
+        ContinentalSurfaceJourneyKind::MesaDesert | ContinentalSurfaceJourneyKind::HumidJungle => {
+            (-16, 16)
+        }
         _ => (-JOURNEY_HALF_STEPS, JOURNEY_HALF_STEPS),
     };
     let sequence = (start_step..=end_step)
@@ -512,12 +576,22 @@ fn build_receipt(
             forest_core: sample.forest_core,
             wetland: sample.wetland,
             aridity: sample.aridity,
+            temperature: sample.temperature,
+            moisture: sample.moisture,
+            drainage_permanence: sample.drainage_permanence,
             regional_archetype: sample.regional_archetype,
             mesa_landform: sample.mesa_landform,
             mesa_caprock: sample.mesa_caprock,
             mesa_escarpment: sample.mesa_escarpment,
             dry_wash: sample.dry_wash,
             alluvial_fan: sample.alluvial_fan,
+            jungle_landform: sample.jungle_landform,
+            jungle_massif: sample.jungle_massif,
+            river_gallery: sample.river_gallery,
+            canopy_core: sample.canopy_core,
+            emergent_canopy: sample.emergent_canopy,
+            canopy_gap: sample.canopy_gap,
+            canopy_cluster: sample.canopy_cluster,
             plan: (*sample).into(),
         })
         .collect::<Vec<_>>();
@@ -595,7 +669,7 @@ mod tests {
     }
 
     #[test]
-    fn selector_publishes_six_separated_bounded_journeys() {
+    fn selector_publishes_seven_separated_bounded_journeys() {
         let catalog =
             compile_continental_surface_journeys(ContinentalEcoregionDescriptor::plane(12_345))
                 .unwrap();
@@ -677,6 +751,14 @@ mod tests {
             point.regional_archetype == ContinentalRegionalArchetype::MesaDesert
                 && point.mesa_landform != MesaLandformKind::None
                 && point.aridity > 0.68
+        }));
+        let jungle = catalog
+            .journey(ContinentalSurfaceJourneyKind::HumidJungle)
+            .unwrap();
+        assert!(jungle.checkpoints.iter().any(|point| {
+            point.regional_archetype == ContinentalRegionalArchetype::HumidJungle
+                && point.jungle_landform != JungleLandformKind::None
+                && point.canopy_core > 0.35
         }));
     }
 

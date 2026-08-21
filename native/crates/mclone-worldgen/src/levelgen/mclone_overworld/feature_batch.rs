@@ -967,6 +967,9 @@ mod tests {
                 McloneTreeFamily::TemperateBroadleaf => 0,
                 McloneTreeFamily::CoolWetConifer => 1,
                 McloneTreeFamily::WarmDryAcacia => 2,
+                McloneTreeFamily::HumidJungleBroadleaf => {
+                    panic!("V1 vegetation unexpectedly produced a humid-jungle tree")
+                }
             };
             seen_families[family_index] = true;
             let base = occurrence.record.canonical_base;
@@ -974,11 +977,17 @@ mod tests {
                 McloneTreeFamily::TemperateBroadleaf => OAK_LOG,
                 McloneTreeFamily::CoolWetConifer => SPRUCE_LOG,
                 McloneTreeFamily::WarmDryAcacia => ACACIA_LOG,
+                McloneTreeFamily::HumidJungleBroadleaf => {
+                    panic!("V1 vegetation unexpectedly produced a humid-jungle tree")
+                }
             };
             let vertical_height = match occurrence.record.family {
                 McloneTreeFamily::WarmDryAcacia => i32::from(occurrence.record.trunk_height) - 2,
                 McloneTreeFamily::TemperateBroadleaf | McloneTreeFamily::CoolWetConifer => {
                     i32::from(occurrence.record.trunk_height)
+                }
+                McloneTreeFamily::HumidJungleBroadleaf => {
+                    panic!("V1 vegetation unexpectedly produced a humid-jungle tree")
                 }
             };
             for dy in 0..vertical_height {
