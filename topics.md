@@ -287,3 +287,6 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
   direct exact/LOD queries, and downstream riparian ecology
 - `quest-frontier-performance` — pixel-preserving suppression, transition
   shading, and support-geometry reductions for stable Low/RD8 Quest headroom
+- `v2-forest-continuity-and-performance` — honest full-view V1/V2 Quest
+  measurement, fixed-budget coarse canopy continuity, and measured V2 cost
+  recovery without reducing terrain or ecology content
