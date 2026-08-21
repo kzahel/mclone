@@ -1,9 +1,8 @@
 # Tactical 327: Atomic Distant Terrain Settings
 
-Status: implementation complete 2026-08-21; physical Quest closeout rerun is
-pending because no attached authorized headset was available. The original
-device failure evidence, corrective architecture, shared implementation, and
-non-device validation are accepted.
+Status: complete 2026-08-21. The shared implementation, cross-platform
+validation, real Graphics UI pixels, and deterministic physical Quest 3
+Off -> Low -> Medium -> High -> Low regression are accepted.
 
 Topic: `procedural-horizon-clipmap`
 Topic: `graphics-video-settings`
@@ -143,13 +142,14 @@ Temporary native and mobile-browser pixel evidence was inspected under
   exact terrain already ready, plus rapid staged changes before one Apply.
 - [x] Build native, Wasm, flat Android, and Android XR boundaries.
 - [x] Inspect native and synthetic-stereo pixels after cold enable.
-- [ ] On physical Quest, select and apply Off, Low, Medium, High, and Low in one
-  process; require no failure notification or new abnormal exit, complete
-  frontier receipts, and normal continued head/controller presentation.
+- [x] On physical Quest, stage and apply Off, Low, Medium, High, and Low through
+  the shared UI actions in one process; require no failure notification or new
+  abnormal exit, complete frontier receipts, and normal continued
+  head/controller presentation.
 - [x] Confirm Low remains the unset Android XR default and reaches the established
   72-submission behavior; retain the p95 qualification rather than claiming a
   stricter lock than the evidence supports.
-- [ ] Commit final device evidence and close the tactical.
+- [x] Commit final device evidence and close the tactical.
 
 ### Phase 3 Evidence
 
@@ -186,12 +186,42 @@ other web-client unit tests, the Wasm build, and the real browser Distant
 Terrain acceptance pass. Keep that existing suite discrepancy visible rather
 than changing unrelated deterministic counts here.
 
-The canonical Quest provider command
-`~/code/machine-control/platforms/quest/bin/quest doctor` reported no attached,
-authorized headset on 2026-08-21. No unsafe direct ADB fallback was attempted.
-The original physical crash receipt remains the root-cause evidence, but the
-fixed APK still needs the one-process Off -> Low -> Medium -> High -> Low
-regression before this tactical can be marked complete.
+After the headset was reattached, the canonical provider found an authorized,
+fully charged Quest 3. The release APK built through
+`pnpm native:android-xr:apk`; the device validator then passed this bounded
+one-process lane while reusing the already staged device asset pack:
+
+```text
+pnpm native:android-xr:validate --skip-build --skip-assets \
+  --terrain-lod-cycle --xr-debug-ui graphics \
+  --log /tmp/mclone-t327-quest-lod-cycle-rerun.txt
+```
+
+The device mode stages and applies each value through the same typed shared UI
+actions as the Graphics page, waits for the scene's applied value, and rejects
+an enabled target without target-ready diagnostics plus a complete frontier
+admission. The accepted receipts were:
+
+| Step | Applied | Frontier | Exact generation | Drawn levels / tiles |
+|---:|---|---|---:|---:|
+| 1 | Off | disabled; target readiness not required | - | - |
+| 2 | Low | preferred; target ready | 15 | 6 / 40 |
+| 3 | Medium | preferred; target ready | 56 | 8 / 44 |
+| 4 | High | preferred; target ready | 63 | 10 / 48 |
+| 5 | Low | preferred; target ready | 63 | 6 / 40 |
+
+Completion reported the exact sequence and final Low at submission 220. The
+same log records the OpenXR current display refresh as 72.0 Hz and contains no
+failure marker, fatal signal, panic, rejected apply, or transient incomplete-
+certificate error. An earlier 180-second run on the fixed APK recorded two
+active controllers and retained live stereo Graphics pixels while the process
+continued at 72 Hz.
+
+Post-run `ApplicationExitInfo` records only the Quest provider's intentional
+`USER REQUESTED / FORCE STOP` cleanup for the new runs. The two original
+signal-9 exits remain older history entries, and no active Mclone failure
+notification exists. The provider restored proximity and sleep state after
+each run.
 
 ## Acceptance
 

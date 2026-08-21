@@ -406,8 +406,12 @@ world were inspected under `/tmp`. Wasm, flat Android, and Android XR builds
 pass. The staged browser smoke proves no engine/storage change before Apply,
 then applies Off -> Low -> Medium -> High -> Low in one process, moves after
 the downshift, captures Low pixels, and restores accepted Low after reload.
-The physical Quest rerun remains pending because no attached authorized
-headset was available at closeout.
+No attached authorized headset was available at the first closeout attempt.
+The reattached Quest 3 then passed the deterministic shared-action sequence
+Off -> Low -> Medium -> High -> Low in one process. Each enabled value reached
+target-ready preferred-frontier diagnostics, final Low completed at submission
+220, OpenXR reported 72.0 Hz, and the run produced neither a settings failure
+nor a new abnormal exit or active failure notification.
 
 ## Code Map
 

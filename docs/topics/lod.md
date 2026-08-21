@@ -99,7 +99,10 @@ reach 72 submissions per second in the accepted stationary sample, and the
 Android XR unset default remains Low as established by Tactical 320; neither
 fact is a stricter p95 lock. Tactical 327 makes live preset changes staged,
 direct, atomic, and recoverable without changing those preset meanings or
-defaults.
+defaults. Its physical Quest 3 closeout applies Off -> Low -> Medium -> High
+-> Low through the shared settings actions in one process; all enabled targets
+reach complete preferred-frontier receipts and the process ends normally at
+Low.
 
 Tactical 328 adds source-side frequency filtering for the continental
 candidate: spacing-one queries preserve exact terrain, while coarse preview

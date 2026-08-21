@@ -12,9 +12,9 @@ high-render-distance frontier implementation. Tactical
 the dominant fragment-time support lookup cost and measured the remaining
 full-belt cost. Tactical
 [`327`](../tactical/327-atomic-distant-terrain-settings.md) makes cold and live
-preset changes atomic behind one direct staged selector. Final human pixel
-reviews remain the acceptance gates; this topic is the canonical system
-description.
+preset changes atomic behind one direct staged selector and passes its
+physical Quest transition regression. Final human pixel reviews remain the
+acceptance gates; this topic is the canonical system description.
 
 ## System Contract
 
@@ -166,6 +166,14 @@ presentations above that bound before later clipmap movement, so retired
 quality levels cannot keep guard-pool slots reserved. Once a target is
 accepted, scene state synchronizes the settings reducer immediately so a
 second staged Apply is not rejected as if the prior request were still active.
+
+The physical Quest 3 validator drives the same typed Stage and Apply actions
+through Off -> Low -> Medium -> High -> Low in one OpenXR process. Every
+enabled step must reach target-ready diagnostics with a complete frontier
+receipt before the next request. The 2026-08-21 release run completed at
+submission 220 with preferred frontier receipts for all enabled targets,
+ended at Low, retained the headset's 72.0 Hz mode, and produced no failure,
+panic, abnormal-exit, or active failure-notification receipt.
 
 ## Exact Readiness And Formats
 
