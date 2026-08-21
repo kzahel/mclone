@@ -1953,6 +1953,7 @@ dependencies = [
  "anyhow",
  "glam 0.30.10",
  "js-sys",
+ "log",
  "mclone-core",
  "mclone-mesh",
  "mclone-render",
