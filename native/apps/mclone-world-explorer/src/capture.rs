@@ -163,7 +163,11 @@ pub fn run_smoke(options: &ExplorerOptions, root: &Path, started: Instant) -> Re
         f64::from(options.width),
         f64::from(options.height),
     );
-    let mut sequence = SmokeSequence::default();
+    let mut sequence = if options.retained_movement_smoke {
+        SmokeSequence::retained_movement()
+    } else {
+        SmokeSequence::default()
+    };
     let mut recorder = SmokeRecorder::new("offscreen", root, &adapter_info, format)?;
 
     while !sequence.is_complete() {

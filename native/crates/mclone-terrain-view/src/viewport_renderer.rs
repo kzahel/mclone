@@ -4207,7 +4207,8 @@ impl TerrainHorizonRenderer {
                         self.frontier_topology_receipt = topology.receipt();
                         self.frontier_topology = Some(topology);
                     }
-                    Err(_error) => {
+                    Err(error) => {
+                        log::warn!("terrain frontier topology rejected: {error}");
                         self.frontier_topology = None;
                         self.frontier_topology_receipt = TerrainFrontierTopologyReceipt::default();
                         self.frontier_topology_failures =
@@ -4216,7 +4217,8 @@ impl TerrainHorizonRenderer {
                 }
                 self.frontier_plan = Some(plan);
             }
-            Err(_error) => {
+            Err(error) => {
+                log::warn!("terrain frontier plan rejected: {error}");
                 self.frontier_plan = None;
                 self.frontier_topology = None;
                 self.frontier_topology_receipt = TerrainFrontierTopologyReceipt::default();

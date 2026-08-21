@@ -70,6 +70,7 @@ pub struct ExplorerOptions {
     pub window_capture: Option<PathBuf>,
     pub smoke_dir: Option<PathBuf>,
     pub window_smoke_dir: Option<PathBuf>,
+    pub retained_movement_smoke: bool,
 }
 
 impl Default for ExplorerOptions {
@@ -98,6 +99,7 @@ impl Default for ExplorerOptions {
             window_capture: None,
             smoke_dir: None,
             window_smoke_dir: None,
+            retained_movement_smoke: false,
         }
     }
 }
@@ -217,6 +219,10 @@ impl ExplorerOptions {
                     options.window_capture = Some(PathBuf::from(value(&mut arguments)?))
                 }
                 "--smoke" => options.smoke_dir = Some(PathBuf::from(value(&mut arguments)?)),
+                "--retained-smoke" => {
+                    options.smoke_dir = Some(PathBuf::from(value(&mut arguments)?));
+                    options.retained_movement_smoke = true;
+                }
                 _ => bail!("unknown World Explorer option {name:?}; use --help"),
             }
         }
@@ -408,6 +414,7 @@ Usage: mclone-world-explorer [options]
   --capture PATH              render an offscreen PNG instead of opening a window
   --window-capture PATH       capture the ready native surface and exit
   --smoke DIR                 run offscreen and native-surface movement smoke
+  --retained-smoke DIR        run only initial and retained movement stages
   -h, --help                  show this help"
     );
 }
@@ -426,6 +433,7 @@ mod tests {
             ExplorerOptions::default().terrain_profile,
             TerrainPreviewProfile::McloneOverworldV1
         );
+        assert!(!ExplorerOptions::default().retained_movement_smoke);
         assert_eq!(
             parse_terrain_source("continental").unwrap(),
             TerrainPreviewProfile::ContinentalEcoregionCandidate

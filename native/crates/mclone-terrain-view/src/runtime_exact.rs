@@ -650,6 +650,14 @@ impl TerrainRuntimeExactRenderer {
             .retain(|_, sections| !sections.is_empty());
         self.tree_occurrences
             .retain(|id, _| self.tree_sections.contains_key(id));
+        let center = ChunkPos::from_block_coords(center_x, center_z);
+        if !retained_exact_reaches_focus(&self.painted, center) {
+            // Rapid movement can outrun the retained exact overlap before its
+            // replacement batch arrives. Do not admit a new focus island
+            // across that gap: restart painted ownership while keeping raw
+            // compiler caches and desired resident meshes reusable.
+            self.painted.clear();
+        }
         self.desired = desired;
         self.queued.extend(
             ordered
@@ -712,7 +720,14 @@ impl TerrainRuntimeExactRenderer {
     }
 
     fn admit_one(&mut self, device: &wgpu::Device) -> Result<bool> {
-        let Some(pending) = self.pending.pop_front() else {
+        let pending_index = self.pending.iter().position(|pending| {
+            let coordinate = pending.admission.requested.coordinate;
+            let requested = ChunkPos::new(coordinate.chunk_x, coordinate.chunk_z);
+            pending.generation != self.generation
+                || !self.desired.contains(&requested)
+                || exact_admission_preserves_connectivity(&self.painted, requested)
+        });
+        let Some(pending) = pending_index.and_then(|index| self.pending.remove(index)) else {
             return Ok(false);
         };
         let coordinate = pending.admission.requested.coordinate;
@@ -869,6 +884,29 @@ impl TerrainRuntimeExactRenderer {
     }
 }
 
+fn cardinal_neighbors(position: ChunkPos) -> impl Iterator<Item = ChunkPos> {
+    [
+        ChunkPos::new(position.x.saturating_sub(1), position.z),
+        ChunkPos::new(position.x.saturating_add(1), position.z),
+        ChunkPos::new(position.x, position.z.saturating_sub(1)),
+        ChunkPos::new(position.x, position.z.saturating_add(1)),
+    ]
+    .into_iter()
+}
+
+fn exact_admission_preserves_connectivity(
+    painted: &BTreeSet<ChunkPos>,
+    requested: ChunkPos,
+) -> bool {
+    painted.is_empty()
+        || painted.contains(&requested)
+        || cardinal_neighbors(requested).any(|neighbor| painted.contains(&neighbor))
+}
+
+fn retained_exact_reaches_focus(painted: &BTreeSet<ChunkPos>, focus: ChunkPos) -> bool {
+    painted.is_empty() || exact_admission_preserves_connectivity(painted, focus)
+}
+
 fn exact_source_color_rgba(rgba: &[u8]) -> Vec<u8> {
     let mut diagnostic = rgba.to_vec();
     for pixel in diagnostic.chunks_exact_mut(4) {
@@ -879,4 +917,36 @@ fn exact_source_color_rgba(rgba: &[u8]) -> Vec<u8> {
         }
     }
     diagnostic
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn exact_admission_stays_connected_to_retained_coverage() {
+        let painted = BTreeSet::from([
+            ChunkPos::new(2, 0),
+            ChunkPos::new(3, 0),
+            ChunkPos::new(4, 0),
+        ]);
+        assert!(exact_admission_preserves_connectivity(
+            &BTreeSet::new(),
+            ChunkPos::new(6, 0)
+        ));
+        assert!(exact_admission_preserves_connectivity(
+            &painted,
+            ChunkPos::new(4, 0)
+        ));
+        assert!(exact_admission_preserves_connectivity(
+            &painted,
+            ChunkPos::new(5, 0)
+        ));
+        assert!(!exact_admission_preserves_connectivity(
+            &painted,
+            ChunkPos::new(6, 0)
+        ));
+        assert!(retained_exact_reaches_focus(&painted, ChunkPos::new(5, 0)));
+        assert!(!retained_exact_reaches_focus(&painted, ChunkPos::new(6, 0)));
+    }
 }

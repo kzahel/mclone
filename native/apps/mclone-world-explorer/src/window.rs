@@ -393,7 +393,13 @@ impl WindowGpu {
             terrain,
             input: NativeViewInput::new(started),
             capture_path,
-            smoke_sequence: smoke_root.as_ref().map(|_| SmokeSequence::default()),
+            smoke_sequence: smoke_root.as_ref().map(|_| {
+                if options.retained_movement_smoke {
+                    SmokeSequence::retained_movement()
+                } else {
+                    SmokeSequence::default()
+                }
+            }),
             smoke_recorder,
             smoke_options: smoke_root.map(|_| options),
         })

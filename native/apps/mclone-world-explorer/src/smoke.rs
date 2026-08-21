@@ -45,19 +45,40 @@ const SMOKE_STAGES: [SmokeStage; 9] = [
     SmokeStage::Orbit,
 ];
 
-#[derive(Default)]
 pub struct SmokeSequence {
     stage_index: usize,
     input_frames_applied: u32,
+    stage_count: usize,
+}
+
+impl Default for SmokeSequence {
+    fn default() -> Self {
+        Self {
+            stage_index: 0,
+            input_frames_applied: 0,
+            stage_count: SMOKE_STAGES.len(),
+        }
+    }
 }
 
 impl SmokeSequence {
+    pub const fn retained_movement() -> Self {
+        Self {
+            stage_index: 0,
+            input_frames_applied: 0,
+            stage_count: 4,
+        }
+    }
+
     pub fn prepare_frame(
         &mut self,
         terrain: &mut ExplorerTerrain,
         viewport: ViewportMetrics,
     ) -> Result<bool> {
-        let Some(stage) = SMOKE_STAGES.get(self.stage_index).copied() else {
+        let Some(stage) = SMOKE_STAGES[..self.stage_count]
+            .get(self.stage_index)
+            .copied()
+        else {
             return Ok(false);
         };
         let frame_count = stage.input_frame_count();
@@ -72,7 +93,10 @@ impl SmokeSequence {
     }
 
     pub fn after_frame(&mut self, stats: TerrainHorizonFrameStats) -> SmokeFrameOutcome {
-        let Some(stage) = SMOKE_STAGES.get(self.stage_index).copied() else {
+        let Some(stage) = SMOKE_STAGES[..self.stage_count]
+            .get(self.stage_index)
+            .copied()
+        else {
             return SmokeFrameOutcome::Complete;
         };
         if self.input_frames_applied < stage.input_frame_count()
@@ -83,7 +107,7 @@ impl SmokeSequence {
         }
         self.stage_index += 1;
         self.input_frames_applied = 0;
-        let complete_after_capture = self.stage_index == SMOKE_STAGES.len();
+        let complete_after_capture = self.stage_index == self.stage_count;
         match stage.capture_label() {
             Some(label) => SmokeFrameOutcome::Capture {
                 label,
@@ -95,21 +119,23 @@ impl SmokeSequence {
     }
 
     pub fn is_complete(&self) -> bool {
-        self.stage_index >= SMOKE_STAGES.len()
+        self.stage_index >= self.stage_count
     }
 
     pub fn requires_continuous_coverage(&self) -> bool {
-        SMOKE_STAGES.get(self.stage_index).is_some_and(|stage| {
-            matches!(
-                stage,
-                SmokeStage::MoveX
-                    | SmokeStage::MoveZ
-                    | SmokeStage::MoveDiagonal
-                    | SmokeStage::Zoom
-                    | SmokeStage::Map
-                    | SmokeStage::Orbit
-            )
-        })
+        SMOKE_STAGES[..self.stage_count]
+            .get(self.stage_index)
+            .is_some_and(|stage| {
+                matches!(
+                    stage,
+                    SmokeStage::MoveX
+                        | SmokeStage::MoveZ
+                        | SmokeStage::MoveDiagonal
+                        | SmokeStage::Zoom
+                        | SmokeStage::Map
+                        | SmokeStage::Orbit
+                )
+            })
     }
 }
 
@@ -571,17 +597,26 @@ impl SmokeRecorder {
             "total_refills": final_stats.residency.total_refills,
             "total_rebases": final_stats.residency.total_rebases,
             "captures": self.captures,
-            "sequence": [
-                "initial 3D",
-                "continuous +X",
-                "continuous -Z",
-                "continuous diagonal",
-                "negative-coordinate rebase",
-                "large teleport",
-                "anchored zoom",
-                "map",
-                "orbit",
-            ],
+            "sequence": if options.retained_movement_smoke {
+                vec![
+                    "initial 3D",
+                    "continuous +X",
+                    "continuous -Z",
+                    "continuous diagonal",
+                ]
+            } else {
+                vec![
+                    "initial 3D",
+                    "continuous +X",
+                    "continuous -Z",
+                    "continuous diagonal",
+                    "negative-coordinate rebase",
+                    "large teleport",
+                    "anchored zoom",
+                    "map",
+                    "orbit",
+                ]
+            },
         });
         let fields = receipt
             .as_object_mut()
@@ -768,4 +803,17 @@ fn frame_summary(samples: &[f64]) -> Value {
         "p95_ms": sorted[p95_index],
         "max_ms": sorted[sorted.len() - 1],
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn retained_movement_sequence_stops_before_rebases() {
+        assert_eq!(SmokeSequence::retained_movement().stage_count, 4);
+        assert_eq!(SmokeSequence::default().stage_count, SMOKE_STAGES.len());
+        assert_eq!(SMOKE_STAGES[3], SmokeStage::MoveDiagonal);
+        assert_eq!(SMOKE_STAGES[4], SmokeStage::NegativeCoordinates);
+    }
 }
