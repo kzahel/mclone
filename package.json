@@ -93,6 +93,7 @@
     "native:world-explorer:web:continental-smoke": "node ./native/apps/mclone-world-explorer/scripts/browser-continental-smoke.mjs",
     "native:world-explorer:journey-captures": "node ./native/apps/mclone-world-explorer/scripts/capture-continental-journeys.mjs",
     "native:world-explorer:continental-exact-review": "node ./native/apps/mclone-world-explorer/scripts/continental-exact-review.mjs",
+    "native:world-explorer:continental-catchment-review": "node ./native/apps/mclone-world-explorer/scripts/continental-catchment-review.mjs",
     "native:world-explorer:web:journey-review": "node ./native/apps/mclone-world-explorer/scripts/browser-journey-review.mjs",
     "native:world-explorer:web:composition-smoke": "node ./native/apps/mclone-world-explorer/scripts/browser-composition-smoke.mjs",
     "native:runtime:smoke": "pnpm native:scheduler:smoke",
