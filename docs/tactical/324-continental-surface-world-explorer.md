@@ -1,10 +1,10 @@
 # Tactical 324: Continental Surface World Explorer
 
-Status: **implementation complete and awaiting Human Review B as of
-2026-08-20. The shared broad surface, explicit native/browser World Explorer
-source, source-qualified cover, causal arid contrast, and six deterministic
-review journeys are drawable with zero exact or production-vegetation work.
-Production remains unchanged.**
+Status: **implementation complete. Human Review B on 2026-08-21 conditionally
+continued the direction without accepting the surface: the macro organization
+seems reasonable, but abstract presentation and poor reference-path
+performance prevent judgment until real exact terrain is composed with LOD.
+Tactical 325 owns that bounded probe. Production remains unchanged.**
 
 Topic: `continental-ecoregion-planning`
 
@@ -371,6 +371,12 @@ This tactical does not:
 - retain a complete infinite-world plan or require a semantic cache.
 
 ## Human Review B
+
+Result, 2026-08-21: **conditional continuation, not acceptance.** The plan-like
+colors seem reasonable, but the review remains too abstract and performs too
+poorly to judge the terrain product. Proceed to three real exact generated
+sites composed with the same LOD under Tactical 325. Do not promote the
+candidate or change production from this evidence.
 
 The decision is one of:
 

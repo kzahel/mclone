@@ -65,7 +65,11 @@ the candidate remains disconnected from production exact chunks. A bounded
 coast, clearing, forest edge, connected water, quiet interior, and
 upland-to-arid-basin review. Native and browser World Explorer expose matched
 locator, overview, oblique, habitat, and fly frames from the same catalog.
-Human Review B now owns the accept, revise, or reject decision.
+Human Review B on 2026-08-21 conditionally continued the direction without
+accepting the surface: the plan seems reasonable, but the abstract
+presentation and poor refill performance are insufficient until real exact
+terrain is composed with the same LOD. Tactical
+[`325`](../tactical/325-continental-exact-lod-review.md) owns that probe.
 Mclone should combine
 top-down continental and ecoregional planning with bottom-up procedural
 realization so the Overworld contains large, recognizable, causally related
@@ -396,8 +400,8 @@ The interactive candidate is at
 `https://mclone.kzahel.com/explore/?journey=coast-to-wooded-interior` and accepts
 any journey label from the table. Production field revision 21 remains the
 A/B control and `mclone-overworld-v1` remains unchanged. Human Review B must
-now choose accept, a named revision, or rejection before any bounded exact-site
-probe or production integration.
+now requires the bounded exact-site probe before accepting, revising, or
+rejecting the surface. Production integration remains unauthorized.
 
 ## Acceptance
 

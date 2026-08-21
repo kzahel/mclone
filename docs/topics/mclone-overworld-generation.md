@@ -1132,10 +1132,11 @@ coordinates rather than a locally executable numeric profile.
 The bounded continental/ecoregional exploration in
 [`continental-ecoregion-planning.md`](continental-ecoregion-planning.md) now
 has a disconnected broad-surface candidate and six deterministic World
-Explorer review journeys. It is stopped at Human Review B. Keep field revision
-21 as the active production control and do not connect candidate exact chunks
-or change `mclone-overworld-v1` until that decision. An accepted result may
-authorize a bounded exact-site probe; a later focused tactical may then change
+Explorer review journeys. Human Review B conditionally authorized a detached
+three-site exact-to-LOD probe in Tactical 325 because the abstract broad view
+cannot establish product quality. Keep field revision 21 as the active
+production control and do not change `mclone-overworld-v1` from that probe. If
+Human Review C accepts the exact result, a later focused tactical may change
 production fields, landforms, water, climate, biome/surface/vegetation
 selection, ecology inputs, fixtures, and coarse summaries together.
 
