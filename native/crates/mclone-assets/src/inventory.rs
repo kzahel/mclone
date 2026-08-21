@@ -10,6 +10,7 @@ pub enum FirstPartyVisualClass {
     Empty,
     Solid,
     Farmland,
+    SnowLayer,
     Slab,
     Stair,
     Fence,
@@ -283,6 +284,7 @@ fn visual_class(block: &str) -> FirstPartyVisualClass {
         "air" | "cave_air" => FirstPartyVisualClass::Empty,
         "water" | "lava" => FirstPartyVisualClass::Fluid,
         "farmland" => FirstPartyVisualClass::Farmland,
+        "snow" => FirstPartyVisualClass::SnowLayer,
         "spruce_slab" => FirstPartyVisualClass::Slab,
         "spruce_stairs" => FirstPartyVisualClass::Stair,
         "oak_fence" => FirstPartyVisualClass::Fence,
@@ -391,6 +393,10 @@ mod tests {
         assert!(inventory.block_visuals.iter().any(|visual| {
             visual.state.block.to_string() == "minecraft:water"
                 && visual.class == FirstPartyVisualClass::Fluid
+        }));
+        assert!(inventory.block_visuals.iter().any(|visual| {
+            visual.state.canonical_key() == "minecraft:snow[layers=1]"
+                && visual.class == FirstPartyVisualClass::SnowLayer
         }));
         assert!(inventory.block_visuals.iter().any(|visual| {
             visual.state.block.to_string() == "minecraft:spruce_stairs"

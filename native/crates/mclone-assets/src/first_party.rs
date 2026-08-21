@@ -248,6 +248,7 @@ mod tests {
                         FirstPartyVisualClass::Empty => "empty",
                         FirstPartyVisualClass::Solid => "solid",
                         FirstPartyVisualClass::Farmland => "farmland",
+                        FirstPartyVisualClass::SnowLayer => "snow_layer",
                         FirstPartyVisualClass::Slab => "slab",
                         FirstPartyVisualClass::Stair => "stair",
                         FirstPartyVisualClass::Fence => "fence",

@@ -309,6 +309,9 @@ impl TexturedMeshCatalog {
                         atlas,
                     )?,
                 ),
+                (FirstPartyVisualClass::SnowLayer, Some(sprite)) => {
+                    first_party_snow_layer_faces(record, sprite)
+                }
                 (FirstPartyVisualClass::Slab, Some(sprite)) => {
                     first_party_slab_faces(record, sprite)
                 }
@@ -807,6 +810,24 @@ fn first_party_slab_faces(
         record.block.path(),
         [0.0, min_y, 0.0],
         [16.0, max_y, 16.0],
+        sprite,
+    )
+}
+
+fn first_party_snow_layer_faces(
+    record: &mclone_assets::BlockStateRecord,
+    sprite: AtlasSpriteUv,
+) -> Vec<TexturedBlockFace> {
+    let layers = record
+        .properties
+        .get("layers")
+        .and_then(|layers| layers.parse::<u8>().ok())
+        .unwrap_or(1)
+        .clamp(1, 8);
+    first_party_cuboid_faces(
+        record.block.path(),
+        [0.0, 0.0, 0.0],
+        [16.0, f32::from(layers) * 2.0, 16.0],
         sprite,
     )
 }
@@ -1545,6 +1566,28 @@ mod tests {
         );
         assert!(!full_cube_occluder(&slab_faces));
         assert!(!full_cube_occluder(&stair_faces));
+    }
+
+    #[test]
+    fn first_party_snow_layer_is_one_eighth_block_tall() {
+        let sprite = AtlasSpriteUv {
+            u0: 0.0,
+            v0: 0.0,
+            u1: 1.0,
+            v1: 1.0,
+        };
+        let snow = mclone_assets::BlockStateRecord::new(
+            BlockStateId(8),
+            ResourceLocation::parse("minecraft:snow").unwrap(),
+            [("layers", "1")],
+        );
+
+        let faces = first_party_snow_layer_faces(&snow, sprite);
+
+        assert_eq!(faces.len(), 6);
+        assert!(faces.iter().all(|face| face.from == [0.0, 0.0, 0.0]));
+        assert!(faces.iter().all(|face| face.to == [16.0, 2.0, 16.0]));
+        assert!(!full_cube_occluder(&faces));
     }
 
     #[test]
