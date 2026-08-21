@@ -7,17 +7,15 @@ use crate::{
     continental_ecoregion::ContinentalEcoregionDescriptor,
     continental_surface::{
         ContinentalSurfacePlan, ContinentalSurfaceSample, ContinentalSurfaceSubstrate,
-        ContinentalSurfaceWaterKind,
+        continental_surface_biome_id,
     },
     feature::FeatureRegion,
     terrain_preview::continental_candidate_tree_records_intersecting,
 };
 
 use super::{
-    BEACH_BIOME_ID, GeneratedChunk, MCLONE_OVERWORLD_FOREST_BIOME_ID,
-    MCLONE_OVERWORLD_RIVER_BIOME_ID, MCLONE_OVERWORLD_SAVANNA_BIOME_ID,
-    MCLONE_OVERWORLD_TAIGA_BIOME_ID, MutableChunkBlockBuffer, OCEAN_BIOME_ID, PLAINS_BIOME_ID,
-    chunk::sample_column_biome_payload, mclone_overworld::realize_mclone_tree_occurrences,
+    GeneratedChunk, MutableChunkBlockBuffer, chunk::sample_column_biome_payload,
+    mclone_overworld::realize_mclone_tree_occurrences,
 };
 
 pub const CONTINENTAL_CANDIDATE_EXACT_REVISION: u16 = 2;
@@ -85,7 +83,7 @@ impl ContinentalCandidateExactGenerator {
             sample_column_biome_payload(min_x, min_z, CANDIDATE_HEIGHT, |world_x, world_z| {
                 let local_x = (world_x - min_x).clamp(0, CHUNK_WIDTH - 1);
                 let local_z = (world_z - min_z).clamp(0, CHUNK_WIDTH - 1);
-                candidate_biome_id(samples[sample_index(local_x, local_z)])
+                continental_surface_biome_id(samples[sample_index(local_x, local_z)])
             });
         GeneratedChunk::from_mutable_buffer_with_biomes(buffer, biomes)
     }
@@ -274,32 +272,6 @@ fn candidate_stratum(substrate: ContinentalSurfaceSubstrate, depth: i32) -> RawB
     }
 }
 
-fn candidate_biome_id(sample: ContinentalSurfaceSample) -> i32 {
-    match sample.water_kind {
-        ContinentalSurfaceWaterKind::Ocean => OCEAN_BIOME_ID,
-        ContinentalSurfaceWaterKind::Lake
-        | ContinentalSurfaceWaterKind::River
-        | ContinentalSurfaceWaterKind::WetlandPool => MCLONE_OVERWORLD_RIVER_BIOME_ID,
-        ContinentalSurfaceWaterKind::None
-            if sample.substrate == ContinentalSurfaceSubstrate::Sand =>
-        {
-            BEACH_BIOME_ID
-        }
-        ContinentalSurfaceWaterKind::None if sample.aridity >= 0.62 => {
-            MCLONE_OVERWORLD_SAVANNA_BIOME_ID
-        }
-        ContinentalSurfaceWaterKind::None
-            if sample.temperature <= 0.38 && sample.forest_core >= 0.28 =>
-        {
-            MCLONE_OVERWORLD_TAIGA_BIOME_ID
-        }
-        ContinentalSurfaceWaterKind::None if sample.forest_core.max(sample.forest_edge) >= 0.28 => {
-            MCLONE_OVERWORLD_FOREST_BIOME_ID
-        }
-        ContinentalSurfaceWaterKind::None => PLAINS_BIOME_ID,
-    }
-}
-
 fn sample_index(local_x: i32, local_z: i32) -> usize {
     (local_z * CHUNK_WIDTH + local_x) as usize
 }
@@ -308,6 +280,7 @@ fn sample_index(local_x: i32, local_z: i32) -> usize {
 mod tests {
     use super::*;
     use crate::block::{ACACIA_LOG, AIR, OAK_LOG, SPRUCE_LOG};
+    use crate::continental_surface::ContinentalSurfaceWaterKind;
 
     const SEED: i64 = 12_345;
 

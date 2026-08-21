@@ -925,19 +925,10 @@ fn continental_preview_sample(
     } else {
         0.0
     };
-    let biome_recipe = if ocean {
-        0.0
-    } else if coast > 0.55 {
-        1.0
-    } else if river {
-        2.0
-    } else if sample.dominant_family == TerrainCharacterFamily::AridRainShadow {
-        5.0
-    } else if sample.forest_core > 0.46 {
-        6.0
-    } else {
-        7.0
-    };
+    // Candidate profiles carry final compatible biome IDs. Only the
+    // production Mclone profile carries the compact recipe codes remapped by
+    // the renderer.
+    let biome_recipe = crate::continental_surface::continental_surface_biome_id(sample) as f32;
     let landform_kind = match sample.dominant_family {
         TerrainCharacterFamily::CoastAndHeadland => 1.0,
         TerrainCharacterFamily::RollingInterior => 5.0,
@@ -2447,6 +2438,10 @@ mod tests {
         assert_eq!(
             grid.sample(0, 0).unwrap().display_y,
             direct.display_surface_y
+        );
+        assert_eq!(
+            grid.sample(0, 0).unwrap().biome_recipe,
+            crate::continental_surface::continental_surface_biome_id(direct) as f32
         );
         assert_eq!(
             grid.compile_work(),

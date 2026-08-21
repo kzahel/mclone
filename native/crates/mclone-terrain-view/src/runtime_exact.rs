@@ -36,6 +36,7 @@ use mclone_worldgen::levelgen::McloneTreeOccurrence;
 use mclone_worldgen::terrain_preview::TerrainPreviewProfile;
 
 const EXACT_COMPILE_BATCH_CHUNKS: usize = 4;
+const CONTINENTAL_EXACT_ADMISSIONS_PER_FRAME: usize = EXACT_COMPILE_BATCH_CHUNKS;
 #[cfg(not(target_arch = "wasm32"))]
 const EXACT_COMMAND_CAPACITY: usize = 1;
 #[cfg(not(target_arch = "wasm32"))]
@@ -439,7 +440,7 @@ impl TerrainRuntimeExactRenderer {
     ) -> Result<()> {
         self.update_desired(device, center_x, center_z)?;
         self.poll_worker()?;
-        self.admit_one(device)?;
+        self.admit_available(device)?;
         self.submit_next()?;
         Ok(())
     }
@@ -692,15 +693,33 @@ impl TerrainRuntimeExactRenderer {
         Ok(())
     }
 
-    fn admit_one(&mut self, device: &wgpu::Device) -> Result<()> {
+    fn admit_available(&mut self, device: &wgpu::Device) -> Result<()> {
+        let limit = if self.source.profile == TerrainPreviewProfile::ContinentalEcoregionCandidate {
+            CONTINENTAL_EXACT_ADMISSIONS_PER_FRAME
+        } else {
+            1
+        };
+        let mut coverage_changed = false;
+        for _ in 0..limit {
+            coverage_changed |= self.admit_one(device)?;
+        }
+        if coverage_changed {
+            self.coverage_generation = self.coverage_generation.wrapping_add(1).max(1);
+            self.refresh_readiness();
+            self.rebuild_tree_ownership(device)?;
+        }
+        Ok(())
+    }
+
+    fn admit_one(&mut self, device: &wgpu::Device) -> Result<bool> {
         let Some(pending) = self.pending.pop_front() else {
-            return Ok(());
+            return Ok(false);
         };
         let coordinate = pending.admission.requested.coordinate;
         let requested = ChunkPos::new(coordinate.chunk_x, coordinate.chunk_z);
         if pending.generation != self.generation || !self.desired.contains(&requested) {
             self.stale_chunks_total = self.stale_chunks_total.saturating_add(1);
-            return Ok(());
+            return Ok(false);
         }
         let sections = unpack_textured_render_sections(&pending.admission.packed_sections)
             .context("invalid runtime canonical packed mesh")?;
@@ -745,13 +764,9 @@ impl TerrainRuntimeExactRenderer {
                 resident.insert(section.key, section);
             }
         }
-        if self.painted.insert(requested) {
-            self.coverage_generation = self.coverage_generation.wrapping_add(1).max(1);
-        }
+        let coverage_changed = self.painted.insert(requested);
         self.admitted_chunks_total = self.admitted_chunks_total.saturating_add(1);
-        self.refresh_readiness();
-        self.rebuild_tree_ownership(device)?;
-        Ok(())
+        Ok(coverage_changed)
     }
 
     fn submit_next(&mut self) -> Result<()> {

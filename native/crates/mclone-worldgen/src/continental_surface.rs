@@ -15,7 +15,11 @@ use crate::{
         LandscapePlanSample, LandscapeWindowRequest, PhysiographicProvinceKind,
         PlanConstructionCounts,
     },
-    levelgen::MCLONE_OVERWORLD_SEA_LEVEL,
+    levelgen::{
+        BEACH_BIOME_ID, MCLONE_OVERWORLD_FOREST_BIOME_ID, MCLONE_OVERWORLD_RIVER_BIOME_ID,
+        MCLONE_OVERWORLD_SAVANNA_BIOME_ID, MCLONE_OVERWORLD_SEA_LEVEL,
+        MCLONE_OVERWORLD_TAIGA_BIOME_ID, OCEAN_BIOME_ID, PLAINS_BIOME_ID,
+    },
     noise::{SeedDomain, ValueNoise2d},
 };
 
@@ -117,6 +121,39 @@ impl ContinentalSurfaceSubstrate {
             Self::Stone => "stone",
             Self::CoarseSoil => "coarse-soil",
         }
+    }
+}
+
+/// Returns the compatible biome identifier shared by exact chunks and every
+/// procedural-horizon level for the detached continental candidate.
+///
+/// Unlike `mclone-overworld-v1`, the candidate preview carries final biome
+/// identifiers rather than Mclone biome-recipe indices. Keeping this
+/// classification beside the shared surface fact prevents exact/LOD tint
+/// seams and gives later ecology work one deterministic biome boundary.
+pub fn continental_surface_biome_id(sample: ContinentalSurfaceSample) -> i32 {
+    match sample.water_kind {
+        ContinentalSurfaceWaterKind::Ocean => OCEAN_BIOME_ID,
+        ContinentalSurfaceWaterKind::Lake
+        | ContinentalSurfaceWaterKind::River
+        | ContinentalSurfaceWaterKind::WetlandPool => MCLONE_OVERWORLD_RIVER_BIOME_ID,
+        ContinentalSurfaceWaterKind::None
+            if sample.substrate == ContinentalSurfaceSubstrate::Sand =>
+        {
+            BEACH_BIOME_ID
+        }
+        ContinentalSurfaceWaterKind::None if sample.aridity >= 0.62 => {
+            MCLONE_OVERWORLD_SAVANNA_BIOME_ID
+        }
+        ContinentalSurfaceWaterKind::None
+            if sample.temperature <= 0.38 && sample.forest_core >= 0.28 =>
+        {
+            MCLONE_OVERWORLD_TAIGA_BIOME_ID
+        }
+        ContinentalSurfaceWaterKind::None if sample.forest_core.max(sample.forest_edge) >= 0.28 => {
+            MCLONE_OVERWORLD_FOREST_BIOME_ID
+        }
+        ContinentalSurfaceWaterKind::None => PLAINS_BIOME_ID,
     }
 }
 

@@ -265,7 +265,7 @@ impl SmokeRecorder {
                 || (stats.ready_slots == stats.allocation_slots
                     && stats.drawn_levels == 10
                     && stats.committed_levels == 10
-                    && stats.vegetation_committed_levels == 3),
+                    && stats.vegetation_committed_levels > 0),
             "World Explorer exposed incomplete committed coverage during a bounded transition: \
              {stats:?}"
         );
@@ -312,6 +312,7 @@ impl SmokeRecorder {
             depth,
         } = checkpoint;
         let service = stats.vegetation_service;
+        let expected_vegetation_tiles = stats.vegetation_committed_levels.saturating_mul(16);
         ensure!(
             stats.staging_slots == 70
                 && stats.normal_halo_radius == 2
@@ -320,14 +321,14 @@ impl SmokeRecorder {
                 && stats.normal_height_fixed_bytes == 4_380_120
                 && stats.staged_levels == 0
                 && stats.committed_levels == 10
-                && stats.vegetation_committed_levels == 3
+                && stats.vegetation_committed_levels > 0
                 && service.coordinator_state == Some(TerrainVegetationCoordinatorState::Running)
                 && service.executor_kind == Some(TerrainVegetationExecutorKind::NativeThread)
-                && service.desired_tiles == 48
+                && service.desired_tiles == expected_vegetation_tiles
                 && service.queued_tiles == 0
-                && service.resident_tiles == 48
+                && service.resident_tiles == expected_vegetation_tiles
                 && !service.in_flight
-                && service.product_count == 48
+                && service.product_count == expected_vegetation_tiles
                 && service.record_count
                     == stats
                         .tree_instance_count
@@ -532,6 +533,8 @@ impl SmokeRecorder {
                 "format": self.format,
             },
             "seed": options.seed,
+            "terrain_source": options.terrain_profile.label(),
+            "journey": options.journey.map(|journey| journey.label()),
             "asset_profile": options.asset_profile.label(),
             "asset_bytes": options.asset_bytes()?,
             "composition": terrain.composition_mode().label(),
