@@ -314,7 +314,7 @@ Completed on 2026-08-21.
   The package uses radius 4, or 81 painted exact chunks, at every site.
 - Cold radius-4 composition completes in roughly 3.6-4.0 seconds on Apple M4
   Pro. Retained movement avoids a full clipmap rebuild: three movements add
-  only 36-40 refills beyond the 320-slot cold fill. The current 24 movement
+  only 36-48 refills beyond the 320-slot cold fill. The current 24 movement
   frames average roughly 27-33 ms with 57-83 ms p95. These are review-host
   reference measurements, not final live-game budgets.
 - Native and browser captures report complete exact ownership, all ten LOD

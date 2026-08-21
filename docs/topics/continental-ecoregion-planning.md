@@ -406,8 +406,8 @@ forest/open/wetland structure at broader scales.
 The interactive candidate is at
 `https://mclone.kzahel.com/explore/?journey=coast-to-wooded-interior` and accepts
 any journey label from the table. Production field revision 21 remains the
-A/B control and `mclone-overworld-v1` remains unchanged. Human Review B now
-requires the bounded exact-site probe before accepting, revising, or
+A/B control and `mclone-overworld-v1` remains unchanged. Human Review B
+required the bounded exact-site probe before accepting, revising, or
 rejecting the surface. Production integration remains unauthorized.
 
 ## Human Review C Candidate
