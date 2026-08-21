@@ -88,6 +88,7 @@ pub struct TerrainViewEngine {
     target_color_transform: RenderTargetColorTransform,
     center: [i32; 2],
     content_stage: TerrainPreviewContentStage,
+    planned: bool,
     last_stats: Option<TerrainHorizonFrameStats>,
 }
 
@@ -123,17 +124,16 @@ impl TerrainViewEngine {
                 target_color_transform,
                 profile,
             )?;
-        let mut engine = Self {
+        Ok(Self {
             renderer,
             config,
             color_format,
             target_color_transform,
             center: [0, 0],
             content_stage: TerrainPreviewContentStage::Cover,
+            planned: false,
             last_stats: None,
-        };
-        engine.replan();
-        Ok(engine)
+        })
     }
 
     pub const fn source(&self) -> TerrainViewSourceIdentity {
@@ -150,7 +150,9 @@ impl TerrainViewEngine {
         self.config.source = next.source;
         self.renderer.reset_source();
         self.last_stats = None;
-        self.replan();
+        if self.planned {
+            self.replan();
+        }
         Ok(true)
     }
 
@@ -210,7 +212,7 @@ impl TerrainViewEngine {
         content_stage: TerrainPreviewContentStage,
     ) {
         let next = [center_x, center_z];
-        if self.center == next && self.content_stage == content_stage {
+        if self.planned && self.center == next && self.content_stage == content_stage {
             return;
         }
         self.center = next;
@@ -219,6 +221,7 @@ impl TerrainViewEngine {
     }
 
     fn replan(&mut self) {
+        self.planned = true;
         let source = self
             .config
             .source

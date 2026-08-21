@@ -52,6 +52,12 @@ pub struct SceneTerrainViewDiagnostics {
     pub exact_center_ready: bool,
     pub last_frame_revision: u64,
     pub ready_slots: u32,
+    pub cpu_compile_workers: u32,
+    pub cpu_compile_in_flight: u32,
+    pub cpu_compile_submitted_total: u64,
+    pub cpu_compile_completed_total: u64,
+    pub cpu_compile_micros_total: u64,
+    pub cpu_compile_stale_results_total: u64,
     pub drawn_levels: u32,
     pub drawn_tiles: u32,
     pub drawn_tiles_by_level: [u32; TERRAIN_LOD_HIGH_LEVEL_COUNT as usize],
@@ -732,6 +738,12 @@ impl SceneTerrainViewState {
     fn record_stats(&mut self, stats: TerrainHorizonFrameStats) {
         self.diagnostics.last_frame_revision = stats.revision;
         self.diagnostics.ready_slots = stats.ready_slots;
+        self.diagnostics.cpu_compile_workers = stats.cpu_compile_workers;
+        self.diagnostics.cpu_compile_in_flight = stats.cpu_compile_in_flight;
+        self.diagnostics.cpu_compile_submitted_total = stats.cpu_compile_submitted_total;
+        self.diagnostics.cpu_compile_completed_total = stats.cpu_compile_completed_total;
+        self.diagnostics.cpu_compile_micros_total = stats.cpu_compile_micros_total;
+        self.diagnostics.cpu_compile_stale_results_total = stats.cpu_compile_stale_results_total;
         self.diagnostics.drawn_levels = stats.drawn_levels;
         self.diagnostics.drawn_tiles = stats.drawn_tiles;
         self.diagnostics.drawn_tiles_by_level = stats.drawn_tiles_by_level;

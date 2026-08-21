@@ -2,6 +2,10 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::mem::size_of;
 use std::num::{NonZeroU32, NonZeroU64};
 use std::sync::mpsc;
+#[cfg(not(target_arch = "wasm32"))]
+use std::thread::{self, JoinHandle};
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::Instant;
 
 use mclone_core::{BlockStateId, ChunkPos, HorizontalTopology};
 use mclone_mesh::{TexturedBlockTint, TexturedMeshCatalog};
@@ -190,6 +194,137 @@ const TERRAIN_HORIZON_NORMAL_EDGE_EAST: u32 = 1 << 28;
 const TERRAIN_HORIZON_NORMAL_EDGE_NORTH: u32 = 1 << 29;
 const TERRAIN_HORIZON_NORMAL_EDGE_SOUTH: u32 = 1 << 30;
 const TERRAIN_HORIZON_SMOOTH_VERTICES_PER_CELL: u32 = 6;
+#[cfg(not(target_arch = "wasm32"))]
+const TERRAIN_HORIZON_CPU_MAX_WORKERS: usize = 4;
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone, Copy)]
+struct TerrainHorizonCpuCompileJob {
+    source_generation: u64,
+    resource: TerrainHorizonResourceTile,
+    request: TerrainPreviewRequest,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+struct TerrainHorizonCpuCompileResult {
+    source_generation: u64,
+    resource: TerrainHorizonResourceTile,
+    request: TerrainPreviewRequest,
+    compiled: Result<(TerrainPreviewReferenceGrid, Vec<f32>), String>,
+    compile_micros: u64,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+struct TerrainHorizonCpuWorker {
+    requests: Option<mpsc::SyncSender<TerrainHorizonCpuCompileJob>>,
+    handle: Option<JoinHandle<()>>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+struct TerrainHorizonCpuCompiler {
+    workers: Vec<TerrainHorizonCpuWorker>,
+    completions: mpsc::Receiver<TerrainHorizonCpuCompileResult>,
+    next_worker: usize,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl TerrainHorizonCpuCompiler {
+    fn new() -> Result<Self, String> {
+        let available = thread::available_parallelism().map_or(1, usize::from);
+        let worker_count = available
+            .saturating_sub(2)
+            .clamp(1, TERRAIN_HORIZON_CPU_MAX_WORKERS);
+        let (completion_sender, completions) = mpsc::channel();
+        let mut workers = Vec::with_capacity(worker_count);
+        for index in 0..worker_count {
+            let (request_sender, request_receiver) =
+                mpsc::sync_channel::<TerrainHorizonCpuCompileJob>(1);
+            let completion_sender = completion_sender.clone();
+            let handle = thread::Builder::new()
+                .name(format!("mclone-terrain-horizon-{index}"))
+                .spawn(move || {
+                    while let Ok(job) = request_receiver.recv() {
+                        let started = Instant::now();
+                        let compiled =
+                            TerrainPreviewReferenceGrid::compile_continental_with_height_halo(
+                                job.request,
+                                TERRAIN_HORIZON_NORMAL_HALO_RADIUS,
+                            );
+                        let result = TerrainHorizonCpuCompileResult {
+                            source_generation: job.source_generation,
+                            resource: job.resource,
+                            request: job.request,
+                            compiled,
+                            compile_micros: u64::try_from(started.elapsed().as_micros())
+                                .unwrap_or(u64::MAX),
+                        };
+                        if completion_sender.send(result).is_err() {
+                            break;
+                        }
+                    }
+                })
+                .map_err(|error| format!("failed to spawn terrain horizon worker: {error}"))?;
+            workers.push(TerrainHorizonCpuWorker {
+                requests: Some(request_sender),
+                handle: Some(handle),
+            });
+        }
+        Ok(Self {
+            workers,
+            completions,
+            next_worker: 0,
+        })
+    }
+
+    fn worker_count(&self) -> usize {
+        self.workers.len()
+    }
+
+    fn try_submit(&mut self, job: TerrainHorizonCpuCompileJob) -> Result<bool, String> {
+        for offset in 0..self.workers.len() {
+            let index = (self.next_worker + offset) % self.workers.len();
+            let sender = self.workers[index]
+                .requests
+                .as_ref()
+                .ok_or("terrain horizon worker is shutting down")?;
+            match sender.try_send(job) {
+                Ok(()) => {
+                    self.next_worker = (index + 1) % self.workers.len();
+                    return Ok(true);
+                }
+                Err(mpsc::TrySendError::Full(_)) => {}
+                Err(mpsc::TrySendError::Disconnected(_)) => {
+                    return Err("terrain horizon worker disconnected".to_owned());
+                }
+            }
+        }
+        Ok(false)
+    }
+
+    fn try_recv(&mut self) -> Result<Option<TerrainHorizonCpuCompileResult>, String> {
+        match self.completions.try_recv() {
+            Ok(result) => Ok(Some(result)),
+            Err(mpsc::TryRecvError::Empty) => Ok(None),
+            Err(mpsc::TryRecvError::Disconnected) => {
+                Err("terrain horizon completion channel disconnected".to_owned())
+            }
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Drop for TerrainHorizonCpuCompiler {
+    fn drop(&mut self) {
+        for worker in &mut self.workers {
+            worker.requests = None;
+        }
+        for worker in &mut self.workers {
+            if let Some(handle) = worker.handle.take() {
+                let _ = handle.join();
+            }
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct TerrainViewportFrameStats {
@@ -294,6 +429,12 @@ pub struct TerrainHorizonFrameStats {
     pub pending_refills: u32,
     pub dispatched_refills: u32,
     pub dispatched_refills_total: u64,
+    pub cpu_compile_workers: u32,
+    pub cpu_compile_in_flight: u32,
+    pub cpu_compile_submitted_total: u64,
+    pub cpu_compile_completed_total: u64,
+    pub cpu_compile_micros_total: u64,
+    pub cpu_compile_stale_results_total: u64,
     pub drawn_levels: u32,
     pub drawn_tiles: u32,
     pub drawn_tiles_by_level: [u32; TERRAIN_LOD_HIGH_LEVEL_COUNT as usize],
@@ -3798,6 +3939,14 @@ pub struct TerrainHorizonRenderer {
     slots: Vec<TerrainViewportGpuTile>,
     admission: TerrainHorizonAdmission,
     pending: VecDeque<TerrainHorizonResourceTile>,
+    #[cfg(not(target_arch = "wasm32"))]
+    cpu_compiler: Option<TerrainHorizonCpuCompiler>,
+    cpu_source_generation: u64,
+    cpu_compile_in_flight: u32,
+    cpu_compile_submitted_total: u64,
+    cpu_compile_completed_total: u64,
+    cpu_compile_micros_total: u64,
+    cpu_compile_stale_results_total: u64,
     vegetation_max_sample_spacing: u32,
     vegetation_executor: Option<Box<dyn TerrainVegetationExecutor>>,
     vegetation_coordinator: Option<TerrainVegetationCoordinator>,
@@ -3837,6 +3986,7 @@ impl TerrainHorizonRenderer {
             .expect("an already validated terrain clipmap config remains valid");
         self.admission.source_reset();
         self.pending.clear();
+        self.cpu_source_generation = self.cpu_source_generation.wrapping_add(1);
         for slot in &mut self.slots {
             slot.clear_vegetation();
             slot.clear_exact_connectors();
@@ -4018,12 +4168,26 @@ impl TerrainHorizonRenderer {
         }
         debug_assert_eq!(slots.len(), admission.resource_slots() as usize);
         let resource_slot_count = slots.len();
+        #[cfg(not(target_arch = "wasm32"))]
+        let cpu_compiler = if profile.supports_gpu_lod() {
+            None
+        } else {
+            Some(TerrainHorizonCpuCompiler::new()?)
+        };
         Ok(Self {
             renderer,
             clipmap,
             slots,
             admission,
             pending: VecDeque::with_capacity(config.allocation_slots() as usize),
+            #[cfg(not(target_arch = "wasm32"))]
+            cpu_compiler,
+            cpu_source_generation: 1,
+            cpu_compile_in_flight: 0,
+            cpu_compile_submitted_total: 0,
+            cpu_compile_completed_total: 0,
+            cpu_compile_micros_total: 0,
+            cpu_compile_stale_results_total: 0,
             vegetation_max_sample_spacing,
             vegetation_executor,
             vegetation_coordinator: None,
@@ -4438,28 +4602,14 @@ impl TerrainHorizonRenderer {
                 identity.presentation,
                 &connector_instances,
             );
-            let ready = !self.profile.supports_gpu_lod();
-            if ready {
-                let (reference, height_halo) =
-                    TerrainPreviewReferenceGrid::compile_continental_with_height_halo(
-                        tile.request.request(),
-                        TERRAIN_HORIZON_NORMAL_HALO_RADIUS,
-                    )?;
-                tile.upload_horizon_reference(
-                    queue,
-                    self.renderer.sample_byte_len,
-                    reference,
-                    &height_halo,
-                )?;
-            }
             tiles.push(TerrainFrontierSupportGpuTile {
                 key: *key,
                 tile,
-                ready,
+                ready: false,
                 outer_edge_flags,
             });
         }
-        let committed = tiles.iter().all(|tile| tile.ready);
+        let committed = tiles.is_empty();
         Ok(TerrainFrontierSupportGpu {
             identity,
             tiles,
@@ -4707,6 +4857,91 @@ impl TerrainHorizonRenderer {
             })
     }
 
+    fn pending_terrain_refills(&self) -> u32 {
+        u32::try_from(self.pending.len())
+            .unwrap_or(u32::MAX)
+            .saturating_add(self.cpu_compile_in_flight)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn admit_completed_cpu_refills(&mut self, queue: &wgpu::Queue) -> Result<u32, String> {
+        let mut admitted = 0_u32;
+        loop {
+            let result = match self.cpu_compiler.as_mut() {
+                Some(compiler) => compiler.try_recv()?,
+                None => None,
+            };
+            let Some(result) = result else {
+                break;
+            };
+            self.cpu_compile_in_flight = self.cpu_compile_in_flight.saturating_sub(1);
+            self.cpu_compile_completed_total = self.cpu_compile_completed_total.saturating_add(1);
+            self.cpu_compile_micros_total = self
+                .cpu_compile_micros_total
+                .saturating_add(result.compile_micros);
+
+            let resource = result.resource;
+            let expected_tile =
+                terrain_horizon_tile_id(self.profile, self.seed, self.content_stage, resource.tile);
+            if result.source_generation != self.cpu_source_generation
+                || result.request != expected_tile.preview_request()
+                || self.admission.assignment(resource.resource_slot) != Some(resource.tile)
+                || self.admission.slot_generation(resource.resource_slot)
+                    != Some(resource.slot_generation)
+            {
+                self.cpu_compile_stale_results_total =
+                    self.cpu_compile_stale_results_total.saturating_add(1);
+                continue;
+            }
+            let (reference, height_halo) = result.compiled?;
+            self.slots[resource.resource_slot as usize].upload_horizon_reference(
+                queue,
+                self.renderer.sample_byte_len,
+                reference,
+                &height_halo,
+            )?;
+            self.admission.mark_ready(resource.resource_slot)?;
+            admitted = admitted.saturating_add(1);
+        }
+        Ok(admitted)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn submit_cpu_refills(&mut self) -> Result<(), String> {
+        loop {
+            let Some(resource) = self.pending.front().copied() else {
+                break;
+            };
+            if self.admission.assignment(resource.resource_slot) != Some(resource.tile)
+                || self.admission.slot_generation(resource.resource_slot)
+                    != Some(resource.slot_generation)
+            {
+                self.pending.pop_front();
+                continue;
+            }
+            let request =
+                terrain_horizon_tile_id(self.profile, self.seed, self.content_stage, resource.tile)
+                    .preview_request();
+            let job = TerrainHorizonCpuCompileJob {
+                source_generation: self.cpu_source_generation,
+                resource,
+                request,
+            };
+            let submitted = self
+                .cpu_compiler
+                .as_mut()
+                .ok_or("continental horizon has no CPU compiler")?
+                .try_submit(job)?;
+            if !submitted {
+                break;
+            }
+            self.pending.pop_front();
+            self.cpu_compile_in_flight = self.cpu_compile_in_flight.saturating_add(1);
+            self.cpu_compile_submitted_total = self.cpu_compile_submitted_total.saturating_add(1);
+        }
+        Ok(())
+    }
+
     pub fn encode(
         &mut self,
         device: &wgpu::Device,
@@ -4842,43 +5077,43 @@ impl TerrainHorizonRenderer {
         };
         let focus_y = presentation.target_y;
         let mut dispatched_refills = 0_u32;
-        for _ in 0..TERRAIN_VIEWPORT_GPU_DISPATCHES_PER_FRAME {
-            let Some(resource) = self.pending.pop_front() else {
-                break;
-            };
-            let tile = resource.tile;
-            let slot_index = resource.resource_slot as usize;
-            if self.admission.assignment(resource.resource_slot) != Some(tile)
-                || self.admission.slot_generation(resource.resource_slot)
-                    != Some(resource.slot_generation)
-            {
-                continue;
-            }
-            let tile_id =
-                terrain_horizon_tile_id(self.profile, self.seed, self.content_stage, tile);
-            let slot = &mut self.slots[slot_index];
-            slot.request = tile_id.preview_request().validate()?;
-            queue.write_buffer(
-                &slot.uniform_buffer,
-                0,
-                &terrain_horizon_uniform_bytes(
-                    slot.request,
-                    width,
-                    height,
-                    options,
-                    presentation.camera,
-                    uniform_presentation,
-                    focus_y,
-                    None,
+        if self.profile.supports_gpu_lod() {
+            for _ in 0..TERRAIN_VIEWPORT_GPU_DISPATCHES_PER_FRAME {
+                let Some(resource) = self.pending.pop_front() else {
+                    break;
+                };
+                let tile = resource.tile;
+                let slot_index = resource.resource_slot as usize;
+                if self.admission.assignment(resource.resource_slot) != Some(tile)
+                    || self.admission.slot_generation(resource.resource_slot)
+                        != Some(resource.slot_generation)
+                {
+                    continue;
+                }
+                let tile_id =
+                    terrain_horizon_tile_id(self.profile, self.seed, self.content_stage, tile);
+                let slot = &mut self.slots[slot_index];
+                slot.request = tile_id.preview_request().validate()?;
+                queue.write_buffer(
+                    &slot.uniform_buffer,
                     0,
-                    if multiview { 0b11 } else { 0b01 },
-                    render_view_overrides,
-                    presentation.sky_darken,
-                    presentation.fog,
-                    presentation.diagnostic,
-                ),
-            );
-            if self.profile.supports_gpu_lod() {
+                    &terrain_horizon_uniform_bytes(
+                        slot.request,
+                        width,
+                        height,
+                        options,
+                        presentation.camera,
+                        uniform_presentation,
+                        focus_y,
+                        None,
+                        0,
+                        if multiview { 0b11 } else { 0b01 },
+                        render_view_overrides,
+                        presentation.sky_darken,
+                        presentation.fog,
+                        presentation.diagnostic,
+                    ),
+                );
                 let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                     label: Some("mclone_terrain_horizon_compute_pass"),
                     timestamp_writes: None,
@@ -4894,7 +5129,31 @@ impl TerrainHorizonRenderer {
                     terrain_horizon_samples_per_axis().div_ceil(TERRAIN_PREVIEW_WORKGROUP_AXIS);
                 pass.dispatch_workgroups(workgroups, workgroups, 1);
                 slot.gpu_submitted = true;
-            } else {
+                self.admission.mark_ready(resource.resource_slot)?;
+                dispatched_refills = dispatched_refills.saturating_add(1);
+            }
+        } else {
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                dispatched_refills = self.admit_completed_cpu_refills(queue)?;
+                self.submit_cpu_refills()?;
+            }
+            #[cfg(target_arch = "wasm32")]
+            for _ in 0..1 {
+                let Some(resource) = self.pending.pop_front() else {
+                    break;
+                };
+                let tile = resource.tile;
+                if self.admission.assignment(resource.resource_slot) != Some(tile)
+                    || self.admission.slot_generation(resource.resource_slot)
+                        != Some(resource.slot_generation)
+                {
+                    continue;
+                }
+                let tile_id =
+                    terrain_horizon_tile_id(self.profile, self.seed, self.content_stage, tile);
+                let slot = &mut self.slots[resource.resource_slot as usize];
+                slot.request = tile_id.preview_request().validate()?;
                 let (reference, height_halo) =
                     TerrainPreviewReferenceGrid::compile_continental_with_height_halo(
                         tile_id.preview_request(),
@@ -4906,9 +5165,9 @@ impl TerrainHorizonRenderer {
                     reference,
                     &height_halo,
                 )?;
+                self.admission.mark_ready(resource.resource_slot)?;
+                dispatched_refills = dispatched_refills.saturating_add(1);
             }
-            self.admission.mark_ready(resource.resource_slot)?;
-            dispatched_refills = dispatched_refills.saturating_add(1);
         }
         self.clipmap.note_refills_completed(dispatched_refills);
         self.dispatched_refills_total = self
@@ -4984,7 +5243,7 @@ impl TerrainHorizonRenderer {
             exact_frontier_required,
             exact_frontier_certifiable,
             terrain_levels.is_empty(),
-            !self.pending.is_empty(),
+            self.pending_terrain_refills() > 0,
             self.admission.has_staged_levels(),
         );
         if exact_frontier_required && !exact_frontier_certifiable {
@@ -5004,15 +5263,20 @@ impl TerrainHorizonRenderer {
         }
         let mut frontier_support_dispatches = 0_u32;
         if exact_frontier_certifiable
-            && self.pending.is_empty()
+            && self.pending_terrain_refills() == 0
             && !self.admission.has_staged_levels()
             && let Some(support) = self.frontier_support_pending.as_mut()
         {
+            let dispatch_limit = if self.profile.supports_gpu_lod() {
+                TERRAIN_FRONTIER_DISPATCHES_PER_FRAME
+            } else {
+                1
+            };
             for support_tile in support
                 .tiles
                 .iter_mut()
                 .filter(|tile| !tile.ready)
-                .take(TERRAIN_FRONTIER_DISPATCHES_PER_FRAME)
+                .take(dispatch_limit)
             {
                 queue.write_buffer(
                     &support_tile.tile.uniform_buffer,
@@ -5034,7 +5298,7 @@ impl TerrainHorizonRenderer {
                         presentation.diagnostic,
                     ),
                 );
-                {
+                if self.profile.supports_gpu_lod() {
                     let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                         label: Some("mclone_terrain_frontier_support_compute_pass"),
                         timestamp_writes: None,
@@ -5049,8 +5313,20 @@ impl TerrainHorizonRenderer {
                     let workgroups =
                         terrain_horizon_samples_per_axis().div_ceil(TERRAIN_PREVIEW_WORKGROUP_AXIS);
                     pass.dispatch_workgroups(workgroups, workgroups, 1);
+                    support_tile.tile.gpu_submitted = true;
+                } else {
+                    let (reference, height_halo) =
+                        TerrainPreviewReferenceGrid::compile_continental_with_height_halo(
+                            support_tile.tile.request.request(),
+                            TERRAIN_HORIZON_NORMAL_HALO_RADIUS,
+                        )?;
+                    support_tile.tile.upload_horizon_reference(
+                        queue,
+                        self.renderer.sample_byte_len,
+                        reference,
+                        &height_halo,
+                    )?;
                 }
-                support_tile.tile.gpu_submitted = true;
                 support_tile.ready = true;
                 frontier_support_dispatches = frontier_support_dispatches.saturating_add(1);
             }
@@ -5869,7 +6145,7 @@ impl TerrainHorizonRenderer {
             snapshot.approximate_owned_ids().count() as u32
         });
         let target_ready = ready_slots == allocation_slots
-            && self.pending.is_empty()
+            && self.pending_terrain_refills() == 0
             && !self.admission.has_staged_levels()
             && self.clipmap.center() == (self.requested_center_x, self.requested_center_z)
             && self.clipmap.origins_settled()
@@ -5893,9 +6169,21 @@ impl TerrainHorizonRenderer {
             vegetation_committed_levels: admission_diagnostics.vegetation_committed_levels,
             atomic_level_commits: admission_diagnostics.atomic_level_commits,
             deferred_transition_attempts: admission_diagnostics.deferred_transition_attempts,
-            pending_refills: self.pending.len() as u32,
+            pending_refills: self.pending_terrain_refills(),
             dispatched_refills,
             dispatched_refills_total: self.dispatched_refills_total,
+            #[cfg(not(target_arch = "wasm32"))]
+            cpu_compile_workers: self
+                .cpu_compiler
+                .as_ref()
+                .map_or(0, |compiler| compiler.worker_count() as u32),
+            #[cfg(target_arch = "wasm32")]
+            cpu_compile_workers: 0,
+            cpu_compile_in_flight: self.cpu_compile_in_flight,
+            cpu_compile_submitted_total: self.cpu_compile_submitted_total,
+            cpu_compile_completed_total: self.cpu_compile_completed_total,
+            cpu_compile_micros_total: self.cpu_compile_micros_total,
+            cpu_compile_stale_results_total: self.cpu_compile_stale_results_total,
             drawn_levels,
             drawn_tiles,
             drawn_tiles_by_level,
@@ -6816,6 +7104,56 @@ fn storage_layout_entry(
 mod tests {
     use super::*;
     use mclone_worldgen::terrain_preview::TerrainPreviewRequest;
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn native_horizon_compiler_moves_continental_tiles_off_thread() {
+        let mut compiler = TerrainHorizonCpuCompiler::new().unwrap();
+        assert!((1..=TERRAIN_HORIZON_CPU_MAX_WORKERS).contains(&compiler.worker_count()));
+        let resource = TerrainHorizonResourceTile {
+            tile: TerrainClipmapTile {
+                level: 9,
+                tile_x: 0,
+                tile_z: 0,
+                sample_spacing: 512,
+                physical_x: 0,
+                physical_z: 0,
+                physical_slot: 0,
+            },
+            resource_slot: 0,
+            slot_generation: 1,
+        };
+        let request = TerrainPreviewRequest::new(12_345, 0, 0, 512)
+            .with_profile(TerrainPreviewProfile::McloneOverworldV2)
+            .with_content_stage(TerrainPreviewContentStage::Cover);
+        assert!(
+            compiler
+                .try_submit(TerrainHorizonCpuCompileJob {
+                    source_generation: 7,
+                    resource,
+                    request,
+                })
+                .unwrap()
+        );
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let result = loop {
+            if let Some(result) = compiler.try_recv().unwrap() {
+                break result;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "continental horizon worker did not complete its bounded tile"
+            );
+            std::thread::yield_now();
+        };
+        assert_eq!(result.source_generation, 7);
+        assert_eq!(result.resource, resource);
+        assert_eq!(result.request, request);
+        let (grid, halo) = result.compiled.unwrap();
+        assert_eq!(grid.samples().len(), 65 * 65);
+        assert_eq!(halo.len(), 69 * 69);
+        assert!(result.compile_micros > 0);
+    }
 
     #[test]
     fn canopy_is_fixed_budget_and_begins_after_proxy_tree_levels() {

@@ -302,6 +302,21 @@ fn main() -> Result<()> {
                 },
             );
             println!("MCLONE_TERRAIN_SEAM_STATE {terrain_view}");
+            let cpu_view = report.terrain_view.map_or_else(
+                || serde_json::json!({ "enabled": false }),
+                |terrain| {
+                    serde_json::json!({
+                        "enabled": true,
+                        "workers": terrain.cpu_compile_workers,
+                        "inFlight": terrain.cpu_compile_in_flight,
+                        "submittedTotal": terrain.cpu_compile_submitted_total,
+                        "completedTotal": terrain.cpu_compile_completed_total,
+                        "compileMicrosTotal": terrain.cpu_compile_micros_total,
+                        "staleResultsTotal": terrain.cpu_compile_stale_results_total,
+                    })
+                },
+            );
+            println!("MCLONE_TERRAIN_CPU_STATE {cpu_view}");
             let canopy_view = report.terrain_view.map_or_else(
                 || serde_json::json!({ "enabled": false }),
                 |terrain| {

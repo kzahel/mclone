@@ -237,3 +237,44 @@ Ask:
 
 V2 remains experimental and V1 remains the default regardless of this review.
 
+## Implementation Progress: CPU Horizon Attribution And Recovery
+
+The first measured owner was not proxy vegetation. V2's continental horizon
+was compiling each `69 x 69` tile synchronously inside render encoding, using
+the GPU lane's allowance of up to 16 refills per frame. The exact/procedural
+frontier compounded that cost: every partial exact-coverage generation built
+and synchronously compiled a fresh preferred support set before a later
+generation immediately superseded it.
+
+The native shared renderer now has a bounded CPU horizon compiler with one to
+four named workers, reserving two reported logical CPUs and capping the pool at
+four. Jobs and completions carry source generation, tile request, physical
+slot, and slot generation. Admission rejects stale source, request, assignment,
+or slot results; fixed GPU buffers and clipmap residency are unchanged. Frame
+diagnostics report worker count, in-flight work, submissions, completions,
+aggregate compile microseconds, and stale results. WASM keeps the same compiler
+and admission contract with a one-tile inline fallback until the common browser
+worker protocol grows a terrain payload.
+
+Preferred CPU frontier resources now begin unready, as GPU frontier resources
+already did. Partial exact generations coalesce while terrain is warming;
+after terrain settles, at most one CPU support tile compiles per frame. The
+zero-capacity synchronous fallback remains immediately complete, so no exact
+boundary is exposed while preferred support warms. The engine also no longer
+starts an unobserved origin-centered fill in its constructor. Its first actual
+residency request plans the clipmap, including the valid `(0, 0)` case.
+
+A matched release native High/jungle 480-frame diagnostic shows the bounded
+work reduction independently of Quest timing:
+
+| Step | Terrain submissions | Terrain CPU | Preferred commits | Process user time |
+|---|---:|---:|---:|---:|
+| async only, speculative origin retained | `320` | `3.447 s` | `31` | `10.28 s` |
+| frontier generations coalesced | `320` | `3.444 s` | `1` | `6.54 s` |
+| first real residency only | `160` | `1.847 s` | `3` | `4.99 s` |
+
+The final run reached all 160 High slots, all 48 vegetation products, zero
+in-flight or stale terrain results, ten drawn levels, and the same 17,920
+canopy cells / 215,040 canopy vertices as the pre-optimization capture. These
+are attribution and regression results, not the physical Quest acceptance;
+the corrected RD8 A/B remains the governing gate.

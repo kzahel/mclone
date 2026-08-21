@@ -5068,6 +5068,16 @@ mod android {
                     horizon.vegetation_transport_failures,
                     horizon.vegetation_job_failures
                 );
+                log::info!(
+                    "MCLONE_ANDROID_XR_TERRAIN_CPU mode={} workers={} in_flight={} submitted={} completed={} compile_micros={} stale_results={}",
+                    mode,
+                    horizon.cpu_compile_workers,
+                    horizon.cpu_compile_in_flight,
+                    horizon.cpu_compile_submitted_total,
+                    horizon.cpu_compile_completed_total,
+                    horizon.cpu_compile_micros_total,
+                    horizon.cpu_compile_stale_results_total,
+                );
             }
             log::info!(
                 "MCLONE_ANDROID_XR_PERF_START seconds={} mode={} detail={} render_path={} frame_accounting_enabled={} render_section_upload_budget={} render_section_accept_budget={} render_completed_result_accept_budget={} skip_actors={} adaptive_chunk_publication_budget={} render_distance={} render_compile_workers={} render_compile_max_pending_jobs={} flight_speed_blocks_per_second={:.3} chunk_view_churn_interval_seconds={:.3} chunk_view_churn_offset_chunks={} settle_seconds={:.3} settle_min_seconds={:.3} settle_frames={} settle_quiet_frames={} refresh_supported={} current_hz={} supported_hz={} target_hz={:.1} budget_ms={:.3} submitted={} runtime_frames={} skipped={}",
@@ -5691,6 +5701,21 @@ mod android {
                 latest_horizon.vegetation_completed_jobs,
                 latest_horizon.vegetation_transport_failures,
                 latest_horizon.vegetation_job_failures
+            );
+            log::info!(
+                "MCLONE_ANDROID_XR_PERF_HORIZON_CPU start_workers={} start_in_flight={} start_submitted={} start_completed={} start_compile_micros={} start_stale_results={} latest_workers={} latest_in_flight={} latest_submitted={} latest_completed={} latest_compile_micros={} latest_stale_results={}",
+                start_horizon.cpu_compile_workers,
+                start_horizon.cpu_compile_in_flight,
+                start_horizon.cpu_compile_submitted_total,
+                start_horizon.cpu_compile_completed_total,
+                start_horizon.cpu_compile_micros_total,
+                start_horizon.cpu_compile_stale_results_total,
+                latest_horizon.cpu_compile_workers,
+                latest_horizon.cpu_compile_in_flight,
+                latest_horizon.cpu_compile_submitted_total,
+                latest_horizon.cpu_compile_completed_total,
+                latest_horizon.cpu_compile_micros_total,
+                latest_horizon.cpu_compile_stale_results_total,
             );
             let latest_persistence = latest_upload.persistence_queue_metrics;
             let max_persistence = self.max_upload.persistence_queue_metrics;
