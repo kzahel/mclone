@@ -1,5 +1,23 @@
 #![deny(unsafe_code)]
 
+fn android_xr_expected_exact_column_count(render_distance: u32) -> Option<u32> {
+    render_distance
+        .checked_mul(2)
+        .and_then(|diameter| diameter.checked_add(1))
+        .and_then(|diameter| diameter.checked_mul(diameter))
+}
+
+fn android_xr_exact_footprint_is_ready(
+    render_distance: u32,
+    exact_column_count: u32,
+    exact_center_ready: bool,
+) -> bool {
+    match android_xr_expected_exact_column_count(render_distance) {
+        Some(expected) => exact_center_ready && exact_column_count >= expected,
+        None => false,
+    }
+}
+
 // Android XR-owned startup flags are OpenXR session/perf harness controls.
 // Shared scene/session policy flags must stay in `StartupArgState`.
 #[cfg(test)]
@@ -137,6 +155,7 @@ mod android {
 
     use super::graphics_vulkan;
     use super::perf_metrics;
+    use super::{android_xr_exact_footprint_is_ready, android_xr_expected_exact_column_count};
 
     type AcquiredEyeTarget<'a> = mclone_xr_host::XrAcquiredEyeTarget<
         'a,
@@ -5006,7 +5025,7 @@ mod android {
             if needs_settle {
                 let horizon = rendered.terrain_view.unwrap_or_default();
                 log::info!(
-                    "MCLONE_ANDROID_XR_PERF_SETTLED mode={} settle_seconds={:.3} settle_min_seconds={:.3} settle_frames={} settle_quiet_frames={} sections={} drawn_sections={} indices={} drawn_indices={} ready_sections={} horizon_active={} horizon_lod_preset={} horizon_lod_levels={} horizon_vegetation_max_sample_spacing={} horizon_target_ready={} horizon_ready_slots={} horizon_drawn_levels={} horizon_drawn_tiles={} horizon_drawn_tiles_by_level={} horizon_inner_hole_culled_tiles={} horizon_frustum_culled_tiles={} horizon_far_culled_tiles={} horizon_drawn_tree_tiles={} horizon_drawn_tree_tiles_by_level={} horizon_drawn_tree_instances={} horizon_drawn_tree_instances_by_level={} horizon_pending_vegetation_tiles={} horizon_vegetation_submitted_jobs={} horizon_vegetation_completed_jobs={} horizon_vegetation_transport_failures={} horizon_vegetation_job_failures={}",
+                    "MCLONE_ANDROID_XR_PERF_SETTLED mode={} settle_seconds={:.3} settle_min_seconds={:.3} settle_frames={} settle_quiet_frames={} sections={} drawn_sections={} indices={} drawn_indices={} ready_sections={} horizon_active={} horizon_lod_preset={} horizon_lod_levels={} horizon_vegetation_max_sample_spacing={} horizon_target_ready={} horizon_ready_slots={} expected_exact_columns={} horizon_exact_columns={} horizon_exact_center_ready={} horizon_drawn_levels={} horizon_drawn_tiles={} horizon_drawn_tiles_by_level={} horizon_inner_hole_culled_tiles={} horizon_frustum_culled_tiles={} horizon_far_culled_tiles={} horizon_drawn_tree_tiles={} horizon_drawn_tree_tiles_by_level={} horizon_drawn_tree_instances={} horizon_drawn_tree_instances_by_level={} horizon_pending_vegetation_tiles={} horizon_vegetation_submitted_jobs={} horizon_vegetation_completed_jobs={} horizon_vegetation_transport_failures={} horizon_vegetation_job_failures={}",
                     mode,
                     settle_seconds,
                     ANDROID_XR_PERF_SETTLE_MIN_SECONDS,
@@ -5023,6 +5042,9 @@ mod android {
                     horizon.vegetation_max_sample_spacing,
                     horizon.target_ready,
                     horizon.ready_slots,
+                    android_xr_expected_exact_column_count(self.render_distance).unwrap_or(0),
+                    horizon.exact_column_count,
+                    horizon.exact_center_ready,
                     horizon.drawn_levels,
                     horizon.drawn_tiles,
                     format_level_counts(&horizon.drawn_tiles_by_level),
@@ -5158,7 +5180,7 @@ mod android {
         ) -> bool {
             let _ = self.settle_started.get_or_insert_with(Instant::now);
             self.settle_frames += 1;
-            let quiet = android_xr_perf_settle_frame_is_quiet(rendered);
+            let quiet = android_xr_perf_settle_frame_is_quiet(rendered, self.render_distance);
             if quiet {
                 self.settle_quiet_frames += 1;
             } else {
@@ -5174,7 +5196,7 @@ mod android {
                 let upload = summary.upload;
                 let horizon = rendered.terrain_view.unwrap_or_default();
                 log::info!(
-                    "MCLONE_ANDROID_XR_PERF_SETTLE_PROGRESS mode={} settle_seconds={:.3} settle_min_seconds={:.3} settle_frames={} settle_quiet_frames={} quiet={} poll_changed={} server_cmd_q={} server_update_q={} pending_jobs_after={} pending_chunks_after={} deferred_sections={} submitted_sections={} deadline_skipped_requests={} completed_sections={} stale_sections={} uploaded_sections={} upload_removed_sections={} ready_sections={} ui_draw_rebuilds={} ui_draw_cache_hits={} ui_panel_repaints={} ui_panel_cache_hits={} ui_panel_texture_recreates={} ui_panel_composites={} sections={} drawn_sections={} drawn_indices={} horizon_active={} horizon_target_ready={} horizon_ready_slots={} horizon_drawn_levels={} horizon_drawn_tiles={} horizon_pending_vegetation_tiles={} horizon_vegetation_submitted_jobs={} horizon_vegetation_completed_jobs={} horizon_vegetation_transport_failures={} horizon_vegetation_job_failures={}",
+                    "MCLONE_ANDROID_XR_PERF_SETTLE_PROGRESS mode={} settle_seconds={:.3} settle_min_seconds={:.3} settle_frames={} settle_quiet_frames={} quiet={} poll_changed={} server_cmd_q={} server_update_q={} pending_jobs_after={} pending_chunks_after={} deferred_sections={} submitted_sections={} deadline_skipped_requests={} completed_sections={} stale_sections={} uploaded_sections={} upload_removed_sections={} ready_sections={} ui_draw_rebuilds={} ui_draw_cache_hits={} ui_panel_repaints={} ui_panel_cache_hits={} ui_panel_texture_recreates={} ui_panel_composites={} sections={} drawn_sections={} drawn_indices={} horizon_active={} horizon_target_ready={} horizon_ready_slots={} expected_exact_columns={} horizon_exact_columns={} horizon_exact_center_ready={} horizon_drawn_levels={} horizon_drawn_tiles={} horizon_pending_vegetation_tiles={} horizon_vegetation_submitted_jobs={} horizon_vegetation_completed_jobs={} horizon_vegetation_transport_failures={} horizon_vegetation_job_failures={}",
                     mode,
                     settle_seconds,
                     ANDROID_XR_PERF_SETTLE_MIN_SECONDS,
@@ -5206,6 +5228,9 @@ mod android {
                     rendered.terrain_view.is_some(),
                     horizon.target_ready,
                     horizon.ready_slots,
+                    android_xr_expected_exact_column_count(self.render_distance).unwrap_or(0),
+                    horizon.exact_column_count,
+                    horizon.exact_center_ready,
                     horizon.drawn_levels,
                     horizon.drawn_tiles,
                     horizon.pending_vegetation_tiles,
@@ -5596,7 +5621,8 @@ mod android {
             let start_horizon = self.start_terrain_view.unwrap_or_default();
             let latest_horizon = self.latest_terrain_view.unwrap_or_default();
             log::info!(
-                "MCLONE_ANDROID_XR_PERF_HORIZON start_active={} start_lod_preset={} start_lod_levels={} start_vegetation_max_sample_spacing={} start_target_ready={} start_ready_slots={} start_exact_columns={} start_exact_center_ready={} start_drawn_levels={} start_drawn_tiles={} start_drawn_tiles_by_level={} start_inner_hole_culled_tiles={} start_frustum_culled_tiles={} start_far_culled_tiles={} start_tree_instances={} start_drawn_tree_tiles={} start_drawn_tree_tiles_by_level={} start_drawn_tree_instances={} start_drawn_tree_instances_by_level={} start_pending_vegetation_tiles={} start_vegetation_submitted_jobs={} start_vegetation_completed_jobs={} latest_active={} latest_lod_preset={} latest_lod_levels={} latest_vegetation_max_sample_spacing={} latest_target_ready={} latest_ready_slots={} latest_exact_columns={} latest_exact_center_ready={} horizon_sample_frames={} exact_center_not_ready_frames={} latest_drawn_levels={} latest_drawn_tiles={} latest_drawn_tiles_by_level={} latest_inner_hole_culled_tiles={} latest_frustum_culled_tiles={} latest_far_culled_tiles={} latest_tree_instances={} latest_drawn_tree_tiles={} latest_drawn_tree_tiles_by_level={} latest_drawn_tree_instances={} latest_drawn_tree_instances_by_level={} latest_pending_vegetation_tiles={} latest_vegetation_submitted_jobs={} latest_vegetation_completed_jobs={} latest_vegetation_transport_failures={} latest_vegetation_job_failures={}",
+                "MCLONE_ANDROID_XR_PERF_HORIZON expected_exact_columns={} start_active={} start_lod_preset={} start_lod_levels={} start_vegetation_max_sample_spacing={} start_target_ready={} start_ready_slots={} start_exact_columns={} start_exact_center_ready={} start_drawn_levels={} start_drawn_tiles={} start_drawn_tiles_by_level={} start_inner_hole_culled_tiles={} start_frustum_culled_tiles={} start_far_culled_tiles={} start_tree_instances={} start_drawn_tree_tiles={} start_drawn_tree_tiles_by_level={} start_drawn_tree_instances={} start_drawn_tree_instances_by_level={} start_pending_vegetation_tiles={} start_vegetation_submitted_jobs={} start_vegetation_completed_jobs={} latest_active={} latest_lod_preset={} latest_lod_levels={} latest_vegetation_max_sample_spacing={} latest_target_ready={} latest_ready_slots={} latest_exact_columns={} latest_exact_center_ready={} horizon_sample_frames={} exact_center_not_ready_frames={} latest_drawn_levels={} latest_drawn_tiles={} latest_drawn_tiles_by_level={} latest_inner_hole_culled_tiles={} latest_frustum_culled_tiles={} latest_far_culled_tiles={} latest_tree_instances={} latest_drawn_tree_tiles={} latest_drawn_tree_tiles_by_level={} latest_drawn_tree_instances={} latest_drawn_tree_instances_by_level={} latest_pending_vegetation_tiles={} latest_vegetation_submitted_jobs={} latest_vegetation_completed_jobs={} latest_vegetation_transport_failures={} latest_vegetation_job_failures={}",
+                android_xr_expected_exact_column_count(self.render_distance).unwrap_or(0),
                 self.start_terrain_view.is_some(),
                 start_horizon.lod_preset.startup_label(),
                 start_horizon.lod_level_count,
@@ -7150,10 +7176,18 @@ mod android {
             || summary.upload_removed_section_count > 0
     }
 
-    fn android_xr_perf_settle_frame_is_quiet(rendered: AndroidXrRenderedFrame) -> bool {
+    fn android_xr_perf_settle_frame_is_quiet(
+        rendered: AndroidXrRenderedFrame,
+        render_distance: u32,
+    ) -> bool {
         let upload = rendered.summary.upload;
         let horizon_ready = rendered.terrain_view.is_none_or(|horizon| {
             horizon.target_ready
+                && android_xr_exact_footprint_is_ready(
+                    render_distance,
+                    horizon.exact_column_count,
+                    horizon.exact_center_ready,
+                )
                 && horizon.pending_vegetation_tiles == 0
                 && horizon.vegetation_submitted_jobs == horizon.vegetation_completed_jobs
                 && horizon.vegetation_transport_failures == 0
@@ -8373,7 +8407,25 @@ pub fn host_placeholder() {}
 mod tests {
     use std::collections::BTreeSet;
 
-    use super::ANDROID_XR_LOCAL_ARG_FLAGS;
+    use super::{
+        ANDROID_XR_LOCAL_ARG_FLAGS, android_xr_exact_footprint_is_ready,
+        android_xr_expected_exact_column_count,
+    };
+
+    #[test]
+    fn settled_exact_footprint_requires_the_requested_square_and_center() {
+        assert_eq!(android_xr_expected_exact_column_count(8), Some(289));
+        assert!(!android_xr_exact_footprint_is_ready(8, 3, true));
+        assert!(!android_xr_exact_footprint_is_ready(8, 288, true));
+        assert!(!android_xr_exact_footprint_is_ready(8, 289, false));
+        assert!(android_xr_exact_footprint_is_ready(8, 289, true));
+        assert!(android_xr_exact_footprint_is_ready(8, 300, true));
+        assert!(!android_xr_exact_footprint_is_ready(
+            u32::MAX,
+            u32::MAX,
+            true
+        ));
+    }
 
     fn collect_source_flags(source: &str) -> BTreeSet<String> {
         let mut flags = BTreeSet::new();
