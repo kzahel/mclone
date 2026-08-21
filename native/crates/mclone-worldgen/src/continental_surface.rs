@@ -1,8 +1,8 @@
 //! Broad surface realization for the accepted continental/ecoregional plan.
 //!
-//! This research source is intentionally disconnected from exact chunk
-//! generation. It lowers stable plan facts into directly queryable height,
-//! water, substrate, and cover facts for World Explorer review.
+//! It lowers stable plan facts into directly queryable height, water,
+//! substrate, and cover facts shared by procedural-horizon review and the
+//! detached exact-chunk promotion probe.
 
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -19,7 +19,7 @@ use crate::{
     noise::{SeedDomain, ValueNoise2d},
 };
 
-pub const CONTINENTAL_SURFACE_SCHEMA_REVISION: &str = "mclone-continental-surface-v3";
+pub const CONTINENTAL_SURFACE_SCHEMA_REVISION: &str = "mclone-continental-surface-v4";
 pub const CONTINENTAL_SURFACE_SOURCE_LABEL: &str = "continental-ecoregion-candidate-v1";
 pub const CONTINENTAL_SURFACE_FAMILY_COUNT: usize = 5;
 pub const CONTINENTAL_SURFACE_MAX_WINDOW_SAMPLES: usize = 262_144;
@@ -29,6 +29,8 @@ const RIDGE_FORM_DOMAIN: SeedDomain = SeedDomain::new(0x6373_7572_7269_6431);
 const BASIN_FORM_DOMAIN: SeedDomain = SeedDomain::new(0x6373_7572_6261_7331);
 const SHORE_FORM_DOMAIN: SeedDomain = SeedDomain::new(0x6373_7572_7368_6f31);
 const LOCAL_FORM_DOMAIN: SeedDomain = SeedDomain::new(0x6373_7572_6c6f_6331);
+const WALKING_FORM_DOMAIN: SeedDomain = SeedDomain::new(0x6373_7572_7761_6c31);
+const MICRO_FORM_DOMAIN: SeedDomain = SeedDomain::new(0x6373_7572_6d69_6331);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[repr(u8)]
@@ -142,7 +144,7 @@ impl ContinentalSurfaceConstructionCounts {
             ecoregion_owner_evaluations: work.ecoregion_owner_evaluations,
             mosaic_owner_evaluations: work.mosaic_owner_evaluations,
             plan_field_evaluations: work.local_field_evaluations,
-            surface_field_evaluations: 5,
+            surface_field_evaluations: 7,
             exact_chunks: work.exact_chunks,
             density_volumes: 0,
             feature_batches: 0,
@@ -260,6 +262,8 @@ struct ContinentalSurfaceFields {
     basin_form: ValueNoise2d,
     shore_form: ValueNoise2d,
     local_form: ValueNoise2d,
+    walking_form: ValueNoise2d,
+    micro_form: ValueNoise2d,
 }
 
 impl ContinentalSurfaceFields {
@@ -278,6 +282,8 @@ impl ContinentalSurfaceFields {
             basin_form: field(BASIN_FORM_DOMAIN, 4_096),
             shore_form: field(SHORE_FORM_DOMAIN, 2_048),
             local_form: field(LOCAL_FORM_DOMAIN, 512),
+            walking_form: field(WALKING_FORM_DOMAIN, 96),
+            micro_form: field(MICRO_FORM_DOMAIN, 32),
         }
     }
 }
@@ -355,6 +361,8 @@ impl ContinentalSurfacePlan {
         let basin_form = self.fields.basin_form.sample(world_x, world_z);
         let shore_form = self.fields.shore_form.sample(world_x, world_z);
         let local_form = self.fields.local_form.sample(world_x, world_z);
+        let walking_form = self.fields.walking_form.sample(world_x, world_z);
+        let micro_form = self.fields.micro_form.sample(world_x, world_z);
         let land = f64::from(plan.land_weight);
         let coast_weight = 1.0 - smoothstep(0.54, 0.92, land);
 
@@ -460,8 +468,16 @@ impl ContinentalSurfacePlan {
         let forest_core = mosaic.map_or(0.0, |mosaic| f64::from(mosaic.forest_core));
         let route = mosaic.map_or(0.0, |mosaic| f64::from(mosaic.corridor));
         let local_amplitude = 1.2 + upland_weight * 5.5 + rolling_weight * 1.8;
-        let quieting = 1.0 - clearing * 0.58 - smoothstep(0.72, 1.0, openness) * 0.18;
-        let local_height = local_form * local_amplitude * quieting.clamp(0.28, 1.0);
+        let broad_quieting =
+            (1.0 - clearing * 0.58 - smoothstep(0.72, 1.0, openness) * 0.18).clamp(0.28, 1.0);
+        let walking_amplitude =
+            2.2 + rolling_weight * 2.0 + upland_weight * 4.5 + arid_weight * 2.8;
+        let walking_quieting = (1.0 - clearing * 0.62 - wetland * 0.45).clamp(0.28, 1.0);
+        let micro_amplitude = 0.55 + upland_weight * 1.25 + arid_weight * 0.75;
+        let micro_quieting = (1.0 - clearing * 0.72 - wetland * 0.58).clamp(0.18, 1.0);
+        let local_height = local_form * local_amplitude * broad_quieting
+            + walking_form * walking_amplitude * walking_quieting
+            + micro_form * micro_amplitude * micro_quieting;
 
         let mut hydrologic_height = 0.0;
         let mut water_level_y = None;
@@ -817,7 +833,7 @@ mod tests {
         let window = surface.query_window(request).unwrap();
         assert_eq!(window.samples.len(), 221);
         assert_eq!(window.work.requested_samples, 221);
-        assert_eq!(window.work.surface_field_evaluations, 221 * 5);
+        assert_eq!(window.work.surface_field_evaluations, 221 * 7);
         assert_eq!(window.work.exact_chunks, 0);
         assert_eq!(window.work.density_volumes, 0);
         assert_eq!(window.work.feature_batches, 0);

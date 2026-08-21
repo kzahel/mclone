@@ -1,7 +1,7 @@
 use mclone_core::{CHUNK_WIDTH, ChunkPos};
 use mclone_worldgen::block::{AIR, RawBlockId, WATER};
 use mclone_worldgen::levelgen::{
-    GeneratedChunk, McloneOverworldFeatureDependencyCache,
+    ContinentalCandidateExactGenerator, GeneratedChunk, McloneOverworldFeatureDependencyCache,
     McloneOverworldFeatureDependencyCacheReport, OverworldFeatureDependencyCache,
     OverworldFeatureDependencyCacheReport, generate_mclone_overworld_surface_chunk,
     generate_overworld_surface_chunk,
@@ -130,9 +130,9 @@ pub struct CanonicalTerrainCompiler {
 
 #[derive(Debug)]
 enum CanonicalTerrainFeatureDependencies {
+    Continental(ContinentalCandidateExactGenerator),
     Mclone(McloneOverworldFeatureDependencyCache),
     Vanilla(OverworldFeatureDependencyCache),
-    Unsupported,
 }
 
 impl CanonicalTerrainCompiler {
@@ -161,7 +161,9 @@ impl CanonicalTerrainCompiler {
                     )
                 }
                 TerrainPreviewProfile::ContinentalEcoregionCandidate => {
-                    CanonicalTerrainFeatureDependencies::Unsupported
+                    CanonicalTerrainFeatureDependencies::Continental(
+                        ContinentalCandidateExactGenerator::new(seed),
+                    )
                 }
             },
         }
@@ -181,17 +183,17 @@ impl CanonicalTerrainCompiler {
 
     pub fn retained_dependency_chunks(&self) -> usize {
         match &self.feature_dependencies {
+            CanonicalTerrainFeatureDependencies::Continental(_) => 0,
             CanonicalTerrainFeatureDependencies::Mclone(cache) => cache.retained_chunk_count(),
             CanonicalTerrainFeatureDependencies::Vanilla(cache) => cache.retained_chunk_count(),
-            CanonicalTerrainFeatureDependencies::Unsupported => 0,
         }
     }
 
     pub fn clear_cache(&mut self) {
         match &mut self.feature_dependencies {
+            CanonicalTerrainFeatureDependencies::Continental(_) => {}
             CanonicalTerrainFeatureDependencies::Mclone(cache) => cache.clear(),
             CanonicalTerrainFeatureDependencies::Vanilla(cache) => cache.clear(),
-            CanonicalTerrainFeatureDependencies::Unsupported => {}
         }
     }
 
@@ -209,7 +211,12 @@ impl CanonicalTerrainCompiler {
                         generate_overworld_surface_chunk(self.seed, chunk_x, chunk_z)
                     }
                     TerrainPreviewProfile::ContinentalEcoregionCandidate => {
-                        panic!("continental ecoregion candidate has no exact chunk compiler")
+                        match &self.feature_dependencies {
+                            CanonicalTerrainFeatureDependencies::Continental(generator) => {
+                                generator.generate_surface_chunk(chunk_x, chunk_z)
+                            }
+                            _ => unreachable!("candidate exact compiler retains its generator"),
+                        }
                     }
                 },
                 CanonicalTerrainDependencyCacheReport::default(),
@@ -217,6 +224,10 @@ impl CanonicalTerrainCompiler {
             CanonicalTerrainStage::FinalFeatures => {
                 let position = ChunkPos::new(chunk_x, chunk_z);
                 let (chunk, cache_report) = match &mut self.feature_dependencies {
+                    CanonicalTerrainFeatureDependencies::Continental(generator) => (
+                        generator.generate_surface_chunk(chunk_x, chunk_z),
+                        CanonicalTerrainDependencyCacheReport::default(),
+                    ),
                     CanonicalTerrainFeatureDependencies::Mclone(cache) => {
                         let mut batch = cache.generate_features_chunks(self.seed, [position]);
                         (
@@ -236,9 +247,6 @@ impl CanonicalTerrainCompiler {
                                 .expect("the feature batch returns every requested chunk"),
                             batch.cache_report.into(),
                         )
-                    }
-                    CanonicalTerrainFeatureDependencies::Unsupported => {
-                        panic!("continental ecoregion candidate has no exact chunk compiler")
                     }
                 };
                 CanonicalTerrainChunk::from_generated(
@@ -320,7 +328,9 @@ fn canonical_preview_without_vegetation(block: RawBlockId) -> RawBlockId {
 mod tests {
     use super::*;
     use mclone_worldgen::block::{OAK_LEAVES, OAK_LOG, SEAGRASS, STONE};
-    use mclone_worldgen::levelgen::generate_mclone_overworld_chunk;
+    use mclone_worldgen::levelgen::{
+        generate_continental_candidate_surface_chunk, generate_mclone_overworld_chunk,
+    };
 
     #[test]
     fn canonical_order_is_center_first_and_radius_bounded() {
@@ -390,6 +400,31 @@ mod tests {
         assert_eq!(result.blocks, direct.blocks());
         assert_eq!(result.biomes, direct.biomes());
         assert_eq!(result.fingerprint, canonical_terrain_fingerprint(&direct));
+    }
+
+    #[test]
+    fn candidate_surface_and_final_stages_share_the_detached_exact_lowering() {
+        let seed = 12_345;
+        let direct = generate_continental_candidate_surface_chunk(seed, -17, 31);
+        for stage in [
+            CanonicalTerrainStage::Surface,
+            CanonicalTerrainStage::FinalFeatures,
+        ] {
+            let mut compiler = CanonicalTerrainCompiler::new_with_profile(
+                TerrainPreviewProfile::ContinentalEcoregionCandidate,
+                seed,
+                stage,
+            );
+            let result = compiler.compile(-17, 31);
+            assert_eq!(
+                result.profile,
+                TerrainPreviewProfile::ContinentalEcoregionCandidate
+            );
+            assert_eq!(result.blocks, direct.blocks());
+            assert_eq!(result.biomes, direct.biomes());
+            assert_eq!(result.fingerprint, canonical_terrain_fingerprint(&direct));
+            assert_eq!(result.dependency_cache, Default::default());
+        }
     }
 
     #[test]

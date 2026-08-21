@@ -181,6 +181,42 @@ recognizable continuity across the exact frontier, plausible water and cover,
 materially different site stories, and a credible path to runtime performance.
 Exact pixels alone do not authorize production integration.
 
+## Execution Record
+
+### Phase 1: Exact Surface Lowering
+
+Completed on 2026-08-21.
+
+- Added a detached `ContinentalCandidateExactGenerator` in
+  `mclone-worldgen`. It retains one plane surface plan per compiler session and
+  emits ordinary 0..255 `GeneratedChunk` payloads without adding a persisted
+  world profile.
+- Exact columns quantize the shared solid height and lower grass, coarse soil,
+  sand/sandstone, gravel, exposed stone, bedrock, source-owned water, and
+  compatible existing biome IDs.
+- The first exact render exposed a tabletop result because the shared source
+  stopped at a 512-block local field. Surface schema v4 therefore adds
+  96-block walking form and 32-block micro form in the shared source, with
+  clearing and wetland quieting. Both exact chunks and LOD consume those facts;
+  exact lowering has no private detail heightfield.
+- Focused tests cover direct-column agreement, negative chunks, adjacent
+  boundaries, reordered generation, repeated fingerprints, and a flat owned
+  lake with gravel bed.
+- Inspected native exact-only frames:
+  `/tmp/mclone-continental-exact-surface-clearing-v2.png`,
+  `/tmp/mclone-continental-exact-surface-water.png`, and
+  `/tmp/mclone-continental-exact-surface-arid.png`. These prove real textured
+  voxel geometry and contrasting relief, but are intentionally bare before
+  candidate vegetation. The water journey center itself is dry; the exact
+  water review camera must use a water-owning checkpoint in the next phase.
+- The first three 17x17 exact-only captures completed in roughly 2.21-2.44
+  seconds on Apple M4 Pro. Exact generation was roughly 196-200 ms and exact
+  meshing 1.89-2.26 seconds. Those measurements are baselines, not accepted
+  budgets.
+
+Surface witness after the shared-detail revision:
+`16173c8d5504d779a7e201eb3bb2ef068f49e971e328964a1aaca4ab0af53dac`.
+
 ## Non-Goals
 
 This tactical does not:

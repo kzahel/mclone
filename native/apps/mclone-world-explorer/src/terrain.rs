@@ -79,12 +79,13 @@ impl ExplorerTerrain {
             }),
         )
         .map_err(anyhow::Error::msg)?;
-        let exact = ExplorerExactTerrain::new(
+        let exact = ExplorerExactTerrain::new_for_profile(
             device,
             queue,
             color_format,
             options.width,
             options.height,
+            options.terrain_profile,
             options.seed,
             options.exact_radius,
             Duration::from_millis(options.exact_delay_ms),

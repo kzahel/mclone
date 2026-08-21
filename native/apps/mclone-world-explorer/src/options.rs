@@ -269,11 +269,6 @@ impl ExplorerOptions {
         if self.source_colors && self.composition == WorldExplorerCompositionMode::Horizon {
             bail!("--source-colors requires exact, composed, or coverage composition");
         }
-        if self.terrain_profile == TerrainPreviewProfile::ContinentalEcoregionCandidate
-            && self.composition != WorldExplorerCompositionMode::Horizon
-        {
-            bail!("the continental terrain source is horizon-only; use --composition horizon");
-        }
         if self.journey.is_some()
             && self.terrain_profile != TerrainPreviewProfile::ContinentalEcoregionCandidate
         {

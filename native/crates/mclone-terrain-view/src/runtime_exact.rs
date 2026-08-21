@@ -72,14 +72,19 @@ struct NativeCanonicalExactExecutor {
 
 #[cfg(not(target_arch = "wasm32"))]
 impl NativeCanonicalExactExecutor {
-    fn new(seed: i64, catalog: TexturedMeshCatalog, compile_delay: Duration) -> Result<Self> {
+    fn new(
+        profile: TerrainPreviewProfile,
+        seed: i64,
+        catalog: TexturedMeshCatalog,
+        compile_delay: Duration,
+    ) -> Result<Self> {
         let (commands, command_receiver) = sync_channel(EXACT_COMMAND_CAPACITY);
         let (result_sender, results) = sync_channel(EXACT_RESULT_CAPACITY);
         let worker = thread::Builder::new()
             .name("mclone-runtime-exact".to_owned())
             .spawn(move || {
                 let mut session = CanonicalMeshSession::new(
-                    TerrainPreviewProfile::McloneOverworldV1,
+                    profile,
                     seed,
                     CanonicalTerrainStage::FinalFeatures,
                     catalog,
@@ -244,13 +249,49 @@ impl TerrainRuntimeExactRenderer {
         source_colors: bool,
         target_color_transform: RenderTargetColorTransform,
     ) -> Result<Self> {
-        let executor = NativeCanonicalExactExecutor::new(seed, catalog.clone(), compile_delay)?;
-        Self::new_with_executor(
+        Self::new_for_profile(
             device,
             queue,
             color_format,
             width,
             height,
+            TerrainPreviewProfile::McloneOverworldV1,
+            seed,
+            radius,
+            compile_delay,
+            catalog,
+            atlas,
+            source_colors,
+            target_color_transform,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn new_for_profile(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        color_format: wgpu::TextureFormat,
+        width: u32,
+        height: u32,
+        profile: TerrainPreviewProfile,
+        seed: i64,
+        radius: u32,
+        compile_delay: Duration,
+        catalog: TexturedMeshCatalog,
+        atlas: ChunkTextureAtlas<'_>,
+        source_colors: bool,
+        target_color_transform: RenderTargetColorTransform,
+    ) -> Result<Self> {
+        let executor =
+            NativeCanonicalExactExecutor::new(profile, seed, catalog.clone(), compile_delay)?;
+        Self::new_with_executor_for_profile(
+            device,
+            queue,
+            color_format,
+            width,
+            height,
+            profile,
             seed,
             radius,
             Box::new(executor),
@@ -267,6 +308,37 @@ impl TerrainRuntimeExactRenderer {
         color_format: wgpu::TextureFormat,
         width: u32,
         height: u32,
+        seed: i64,
+        radius: u32,
+        executor: Box<dyn CanonicalExactExecutor>,
+        atlas: ChunkTextureAtlas<'_>,
+        source_colors: bool,
+        target_color_transform: RenderTargetColorTransform,
+    ) -> Result<Self> {
+        Self::new_with_executor_for_profile(
+            device,
+            queue,
+            color_format,
+            width,
+            height,
+            TerrainPreviewProfile::McloneOverworldV1,
+            seed,
+            radius,
+            executor,
+            atlas,
+            source_colors,
+            target_color_transform,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_executor_for_profile(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        color_format: wgpu::TextureFormat,
+        width: u32,
+        height: u32,
+        profile: TerrainPreviewProfile,
         seed: i64,
         radius: u32,
         executor: Box<dyn CanonicalExactExecutor>,
@@ -304,8 +376,7 @@ impl TerrainRuntimeExactRenderer {
             ChunkTextureSampling::TerrainOverview,
         )
         .context("failed to initialize runtime exact natural-tree renderer")?;
-        let source =
-            TerrainCompositionSourceIdentity::new(TerrainPreviewProfile::McloneOverworldV1, seed);
+        let source = TerrainCompositionSourceIdentity::new(profile, seed);
         Ok(Self {
             draw,
             tree_draw,

@@ -406,12 +406,8 @@ impl TerrainRuntimeSession {
         radius_chunks: u32,
         anchor: TerrainRuntimeExactAnchor,
     ) -> Result<TerrainRuntimeExactView, String> {
-        if self.config.profile == TerrainPreviewProfile::ContinentalEcoregionCandidate {
-            return Err(
-                "continental ecoregion candidate is a horizon-only review source".to_owned(),
-            );
-        }
         terrain_runtime_exact_view(
+            self.config.profile,
             self.config.seed,
             self.view_state,
             self.config.width,
@@ -618,6 +614,7 @@ fn floor_i32(value: f64) -> i32 {
 }
 
 fn terrain_runtime_exact_view(
+    profile: TerrainPreviewProfile,
     seed: i64,
     state: WorldViewState,
     width: u32,
@@ -647,7 +644,7 @@ fn terrain_runtime_exact_view(
     let base_render_view = crate::terrain_horizon_chunk_render_view(presentation, width, height)?;
     let target_y = if state.mode == WorldViewMode::Orbit {
         let viewer_surface_y = terrain_preview_focus_y_for_profile(
-            TerrainPreviewProfile::McloneOverworldV1,
+            profile,
             seed,
             floor_i32(f64::from(base_render_view.camera_position.x)),
             floor_i32(f64::from(base_render_view.camera_position.z)),
@@ -820,6 +817,7 @@ mod tests {
             std::f64::consts::PI * 1.5,
         ] {
             let view = terrain_runtime_exact_view(
+                TerrainPreviewProfile::McloneOverworldV1,
                 12_345,
                 WorldViewState {
                     yaw_radians,
@@ -848,6 +846,7 @@ mod tests {
         };
 
         let east = terrain_runtime_exact_view(
+            TerrainPreviewProfile::McloneOverworldV1,
             12_345,
             state,
             1280,
@@ -857,6 +856,7 @@ mod tests {
         )
         .unwrap();
         let west = terrain_runtime_exact_view(
+            TerrainPreviewProfile::McloneOverworldV1,
             12_345,
             WorldViewState {
                 yaw_radians: std::f64::consts::PI,
@@ -885,6 +885,7 @@ mod tests {
             std::f64::consts::PI * 1.5,
         ] {
             let view = terrain_runtime_exact_view(
+                TerrainPreviewProfile::McloneOverworldV1,
                 12_345,
                 WorldViewState {
                     yaw_radians,
@@ -912,6 +913,7 @@ mod tests {
     #[test]
     fn map_exact_near_field_remains_under_the_focus() {
         let view = terrain_runtime_exact_view(
+            TerrainPreviewProfile::McloneOverworldV1,
             12_345,
             WorldViewState {
                 focus_x: -0.25,

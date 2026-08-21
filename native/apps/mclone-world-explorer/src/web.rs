@@ -185,7 +185,7 @@ impl WebExplorerOptions {
             && options.composition != WorldExplorerCompositionMode::Horizon
         {
             return Err(
-                "the continental terrain source is horizon-only; use composition=horizon"
+                "the continental terrain source requires horizon composition until its exact Web Worker is initialized"
                     .to_owned(),
             );
         }

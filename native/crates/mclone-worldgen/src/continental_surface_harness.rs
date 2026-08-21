@@ -16,7 +16,7 @@ use crate::{
 pub const CONTINENTAL_SURFACE_HARNESS_SCHEMA_REVISION: &str =
     "mclone-continental-surface-harness-v1";
 pub const CONTINENTAL_SURFACE_WITNESS_SHA256: &str =
-    "69d083dbde36f497aefb766c975803a937f913d7469806e7afedfb7af6f9d3e9";
+    "16173c8d5504d779a7e201eb3bb2ef068f49e971e328964a1aaca4ab0af53dac";
 
 const CORPUS_SEEDS: [i64; 2] = [12_345, -98_765];
 const CORPUS_PERIOD_BLOCKS: i32 = 196_608;
@@ -222,7 +222,7 @@ fn validate_work(
         || work.ecoregion_owner_evaluations > samples * 9
         || work.mosaic_owner_evaluations > samples * 9
         || work.plan_field_evaluations > samples * 10
-        || work.surface_field_evaluations != samples * 5
+        || work.surface_field_evaluations != samples * 7
         || work.exact_chunks != 0
         || work.density_volumes != 0
         || work.feature_batches != 0

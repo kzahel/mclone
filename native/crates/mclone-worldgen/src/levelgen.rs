@@ -1,6 +1,7 @@
 mod alpha;
 mod beta;
 mod chunk;
+mod continental_candidate;
 mod feature_batch;
 mod generator;
 mod mclone_overworld;
@@ -15,6 +16,10 @@ mod vanilla_overworld_lod;
 
 pub use crate::biome::{ConstantBiomeSource, NoiseBiome, NoiseBiomeSource};
 pub use chunk::{GeneratedChunk, MutableChunkBlockBuffer, ScheduledTick};
+pub use continental_candidate::{
+    CONTINENTAL_CANDIDATE_EXACT_REVISION, ContinentalCandidateExactGenerator,
+    generate_continental_candidate_surface_chunk,
+};
 pub use feature_batch::{
     OverworldFeatureBatchResult, OverworldFeatureDependencyCache,
     OverworldFeatureDependencyCacheReport, generate_overworld_features_chunk,
