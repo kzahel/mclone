@@ -1326,11 +1326,11 @@ fi
 
 if [[ "$TERRAIN_LOD_CYCLE" == "1" ]]; then
     terrain_lod_cycle_expectations=(
-        "1 off"
-        "2 low"
-        "3 medium"
-        "4 high"
-        "5 low"
+        "1 Off"
+        "2 Low"
+        "3 Medium"
+        "4 High"
+        "5 Low"
     )
     for expectation in "${terrain_lod_cycle_expectations[@]}"; do
         read -r step preset <<< "$expectation"
@@ -1341,7 +1341,7 @@ if [[ "$TERRAIN_LOD_CYCLE" == "1" ]]; then
             mclone_die "Android XR terrain-LOD acceptance step $step ($preset) was not seen; see $LOG_PATH"
         fi
     done
-    if ! grep -E "MCLONE_XR_TERRAIN_LOD_CYCLE_COMPLETE sequence=off,low,medium,high,low applied=low " "$LOG_PATH" >/dev/null 2>&1; then
+    if ! grep -E "MCLONE_XR_TERRAIN_LOD_CYCLE_COMPLETE sequence=off,low,medium,high,low applied=Low " "$LOG_PATH" >/dev/null 2>&1; then
         mclone_die "Android XR terrain-LOD final Low receipt was not seen; see $LOG_PATH"
     fi
 fi
