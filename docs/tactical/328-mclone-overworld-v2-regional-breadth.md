@@ -1,10 +1,12 @@
 # Tactical 328: Mclone Overworld V2 Regional Breadth
 
-Status: **authorized 2026-08-21. Human Review D selected revise while retaining
-the continental catchment mechanism. Implementation is proceeding through
-regional continuity, LOD presentation correction, a selectable persisted
+Status: **implemented to Human Review E on 2026-08-21. Human Review D
+selected revise while retaining the continental catchment mechanism. Regional
+continuity, LOD presentation correction, a selectable persisted
 `mclone-overworld-v2` profile, mesa-desert and humid-jungle vertical slices,
-and live-game review. `mclone-overworld-v1` remains selectable and the default.**
+and live-game review are complete. `mclone-overworld-v1` remains selectable
+and the default. Human Review E is pending; the exact/procedural appearance
+frontier and V2 CPU horizon cost are recorded revision candidates.**
 
 Topic: `continental-ecoregion-planning`
 Topic: `world-generation-profiles`
@@ -354,8 +356,44 @@ half-sampled by stable rank at spacing 8, and one-eighth sampled at spacing
 bytes, and from `195.21` to `42.11 ms` vegetation compilation while retaining
 a continuous visible forest. Cold debug target readiness remains about seven
 seconds because CPU continental terrain compilation, not vegetation, now
-dominates. Retained movement and platform/package evidence follow in this
-phase.
+dominates.
+
+The retained-movement probe confirms that the clipmap does not regenerate the
+whole horizon after travel. Both matched High-preset runs fill 320 initial
+products; a 164-by-20-block move then admits 36 entering-strip refills and
+finishes with all 160 logical slots ready. V1 reaches the moved target in
+about `4.5 s`; the V2 jungle takes about `13.1 s`. The work is bounded by the
+retained topology, but V2's CPU-authored product cost remains materially
+higher.
+
+Packaged live-game review now covers unchanged V1, the V2 mesa desert, humid
+jungle, and temperate catchment through the ordinary integrated authority,
+exact chunks, scene, and procedural horizon. The mesa review uncovered a
+spawn-admission defect: the generic admission path expected a legacy
+biome-derived grass or podzol top and could never accept V2's valid red sand or
+terracotta. V2 now uses one continental surface plan for both candidate
+selection and authored substrate validation. A regression at far mesa chunk
+`(-800, 2880)` reaches the loaded dry surface; other profiles retain their
+existing admission behavior.
+
+Those live pixels establish real game integration and characteristic breadth,
+but they also expose a remaining representation boundary. The exact footprint
+and procedural horizon can differ in albedo strongly enough to reveal the
+square exact extent in the mesa, and translucent exact water meets the opaque
+procedural water as a straight color frontier at the catchment. These are not
+accepted as authored terrain seams. They are explicit Human Review E revision
+candidates alongside the CPU horizon spikes; the regional V2 generator does
+not need to be discarded to correct them.
+
+Shared validation passes the 480-test worldgen suite (one ignored), the
+787-test server suite, the 151-test terrain-view suite (one ignored), and the
+full workspace check. The native release client, browser Wasm build, flat
+Android debug APK, and Android XR release APK build successfully. World
+Explorer's browser Worker completes exact and 160-slot procedural composition
+for both new domains. The live-game browser smoke reaches the same WebGPU
+device-destruction failure in matched V1 and V2 controls, so it is not counted
+as V2 browser-pixel acceptance; the runner nevertheless now
+accepts the V2 profile label instead of rejecting it at argument parsing.
 
 ## Automated Acceptance
 

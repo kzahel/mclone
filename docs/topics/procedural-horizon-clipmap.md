@@ -96,6 +96,21 @@ instances from `42,637` to `10,889` and vegetation compilation from
 `195.21 ms` to `42.11 ms` without the visibly empty spacing-4 cutoff rejected
 during pixel review.
 
+Retained movement is still incremental for both product sources. After the
+common 320-product High-preset cold fill, a 164-by-20-block move prepares 36
+entering-strip refills and returns all 160 logical slots to ready. V1 reaches
+the target in about `4.5 s`; the V2 jungle takes about `13.1 s`. This proves
+bounded retained topology, not equivalent compilation cost.
+
+Packaged live-game pixels expose one unresolved appearance contract at the
+exact frontier. Mesa exact chunks and their procedural continuation can differ
+enough in albedo to reveal the square exact extent. At the catchment, exact
+translucent water meets opaque procedural water as a straight color boundary.
+Height, water level, source identity, and ready-coverage accounting remain
+shared, but those appearance differences are still visible seams and are
+Human Review E revision candidates. They must be corrected in composition or
+shared appearance semantics rather than hidden with additional terrain noise.
+
 ## Regular Clipmap And Presets
 
 Every enabled level is a four-by-four toroidal grid of 64-cell terrain tiles.

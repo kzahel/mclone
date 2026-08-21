@@ -50,7 +50,26 @@ matched on the reviewed host; dense-jungle cold exact is about 1.33 times V1
 and warm exact remains about 2.54 times V1. Exact-only live startup is matched,
 while V2 High Distant Terrain remains materially slower because its
 continental source is CPU-authored rather than GPU-native.
-Its deterministic spawn policy keeps the existing exact dry-surface gate and
+Retained High-preset travel confirms the geometry clipmap remains incremental:
+after the common 320-product cold fill, a 164-by-20-block move adds 36 strip
+refills and returns all 160 logical slots to ready. The V2 jungle reaches that
+moved target in about `13.1 s` versus V1's `4.5 s`, so bounded work is proven
+but performance parity is not.
+Packaged native live-game review now reaches the V2 catchment, mesa, and jungle
+through the ordinary integrated authority. V2 admission validates the exact
+continental substrate rather than requiring V1's biome-derived grass or
+podzol, which permits valid far mesa starts while preserving every other
+profile's spawn path. The three domains read distinctly in live terrain, but
+the review also exposes a square exact/procedural albedo frontier in the mesa
+and an opaque-horizon/translucent-exact water frontier at the catchment. Human
+Review E is therefore pending with those presentation seams and CPU horizon
+cost as revision candidates, not hidden acceptance criteria.
+The full worldgen, server, and terrain-view suites and workspace check pass;
+native, Wasm, flat Android, and Android XR package boundaries build. Browser
+World Explorer composition passes for mesa and jungle. A live-game browser
+smoke fails with the same WebGPU device-destruction outcome for matched V1 and
+V2 controls and is not claimed as V2 browser-pixel evidence.
+V1's deterministic spawn policy keeps the existing exact dry-surface gate and
 adds a 129-by-129-block sparse neighborhood survey, so the first locally safe
 chunk beside a dominant ocean is no longer accepted as the world entry region.
 Authoritative player/respawn admission also uses the selected profile's biome

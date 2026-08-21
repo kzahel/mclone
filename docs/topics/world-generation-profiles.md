@@ -30,8 +30,10 @@ new internal-unshipped `mclone-overworld-v2` sibling for the continental
 candidate while preserving V1 as selectable and default. V2 is now live as
 an explicitly experimental unbounded-plane profile with stored binary tag 9;
 its mesa-desert and humid-jungle characteristic-domain slices are implemented
-beside the retained temperate catchment. Performance and packaged live-game
-review remain before Human Review E.**
+beside the retained temperate catchment. Native packaged live-game review and
+shared/native/Wasm/Android/XR build boundaries are complete. Human Review E is
+pending with the exact/procedural appearance frontier and CPU-authored V2
+horizon cost recorded as revision candidates.**
 
 This topic owns the current truth and durable decisions for selectable,
 versioned world-generation profiles. Detailed refactoring and implementation
@@ -72,7 +74,7 @@ The first alternate generators are intentionally smaller:
 
 ## Current Truth
 
-The stored server-owned `WorldGenerationProfile` has eight values:
+The stored server-owned `WorldGenerationProfile` has nine values:
 
 - `Overworld`: legacy procedural Java-1.17-shaped generation, retained as an
   internal development/reference selection rather than the product default;
@@ -85,6 +87,10 @@ The stored server-owned `WorldGenerationProfile` has eight values:
   wooded rolling upland terrain from inspectable profile-owned fields, with
   gravel/sand/grass/stone surface recipes and a profile-owned oak, grass, and
   occasional-flower decoration language;
+- `McloneOverworldV2`: an experimental unbounded continental profile with a
+  retained temperate catchment plus mesa-desert and humid-jungle regional
+  archetypes, generated from one exact/procedural surface source while V1
+  remains available and default;
 - `TopologyProbeV1`: a hidden adversarial plane/cylinder/torus conformance
   generator that guarantees terrain, water, bounded geometry, material,
   lighting, and persistence canaries at canonical seams;
@@ -99,9 +105,10 @@ The profile already crosses world catalogs, realm/dimension metadata,
 integrated and dedicated startup, native and browser hosts, and persistence.
 It is fixed before chunk scheduling starts.
 
-Product world creation defaults to Mclone Overworld and cycles seven procedural
-selections—the four modern profiles, Alpha temperate, Alpha winter, and
-Beta—through shared catalog policy and generator-agnostic UI text. Mclone
+Product world creation defaults to Mclone Overworld V1 and cycles eight
+procedural selections—V1, experimental V2, legacy Overworld, Flat Grass,
+Small Island, Alpha temperate, Alpha winter, and Beta—through shared catalog
+policy and generator-agnostic UI text. Mclone
 Overworld is the product creation default across catalog, startup, dedicated,
 and integrated-runner entry points. Catalog records require an explicit
 profile; the internal-unshipped project carries no compatibility policy for
