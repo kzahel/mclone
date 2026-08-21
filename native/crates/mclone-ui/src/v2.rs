@@ -166,6 +166,7 @@ pub enum UiWidgetKind {
     },
     Slider {
         value: f32,
+        steps: u8,
     },
 }
 
@@ -227,6 +228,28 @@ impl UiWidget {
             id,
             kind: UiWidgetKind::Slider {
                 value: value.clamp(0.0, 1.0),
+                steps: 0,
+            },
+            rect,
+            label: label.into(),
+            enabled: true,
+            value: None,
+            action: None,
+        }
+    }
+
+    pub fn stepped_slider(
+        id: UiWidgetId,
+        rect: Rect,
+        label: impl Into<String>,
+        value: f32,
+        steps: u8,
+    ) -> Self {
+        Self {
+            id,
+            kind: UiWidgetKind::Slider {
+                value: value.clamp(0.0, 1.0),
+                steps: steps.max(2),
             },
             rect,
             label: label.into(),
@@ -328,6 +351,7 @@ enum UiWidgetAction {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum UiSliderAction {
+    TerrainLodPreset,
     RenderDistance,
     FogVisibility,
     FogClassicStart,
@@ -1250,11 +1274,17 @@ impl UiSurface {
         let widget = self
             .focused
             .and_then(|focused| self.layout.widget(focused))?;
-        let UiWidgetKind::Slider { value } = widget.kind else {
+        let UiWidgetKind::Slider { value, steps } = widget.kind else {
             return None;
         };
-        let slider = Slider::new(widget.id.legacy_widget_id(), widget.rect, "", value);
-        self.action_for_widget(widget, slider.point_for_value(value + direction * 0.05))
+        let step = if steps >= 2 {
+            1.0 / f32::from(steps - 1)
+        } else {
+            0.05
+        };
+        let slider =
+            Slider::new(widget.id.legacy_widget_id(), widget.rect, "", value).stepped(steps);
+        self.action_for_widget(widget, slider.point_for_value(value + direction * step))
     }
 
     fn render_title(&self, draw: &mut GuiDrawList) {
@@ -2161,12 +2191,13 @@ impl UiSurface {
                     draw.outline(widget.rect.inset(-1.0), Color::rgba(245, 250, 255, 205));
                 }
             }
-            UiWidgetKind::Slider { value } => Slider::new(
+            UiWidgetKind::Slider { value, steps } => Slider::new(
                 widget.id.legacy_widget_id(),
                 widget.rect,
                 widget.label.as_str(),
                 *value,
             )
+            .stepped(*steps)
             .enabled(widget.enabled)
             .render_atlas_text(draw, &self.font, interaction),
         }
@@ -2200,9 +2231,17 @@ impl UiSurface {
         match widget.action? {
             UiWidgetAction::Static(action) => Some(action),
             UiWidgetAction::Slider(action) => {
+                let steps = match widget.kind {
+                    UiWidgetKind::Slider { steps, .. } => steps,
+                    _ => 0,
+                };
                 let value = Slider::new(widget.id.legacy_widget_id(), widget.rect, "", 0.0)
+                    .stepped(steps)
                     .value_from_point(point);
                 Some(match action {
+                    UiSliderAction::TerrainLodPreset => GameUiAction::StageTerrainLodPreset(
+                        terrain_lod_preset_from_slider_value(value),
+                    ),
                     UiSliderAction::RenderDistance => GameUiAction::SetRenderDistance(
                         render_distance_from_slider_value(value, self.render_state),
                     ),
@@ -3009,7 +3048,9 @@ impl GameUiHost {
             GameUiAction::ToggleSectionOcclusion
             | GameUiAction::SetLeafDetail(_)
             | GameUiAction::SetGrassDetail(_)
-            | GameUiAction::SetTerrainLodPreset(_)
+            | GameUiAction::StageTerrainLodPreset(_)
+            | GameUiAction::ApplyTerrainLodPreset
+            | GameUiAction::CancelTerrainLodPreset
             | GameUiAction::SetFogSettings(_)
             | GameUiAction::SetSeasonPreview(_)
             | GameUiAction::SetCelestialDebug(_)
@@ -3253,6 +3294,8 @@ const UI_V2_OPTIONS_WORLD_RENDER_SCALE: UiWidgetId = UiWidgetId(146);
 const UI_V2_OPTIONS_LEAF_DETAIL: UiWidgetId = UiWidgetId(147);
 const UI_V2_OPTIONS_GRASS_DETAIL: UiWidgetId = UiWidgetId(154);
 const UI_V2_OPTIONS_TERRAIN_PRESENTATION: UiWidgetId = UiWidgetId(155);
+const UI_V2_OPTIONS_TERRAIN_APPLY: UiWidgetId = UiWidgetId(199);
+const UI_V2_OPTIONS_TERRAIN_CANCEL: UiWidgetId = UiWidgetId(200);
 const UI_V2_OPTIONS_FOG_SUBMENU: UiWidgetId = UiWidgetId(156);
 const UI_V2_FOG_MODE: UiWidgetId = UiWidgetId(157);
 const UI_V2_FOG_VISIBILITY: UiWidgetId = UiWidgetId(158);
@@ -4556,6 +4599,28 @@ fn options_category_rows(
     let ph = Rect::new(0.0, 0.0, 0.0, 0.0);
     match category {
         GameOptionsCategory::Graphics => {
+            let terrain_lod_dirty = state.terrain_lod_staged_preset != state.terrain_lod_preset;
+            let terrain_lod_enabled = !state.terrain_lod_applying;
+            let terrain_lod_apply_available =
+                state.terrain_lod_available || !state.terrain_lod_staged_preset.horizon_enabled();
+            let terrain_lod_status = if state.terrain_lod_applying {
+                format!(
+                    "Applying {} - current {}",
+                    state.terrain_lod_preset.label(),
+                    state.terrain_lod_effective_preset.label()
+                )
+            } else if !terrain_lod_apply_available {
+                "Unavailable in this world".to_owned()
+            } else if terrain_lod_dirty {
+                format!("Apply {}", state.terrain_lod_staged_preset.label())
+            } else if state.terrain_lod_apply_failed {
+                format!(
+                    "Apply failed - kept {}",
+                    state.terrain_lod_effective_preset.label()
+                )
+            } else {
+                format!("Applied: {}", state.terrain_lod_effective_preset.label())
+            };
             let mut rows = vec![
                 (
                     20.0,
@@ -4643,34 +4708,33 @@ fn options_category_rows(
                     .action(GameUiAction::SetGrassDetail(state.grass_detail.next())),
                 ),
                 (
-                    20.0,
-                    UiWidget::cycle(
+                    24.0,
+                    UiWidget::stepped_slider(
                         UI_V2_OPTIONS_TERRAIN_PRESENTATION,
                         ph,
-                        "Distant Terrain",
-                        if state.terrain_lod_preset.horizon_enabled()
-                            && !state.terrain_lod_available
-                        {
-                            match state.terrain_lod_preset {
-                                crate::TerrainLodPreset::Low => "Low (Unavailable)",
-                                crate::TerrainLodPreset::Medium => "Medium (Unavailable)",
-                                crate::TerrainLodPreset::High => "High (Unavailable)",
-                                crate::TerrainLodPreset::Off => "Off",
-                            }
-                        } else if state.terrain_lod_applying {
-                            match state.terrain_lod_preset {
-                                crate::TerrainLodPreset::Off => "Off (Applying)",
-                                crate::TerrainLodPreset::Low => "Low (Applying)",
-                                crate::TerrainLodPreset::Medium => "Medium (Applying)",
-                                crate::TerrainLodPreset::High => "High (Applying)",
-                            }
-                        } else {
-                            state.terrain_lod_preset.label()
-                        },
+                        format!(
+                            "Distant Terrain: {}",
+                            state.terrain_lod_staged_preset.label()
+                        ),
+                        terrain_lod_preset_slider_value(state.terrain_lod_staged_preset),
+                        4,
                     )
-                    .action(GameUiAction::SetTerrainLodPreset(
-                        state.terrain_lod_preset.next(),
-                    )),
+                    .enabled(terrain_lod_enabled)
+                    .slider_action(UiSliderAction::TerrainLodPreset),
+                ),
+                (
+                    20.0,
+                    UiWidget::button(UI_V2_OPTIONS_TERRAIN_APPLY, ph, terrain_lod_status)
+                        .enabled(
+                            terrain_lod_dirty && terrain_lod_enabled && terrain_lod_apply_available,
+                        )
+                        .action(GameUiAction::ApplyTerrainLodPreset),
+                ),
+                (
+                    20.0,
+                    UiWidget::button(UI_V2_OPTIONS_TERRAIN_CANCEL, ph, "Cancel Distant Terrain")
+                        .enabled(terrain_lod_dirty && terrain_lod_enabled)
+                        .action(GameUiAction::CancelTerrainLodPreset),
                 ),
                 (
                     20.0,
@@ -5290,6 +5354,24 @@ fn options_category_rows(
                 ),
             ]
         }
+    }
+}
+
+const fn terrain_lod_preset_slider_value(preset: crate::TerrainLodPreset) -> f32 {
+    match preset {
+        crate::TerrainLodPreset::Off => 0.0,
+        crate::TerrainLodPreset::Low => 1.0 / 3.0,
+        crate::TerrainLodPreset::Medium => 2.0 / 3.0,
+        crate::TerrainLodPreset::High => 1.0,
+    }
+}
+
+fn terrain_lod_preset_from_slider_value(value: f32) -> crate::TerrainLodPreset {
+    match (value.clamp(0.0, 1.0) * 3.0).round() as u8 {
+        0 => crate::TerrainLodPreset::Off,
+        1 => crate::TerrainLodPreset::Low,
+        2 => crate::TerrainLodPreset::Medium,
+        _ => crate::TerrainLodPreset::High,
     }
 }
 

@@ -866,7 +866,7 @@ impl McloneSceneHost {
                 feature_buffer_writes: celestial_stats.feature_buffer_writes,
                 resident_resource_bytes: celestial_stats.resident_resource_bytes,
             });
-        GameUiRenderState {
+        let mut state = GameUiRenderState {
             lobby_scenario_available: self
                 .client_experience
                 .profile()
@@ -885,9 +885,11 @@ impl McloneSceneHost {
             leaf_detail: game_leaf_detail(self.mesh_assets.catalog.leaf_detail()),
             grass_detail: game_grass_detail(self.render_options.grass_detail),
             terrain_lod_preset: self.terrain_lod_preset_preference(),
+            terrain_lod_staged_preset: self.terrain_lod_preset_preference(),
             terrain_lod_effective_preset: self.applied_terrain_lod_preset(),
             terrain_lod_applying: self.terrain_lod_applying(),
             terrain_lod_available: self.terrain_lod_supported(),
+            terrain_lod_apply_failed: self.terrain_lod_apply_error().is_some(),
             fog: self.fog_settings,
             season_preview: self.season_preview,
             seasonal_debug,
@@ -926,7 +928,11 @@ impl McloneSceneHost {
             touch_controls_mode: None,
             touch_settings: None,
             block_palette,
-        }
+        };
+        self.client_experience
+            .settings()
+            .project_terrain_lod_staging(&mut state);
+        state
     }
 
     pub(crate) fn refresh_debug_diagnostics_overlay(&mut self) {

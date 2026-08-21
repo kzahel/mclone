@@ -761,6 +761,7 @@ pub struct Slider {
     pub rect: Rect,
     pub label: String,
     pub value: f32,
+    pub steps: u8,
     pub enabled: bool,
 }
 
@@ -773,8 +774,15 @@ impl Slider {
             rect,
             label: label.into(),
             value: value.clamp(0.0, 1.0),
+            steps: 0,
             enabled: true,
         }
+    }
+
+    pub fn stepped(mut self, steps: u8) -> Self {
+        self.steps = if steps >= 2 { steps } else { 0 };
+        self.value = self.snapped_value(self.value);
+        self
     }
 
     pub fn enabled(mut self, enabled: bool) -> Self {
@@ -788,7 +796,7 @@ impl Slider {
 
     pub fn value_from_point(&self, point: Point) -> f32 {
         let track = self.track_rect();
-        ((point.x - track.x) / track.width.max(1.0)).clamp(0.0, 1.0)
+        self.snapped_value(((point.x - track.x) / track.width.max(1.0)).clamp(0.0, 1.0))
     }
 
     pub fn point_for_value(&self, value: f32) -> Point {
@@ -806,6 +814,15 @@ impl Slider {
             (self.rect.width - Self::TRACK_INSET * 2.0).max(0.0),
             2.0,
         )
+    }
+
+    fn snapped_value(&self, value: f32) -> f32 {
+        if self.steps < 2 {
+            value.clamp(0.0, 1.0)
+        } else {
+            let intervals = f32::from(self.steps - 1);
+            (value.clamp(0.0, 1.0) * intervals).round() / intervals
+        }
     }
 
     pub fn render(&self, draw: &mut GuiDrawList, font: &Font, interaction: Interaction) {
@@ -828,6 +845,16 @@ impl Slider {
             .render_with_text_mode(draw, font, interaction, atlas_text);
         let track = self.track_rect();
         draw.fill(track, Color::rgba(15, 18, 18, 230));
+        if self.steps >= 2 {
+            let intervals = f32::from(self.steps - 1);
+            for step in 0..self.steps {
+                let x = track.x + f32::from(step) / intervals * track.width;
+                draw.fill(
+                    Rect::new(x - 0.5, track.y - 2.0, 1.0, 6.0),
+                    Color::rgba(126, 143, 126, 255),
+                );
+            }
+        }
         let knob_x = track.x + self.value * track.width;
         draw.fill(
             Rect::new(knob_x - 2.0, track.y - 4.0, 4.0, 10.0),
@@ -2045,7 +2072,9 @@ pub enum GameUiAction {
     ToggleSectionOcclusion,
     SetLeafDetail(GameLeafDetail),
     SetGrassDetail(GameGrassDetail),
-    SetTerrainLodPreset(TerrainLodPreset),
+    StageTerrainLodPreset(TerrainLodPreset),
+    ApplyTerrainLodPreset,
+    CancelTerrainLodPreset,
     SetFogSettings(GameFogSettings),
     SetSeasonPreview(SeasonPreviewSettings),
     SetCelestialDebug(CelestialDebugSettings),
@@ -2630,9 +2659,11 @@ pub struct GameUiRenderState {
     pub leaf_detail: GameLeafDetail,
     pub grass_detail: GameGrassDetail,
     pub terrain_lod_preset: TerrainLodPreset,
+    pub terrain_lod_staged_preset: TerrainLodPreset,
     pub terrain_lod_effective_preset: TerrainLodPreset,
     pub terrain_lod_applying: bool,
     pub terrain_lod_available: bool,
+    pub terrain_lod_apply_failed: bool,
     pub fog: GameFogSettings,
     pub season_preview: SeasonPreviewSettings,
     pub seasonal_debug: Option<GameSeasonalDebugState>,
@@ -2686,9 +2717,11 @@ impl Default for GameUiRenderState {
             leaf_detail: GameLeafDetail::Blocky,
             grass_detail: GameGrassDetail::Off,
             terrain_lod_preset: TerrainLodPreset::Off,
+            terrain_lod_staged_preset: TerrainLodPreset::Off,
             terrain_lod_effective_preset: TerrainLodPreset::Off,
             terrain_lod_applying: false,
             terrain_lod_available: true,
+            terrain_lod_apply_failed: false,
             fog: GameFogSettings::default(),
             season_preview: SeasonPreviewSettings::default(),
             seasonal_debug: None,

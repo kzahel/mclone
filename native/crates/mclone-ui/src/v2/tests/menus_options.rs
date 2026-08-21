@@ -560,7 +560,7 @@ fn graphics_options_show_and_cycle_grass_detail() {
 }
 
 #[test]
-fn graphics_options_show_and_cycle_distant_terrain_quality() {
+fn graphics_options_stage_direct_distant_terrain_quality_before_apply() {
     let mut surface = UiSurface::new();
     surface.set_screen(Some(UiScreenId::OptionsCategory {
         parent: GameOptionsParent::Pause,
@@ -569,6 +569,8 @@ fn graphics_options_show_and_cycle_distant_terrain_quality() {
     surface.set_scale(GuiScale::from_pixels(960, 540));
     let state = GameUiRenderState {
         terrain_lod_preset: TerrainLodPreset::Medium,
+        terrain_lod_staged_preset: TerrainLodPreset::Medium,
+        terrain_lod_effective_preset: TerrainLodPreset::Medium,
         ..GameUiRenderState::default()
     };
     surface.set_render_state(state);
@@ -578,41 +580,101 @@ fn graphics_options_show_and_cycle_distant_terrain_quality() {
         .widget(UI_V2_OPTIONS_TERRAIN_PRESENTATION)
         .expect("terrain horizon row")
         .clone();
-    assert_eq!(terrain_horizon.label, "Distant Terrain");
-    assert_eq!(terrain_horizon.value.as_deref(), Some("Medium"));
-    assert!(terrain_horizon.enabled);
-    assert!(surface.pointer_down(point_in(terrain_horizon.rect), state));
+    assert_eq!(terrain_horizon.label, "Distant Terrain: Medium");
+    assert_eq!(terrain_horizon.value, None);
     assert_eq!(
-        surface.pointer_up(point_in(terrain_horizon.rect), state).1,
-        Some(GameUiAction::SetTerrainLodPreset(TerrainLodPreset::High,))
+        terrain_horizon.kind,
+        UiWidgetKind::Slider {
+            value: 2.0 / 3.0,
+            steps: 4,
+        }
+    );
+    assert!(terrain_horizon.enabled);
+    let high = Point {
+        x: terrain_horizon.rect.right() - 2.0,
+        y: terrain_horizon.rect.y + terrain_horizon.rect.height * 0.5,
+    };
+    assert!(surface.pointer_down(high, state));
+    assert_eq!(
+        surface.pointer_up(high, state).1,
+        Some(GameUiAction::StageTerrainLodPreset(TerrainLodPreset::High))
+    );
+
+    surface.set_focus(Some(UI_V2_OPTIONS_TERRAIN_PRESENTATION));
+    assert_eq!(
+        surface.navigate(GuiNavigation::Right, state).1,
+        Some(GameUiAction::StageTerrainLodPreset(TerrainLodPreset::High)),
+        "keyboard, controller, and XR focus navigation advances exactly one stop"
+    );
+
+    let staged = GameUiRenderState {
+        terrain_lod_staged_preset: TerrainLodPreset::High,
+        ..state
+    };
+    surface.set_render_state(staged);
+    let apply = surface
+        .layout()
+        .widget(UI_V2_OPTIONS_TERRAIN_APPLY)
+        .expect("terrain apply row");
+    assert_eq!(apply.label, "Apply High");
+    assert!(apply.enabled);
+    assert_eq!(
+        apply.action,
+        Some(UiWidgetAction::Static(GameUiAction::ApplyTerrainLodPreset))
+    );
+    let cancel = surface
+        .layout()
+        .widget(UI_V2_OPTIONS_TERRAIN_CANCEL)
+        .expect("terrain cancel row");
+    assert!(cancel.enabled);
+    assert_eq!(
+        cancel.action,
+        Some(UiWidgetAction::Static(GameUiAction::CancelTerrainLodPreset))
     );
 
     let unavailable = GameUiRenderState {
         terrain_lod_available: false,
-        ..state
+        ..staged
     };
     surface.set_render_state(unavailable);
-    assert_eq!(
-        surface
-            .layout()
-            .widget(UI_V2_OPTIONS_TERRAIN_PRESENTATION)
-            .and_then(|widget| widget.value.as_deref()),
-        Some("Medium (Unavailable)")
-    );
+    let unavailable_apply = surface
+        .layout()
+        .widget(UI_V2_OPTIONS_TERRAIN_APPLY)
+        .expect("unavailable terrain apply row");
+    assert_eq!(unavailable_apply.label, "Unavailable in this world");
+    assert!(!unavailable_apply.enabled);
 
     let applying = GameUiRenderState {
         terrain_lod_available: true,
         terrain_lod_applying: true,
-        terrain_lod_effective_preset: TerrainLodPreset::High,
+        terrain_lod_effective_preset: TerrainLodPreset::Low,
         ..state
     };
     surface.set_render_state(applying);
+    let applying_selector = surface
+        .layout()
+        .widget(UI_V2_OPTIONS_TERRAIN_PRESENTATION)
+        .expect("applying terrain selector");
+    assert!(!applying_selector.enabled);
+    let applying_status = surface
+        .layout()
+        .widget(UI_V2_OPTIONS_TERRAIN_APPLY)
+        .expect("applying terrain status");
+    assert_eq!(applying_status.label, "Applying Medium - current Low");
+    assert!(!applying_status.enabled);
+
+    let failed = GameUiRenderState {
+        terrain_lod_apply_failed: true,
+        ..state
+    };
+    surface.set_render_state(failed);
     assert_eq!(
         surface
             .layout()
-            .widget(UI_V2_OPTIONS_TERRAIN_PRESENTATION)
-            .and_then(|widget| widget.value.as_deref()),
-        Some("Medium (Applying)")
+            .widget(UI_V2_OPTIONS_TERRAIN_APPLY)
+            .expect("failed terrain status")
+            .label,
+        "Apply failed - kept Medium"
     );
 }
 

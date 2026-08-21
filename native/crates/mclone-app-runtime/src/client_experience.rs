@@ -159,7 +159,9 @@ impl ClientExperienceController {
             GameUiAction::ToggleSectionOcclusion
             | GameUiAction::SetLeafDetail(_)
             | GameUiAction::SetGrassDetail(_)
-            | GameUiAction::SetTerrainLodPreset(_)
+            | GameUiAction::StageTerrainLodPreset(_)
+            | GameUiAction::ApplyTerrainLodPreset
+            | GameUiAction::CancelTerrainLodPreset
             | GameUiAction::SetFogSettings(_)
             | GameUiAction::SetSeasonPreview(_)
             | GameUiAction::SetCelestialDebug(_)
@@ -733,11 +735,15 @@ pub struct ClientExperienceActionAvailability {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ClientExperienceSettingsController {
     state: ClientExperienceSettingsState,
+    terrain_lod_staged_preset: Option<TerrainLodPreset>,
 }
 
 impl ClientExperienceSettingsController {
     pub fn new(state: ClientExperienceSettingsState) -> Self {
-        Self { state }
+        Self {
+            state,
+            terrain_lod_staged_preset: None,
+        }
     }
 
     pub fn state(&self) -> ClientExperienceSettingsState {
@@ -746,6 +752,12 @@ impl ClientExperienceSettingsController {
 
     pub fn set_state(&mut self, state: ClientExperienceSettingsState) {
         self.state = state;
+    }
+
+    pub fn project_terrain_lod_staging(&self, state: &mut GameUiRenderState) {
+        state.terrain_lod_staged_preset = self
+            .terrain_lod_staged_preset
+            .unwrap_or(state.terrain_lod_preset);
     }
 
     fn apply_movement_experience_change(
@@ -790,13 +802,27 @@ impl ClientExperienceSettingsController {
                     .setting_effects
                     .push(ClientExperienceSettingEffect::SetGrassDetail(detail));
             }
-            GameUiAction::SetTerrainLodPreset(presentation) => {
-                self.state.terrain_lod_preset = presentation;
-                effects
-                    .setting_effects
-                    .push(ClientExperienceSettingEffect::SetTerrainLodPreset(
-                        presentation,
-                    ));
+            GameUiAction::StageTerrainLodPreset(presentation) => {
+                if !self.state.terrain_lod_applying {
+                    self.terrain_lod_staged_preset =
+                        (presentation != self.state.terrain_lod_preset).then_some(presentation);
+                }
+            }
+            GameUiAction::ApplyTerrainLodPreset => {
+                if !self.state.terrain_lod_applying
+                    && let Some(presentation) = self.terrain_lod_staged_preset.take()
+                {
+                    self.state.terrain_lod_preset = presentation;
+                    self.state.terrain_lod_applying = presentation.horizon_enabled();
+                    effects.setting_effects.push(
+                        ClientExperienceSettingEffect::SetTerrainLodPreset(presentation),
+                    );
+                }
+            }
+            GameUiAction::CancelTerrainLodPreset => {
+                if !self.state.terrain_lod_applying {
+                    self.terrain_lod_staged_preset = None;
+                }
             }
             GameUiAction::SetFogSettings(settings) => {
                 self.state.fog = settings.normalized();
@@ -1311,6 +1337,10 @@ pub struct ClientExperienceSettingsState {
     pub leaf_detail: GameLeafDetail,
     pub grass_detail: GameGrassDetail,
     pub terrain_lod_preset: TerrainLodPreset,
+    pub terrain_lod_effective_preset: TerrainLodPreset,
+    pub terrain_lod_applying: bool,
+    pub terrain_lod_available: bool,
+    pub terrain_lod_apply_failed: bool,
     pub fog: GameFogSettings,
     pub season_preview: SeasonPreviewSettings,
     pub celestial_debug: CelestialDebugSettings,
@@ -1358,6 +1388,10 @@ impl From<GameUiRenderState> for ClientExperienceSettingsState {
             leaf_detail: state.leaf_detail,
             grass_detail: state.grass_detail,
             terrain_lod_preset: state.terrain_lod_preset,
+            terrain_lod_effective_preset: state.terrain_lod_effective_preset,
+            terrain_lod_applying: state.terrain_lod_applying,
+            terrain_lod_available: state.terrain_lod_available,
+            terrain_lod_apply_failed: state.terrain_lod_apply_failed,
             fog: state.fog.normalized(),
             season_preview: state.season_preview,
             celestial_debug: state.celestial_debug_settings,
@@ -1406,6 +1440,10 @@ impl ClientExperienceSettingsState {
         state.leaf_detail = self.leaf_detail;
         state.grass_detail = self.grass_detail;
         state.terrain_lod_preset = self.terrain_lod_preset;
+        state.terrain_lod_effective_preset = self.terrain_lod_effective_preset;
+        state.terrain_lod_applying = self.terrain_lod_applying;
+        state.terrain_lod_available = self.terrain_lod_available;
+        state.terrain_lod_apply_failed = self.terrain_lod_apply_failed;
         state.fog = self.fog.normalized();
         state.season_preview = self.season_preview;
         state.celestial_debug_settings = self.celestial_debug;
@@ -1802,7 +1840,9 @@ pub fn client_experience_action_kind(action: GameUiAction) -> ClientExperienceAc
         GameUiAction::ToggleSectionOcclusion => ClientExperienceActionKind::ToggleSectionOcclusion,
         GameUiAction::SetLeafDetail(_) => ClientExperienceActionKind::SetLeafDetail,
         GameUiAction::SetGrassDetail(_) => ClientExperienceActionKind::SetGrassDetail,
-        GameUiAction::SetTerrainLodPreset(_) => ClientExperienceActionKind::SetTerrainLodPreset,
+        GameUiAction::StageTerrainLodPreset(_)
+        | GameUiAction::ApplyTerrainLodPreset
+        | GameUiAction::CancelTerrainLodPreset => ClientExperienceActionKind::SetTerrainLodPreset,
         GameUiAction::SetFogSettings(_) => ClientExperienceActionKind::SetFogSettings,
         GameUiAction::SetSeasonPreview(_) => ClientExperienceActionKind::SetSeasonPreview,
         GameUiAction::SetCelestialDebug(_) => ClientExperienceActionKind::SetCelestialDebug,
@@ -2163,6 +2203,10 @@ mod tests {
             GameUiAction::QuitToTitle,
             GameUiAction::ToggleSectionOcclusion,
             GameUiAction::SetLeafDetail(GameLeafDetail::Bushy),
+            GameUiAction::SetGrassDetail(GameGrassDetail::Lush),
+            GameUiAction::StageTerrainLodPreset(TerrainLodPreset::Low),
+            GameUiAction::ApplyTerrainLodPreset,
+            GameUiAction::CancelTerrainLodPreset,
             GameUiAction::SetSeasonPreview(SeasonPreviewSettings::default()),
             GameUiAction::SetCelestialDebug(CelestialDebugSettings::default()),
             GameUiAction::ToggleFullbright,
@@ -2190,7 +2234,7 @@ mod tests {
             GameUiAction::Quit,
         ];
 
-        assert_eq!(samples.len(), 66);
+        assert_eq!(samples.len(), 70);
         for sample in samples {
             let _ = classify_game_ui_action(sample);
         }
@@ -2427,7 +2471,44 @@ mod tests {
         );
 
         let effects = settings.apply_ui_action(
-            GameUiAction::SetTerrainLodPreset(TerrainLodPreset::Medium),
+            GameUiAction::StageTerrainLodPreset(TerrainLodPreset::Medium),
+            ClientExperienceSettingsProfile::default(),
+        );
+        assert!(effects.setting_effects.is_empty());
+        assert_eq!(settings.state().terrain_lod_preset, TerrainLodPreset::Off);
+        let mut projection = GameUiRenderState::default();
+        settings.project_terrain_lod_staging(&mut projection);
+        assert_eq!(
+            projection.terrain_lod_staged_preset,
+            TerrainLodPreset::Medium
+        );
+
+        let effects = settings.apply_ui_action(
+            GameUiAction::StageTerrainLodPreset(TerrainLodPreset::High),
+            ClientExperienceSettingsProfile::default(),
+        );
+        assert!(effects.setting_effects.is_empty());
+        settings.project_terrain_lod_staging(&mut projection);
+        assert_eq!(
+            projection.terrain_lod_staged_preset,
+            TerrainLodPreset::High,
+            "arbitrary staging changes coalesce before Apply"
+        );
+
+        let effects = settings.apply_ui_action(
+            GameUiAction::CancelTerrainLodPreset,
+            ClientExperienceSettingsProfile::default(),
+        );
+        assert!(effects.setting_effects.is_empty());
+        settings.project_terrain_lod_staging(&mut projection);
+        assert_eq!(projection.terrain_lod_staged_preset, TerrainLodPreset::Off);
+
+        settings.apply_ui_action(
+            GameUiAction::StageTerrainLodPreset(TerrainLodPreset::Medium),
+            ClientExperienceSettingsProfile::default(),
+        );
+        let effects = settings.apply_ui_action(
+            GameUiAction::ApplyTerrainLodPreset,
             ClientExperienceSettingsProfile::default(),
         );
         assert_eq!(
@@ -2439,6 +2520,19 @@ mod tests {
             vec![ClientExperienceSettingEffect::SetTerrainLodPreset(
                 TerrainLodPreset::Medium
             )]
+        );
+
+        settings.apply_ui_action(
+            GameUiAction::StageTerrainLodPreset(TerrainLodPreset::High),
+            ClientExperienceSettingsProfile::default(),
+        );
+        let effects = settings.apply_ui_action(
+            GameUiAction::ApplyTerrainLodPreset,
+            ClientExperienceSettingsProfile::default(),
+        );
+        assert!(
+            effects.setting_effects.is_empty(),
+            "a second Apply is rejected while the first enabled target prepares"
         );
 
         let requested_fog = GameFogSettings {

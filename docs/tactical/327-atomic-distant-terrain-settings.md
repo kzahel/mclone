@@ -115,17 +115,24 @@ the same typed staging and Apply/Cancel actions.
 
 ### Phase 2: Shared Staged Selector
 
-- Add typed Stage, Apply, and Cancel Distant Terrain actions.
-- Replace the cycle row with four directly addressable stops and explicit
+- [x] Add typed Stage, Apply, and Cancel Distant Terrain actions.
+- [x] Replace the cycle row with four directly addressable stops and explicit
   Apply/Cancel buttons using the existing shared menu/input machinery.
-- Coalesce arbitrary staging changes before Apply and reject Apply while a
+- [x] Coalesce arbitrary staging changes before Apply and reject Apply while a
   previous request is still preparing.
-- Update browser and other scripted menu checks to select a value directly and
-  apply it once.
-- Add UI/reducer tests for mouse, controller/keyboard focus activation,
-  pending labels, cancellation, and rejected state.
-- Capture and inspect the first native rendered Graphics page.
-- Commit.
+- [x] Update the browser menu check to select Low directly and apply it once.
+  Its staged receipt proves that neither the engine nor storage changed before
+  Apply; its accepted receipt proves Low was stored only once target-ready.
+- [x] Add UI/reducer tests for pointer and focused controller/keyboard
+  selection, pending labels, cancellation, coalescing, and rejected concurrent
+  Apply.
+- [x] Capture and inspect the first native rendered Graphics page and the
+  browser's staged mobile page. Both show the four-stop rail, selected label,
+  current/applied status, and Apply/Cancel controls without clipping.
+- [x] Commit.
+
+Temporary native and mobile-browser pixel evidence was inspected under
+`/tmp`; it remains outside the repository.
 
 ### Phase 3: Cross-Platform And XR Validation
 

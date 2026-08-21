@@ -3446,6 +3446,8 @@ async function run() {
           || probe.reloadResult?.terrainViewActive !== true
           || probe.reloadResult?.terrainViewLodPreset !== "low"
           || probe.reloadResult?.terrainViewDrawnTiles <= 0
+          || probe.staged?.terrainViewActive !== false
+          || probe.staged?.storedPreset != null
           || probe.storedPreset !== "low"
           || probe.reloadedStoredPreset !== "low"
         ) {
@@ -11739,9 +11741,10 @@ function summarizeSeasonalAppearanceRenderResult(result) {
 }
 
 /**
- * Exercise the shared Graphics row from an explicit Off baseline, prove that
- * Low produces distant-terrain pixels, then reload without a query override and
- * prove that the stored preference restores the same renderer.
+ * Exercise the shared Graphics stepped selector from an explicit Off baseline,
+ * stage Low without side effects, Apply it once, prove that Low produces
+ * distant-terrain pixels, then reload without a query override and prove that
+ * the accepted stored preference restores the same renderer.
  *
  * @param {Page} page
  * @param {Locator} canvas
@@ -11763,9 +11766,34 @@ async function runTerrainHorizonRegressionProbe(
   await clickNativeMenuButton(canvas, "pause", 1);
   await waitForNativeUiScreen(page, "options");
   // The regression lane owns a fixed 390-by-844 phone viewport. Exercise the
-  // first Options category and the first row in Graphics' right column.
+  // first Options category, choose the Low stop in Graphics' left-column
+  // stepped selector, then activate the adjacent right-column Apply row.
   await clickCanvasFraction(canvas, 0.5, 0.392);
   await waitForNativeUiScreen(page, "optionsCategory");
+  await clickCanvasFraction(canvas, 0.215, 0.583);
+  await page.waitForTimeout(100);
+  const stagedScreenshotPath = "/tmp/mclone-native-web-terrain-horizon-stage.png";
+  await canvas.screenshot({ path: stagedScreenshotPath, timeout: 60_000 });
+  const staged = await page.evaluate(() => {
+    let storedPreset = null;
+    try {
+      storedPreset = JSON.parse(
+        globalThis.localStorage?.getItem("mclone.graphics.preferences.v1") ?? "null",
+      )?.preferences?.terrainLodPreset ?? null;
+    } catch {
+      storedPreset = null;
+    }
+    return {
+      terrainViewActive: globalThis.__mcloneWebApp?.state?.terrainViewActive ?? null,
+      storedPreset,
+    };
+  });
+  if (staged.terrainViewActive !== false || staged.storedPreset != null) {
+    throw new Error(
+      `Distant Terrain staging caused an engine or persistence effect; `
+        + `screenshot=${stagedScreenshotPath}; ${JSON.stringify(staged)}`,
+    );
+  }
   await clickCanvasFraction(canvas, 0.72, 0.409);
   try {
     await page.waitForFunction(
@@ -11781,7 +11809,7 @@ async function runTerrainHorizonRegressionProbe(
         }
       },
       undefined,
-      { timeout: 10_000 },
+      { timeout: terrainCompositionProbeTimeoutMs },
     );
   } catch (error) {
     const diagnosticPath = "/tmp/mclone-native-web-terrain-horizon-options.png";
@@ -11793,7 +11821,7 @@ async function runTerrainHorizonRegressionProbe(
       stored: globalThis.localStorage?.getItem("mclone.graphics.preferences.v1") ?? null,
     }));
     throw new Error(
-      `Distant Terrain row did not persist after its UI tap; screenshot=${diagnosticPath}; `
+      `Distant Terrain Apply did not persist after acceptance; screenshot=${diagnosticPath}; `
         + `${error instanceof Error ? error.message : String(error)}\n`
         + JSON.stringify(diagnostic, null, 2),
     );
@@ -11837,6 +11865,8 @@ async function runTerrainHorizonRegressionProbe(
     reloadScreenshotPath,
   );
   return {
+    staged,
+    stagedScreenshotPath,
     storedPreset,
     reloadedStoredPreset,
     toggleResult: summarizeTerrainHorizonResult(toggleProof.result),
