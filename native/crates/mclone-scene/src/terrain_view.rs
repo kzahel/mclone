@@ -445,6 +445,7 @@ impl McloneSceneHost {
         } else {
             self.terrain_lod_pending_persistence = Some(presentation);
         }
+        self.sync_terrain_lod_settings_controller_state();
         log::info!(
             "terrain horizon preference set to {}; active={}",
             presentation.label(),
@@ -566,6 +567,7 @@ impl McloneSceneHost {
         }
         self.terrain_lod_applied_preset = effective_preset;
         self.commit_pending_terrain_lod_preference(effective_preset);
+        self.sync_terrain_lod_settings_controller_state();
     }
 
     fn reject_pending_terrain_lod_preset(&mut self, error: anyhow::Error) {
@@ -583,6 +585,7 @@ impl McloneSceneHost {
         if !fallback.horizon_enabled() {
             self.reset_terrain_view();
         }
+        self.sync_terrain_lod_settings_controller_state();
     }
 
     fn commit_pending_terrain_lod_preference(&mut self, accepted: TerrainLodPreset) {
@@ -613,6 +616,23 @@ impl McloneSceneHost {
         if !self.terrain_lod_preset_preference.horizon_enabled() {
             self.reset_terrain_view();
         }
+        self.sync_terrain_lod_settings_controller_state();
+    }
+
+    fn sync_terrain_lod_settings_controller_state(&mut self) {
+        let desired = self.terrain_lod_preset_preference;
+        let effective = self.applied_terrain_lod_preset();
+        let applying = self.terrain_lod_applying();
+        let available = self.terrain_lod_supported();
+        let failed = self.terrain_lod_apply_error.is_some();
+        let settings = self.client_experience.settings_mut();
+        let mut state = settings.state();
+        state.terrain_lod_preset = desired;
+        state.terrain_lod_effective_preset = effective;
+        state.terrain_lod_applying = applying;
+        state.terrain_lod_available = available;
+        state.terrain_lod_apply_failed = failed;
+        settings.set_state(state);
     }
 
     pub fn terrain_view_diagnostics(&self) -> Option<SceneTerrainViewDiagnostics> {

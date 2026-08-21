@@ -325,6 +325,23 @@ impl TerrainHorizonAdmission {
         committed
     }
 
+    pub fn clear_vegetation_above_sample_spacing(&mut self, maximum_sample_spacing: u32) -> u32 {
+        let mut cleared = 0_u32;
+        for level in &mut self.levels {
+            if level
+                .vegetation_committed
+                .as_ref()
+                .is_some_and(|presentation| {
+                    presentation.snapshot.sample_spacing > maximum_sample_spacing
+                })
+            {
+                level.vegetation_committed = None;
+                cleared = cleared.saturating_add(1);
+            }
+        }
+        cleared
+    }
+
     pub fn assignment(&self, resource_slot: u32) -> Option<TerrainClipmapTile> {
         self.assignments
             .get(resource_slot as usize)
@@ -540,6 +557,37 @@ mod tests {
             7
         );
         assert_eq!(admission.diagnostics().staging_slots, 21);
+    }
+
+    #[test]
+    fn reduced_vegetation_bound_releases_coarse_transition_guards() {
+        let mut clipmap = clipmap();
+        let initial = clipmap.update_center(-184, -184);
+        let mut admission = TerrainHorizonAdmission::new(3, 16).unwrap();
+        let (_, resources) = admission
+            .begin_transition(&clipmap.levels(), &initial.rebased_levels)
+            .unwrap();
+        ready_all(&mut admission, &resources);
+        admission.commit_ready_vegetation(|_| true);
+        assert_eq!(admission.diagnostics().vegetation_committed_levels, 3);
+
+        assert_eq!(admission.clear_vegetation_above_sample_spacing(1), 2);
+        assert_eq!(admission.diagnostics().vegetation_committed_levels, 1);
+
+        let first = clipmap.update_center(8, 8);
+        let (state, entering) = admission
+            .begin_transition(&clipmap.levels(), &first.rebased_levels)
+            .unwrap();
+        assert_eq!(state, TerrainHorizonBeginTransition::Started);
+        ready_all(&mut admission, &entering);
+        admission.commit_ready_vegetation(|resource| resource.tile.sample_spacing == 1);
+
+        let second = clipmap.update_center(8, 8);
+        let (state, entering) = admission
+            .begin_transition(&clipmap.levels(), &second.rebased_levels)
+            .unwrap();
+        assert_eq!(state, TerrainHorizonBeginTransition::Started);
+        assert!(!entering.is_empty());
     }
 
     #[test]

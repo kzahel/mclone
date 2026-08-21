@@ -3449,6 +3449,13 @@ async function run() {
           || probe.staged?.terrainViewActive !== false
           || probe.staged?.storedPreset != null
           || probe.storedPreset !== "low"
+          || JSON.stringify(probe.liveTransitions?.map((receipt) => receipt.target))
+            !== JSON.stringify(["medium", "high", "low"])
+          || probe.liveTransitions?.some((receipt) => (
+            receipt.lodPreset !== receipt.target
+            || receipt.targetReady !== true
+            || receipt.storedPreset !== receipt.target
+          ))
           || probe.reloadedStoredPreset !== "low"
         ) {
           throw new Error(`browser terrain-horizon probe failed:\n${JSON.stringify({
@@ -11742,9 +11749,10 @@ function summarizeSeasonalAppearanceRenderResult(result) {
 
 /**
  * Exercise the shared Graphics stepped selector from an explicit Off baseline,
- * stage Low without side effects, Apply it once, prove that Low produces
- * distant-terrain pixels, then reload without a query override and prove that
- * the accepted stored preference restores the same renderer.
+ * stage Low without side effects, then run Off -> Low -> Medium -> High -> Low
+ * through the rendered Apply UI in one process. Prove that the final Low
+ * produces distant-terrain pixels, then reload without a query override and
+ * prove that the accepted stored preference restores the same renderer.
  *
  * @param {Page} page
  * @param {Locator} canvas
@@ -11827,6 +11835,19 @@ async function runTerrainHorizonRegressionProbe(
     );
   }
   const storedPreset = await readStoredTerrainLodPreset(page);
+  const liveTransitions = [];
+  for (const transition of [
+    { target: "medium", sliderX: 0.341 },
+    { target: "high", sliderX: 0.467 },
+    { target: "low", sliderX: 0.215 },
+  ]) {
+    liveTransitions.push(await applyTerrainLodStop(
+      page,
+      canvas,
+      transition.target,
+      transition.sliderX,
+    ));
+  }
   await page.evaluate(() => globalThis.__mcloneWebApp?.closeNativeUi?.());
   const toggleProof = await captureTerrainHorizonFrame(
     page,
@@ -11868,12 +11889,142 @@ async function runTerrainHorizonRegressionProbe(
     staged,
     stagedScreenshotPath,
     storedPreset,
+    liveTransitions,
     reloadedStoredPreset,
     toggleResult: summarizeTerrainHorizonResult(toggleProof.result),
     togglePixels: toggleProof.pixels,
     reloadResult: summarizeTerrainHorizonResult(reloadProof.result),
     reloadPixels: reloadProof.pixels,
   };
+}
+
+/**
+ * Apply one directly addressed Graphics selector stop and require the prior
+ * renderer/storage state to remain unchanged while the choice is only staged.
+ *
+ * @param {Page} page
+ * @param {Locator} canvas
+ * @param {"low" | "medium" | "high"} target
+ * @param {number} sliderX
+ */
+async function applyTerrainLodStop(page, canvas, target, sliderX) {
+  const before = await page.evaluate(() => ({
+    lodPreset: globalThis.__mcloneWebApp?.state?.terrainViewLodPreset ?? null,
+    storedPreset: (() => {
+      try {
+        return JSON.parse(
+          globalThis.localStorage?.getItem("mclone.graphics.preferences.v1") ?? "null",
+        )?.preferences?.terrainLodPreset ?? null;
+      } catch {
+        return null;
+      }
+    })(),
+  }));
+  await clickCanvasFraction(canvas, sliderX, 0.583);
+  await page.waitForTimeout(100);
+  const staged = await page.evaluate(() => ({
+    lodPreset: globalThis.__mcloneWebApp?.state?.terrainViewLodPreset ?? null,
+    storedPreset: (() => {
+      try {
+        return JSON.parse(
+          globalThis.localStorage?.getItem("mclone.graphics.preferences.v1") ?? "null",
+        )?.preferences?.terrainLodPreset ?? null;
+      } catch {
+        return null;
+      }
+    })(),
+  }));
+  if (
+    staged.lodPreset !== before.lodPreset
+    || staged.storedPreset !== before.storedPreset
+  ) {
+    throw new Error(
+      `staging Distant Terrain ${target} changed renderer/storage state: `
+        + JSON.stringify({ before, staged }),
+    );
+  }
+  await clickCanvasFraction(canvas, 0.72, 0.409);
+  await page.waitForTimeout(1_000);
+  const applying = await terrainLodBrowserState(page);
+  if (applying.requestedPreset !== target) {
+    const diagnosticPath =
+      `/tmp/mclone-native-web-terrain-horizon-${target}-apply.png`;
+    await canvas.screenshot({ path: diagnosticPath, timeout: 60_000 });
+    throw new Error(
+      `Distant Terrain ${target} Apply did not submit the staged request; `
+        + `screenshot=${diagnosticPath}; `
+        + JSON.stringify({ before, staged, applying }),
+    );
+  }
+  try {
+    await page.waitForFunction(
+      (target) => {
+        const state = globalThis.__mcloneWebApp?.state;
+        let storedPreset = null;
+        try {
+          storedPreset = JSON.parse(
+            globalThis.localStorage?.getItem("mclone.graphics.preferences.v1") ?? "null",
+          )?.preferences?.terrainLodPreset ?? null;
+        } catch {
+          return false;
+        }
+        return state?.terrainViewActive === true
+          && state?.terrainViewTargetReady === true
+          && state?.terrainViewLodPreset === target
+          && storedPreset === target;
+      },
+      target,
+      { timeout: terrainCompositionProbeTimeoutMs },
+    );
+  } catch (error) {
+    const diagnosticPath = `/tmp/mclone-native-web-terrain-horizon-${target}-timeout.png`;
+    await canvas.screenshot({ path: diagnosticPath, timeout: 60_000 });
+    const timedOut = await terrainLodBrowserState(page);
+    throw new Error(
+      `Distant Terrain ${target} did not become accepted; screenshot=${diagnosticPath}; `
+        + `${error instanceof Error ? error.message : String(error)}; `
+        + JSON.stringify({ before, staged, applying, timedOut }),
+    );
+  }
+  return page.evaluate((target) => ({
+    target,
+    lodPreset: globalThis.__mcloneWebApp?.state?.terrainViewLodPreset ?? null,
+    targetReady: globalThis.__mcloneWebApp?.state?.terrainViewTargetReady ?? null,
+    storedPreset: (() => {
+      try {
+        return JSON.parse(
+          globalThis.localStorage?.getItem("mclone.graphics.preferences.v1") ?? "null",
+        )?.preferences?.terrainLodPreset ?? null;
+      } catch {
+        return null;
+      }
+    })(),
+  }), target);
+}
+
+/** @param {Page} page */
+async function terrainLodBrowserState(page) {
+  return page.evaluate(() => ({
+    nativeUiScreen: globalThis.__mcloneWebApp?.state?.nativeUiScreen ?? null,
+    lodPreset: globalThis.__mcloneWebApp?.state?.terrainViewLodPreset ?? null,
+    requestedPreset:
+      globalThis.__mcloneWebApp?.state?.terrainViewRequestedLodPreset ?? null,
+    appliedPreset:
+      globalThis.__mcloneWebApp?.state?.terrainViewAppliedLodPreset ?? null,
+    applying: globalThis.__mcloneWebApp?.state?.terrainViewLodApplying ?? null,
+    applyError: globalThis.__mcloneWebApp?.state?.terrainViewLodApplyError ?? null,
+    active: globalThis.__mcloneWebApp?.state?.terrainViewActive ?? null,
+    targetReady: globalThis.__mcloneWebApp?.state?.terrainViewTargetReady ?? null,
+    storedPreset: (() => {
+      try {
+        return JSON.parse(
+          globalThis.localStorage?.getItem("mclone.graphics.preferences.v1") ?? "null",
+        )?.preferences?.terrainLodPreset ?? null;
+      } catch {
+        return null;
+      }
+    })(),
+  }));
 }
 
 /** @param {Record<string, any> | null} result */

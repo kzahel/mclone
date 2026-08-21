@@ -269,6 +269,28 @@ impl TerrainVegetationCoordinator {
         self.state
     }
 
+    /// Change the validation bound used by the next semantic desired-set update.
+    ///
+    /// The caller owns selecting that next set, so lowering the bound does not
+    /// arbitrarily evict currently desired tiles here.
+    pub fn reconfigure_maximum_desired_tiles(
+        &mut self,
+        maximum_desired_tiles: usize,
+    ) -> Result<bool, String> {
+        if maximum_desired_tiles == 0 {
+            return Err("terrain vegetation desired-tile bound must be non-zero".to_owned());
+        }
+        if maximum_desired_tiles == self.maximum_desired_tiles {
+            return Ok(false);
+        }
+        if maximum_desired_tiles > self.maximum_desired_tiles {
+            self.queue
+                .reserve(maximum_desired_tiles.saturating_sub(self.queue.len()));
+        }
+        self.maximum_desired_tiles = maximum_desired_tiles;
+        Ok(true)
+    }
+
     pub fn update_desired(
         &mut self,
         source: TerrainVegetationSourceIdentity,
@@ -1128,6 +1150,40 @@ mod tests {
                 .update_desired(source, 0, 0, [desired(tile(12_345, 8, 0, 0), 0, 1)])
                 .is_err()
         );
+    }
+
+    #[test]
+    fn desired_tile_bound_tracks_live_lod_reconfiguration() {
+        let control = Rc::new(RefCell::new(FakeControl::default()));
+        let mut coordinator = TerrainVegetationCoordinator::new(
+            Box::new(FakeExecutor {
+                control: Rc::clone(&control),
+            }),
+            source(12_345),
+            1,
+        )
+        .unwrap();
+        let first = desired(tile(12_345, 1, 0, 0), 0, 1);
+        let second = desired(tile(12_345, 1, 1, 0), 1, 1);
+
+        assert!(
+            coordinator
+                .update_desired(source(12_345), 0, 0, [first, second])
+                .is_err()
+        );
+        assert!(coordinator.reconfigure_maximum_desired_tiles(2).unwrap());
+        coordinator
+            .update_desired(source(12_345), 0, 0, [first, second])
+            .unwrap();
+        assert_eq!(coordinator.diagnostics().desired_tiles, 2);
+
+        assert!(coordinator.reconfigure_maximum_desired_tiles(1).unwrap());
+        coordinator
+            .update_desired(source(12_345), 0, 0, [first])
+            .unwrap();
+        assert_eq!(coordinator.diagnostics().desired_tiles, 1);
+        assert!(!coordinator.reconfigure_maximum_desired_tiles(1).unwrap());
+        assert!(coordinator.reconfigure_maximum_desired_tiles(0).is_err());
     }
 
     #[test]

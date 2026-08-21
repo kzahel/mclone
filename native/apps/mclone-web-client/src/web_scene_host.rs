@@ -3228,6 +3228,9 @@ impl WebSceneHost {
             GameUiAction::SetRenderDistance(distance) => {
                 report_set_number(object, "renderDistance", f64::from(distance))
             }
+            GameUiAction::StageTerrainLodPreset(preset) => {
+                report_set_string(object, "terrainLodPreset", preset.startup_label())
+            }
             GameUiAction::SetTouchLookSensitivity(value) => {
                 report_set_number(object, "touchLookSensitivity", f64::from(value))
             }
@@ -3614,6 +3617,26 @@ impl WebSceneHost {
             } else {
                 report_set_bool(&object, "acceptedViewAvailable", false)?;
             }
+            report_set_string(
+                &object,
+                "terrainViewRequestedLodPreset",
+                host.terrain_lod_preset_preference().startup_label(),
+            )?;
+            report_set_string(
+                &object,
+                "terrainViewAppliedLodPreset",
+                host.applied_terrain_lod_preset().startup_label(),
+            )?;
+            report_set_bool(
+                &object,
+                "terrainViewLodApplying",
+                host.terrain_lod_applying(),
+            )?;
+            report_set_string(
+                &object,
+                "terrainViewLodApplyError",
+                host.terrain_lod_apply_error().unwrap_or_default(),
+            )?;
             if let Some(terrain) = host.terrain_view_diagnostics() {
                 report_set_bool(&object, "terrainViewActive", true)?;
                 report_set_string(

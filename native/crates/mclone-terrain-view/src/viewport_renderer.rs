@@ -4059,6 +4059,13 @@ impl TerrainHorizonRenderer {
         self.visible_vegetation_slots
             .resize(self.slots.len(), false);
         self.vegetation_max_sample_spacing = vegetation_max_sample_spacing;
+        if let Some(coordinator) = &mut self.vegetation_coordinator {
+            coordinator.reconfigure_maximum_desired_tiles(
+                maximum_terrain_vegetation_desired_tiles(config, vegetation_max_sample_spacing)?,
+            )?;
+        }
+        self.admission
+            .clear_vegetation_above_sample_spacing(vegetation_max_sample_spacing);
         for slot in &mut self.slots {
             if slot.request.request().sample_spacing > vegetation_max_sample_spacing {
                 slot.clear_vegetation();

@@ -2682,6 +2682,38 @@ mod tests {
     }
 
     #[test]
+    fn accepted_distant_terrain_target_allows_another_staged_apply() {
+        let mut settings = ClientExperienceSettingsController::default();
+        settings.apply_ui_action(
+            GameUiAction::StageTerrainLodPreset(TerrainLodPreset::Low),
+            ClientExperienceSettingsProfile::default(),
+        );
+        settings.apply_ui_action(
+            GameUiAction::ApplyTerrainLodPreset,
+            ClientExperienceSettingsProfile::default(),
+        );
+
+        let mut accepted = settings.state();
+        accepted.terrain_lod_effective_preset = TerrainLodPreset::Low;
+        accepted.terrain_lod_applying = false;
+        settings.set_state(accepted);
+        settings.apply_ui_action(
+            GameUiAction::StageTerrainLodPreset(TerrainLodPreset::Medium),
+            ClientExperienceSettingsProfile::default(),
+        );
+        let effects = settings.apply_ui_action(
+            GameUiAction::ApplyTerrainLodPreset,
+            ClientExperienceSettingsProfile::default(),
+        );
+        assert_eq!(
+            effects.setting_effects,
+            vec![ClientExperienceSettingEffect::SetTerrainLodPreset(
+                TerrainLodPreset::Medium
+            )]
+        );
+    }
+
+    #[test]
     fn settings_clamp_render_distance_effects() {
         let mut settings = ClientExperienceSettingsController::new(ClientExperienceSettingsState {
             render_distance: 4,
