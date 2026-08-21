@@ -12,6 +12,7 @@ const outputRoot = "/tmp/mclone-continental-exact-review";
 const skipBuild = process.argv.includes("--skip-build");
 const skipBrowser = process.argv.includes("--skip-browser");
 const exactRadius = 4;
+const browserEnvironment = { ...process.env, HEADED: "1" };
 const sites = [
   {
     label: "clearing",
@@ -20,8 +21,6 @@ const sites = [
   {
     label: "water",
     journey: "connected-water-country",
-    centerX: "7168",
-    centerZ: "-21504",
   },
   {
     label: "arid",
@@ -50,6 +49,14 @@ const directReceipt = path.join(outputRoot, "direct-exact.json");
 run(path.join(nativeRoot, "target", "debug", "mclone_continental_exact_review"), [
   "--output", directReceipt,
 ]);
+const direct = JSON.parse(await readFile(directReceipt));
+const waterReceipt = direct.review.sites.find((site) => site.label === "water");
+if (!waterReceipt) {
+  throw new Error("direct exact receipt did not select a water review site");
+}
+const waterSite = sites.find((site) => site.label === "water");
+waterSite.centerX = waterReceipt.centerX.toString();
+waterSite.centerZ = waterReceipt.centerZ.toString();
 
 const nativeCaptures = [];
 const nativeSmokes = [];
@@ -99,18 +106,18 @@ if (!skipBrowser) {
       "--composition", "composed",
       "--blocks-across", "512",
       "--exact-radius", exactRadius.toString(),
+      "--pitch", "0.42",
     ];
     if (site.centerX !== undefined) {
       argumentsForBrowser.push("--center-x", site.centerX, "--center-z", site.centerZ);
     }
-    run("node", argumentsForBrowser);
+    run("node", argumentsForBrowser, browserEnvironment);
     const label = `continental-${site.journey}-composed`;
     const receiptPath = `/tmp/mclone-world-explorer-web-desktop-${label}-receipt.json`;
     browserReceipts.push(JSON.parse(await readFile(receiptPath)));
   }
 }
 
-const direct = JSON.parse(await readFile(directReceipt));
 const receipt = {
   schemaRevision: "mclone-continental-exact-review-package-v1",
   sourceCommit: commandText("git", ["rev-parse", "HEAD"]),
@@ -137,10 +144,10 @@ async function artifact(file) {
   return { file, bytes: (await stat(file)).size };
 }
 
-function run(command, args) {
+function run(command, args, environment = process.env) {
   const result = spawnSync(command, args, {
     cwd: repositoryRoot,
-    env: process.env,
+    env: environment,
     stdio: "inherit",
   });
   if (result.error) {

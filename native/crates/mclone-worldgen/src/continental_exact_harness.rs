@@ -39,6 +39,8 @@ pub struct ContinentalExactSiteReceipt {
     pub exact_chunks: u32,
     pub compared_columns: u32,
     pub compared_biomes: u32,
+    pub direct_land_columns: u32,
+    pub direct_water_columns: u32,
     pub height_mismatches: u32,
     pub material_mismatches: u32,
     pub water_mismatches: u32,
@@ -95,6 +97,11 @@ pub fn run_continental_exact_review(seed: i64) -> Result<ContinentalExactReviewR
         .ok_or_else(|| "missing upland-to-arid journey".to_owned())?;
 
     let generator = ContinentalCandidateExactGenerator::new(seed);
+    let water_review = select_water_bank_review_point(
+        &generator,
+        water_checkpoint.world_x,
+        water_checkpoint.world_z,
+    )?;
     let mut feature_cache = ContinentalCandidateFeatureDependencyCache::new(seed);
     let site_specs = [
         (
@@ -103,12 +110,7 @@ pub fn run_continental_exact_review(seed: i64) -> Result<ContinentalExactReviewR
             clearing.center_x,
             clearing.center_z,
         ),
-        (
-            "water",
-            water.kind.label(),
-            water_checkpoint.world_x,
-            water_checkpoint.world_z,
-        ),
+        ("water", water.kind.label(), water_review.0, water_review.1),
         ("arid", arid.kind.label(), arid.center_x, arid.center_z),
     ];
     let mut sites = Vec::with_capacity(site_specs.len());
@@ -170,6 +172,8 @@ fn review_site(
     let mut biome_mismatches = 0_u32;
     let mut compared_columns = 0_u32;
     let mut compared_biomes = 0_u32;
+    let mut direct_land_columns = 0_u32;
+    let mut direct_water_columns = 0_u32;
     let mut owned_tree_bases = 0_u32;
     let mut tree_base_mismatches = 0_u32;
     let mut exact_tree_voxels = 0_u32;
@@ -192,6 +196,11 @@ fn review_site(
                         .query_point(min_x + local_x, min_z + local_z)
                         .sample;
                     let expected_y = quantized_continental_candidate_surface_y(sample);
+                    if sample.is_water() {
+                        direct_water_columns += 1;
+                    } else {
+                        direct_land_columns += 1;
+                    }
                     let actual_y = highest_solid_y(&surface, local_x, local_z);
                     height_mismatches += u32::from(actual_y != Some(expected_y));
                     material_mismatches += u32::from(
@@ -282,6 +291,8 @@ fn review_site(
         exact_chunks: ((max_chunk_x - min_chunk_x + 1) * (max_chunk_z - min_chunk_z + 1)) as u32,
         compared_columns,
         compared_biomes,
+        direct_land_columns,
+        direct_water_columns,
         height_mismatches,
         material_mismatches,
         water_mismatches,
@@ -296,6 +307,54 @@ fn review_site(
         retained_feature_dependency_chunks,
         exact_sha256: digest_hex(exact_digest.finalize()),
     })
+}
+
+fn select_water_bank_review_point(
+    generator: &ContinentalCandidateExactGenerator,
+    origin_x: i32,
+    origin_z: i32,
+) -> Result<(i32, i32), String> {
+    const STEP: i32 = 32;
+    const MAX_RADIUS: i32 = 4_096;
+    const LAND_PROBE: i32 = 32;
+    const PROBES: [(i32, i32); 8] = [
+        (-LAND_PROBE, -LAND_PROBE),
+        (0, -LAND_PROBE),
+        (LAND_PROBE, -LAND_PROBE),
+        (-LAND_PROBE, 0),
+        (LAND_PROBE, 0),
+        (-LAND_PROBE, LAND_PROBE),
+        (0, LAND_PROBE),
+        (LAND_PROBE, LAND_PROBE),
+    ];
+    for radius in (0..=MAX_RADIUS).step_by(STEP as usize) {
+        for offset_z in (-radius..=radius).step_by(STEP as usize) {
+            for offset_x in (-radius..=radius).step_by(STEP as usize) {
+                if offset_x.abs().max(offset_z.abs()) != radius {
+                    continue;
+                }
+                let world_x = origin_x + offset_x;
+                let world_z = origin_z + offset_z;
+                let sample = generator.surface().query_point(world_x, world_z).sample;
+                if !sample.is_water() {
+                    continue;
+                }
+                let has_nearby_land = PROBES.iter().any(|(probe_x, probe_z)| {
+                    !generator
+                        .surface()
+                        .query_point(world_x + probe_x, world_z + probe_z)
+                        .sample
+                        .is_water()
+                });
+                if has_nearby_land {
+                    return Ok((world_x, world_z));
+                }
+            }
+        }
+    }
+    Err(format!(
+        "no water-to-land review point within {MAX_RADIUS} blocks of ({origin_x}, {origin_z})"
+    ))
 }
 
 fn highest_solid_y(
@@ -364,6 +423,13 @@ mod tests {
                 .iter()
                 .all(|site| site.compared_columns == 6_400)
         );
+        let water = receipt
+            .sites
+            .iter()
+            .find(|site| site.label == "water")
+            .unwrap();
+        assert!(water.direct_water_columns > 0);
+        assert!(water.direct_land_columns > 0);
         assert!(
             receipt
                 .sites

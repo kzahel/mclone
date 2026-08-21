@@ -25,6 +25,8 @@ const centerX = argumentValue("--center-x");
 const centerZ = argumentValue("--center-z");
 const blocksAcross = Number.parseInt(argumentValue("--blocks-across") ?? "96", 10);
 const exactRadius = Number.parseInt(argumentValue("--exact-radius") ?? "2", 10);
+const yaw = argumentValue("--yaw") ?? "3.1415927";
+const pitch = argumentValue("--pitch") ?? "0.12";
 if (!["composed", "coverage", "exact"].includes(composition)) {
   throw new Error(`unsupported browser composition smoke mode ${composition}`);
 }
@@ -82,8 +84,8 @@ try {
   parameters.set("blocksAcross", blocksAcross.toString());
   parameters.set("view", "3d");
   parameters.set("projection", "perspective");
-  parameters.set("yaw", "3.1415927");
-  parameters.set("pitch", "0.12");
+  parameters.set("yaw", yaw);
+  parameters.set("pitch", pitch);
   parameters.set("composition", composition);
   parameters.set("exactRadius", exactRadius.toString());
   parameters.set("smokeObserver", "1");
