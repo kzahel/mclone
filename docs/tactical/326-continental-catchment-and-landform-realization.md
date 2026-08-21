@@ -1,6 +1,9 @@
 # Tactical 326: Continental Catchment And Landform Realization
 
-Status: **authorized 2026-08-21; Phase 0 documentation in progress.**
+Status: **authorized 2026-08-21; Phase 1 graph foundation implemented. The
+reported mountain-navigation crash has not reproduced in the old candidate's
+static or full movement/teleport smokes, so the retained regression must be
+repeated against the substantially higher realized range in Phase 2.**
 
 Topic: `continental-hydrography`
 Topic: `continental-ecoregion-planning`
@@ -185,6 +188,52 @@ recipes or coordinate-specific terrain branches.
 - LOD cold teleport and pan perform bounded point/window work with zero exact
   generation inside the procedural source.
 - Native and Wasm deterministic witnesses match.
+
+## Execution Record
+
+### Phase 0: Review Decision And Crash Baseline
+
+Started on 2026-08-21.
+
+- Human Review C is recorded as revise in Tactical 325 and the living
+  continental topic. The new `continental-hydrography` topic consolidates the
+  accepted/rejected river, stream, shoreline, basin, planning, and
+  representation evidence.
+- The existing headed browser composition runner reached the upland/arid site
+  with 81 exact chunks, ten committed LOD levels, complete tree ownership, and
+  no panic or device loss.
+- A native full smoke beginning at highland checkpoint `(12800, 19968)` then
+  exercised retained pans, negative coordinates, and a cold teleport to
+  roughly `(1000051, -1000022)`. Native-surface and offscreen lanes both
+  completed with 81 exact chunks and all 160 procedural slots.
+- These controls do not falsify the report. They show that height 123 in the
+  old scalar candidate is not sufficient to reproduce it. Phase 2 must repeat
+  the same movement and teleport path over the new higher range, and retain
+  any resulting failure coordinate as the regression.
+
+### Phase 1: Catchment Graph Foundation
+
+Implemented on 2026-08-21.
+
+- Added a detached `ContinentalHydrographyPlan` over 32,768-block canonical
+  owner cells. Each point reconstructs exactly a 3-by-3 owner neighborhood,
+  selects at most one bounded catchment, and evaluates eight compact reaches.
+- One graph contains three headwaters, two tributaries, one trunk, one lake
+  inlet, an explicit lake/spill, and one outlet. Stable typed IDs distinguish
+  catchment, reach, lake, and spill ownership.
+- Reach order, synthetic discharge, head/tail water levels, width envelopes,
+  downstream identity/vector, lake level, shore intent, range/divide/saddle,
+  valley, and floodplain weights are directly queryable. Point work records
+  zero raster cells and zero exact chunks.
+- Focused tests prove bounded topological order, monotonic levels, every
+  pre-lake source reaching the lake, arbitrary query-order identity, negative
+  owners, and exact repetition on the 196,608-block X-cylinder.
+- The native/Wasm corpus covers three graphs and eleven semantic samples per
+  graph. Its committed witness is
+  `febe9aea251e4e6fd63127e4b6c0e4187ef76ee525ece2bcdeff25916d2880d0`.
+- The graph is not yet connected to `ContinentalSurfacePlan`, exact chunks, or
+  LOD. Its JSON receipt is diagnostic topology evidence, not a Human Review D
+  artifact.
 
 ## Human Review D
 

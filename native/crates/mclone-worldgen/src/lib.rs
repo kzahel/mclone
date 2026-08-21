@@ -7,6 +7,8 @@ pub mod continental_ecoregion;
 pub mod continental_ecoregion_atlas;
 pub mod continental_ecoregion_harness;
 pub mod continental_exact_harness;
+pub mod continental_hydrography;
+pub mod continental_hydrography_harness;
 pub mod continental_surface;
 pub mod continental_surface_harness;
 pub mod continental_surface_journey;
