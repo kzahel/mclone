@@ -7,6 +7,7 @@ use crate::{
     CanonicalPackedNaturalTree, decode_canonical_batch, encode_canonical_batch,
 };
 use js_sys::{Array, Function, Object, Reflect, Uint8Array};
+use mclone_worldgen::terrain_preview::TerrainPreviewProfile;
 use wasm_bindgen::{JsCast, JsValue};
 
 const FRAME_INIT: &str = "exact-init";
@@ -30,8 +31,27 @@ impl BrowserCanonicalExactExecutor {
         provisional_bytes: Vec<u8>,
         diagnostic_bytes: Vec<u8>,
     ) -> Result<Self, String> {
-        Self::new_with_visual_assets(
+        Self::new_for_profile(
             transport_factory,
+            TerrainPreviewProfile::McloneOverworldV1,
+            seed,
+            authored_bytes,
+            provisional_bytes,
+            diagnostic_bytes,
+        )
+    }
+
+    pub fn new_for_profile(
+        transport_factory: JsValue,
+        profile: TerrainPreviewProfile,
+        seed: i64,
+        authored_bytes: Vec<u8>,
+        provisional_bytes: Vec<u8>,
+        diagnostic_bytes: Vec<u8>,
+    ) -> Result<Self, String> {
+        Self::new_with_visual_assets_for_profile(
+            transport_factory,
+            profile,
             seed,
             authored_bytes,
             Vec::new(),
@@ -53,6 +73,31 @@ impl BrowserCanonicalExactExecutor {
         visual_profile: &str,
         texture_presentation: &str,
     ) -> Result<Self, String> {
+        Self::new_with_visual_assets_for_profile(
+            transport_factory,
+            TerrainPreviewProfile::McloneOverworldV1,
+            seed,
+            authored_bytes,
+            reference_bytes,
+            provisional_bytes,
+            diagnostic_bytes,
+            visual_profile,
+            texture_presentation,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_visual_assets_for_profile(
+        transport_factory: JsValue,
+        profile: TerrainPreviewProfile,
+        seed: i64,
+        authored_bytes: Vec<u8>,
+        reference_bytes: Vec<u8>,
+        provisional_bytes: Vec<u8>,
+        diagnostic_bytes: Vec<u8>,
+        visual_profile: &str,
+        texture_presentation: &str,
+    ) -> Result<Self, String> {
         let factory = transport_factory
             .dyn_into::<Function>()
             .map_err(|_| "runtime exact Worker transport factory is not callable".to_owned())?;
@@ -62,6 +107,7 @@ impl BrowserCanonicalExactExecutor {
         }
         let frame = Object::new();
         set_string(&frame, "kind", FRAME_INIT)?;
+        set_string(&frame, "profile", profile.label())?;
         set_string(&frame, "seed", &seed.to_string())?;
         set_string(&frame, "visualProfile", visual_profile)?;
         set_string(&frame, "texturePresentation", texture_presentation)?;

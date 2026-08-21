@@ -217,6 +217,42 @@ Completed on 2026-08-21.
 Surface witness after the shared-detail revision:
 `16173c8d5504d779a7e201eb3bb2ef068f49e971e328964a1aaca4ab0af53dac`.
 
+### Phase 2: Composed Exact And LOD
+
+Completed on 2026-08-21.
+
+- Native and browser exact executors now carry the selected terrain profile
+  through worker initialization, canonical meshing, exact source identity,
+  runtime view height, coverage, and tree-ownership validation. Existing
+  default constructors retain production behavior for other hosts.
+- The first composed candidate frame exposed a production-source leak in the
+  fine frontier support belt as a conspicuous snowy mountain ring. Frontier
+  resources and tree ownership are now profile-qualified. Because the
+  candidate is a CPU reference source, its fine support tiles upload the same
+  candidate reference samples and height halo instead of dispatching the
+  production-only GPU sampler.
+- Journey URLs now default to composed exact-plus-horizon review. Explicit
+  `composition=horizon`, `exact`, and `coverage` remain available.
+- Inspected radius-4 native frames for all three sites at
+  `/tmp/mclone-continental-composed-clearing-phase2-v2.png`,
+  `/tmp/mclone-continental-composed-water-phase2.png`, and
+  `/tmp/mclone-continental-composed-arid-phase2.png`, plus
+  `/tmp/mclone-continental-coverage-clearing-phase2.png`. The water frame uses
+  checkpoint `(7168, -21504)`, where the shared plan owns a lake.
+- A source-qualified browser Worker completed the clearing site with 25 exact
+  chunks, matching coverage generation 27, no missing ownership records, and
+  inspected pixels at
+  `/tmp/mclone-world-explorer-web-desktop-continental-clearing-between-forest-cores-composed-review.png`.
+- Radius-4 composed captures completed in 2.95-3.24 seconds. A radius-8
+  candidate composition exposed avoidable CPU frontier reconstruction on each
+  incremental exact admission and missed the 15-second capture deadline after
+  painting 227 of 289 chunks. That is recorded performance debt for Phase 4,
+  not a smaller accepted exact radius.
+
+The central exact ground is intentionally treeless at this gate. Phase 3 must
+realize and transfer ownership of the same stable candidate tree records; the
+empty square is not review-ready terrain.
+
 ## Non-Goals
 
 This tactical does not:

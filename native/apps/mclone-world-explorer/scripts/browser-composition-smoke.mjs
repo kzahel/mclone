@@ -19,6 +19,12 @@ const semanticOnly = process.argv.includes("--semantic-only");
 const sourceColors = process.argv.includes("--source-colors");
 const composition = argumentValue("--composition") ?? "composed";
 const exactAnchor = argumentValue("--exact-anchor") ?? "focus";
+const terrainSource = argumentValue("--source") ?? "production";
+const journey = argumentValue("--journey");
+const centerX = argumentValue("--center-x");
+const centerZ = argumentValue("--center-z");
+const blocksAcross = Number.parseInt(argumentValue("--blocks-across") ?? "96", 10);
+const exactRadius = Number.parseInt(argumentValue("--exact-radius") ?? "2", 10);
 if (!["composed", "coverage", "exact"].includes(composition)) {
   throw new Error(`unsupported browser composition smoke mode ${composition}`);
 }
@@ -28,6 +34,8 @@ if (!["focus", "viewer-forward"].includes(exactAnchor)) {
 const externalBaseUrl = process.env.WORLD_EXPLORER_SMOKE_BASE_URL;
 const label = mobile ? "phone" : "desktop";
 const captureLabel = [
+  terrainSource === "production" ? null : terrainSource,
+  journey,
   composition,
   sourceColors ? "source-colors" : null,
   exactAnchor === "focus" ? null : exactAnchor,
@@ -67,14 +75,25 @@ try {
       pageErrors.push(message.text());
     }
   });
-  const target = new URL(
-    "?seed=12345&centerX=0&centerZ=0&blocksAcross=96"
-      + "&view=3d&projection=perspective&yaw=3.1415927&pitch=0.12"
-      + `&composition=${composition}&exactRadius=2&smokeObserver=1`
-      + `&exactAnchor=${exactAnchor}`
-      + (sourceColors ? "&sourceColors=1" : ""),
-    normalizedBaseUrl(),
-  );
+  const target = new URL(normalizedBaseUrl());
+  const parameters = target.searchParams;
+  parameters.set("seed", "12345");
+  parameters.set("source", terrainSource);
+  parameters.set("blocksAcross", blocksAcross.toString());
+  parameters.set("view", "3d");
+  parameters.set("projection", "perspective");
+  parameters.set("yaw", "3.1415927");
+  parameters.set("pitch", "0.12");
+  parameters.set("composition", composition);
+  parameters.set("exactRadius", exactRadius.toString());
+  parameters.set("smokeObserver", "1");
+  parameters.set("exactAnchor", exactAnchor);
+  if (journey) parameters.set("journey", journey);
+  if (centerX !== undefined) parameters.set("centerX", centerX);
+  if (centerZ !== undefined) parameters.set("centerZ", centerZ);
+  if (!journey && centerX === undefined) parameters.set("centerX", "0");
+  if (!journey && centerZ === undefined) parameters.set("centerZ", "0");
+  if (sourceColors) parameters.set("sourceColors", "1");
   await page.goto(target.href, { waitUntil: "networkidle" });
   await page.locator("#world-explorer-shell").waitFor({ state: "visible" });
   await page.waitForFunction(
@@ -146,14 +165,19 @@ try {
 }
 
 function assertCompositionReport(report) {
+  const expectedChunks = (exactRadius * 2 + 1) ** 2;
   const expectedCoverageMode = composition === "coverage"
     ? "visualize-painted"
     : composition === "composed"
       ? "discard-painted"
       : "disabled";
   if (report.composition !== composition
+      || report.terrainSource !== (terrainSource === "continental"
+        ? "continental-ecoregion-candidate-v1"
+        : "mclone-overworld-v1")
+      || report.journey !== (journey ?? null)
       || report.sourceColors !== sourceColors
-      || report.exactRadius !== 2
+      || report.exactRadius !== exactRadius
       || report.exactAnchor !== exactAnchor
       || (exactAnchor === "focus"
         && (report.exactAnchorX !== report.centerX
@@ -163,8 +187,8 @@ function assertCompositionReport(report) {
           report.exactAnchorX - report.centerX,
           report.exactAnchorZ - report.centerZ,
         ) < 64)
-      || report.exactDesiredChunks !== 25
-      || report.exactPaintedChunks !== 25
+      || report.exactDesiredChunks !== expectedChunks
+      || report.exactPaintedChunks !== expectedChunks
       || report.exactQueuedChunks !== 0
       || report.exactPendingAdmissions !== 0
       || report.exactInFlight
@@ -172,7 +196,7 @@ function assertCompositionReport(report) {
       || report.exactCoverageMode !== expectedCoverageMode
       || (composition !== "exact"
         && report.proceduralCoverageGeneration !== report.exactCoverageGeneration)
-      || (composition !== "exact" && report.proceduralPaintedChunks !== 25)
+      || (composition !== "exact" && report.proceduralPaintedChunks !== expectedChunks)
       || report.treeProxyMissingExactRecords !== 0
       || report.treeProxyMissingProxyRecords !== 0
       || report.canonicalExactOwnedTreeRecords

@@ -3912,7 +3912,7 @@ impl TerrainHorizonRenderer {
                     renderer.sample_byte_len,
                     horizon_normal_height_byte_len,
                     TerrainViewportTileId {
-                        profile: TerrainPreviewProfile::McloneOverworldV1,
+                        profile,
                         seed: 0,
                         tile_x: (resource % config.tiles_per_axis) as i32,
                         tile_z: (resource / config.tiles_per_axis) as i32,
@@ -4031,7 +4031,7 @@ impl TerrainHorizonRenderer {
                         self.renderer.sample_byte_len,
                         horizon_normal_height_byte_len,
                         TerrainViewportTileId {
-                            profile: TerrainPreviewProfile::McloneOverworldV1,
+                            profile: self.profile,
                             seed: 0,
                             tile_x: (resource % config.tiles_per_axis) as i32,
                             tile_z: (resource / config.tiles_per_axis) as i32,
@@ -4320,7 +4320,7 @@ impl TerrainHorizonRenderer {
                 self.renderer.sample_byte_len,
                 normal_height_byte_len,
                 TerrainViewportTileId {
-                    profile: TerrainPreviewProfile::McloneOverworldV1,
+                    profile: self.profile,
                     seed: self.seed,
                     tile_x,
                     tile_z,
@@ -4336,14 +4336,28 @@ impl TerrainHorizonRenderer {
                 identity.presentation,
                 &connector_instances,
             );
+            let ready = !self.profile.supports_gpu_lod();
+            if ready {
+                let (reference, height_halo) =
+                    TerrainPreviewReferenceGrid::compile_continental_with_height_halo(
+                        tile.request.request(),
+                        TERRAIN_HORIZON_NORMAL_HALO_RADIUS,
+                    )?;
+                tile.upload_horizon_reference(
+                    queue,
+                    self.renderer.sample_byte_len,
+                    reference,
+                    &height_halo,
+                )?;
+            }
             tiles.push(TerrainFrontierSupportGpuTile {
                 key: *key,
                 tile,
-                ready: false,
+                ready,
                 outer_edge_flags,
             });
         }
-        let committed = tiles.is_empty();
+        let committed = tiles.iter().all(|tile| tile.ready);
         Ok(TerrainFrontierSupportGpu {
             identity,
             tiles,
@@ -4472,10 +4486,7 @@ impl TerrainHorizonRenderer {
         queue: &wgpu::Queue,
         snapshot: &BoundedRepresentationOwnershipSnapshot<McloneTreeOccurrenceId>,
     ) -> Result<(), String> {
-        let expected = TerrainCompositionSourceIdentity::new(
-            TerrainPreviewProfile::McloneOverworldV1,
-            self.seed,
-        );
+        let expected = TerrainCompositionSourceIdentity::new(self.profile, self.seed);
         if snapshot.source() != expected {
             return Err(format!(
                 "tree ownership source {:?} does not match horizon source {:?}",

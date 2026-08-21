@@ -110,7 +110,6 @@ impl ExplorerOptions {
         let mut center_z_explicit = false;
         let mut blocks_across_explicit = false;
         let mut yaw_explicit = false;
-        let mut composition_explicit = false;
         let mut arguments = env::args_os();
         let _program = arguments.next();
         while let Some(argument) = arguments.next() {
@@ -193,7 +192,6 @@ impl ExplorerOptions {
                         name,
                     )?)
                     .map_err(anyhow::Error::msg)?;
-                    composition_explicit = true;
                 }
                 "--source-colors" => options.source_colors = true,
                 "--exact-radius" => {
@@ -225,9 +223,6 @@ impl ExplorerOptions {
         if let Some(journey) = options.journey {
             if !source_explicit {
                 options.terrain_profile = TerrainPreviewProfile::ContinentalEcoregionCandidate;
-            }
-            if !composition_explicit {
-                options.composition = WorldExplorerCompositionMode::Horizon;
             }
             let catalog = compile_continental_surface_journeys(
                 ContinentalEcoregionDescriptor::plane(options.seed),

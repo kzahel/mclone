@@ -117,7 +117,6 @@ impl WebExplorerOptions {
         if let Some(value) = parameters.get("exactAnchor") {
             options.exact_anchor = WorldExplorerExactAnchor::parse_label(&value)?;
         }
-        let composition_explicit = parameters.get("composition").is_some();
         if let Some(value) = parameters.get("composition") {
             options.composition = WorldExplorerCompositionMode::parse_label(&value)?;
         }
@@ -149,9 +148,6 @@ impl WebExplorerOptions {
             if !source_explicit {
                 options.terrain_profile = TerrainPreviewProfile::ContinentalEcoregionCandidate;
             }
-            if !composition_explicit {
-                options.composition = WorldExplorerCompositionMode::Horizon;
-            }
             let catalog = compile_continental_surface_journeys(
                 ContinentalEcoregionDescriptor::plane(options.seed),
             )
@@ -178,14 +174,6 @@ impl WebExplorerOptions {
         if options.source_colors && options.composition == WorldExplorerCompositionMode::Horizon {
             return Err(
                 "World Explorer sourceColors=1 requires exact, composed, or coverage composition"
-                    .to_owned(),
-            );
-        }
-        if options.terrain_profile == TerrainPreviewProfile::ContinentalEcoregionCandidate
-            && options.composition != WorldExplorerCompositionMode::Horizon
-        {
-            return Err(
-                "the continental terrain source requires horizon composition until its exact Web Worker is initialized"
                     .to_owned(),
             );
         }
@@ -834,20 +822,22 @@ impl WebWorldExplorer {
         let exact = if options.composition == WorldExplorerCompositionMode::Horizon {
             None
         } else {
-            let executor = BrowserCanonicalExactExecutor::new(
+            let executor = BrowserCanonicalExactExecutor::new_for_profile(
                 exact_worker_transport_factory,
+                options.terrain_profile,
                 options.seed,
                 authored_asset_bytes,
                 provisional_asset_bytes,
                 diagnostic_asset_bytes,
             )?;
             Some(
-                ExplorerExactTerrain::new_with_executor(
+                ExplorerExactTerrain::new_with_executor_for_profile(
                     &device,
                     &queue,
                     format,
                     width,
                     height,
+                    options.terrain_profile,
                     options.seed,
                     options.exact_radius,
                     Box::new(executor),

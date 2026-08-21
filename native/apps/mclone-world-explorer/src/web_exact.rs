@@ -43,6 +43,8 @@ impl WorldExplorerExactWorkerActor {
     fn handle_message_inner(&mut self, frame: &JsValue) -> Result<Object, String> {
         match string_property(frame, "kind")?.as_str() {
             FRAME_INIT => {
+                let profile =
+                    TerrainPreviewProfile::parse_label(&string_property(frame, "profile")?)?;
                 let seed_text = string_property(frame, "seed")?;
                 let seed = seed_text
                     .parse::<i64>()
@@ -53,7 +55,7 @@ impl WorldExplorerExactWorkerActor {
                     bytes_property(frame, "diagnosticBytes")?,
                 )?;
                 let mut session = CanonicalMeshSession::new(
-                    TerrainPreviewProfile::McloneOverworldV1,
+                    profile,
                     seed,
                     CanonicalTerrainStage::FinalFeatures,
                     assets.catalog,
