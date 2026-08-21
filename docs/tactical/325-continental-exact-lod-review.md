@@ -1,7 +1,7 @@
 # Tactical 325: Continental Exact And LOD Review
 
-Status: **implemented through Human Review C on 2026-08-21; awaiting human
-review.**
+Status: **implemented and reviewed 2026-08-21; Human Review C selected revise
+and continues through Tactical 326.**
 
 Topic: `continental-ecoregion-planning`
 
@@ -344,6 +344,23 @@ This tactical does not:
 - declare the macro plan or surface accepted without Human Review C.
 
 ## Human Review C
+
+Human Review C selected **revise** on 2026-08-21. The reviewer retained the
+continent-scale direction and found the candidate promising, but did not
+accept the surface or authorize production integration:
+
+- the lake shoreline is an abrupt, mostly constant-height cliff;
+- travel toward the larger mountain/snow region can crash;
+- mountains and other persistent landforms are absent, leaving a mostly flat
+  macro plan plus noise; and
+- rivers and streams are missing as a connected drainage system.
+
+The correction must treat ranges, divides, valleys, streams, rivers, lake
+basins, shorelines, and outlets as one causal catchment rather than independent
+surface effects. Existing water research and accepted bounded stream and
+morphology work should be reused where compatible. Tactical
+[`326`](326-continental-catchment-and-landform-realization.md) owns that
+revision and again stops before production integration.
 
 The decision is one of:
 

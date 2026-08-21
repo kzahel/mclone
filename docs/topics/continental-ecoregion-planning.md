@@ -70,13 +70,17 @@ accepting the surface: the plan seems reasonable, but the abstract
 presentation and poor refill performance are insufficient until real exact
 terrain is composed with the same LOD. Tactical
 [`325`](../tactical/325-continental-exact-lod-review.md) now implements that
-probe and awaits Human Review C. One detached shared source produces exact
+probe and reached Human Review C. One detached shared source produces exact
 blocks, materials, water, biome IDs, stable trees, and every LOD level at the
 clearing, connected-water, and arid journeys. Direct-versus-exact checks have
 zero semantic mismatches, while retained movement preserves bounded work.
-Production remains unchanged. Review must still judge the visible
-exact/procedural water treatment and regular broad proxy forests before any
-promotion.
+Production remains unchanged. Human Review C retained the continental scale
+but selected **revise**: the thresholded lake has a uniform cliff-like rim,
+mountain travel can crash, broad uplands lack recognizable mountain form, and
+the candidate has no connected river/stream system. Tactical
+[`326`](../tactical/326-continental-catchment-and-landform-realization.md)
+therefore co-authors one bounded range-to-lake catchment through exact terrain
+and LOD before another production decision.
 Mclone should combine
 top-down continental and ecoregional planning with bottom-up procedural
 realization so the Overworld contains large, recognizable, causally related
@@ -428,6 +432,12 @@ revision; rejection may remove the candidate without a migration. The known
 review debts are the regular broad proxy forests, the exact/procedural water
 appearance seam, and reference-path streaming cost rather than missing exact
 terrain or divergent geography.
+
+Human Review C selected **revise** on 2026-08-21. The exact/LOD architecture
+and continent-scale organization remain useful, but the current scalar upland,
+threshold lake, habitat-derived pseudo-river, and crash behavior are not an
+acceptable terrain realization. The next proof is governed by
+[`continental-hydrography.md`](continental-hydrography.md) and Tactical 326.
 
 ## Acceptance
 
