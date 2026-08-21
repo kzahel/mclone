@@ -89,6 +89,11 @@ pub struct SceneTerrainViewDiagnostics {
     pub drawn_tree_instances: u32,
     pub drawn_tree_tiles_by_level: [u32; TERRAIN_LOD_HIGH_LEVEL_COUNT as usize],
     pub drawn_tree_instances_by_level: [u32; TERRAIN_LOD_HIGH_LEVEL_COUNT as usize],
+    pub drawn_canopy_tiles: u32,
+    pub drawn_canopy_cells: u32,
+    pub drawn_canopy_vertices: u32,
+    pub drawn_canopy_tiles_by_level: [u32; TERRAIN_LOD_HIGH_LEVEL_COUNT as usize],
+    pub drawn_canopy_cells_by_level: [u32; TERRAIN_LOD_HIGH_LEVEL_COUNT as usize],
     pub target_ready: bool,
     pub tree_instance_count: u32,
     pub pending_vegetation_tiles: u32,
@@ -765,6 +770,11 @@ impl SceneTerrainViewState {
         self.diagnostics.drawn_tree_instances = stats.drawn_tree_instances;
         self.diagnostics.drawn_tree_tiles_by_level = stats.drawn_tree_tiles_by_level;
         self.diagnostics.drawn_tree_instances_by_level = stats.drawn_tree_instances_by_level;
+        self.diagnostics.drawn_canopy_tiles = stats.drawn_canopy_tiles;
+        self.diagnostics.drawn_canopy_cells = stats.drawn_canopy_cells;
+        self.diagnostics.drawn_canopy_vertices = stats.drawn_canopy_vertices;
+        self.diagnostics.drawn_canopy_tiles_by_level = stats.drawn_canopy_tiles_by_level;
+        self.diagnostics.drawn_canopy_cells_by_level = stats.drawn_canopy_cells_by_level;
         self.diagnostics.target_ready = stats.target_ready;
         self.diagnostics.tree_instance_count = stats.tree_instance_count;
         self.diagnostics.pending_vegetation_tiles = stats.pending_vegetation_tiles;

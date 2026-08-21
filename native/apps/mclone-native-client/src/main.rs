@@ -302,6 +302,20 @@ fn main() -> Result<()> {
                 },
             );
             println!("MCLONE_TERRAIN_SEAM_STATE {terrain_view}");
+            let canopy_view = report.terrain_view.map_or_else(
+                || serde_json::json!({ "enabled": false }),
+                |terrain| {
+                    serde_json::json!({
+                        "enabled": true,
+                        "drawnTiles": terrain.drawn_canopy_tiles,
+                        "drawnCells": terrain.drawn_canopy_cells,
+                        "drawnVertices": terrain.drawn_canopy_vertices,
+                        "drawnTilesByLevel": terrain.drawn_canopy_tiles_by_level,
+                        "drawnCellsByLevel": terrain.drawn_canopy_cells_by_level,
+                    })
+                },
+            );
+            println!("MCLONE_TERRAIN_CANOPY_STATE {canopy_view}");
             println!(
                 "MCLONE_SEASONAL_APPEARANCE_STATE {}",
                 report.seasonal_appearance_receipt_json

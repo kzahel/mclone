@@ -19,6 +19,17 @@ struct TerrainPreviewParams {
     multiview_options: vec4<u32>,
 };
 
+struct TerrainPreviewSample {
+    terrain: vec4<f32>,
+    climate: vec4<f32>,
+    large_fields: vec4<f32>,
+    hydrology: vec4<f32>,
+    hydrology_detail: vec4<f32>,
+    semantics: vec4<f32>,
+    forest_summary: vec4<f32>,
+    forest_detail: vec4<f32>,
+};
+
 // __MCLONE_TARGET_COLOR_TRANSFER_WGSL__
 const terrain_target_color_transform: f32 = __MCLONE_TARGET_COLOR_TRANSFORM__;
 // MCLONE_FOG_FUNCTION
@@ -36,6 +47,9 @@ const TERRAIN_HORIZON_DIAGNOSTIC_FRONTIER_SUPPORT: u32 = 9u;
 
 @group(0) @binding(0)
 var<uniform> params: TerrainPreviewParams;
+
+@group(0) @binding(1)
+var<storage, read> terrain_samples: array<TerrainPreviewSample>;
 
 struct TerrainExactCoverageParams {
     origin_size: vec4<i32>,
@@ -112,6 +126,122 @@ fn family_color(family: u32, trunk: bool) -> vec3<f32> {
         return vec3<f32>(0.08, 0.34, 0.12);
     }
     return vec3<f32>(0.16, 0.45, 0.20);
+}
+
+fn canopy_fan_position(vertex_in_cell: u32) -> vec2<f32> {
+    let corner = vertex_in_cell / 3u;
+    let vertex = vertex_in_cell % 3u;
+    if vertex == 2u {
+        return vec2<f32>(0.5, 0.5);
+    }
+    let corners = array<vec2<f32>, 4>(
+        vec2<f32>(0.0, 0.0),
+        vec2<f32>(0.0, 1.0),
+        vec2<f32>(1.0, 1.0),
+        vec2<f32>(1.0, 0.0),
+    );
+    return corners[(corner + vertex) & 3u];
+}
+
+fn canopy_height_hash(world_x: i32, world_z: i32) -> f32 {
+    var value = bitcast<u32>(world_x) * 0x9e3779b9u;
+    value = value ^ (bitcast<u32>(world_z) * 0x85ebca6bu);
+    value = value ^ (params.seed_source_view.x * 0xc2b2ae35u);
+    value = value ^ (value >> 16u);
+    value = value * 0x7feb352du;
+    value = value ^ (value >> 15u);
+    return f32(value & 1023u) / 1023.0;
+}
+
+fn canopy_vertex(vertex_index: u32, view_index: u32) -> VertexOutput {
+    let canopy_cells_per_axis = 16u;
+    let tile_cells = u32(params.origin_spacing_cells.w);
+    let sample_stride = max(tile_cells / canopy_cells_per_axis, 1u);
+    let canopy_cell = vertex_index / 12u;
+    let canopy_x = canopy_cell % canopy_cells_per_axis;
+    let canopy_z = canopy_cell / canopy_cells_per_axis;
+    let local_position = canopy_fan_position(vertex_index % 12u);
+    let center_sample_x = min(canopy_x * sample_stride + sample_stride / 2u, tile_cells);
+    let center_sample_z = min(canopy_z * sample_stride + sample_stride / 2u, tile_cells);
+    let center_index = center_sample_z * params.layer_samples_size.y + center_sample_x;
+    let center_sample = terrain_samples[center_index];
+    let shaped_position = local_position;
+    let sample_x = min(
+        canopy_x * sample_stride + u32(round(shaped_position.x * f32(sample_stride))),
+        tile_cells,
+    );
+    let sample_z = min(
+        canopy_z * sample_stride + u32(round(shaped_position.y * f32(sample_stride))),
+        tile_cells,
+    );
+    let surface_index = sample_z * params.layer_samples_size.y + sample_x;
+    let surface = terrain_samples[surface_index];
+    let world_x = f32(params.origin_spacing_cells.x)
+        + (f32(canopy_x * sample_stride) + shaped_position.x * f32(sample_stride))
+            * f32(params.origin_spacing_cells.z);
+    let world_z = f32(params.origin_spacing_cells.y)
+        + (f32(canopy_z * sample_stride) + shaped_position.y * f32(sample_stride))
+            * f32(params.origin_spacing_cells.z);
+    let center_vertex = (vertex_index % 3u) == 2u;
+    var coverage = clamp(
+        center_sample.forest_summary.x
+            * clamp(center_sample.forest_detail.w, 0.0, 1.0)
+            * (1.0 - clamp(center_sample.climate.z, 0.0, 1.0)),
+        0.0,
+        1.0,
+    );
+    var mean_height = max(center_sample.forest_detail.x, 2.0);
+    var variation = max(center_sample.forest_detail.y, 0.0);
+    var family = u32(round(center_sample.forest_summary.z));
+    var family_mix = clamp(center_sample.forest_summary.w, 0.0, 1.0);
+    if !center_vertex {
+        coverage = clamp(
+            surface.forest_summary.x
+                * clamp(surface.forest_detail.w, 0.0, 1.0)
+                * (1.0 - clamp(surface.climate.z, 0.0, 1.0)),
+            0.0,
+            1.0,
+        );
+        mean_height = max(surface.forest_detail.x, 2.0);
+        variation = max(surface.forest_detail.y, 0.0);
+        family = u32(round(surface.forest_summary.z));
+        family_mix = clamp(surface.forest_summary.w, 0.0, 1.0);
+    }
+    let height_noise = canopy_height_hash(i32(round(world_x)), i32(round(world_z)));
+    let canopy_height = max(mean_height + (height_noise - 0.5) * variation, 1.5);
+    let lift = canopy_height * smoothstep(0.10, 0.68, coverage);
+    let crown_shape = select(0.82 + height_noise * 0.06, 1.0, center_vertex);
+    let world = vec3<f32>(
+        world_x,
+        surface.terrain.y + 1.05 + lift * crown_shape,
+        world_z,
+    );
+    let relative_x = world.x - f32(params.viewport_center_extent.x)
+        - params.presentation_center_extent.x;
+    let relative_z = world.z - f32(params.viewport_center_extent.y)
+        - params.presentation_center_extent.y;
+    var view_projection = params.view_projection;
+    if view_index != 0u {
+        view_projection = params.view_projection_right;
+    }
+    var clip_position = view_projection * vec4<f32>(
+        vec3<f32>(relative_x, world.y, relative_z),
+        1.0,
+    );
+    if (params.multiview_options.x & (1u << view_index)) == 0u {
+        clip_position = vec4<f32>(2.0, 2.0, 2.0, 1.0);
+    }
+    var canopy_color = family_color(family, false);
+    canopy_color = mix(canopy_color, vec3<f32>(0.38, 0.52, 0.18), family_mix * 0.36);
+    canopy_color *= 0.72 + height_noise * 0.16;
+
+    var out: VertexOutput;
+    out.position = clip_position;
+    out.color = vec4<f32>(canopy_color, coverage);
+    out.world_xz = world.xz;
+    out.world_position = world;
+    out.view_index = view_index;
+    return out;
 }
 
 fn terrain_horizon_level_color(sample_spacing: u32) -> vec3<f32> {
@@ -268,6 +398,13 @@ fn vertex_main(
     return tree_vertex(input, vertex_index, 0u);
 }
 
+@vertex
+fn canopy_vertex_main(
+    @builtin(vertex_index) vertex_index: u32,
+) -> VertexOutput {
+    return canopy_vertex(vertex_index, 0u);
+}
+
 // __MCLONE_MULTIVIEW_VERTEX_ENTRY__
 
 @fragment
@@ -296,6 +433,68 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
         color = environmental_illumination;
     } else if horizon_diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_GEOMETRY {
         color = vec3<f32>(input.color.a);
+    } else if horizon_diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_OCCLUSION {
+        color = vec3<f32>(1.0);
+    } else if horizon_diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_WATER
+        || horizon_diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_TEXTURE {
+        color = vec3<f32>(0.0);
+    }
+    if exact_coverage.mode_count_generation.x == 2u && exact_painted {
+        color = mix(color, vec3<f32>(1.0, 0.08, 0.72), 0.86);
+    }
+    if horizon_diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_NATURAL {
+        var fog_camera_position = params.fog_camera_position;
+        if input.view_index != 0u {
+            fog_camera_position = params.fog_camera_position_right;
+        }
+        let fog_factor = mclone_fog_factor(
+            input.world_position,
+            fog_camera_position,
+            params.fog_render_options,
+            params.fog_color,
+            params.fog_distances,
+        );
+        color = mix(color, params.fog_color.rgb, fog_factor);
+    }
+    return mclone_apply_target_color_transform_rgba(
+        vec4<f32>(color, 1.0),
+        terrain_target_color_transform,
+    );
+}
+
+
+@fragment
+fn canopy_fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
+    if params.clipmap_inner_bounds.z > params.clipmap_inner_bounds.x
+        && params.clipmap_inner_bounds.w > params.clipmap_inner_bounds.y
+        && input.world_xz.x >= f32(params.clipmap_inner_bounds.x)
+        && input.world_xz.x < f32(params.clipmap_inner_bounds.z)
+        && input.world_xz.y >= f32(params.clipmap_inner_bounds.y)
+        && input.world_xz.y < f32(params.clipmap_inner_bounds.w) {
+        discard;
+    }
+    if input.color.a < 0.14 {
+        discard;
+    }
+    let exact_painted = exact_chunk_painted(input.world_xz);
+    if exact_coverage.mode_count_generation.x == 1u && exact_painted {
+        discard;
+    }
+    let horizon_diagnostic = params.multiview_options.y;
+    let environmental_illumination = full_sky_environmental_illumination();
+    var color = input.color.rgb * environmental_illumination;
+    if horizon_diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_FRONTIER_SUPPORT {
+        color = vec3<f32>(0.0);
+    } else if horizon_diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_OWNERSHIP_LEVEL {
+        color = terrain_horizon_level_color(u32(params.origin_spacing_cells.z));
+    } else if horizon_diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_TOPOLOGY {
+        color = vec3<f32>(0.74, 0.18, 0.88);
+    } else if horizon_diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_ALBEDO {
+        color = input.color.rgb;
+    } else if horizon_diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_ENVIRONMENT {
+        color = environmental_illumination;
+    } else if horizon_diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_GEOMETRY {
+        color = vec3<f32>(0.84);
     } else if horizon_diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_OCCLUSION {
         color = vec3<f32>(1.0);
     } else if horizon_diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_WATER

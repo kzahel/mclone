@@ -3729,6 +3729,31 @@ impl WebSceneHost {
                 )?;
                 report_set_number(
                     &object,
+                    "terrainViewDrawnCanopyTiles",
+                    terrain.drawn_canopy_tiles as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "terrainViewDrawnCanopyCells",
+                    terrain.drawn_canopy_cells as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "terrainViewDrawnCanopyVertices",
+                    terrain.drawn_canopy_vertices as f64,
+                )?;
+                report_set_number_array(
+                    &object,
+                    "terrainViewDrawnCanopyTilesByLevel",
+                    &terrain.drawn_canopy_tiles_by_level,
+                )?;
+                report_set_number_array(
+                    &object,
+                    "terrainViewDrawnCanopyCellsByLevel",
+                    &terrain.drawn_canopy_cells_by_level,
+                )?;
+                report_set_number(
+                    &object,
                     "terrainViewVegetationTransportFailures",
                     terrain.vegetation_transport_failures as f64,
                 )?;

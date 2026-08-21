@@ -178,6 +178,12 @@ const TERRAIN_PREVIEW_TREE_INSTANCE_FLOATS: usize = 12;
 const TERRAIN_PREVIEW_TREE_INSTANCE_BYTES: u64 =
     (TERRAIN_PREVIEW_TREE_INSTANCE_FLOATS * size_of::<f32>()) as u64;
 const TERRAIN_PREVIEW_TREE_VERTICES_PER_INSTANCE: u32 = 108;
+const TERRAIN_HORIZON_CANOPY_CELLS_PER_AXIS: u32 = 16;
+const TERRAIN_HORIZON_CANOPY_CELLS_PER_TILE: u32 =
+    TERRAIN_HORIZON_CANOPY_CELLS_PER_AXIS * TERRAIN_HORIZON_CANOPY_CELLS_PER_AXIS;
+const TERRAIN_HORIZON_CANOPY_VERTICES_PER_CELL: u32 = 12;
+const TERRAIN_HORIZON_CANOPY_VERTICES_PER_TILE: u32 =
+    TERRAIN_HORIZON_CANOPY_CELLS_PER_TILE * TERRAIN_HORIZON_CANOPY_VERTICES_PER_CELL;
 const TERRAIN_HORIZON_NORMAL_HALO_RADIUS: u32 = 2;
 const TERRAIN_HORIZON_NORMAL_EDGE_WEST: u32 = 1 << 27;
 const TERRAIN_HORIZON_NORMAL_EDGE_EAST: u32 = 1 << 28;
@@ -298,6 +304,11 @@ pub struct TerrainHorizonFrameStats {
     pub drawn_tree_instances: u32,
     pub drawn_tree_tiles_by_level: [u32; TERRAIN_LOD_HIGH_LEVEL_COUNT as usize],
     pub drawn_tree_instances_by_level: [u32; TERRAIN_LOD_HIGH_LEVEL_COUNT as usize],
+    pub drawn_canopy_tiles: u32,
+    pub drawn_canopy_cells: u32,
+    pub drawn_canopy_vertices: u32,
+    pub drawn_canopy_tiles_by_level: [u32; TERRAIN_LOD_HIGH_LEVEL_COUNT as usize],
+    pub drawn_canopy_cells_by_level: [u32; TERRAIN_LOD_HIGH_LEVEL_COUNT as usize],
     pub exact_connector_segments: u32,
     pub exact_connector_vertex_count: u32,
     pub frontier_support_allocated_tiles: u32,
@@ -1739,6 +1750,8 @@ pub struct TerrainViewportRenderer {
     horizon_render_cell_stride: u32,
     tree_pipeline: wgpu::RenderPipeline,
     tree_multiview_pipeline: Option<wgpu::RenderPipeline>,
+    canopy_pipeline: Option<wgpu::RenderPipeline>,
+    canopy_multiview_pipeline: Option<wgpu::RenderPipeline>,
     clear_color: wgpu::Color,
     depth: TerrainViewportDepthTarget,
     depth_capture_enabled: bool,
@@ -2409,6 +2422,84 @@ impl TerrainViewportRenderer {
                 cache: None,
             })
         });
+        let canopy_pipeline = (pipeline_set == TerrainViewportPipelineSet::Horizon).then(|| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("mclone_terrain_horizon_canopy_pipeline"),
+                layout: Some(&tree_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &tree_shader,
+                    entry_point: Some("canopy_vertex_main"),
+                    buffers: &[],
+                    compilation_options: Default::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &tree_shader,
+                    entry_point: Some("canopy_fragment_main"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: color_format,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: Default::default(),
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: None,
+                    ..Default::default()
+                },
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: TERRAIN_PREVIEW_DEPTH_FORMAT,
+                    depth_write_enabled: true,
+                    depth_compare: wgpu::CompareFunction::GreaterEqual,
+                    stencil: Default::default(),
+                    bias: Default::default(),
+                }),
+                multisample: Default::default(),
+                multiview: None,
+                cache: None,
+            })
+        });
+        let canopy_multiview_pipeline = multiview_enabled.then(|| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("mclone_terrain_horizon_canopy_multiview_pipeline"),
+                layout: Some(&tree_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: multiview_tree_shader
+                        .as_ref()
+                        .expect("multiview tree shader exists when multiview is enabled"),
+                    entry_point: Some("canopy_vertex_multiview_main"),
+                    buffers: &[],
+                    compilation_options: Default::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &tree_shader,
+                    entry_point: Some("canopy_fragment_main"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: color_format,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: Default::default(),
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: None,
+                    ..Default::default()
+                },
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: TERRAIN_PREVIEW_DEPTH_FORMAT,
+                    depth_write_enabled: true,
+                    depth_compare: wgpu::CompareFunction::GreaterEqual,
+                    stencil: Default::default(),
+                    bias: Default::default(),
+                }),
+                multisample: Default::default(),
+                multiview: NonZeroU32::new(2),
+                cache: None,
+            })
+        });
         Ok(Self {
             sample_count_per_tile,
             sample_byte_len,
@@ -2427,6 +2518,8 @@ impl TerrainViewportRenderer {
             horizon_render_cell_stride,
             tree_pipeline,
             tree_multiview_pipeline,
+            canopy_pipeline,
+            canopy_multiview_pipeline,
             clear_color: color_transform_wgpu(
                 wgpu::Color {
                     r: 0.025,
@@ -4685,6 +4778,7 @@ impl TerrainHorizonRenderer {
         }
         if self.renderer.horizon_multiview_render_pipeline.is_none()
             || self.renderer.tree_multiview_pipeline.is_none()
+            || self.renderer.canopy_multiview_pipeline.is_none()
         {
             return Err("terrain horizon multiview pipelines are unavailable".to_owned());
         }
@@ -5230,6 +5324,60 @@ impl TerrainHorizonRenderer {
                     );
                 }
             }
+            for level in &terrain_levels {
+                if !terrain_horizon_level_uses_canopy(
+                    self.profile,
+                    self.content_stage,
+                    level.snapshot.sample_spacing,
+                    self.vegetation_max_sample_spacing,
+                ) {
+                    continue;
+                }
+                let inner_hole = finer_level_bounds(&terrain_levels, level.snapshot.level);
+                for resource in &level.tiles {
+                    if terrain_horizon_tile_visibility_for_views(
+                        resource.tile,
+                        inner_hole,
+                        TERRAIN_HORIZON_TREE_CULL_MARGIN_BLOCKS,
+                        far_culls,
+                        render_view_overrides,
+                        uniform_presentation,
+                    ) != TerrainHorizonTileVisibility::Visible
+                    {
+                        continue;
+                    }
+                    self.visible_vegetation_slots[resource.resource_slot as usize] = true;
+                    let view_mask = terrain_horizon_tile_view_mask(
+                        resource.tile,
+                        inner_hole,
+                        TERRAIN_HORIZON_TREE_CULL_MARGIN_BLOCKS,
+                        far_culls,
+                        render_view_overrides,
+                        uniform_presentation,
+                    );
+                    let slot = &self.slots[resource.resource_slot as usize];
+                    queue.write_buffer(
+                        &slot.tree_uniform_buffer,
+                        0,
+                        &terrain_horizon_uniform_bytes(
+                            slot.request,
+                            width,
+                            height,
+                            options,
+                            presentation.camera,
+                            uniform_presentation,
+                            focus_y,
+                            inner_hole,
+                            0,
+                            view_mask,
+                            render_view_overrides,
+                            presentation.sky_darken,
+                            presentation.fog,
+                            presentation.diagnostic,
+                        ),
+                    );
+                }
+            }
         }
 
         let mut drawn_levels = 0_u32;
@@ -5242,6 +5390,11 @@ impl TerrainHorizonRenderer {
         let mut drawn_tree_instances = 0_u32;
         let mut drawn_tree_tiles_by_level = [0_u32; TERRAIN_LOD_HIGH_LEVEL_COUNT as usize];
         let mut drawn_tree_instances_by_level = [0_u32; TERRAIN_LOD_HIGH_LEVEL_COUNT as usize];
+        let mut drawn_canopy_tiles = 0_u32;
+        let mut drawn_canopy_cells = 0_u32;
+        let mut drawn_canopy_vertices = 0_u32;
+        let mut drawn_canopy_tiles_by_level = [0_u32; TERRAIN_LOD_HIGH_LEVEL_COUNT as usize];
+        let mut drawn_canopy_cells_by_level = [0_u32; TERRAIN_LOD_HIGH_LEVEL_COUNT as usize];
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("mclone_terrain_horizon_render_pass"),
@@ -5415,6 +5568,52 @@ impl TerrainHorizonRenderer {
             } else {
                 &self.renderer.tree_pipeline
             };
+            let canopy_pipeline = if multiview {
+                self.renderer
+                    .canopy_multiview_pipeline
+                    .as_ref()
+                    .expect("validated canopy multiview pipeline remains available")
+            } else {
+                self.renderer
+                    .canopy_pipeline
+                    .as_ref()
+                    .expect("horizon renderer owns its canopy pipeline")
+            };
+            pass.set_pipeline(canopy_pipeline);
+            pass.set_bind_group(1, &self.renderer.exact_coverage.bind_group, &[]);
+            for level in &terrain_levels {
+                if !terrain_horizon_level_uses_canopy(
+                    self.profile,
+                    self.content_stage,
+                    level.snapshot.sample_spacing,
+                    self.vegetation_max_sample_spacing,
+                ) {
+                    continue;
+                }
+                for resource in &level.tiles {
+                    if !self.visible_vegetation_slots[resource.resource_slot as usize] {
+                        continue;
+                    }
+                    let slot = &self.slots[resource.resource_slot as usize];
+                    pass.set_bind_group(0, &slot.tree_render_bind_group, &[]);
+                    pass.draw(0..TERRAIN_HORIZON_CANOPY_VERTICES_PER_TILE, 0..1);
+                    drawn_canopy_tiles = drawn_canopy_tiles.saturating_add(1);
+                    drawn_canopy_cells =
+                        drawn_canopy_cells.saturating_add(TERRAIN_HORIZON_CANOPY_CELLS_PER_TILE);
+                    drawn_canopy_vertices = drawn_canopy_vertices
+                        .saturating_add(TERRAIN_HORIZON_CANOPY_VERTICES_PER_TILE);
+                    if let Some(count) =
+                        drawn_canopy_tiles_by_level.get_mut(level.snapshot.level as usize)
+                    {
+                        *count = count.saturating_add(1);
+                    }
+                    if let Some(count) =
+                        drawn_canopy_cells_by_level.get_mut(level.snapshot.level as usize)
+                    {
+                        *count = count.saturating_add(TERRAIN_HORIZON_CANOPY_CELLS_PER_TILE);
+                    }
+                }
+            }
             pass.set_pipeline(tree_pipeline);
             pass.set_bind_group(1, &self.renderer.exact_coverage.bind_group, &[]);
             for level in &vegetation_levels {
@@ -5538,6 +5737,7 @@ impl TerrainHorizonRenderer {
             .saturating_add(exact_connector_vertex_count)
             .saturating_add(frontier_support_vertex_count)
             .saturating_add(frontier_connector_vertex_count)
+            .saturating_add(drawn_canopy_vertices)
             .saturating_add(
                 drawn_tree_instances.saturating_mul(TERRAIN_PREVIEW_TREE_VERTICES_PER_INSTANCE),
             );
@@ -5706,6 +5906,11 @@ impl TerrainHorizonRenderer {
             drawn_tree_instances,
             drawn_tree_tiles_by_level,
             drawn_tree_instances_by_level,
+            drawn_canopy_tiles,
+            drawn_canopy_cells,
+            drawn_canopy_vertices,
+            drawn_canopy_tiles_by_level,
+            drawn_canopy_cells_by_level,
             exact_connector_segments: drawn_exact_connector_segments,
             exact_connector_vertex_count,
             frontier_support_allocated_tiles,
@@ -5936,6 +6141,21 @@ fn finer_level_bounds(
         .iter()
         .find(|candidate| candidate.snapshot.level == finer)
         .map(|candidate| candidate.snapshot.bounds)
+}
+
+const fn terrain_horizon_level_uses_canopy(
+    profile: TerrainPreviewProfile,
+    content_stage: TerrainPreviewContentStage,
+    sample_spacing: u32,
+    vegetation_max_sample_spacing: u32,
+) -> bool {
+    matches!(
+        profile,
+        TerrainPreviewProfile::McloneOverworldV1
+            | TerrainPreviewProfile::ContinentalEcoregionCandidate
+            | TerrainPreviewProfile::McloneOverworldV2
+    ) && matches!(content_stage, TerrainPreviewContentStage::Cover)
+        && sample_spacing > vegetation_max_sample_spacing
 }
 
 fn terrain_horizon_samples_per_axis() -> u32 {
@@ -6596,6 +6816,36 @@ fn storage_layout_entry(
 mod tests {
     use super::*;
     use mclone_worldgen::terrain_preview::TerrainPreviewRequest;
+
+    #[test]
+    fn canopy_is_fixed_budget_and_begins_after_proxy_tree_levels() {
+        assert_eq!(TERRAIN_HORIZON_CANOPY_CELLS_PER_TILE, 256);
+        assert_eq!(TERRAIN_HORIZON_CANOPY_VERTICES_PER_TILE, 3_072);
+        assert!(!terrain_horizon_level_uses_canopy(
+            TerrainPreviewProfile::McloneOverworldV2,
+            TerrainPreviewContentStage::Cover,
+            4,
+            4,
+        ));
+        assert!(terrain_horizon_level_uses_canopy(
+            TerrainPreviewProfile::McloneOverworldV2,
+            TerrainPreviewContentStage::Cover,
+            8,
+            4,
+        ));
+        assert!(!terrain_horizon_level_uses_canopy(
+            TerrainPreviewProfile::McloneOverworldV2,
+            TerrainPreviewContentStage::Surface,
+            8,
+            4,
+        ));
+        assert!(!terrain_horizon_level_uses_canopy(
+            TerrainPreviewProfile::VanillaOverworld,
+            TerrainPreviewContentStage::Cover,
+            8,
+            4,
+        ));
+    }
 
     #[test]
     fn compare_panels_match_shader_layout() {

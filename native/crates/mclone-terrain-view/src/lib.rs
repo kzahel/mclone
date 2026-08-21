@@ -277,6 +277,14 @@ fn vertex_multiview_main(
     @builtin(view_index) view_index: i32,
 ) -> VertexOutput {
     return tree_vertex(input, vertex_index, u32(view_index));
+}
+
+@vertex
+fn canopy_vertex_multiview_main(
+    @builtin(vertex_index) vertex_index: u32,
+    @builtin(view_index) view_index: i32,
+) -> VertexOutput {
+    return canopy_vertex(vertex_index, u32(view_index));
 }"#,
     );
     let source = inject_multiview_vertex_entry(TERRAIN_PREVIEW_TREE_WGSL, multiview_entry);
