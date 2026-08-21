@@ -278,3 +278,18 @@ in-flight or stale terrain results, ten drawn levels, and the same 17,920
 canopy cells / 215,040 canopy vertices as the pre-optimization capture. These
 are attribution and regression results, not the physical Quest acceptance;
 the corrected RD8 A/B remains the governing gate.
+
+The first corrected physical Quest V2 run then reached all 289 exact columns,
+an exact-ready center, all 96 Low horizon slots, and quiet vegetation in
+`10.632 s`, down from `133.748 s` and within 1.06x of its current `10.003 s` V1
+control. Android reported one available CPU horizon worker, 124 completed tile
+jobs, `5.562 s` aggregate worker time, and zero stale results. The result meets
+the cold-convergence target without reducing RD8 completeness, clipmap levels,
+or authored coverage.
+
+That control also found an avoidable scope regression: enabling coarse canopy
+for V1 raised its stationary p95 from the pre-canopy `10.721 ms` baseline to
+`12.109 ms`. The severe forest-volume collapse belongs to V2/candidate, while
+V1 already has its accepted presentation. Canopy eligibility is therefore
+narrowed to V2/candidate so V1 remains a clean unchanged performance control;
+a rebuilt V1 repeat remains required before final A/B acceptance.

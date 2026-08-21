@@ -6439,8 +6439,7 @@ const fn terrain_horizon_level_uses_canopy(
 ) -> bool {
     matches!(
         profile,
-        TerrainPreviewProfile::McloneOverworldV1
-            | TerrainPreviewProfile::ContinentalEcoregionCandidate
+        TerrainPreviewProfile::ContinentalEcoregionCandidate
             | TerrainPreviewProfile::McloneOverworldV2
     ) && matches!(content_stage, TerrainPreviewContentStage::Cover)
         && sample_spacing > vegetation_max_sample_spacing
@@ -7174,6 +7173,12 @@ mod tests {
         assert!(!terrain_horizon_level_uses_canopy(
             TerrainPreviewProfile::McloneOverworldV2,
             TerrainPreviewContentStage::Surface,
+            8,
+            4,
+        ));
+        assert!(!terrain_horizon_level_uses_canopy(
+            TerrainPreviewProfile::McloneOverworldV1,
+            TerrainPreviewContentStage::Cover,
             8,
             4,
         ));
