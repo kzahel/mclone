@@ -10,8 +10,11 @@ and XR. Tactical
 high-render-distance frontier implementation. Tactical
 [`323`](../tactical/323-quest-frontier-performance-recovery.md) then removed
 the dominant fragment-time support lookup cost and measured the remaining
-full-belt cost. Final human pixel reviews remain the acceptance gates; this
-topic is the canonical system description.
+full-belt cost. Tactical
+[`327`](../tactical/327-atomic-distant-terrain-settings.md) makes cold and live
+preset changes atomic behind one direct staged selector. Final human pixel
+reviews remain the acceptance gates; this topic is the canonical system
+description.
 
 ## System Contract
 
@@ -83,8 +86,34 @@ identity used by the frontier certificate.
 Off constructs no terrain-view engine, clipmap, frontier, or proxy-vegetation
 resources. Low, Medium, and High share identical near geometry and differ only
 in outer reach and vegetation reach. Platform profiles choose defaults without
-changing those meanings; Android XR remains Off by default because its full-
-resolution Low workload does not reliably meet 72 Hz.
+changing those meanings. Native desktop defaults High; SteamOS, Web, and
+desktop OpenXR default Medium; flat Android and Android XR default Low. The
+Android XR Low default reaches 72 submissions per second in the accepted
+stationary sample but does not reliably meet the strict 72 Hz p95 budget.
+
+### Live preset transaction
+
+The shared Graphics page exposes Off, Low, Medium, and High as four direct
+stops. Moving the selector changes only reducer-owned staged state. Apply emits
+one typed request; Cancel discards the staged choice. No engine allocation,
+reconfiguration, teardown, or preference write occurs merely while selecting.
+
+The scene tracks requested and applied presets independently. Enabled targets
+become applied and durable only after renderer diagnostics report a complete
+drawable presentation for that exact target. Off can tear down and persist
+immediately. During a cold Off-to-enabled transition, exact terrain continues
+alone while bounded clipmap work prepares; optional terrain, tree, support, and
+connector draws stay suppressed until a complete frontier certificate exists.
+Construction or reconfiguration rejection restores the prior applied and
+stored value and projects a bounded settings failure instead of terminating a
+client frame loop.
+
+Enabled-to-enabled reconfiguration also updates the proxy-vegetation desired
+bound with the new preset. A downshift releases committed coarse vegetation
+presentations above that bound before later clipmap movement, so retired
+quality levels cannot keep guard-pool slots reserved. Once a target is
+accepted, scene state synchronizes the settings reducer immediately so a
+second staged Apply is not rejected as if the prior request were still active.
 
 ## Exact Readiness And Formats
 
@@ -146,8 +175,11 @@ preferred 32-tile generation may compile behind it. Support terrain,
 coarse-base suppression, and connector ownership become active together only
 after every selected resource is ready. Newer exact or clipmap epochs coalesce
 obsolete pending work. The public admission state is one of `disabled`,
-`synchronous-fallback`, `preparing-preferred`, `preferred`, or `rejected`;
-the three middle states are complete drawable certificates.
+`warming`, `synchronous-fallback`, `preparing-preferred`, `preferred`, or
+`rejected`; the three certificate states are complete and drawable. `warming`
+is a bounded cold-start state with work outstanding and exact-only output.
+Once cold work is settled, an incomplete topology remains `rejected` rather
+than being hidden as perpetual warming.
 
 Horizontal ownership is binary:
 
@@ -188,8 +220,9 @@ per-eye and full-frame multiview Low/RD8 submissions. The full-resolution
 Quest steady sample measured 14.52 ms p50 and 18.48 ms p95 app work against a
 13.89 ms 72 Hz budget. Settled full-frame multiview measured 16.87 ms p50 and
 20.15 ms p95 while retaining all 96 Low slots and 289 exact columns. Enabled
-LOD on that platform is therefore an explicit quality choice rather than its
-default.
+LOD was therefore still an explicit quality choice at the Tactical 321
+checkpoint; Tactical 320 subsequently established Low as the Android XR unset
+default through its matched orbit and rebuilt no-override evidence.
 
 Tactical 323 replaces the old per-fragment scan through 32 support records
 with a collision-free 18-by-18 row-mask lookup. The fixed suppression binding
@@ -206,8 +239,9 @@ The now-cheap forced-fallback control measures 12.12 ms p50 and 13.12 ms p95,
 6.73 ms app GPU, and 0.1% over-period frames. This isolates the remaining
 stationary preferred cost to the full spacing-one support belt. Fixed
 foveation Low and Medium do not clear p95 and remain unpromoted. Preferred
-settled orbit remains over budget at 13.71/18.98 ms p50/p95, so Low remains
-Off by default on Quest.
+settled orbit remains over budget at 13.71/18.98 ms p50/p95. The strict p95
+lock therefore remains unclaimed; Android XR's separately accepted unset
+default remains Low, and fixed foveation remains Off.
 
 The bounded RD8 preferred case uses 20 added tiles, 11,212,240 terrain bytes,
 and 31,488 active connector bytes. It certifies all 1,088 perimeter segments.
@@ -269,9 +303,10 @@ selector, and A/B harness are deleted rather than retained as a fallback.
 Tactical
 [`320`](../tactical/320-cross-platform-lod-quality-presets.md) is complete as
 of 2026-08-20. The shared in-game Graphics screen exposes
-`Distant Terrain: Off / Low / Medium / High`; the same typed action,
-preference, settings reducer, and scene effect serve desktop, browser, flat
-Android, and ordinary per-eye XR. All non-Off qualities use the same
+`Distant Terrain: Off / Low / Medium / High`; Tactical 327 later replaces its
+immediate cycle with four direct staged stops and Apply/Cancel. The same typed
+actions, preference, settings reducer, and scene effect serve desktop, browser,
+flat Android, and ordinary per-eye XR. All non-Off qualities use the same
 stride-one four-by-four geometry clipmap with six, eight, or ten levels and a
 separately bounded proxy-vegetation reach. Live changes reconfigure that
 engine in place and reuse common level, admission, GPU-pool, and vegetation
@@ -638,8 +673,9 @@ coverage from the active draw store's traversal-ready columns, exact
 opaque/cutout terrain establishes the ordinary reversed-Z depth, and the
 shared procedural backdrop
 loads and extends the same target before actors and translucent terrain. The
-current player-facing control is `Graphics -> Distant Terrain -> Off / Low /
-Medium / High`, with `terrainLodQuality` / `--terrain-lod-quality` as the
+current player-facing control is a direct four-stop
+`Graphics -> Distant Terrain -> Off / Low / Medium / High` selector with
+Apply/Cancel, while `terrainLodQuality` / `--terrain-lod-quality` are the
 canonical launch-only inputs. The former `terrainPresentation` /
 `--terrain-presentation` inputs remain deprecated Off/High compatibility
 aliases. Composition is restricted to local `mclone-overworld-v1`; Off is

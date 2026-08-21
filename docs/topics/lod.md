@@ -94,9 +94,12 @@ belt with a complete resolution-aware land/water fallback, generation-coherent
 admission, and shared mono/per-eye/multiview ownership; the detailed contract
 and its platform bounds live only in the canonical topic. Tactical 323 makes
 support suppression constant time and materially improves Quest Low/RD8, but
-the preferred full-tile belt still misses the strict 72 Hz p95 gate; Android
-XR therefore remains Off by default pending a separately reviewed narrower
-support-ownership design.
+the preferred full-tile belt still misses the strict 72 Hz p95 gate. It does
+reach 72 submissions per second in the accepted stationary sample, and the
+Android XR unset default remains Low as established by Tactical 320; neither
+fact is a stricter p95 lock. Tactical 327 makes live preset changes staged,
+direct, atomic, and recoverable without changing those preset meanings or
+defaults.
 
 ## Historical Routes
 

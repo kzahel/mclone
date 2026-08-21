@@ -43,7 +43,7 @@ The shared Graphics page currently exposes ten rows:
 | World Scale | Live `Auto`, 50%, 67%, 75%, or 100% selection | shared typed action, desktop `HostEffects`, native flat surface | no; relaunch returns to `Auto` |
 | Section Occlusion | Live on/off renderer option | shared settings controller and scene/render host | no |
 | Leaf Detail | Live `Blocky` / `Bushy`; changes derived active-pack leaf geometry through a transactional asset epoch | shared catalog/compiler, settings controller, and scene | yes; schema-1 machine-local graphics preference |
-| Distant Terrain | Live `Off` / `Low` / `Medium` / `High`; presets have identical bounds on all hosts, while an unset choice resolves through the platform profile | shared terrain-view, settings controller, and scene | yes; schema-1 machine-local graphics preference |
+| Distant Terrain | Four-stop `Off` / `Low` / `Medium` / `High` selector with explicit Apply/Cancel; selection is side-effect free and presets have identical bounds on all hosts, while an unset choice resolves through the platform profile | shared terrain-view, settings controller, and scene | yes; schema-1 machine-local graphics preference, saved only after the applied target is drawable |
 | Fog | Opens the independent Off/Classic/Natural/Ground Haze controls and color/visibility tuning; LOD quality neither enables nor rewrites fog | shared render fog contract, settings controller, and scene | yes; schema-1 machine-local graphics preference |
 | Render Distance | Live chunk-distance slider | shared settings controller and scene/runtime | no |
 | Frame Pacing | Live VSync / Max FPS / Uncapped cycle when supported | shared action and platform cadence/surface host | no |
@@ -71,6 +71,33 @@ with no override resolved to Low and submitted `71.86 FPS`; the same binary's
 explicit High control submitted `64.07 FPS`. Tactical
 [`320`](../tactical/320-cross-platform-lod-quality-presets.md) records the
 complete app-work, GPU, draw, residency, pixel, and validation receipts.
+
+The later constant-time frontier lookup in Tactical
+[`323`](../tactical/323-quest-frontier-performance-recovery.md) improves the
+stationary Low/RD8 preferred path to `13.273 / 14.305ms` app-work p50/p95,
+`7.483ms` reported app GPU, and `17.2%` over-period frames. It reaches 72
+submissions per second, which is the current accurate shorthand, but the
+`14.305ms` p95 remains above the `13.889ms` 72 Hz period. Android XR's unset
+default remains Low; the measurement is not a claim of a strict p95 lock.
+
+### Distant Terrain apply boundary
+
+Distant Terrain is an expensive live reconstruction, not an immediate cycle.
+Pointer, touch, keyboard/controller focus, and tracked XR rays address any of
+the four ordered stops directly. Moving among them changes only shared staged
+state. Apply emits one typed target and is disabled while a previous target is
+preparing; Cancel returns to the current requested choice without an engine
+effect.
+
+The scene distinguishes requested, applied, and persisted values. Enabled
+targets persist only after one complete target-ready presentation. A cold
+Off-to-enabled request keeps exact-only output while its clipmap and frontier
+warm; it never exposes uncertified optional terrain. Rejected construction or
+reconfiguration preserves the prior applied and stored values and reports an
+inline failure. Off removes the optional representation and can apply and save
+immediately. Tactical
+[`327`](../tactical/327-atomic-distant-terrain-settings.md) owns this contract
+and its regression evidence.
 
 The separate Display page currently owns player model, first-person body, and
 crosshair visibility. Those are presentation/gameplay preferences rather than
@@ -271,7 +298,9 @@ could sync portable accessibility or gameplay preferences separately.
 ### Apply and save semantics
 
 Most quality controls may apply live and save immediately after a successful
-effect. Output modes need a transaction:
+effect. Distant Terrain uses the staged, target-ready transaction above because
+even an otherwise valid preset change may require a bounded full rebuild.
+Output modes need a different transaction:
 
 1. enumerate and validate a platform-supported candidate;
 2. apply it without overwriting the last-known-good value;
@@ -315,7 +344,7 @@ inventory is:
 | GUI scale | automatic only; add an Auto plus explicit logical-scale control |
 | UI render resolution | native only; keep native default and evaluate optional Match World mode |
 | Overall graphics quality preset | absent; do not conflate the focused distant-terrain LOD presets in Tactical [`320`](../tactical/320-cross-platform-lod-quality-presets.md) with a future bundle that also rewrites leaves, grass, world resolution, actors, or effects; manual edits to a later broad bundle should report Custom |
-| Distant-terrain LOD quality | complete in Tactical [`320`](../tactical/320-cross-platform-lod-quality-presets.md): shared Off/Low/Medium/High semantics, live accepted-effect persistence, optional independent fog, and different unset defaults selected by platform profile |
+| Distant-terrain LOD quality | preset semantics and platform defaults complete in Tactical [`320`](../tactical/320-cross-platform-lod-quality-presets.md); Tactical [`327`](../tactical/327-atomic-distant-terrain-settings.md) adds a direct four-stop staged selector, Apply/Cancel, target-ready persistence, cold exact-only warming, and recoverable rejection |
 | Ambient occlusion | absent as a player control; first define the renderer-quality effect |
 | Brightness/gamma | absent; distinguish a player-facing calibrated range from the fullbright debug toggle |
 | Clouds | absent system/control |
@@ -369,6 +398,16 @@ screen. The 2026-07-23 local slice passed the four affected Rust packages and
 was visually inspected at 1280x800 and compact 320x140. It still needs a
 physical Deck Gaming Mode pass for menu-driven scale changes and
 trackpad/controller scrolling.
+
+The 2026-08-21 Distant Terrain transaction slice adds a 12-pair direct
+transition matrix plus pointer and focused-navigation coverage. Its native
+960x540 and compact mobile-browser Graphics pages and its Low synthetic-stereo
+world were inspected under `/tmp`. Wasm, flat Android, and Android XR builds
+pass. The staged browser smoke proves no engine/storage change before Apply,
+then applies Off -> Low -> Medium -> High -> Low in one process, moves after
+the downshift, captures Low pixels, and restores accepted Low after reload.
+The physical Quest rerun remains pending because no attached authorized
+headset was available at closeout.
 
 ## Code Map
 

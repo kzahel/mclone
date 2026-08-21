@@ -3,7 +3,8 @@
 Status: complete 2026-08-20. Constant-time suppression is retained;
 inactive-transition shading is retained as simpler equivalent control flow;
 compact support drawing was measured and reverted; preferred support improved
-substantially but still misses the strict Quest p95 gate.
+substantially and reaches 72 submissions per second in the stationary sample,
+but still misses the strict Quest p95 gate.
 
 Topics: `procedural-horizon-clipmap`, `performance`,
 `quest-frontier-performance`

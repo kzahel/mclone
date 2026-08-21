@@ -1,7 +1,9 @@
 # Tactical 327: Atomic Distant Terrain Settings
 
-Status: active 2026-08-21. Physical Quest failure evidence and the corrective
-architecture are accepted; implementation is authorized end to end.
+Status: implementation complete 2026-08-21; physical Quest closeout rerun is
+pending because no attached authorized headset was available. The original
+device failure evidence, corrective architecture, shared implementation, and
+non-device validation are accepted.
 
 Topic: `procedural-horizon-clipmap`
 Topic: `graphics-video-settings`
@@ -93,7 +95,7 @@ the same typed staging and Apply/Cancel actions.
 - [x] Retain the physical failure notification and exit classification.
 - [x] Trace the cold Off-to-enabled certificate gap through shared code.
 - [x] Record the direct staged-selector and atomic-apply contract.
-- [ ] Correct the living Quest default prose after implementation evidence.
+- [x] Correct the living Quest default prose after implementation evidence.
 - Commit the tactical before changing behavior.
 
 ### Phase 1: Atomic Renderer And Scene Admission
@@ -136,18 +138,60 @@ Temporary native and mobile-browser pixel evidence was inspected under
 
 ### Phase 3: Cross-Platform And XR Validation
 
-- Run the affected shared package suites and workspace formatting/checks.
-- Exercise every direct preset pair, especially Off-to-Low/Medium/High with
+- [x] Run the affected shared package suites and workspace formatting/checks.
+- [x] Exercise every direct preset pair, especially Off-to-Low/Medium/High with
   exact terrain already ready, plus rapid staged changes before one Apply.
-- Build native, Wasm, flat Android, and Android XR boundaries.
-- Inspect native and synthetic-stereo pixels after cold enable.
-- On physical Quest, select and apply Off, Low, Medium, High, and Low in one
+- [x] Build native, Wasm, flat Android, and Android XR boundaries.
+- [x] Inspect native and synthetic-stereo pixels after cold enable.
+- [ ] On physical Quest, select and apply Off, Low, Medium, High, and Low in one
   process; require no failure notification or new abnormal exit, complete
   frontier receipts, and normal continued head/controller presentation.
-- Confirm Low remains the unset Android XR default and reaches the established
+- [x] Confirm Low remains the unset Android XR default and reaches the established
   72-submission behavior; retain the p95 qualification rather than claiming a
   stricter lock than the evidence supports.
-- Commit evidence and close the tactical.
+- [ ] Commit final device evidence and close the tactical.
+
+### Phase 3 Evidence
+
+The shared suites pass with 151 terrain-view tests plus one adapter-dependent
+ignore, five focused scene terrain-view tests, 301 app-runtime tests, and 115
+UI tests. The app-runtime matrix covers all 12 distinct source/target pairs;
+the UI matrix directly addresses all four stops from each current preset.
+Workspace formatting and all-target checks pass.
+
+Native/Wasm, flat Android, and release Android XR boundaries build. The headed
+browser terrain-horizon smoke proves staged Low leaves both the engine and
+`localStorage` at Off. It then applies Off -> Low -> Medium -> High -> Low in
+one process, requires each direct target to become drawable before persistence,
+moves after the High-to-Low downshift, captures Low pixels, and restores Low
+after reload.
+
+That sequence also covers two reconfiguration invariants found during
+closeout. Accepted scene state must clear the reducer's applying state before
+another value can be staged. The vegetation coordinator's desired-set bound
+must grow with Medium/High, while a downshift must release coarse vegetation
+presentations that no longer belong to the new preset; otherwise stale
+reservations exhaust the bounded transition guard pool during later movement.
+
+The native 960-by-540 Graphics capture, compact mobile-browser staged page,
+and 640-by-640-per-eye Low synthetic-stereo capture were inspected under
+`/tmp` without clipping or invalid pixels. The final stereo receipt reports
+251,285 differing eye pixels.
+
+The native `mclone-web-client` unit binary currently has three outside-scope
+deterministic runtime-smoke expectation mismatches: observed update counts are
+10/14 rather than 9/13, and the packed expected word follows that stale count.
+No runtime-smoke implementation or expectation changed in this tactical; 41
+other web-client unit tests, the Wasm build, and the real browser Distant
+Terrain acceptance pass. Keep that existing suite discrepancy visible rather
+than changing unrelated deterministic counts here.
+
+The canonical Quest provider command
+`~/code/machine-control/platforms/quest/bin/quest doctor` reported no attached,
+authorized headset on 2026-08-21. No unsafe direct ADB fallback was attempted.
+The original physical crash receipt remains the root-cause evidence, but the
+fixed APK still needs the one-process Off -> Low -> Medium -> High -> Low
+regression before this tactical can be marked complete.
 
 ## Acceptance
 
