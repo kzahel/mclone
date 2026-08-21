@@ -35,6 +35,7 @@ const ANDROID_XR_LOCAL_ARG_FLAGS: &[&str] = &[
     "--terrain-multiview-perf",
     "--terrain-multiview-proof",
     "--terrain-horizon-diagnostic",
+    "--terrain-lod-cycle",
     "--start-in-world",
     "--xr-debug-ui",
     "--xr-display-refresh-rate",
@@ -362,6 +363,7 @@ mod android {
         skip_actors: bool,
         xr_render_mode: mclone_xr_host::XrRenderMode,
         xr_render_mode_cycle: bool,
+        terrain_lod_cycle: bool,
         frame_overlap: bool,
         frame_overlap_mode: AndroidXrFrameOverlapMode,
         overlap_eye_submits: bool,
@@ -403,6 +405,7 @@ mod android {
                 skip_actors: false,
                 xr_render_mode: mclone_xr_host::XrRenderMode::DualPerEye,
                 xr_render_mode_cycle: false,
+                terrain_lod_cycle: false,
                 frame_overlap: false,
                 frame_overlap_mode: AndroidXrFrameOverlapMode::default(),
                 overlap_eye_submits: false,
@@ -805,6 +808,9 @@ mod android {
                             anyhow::anyhow!("unsupported --terrain-horizon-diagnostic `{value}`")
                         })?;
                 }
+                "--terrain-lod-cycle" => {
+                    options.terrain_lod_cycle = true;
+                }
                 "--sky-terrain-multiview-perf" => {
                     options.sky_terrain_multiview_perf = true;
                 }
@@ -1024,6 +1030,9 @@ mod android {
         {
             bail!("--xr-render-mode-cycle must start in dual-per-eye mode");
         }
+        if options.terrain_lod_cycle && options.xr_render_mode_cycle {
+            bail!("--terrain-lod-cycle cannot be combined with --xr-render-mode-cycle");
+        }
         if matches!(options.perf_detail, AndroidXrPerfDetail::Minimal)
             && !options.frame_accounting_enabled
         {
@@ -1052,6 +1061,7 @@ mod android {
         resolve_android_xr_frame_overlap(&mut options)?;
         let automation_session = options.session_smoke.is_some()
             || options.perf_seconds.is_some()
+            || options.terrain_lod_cycle
             || options.terrain_multiview_proof
             || options.terrain_multiview_perf
             || options.sky_terrain_multiview_perf
@@ -1549,6 +1559,10 @@ mod android {
             startup_options.xr_render_mode_cycle
         );
         log::info!(
+            "Android XR terrain LOD cycle: {}",
+            startup_options.terrain_lod_cycle
+        );
+        log::info!(
             "Android XR frame overlap mode: {}",
             startup_options.frame_overlap_mode.label()
         );
@@ -1662,6 +1676,7 @@ mod android {
             startup_options.sky_terrain_actors_multiview_perf,
             startup_options.xr_render_mode,
             startup_options.xr_render_mode_cycle,
+            startup_options.terrain_lod_cycle,
             startup_options.frame_overlap,
             startup_options.overlap_eye_submits,
             startup_options.overlap_runtime_prefetch,
@@ -1704,6 +1719,7 @@ mod android {
         sky_terrain_actors_multiview_perf: bool,
         xr_render_mode: mclone_xr_host::XrRenderMode,
         xr_render_mode_cycle: bool,
+        terrain_lod_cycle: bool,
         frame_overlap: bool,
         overlap_eye_submits: bool,
         overlap_runtime_prefetch: bool,
@@ -2177,6 +2193,7 @@ mod android {
                 false,
                 true,
                 xr_render_mode_cycle,
+                terrain_lod_cycle,
                 &mut terrain,
                 &mut controller_actions,
                 &controller_preferences,
@@ -2309,6 +2326,7 @@ mod android {
             overlap_eye_submits,
             overlap_runtime_prefetch,
             xr_render_mode_cycle,
+            terrain_lod_cycle,
             &mut terrain,
             &mut controller_actions,
             &controller_preferences,
@@ -3587,6 +3605,7 @@ mod android {
         overlap_eye_submits: bool,
         overlap_runtime_prefetch: bool,
         xr_render_mode_cycle: bool,
+        terrain_lod_cycle: bool,
         terrain: &mut AndroidXrTerrainState,
         controller_actions: &mut OpenXrControllerActions,
         controller_preferences: &ControllerInputPreferences,
@@ -3707,6 +3726,7 @@ mod android {
             overlap_eye_submits,
             overlap_runtime_prefetch,
             render_mode_cycle: xr_render_mode_cycle.then(AndroidXrRenderModeCycle::default),
+            terrain_lod_cycle: terrain_lod_cycle.then(AndroidXrTerrainLodCycle::default),
             terrain,
             controller_actions,
             session_smoke,
@@ -3951,6 +3971,14 @@ mod android {
         mclone_xr_host::XrRenderMode::ArrayPerEye,
         mclone_xr_host::XrRenderMode::DualPerEye,
     ];
+    const ANDROID_XR_TERRAIN_LOD_CYCLE_DWELL_FRAMES: u64 = 30;
+    const ANDROID_XR_TERRAIN_LOD_CYCLE: [mclone_ui::TerrainLodPreset; 5] = [
+        mclone_ui::TerrainLodPreset::Off,
+        mclone_ui::TerrainLodPreset::Low,
+        mclone_ui::TerrainLodPreset::Medium,
+        mclone_ui::TerrainLodPreset::High,
+        mclone_ui::TerrainLodPreset::Low,
+    ];
 
     const fn ui_xr_render_mode(mode: mclone_xr_host::XrRenderMode) -> mclone_ui::GameXrRenderMode {
         match mode {
@@ -4023,6 +4051,121 @@ mod android {
         next_submitted_frame: u64,
     }
 
+    #[derive(Default)]
+    struct AndroidXrTerrainLodCycle {
+        next_preset_index: usize,
+        pending_preset: Option<mclone_ui::TerrainLodPreset>,
+        next_submitted_frame: u64,
+    }
+
+    impl AndroidXrTerrainLodCycle {
+        fn advance(
+            &mut self,
+            terrain: &mut AndroidXrTerrainState,
+            device: &wgpu::Device,
+            queue: &wgpu::Queue,
+            submitted_frames: u64,
+        ) -> Result<bool> {
+            if let Some(target) = self.pending_preset {
+                if let Some(error) = terrain.terrain_lod_apply_error() {
+                    bail!(
+                        "Android XR terrain LOD cycle could not apply {}: {error}",
+                        target.label()
+                    );
+                }
+                if terrain.terrain_lod_preset_preference() != target {
+                    bail!(
+                        "Android XR terrain LOD cycle requested {}, but scene preference is {}",
+                        target.label(),
+                        terrain.terrain_lod_preset_preference().label()
+                    );
+                }
+                if terrain.applied_terrain_lod_preset() != target || terrain.terrain_lod_applying()
+                {
+                    return Ok(false);
+                }
+
+                let step = self.next_preset_index + 1;
+                if target.horizon_enabled() {
+                    let diagnostics = terrain.terrain_view_diagnostics().ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "Android XR terrain LOD cycle accepted {} without terrain diagnostics",
+                            target.label()
+                        )
+                    })?;
+                    if !diagnostics.target_ready
+                        || diagnostics.lod_preset != target
+                        || !diagnostics.frontier_admission.complete()
+                    {
+                        bail!(
+                            "Android XR terrain LOD cycle accepted {} without a complete drawable frontier: {diagnostics:?}",
+                            target.label()
+                        );
+                    }
+                    log::info!(
+                        "MCLONE_XR_TERRAIN_LOD_CYCLE_ACCEPTED step={step}/{} applied={} target_ready={} frontier={} exact_generation={} drawn_levels={} drawn_tiles={}",
+                        ANDROID_XR_TERRAIN_LOD_CYCLE.len(),
+                        target.label(),
+                        diagnostics.target_ready,
+                        diagnostics.frontier_admission.state.label(),
+                        diagnostics.frontier_admission.exact_generation,
+                        diagnostics.drawn_levels,
+                        diagnostics.drawn_tiles,
+                    );
+                } else {
+                    log::info!(
+                        "MCLONE_XR_TERRAIN_LOD_CYCLE_ACCEPTED step={step}/{} applied={} target_ready=not-required frontier=disabled",
+                        ANDROID_XR_TERRAIN_LOD_CYCLE.len(),
+                        target.label(),
+                    );
+                }
+                self.pending_preset = None;
+                self.next_preset_index += 1;
+                self.next_submitted_frame =
+                    submitted_frames.saturating_add(ANDROID_XR_TERRAIN_LOD_CYCLE_DWELL_FRAMES);
+                return Ok(false);
+            }
+
+            if submitted_frames < self.next_submitted_frame || terrain.terrain_lod_applying() {
+                return Ok(false);
+            }
+            if self.next_preset_index == ANDROID_XR_TERRAIN_LOD_CYCLE.len() {
+                log::info!(
+                    "MCLONE_XR_TERRAIN_LOD_CYCLE_COMPLETE sequence=off,low,medium,high,low applied={} submitted={submitted_frames}",
+                    terrain.applied_terrain_lod_preset().label(),
+                );
+                return Ok(true);
+            }
+
+            let target = ANDROID_XR_TERRAIN_LOD_CYCLE[self.next_preset_index];
+            let step = self.next_preset_index + 1;
+            terrain.apply_xr_ui_action(
+                mclone_ui::GameUiAction::StageTerrainLodPreset(target),
+                device,
+                queue,
+            )?;
+            terrain.apply_xr_ui_action(
+                mclone_ui::GameUiAction::ApplyTerrainLodPreset,
+                device,
+                queue,
+            )?;
+            if terrain.terrain_lod_preset_preference() != target {
+                bail!(
+                    "Android XR terrain LOD cycle actions did not request {}; scene preference remains {}",
+                    target.label(),
+                    terrain.terrain_lod_preset_preference().label()
+                );
+            }
+            log::info!(
+                "MCLONE_XR_TERRAIN_LOD_CYCLE_REQUEST step={step}/{} requested={} result=SharedUiApplied",
+                ANDROID_XR_TERRAIN_LOD_CYCLE.len(),
+                target.label(),
+            );
+            self.pending_preset = Some(target);
+            Ok(false)
+        }
+    }
+
     struct AndroidXrMainFrameLoop<'a> {
         app: &'a AndroidApp,
         device: &'a wgpu::Device,
@@ -4035,6 +4178,7 @@ mod android {
         overlap_eye_submits: bool,
         overlap_runtime_prefetch: bool,
         render_mode_cycle: Option<AndroidXrRenderModeCycle>,
+        terrain_lod_cycle: Option<AndroidXrTerrainLodCycle>,
         terrain: &'a mut AndroidXrTerrainState,
         controller_actions: &'a mut OpenXrControllerActions,
         session_smoke: Option<AndroidXrSessionSmoke>,
@@ -4406,6 +4550,16 @@ mod android {
                         );
                         self.render_mode_cycle = None;
                     }
+                }
+                if let Some(mut cycle) = self.terrain_lod_cycle.take()
+                    && !cycle.advance(
+                        self.terrain,
+                        self.device,
+                        self.queue,
+                        outcome.stats.submitted_frames,
+                    )?
+                {
+                    self.terrain_lod_cycle = Some(cycle);
                 }
             }
             if let Some(requested_mode) = self.terrain.take_xr_render_mode_request() {

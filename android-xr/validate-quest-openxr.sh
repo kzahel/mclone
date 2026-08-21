@@ -29,6 +29,7 @@ XR_UNDERWATER_MODE="${MCLONE_ANDROID_XR_UNDERWATER_MODE:-}"
 XR_DEBUG_UI="${MCLONE_ANDROID_XR_DEBUG_UI:-}"
 XR_RENDER_MODE="${MCLONE_ANDROID_XR_RENDER_MODE:-}"
 XR_RENDER_MODE_CYCLE="${MCLONE_ANDROID_XR_RENDER_MODE_CYCLE:-0}"
+TERRAIN_LOD_CYCLE="${MCLONE_ANDROID_XR_TERRAIN_LOD_CYCLE:-0}"
 REMOTE_ADDR="${MCLONE_ANDROID_XR_REMOTE_ADDR:-}"
 START_SERVER=0
 SERVER_LISTEN="${MCLONE_ANDROID_XR_SERVER_LISTEN:-0.0.0.0:25565}"
@@ -116,6 +117,9 @@ Options:
   --xr-render-mode-cycle
                      Exercise all three modes and both target topologies in
                      one live OpenXR/world session.
+  --terrain-lod-cycle
+                     Stage and Apply Off, Low, Medium, High, then Low through
+                     the shared settings path in one live OpenXR/world session.
   --remote-addr ADDR
                      Add --remote-addr ADDR to mclone.startup.argv.
   --world-dir PATH   Add --world-dir PATH to mclone.startup.argv.
@@ -580,6 +584,11 @@ while [[ $# -gt 0 ]]; do
             STARTUP_ARGV+=("$1")
             shift
             ;;
+        --terrain-lod-cycle)
+            TERRAIN_LOD_CYCLE=1
+            STARTUP_ARGV+=("$1")
+            shift
+            ;;
         --freeze-time|--transient)
             STARTUP_ARGV+=("$1")
             shift
@@ -949,6 +958,17 @@ fi
 if [[ -n "$XR_DISPLAY_REFRESH_RATE" ]]; then
     validate_positive_number "--xr-display-refresh-rate" "$XR_DISPLAY_REFRESH_RATE"
 fi
+if [[ "$TERRAIN_LOD_CYCLE" == "1" ]]; then
+    if [[ "$XR_RENDER_MODE_CYCLE" == "1" ]]; then
+        mclone_die "--terrain-lod-cycle cannot be combined with --xr-render-mode-cycle"
+    fi
+    if [[ -n "$PERF_SECONDS" || -n "$SESSION_SMOKE" ]]; then
+        mclone_die "--terrain-lod-cycle cannot be combined with perf or session smokes"
+    fi
+    if [[ -z "$WAIT_SECONDS_EXPLICIT" ]]; then
+        WAIT_SECONDS=120
+    fi
+fi
 if [[ -n "$PERF_SECONDS" ]]; then
     validate_positive_integer "--perf-seconds" "$PERF_SECONDS"
     if [[ "$SESSION_ONLY" == "1" ]]; then
@@ -1212,6 +1232,10 @@ deadline=$((SECONDS + WAIT_SECONDS))
 success=0
 failure=0
 while (( SECONDS < deadline )); do
+    if [[ "$TERRAIN_LOD_CYCLE" == "1" ]] && grep -F "MCLONE_XR_TERRAIN_LOD_CYCLE_COMPLETE" "$LOG_PATH" >/dev/null 2>&1; then
+        success=1
+        break
+    fi
     if [[ "$XR_RENDER_MODE_CYCLE" == "1" ]] && grep -F "MCLONE_XR_RENDER_PATH_CYCLE_COMPLETE" "$LOG_PATH" >/dev/null 2>&1; then
         success=1
         break
@@ -1248,7 +1272,7 @@ while (( SECONDS < deadline )); do
         success=1
         break
     fi
-    if [[ "$XR_RENDER_MODE_CYCLE" != "1" && "$MULTIVIEW_PROOF" != "1" && "$TERRAIN_MULTIVIEW_PROOF" != "1" && "$TERRAIN_MULTIVIEW_PERF" != "1" && "$SKY_TERRAIN_MULTIVIEW_PERF" != "1" && "$SKY_TERRAIN_ACTORS_MULTIVIEW_PERF" != "1" && "$XR_FULL_FRAME_MULTIVIEW" != "1" && -z "$SESSION_SMOKE" && -z "$PERF_SECONDS" ]] && grep -F "MCLONE_ANDROID_XR_READY" "$LOG_PATH" >/dev/null 2>&1; then
+    if [[ "$TERRAIN_LOD_CYCLE" != "1" && "$XR_RENDER_MODE_CYCLE" != "1" && "$MULTIVIEW_PROOF" != "1" && "$TERRAIN_MULTIVIEW_PROOF" != "1" && "$TERRAIN_MULTIVIEW_PERF" != "1" && "$SKY_TERRAIN_MULTIVIEW_PERF" != "1" && "$SKY_TERRAIN_ACTORS_MULTIVIEW_PERF" != "1" && "$XR_FULL_FRAME_MULTIVIEW" != "1" && -z "$SESSION_SMOKE" && -z "$PERF_SECONDS" ]] && grep -F "MCLONE_ANDROID_XR_READY" "$LOG_PATH" >/dev/null 2>&1; then
         success=1
         break
     fi
@@ -1273,7 +1297,9 @@ if [[ "$success" != "1" ]]; then
     if grep -F "LaunchCheckControllerRequiredDialogActivity" "$ACTIVITY_PATH" >/dev/null 2>&1; then
         mclone_die "OpenXR launch was blocked by the Oculus controller-required launch check; activity dump: $ACTIVITY_PATH; logcat: $LOG_PATH"
     fi
-    if [[ "$XR_RENDER_MODE_CYCLE" == "1" ]]; then
+    if [[ "$TERRAIN_LOD_CYCLE" == "1" ]]; then
+        mclone_die "Android XR terrain-LOD cycle completion marker was not seen within ${WAIT_SECONDS}s; see $LOG_PATH"
+    elif [[ "$XR_RENDER_MODE_CYCLE" == "1" ]]; then
         mclone_die "Android XR render-mode cycle completion marker was not seen within ${WAIT_SECONDS}s; see $LOG_PATH"
     elif [[ "$MULTIVIEW_PROOF" == "1" ]]; then
         mclone_die "Android XR multiview proof marker was not seen within ${WAIT_SECONDS}s; see $LOG_PATH"
@@ -1295,6 +1321,28 @@ if [[ "$success" != "1" ]]; then
         mclone_die "Android XR replacement-ready marker was not seen within ${WAIT_SECONDS}s; see $LOG_PATH"
     else
         mclone_die "Android XR submitted-frame ready marker was not seen within ${WAIT_SECONDS}s; see $LOG_PATH"
+    fi
+fi
+
+if [[ "$TERRAIN_LOD_CYCLE" == "1" ]]; then
+    terrain_lod_cycle_expectations=(
+        "1 off"
+        "2 low"
+        "3 medium"
+        "4 high"
+        "5 low"
+    )
+    for expectation in "${terrain_lod_cycle_expectations[@]}"; do
+        read -r step preset <<< "$expectation"
+        if ! grep -E "MCLONE_XR_TERRAIN_LOD_CYCLE_REQUEST step=${step}/5 requested=${preset} " "$LOG_PATH" >/dev/null 2>&1; then
+            mclone_die "Android XR terrain-LOD request step $step ($preset) was not seen; see $LOG_PATH"
+        fi
+        if ! grep -E "MCLONE_XR_TERRAIN_LOD_CYCLE_ACCEPTED step=${step}/5 applied=${preset} " "$LOG_PATH" >/dev/null 2>&1; then
+            mclone_die "Android XR terrain-LOD acceptance step $step ($preset) was not seen; see $LOG_PATH"
+        fi
+    done
+    if ! grep -E "MCLONE_XR_TERRAIN_LOD_CYCLE_COMPLETE sequence=off,low,medium,high,low applied=low " "$LOG_PATH" >/dev/null 2>&1; then
+        mclone_die "Android XR terrain-LOD final Low receipt was not seen; see $LOG_PATH"
     fi
 fi
 
