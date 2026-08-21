@@ -1131,14 +1131,17 @@ coordinates rather than a locally executable numeric profile.
 
 The bounded continental/ecoregional exploration in
 [`continental-ecoregion-planning.md`](continental-ecoregion-planning.md) now
-has a disconnected broad-surface candidate and six deterministic World
-Explorer review journeys. Human Review B conditionally authorized a detached
-three-site exact-to-LOD probe in Tactical 325 because the abstract broad view
-cannot establish product quality. Keep field revision 21 as the active
-production control and do not change `mclone-overworld-v1` from that probe. If
-Human Review C accepts the exact result, a later focused tactical may change
-production fields, landforms, water, climate, biome/surface/vegetation
-selection, ecology inputs, fixtures, and coarse summaries together.
+has a detached exact-to-LOD candidate and six deterministic World Explorer
+review journeys. Tactical 325 now lowers the candidate into ordinary exact
+blocks, materials, water, biomes, and trees at three characteristic sites and
+composes those chunks with the same procedural-horizon source. Its direct
+comparison reports zero semantic mismatches, and native/browser review
+receipts reach complete radius-4 exact coverage. Keep field revision 21 as
+the active production control: `mclone-overworld-v1`, persistence, and startup
+remain unchanged through Human Review C. Acceptance may authorize a later
+focused in-place revision of production fields, landforms, water, climate,
+biome/surface/vegetation selection, ecology inputs, fixtures, and coarse
+summaries together.
 
 Field revision 12 owns the first complete bounded valley stream: reusable
 procedural starts and references, a 48-96-block monotonic plan, clipped

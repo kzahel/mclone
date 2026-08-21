@@ -69,7 +69,14 @@ Human Review B on 2026-08-21 conditionally continued the direction without
 accepting the surface: the plan seems reasonable, but the abstract
 presentation and poor refill performance are insufficient until real exact
 terrain is composed with the same LOD. Tactical
-[`325`](../tactical/325-continental-exact-lod-review.md) owns that probe.
+[`325`](../tactical/325-continental-exact-lod-review.md) now implements that
+probe and awaits Human Review C. One detached shared source produces exact
+blocks, materials, water, biome IDs, stable trees, and every LOD level at the
+clearing, connected-water, and arid journeys. Direct-versus-exact checks have
+zero semantic mismatches, while retained movement preserves bounded work.
+Production remains unchanged. Review must still judge the visible
+exact/procedural water treatment and regular broad proxy forests before any
+promotion.
 Mclone should combine
 top-down continental and ecoregional planning with bottom-up procedural
 realization so the Overworld contains large, recognizable, causally related
@@ -399,9 +406,28 @@ forest/open/wetland structure at broader scales.
 The interactive candidate is at
 `https://mclone.kzahel.com/explore/?journey=coast-to-wooded-interior` and accepts
 any journey label from the table. Production field revision 21 remains the
-A/B control and `mclone-overworld-v1` remains unchanged. Human Review B must
-now requires the bounded exact-site probe before accepting, revising, or
+A/B control and `mclone-overworld-v1` remains unchanged. Human Review B now
+requires the bounded exact-site probe before accepting, revising, or
 rejecting the surface. Production integration remains unauthorized.
+
+## Human Review C Candidate
+
+Tactical
+[`325`](../tactical/325-continental-exact-lod-review.md) lowers the same
+candidate into ordinary exact chunks at three characteristic journeys and
+composes them with the current procedural-horizon LOD. The review package
+contains exact-only, ownership, composed, broad-horizon, retained-movement,
+and headed-browser evidence. A direct 5-by-5 chunk comparison at every site
+checks 19,200 columns and 76,800 biome samples with zero height, material,
+water, biome, or tree-base mismatches.
+
+This is still a detached promotion probe, not a second product Overworld.
+`mclone-overworld-v1`, persistence, startup defaults, and existing worlds are
+unchanged. Acceptance should authorize a focused in-place production
+revision; rejection may remove the candidate without a migration. The known
+review debts are the regular broad proxy forests, the exact/procedural water
+appearance seam, and reference-path streaming cost rather than missing exact
+terrain or divergent geography.
 
 ## Acceptance
 

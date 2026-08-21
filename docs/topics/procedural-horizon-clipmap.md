@@ -2,7 +2,7 @@
 
 Topic: `procedural-horizon-clipmap`
 
-Status: current shared product architecture as of 2026-08-20. The regular
+Status: current shared product architecture as of 2026-08-21. The regular
 geometry clipmap, focus-connected exact composition, and bounded hybrid
 frontier run through `mclone-terrain-view` on native, WebGPU, flat Android,
 and XR. Tactical
@@ -383,6 +383,18 @@ World Explorer was its first proof host and remains a consumer, but the shared
 implementation owner is `mclone-terrain-view`. The canonical terminology and
 document routes live in [`lod.md`](lod.md). The deleted chunk-granular system
 is always called the **retired chunk-based Far LOD**.
+
+Tactical
+[`325`](../tactical/325-continental-exact-lod-review.md) now exercises the
+same composition architecture with a detached continental candidate. Native
+and browser exact executors retain the selected source through chunk
+compilation, coverage, frontier support, direct coarse sampling, and stable
+tree ownership. Candidate admission batches four chunks per frame and
+rebuilds frontier ownership once per batch; production retains its existing
+cadence. Retained movement also prevents disconnected exact islands and
+rebases painted ownership when movement loses all cardinal overlap. This is a
+source-generalization proof awaiting Human Review C, not a new persisted
+generation profile or a change to the live-game source.
 
 The exact-water ownership defect reported on 2026-08-20 is corrected. The
 procedural shader previously exempted water from exact-coverage discard, so an

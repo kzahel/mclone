@@ -3,7 +3,7 @@
 Topic: `lod`
 
 Status: canonical current terminology and document-routing entry point as of
-2026-08-20. Detailed implementation status remains in
+2026-08-21. Detailed implementation status remains in
 [`procedural-horizon-clipmap.md`](procedural-horizon-clipmap.md); this page does
 not duplicate its execution ledger.
 
@@ -46,6 +46,13 @@ ecoregional direction is owned by
 is judged first through plan maps, regional three-dimensional exploration,
 and walking-scale places. The current clipmap is a downstream consumer that
 must present accepted terrain cheaply and consistently.
+
+Tactical
+[`325`](../tactical/325-continental-exact-lod-review.md) proves that boundary
+with a detached continental candidate: one worldgen source feeds ordinary
+exact chunks and every procedural level, while the existing focus-connected
+coverage, frontier, water, and tree-ownership machinery composes them. It does
+not make LOD the geography owner or change `mclone-overworld-v1`.
 
 Do not require a world-generation mechanism to adopt the visually
 disappointing Tactical 272/273 semantic terrain reconstruction merely because

@@ -1,7 +1,7 @@
 # Tactical 325: Continental Exact And LOD Review
 
-Status: **planned 2026-08-21; implementation authorized through Human Review
-C.**
+Status: **implemented through Human Review C on 2026-08-21; awaiting human
+review.**
 
 Topic: `continental-ecoregion-planning`
 
@@ -285,6 +285,50 @@ Completed on 2026-08-21.
 No separate close-range ground-cover scatter was added. It is not needed to
 establish the terrain/tree ownership contract and would distract from the
 larger surface judgment.
+
+### Phase 4: Runtime Cost And Review Package
+
+Completed on 2026-08-21.
+
+- Candidate admission now compiles at most four exact chunks per frame and
+  rebuilds coverage, frontier, and vegetation ownership once for the batch.
+  Radius 8 consequently reaches all 289 chunks in about 3.8-4.0 seconds on
+  the review host instead of missing the 15-second deadline at 227 chunks.
+  Production retains its existing one-chunk admission cadence.
+- Rapid review movement exposed a real topology error: after the camera
+  outran the retained overlap, a newly ready center could be admitted as a
+  disconnected exact island. Admission now requires existing or cardinally
+  adjacent ownership. A lost-overlap rebase clears only painted ownership;
+  reusable compiler and resident work remain cached.
+- The direct/exact harness compares a 5-by-5 exact-chunk neighborhood at each
+  site. Its 19,200 columns, 76,800 biome samples, top materials, water facts,
+  and tree bases have zero mismatches. The suite semantic witness is
+  `6c01abd836840bd9d1df665a9cd3c33d38b9f339c5dd55635491f538cf0d42fb`.
+- The water review location is selected deterministically at
+  `(6816, -21184)`, near a bank rather than at the center of an open lake. Its
+  neighborhood contains 840 land and 5,560 water columns, so one low-oblique
+  frame shows exact water, floor, bank, land, and a crossing tree crown.
+- A sequential review runner now packages direct agreement, exact-only,
+  coverage, composed, and broad-horizon native frames; retained window and
+  offscreen movement receipts; and three headed-browser composed receipts.
+  The package uses radius 4, or 81 painted exact chunks, at every site.
+- Cold radius-4 composition completes in roughly 3.6-4.0 seconds on Apple M4
+  Pro. Retained movement avoids a full clipmap rebuild: three movements add
+  only 36-40 refills beyond the 320-slot cold fill. The current 24 movement
+  frames average roughly 27-33 ms with 57-83 ms p95. These are review-host
+  reference measurements, not final live-game budgets.
+- Native and browser captures report complete exact ownership, all ten LOD
+  levels, and zero missing exact/proxy tree records. The final reproducible
+  package is written outside the repository at
+  `/tmp/mclone-continental-exact-review/review-index.json`.
+
+The result deliberately retains two visible review issues. Procedural proxy
+forests are still more regular than the exact block trees, and exact water's
+translucent active-pack presentation differs conspicuously from the coarser
+procedural-water presentation at the frontier. The direct/exact receipts show
+that these are representation problems rather than a second geography. Human
+Review C should judge whether to revise those presentations before or during
+production promotion.
 
 ## Non-Goals
 
