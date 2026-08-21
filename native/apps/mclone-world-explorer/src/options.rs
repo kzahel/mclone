@@ -6,6 +6,9 @@ use anyhow::{Context, Result, bail};
 use mclone_view_control::{WorldViewMode, WorldViewProjection, WorldViewState};
 use mclone_world_explorer::{WorldExplorerCompositionMode, WorldExplorerExactAnchor};
 use mclone_worldgen::{
+    continental_catchment_review::{
+        ContinentalCatchmentReviewSiteKind, compile_continental_catchment_review,
+    },
     continental_ecoregion::ContinentalEcoregionDescriptor,
     continental_surface_journey::{
         ContinentalSurfaceJourneyKind, compile_continental_surface_journeys,
@@ -52,6 +55,7 @@ pub struct ExplorerOptions {
     pub seed: i64,
     pub terrain_profile: TerrainPreviewProfile,
     pub journey: Option<ContinentalSurfaceJourneyKind>,
+    pub catchment_site: Option<ContinentalCatchmentReviewSiteKind>,
     pub center_x: i32,
     pub center_z: i32,
     pub blocks_across: u32,
@@ -81,6 +85,7 @@ impl Default for ExplorerOptions {
             seed: DEFAULT_SEED,
             terrain_profile: TerrainPreviewProfile::McloneOverworldV1,
             journey: None,
+            catchment_site: None,
             center_x: 0,
             center_z: 0,
             blocks_across: DEFAULT_BLOCKS_ACROSS,
@@ -112,6 +117,7 @@ impl ExplorerOptions {
         let mut center_z_explicit = false;
         let mut blocks_across_explicit = false;
         let mut yaw_explicit = false;
+        let mut pitch_explicit = false;
         let mut arguments = env::args_os();
         let _program = arguments.next();
         while let Some(argument) = arguments.next() {
@@ -153,6 +159,15 @@ impl ExplorerOptions {
                         .map_err(anyhow::Error::msg)?,
                     )
                 }
+                "--catchment-site" => {
+                    options.catchment_site = Some(
+                        ContinentalCatchmentReviewSiteKind::parse_label(&utf8_value(
+                            value(&mut arguments)?,
+                            name,
+                        )?)
+                        .map_err(anyhow::Error::msg)?,
+                    )
+                }
                 "--center-x" => {
                     options.center_x = parse_value(value(&mut arguments)?, name)?;
                     center_x_explicit = true;
@@ -169,7 +184,10 @@ impl ExplorerOptions {
                     options.yaw_radians = parse_value(value(&mut arguments)?, name)?;
                     yaw_explicit = true;
                 }
-                "--pitch" => options.pitch_radians = parse_value(value(&mut arguments)?, name)?,
+                "--pitch" => {
+                    options.pitch_radians = parse_value(value(&mut arguments)?, name)?;
+                    pitch_explicit = true;
+                }
                 "--view" => {
                     let value = utf8_value(value(&mut arguments)?, name)?;
                     options.view = match value.as_str() {
@@ -250,6 +268,36 @@ impl ExplorerOptions {
                 options.yaw_radians = receipt.review_frames.yaw_radians;
             }
         }
+        if let Some(site_kind) = options.catchment_site {
+            if options.journey.is_some() {
+                bail!("--journey and --catchment-site are mutually exclusive");
+            }
+            if !source_explicit {
+                options.terrain_profile = TerrainPreviewProfile::ContinentalEcoregionCandidate;
+            }
+            let catalog = compile_continental_catchment_review(
+                ContinentalEcoregionDescriptor::plane(options.seed),
+            )
+            .map_err(anyhow::Error::msg)?;
+            let site = catalog
+                .site(site_kind)
+                .expect("the shared catchment review catalog is complete");
+            if !center_x_explicit {
+                options.center_x = site.center_x;
+            }
+            if !center_z_explicit {
+                options.center_z = site.center_z;
+            }
+            if !blocks_across_explicit {
+                options.blocks_across = site.review_frames.oblique_blocks;
+            }
+            if !yaw_explicit {
+                options.yaw_radians = site.review_frames.yaw_radians;
+            }
+            if !pitch_explicit {
+                options.pitch_radians = site.review_frames.pitch_radians;
+            }
+        }
         options.validate()?;
         Ok(Some(options))
     }
@@ -274,6 +322,11 @@ impl ExplorerOptions {
             && self.terrain_profile != TerrainPreviewProfile::ContinentalEcoregionCandidate
         {
             bail!("--journey requires the continental terrain source");
+        }
+        if self.catchment_site.is_some()
+            && self.terrain_profile != TerrainPreviewProfile::ContinentalEcoregionCandidate
+        {
+            bail!("--catchment-site requires the continental terrain source");
         }
         if usize::from(self.capture.is_some())
             + usize::from(self.window_capture.is_some())
@@ -308,11 +361,15 @@ impl ExplorerOptions {
         let journey = self
             .journey
             .map_or(String::new(), |journey| format!(" — {}", journey.title()));
+        let catchment_site = self
+            .catchment_site
+            .map_or(String::new(), |site| format!(" — {}", site.title()));
         format!(
-            "Mclone World Explorer — {} — {}{} — seed {} — ({}, {}) — {} blocks — {}",
+            "Mclone World Explorer — {} — {}{}{} — seed {} — ({}, {}) — {} blocks — {}",
             self.composition.label(),
             self.terrain_profile.label(),
             journey,
+            catchment_site,
             self.seed,
             self.center_x,
             self.center_z,
@@ -395,6 +452,7 @@ Usage: mclone-world-explorer [options]
   --seed N                    terrain seed (default {DEFAULT_SEED})
   --source SOURCE             production (default) or continental
   --journey NAME              select a shared continental review journey
+  --catchment-site NAME       select one realized catchment review site
   --center-x N                view center X (default 0)
   --center-z N                view center Z (default 0)
   --blocks-across N           horizontal footprint (default {DEFAULT_BLOCKS_ACROSS})

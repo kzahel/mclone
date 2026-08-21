@@ -561,6 +561,7 @@ impl SmokeRecorder {
             "seed": options.seed,
             "terrain_source": options.terrain_profile.label(),
             "journey": options.journey.map(|journey| journey.label()),
+            "catchment_site": options.catchment_site.map(|site| site.label()),
             "asset_profile": options.asset_profile.label(),
             "asset_bytes": options.asset_bytes()?,
             "composition": terrain.composition_mode().label(),

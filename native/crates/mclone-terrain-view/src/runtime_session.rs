@@ -643,6 +643,12 @@ fn terrain_runtime_exact_view(
     )?;
     let base_render_view = crate::terrain_horizon_chunk_render_view(presentation, width, height)?;
     let target_y = if state.mode == WorldViewMode::Orbit {
+        let focus_surface_y = terrain_preview_focus_y_for_profile(
+            profile,
+            seed,
+            floor_i32(state.focus_x),
+            floor_i32(state.focus_z),
+        );
         let viewer_surface_y = terrain_preview_focus_y_for_profile(
             profile,
             seed,
@@ -652,6 +658,7 @@ fn terrain_runtime_exact_view(
         let eye_offset_y = base_render_view.camera_position.y - presentation.target_y;
         presentation
             .target_y
+            .max(focus_surface_y)
             .max(viewer_surface_y + COMPOSED_ORBIT_VIEWER_CLEARANCE_BLOCKS - eye_offset_y)
     } else {
         MCLONE_OVERWORLD_SEA_LEVEL as f32
@@ -929,5 +936,36 @@ mod tests {
         .unwrap();
 
         assert_eq!(view.residency_anchor, [-1, 17]);
+    }
+
+    #[test]
+    fn continental_orbit_tracks_a_high_focus_without_burying_the_camera() {
+        let state = WorldViewState {
+            focus_x: 23_195.0,
+            focus_z: 24_162.0,
+            blocks_across: 8_192.0,
+            yaw_radians: std::f64::consts::FRAC_PI_4,
+            pitch_radians: 0.30,
+            mode: WorldViewMode::Orbit,
+            projection: WorldViewProjection::Perspective,
+        };
+        let view = terrain_runtime_exact_view(
+            TerrainPreviewProfile::ContinentalEcoregionCandidate,
+            12_345,
+            state,
+            1280,
+            720,
+            4,
+            TerrainRuntimeExactAnchor::Focus,
+        )
+        .unwrap();
+        let focus_surface_y = terrain_preview_focus_y_for_profile(
+            TerrainPreviewProfile::ContinentalEcoregionCandidate,
+            12_345,
+            23_195,
+            24_162,
+        );
+        assert!(view.target_y >= focus_surface_y);
+        assert!(view.render_view.camera_position.y > view.target_y);
     }
 }

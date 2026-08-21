@@ -8,22 +8,27 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 use crate::{
-    block::{COARSE_DIRT, GRASS_BLOCK, GRAVEL, SAND, STONE},
+    block::{COARSE_DIRT, GRASS_BLOCK, GRAVEL, SAND, SNOW_BLOCK, STONE},
     continental_ecoregion::{
         ContinentalEcoregionDescriptor, ContinentalEcoregionError, ContinentalEcoregionPlan,
         ContinentalEcoregionTopology, HabitatRouteKind, LandscapeFeatureId, LandscapePlanDetail,
         LandscapePlanSample, LandscapeWindowRequest, PhysiographicProvinceKind,
         PlanConstructionCounts,
     },
+    continental_hydrography::{
+        ContinentalHydrographyPlan, ContinentalHydrographySample, ContinentalReachKind,
+        ContinentalShoreIntent, HydrographyFeatureId,
+    },
     levelgen::{
         BEACH_BIOME_ID, MCLONE_OVERWORLD_FOREST_BIOME_ID, MCLONE_OVERWORLD_RIVER_BIOME_ID,
         MCLONE_OVERWORLD_SAVANNA_BIOME_ID, MCLONE_OVERWORLD_SEA_LEVEL,
-        MCLONE_OVERWORLD_TAIGA_BIOME_ID, OCEAN_BIOME_ID, PLAINS_BIOME_ID,
+        MCLONE_OVERWORLD_SNOWY_MOUNTAINS_BIOME_ID, MCLONE_OVERWORLD_TAIGA_BIOME_ID, OCEAN_BIOME_ID,
+        PLAINS_BIOME_ID,
     },
     noise::{SeedDomain, ValueNoise2d},
 };
 
-pub const CONTINENTAL_SURFACE_SCHEMA_REVISION: &str = "mclone-continental-surface-v4";
+pub const CONTINENTAL_SURFACE_SCHEMA_REVISION: &str = "mclone-continental-surface-v6";
 pub const CONTINENTAL_SURFACE_SOURCE_LABEL: &str = "continental-ecoregion-candidate-v1";
 pub const CONTINENTAL_SURFACE_FAMILY_COUNT: usize = 5;
 pub const CONTINENTAL_SURFACE_MAX_WINDOW_SAMPLES: usize = 262_144;
@@ -99,6 +104,7 @@ pub enum ContinentalSurfaceSubstrate {
     Sand,
     Gravel,
     Stone,
+    Snow,
     CoarseSoil,
 }
 
@@ -109,6 +115,7 @@ impl ContinentalSurfaceSubstrate {
             Self::Sand => SAND,
             Self::Gravel => GRAVEL,
             Self::Stone => STONE,
+            Self::Snow => SNOW_BLOCK,
             Self::CoarseSoil => COARSE_DIRT,
         }
     }
@@ -119,6 +126,7 @@ impl ContinentalSurfaceSubstrate {
             Self::Sand => "sand",
             Self::Gravel => "gravel",
             Self::Stone => "stone",
+            Self::Snow => "snow",
             Self::CoarseSoil => "coarse-soil",
         }
     }
@@ -141,6 +149,11 @@ pub fn continental_surface_biome_id(sample: ContinentalSurfaceSample) -> i32 {
             if sample.substrate == ContinentalSurfaceSubstrate::Sand =>
         {
             BEACH_BIOME_ID
+        }
+        ContinentalSurfaceWaterKind::None
+            if sample.substrate == ContinentalSurfaceSubstrate::Snow =>
+        {
+            MCLONE_OVERWORLD_SNOWY_MOUNTAINS_BIOME_ID
         }
         ContinentalSurfaceWaterKind::None if sample.aridity >= 0.62 => {
             MCLONE_OVERWORLD_SAVANNA_BIOME_ID
@@ -167,6 +180,10 @@ pub struct ContinentalSurfaceConstructionCounts {
     pub mosaic_owner_evaluations: u64,
     pub plan_field_evaluations: u64,
     pub surface_field_evaluations: u64,
+    pub hydrography_owner_evaluations: u64,
+    pub hydrography_graph_constructions: u64,
+    pub hydrography_reach_evaluations: u64,
+    pub hydrography_raster_cells: u64,
     pub exact_chunks: u64,
     pub density_volumes: u64,
     pub feature_batches: u64,
@@ -182,6 +199,10 @@ impl ContinentalSurfaceConstructionCounts {
             mosaic_owner_evaluations: work.mosaic_owner_evaluations,
             plan_field_evaluations: work.local_field_evaluations,
             surface_field_evaluations: 7,
+            hydrography_owner_evaluations: 0,
+            hydrography_graph_constructions: 0,
+            hydrography_reach_evaluations: 0,
+            hydrography_raster_cells: 0,
             exact_chunks: work.exact_chunks,
             density_volumes: 0,
             feature_batches: 0,
@@ -196,6 +217,10 @@ impl ContinentalSurfaceConstructionCounts {
         self.mosaic_owner_evaluations += other.mosaic_owner_evaluations;
         self.plan_field_evaluations += other.plan_field_evaluations;
         self.surface_field_evaluations += other.surface_field_evaluations;
+        self.hydrography_owner_evaluations += other.hydrography_owner_evaluations;
+        self.hydrography_graph_constructions += other.hydrography_graph_constructions;
+        self.hydrography_reach_evaluations += other.hydrography_reach_evaluations;
+        self.hydrography_raster_cells += other.hydrography_raster_cells;
         self.exact_chunks += other.exact_chunks;
         self.density_volumes += other.density_volumes;
         self.feature_batches += other.feature_batches;
@@ -212,6 +237,9 @@ pub struct ContinentalSurfaceSample {
     pub ecoregion_id: Option<LandscapeFeatureId>,
     pub clearing_id: Option<LandscapeFeatureId>,
     pub route_id: Option<LandscapeFeatureId>,
+    pub catchment_id: Option<HydrographyFeatureId>,
+    pub reach_id: Option<HydrographyFeatureId>,
+    pub lake_id: Option<HydrographyFeatureId>,
     pub family_weights: [f32; CONTINENTAL_SURFACE_FAMILY_COUNT],
     pub dominant_family: TerrainCharacterFamily,
     pub continental_height: f32,
@@ -234,6 +262,17 @@ pub struct ContinentalSurfaceSample {
     pub aridity: f32,
     pub leeward_exposure: f32,
     pub drainage_permanence: f32,
+    pub reach_kind: Option<ContinentalReachKind>,
+    pub reach_order: u8,
+    pub discharge: f32,
+    pub channel_signed_distance_blocks: f32,
+    pub channel_distance_blocks: f32,
+    pub channel_width_blocks: f32,
+    pub downstream_x: f32,
+    pub downstream_z: f32,
+    pub floodplain: f32,
+    pub riparian: f32,
+    pub shore_intent: ContinentalShoreIntent,
 }
 
 impl ContinentalSurfaceSample {
@@ -329,6 +368,7 @@ impl ContinentalSurfaceFields {
 pub struct ContinentalSurfacePlan {
     descriptor: ContinentalEcoregionDescriptor,
     plan: ContinentalEcoregionPlan,
+    hydrography: ContinentalHydrographyPlan,
     fields: ContinentalSurfaceFields,
 }
 
@@ -339,6 +379,7 @@ impl ContinentalSurfacePlan {
         Ok(Self {
             descriptor,
             plan: ContinentalEcoregionPlan::new(descriptor)?,
+            hydrography: ContinentalHydrographyPlan::new(descriptor),
             fields: ContinentalSurfaceFields::new(descriptor),
         })
     }
@@ -351,11 +392,14 @@ impl ContinentalSurfacePlan {
         let plan = self
             .plan
             .query_point(LandscapePlanDetail::Mosaic, world_x, world_z);
-        let sample = self.realize(world_x, world_z, &plan.sample);
-        ContinentalSurfacePointQuery {
-            sample,
-            work: ContinentalSurfaceConstructionCounts::from_plan(plan.work),
-        }
+        let hydrography = self.hydrography.query_point(world_x, world_z);
+        let sample = self.realize(world_x, world_z, &plan.sample, hydrography.sample);
+        let mut work = ContinentalSurfaceConstructionCounts::from_plan(plan.work);
+        work.hydrography_owner_evaluations = u64::from(hydrography.work.owner_evaluations);
+        work.hydrography_graph_constructions = u64::from(hydrography.work.graph_constructions);
+        work.hydrography_reach_evaluations = u64::from(hydrography.work.reach_evaluations);
+        work.hydrography_raster_cells = u64::from(hydrography.work.raster_cells);
+        ContinentalSurfacePointQuery { sample, work }
     }
 
     pub fn query_window(
@@ -392,6 +436,7 @@ impl ContinentalSurfacePlan {
         world_x: i32,
         world_z: i32,
         plan: &LandscapePlanSample,
+        hydrography: Option<ContinentalHydrographySample>,
     ) -> ContinentalSurfaceSample {
         let macro_roll = self.fields.macro_roll.sample(world_x, world_z);
         let ridge_form = self.fields.ridge_form.sample(world_x, world_z);
@@ -400,6 +445,12 @@ impl ContinentalSurfacePlan {
         let local_form = self.fields.local_form.sample(world_x, world_z);
         let walking_form = self.fields.walking_form.sample(world_x, world_z);
         let micro_form = self.fields.micro_form.sample(world_x, world_z);
+        let realized_lake_distance = hydrography.map_or(f64::INFINITY, |hydrography| {
+            f64::from(hydrography.lake_signed_distance_blocks)
+                + shore_form * 620.0
+                + ridge_form * 150.0
+                + local_form * 84.0
+        });
         let land = f64::from(plan.land_weight);
         let coast_weight = 1.0 - smoothstep(0.54, 0.92, land);
 
@@ -419,7 +470,7 @@ impl ContinentalSurfacePlan {
             };
             lerp(0.62, owned, province_identity)
         });
-        let water_route = mosaic
+        let legacy_water_route = mosaic
             .and_then(|mosaic| mosaic.corridor_kind.map(|kind| (kind, mosaic.corridor)))
             .map_or(0.0, |(kind, weight)| match kind {
                 HabitatRouteKind::RiparianSpine | HabitatRouteKind::WetlandChain => {
@@ -427,27 +478,81 @@ impl ContinentalSurfacePlan {
                 }
                 HabitatRouteKind::WoodlandPass | HabitatRouteKind::OpenRangeLink => 0.0,
             });
-        let wetland = mosaic.map_or(0.0, |mosaic| f64::from(mosaic.wetland));
+        // Hydrography weights already include the catchment's bounded taper.
+        // This factor only gates the graph against the accepted landmass.
+        let hydro_land = if hydrography.is_some() {
+            smoothstep(0.58, 0.78, land)
+        } else {
+            0.0
+        };
+        let hydro_riparian = hydrography.map_or(0.0, |hydrography| {
+            if !hydrography.channel_distance_blocks.is_finite()
+                || hydrography.bankfull_width_blocks <= 0.0
+            {
+                return 0.0;
+            }
+            inverse_smoothstep(
+                f64::from(hydrography.bankfull_width_blocks) * 0.6,
+                f64::from(hydrography.bankfull_width_blocks) * 7.0 + 48.0,
+                f64::from(hydrography.channel_distance_blocks),
+            ) * hydro_land
+        });
+        let hydro_floodplain = hydrography.map_or(0.0, |hydrography| {
+            f64::from(hydrography.floodplain_weight) * hydro_land
+        });
+        let hydro_lake_margin = hydrography.map_or(0.0, |_| {
+            inverse_smoothstep(-220.0, 850.0, realized_lake_distance.abs()) * hydro_land
+        });
+        let hydro_wet_shore = hydrography.map_or(0.0, |hydrography| {
+            if matches!(
+                hydrography.shore_intent,
+                ContinentalShoreIntent::Wetland | ContinentalShoreIntent::Depositional
+            ) {
+                hydro_lake_margin
+            } else {
+                0.0
+            }
+        });
+        let wetland = mosaic
+            .map_or(0.0, |mosaic| f64::from(mosaic.wetland))
+            .max(hydro_floodplain * 0.72)
+            .max(hydro_wet_shore * 0.86);
         let major_water = province.map_or(0.0, |province| f64::from(province.major_water));
-        let fluvial_weight = (water_route.max(wetland * 0.78).max(province.map_or(
-            0.0,
-            |province| match province.kind {
+        let hydro_fluvial = hydrography.map_or(0.0, |hydrography| {
+            f64::from(
+                hydrography
+                    .valley_weight
+                    .max(hydrography.floodplain_weight)
+                    .max(hydrography.lake_weight),
+            ) * hydro_land
+        });
+        let fluvial_weight = (legacy_water_route
+            .max(wetland * 0.78)
+            .max(hydro_fluvial)
+            .max(province.map_or(0.0, |province| match province.kind {
                 PhysiographicProvinceKind::RiverLowland => 0.72 * province_identity,
                 PhysiographicProvinceKind::LakeBasin => 0.86 * province_identity,
                 _ => major_water * 0.36 * province_identity,
-            },
-        )))
+            })))
         .clamp(0.0, 1.0);
-        let upland_weight = province.map_or(0.0, |province| {
-            let kind = match province.kind {
-                PhysiographicProvinceKind::RockyRidge => 1.0,
-                PhysiographicProvinceKind::WoodedUpland => 0.72,
-                PhysiographicProvinceKind::RollingHills => 0.34,
-                PhysiographicProvinceKind::QuietBench => 0.24,
-                _ => 0.10,
-            };
-            kind * province_identity
-        });
+        let upland_weight = province
+            .map_or(0.0, |province| {
+                let kind = match province.kind {
+                    PhysiographicProvinceKind::RockyRidge => 1.0,
+                    PhysiographicProvinceKind::WoodedUpland => 0.72,
+                    PhysiographicProvinceKind::RollingHills => 0.34,
+                    PhysiographicProvinceKind::QuietBench => 0.24,
+                    _ => 0.10,
+                };
+                kind * province_identity
+            })
+            .max(hydrography.map_or(0.0, |hydrography| {
+                f64::from(
+                    hydrography
+                        .range_weight
+                        .max(hydrography.divide_weight * 0.82),
+                ) * hydro_land
+            }));
         let leeward_exposure =
             province.map_or(0.0, |province| f64::from(province.leeward_exposure));
         let aridity = ecoregion.map_or(0.0, |ecoregion| f64::from(ecoregion.aridity));
@@ -504,14 +609,22 @@ impl ContinentalSurfacePlan {
         let openness = mosaic.map_or(0.0, |mosaic| f64::from(mosaic.openness));
         let forest_core = mosaic.map_or(0.0, |mosaic| f64::from(mosaic.forest_core));
         let route = mosaic.map_or(0.0, |mosaic| f64::from(mosaic.corridor));
+        let hydro_quieting = hydrography.map_or(1.0, |hydrography| {
+            (1.0 - f64::from(hydrography.valley_weight) * hydro_land * 0.62
+                - f64::from(hydrography.lake_weight) * hydro_land * 0.82)
+                .clamp(0.12, 1.0)
+        });
         let local_amplitude = 1.2 + upland_weight * 5.5 + rolling_weight * 1.8;
-        let broad_quieting =
-            (1.0 - clearing * 0.58 - smoothstep(0.72, 1.0, openness) * 0.18).clamp(0.28, 1.0);
+        let broad_quieting = (1.0 - clearing * 0.58 - smoothstep(0.72, 1.0, openness) * 0.18)
+            .clamp(0.28, 1.0)
+            * hydro_quieting;
         let walking_amplitude =
             2.2 + rolling_weight * 2.0 + upland_weight * 4.5 + arid_weight * 2.8;
-        let walking_quieting = (1.0 - clearing * 0.62 - wetland * 0.45).clamp(0.28, 1.0);
+        let walking_quieting =
+            (1.0 - clearing * 0.62 - wetland * 0.45).clamp(0.28, 1.0) * hydro_quieting;
         let micro_amplitude = 0.55 + upland_weight * 1.25 + arid_weight * 0.75;
-        let micro_quieting = (1.0 - clearing * 0.72 - wetland * 0.58).clamp(0.18, 1.0);
+        let micro_quieting =
+            (1.0 - clearing * 0.72 - wetland * 0.58).clamp(0.18, 1.0) * hydro_quieting;
         let local_height = local_form * local_amplitude * broad_quieting
             + walking_form * walking_amplitude * walking_quieting
             + micro_form * micro_amplitude * micro_quieting;
@@ -525,12 +638,134 @@ impl ContinentalSurfacePlan {
         let coast_blend = smoothstep(0.42, 0.62, land);
         let mut solid_surface_y = lerp(ocean_floor, land_surface, coast_blend);
 
+        if let Some(hydrography) = hydrography.filter(|_| hydro_land > 0.0) {
+            let before = solid_surface_y;
+            let lake_level = f64::from(
+                hydrography
+                    .lake_water_y
+                    .unwrap_or(MCLONE_OVERWORLD_SEA_LEVEL as f32 + 7.0),
+            );
+            let range_weight = f64::from(hydrography.range_weight) * hydro_land;
+            let divide_weight = f64::from(hydrography.divide_weight) * hydro_land;
+            let saddle_weight = f64::from(hydrography.saddle_weight) * hydro_land;
+            let peak_variation = ridge_form * 15.0 + local_form * 9.0 + walking_form * 3.0;
+            let mountain_target = lake_level
+                + 34.0
+                + range_weight * (120.0 + peak_variation)
+                + divide_weight * (1.0 - range_weight) * 22.0
+                - saddle_weight * 42.0;
+            let mountain_blend = range_weight.max(divide_weight * 0.72).clamp(0.0, 1.0);
+            solid_surface_y = lerp(
+                solid_surface_y,
+                solid_surface_y.max(mountain_target),
+                mountain_blend,
+            );
+
+            if let Some(bed_y) = hydrography.bed_y {
+                let meander_envelope = 4.0
+                    * f64::from(hydrography.reach_progress)
+                    * (1.0 - f64::from(hydrography.reach_progress));
+                let centerline_warp = (match hydrography.reach_kind {
+                    Some(ContinentalReachKind::Headwater) => local_form * 54.0 + walking_form * 9.0,
+                    Some(ContinentalReachKind::Tributary) => {
+                        local_form * 86.0 + walking_form * 14.0
+                    }
+                    Some(ContinentalReachKind::Trunk)
+                    | Some(ContinentalReachKind::LakeInlet)
+                    | Some(ContinentalReachKind::Outlet) => {
+                        local_form * 128.0 + walking_form * 20.0
+                    }
+                    None => 0.0,
+                }) * meander_envelope;
+                let signed_distance =
+                    f64::from(hydrography.channel_signed_distance_blocks) + centerline_warp;
+                let distance = signed_distance.abs();
+                let channel_half = f64::from(hydrography.channel_width_blocks) * 0.5;
+                let bankfull_half = f64::from(hydrography.bankfull_width_blocks) * 0.5;
+                let bend_phase = f64::from(hydrography.reach_progress)
+                    * std::f64::consts::TAU
+                    * (1.25 + f64::from(hydrography.reach_order) * 0.18)
+                    + f64::from(hydrography.reach_slot.unwrap_or(0)) * 1.73;
+                let bend_side = bend_phase.sin() * signed_distance.signum();
+                let effective_bankfull_half =
+                    bankfull_half * (1.0 + bend_side * 0.32).clamp(0.58, 1.42);
+                let valley_inner = (bankfull_half * 8.0 + 96.0).max(180.0);
+                let valley_outer = match hydrography.reach_kind {
+                    Some(ContinentalReachKind::Headwater) => 1_050.0,
+                    Some(ContinentalReachKind::Tributary) => 1_450.0,
+                    Some(ContinentalReachKind::Trunk) | Some(ContinentalReachKind::LakeInlet) => {
+                        2_250.0
+                    }
+                    Some(ContinentalReachKind::Outlet) => 1_850.0,
+                    None => 1_100.0,
+                };
+                let bank_rise =
+                    smoothstep(
+                        channel_half,
+                        effective_bankfull_half.max(channel_half + 3.0),
+                        distance,
+                    ) * (3.0 + f64::from(hydrography.reach_order) + bend_side.max(0.0) * 3.5);
+                let terrace_start = bankfull_half * (1.0 - bend_side * 0.28).clamp(0.62, 1.38);
+                let terrace_rise = smoothstep(terrace_start, valley_inner, distance)
+                    * (7.0 + bend_side.max(0.0) * 4.0);
+                let wall_rise = smoothstep(valley_inner, valley_outer, distance)
+                    * (18.0 + f64::from(hydrography.reach_order) * 5.0);
+                let valley_target = f64::from(bed_y) + bank_rise + terrace_rise + wall_rise;
+                let valley_blend =
+                    (f64::from(hydrography.valley_weight) * hydro_land * 1.12).clamp(0.0, 1.0);
+                solid_surface_y = lerp(solid_surface_y, valley_target, valley_blend);
+            }
+
+            let lake_distance = realized_lake_distance;
+            if hydrography.lake_id.is_some() && lake_distance < 1_250.0 {
+                let shore_slope = match hydrography.shore_intent {
+                    ContinentalShoreIntent::Wetland => 0.0035,
+                    ContinentalShoreIntent::Depositional | ContinentalShoreIntent::Inlet => 0.007,
+                    ContinentalShoreIntent::Ordinary => 0.018,
+                    ContinentalShoreIntent::Gravel => 0.032,
+                    ContinentalShoreIntent::Rocky => 0.060,
+                    ContinentalShoreIntent::Outlet => 0.024,
+                    ContinentalShoreIntent::None => 0.018,
+                };
+                let shore_roughness = match hydrography.shore_intent {
+                    ContinentalShoreIntent::Rocky => local_form * 5.0 + walking_form * 1.2,
+                    ContinentalShoreIntent::Gravel => local_form * 2.0,
+                    ContinentalShoreIntent::Wetland
+                    | ContinentalShoreIntent::Depositional
+                    | ContinentalShoreIntent::Inlet => walking_form * 0.35,
+                    _ => local_form * 0.8,
+                };
+                let lake_target = if lake_distance < 0.0 {
+                    let edge_depth = match hydrography.shore_intent {
+                        ContinentalShoreIntent::Wetland
+                        | ContinentalShoreIntent::Depositional
+                        | ContinentalShoreIntent::Inlet => 0.35,
+                        _ => 0.75,
+                    };
+                    let depth = edge_depth + (-lake_distance / 620.0).clamp(0.0, 1.0) * 10.0;
+                    lake_level - depth + basin_form * 0.7
+                } else {
+                    lake_level + lake_distance * shore_slope + shore_roughness
+                };
+                let realized_lake_weight = inverse_smoothstep(-420.0, 760.0, lake_distance);
+                let lake_blend = (realized_lake_weight
+                    * f64::from(hydrography.catchment_weight)
+                    * hydro_land
+                    * 1.18)
+                    .clamp(0.0, 1.0);
+                solid_surface_y = lerp(solid_surface_y, lake_target, lake_blend);
+            }
+            hydrologic_height += solid_surface_y - before;
+        }
+
         if land < 0.54 && solid_surface_y < sea_level {
             water_level_y = Some(sea_level);
             water_kind = ContinentalSurfaceWaterKind::Ocean;
         }
 
-        if let Some(province) = province {
+        if hydro_land < 0.12
+            && let Some(province) = province
+        {
             if province.kind == PhysiographicProvinceKind::LakeBasin && drainage_permanence > 0.46 {
                 let lake_level = sea_level + 2.0 + f64::from((province.id.hash >> 17) as u8 % 5);
                 let lake_shape = smoothstep(
@@ -550,18 +785,87 @@ impl ContinentalSurfacePlan {
             }
         }
 
-        let river_channel = smoothstep(0.58, 0.90, water_route) * (0.72 + wetland * 0.28);
-        if river_channel > 0.0 {
-            let river_level = river_water_level(plan, self.descriptor.topology);
-            let river_bed = river_level - 2.0 - river_channel * 4.0;
+        let legacy_river_channel = if hydro_land < 0.12 {
+            smoothstep(0.58, 0.90, legacy_water_route) * (0.72 + wetland * 0.28)
+        } else {
+            0.0
+        };
+        // The lake owns its full interior and one flat water level. Inlet and
+        // outlet centerlines may meet the rim, but a quantized reach must not
+        // cut a lower parallel trench through the lake bed.
+        let hydro_river_channel = if realized_lake_distance < 0.0 {
+            0.0
+        } else {
+            hydrography.map_or(0.0, |hydrography| {
+                let meander_envelope = 4.0
+                    * f64::from(hydrography.reach_progress)
+                    * (1.0 - f64::from(hydrography.reach_progress));
+                let centerline_warp = (match hydrography.reach_kind {
+                    Some(ContinentalReachKind::Headwater) => local_form * 54.0 + walking_form * 9.0,
+                    Some(ContinentalReachKind::Tributary) => {
+                        local_form * 86.0 + walking_form * 14.0
+                    }
+                    Some(ContinentalReachKind::Trunk)
+                    | Some(ContinentalReachKind::LakeInlet)
+                    | Some(ContinentalReachKind::Outlet) => {
+                        local_form * 128.0 + walking_form * 20.0
+                    }
+                    None => 0.0,
+                }) * meander_envelope;
+                let edge_warp = micro_form * 0.75;
+                inverse_smoothstep(
+                    f64::from(hydrography.channel_width_blocks) * 0.5 - 1.0,
+                    f64::from(hydrography.channel_width_blocks) * 0.5 + 2.5,
+                    (f64::from(hydrography.channel_signed_distance_blocks) + centerline_warp).abs()
+                        + edge_warp,
+                ) * hydro_land
+            })
+        };
+        let river_channel = legacy_river_channel.max(hydro_river_channel);
+        if hydro_river_channel > 0.0 {
+            let hydrography = hydrography.expect("hydro river weight requires a sample");
+            let raw_level = f64::from(
+                hydrography
+                    .water_level_y
+                    .unwrap_or(MCLONE_OVERWORLD_SEA_LEVEL as f32),
+            );
+            let river_level = (raw_level / 2.0).floor() * 2.0;
+            let river_depth = 1.5
+                + f64::from(hydrography.reach_order) * 0.85
+                + f64::from(hydrography.discharge).sqrt() * 0.45;
+            let river_bed = river_level - river_depth;
             if river_bed < solid_surface_y {
                 hydrologic_height += river_bed - solid_surface_y;
                 solid_surface_y = river_bed;
             }
-            if river_channel > 0.38 && drainage_permanence > 0.40 {
+            let permanent_threshold = match hydrography.reach_kind {
+                Some(ContinentalReachKind::Headwater) => 0.26,
+                _ => 0.18,
+            };
+            if hydro_river_channel > 0.36 && drainage_permanence > permanent_threshold {
                 water_level_y = Some(river_level);
                 water_kind = ContinentalSurfaceWaterKind::River;
             }
+        } else if legacy_river_channel > 0.0 {
+            let river_level = river_water_level(plan, self.descriptor.topology);
+            let river_bed = river_level - 2.0 - legacy_river_channel * 4.0;
+            if river_bed < solid_surface_y {
+                hydrologic_height += river_bed - solid_surface_y;
+                solid_surface_y = river_bed;
+            }
+            if legacy_river_channel > 0.38 && drainage_permanence > 0.40 {
+                water_level_y = Some(river_level);
+                water_kind = ContinentalSurfaceWaterKind::River;
+            }
+        } else if hydrography.is_some_and(|_| realized_lake_distance < 0.0 && hydro_land > 0.18) {
+            let hydrography = hydrography.expect("lake condition requires a sample");
+            let lake_level = f64::from(
+                hydrography
+                    .lake_water_y
+                    .expect("lake interior carries its level"),
+            );
+            water_level_y = Some(lake_level);
+            water_kind = ContinentalSurfaceWaterKind::Lake;
         } else if wetland > 0.58 && drainage_permanence > 0.54 && unit_field(basin_form) > 0.64 {
             let pool_level = solid_surface_y.floor() + 1.0;
             solid_surface_y = solid_surface_y.min(pool_level - 1.5);
@@ -569,6 +873,8 @@ impl ContinentalSurfacePlan {
             water_kind = ContinentalSurfaceWaterKind::WetlandPool;
         }
 
+        solid_surface_y = solid_surface_y.clamp(1.0, 248.0);
+        water_level_y = water_level_y.map(|water| water.clamp(2.0, 252.0));
         let display_surface_y =
             water_level_y.map_or(solid_surface_y, |water| water.max(solid_surface_y));
         let substrate = surface_substrate(
@@ -582,6 +888,12 @@ impl ContinentalSurfacePlan {
             aridity,
             drainage_permanence,
             river_channel,
+            solid_surface_y,
+            hydrography.map_or(0.0, |hydrography| f64::from(hydrography.range_weight)),
+            hydrography.map_or(ContinentalShoreIntent::None, |hydrography| {
+                hydrography.shore_intent
+            }),
+            realized_lake_distance,
         );
         let forest_edge = (forest_core * (1.0 - forest_core) * 4.0).clamp(0.0, 1.0);
         let (temperature, moisture) = ecoregion.map_or((0.5, 0.5), |ecoregion| {
@@ -599,6 +911,9 @@ impl ContinentalSurfacePlan {
             ecoregion_id: ecoregion.map(|ecoregion| ecoregion.id),
             clearing_id: mosaic.and_then(|mosaic| mosaic.clearing_id),
             route_id: mosaic.and_then(|mosaic| mosaic.corridor_id),
+            catchment_id: hydrography.map(|hydrography| hydrography.catchment_id),
+            reach_id: hydrography.and_then(|hydrography| hydrography.reach_id),
+            lake_id: hydrography.and_then(|hydrography| hydrography.lake_id),
             family_weights: family_weights.map(|weight| weight as f32),
             dominant_family,
             continental_height: continental_height as f32,
@@ -621,6 +936,27 @@ impl ContinentalSurfacePlan {
             aridity: aridity as f32,
             leeward_exposure: leeward_exposure as f32,
             drainage_permanence: drainage_permanence as f32,
+            reach_kind: hydrography.and_then(|hydrography| hydrography.reach_kind),
+            reach_order: hydrography.map_or(0, |hydrography| hydrography.reach_order),
+            discharge: hydrography.map_or(0.0, |hydrography| hydrography.discharge),
+            // Keep review receipts valid JSON even outside every bounded
+            // catchment. The value is a deliberately unreachable finite
+            // sentinel rather than IEEE infinity.
+            channel_signed_distance_blocks: hydrography.map_or(1_000_000.0, |hydrography| {
+                hydrography.channel_signed_distance_blocks
+            }),
+            channel_distance_blocks: hydrography.map_or(1_000_000.0, |hydrography| {
+                hydrography.channel_distance_blocks
+            }),
+            channel_width_blocks: hydrography
+                .map_or(0.0, |hydrography| hydrography.channel_width_blocks),
+            downstream_x: hydrography.map_or(0.0, |hydrography| hydrography.downstream_x),
+            downstream_z: hydrography.map_or(0.0, |hydrography| hydrography.downstream_z),
+            floodplain: hydro_floodplain as f32,
+            riparian: hydro_riparian as f32,
+            shore_intent: hydrography.map_or(ContinentalShoreIntent::None, |hydrography| {
+                hydrography.shore_intent
+            }),
         }
     }
 }
@@ -719,6 +1055,10 @@ fn surface_substrate(
     aridity: f64,
     drainage_permanence: f64,
     channel: f64,
+    surface_y: f64,
+    range_weight: f64,
+    shore_intent: ContinentalShoreIntent,
+    shore_distance: f64,
 ) -> ContinentalSurfaceSubstrate {
     match water {
         ContinentalSurfaceWaterKind::Ocean => {
@@ -729,15 +1069,53 @@ fn surface_substrate(
             }
         }
         ContinentalSurfaceWaterKind::Lake | ContinentalSurfaceWaterKind::River => {
-            if wetland > 0.58 {
+            if wetland > 0.58
+                || matches!(
+                    shore_intent,
+                    ContinentalShoreIntent::Wetland | ContinentalShoreIntent::Depositional
+                )
+            {
                 ContinentalSurfaceSubstrate::Sand
+            } else if shore_intent == ContinentalShoreIntent::Rocky {
+                ContinentalSurfaceSubstrate::Stone
             } else {
                 ContinentalSurfaceSubstrate::Gravel
             }
         }
         ContinentalSurfaceWaterKind::WetlandPool => ContinentalSurfaceSubstrate::CoarseSoil,
+        ContinentalSurfaceWaterKind::None
+            if range_weight > 0.34 && surface_y > 204.0 + local_form * 9.0 =>
+        {
+            ContinentalSurfaceSubstrate::Snow
+        }
+        ContinentalSurfaceWaterKind::None if range_weight > 0.28 && surface_y > 164.0 => {
+            ContinentalSurfaceSubstrate::Stone
+        }
         ContinentalSurfaceWaterKind::None if channel > 0.34 && drainage_permanence < 0.40 => {
             ContinentalSurfaceSubstrate::Gravel
+        }
+        ContinentalSurfaceWaterKind::None
+            if shore_distance.abs() < 28.0
+                && matches!(
+                    shore_intent,
+                    ContinentalShoreIntent::Depositional | ContinentalShoreIntent::Inlet
+                ) =>
+        {
+            ContinentalSurfaceSubstrate::Sand
+        }
+        ContinentalSurfaceWaterKind::None
+            if shore_distance.abs() < 20.0
+                && matches!(
+                    shore_intent,
+                    ContinentalShoreIntent::Gravel | ContinentalShoreIntent::Outlet
+                ) =>
+        {
+            ContinentalSurfaceSubstrate::Gravel
+        }
+        ContinentalSurfaceWaterKind::None
+            if shore_distance.abs() < 18.0 && shore_intent == ContinentalShoreIntent::Rocky =>
+        {
+            ContinentalSurfaceSubstrate::Stone
         }
         ContinentalSurfaceWaterKind::None
             if aridity > 0.88 && ridge_form > 0.70 && local_form > 0.40 =>
@@ -774,6 +1152,10 @@ fn unit_field(value: f64) -> f64 {
 fn smoothstep(low: f64, high: f64, value: f64) -> f64 {
     let unit = ((value - low) / (high - low)).clamp(0.0, 1.0);
     unit * unit * (3.0 - 2.0 * unit)
+}
+
+fn inverse_smoothstep(inner: f64, outer: f64, distance: f64) -> f64 {
+    1.0 - smoothstep(inner, outer, distance)
 }
 
 fn lerp(left: f64, right: f64, weight: f64) -> f64 {
@@ -813,6 +1195,9 @@ fn semantic_sha256(
         ] {
             digest.update(id.map_or(0, |id| id.hash).to_le_bytes());
         }
+        for id in [sample.catchment_id, sample.reach_id, sample.lake_id] {
+            digest.update(id.map_or(0, |id| id.hash).to_le_bytes());
+        }
         for weight in sample.family_weights {
             digest.update(weight.to_bits().to_le_bytes());
         }
@@ -836,10 +1221,24 @@ fn semantic_sha256(
             sample.aridity,
             sample.leeward_exposure,
             sample.drainage_permanence,
+            sample.discharge,
+            sample.channel_signed_distance_blocks,
+            sample.channel_distance_blocks,
+            sample.channel_width_blocks,
+            sample.downstream_x,
+            sample.downstream_z,
+            sample.floodplain,
+            sample.riparian,
         ] {
             digest.update(value.to_bits().to_le_bytes());
         }
-        digest.update([sample.water_kind as u8, sample.substrate as u8]);
+        digest.update([
+            sample.water_kind as u8,
+            sample.substrate as u8,
+            sample.reach_kind.map_or(u8::MAX, |kind| kind as u8),
+            sample.reach_order,
+            sample.shore_intent as u8,
+        ]);
     }
     for value in [
         work.requested_samples,
@@ -849,6 +1248,10 @@ fn semantic_sha256(
         work.mosaic_owner_evaluations,
         work.plan_field_evaluations,
         work.surface_field_evaluations,
+        work.hydrography_owner_evaluations,
+        work.hydrography_graph_constructions,
+        work.hydrography_reach_evaluations,
+        work.hydrography_raster_cells,
         work.exact_chunks,
         work.density_volumes,
         work.feature_batches,

@@ -3,6 +3,7 @@
 pub mod biome;
 pub mod block;
 pub mod carver;
+pub mod continental_catchment_review;
 pub mod continental_ecoregion;
 pub mod continental_ecoregion_atlas;
 pub mod continental_ecoregion_harness;

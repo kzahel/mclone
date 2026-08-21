@@ -920,7 +920,11 @@ fn continental_preview_sample(
     let river = sample.water_kind == ContinentalSurfaceWaterKind::River;
     let wetland_pool = sample.water_kind == ContinentalSurfaceWaterKind::WetlandPool;
     let river_influence = if river { sample.route.max(0.55) } else { 0.0 };
-    let forest_coverage = if content_stage == TerrainPreviewContentStage::Cover {
+    let forest_coverage = if content_stage == TerrainPreviewContentStage::Cover
+        && matches!(
+            sample.substrate,
+            ContinentalSurfaceSubstrate::Grass | ContinentalSurfaceSubstrate::CoarseSoil
+        ) {
         (sample.forest_core * 0.88 + sample.forest_edge * 0.24).clamp(0.0, 1.0)
     } else {
         0.0
@@ -951,6 +955,7 @@ fn continental_preview_sample(
             3.0
         }
         (_, ContinentalSurfaceSubstrate::Stone) => 8.0,
+        (_, ContinentalSurfaceSubstrate::Snow) => 8.0,
         (_, ContinentalSurfaceSubstrate::Grass) => 5.0,
         (_, ContinentalSurfaceSubstrate::Sand) => 1.0,
         (_, ContinentalSurfaceSubstrate::Gravel) => 6.0,
@@ -1456,7 +1461,12 @@ fn compile_continental_proxy_vegetation(
             }
 
             let sample = surface.query_point(world_x, world_z).sample;
-            if sample.is_water() {
+            if sample.is_water()
+                || !matches!(
+                    sample.substrate,
+                    ContinentalSurfaceSubstrate::Grass | ContinentalSurfaceSubstrate::CoarseSoil
+                )
+            {
                 continue;
             }
             let forest_structure = sample.forest_core.max(sample.forest_edge * 0.72);

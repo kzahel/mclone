@@ -10,7 +10,7 @@ use serde::Serialize;
 
 use crate::continental_ecoregion::{ContinentalEcoregionDescriptor, ContinentalEcoregionTopology};
 
-pub const CONTINENTAL_HYDROGRAPHY_SCHEMA_REVISION: &str = "mclone-continental-hydrography-v1";
+pub const CONTINENTAL_HYDROGRAPHY_SCHEMA_REVISION: &str = "mclone-continental-hydrography-v2";
 pub const CONTINENTAL_CATCHMENT_CELL_BLOCKS: i32 = 32_768;
 pub const CONTINENTAL_CATCHMENT_MAX_REACHES: usize = 8;
 pub const CONTINENTAL_CATCHMENT_MAX_NODES: usize = 11;
@@ -198,6 +198,7 @@ pub struct ContinentalHydrographySample {
     pub reach_kind: Option<ContinentalReachKind>,
     pub reach_order: u8,
     pub discharge: f32,
+    pub channel_signed_distance_blocks: f32,
     pub channel_distance_blocks: f32,
     pub channel_width_blocks: f32,
     pub bankfull_width_blocks: f32,
@@ -232,6 +233,7 @@ struct OwnerCandidate {
 
 #[derive(Clone, Copy, Debug)]
 struct ReachDistance {
+    signed_distance: f64,
     distance: f64,
     progress: f64,
     tangent_across: f64,
@@ -355,7 +357,7 @@ fn catchment_for_owner(
         CatchmentLocalPoint::new(650.0, 2_000.0, lake_y + 10.0),
         CatchmentLocalPoint::new(-250.0, 4_900.0, lake_y + 2.0),
         CatchmentLocalPoint::new(0.0, 7_200.0, lake_y - 4.0),
-        CatchmentLocalPoint::new(1_250.0, 9_450.0, lake_y - 1.0),
+        CatchmentLocalPoint::new(1_250.0, 10_150.0, lake_y - 1.0),
         CatchmentLocalPoint::new(2_600.0, 13_100.0, lake_y - 6.0),
     ];
 
@@ -554,25 +556,55 @@ fn evaluate_catchment(
     work: &mut ContinentalHydrographyWork,
 ) -> ContinentalHydrographySample {
     let point = CatchmentLocalPoint::new(local_across, local_downstream, 0.0);
-    let catchment_weight = (1.0
-        - ((local_across / catchment.half_width_blocks).powi(2)
-            + if local_downstream < 0.0 {
-                (local_downstream / catchment.upstream_blocks).powi(2)
-            } else {
-                (local_downstream / catchment.downstream_blocks).powi(2)
-            })
-        .sqrt())
-    .clamp(0.0, 1.0);
+    let normalized_extent = ((local_across / catchment.half_width_blocks).powi(2)
+        + if local_downstream < 0.0 {
+            (local_downstream / catchment.upstream_blocks).powi(2)
+        } else {
+            (local_downstream / catchment.downstream_blocks).powi(2)
+        })
+    .sqrt();
+    let catchment_weight = inverse_smoothstep(0.72, 1.02, normalized_extent);
 
     let divide_center = -10_300.0 + local_across * 0.055;
     let divide_distance = (local_downstream - divide_center).abs();
     let divide_weight = inverse_smoothstep(500.0, 3_600.0, divide_distance) * catchment_weight;
-    let peak_modulation =
-        0.62 + 0.38 * inverse_smoothstep(1_000.0, 5_500.0, (local_across.abs() - 2_400.0).abs());
-    let range_weight = inverse_smoothstep(1_100.0, 7_800.0, divide_distance)
-        * inverse_smoothstep(7_800.0, 12_500.0, local_across.abs())
-        * peak_modulation
-        * catchment_weight;
+    let crest_weight = inverse_smoothstep(80.0, 460.0, divide_distance)
+        * inverse_smoothstep(8_200.0, 11_500.0, local_across.abs());
+    let peak_weight = [
+        (-5_200.0, -10_650.0, 760.0),
+        (-1_550.0, -11_100.0, 620.0),
+        (1_550.0, -10_850.0, 660.0),
+        (5_200.0, -9_900.0, 820.0),
+    ]
+    .into_iter()
+    .map(|(peak_across, peak_downstream, radius)| {
+        inverse_smoothstep(
+            radius * 0.04,
+            radius,
+            (local_across - peak_across).hypot(local_downstream - peak_downstream),
+        )
+    })
+    .fold(0.0_f64, f64::max);
+    let branch_weight = [
+        ((-5_200.0, -10_650.0), (-6_600.0, -2_700.0)),
+        ((-1_550.0, -11_100.0), (400.0, -3_700.0)),
+        ((1_550.0, -10_850.0), (4_900.0, -2_500.0)),
+    ]
+    .into_iter()
+    .map(
+        |((start_across, start_downstream), (end_across, end_downstream))| {
+            let distance = line_segment_distance(
+                point,
+                CatchmentLocalPoint::new(start_across, start_downstream, 0.0),
+                CatchmentLocalPoint::new(end_across, end_downstream, 0.0),
+            )
+            .distance;
+            let downstream_fade = inverse_smoothstep(-2_800.0, 1_200.0, local_downstream);
+            inverse_smoothstep(60.0, 390.0, distance) * downstream_fade * 0.72
+        },
+    )
+    .fold(0.0_f64, f64::max);
+    let range_weight = peak_weight.max(crest_weight * 0.58).max(branch_weight) * catchment_weight;
     let saddle_weight = inverse_smoothstep(0.0, 1_350.0, local_across.abs())
         * inverse_smoothstep(0.0, 1_100.0, divide_distance)
         * catchment_weight;
@@ -628,6 +660,7 @@ fn evaluate_catchment(
         reach_kind,
         reach_order,
         discharge,
+        channel_signed_distance,
         channel_distance,
         channel_width,
         bankfull_width,
@@ -643,6 +676,7 @@ fn evaluate_catchment(
             None,
             0,
             0.0,
+            f32::INFINITY,
             f32::INFINITY,
             0.0,
             0.0,
@@ -685,6 +719,7 @@ fn evaluate_catchment(
                 Some(reach.kind),
                 reach.order,
                 reach.discharge,
+                distance.signed_distance as f32,
                 distance.distance as f32,
                 width as f32,
                 (width * (2.6 + f64::from(reach.order) * 0.45)) as f32,
@@ -732,6 +767,7 @@ fn evaluate_catchment(
         reach_kind,
         reach_order,
         discharge,
+        channel_signed_distance_blocks: channel_signed_distance,
         channel_distance_blocks: channel_distance,
         channel_width_blocks: channel_width,
         bankfull_width_blocks: bankfull_width,
@@ -757,6 +793,7 @@ fn quadratic_reach_distance(
 ) -> ReachDistance {
     const SEGMENTS: usize = 8;
     let mut best = ReachDistance {
+        signed_distance: f64::INFINITY,
         distance: f64::INFINITY,
         progress: 0.0,
         tangent_across: end.across - start.across,
@@ -770,6 +807,7 @@ fn quadratic_reach_distance(
         let candidate = line_segment_distance(point, segment_start, segment_end);
         if candidate.distance < best.distance {
             best = ReachDistance {
+                signed_distance: candidate.signed_distance,
                 distance: candidate.distance,
                 progress: lerp(start_progress, end_progress, candidate.progress),
                 tangent_across: segment_end.across - segment_start.across,
@@ -818,6 +856,13 @@ fn line_segment_distance(
     let closest_across = start.across + across * progress;
     let closest_downstream = start.downstream + downstream * progress;
     ReachDistance {
+        signed_distance: if length_squared <= f64::EPSILON {
+            (point.across - closest_across).hypot(point.downstream - closest_downstream)
+        } else {
+            ((point.across - closest_across) * downstream
+                - (point.downstream - closest_downstream) * across)
+                / length_squared.sqrt()
+        },
         distance: (point.across - closest_across).hypot(point.downstream - closest_downstream),
         progress,
         tangent_across: across,

@@ -21,6 +21,7 @@ const composition = argumentValue("--composition") ?? "composed";
 const exactAnchor = argumentValue("--exact-anchor") ?? "focus";
 const terrainSource = argumentValue("--source") ?? "production";
 const journey = argumentValue("--journey");
+const catchmentSite = argumentValue("--catchment-site");
 const centerX = argumentValue("--center-x");
 const centerZ = argumentValue("--center-z");
 const blocksAcross = Number.parseInt(argumentValue("--blocks-across") ?? "96", 10);
@@ -38,6 +39,7 @@ const label = mobile ? "phone" : "desktop";
 const captureLabel = [
   terrainSource === "production" ? null : terrainSource,
   journey,
+  catchmentSite,
   composition,
   sourceColors ? "source-colors" : null,
   exactAnchor === "focus" ? null : exactAnchor,
@@ -91,10 +93,11 @@ try {
   parameters.set("smokeObserver", "1");
   parameters.set("exactAnchor", exactAnchor);
   if (journey) parameters.set("journey", journey);
+  if (catchmentSite) parameters.set("catchmentSite", catchmentSite);
   if (centerX !== undefined) parameters.set("centerX", centerX);
   if (centerZ !== undefined) parameters.set("centerZ", centerZ);
-  if (!journey && centerX === undefined) parameters.set("centerX", "0");
-  if (!journey && centerZ === undefined) parameters.set("centerZ", "0");
+  if (!journey && !catchmentSite && centerX === undefined) parameters.set("centerX", "0");
+  if (!journey && !catchmentSite && centerZ === undefined) parameters.set("centerZ", "0");
   if (sourceColors) parameters.set("sourceColors", "1");
   await page.goto(target.href, { waitUntil: "networkidle" });
   await page.locator("#world-explorer-shell").waitFor({ state: "visible" });
@@ -178,6 +181,7 @@ function assertCompositionReport(report) {
         ? "continental-ecoregion-candidate-v1"
         : "mclone-overworld-v1")
       || report.journey !== (journey ?? null)
+      || report.catchmentSite !== (catchmentSite ?? null)
       || report.sourceColors !== sourceColors
       || report.exactRadius !== exactRadius
       || report.exactAnchor !== exactAnchor

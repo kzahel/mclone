@@ -1,9 +1,11 @@
 # Tactical 326: Continental Catchment And Landform Realization
 
-Status: **authorized 2026-08-21; Phase 1 graph foundation implemented. The
-reported mountain-navigation crash has not reproduced in the old candidate's
-static or full movement/teleport smokes, so the retained regression must be
-repeated against the substantially higher realized range in Phase 2.**
+Status: **authorized 2026-08-21; Phases 0-2 implemented. One selected bounded
+catchment now realizes ranges, valleys, snow/rock summits, ordered channels,
+one flat lake, varied shore intent, spill, and outlet in exact terrain and the
+shared direct source. The reported crash still has not reproduced, including
+new high-range captures. Phase 3 must correct the observed exact/LOD valley
+frontier seam and preserve narrow-water crossings before review packaging.**
 
 Topic: `continental-hydrography`
 Topic: `continental-ecoregion-planning`
@@ -234,6 +236,47 @@ Implemented on 2026-08-21.
 - The graph is not yet connected to `ContinentalSurfacePlan`, exact chunks, or
   LOD. Its JSON receipt is diagnostic topology evidence, not a Human Review D
   artifact.
+
+### Phase 2: Range, Valley, And Water Realization
+
+Implemented on 2026-08-21.
+
+- `ContinentalSurfacePlan` now consumes the bounded graph directly. Compact
+  range peaks and branch ridges rise above a broader divide, the selected pass
+  remains lower, and reach-order profiles establish source valleys,
+  tributaries, a trunk terrace/floodplain, lake basin, spill, and outlet.
+- Reaches use locally warped centerlines, ordered widths/depths, and
+  side-dependent banks and terraces. Lakes own one flat level, a warped
+  boundary, varied wetland/depositional/gravel/rocky/inlet/outlet slopes, and
+  narrow material transitions. The lake explicitly suppresses lower reach
+  trenches in its interior.
+- Elevation and range ownership now expose stone and snow summit substrates;
+  candidate vegetation rejects water, stone, snow, sand, and gravel bases.
+  Hydrology publishes stable IDs, reach order, discharge, signed channel
+  relation, water level, downstream vector, floodplain, riparian, and shore
+  intent through the ordinary surface query.
+- A deterministic five-site catalog selects one land-surviving catchment and
+  records review centers, camera scales, direct water/identity facts, and
+  sparse local relief. Native `--catchment-site` and browser
+  `catchmentSite=...` selection resolve those shared records without
+  coordinate-specific generation branches.
+- Exact-only captures were inspected at all five sites. The trunk is a real
+  10-20-block channel with an asymmetric terrace; the lake/outlet frame shows
+  flat water meeting land without the former constant-height cliff; the quiet
+  control remains ordinary rolling ground. The broad confluence frame shows
+  two independent valleys and channels meeting the trunk.
+- A composed confluence capture exposed a rectangular height mismatch at the
+  exact/procedural frontier where sparse LOD interpolation crosses narrow
+  valleys. This is retained as the first Phase 3 correction rather than
+  accepted as Phase 2 presentation evidence.
+- Static and composed captures over the new 200-plus-block range completed
+  without panic, device loss, or buried-camera failure. Orbit target selection
+  now accounts for both viewer and focus surfaces; movement/teleport stress is
+  still required in Phase 4.
+- The revised hydrography native/Wasm witness is
+  `8010fe5dbb1b6bb8ea344d1a003d4ff822ef7773c34121ca4f903c25ffce2ca6`;
+  the integrated surface witness is
+  `283e63b08aec8fcdbb32f3aea8cc89fabc7722afddec1b2e67818e84d6c8e55f`.
 
 ## Human Review D
 

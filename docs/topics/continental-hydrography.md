@@ -6,11 +6,12 @@ Status: **selected product direction as of 2026-08-21. Human Review C of the
 detached continental exact/LOD candidate retained the continental scale but
 rejected its water and landform realization as final. Tactical
 [`326`](../tactical/326-continental-catchment-and-landform-realization.md)
-owns the first bounded mountain-to-lake catchment proof. Its directed
-feature-owned graph foundation is implemented with a native/Wasm witness;
-terrain, water, exact, and LOD realization remain in progress. Production
-`mclone-overworld-v1` remains unchanged until that proof passes Human Review
-D.**
+owns the first bounded mountain-to-lake catchment proof. Its directed graph,
+shared terrain/water realization, exact lowering, snow/rock summits, ecology
+semantics, and five deterministic review sites are implemented. Phase 3 now
+owns conservative narrow-water LOD summaries and the observed valley frontier
+seam. Production `mclone-overworld-v1` remains unchanged until that proof
+passes Human Review D.**
 
 ## Motivation
 

@@ -271,6 +271,7 @@ pub(crate) fn continental_candidate_stratum(
         ContinentalSurfaceSubstrate::Sand if depth <= 7 => SANDSTONE,
         ContinentalSurfaceSubstrate::Gravel if depth <= 2 => GRAVEL,
         ContinentalSurfaceSubstrate::Stone if depth == 0 => STONE,
+        ContinentalSurfaceSubstrate::Snow if depth == 0 => substrate.block_id(),
         _ => STONE,
     }
 }
@@ -365,8 +366,13 @@ mod tests {
     #[test]
     fn owned_lake_water_is_flat_and_preserves_its_gravel_bed() {
         let generator = ContinentalCandidateExactGenerator::new(SEED);
-        let world_x = 7_168;
-        let world_z = -21_504;
+        let catchment = crate::continental_hydrography::ContinentalHydrographyPlan::new(
+            crate::continental_ecoregion::ContinentalEcoregionDescriptor::plane(SEED),
+        )
+        .catchment_for_owner(0, -2);
+        let (world_x, world_z) = catchment.local_to_world(catchment.lake_center);
+        let world_x = world_x.round() as i32;
+        let world_z = world_z.round() as i32;
         let sample = generator.surface().query_point(world_x, world_z).sample;
         assert_eq!(sample.water_kind, ContinentalSurfaceWaterKind::Lake);
         assert_eq!(sample.substrate, ContinentalSurfaceSubstrate::Gravel);

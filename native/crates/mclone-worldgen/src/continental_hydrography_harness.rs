@@ -14,7 +14,7 @@ use crate::{
 pub const CONTINENTAL_HYDROGRAPHY_HARNESS_REVISION: &str =
     "mclone-continental-hydrography-harness-v1";
 pub const CONTINENTAL_HYDROGRAPHY_WITNESS_SHA256: &str =
-    "febe9aea251e4e6fd63127e4b6c0e4187ef76ee525ece2bcdeff25916d2880d0";
+    "8010fe5dbb1b6bb8ea344d1a003d4ff822ef7773c34121ca4f903c25ffce2ca6";
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -26,6 +26,8 @@ pub struct ContinentalHydrographyCaseReceipt {
     pub catchment_hash: u64,
     pub center_x: i64,
     pub center_z: i64,
+    pub downstream_axis_x: f64,
+    pub downstream_axis_z: f64,
     pub reach_hashes: Vec<u64>,
     pub samples: Vec<ContinentalHydrographySample>,
     pub work: ContinentalHydrographyWork,
@@ -117,6 +119,8 @@ fn compile_case(
         catchment_hash: catchment.id.hash,
         center_x: catchment.center_x,
         center_z: catchment.center_z,
+        downstream_axis_x: catchment.downstream_axis_x,
+        downstream_axis_z: catchment.downstream_axis_z,
         reach_hashes: catchment
             .reaches
             .iter()

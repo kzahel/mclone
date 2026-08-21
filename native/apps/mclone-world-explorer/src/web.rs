@@ -19,6 +19,9 @@ use mclone_view_control::{
     WorldViewIntent, WorldViewMode, WorldViewProjection, WorldViewState, pointer_contact_purpose,
 };
 use mclone_worldgen::{
+    continental_catchment_review::{
+        ContinentalCatchmentReviewSiteKind, compile_continental_catchment_review,
+    },
     continental_ecoregion::ContinentalEcoregionDescriptor,
     continental_surface_journey::{
         ContinentalSurfaceJourneyKind, compile_continental_surface_journeys,
@@ -44,6 +47,8 @@ struct WebExplorerOptions {
     terrain_profile: TerrainPreviewProfile,
     journey: Option<ContinentalSurfaceJourneyKind>,
     journey_catalog_sha256: Option<String>,
+    catchment_site: Option<ContinentalCatchmentReviewSiteKind>,
+    catchment_catalog_sha256: Option<String>,
     journey_heading_x: i8,
     journey_heading_z: i8,
     center_x: i32,
@@ -68,6 +73,8 @@ impl Default for WebExplorerOptions {
             terrain_profile: TerrainPreviewProfile::McloneOverworldV1,
             journey: None,
             journey_catalog_sha256: None,
+            catchment_site: None,
+            catchment_catalog_sha256: None,
             journey_heading_x: 0,
             journey_heading_z: 0,
             center_x: 0,
@@ -100,10 +107,14 @@ impl WebExplorerOptions {
         if let Some(value) = parameters.get("journey") {
             options.journey = Some(ContinentalSurfaceJourneyKind::parse_label(&value)?);
         }
+        if let Some(value) = parameters.get("catchmentSite") {
+            options.catchment_site = Some(ContinentalCatchmentReviewSiteKind::parse_label(&value)?);
+        }
         let center_x_explicit = parameters.get("centerX").is_some();
         let center_z_explicit = parameters.get("centerZ").is_some();
         let blocks_across_explicit = parameters.get("blocksAcross").is_some();
         let yaw_explicit = parameters.get("yaw").is_some();
+        let pitch_explicit = parameters.get("pitch").is_some();
         options.center_x = parse_parameter(&parameters, "centerX", options.center_x)?;
         options.center_z = parse_parameter(&parameters, "centerZ", options.center_z)?;
         options.blocks_across =
@@ -171,6 +182,38 @@ impl WebExplorerOptions {
                 options.yaw_radians = f64::from(receipt.review_frames.yaw_radians);
             }
         }
+        if let Some(site_kind) = options.catchment_site {
+            if options.journey.is_some() {
+                return Err(
+                    "World Explorer journey and catchmentSite are mutually exclusive".to_owned(),
+                );
+            }
+            if !source_explicit {
+                options.terrain_profile = TerrainPreviewProfile::ContinentalEcoregionCandidate;
+            }
+            let catalog = compile_continental_catchment_review(
+                ContinentalEcoregionDescriptor::plane(options.seed),
+            )?;
+            let site = catalog
+                .site(site_kind)
+                .expect("the shared catchment review catalog is complete");
+            options.catchment_catalog_sha256 = Some(catalog.semantic_sha256.clone());
+            if !center_x_explicit {
+                options.center_x = site.center_x;
+            }
+            if !center_z_explicit {
+                options.center_z = site.center_z;
+            }
+            if !blocks_across_explicit {
+                options.blocks_across = site.review_frames.oblique_blocks;
+            }
+            if !yaw_explicit {
+                options.yaw_radians = f64::from(site.review_frames.yaw_radians);
+            }
+            if !pitch_explicit {
+                options.pitch_radians = f64::from(site.review_frames.pitch_radians);
+            }
+        }
         if options.source_colors && options.composition == WorldExplorerCompositionMode::Horizon {
             return Err(
                 "World Explorer sourceColors=1 requires exact, composed, or coverage composition"
@@ -181,6 +224,11 @@ impl WebExplorerOptions {
             && options.terrain_profile != TerrainPreviewProfile::ContinentalEcoregionCandidate
         {
             return Err("World Explorer journey requires source=continental".to_owned());
+        }
+        if options.catchment_site.is_some()
+            && options.terrain_profile != TerrainPreviewProfile::ContinentalEcoregionCandidate
+        {
+            return Err("World Explorer catchmentSite requires source=continental".to_owned());
         }
         Ok(options)
     }
@@ -206,6 +254,8 @@ struct WebExplorerReport {
     terrain_source: &'static str,
     journey: Option<&'static str>,
     journey_catalog_sha256: Option<String>,
+    catchment_site: Option<&'static str>,
+    catchment_catalog_sha256: Option<String>,
     journey_heading_x: i8,
     journey_heading_z: i8,
     center_x: i32,
@@ -357,6 +407,8 @@ pub struct WebWorldExplorer {
     terrain_profile: TerrainPreviewProfile,
     journey: Option<ContinentalSurfaceJourneyKind>,
     journey_catalog_sha256: Option<String>,
+    catchment_site: Option<ContinentalCatchmentReviewSiteKind>,
+    catchment_catalog_sha256: Option<String>,
     journey_heading_x: i8,
     journey_heading_z: i8,
     frame_epoch_ms: Option<f64>,
@@ -455,6 +507,8 @@ impl WebWorldExplorer {
                 self.terrain_profile,
                 self.journey,
                 self.journey_catalog_sha256.clone(),
+                self.catchment_site,
+                self.catchment_catalog_sha256.clone(),
                 self.journey_heading_x,
                 self.journey_heading_z,
                 self.session.view_state(),
@@ -872,6 +926,8 @@ impl WebWorldExplorer {
             terrain_profile: options.terrain_profile,
             journey: options.journey,
             journey_catalog_sha256: options.journey_catalog_sha256,
+            catchment_site: options.catchment_site,
+            catchment_catalog_sha256: options.catchment_catalog_sha256,
             journey_heading_x: options.journey_heading_x,
             journey_heading_z: options.journey_heading_z,
             frame_epoch_ms: None,
@@ -960,6 +1016,8 @@ fn explorer_report(
     terrain_profile: TerrainPreviewProfile,
     journey: Option<ContinentalSurfaceJourneyKind>,
     journey_catalog_sha256: Option<String>,
+    catchment_site: Option<ContinentalCatchmentReviewSiteKind>,
+    catchment_catalog_sha256: Option<String>,
     journey_heading_x: i8,
     journey_heading_z: i8,
     state: WorldViewState,
@@ -981,6 +1039,8 @@ fn explorer_report(
         terrain_source: terrain_profile.label(),
         journey: journey.map(ContinentalSurfaceJourneyKind::label),
         journey_catalog_sha256,
+        catchment_site: catchment_site.map(ContinentalCatchmentReviewSiteKind::label),
+        catchment_catalog_sha256,
         journey_heading_x,
         journey_heading_z,
         center_x: state.center_x_i32(),
