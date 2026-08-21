@@ -97,6 +97,11 @@ features whose bounds cover the point, and evaluate analytic profiles. Cache
 contents, request order, camera scale, clipmap level, and traversal history may
 change cost only. They may not change graph identity or geometry.
 
+Window queries retain reconstructed catchments only for the lifetime of that
+bounded request. This removes per-lattice-point graph reconstruction without
+making cache contents semantic, retaining graphs across unbounded travel, or
+changing the cold-reset result.
+
 Plane and cylinder topology remain distinct. Cylinder ownership and geometry
 must be periodic at the seam; directed cycles remain invalid. A future finite
 world may choose complete analytical hydrology, but that is a different

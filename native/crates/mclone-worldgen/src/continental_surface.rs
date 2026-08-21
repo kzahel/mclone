@@ -16,8 +16,8 @@ use crate::{
         PlanConstructionCounts,
     },
     continental_hydrography::{
-        ContinentalHydrographyPlan, ContinentalHydrographySample, ContinentalReachKind,
-        ContinentalShoreIntent, HydrographyFeatureId,
+        ContinentalHydrographyPlan, ContinentalHydrographyQueryCache, ContinentalHydrographySample,
+        ContinentalReachKind, ContinentalShoreIntent, HydrographyFeatureId,
     },
     levelgen::{
         BEACH_BIOME_ID, MCLONE_OVERWORLD_FOREST_BIOME_ID, MCLONE_OVERWORLD_RIVER_BIOME_ID,
@@ -28,7 +28,7 @@ use crate::{
     noise::{SeedDomain, ValueNoise2d},
 };
 
-pub const CONTINENTAL_SURFACE_SCHEMA_REVISION: &str = "mclone-continental-surface-v7";
+pub const CONTINENTAL_SURFACE_SCHEMA_REVISION: &str = "mclone-continental-surface-v8";
 pub const CONTINENTAL_SURFACE_SOURCE_LABEL: &str = "continental-ecoregion-candidate-v1";
 pub const CONTINENTAL_SURFACE_FAMILY_COUNT: usize = 5;
 pub const CONTINENTAL_SURFACE_MAX_WINDOW_SAMPLES: usize = 262_144;
@@ -414,13 +414,28 @@ impl ContinentalSurfacePlan {
             .ok_or(ContinentalEcoregionError::CoordinateOverflow)?;
         let mut samples = Vec::with_capacity(sample_count);
         let mut work = ContinentalSurfaceConstructionCounts::default();
+        let mut hydrography_cache = ContinentalHydrographyQueryCache::default();
         for sample_z in 0..request.depth_samples {
             let world_z = window_coordinate(request.min_z, sample_z, request.step_blocks)?;
             for sample_x in 0..request.width_samples {
                 let world_x = window_coordinate(request.min_x, sample_x, request.step_blocks)?;
-                let query = self.query_point(world_x, world_z);
-                work.add_assign(query.work);
-                samples.push(query.sample);
+                let plan = self
+                    .plan
+                    .query_point(LandscapePlanDetail::Mosaic, world_x, world_z);
+                let hydrography =
+                    self.hydrography
+                        .query_point_cached(world_x, world_z, &mut hydrography_cache);
+                let sample = self.realize(world_x, world_z, &plan.sample, hydrography.sample);
+                let mut sample_work = ContinentalSurfaceConstructionCounts::from_plan(plan.work);
+                sample_work.hydrography_owner_evaluations =
+                    u64::from(hydrography.work.owner_evaluations);
+                sample_work.hydrography_graph_constructions =
+                    u64::from(hydrography.work.graph_constructions);
+                sample_work.hydrography_reach_evaluations =
+                    u64::from(hydrography.work.reach_evaluations);
+                sample_work.hydrography_raster_cells = u64::from(hydrography.work.raster_cells);
+                work.add_assign(sample_work);
+                samples.push(sample);
             }
         }
         let semantic_sha256 = semantic_sha256(self.descriptor, request, &samples, work);
@@ -1306,6 +1321,8 @@ mod tests {
         assert_eq!(window.samples.len(), 221);
         assert_eq!(window.work.requested_samples, 221);
         assert_eq!(window.work.surface_field_evaluations, 221 * 7);
+        assert!(window.work.hydrography_graph_constructions > 0);
+        assert!(window.work.hydrography_graph_constructions < 221 * 10);
         assert_eq!(window.work.exact_chunks, 0);
         assert_eq!(window.work.density_volumes, 0);
         assert_eq!(window.work.feature_batches, 0);

@@ -6,6 +6,8 @@
 //! explicit influence bounds. Terrain realization and ecology consume these
 //! facts; neither clipmap scale nor query history participates in them.
 
+use std::collections::{BTreeMap, btree_map::Entry};
+
 use serde::Serialize;
 
 use crate::continental_ecoregion::{ContinentalEcoregionDescriptor, ContinentalEcoregionTopology};
@@ -249,6 +251,35 @@ pub struct ContinentalHydrographyPlan {
     descriptor: ContinentalEcoregionDescriptor,
 }
 
+#[derive(Clone, Debug, Default)]
+pub(crate) struct ContinentalHydrographyQueryCache {
+    catchments: BTreeMap<(i32, i32), ContinentalCatchment>,
+}
+
+impl ContinentalHydrographyQueryCache {
+    fn catchment<'a>(
+        &'a mut self,
+        plan: &ContinentalHydrographyPlan,
+        owner_x: i32,
+        owner_z: i32,
+        work: &mut ContinentalHydrographyWork,
+    ) -> &'a ContinentalCatchment {
+        let owner_x = canonical_owner_x(plan.descriptor, owner_x);
+        match self.catchments.entry((owner_x, owner_z)) {
+            Entry::Occupied(entry) => entry.into_mut(),
+            Entry::Vacant(entry) => {
+                work.graph_constructions += 1;
+                entry.insert(catchment_for_owner(plan.descriptor, owner_x, owner_z))
+            }
+        }
+    }
+
+    #[cfg(test)]
+    fn retained_catchments(&self) -> usize {
+        self.catchments.len()
+    }
+}
+
 impl ContinentalHydrographyPlan {
     pub const fn new(descriptor: ContinentalEcoregionDescriptor) -> Self {
         Self { descriptor }
@@ -314,6 +345,67 @@ impl ContinentalHydrographyPlan {
         let catchment = catchment_for_owner(self.descriptor, selected.owner_x, selected.owner_z);
         let sample = evaluate_catchment(
             &catchment,
+            selected.local_across,
+            selected.local_downstream,
+            &mut work,
+        );
+        ContinentalHydrographyPointQuery {
+            sample: Some(sample),
+            work,
+        }
+    }
+
+    pub(crate) fn query_point_cached(
+        &self,
+        world_x: i32,
+        world_z: i32,
+        cache: &mut ContinentalHydrographyQueryCache,
+    ) -> ContinentalHydrographyPointQuery {
+        let canonical_x = canonical_world_x(self.descriptor, world_x);
+        let base_owner_x = canonical_x.div_euclid(CONTINENTAL_CATCHMENT_CELL_BLOCKS);
+        let base_owner_z = world_z.div_euclid(CONTINENTAL_CATCHMENT_CELL_BLOCKS);
+        let mut selected: Option<OwnerCandidate> = None;
+        let mut work = ContinentalHydrographyWork::default();
+
+        for offset_z in -NEIGHBORHOOD_RADIUS..=NEIGHBORHOOD_RADIUS {
+            for offset_x in -NEIGHBORHOOD_RADIUS..=NEIGHBORHOOD_RADIUS {
+                work.owner_evaluations += 1;
+                let owner_x = canonical_owner_x(self.descriptor, base_owner_x + offset_x);
+                let owner_z = base_owner_z + offset_z;
+                let catchment = cache.catchment(self, owner_x, owner_z, &mut work);
+                let (local_across, local_downstream) =
+                    world_to_local(self.descriptor, catchment, canonical_x, world_z);
+                let across_unit = local_across / catchment.half_width_blocks;
+                let downstream_unit = if local_downstream < 0.0 {
+                    local_downstream / catchment.upstream_blocks
+                } else {
+                    local_downstream / catchment.downstream_blocks
+                };
+                let score = across_unit * across_unit + downstream_unit * downstream_unit;
+                if score <= 1.16
+                    && selected.is_none_or(|current| {
+                        score.total_cmp(&current.score).is_lt()
+                            || (score == current.score
+                                && (owner_z, owner_x) < (current.owner_z, current.owner_x))
+                    })
+                {
+                    selected = Some(OwnerCandidate {
+                        owner_x,
+                        owner_z,
+                        score,
+                        local_across,
+                        local_downstream,
+                    });
+                }
+            }
+        }
+
+        let Some(selected) = selected else {
+            return ContinentalHydrographyPointQuery { sample: None, work };
+        };
+        let catchment = cache.catchment(self, selected.owner_x, selected.owner_z, &mut work);
+        let sample = evaluate_catchment(
+            catchment,
             selected.local_across,
             selected.local_downstream,
             &mut work,
@@ -1113,6 +1205,25 @@ mod tests {
         let mut reversed = reverse.map(|(x, z)| plan.query_point(x, z));
         reversed.reverse();
         assert_eq!(forward, reversed);
+    }
+
+    #[test]
+    fn bounded_query_cache_changes_cost_but_not_hydrography() {
+        let plan = ContinentalHydrographyPlan::new(ContinentalEcoregionDescriptor::plane(12_345));
+        let mut cache = ContinentalHydrographyQueryCache::default();
+        let direct = plan.query_point(18_470, -49_535);
+        let cold = plan.query_point_cached(18_470, -49_535, &mut cache);
+        let warm = plan.query_point_cached(18_470, -49_535, &mut cache);
+        assert_eq!(cold.sample, direct.sample);
+        assert_eq!(warm.sample, direct.sample);
+        assert_eq!(cold.work.graph_constructions, 9);
+        assert_eq!(warm.work.graph_constructions, 0);
+        assert_eq!(cache.retained_catchments(), 9);
+
+        let mut reset = ContinentalHydrographyQueryCache::default();
+        let rebuilt = plan.query_point_cached(18_470, -49_535, &mut reset);
+        assert_eq!(rebuilt.sample, direct.sample);
+        assert_eq!(rebuilt.work, cold.work);
     }
 
     #[test]

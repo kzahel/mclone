@@ -312,6 +312,22 @@ Implemented on 2026-08-21.
   the surface witness is
   `0760b0f2bda0c798d21bee7be873f1255c30b28dbd863967046cd56f15f68c84`.
 
+### Phase 4: Movement, Performance, And Human Review D
+
+In progress on 2026-08-21.
+
+- Surface windows now retain a bounded query-local catchment cache. A
+  21-by-21 tile halo reconstructs each intersecting graph once rather than
+  once per lattice point, while point facts and cache-reset output remain
+  exact. Cache contents never escape the request.
+- The same cold native confluence composition improved from 7,259 ms to
+  6,404 ms target readiness on the Apple M4 Pro debug lane. Exact generation,
+  meshing, and vegetation remained approximately 371 ms, 990 ms, and 92 ms;
+  the remaining clipmap/direct-source cost still dominates review startup.
+- The cost-only surface contract is now `mclone-continental-surface-v8` with
+  native/Wasm witness
+  `255ecfc364ffb5908be17695aa70d4d178a74cd1c46dfedeccf0309857ff6554`.
+
 ## Human Review D
 
 Review the same five places in exact-only and composed exact-plus-LOD views.

@@ -16,7 +16,7 @@ use crate::{
 pub const CONTINENTAL_SURFACE_HARNESS_SCHEMA_REVISION: &str =
     "mclone-continental-surface-harness-v1";
 pub const CONTINENTAL_SURFACE_WITNESS_SHA256: &str =
-    "0760b0f2bda0c798d21bee7be873f1255c30b28dbd863967046cd56f15f68c84";
+    "255ecfc364ffb5908be17695aa70d4d178a74cd1c46dfedeccf0309857ff6554";
 
 const CORPUS_SEEDS: [i64; 2] = [12_345, -98_765];
 const CORPUS_PERIOD_BLOCKS: i32 = 196_608;
