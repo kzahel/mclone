@@ -110,8 +110,9 @@ instances from `42,637` to `10,889` and vegetation compilation from
 during pixel review.
 
 V2 now consumes those already-resident forest summaries through a fixed
-`16 x 16` world-oriented canopy lattice per eligible tile. Shared-coordinate
-fan corners, summary coverage,
+`16 x 16` world-oriented canopy lattice per eligible spacing-two-or-coarser
+tile. The spacing-one ring keeps detailed proxies and broad forest tint without
+also drawing the coarse canopy. Shared-coordinate fan corners, summary coverage,
 family, mean height, variation, and opening influence preserve forest volume
 and authored gaps without allocating canopy instances or resident buffers.
 Individual proxies and canopy mass use complementary projected-scale and
@@ -143,8 +144,10 @@ V2 versus `10.003 s` for V1, replacing the invalid earlier V2 result of
 `12.119 ms` for V1, within the tactical's 10% target. Both corrected moving
 lanes started at 289 columns and reported zero exact-center-unavailable
 frames. One process-local roughly 9.5-second render stall still occurs in
-both profiles, and the final moving horizon target can be transiently unready;
-those are explicit remaining presentation-tail debts.
+both profiles at that checkpoint, and the final moving horizon target can be
+transiently unready. Later Tactical 331 movement tracing separates that old
+shared startup observation from a V2-only preferred-frontier compile tail and
+removes the latter as described below.
 
 Tactical
 [`330`](../tactical/330-procedural-lod-continuity-and-movement-safety.md)
@@ -188,6 +191,31 @@ field, and converges spacing-one vertices to the exact block-height convention
 before recovering the smooth surface. At catchments, exact translucent water
 can still meet procedural water as a perceptible color boundary; that narrower
 appearance debt remains a Human Review revision candidate.
+
+Tactical
+[`331`](../tactical/331-exact-frontier-and-forest-presentation.md) closes the
+reported live V2 exact-square, forest-pop, grazing-canopy, partial-frontier
+crash, and movement-tail defects without restoring the retired voxel shell.
+The V2 product has its own textured material identity, near procedural heights
+converge to the exact block convention through the existing appearance field,
+and forest-summary darkening fades out at that boundary. Cold and entering
+forest tiles reveal over `0.65 s`; canopy eligibility additionally requires an
+eye six to 32 blocks above the represented crown, preventing the ground-level
+fuzzy halo.
+
+Preferred V2 spacing-one support compilation now runs through the same bounded
+native horizon workers as resident continental tiles. Completions are admitted
+only when source, exact generation, presentation, request, and fine tile still
+match. The complete synchronous fallback remains drawable during warming, and
+partial exact coverage remains recoverable. On the final physical Quest 3
+Low/RD8 12-block/second orbit, app-work p50/p95 is `10.890/13.566 ms`, 3.4% of
+frames exceed the 13.889 ms period, and the headset submits 71.57 frames per
+second. Before moving support compilation off encode, the same lane measured
+`13.014/99.249 ms`, 42.0%, and 27.4 submissions per second. All 289 exact
+columns are ready at sample start and the process exits normally. Extreme
+high-aerial canopy fans can still read as faceted; that remaining far-forest
+representation issue is separate from the corrected ground halo and admission
+pop.
 
 ## Regular Clipmap And Presets
 

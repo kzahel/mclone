@@ -133,6 +133,18 @@ draw all ten levels with zero exact chunks and no level-aligned natural-color,
 albedo, geometric-shade, or forest patch. The same slice keeps exact and
 procedural World Explorer movement on one advanced view identity.
 
+Tactical
+[`331`](../tactical/331-exact-frontier-and-forest-presentation.md) corrects the
+live V2 exact-square, mass forest-pop, ground canopy-halo, partial-frontier
+crash, and V2 movement-tail reports in the same shared owner. It retains one
+smooth spacing-one terrain owner and the bounded fallback/preferred frontier;
+the retired voxel shell is not restored. Native preferred support compilation
+now uses the bounded horizon worker pool with generation-safe admission. The
+final Quest Low/RD8 12-block/second orbit improves V2 app-work p95 from about
+99 ms to 13.566 ms while all 289 exact columns are ready and no frontier error
+occurs. Human review still owns the perceptual acceptance, especially the
+remaining extreme-aerial canopy faceting.
+
 ## Historical Routes
 
 - [`far-lod.md`](far-lod.md) is the retirement record for the removed

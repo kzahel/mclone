@@ -1,7 +1,7 @@
 # Tactical 331: Exact Frontier And Forest Presentation
 
-Status: **active as of 2026-08-22. Phase 0 diagnostics are implemented; pixel
-and motion corrections are in progress.**
+Status: **implementation and automated/platform acceptance complete as of
+2026-08-22; awaiting Human Review H.**
 
 Topic: `procedural-horizon-clipmap`
 Topic: `v2-forest-continuity-and-performance`
@@ -285,6 +285,48 @@ support tiles within the existing capacity of 32 and prepares them under the
 bounded dispatch budget. The corresponding physical Quest acceptance is
 repeated after rebuilding the release APK below.
 
+The initial stationary Quest comparison also exposed avoidable canopy cost in
+the spacing-one ring. That ring already draws the detailed proxy
+representation and broad forest tint, so drawing the coarse aerial canopy
+there duplicated representation work nearest the observer. Canopy fans now
+begin at spacing two. At V2 Low/RD8 this reduces the settled fixed canopy from
+49 tiles / 12,544 cells to 33 tiles / 8,448 cells. The matched physical V2
+stationary sample improves from `13.092/14.161 ms` app-work p50/p95 with 10.3%
+over-period frames to `12.242/13.202 ms` and 0.0%. Its `6.586 ms` app GPU time
+is 6.7% above the paired V1 control's `6.172 ms`, while app-work p95 is 5.6%
+above V1's `12.497 ms`; both stay within the accepted 10% V2 envelope.
+
+The first 12-block/second retained-motion replay was safe but exposed a much
+larger V2-only render-thread tail: app-work reached about `99.249 ms` p95,
+42.0% of frames exceeded the 72 Hz period, and only 27.4 frames/second were
+submitted. Focused phase tracing showed that preferred spacing-one frontier
+support tiles were compiling the continental CPU reference grid synchronously
+inside each eye's encode. Deferring transient pool allocation alone did not
+remove that cost.
+
+Preferred V2 frontier tiles now use the existing bounded native horizon CPU
+compiler. Each completion carries source, exact generation, presentation, and
+fine-tile identities; a retired result is counted stale and cannot enter a
+replacement support pool. The already-complete zero-capacity fallback remains
+active while preferred tiles warm, and frontier jobs do not masquerade as
+ordinary clipmap refills or block their dispatch.
+
+The rebuilt physical Quest 3 V2 Low/RD8 replay starts with all 289 exact
+columns and 96 horizon slots ready, moves `30.973` blocks over `30.014 s` at
+12 blocks/second, and exits normally. It sustains 71.57 submitted frames per
+second with app-work `10.890/13.566/15.857 ms` p50/p95/p99, 3.4% over-period
+frames, and no 2x-budget worst frame. The paired unchanged V1 control measured
+`12.609/16.738 ms` p50/p95 and 15.1% over-period frames. This removes the
+V2-specific roughly 100 ms movement tail without enlarging the support pool or
+weakening exact-frontier certification.
+
+Native `mclone-terrain-view` passes 157 tests with one adapter-only test
+ignored. The shared browser client compiles for `wasm32-unknown-unknown`, the
+flat Android APK builds, and the Android XR release APK builds. The physical
+XR replay used the already-staged headset assets because the unrelated legacy
+`mclone-game-1.17.1` asset lock is stale; first-party pack generation and both
+Android code builds succeed.
+
 ## Human Review H
 
 Stop with one deployed V2 world at a broad flat forest/clearing and provide
@@ -292,3 +334,8 @@ two reproducible views: ground-level forward movement and elevated flight
 across the same exact boundary. Ask whether the exact square, mass tree pop,
 or canopy halo remains distracting. Keep V2 experimental and V1 default
 regardless of acceptance.
+
+Extreme high-aerial views can still expose faceted or crisscross edges in the
+fixed canopy carpet. The ground halo is removed and the broad forest no longer
+vanishes, but replacing that farthest forest-mass representation is a distinct
+follow-up rather than a reason to reintroduce near spacing-one canopy cost.
