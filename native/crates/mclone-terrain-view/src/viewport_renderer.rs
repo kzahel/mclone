@@ -5379,7 +5379,18 @@ impl TerrainHorizonRenderer {
         }
         if exact_frontier_certifiable {
             self.ensure_frontier_fallback(device, queue)?;
-            self.prepare_frontier_support(device, queue)?;
+            if exact_frontier_preferred_support_allowed(
+                exact_frontier_certifiable,
+                self.exact_coverage_stabilizing,
+            ) {
+                self.prepare_frontier_support(device, queue)?;
+            } else if self.frontier_support_pending.take().is_some() {
+                // A preferred pool is an optimization behind the complete
+                // zero-capacity fallback. Do not repeatedly allocate pools
+                // for partial exact generations that the live view has
+                // explicitly declared transient.
+                self.frontier_admission.record_coalesced_generation();
+            }
         } else {
             self.disable_frontier_support(queue)?;
         }
@@ -6920,6 +6931,13 @@ fn exact_frontier_warming(
         && (exact_coverage_stabilizing || terrain_levels_empty || refills_pending || levels_staged)
 }
 
+const fn exact_frontier_preferred_support_allowed(
+    exact_frontier_certifiable: bool,
+    exact_coverage_stabilizing: bool,
+) -> bool {
+    exact_frontier_certifiable && !exact_coverage_stabilizing
+}
+
 fn terrain_horizon_tile_visibility(
     tile: TerrainClipmapTile,
     inner_hole: Option<super::TerrainClipmapBounds>,
@@ -8118,6 +8136,9 @@ mod tests {
         assert!(!exact_frontier_warming(
             false, false, true, true, true, true
         ));
+        assert!(!exact_frontier_preferred_support_allowed(true, true));
+        assert!(exact_frontier_preferred_support_allowed(true, false));
+        assert!(!exact_frontier_preferred_support_allowed(false, false));
     }
 
     #[test]
