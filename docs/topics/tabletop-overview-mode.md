@@ -2,15 +2,19 @@
 
 Topic: `tabletop-overview-mode`
 
-Status: **potential feature directions researched 2026-07-23; no
+Status: **potential feature directions researched through 2026-08-22; no
 implementation or tactical is open.** The recommended product shape is one
 shared active-world overview presentation with direct-control adventure and
 edit purposes across flat, touch, gamepad, tracked-controller, and later
-hand-tracking interaction. XR may place that presentation over passthrough
-when the runtime supports it, but passthrough is a capability rather than the
-feature's owner or availability boundary.
+hand-tracking interaction. The
+[`isocraft-reference.md`](isocraft-reference.md) study strengthens the
+underground-visibility direction from a ray-only keyhole to a bounded
+topology-first room/local-cave mask plus camera occluder proof. XR may place
+the presentation over passthrough when the runtime supports it, but
+passthrough is a capability rather than the feature's owner or availability
+boundary.
 
-Last reconciled: **2026-07-23**.
+Last reconciled: **2026-08-22**.
 
 ## Scope
 
@@ -137,6 +141,31 @@ Relevant lessons:
 Discovery 2 should remain a product/interaction reference, not an
 implementation source. Mclone should not copy its visual identity, circular
 crop treatment, menus, hands, or control details blindly.
+
+## Isocraft Implementation Reference
+
+RuneFist's
+[Isocraft](https://modrinth.com/mod/isocraft) is a closer flat-screen
+interaction and implementation reference. Its isometric mode combines
+screen-relative movement, cursor aim, optional click-to-move, hidden-face
+building assistance, and a topology-aware room/cave reveal. The inspected
+0.1.1 jar does not merely cast a camera ray and hide its hits. It:
+
+- floods a bounded connected player interior and its one-cell terrain shell;
+- classifies credible rooms from roof, wall, floor, and overburden evidence;
+- switches oversized or deeply buried spaces to a horizontally bounded local
+  cave mask;
+- rejects local caves that reach nearby open sky;
+- removes only camera-side geometry with proven visible space behind it while
+  darkening unrelated exterior terrain; and
+- makes cursor targeting skip the same presentation-hidden geometry.
+
+The detailed trace, local specimen receipt, and Mclone lessons live in
+[`isocraft-reference.md`](isocraft-reference.md). It supports the product case
+for an optional direct-control adventure view that reduces dependence on
+first-person camera skill. It also shows that such a profile needs a complete
+movement, targeting, building, and feedback design; changing the camera alone
+would exchange FPS unfamiliarity for isometric depth and targeting ambiguity.
 
 ## Relationship To Existing Mclone Work
 
@@ -318,20 +347,30 @@ presentations will need to communicate a change of local frame somehow.
 
 An external camera will often lose the controlled player beneath a roof,
 overhang, or underground terrain. Removing whole chunks, sections, or every
-block above the player would suppress too much spatial context. The first
-candidate should instead combine cheap CPU occlusion detection with a bounded
-overview-only shader effect:
+block above the player would suppress too much spatial context. The Isocraft
+study shows that a ray-only keyhole is also insufficient: it cannot by itself
+distinguish one room from a neighboring room, a local cave from its entire
+connected network, or a cave mouth from an interior.
 
-1. cast a voxel DDA ray, or a small fixed set of rays, from the flat camera or
-   XR eye midpoint toward the miniature's head and torso;
-2. ignore configurable weak occluders such as glass, leaves, and water when
-   deciding whether the cutaway is needed;
-3. when solid terrain blocks the view, enable a narrow world-space capsule or
-   cone running from the observer toward the player;
-4. discard only overview terrain fragments inside that volume and in front of
-   the player, with a short ordered-dither feather band at its boundary; and
-5. hold activation/deactivation briefly, initially about 150–250 ms, so
-   individual block edges do not make the aperture flicker.
+The first candidate should combine a bounded player-local topology mask with
+cheap camera occlusion detection and an overview-only shader effect:
+
+1. flood a hard-bounded connected air/liquid component around the player and
+   retain its immediate solid boundary shell;
+2. classify that component as outdoor, credible enclosed room, or local cave
+   using roof/open-sky, floor, wall, overburden, and work-budget evidence;
+3. constrain a local cave by horizontal/topological distance even when a much
+   larger cave network is connected, and reject it when open sky is too near;
+4. cast a voxel DDA ray, or a small fixed set of rays, from the flat camera or
+   XR eye midpoint toward the miniature's head and torso to decide which
+   camera-side terrain actually occludes the selected mask;
+5. ignore configurable weak occluders such as glass, leaves, and water when
+   deciding whether the solid cutaway is needed;
+6. for a room, reveal only camera-facing roof/wall fragments with selected
+   interior behind them; for a local cave, use a narrower world-space capsule
+   or cone in front of the player and preserve the navigable floor; and
+7. transition with a short ordered-dither feather and enter/exit hysteresis so
+   individual block edges or door crossings do not make the aperture flicker.
 
 The aperture radius and affected depth must be clamped. Geometry behind the
 player remains visible, preserving the cave's local context. Ordered dithering
@@ -352,10 +391,11 @@ terrain, fall back to a local-player outline or a bounded local-cave slice
 rather than expanding the hole across most of the world. True cap faces or
 mesh surgery are a separate, substantially more expensive feature.
 
-The keyhole changes visibility only. If camera-pointer underground editing is
-added later, picking must apply the exact same cut-volume visibility rule or
-the pointer will hit an invisible roof. Body-centric actions avoid that
-ambiguity in the first direct-control implementation.
+The topology mask and keyhole change visibility only. If camera-pointer
+underground editing is added later, picking must apply the exact same shown
+mask and cut-volume rule or the pointer will hit an invisible roof. Isocraft's
+targeting path confirms that this agreement is necessary. Body-centric actions
+avoid that ambiguity in the first direct-control implementation.
 
 ## Authority And Game-Mode Policy
 

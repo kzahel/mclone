@@ -290,3 +290,6 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
 - `v2-forest-continuity-and-performance` — honest full-view V1/V2 Quest
   measurement, fixed-budget coarse canopy continuity, and measured V2 cost
   recovery without reducing terrain or ecology content
+- `isocraft-reference` — pinned Isocraft reveal implementation study,
+  topology-first room/local-cave masks, geometry cutaway, and lessons for an
+  optional Mclone adventure-view control profile

@@ -449,9 +449,14 @@ series implements the same concern, normally reuse the document slug in its
   potential for presenting the active world as one shared manipulable scale
   model across flat, touch, gamepad, XR, and capability-gated passthrough;
   records edit and direct-control adventure purposes, same-slot renderer reuse,
-  camera follow and leashed XR recentering, bounded keyhole cutaways, inverse
-  target mapping, authority boundaries, platform-neutral input, current gaps,
-  and a read-only-first implementation sequence.
+  camera follow and leashed XR recentering, topology-first room/local-cave
+  cutaways, inverse target mapping, authority boundaries, platform-neutral
+  input, current gaps, and a read-only-first implementation sequence.
+- [`isocraft-reference.md`](isocraft-reference.md): implementation study of
+  RuneFist Isocraft's bounded connected-interior masks, room classifier,
+  local-cave fallback, camera-side geometry removal, exterior darkening, and
+  render/picking agreement, plus lessons for an optional Mclone adventure view
+  that reduces dependence on first-person camera skill.
 - [`world-view-navigation.md`](world-view-navigation.md): implemented shared
   map/orbit/focus/zoom/contact reducer and standalone native Explorer
   foundation; audited the game, Lab, and Explorer browser-input boundaries;
