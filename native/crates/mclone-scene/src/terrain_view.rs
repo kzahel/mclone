@@ -100,6 +100,8 @@ pub struct SceneTerrainViewDiagnostics {
     pub drawn_canopy_vertices: u32,
     pub drawn_canopy_tiles_by_level: [u32; TERRAIN_LOD_HIGH_LEVEL_COUNT as usize],
     pub drawn_canopy_cells_by_level: [u32; TERRAIN_LOD_HIGH_LEVEL_COUNT as usize],
+    pub revealing_proxy_tiles: u32,
+    pub revealing_canopy_tiles: u32,
     pub target_ready: bool,
     pub tree_instance_count: u32,
     pub pending_vegetation_tiles: u32,
@@ -800,6 +802,8 @@ impl SceneTerrainViewState {
         self.diagnostics.drawn_canopy_vertices = stats.drawn_canopy_vertices;
         self.diagnostics.drawn_canopy_tiles_by_level = stats.drawn_canopy_tiles_by_level;
         self.diagnostics.drawn_canopy_cells_by_level = stats.drawn_canopy_cells_by_level;
+        self.diagnostics.revealing_proxy_tiles = stats.revealing_proxy_tiles;
+        self.diagnostics.revealing_canopy_tiles = stats.revealing_canopy_tiles;
         self.diagnostics.target_ready = stats.target_ready;
         self.diagnostics.tree_instance_count = stats.tree_instance_count;
         self.diagnostics.pending_vegetation_tiles = stats.pending_vegetation_tiles;

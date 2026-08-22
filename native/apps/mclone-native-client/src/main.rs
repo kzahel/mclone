@@ -327,6 +327,8 @@ fn main() -> Result<()> {
                         "drawnVertices": terrain.drawn_canopy_vertices,
                         "drawnTilesByLevel": terrain.drawn_canopy_tiles_by_level,
                         "drawnCellsByLevel": terrain.drawn_canopy_cells_by_level,
+                        "revealingProxyTiles": terrain.revealing_proxy_tiles,
+                        "revealingCanopyTiles": terrain.revealing_canopy_tiles,
                     })
                 },
             );

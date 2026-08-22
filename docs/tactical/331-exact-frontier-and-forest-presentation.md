@@ -228,6 +228,39 @@ bright rectangle inside a flat olive mesh. The remaining transition is the
 intentional block-to-smooth topology change and ordinary tree representation,
 which Phases 2 and 3 address independently.
 
+## Phase 2 Evidence
+
+Vegetation no longer falls through to a terrain presentation while product
+tiles arrive individually. A complete cold or replacement level remains the
+admission unit, but newly presented world tiles now begin with an independent
+proxy/canopy reveal age. Retained semantic tiles preserve their age across a
+clipmap shift; a reused physical slot cannot inherit its previous occupant's
+age. A `0.65 s` time-based ramp is shared by native and Web clocks, and each
+frame contributes at most `0.10 s`, so a suspend or hitch cannot skip the
+transition in one update.
+
+The native cold-frame receipt exposes all 16 proxy tiles and 96 canopy tiles
+as revealing immediately after the target becomes ready. After 90 ordinary
+settle frames, both counts are zero with the same 16 vegetation products, 96
+terrain slots, 67 total proxy records, and fixed canopy budget. Inspected
+first and settled pixels show the outer proxy population moving from low
+opacity to full opacity instead of appearing as an opaque band.
+
+## Phase 3 Evidence
+
+The proxy/canopy complement now combines projected scale with eye altitude
+relative to each represented crown. From six through 32 blocks above a crown,
+the aerial canopy becomes smoothly eligible. Below that range a grazing X/Z
+derivative cannot promote the canopy on its own, and individual proxies retain
+the complementary weight. Mono and multiview use the same function, selecting
+the physical camera for each eye.
+
+An inspected settled ground capture inside the exact footprint shows ordinary
+exact trees transitioning to procedural proxy crowns without the former long
+translucent canopy edges or fuzzy sky halo. Elevated pixels retain the fixed
+canopy population and broad forest-summary tint. This changes no canopy cells,
+vertices, buffers, clipmap slots, tree records, or ownership rules.
+
 ## Human Review H
 
 Stop with one deployed V2 world at a broad flat forest/clearing and provide

@@ -3754,6 +3754,16 @@ impl WebSceneHost {
                 )?;
                 report_set_number(
                     &object,
+                    "terrainViewRevealingProxyTiles",
+                    terrain.revealing_proxy_tiles as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "terrainViewRevealingCanopyTiles",
+                    terrain.revealing_canopy_tiles as f64,
+                )?;
+                report_set_number(
+                    &object,
                     "terrainViewVegetationTransportFailures",
                     terrain.vegetation_transport_failures as f64,
                 )?;

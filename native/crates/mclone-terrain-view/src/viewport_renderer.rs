@@ -194,8 +194,47 @@ const TERRAIN_HORIZON_NORMAL_EDGE_EAST: u32 = 1 << 28;
 const TERRAIN_HORIZON_NORMAL_EDGE_NORTH: u32 = 1 << 29;
 const TERRAIN_HORIZON_NORMAL_EDGE_SOUTH: u32 = 1 << 30;
 const TERRAIN_HORIZON_SMOOTH_VERTICES_PER_CELL: u32 = 6;
+const TERRAIN_HORIZON_FOREST_REVEAL_SECONDS: f32 = 0.65;
+const TERRAIN_HORIZON_FOREST_REVEAL_MAX_STEP_SECONDS: f32 = 0.10;
 #[cfg(not(target_arch = "wasm32"))]
 const TERRAIN_HORIZON_CPU_MAX_WORKERS: usize = 4;
+
+#[cfg(not(target_arch = "wasm32"))]
+type TerrainHorizonRevealClock = Instant;
+#[cfg(target_arch = "wasm32")]
+type TerrainHorizonRevealClock = f64;
+
+#[cfg(not(target_arch = "wasm32"))]
+fn terrain_horizon_reveal_now() -> TerrainHorizonRevealClock {
+    Instant::now()
+}
+
+#[cfg(target_arch = "wasm32")]
+fn terrain_horizon_reveal_now() -> TerrainHorizonRevealClock {
+    js_sys::Date::now()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn terrain_horizon_reveal_elapsed_seconds(
+    previous: TerrainHorizonRevealClock,
+    current: TerrainHorizonRevealClock,
+) -> f32 {
+    current.saturating_duration_since(previous).as_secs_f32()
+}
+
+#[cfg(target_arch = "wasm32")]
+fn terrain_horizon_reveal_elapsed_seconds(
+    previous: TerrainHorizonRevealClock,
+    current: TerrainHorizonRevealClock,
+) -> f32 {
+    ((current - previous).max(0.0) / 1_000.0) as f32
+}
+
+fn advance_forest_reveal(current: f32, elapsed_seconds: f32) -> f32 {
+    let step = elapsed_seconds.clamp(0.0, TERRAIN_HORIZON_FOREST_REVEAL_MAX_STEP_SECONDS)
+        / TERRAIN_HORIZON_FOREST_REVEAL_SECONDS;
+    (current + step).clamp(0.0, 1.0)
+}
 
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone, Copy)]
@@ -450,6 +489,8 @@ pub struct TerrainHorizonFrameStats {
     pub drawn_canopy_vertices: u32,
     pub drawn_canopy_tiles_by_level: [u32; TERRAIN_LOD_HIGH_LEVEL_COUNT as usize],
     pub drawn_canopy_cells_by_level: [u32; TERRAIN_LOD_HIGH_LEVEL_COUNT as usize],
+    pub revealing_proxy_tiles: u32,
+    pub revealing_canopy_tiles: u32,
     pub exact_connector_segments: u32,
     pub exact_connector_vertex_count: u32,
     pub frontier_support_allocated_tiles: u32,
@@ -1403,6 +1444,8 @@ struct TerrainViewportGpuTile {
     tree_instance_count: u32,
     tree_suppressed_instance_count: u32,
     tree_instance_bytes: u64,
+    proxy_reveal: f32,
+    canopy_reveal: f32,
     exact_connector_buffer: Option<wgpu::Buffer>,
     exact_connector_instance_count: u32,
     exact_connector_instance_bytes: u64,
@@ -1588,6 +1631,8 @@ impl TerrainViewportGpuTile {
             tree_instance_count: 0,
             tree_suppressed_instance_count: 0,
             tree_instance_bytes: 0,
+            proxy_reveal: 1.0,
+            canopy_reveal: 1.0,
             exact_connector_buffer: None,
             exact_connector_instance_count: 0,
             exact_connector_instance_bytes: 0,
@@ -1691,6 +1736,19 @@ impl TerrainViewportGpuTile {
         Ok(())
     }
 
+    fn advance_forest_reveal(&mut self, elapsed_seconds: f32) {
+        self.proxy_reveal = advance_forest_reveal(self.proxy_reveal, elapsed_seconds);
+        self.canopy_reveal = advance_forest_reveal(self.canopy_reveal, elapsed_seconds);
+    }
+
+    fn reset_proxy_reveal(&mut self) {
+        self.proxy_reveal = 0.0;
+    }
+
+    fn reset_canopy_reveal(&mut self) {
+        self.canopy_reveal = 0.0;
+    }
+
     fn refresh_tree_instances(
         &mut self,
         device: &wgpu::Device,
@@ -1743,6 +1801,7 @@ impl TerrainViewportGpuTile {
         self.tree_instance_count = 0;
         self.tree_suppressed_instance_count = 0;
         self.tree_instance_bytes = 0;
+        self.reset_proxy_reveal();
     }
 
     fn refresh_exact_connectors(
@@ -3981,6 +4040,7 @@ pub struct TerrainHorizonRenderer {
     exact_owned_tree_ids: BTreeSet<McloneTreeOccurrenceId>,
     visible_terrain_slots: Vec<bool>,
     visible_vegetation_slots: Vec<bool>,
+    forest_reveal_clock: TerrainHorizonRevealClock,
 }
 
 impl TerrainHorizonRenderer {
@@ -4007,6 +4067,7 @@ impl TerrainHorizonRenderer {
         self.frontier_observer_chunk = [0, 0];
         self.tree_ownership = None;
         self.exact_owned_tree_ids.clear();
+        self.forest_reveal_clock = terrain_horizon_reveal_now();
     }
 
     pub fn new(
@@ -4219,6 +4280,7 @@ impl TerrainHorizonRenderer {
             exact_owned_tree_ids: BTreeSet::new(),
             visible_terrain_slots: vec![false; resource_slot_count],
             visible_vegetation_slots: vec![false; resource_slot_count],
+            forest_reveal_clock: terrain_horizon_reveal_now(),
         })
     }
 
@@ -5055,6 +5117,13 @@ impl TerrainHorizonRenderer {
         multiview: bool,
     ) -> Result<TerrainHorizonFrameStats, String> {
         self.resize(device, width, height);
+        let reveal_now = terrain_horizon_reveal_now();
+        let reveal_elapsed =
+            terrain_horizon_reveal_elapsed_seconds(self.forest_reveal_clock, reveal_now);
+        self.forest_reveal_clock = reveal_now;
+        for slot in &mut self.slots {
+            slot.advance_forest_reveal(reveal_elapsed);
+        }
         self.renderer.exact_coverage.sync(queue);
         if !self.admission.has_staged_levels()
             && (self.clipmap.center() != (self.requested_center_x, self.requested_center_z)
@@ -5114,6 +5183,7 @@ impl TerrainHorizonRenderer {
                         render_view_overrides,
                         presentation.sky_darken,
                         presentation.fog,
+                        [1.0, 1.0],
                         presentation.diagnostic,
                     ),
                 );
@@ -5176,7 +5246,26 @@ impl TerrainHorizonRenderer {
         self.dispatched_refills_total = self
             .dispatched_refills_total
             .saturating_add(u64::from(dispatched_refills));
-        self.admission.commit_ready_terrain();
+        let prior_terrain_tiles = self
+            .admission
+            .terrain_presentations()
+            .into_iter()
+            .flat_map(|level| level.tiles)
+            .map(|resource| terrain_horizon_semantic_tile_key(resource.tile))
+            .collect::<HashSet<_>>();
+        if self.admission.commit_ready_terrain() > 0 {
+            for resource in self
+                .admission
+                .terrain_presentations()
+                .into_iter()
+                .flat_map(|level| level.tiles)
+                .filter(|resource| {
+                    !prior_terrain_tiles.contains(&terrain_horizon_semantic_tile_key(resource.tile))
+                })
+            {
+                self.slots[resource.resource_slot as usize].reset_canopy_reveal();
+            }
+        }
 
         if let Some(error) = self.vegetation_error.take() {
             return Err(error);
@@ -5213,7 +5302,14 @@ impl TerrainHorizonRenderer {
         let profile = self.profile;
         let seed = self.seed;
         let content_stage = self.content_stage;
-        self.admission.commit_ready_vegetation(|resource| {
+        let prior_vegetation_tiles = self
+            .admission
+            .vegetation_presentations()
+            .into_iter()
+            .flat_map(|level| level.tiles)
+            .map(|resource| terrain_horizon_semantic_tile_key(resource.tile))
+            .collect::<HashSet<_>>();
+        if self.admission.commit_ready_vegetation(|resource| {
             slots[resource.resource_slot as usize]
                 .vegetation
                 .as_ref()
@@ -5222,7 +5318,21 @@ impl TerrainHorizonRenderer {
                         == terrain_horizon_tile_id(profile, seed, content_stage, resource.tile)
                             .preview_request()
                 })
-        });
+        }) > 0
+        {
+            for resource in self
+                .admission
+                .vegetation_presentations()
+                .into_iter()
+                .flat_map(|level| level.tiles)
+                .filter(|resource| {
+                    !prior_vegetation_tiles
+                        .contains(&terrain_horizon_semantic_tile_key(resource.tile))
+                })
+            {
+                self.slots[resource.resource_slot as usize].reset_proxy_reveal();
+            }
+        }
         self.refresh_authoritative_tree_ownership(device, queue)?;
 
         let terrain_levels = self.admission.terrain_presentations();
@@ -5298,6 +5408,7 @@ impl TerrainHorizonRenderer {
                         render_view_overrides,
                         presentation.sky_darken,
                         presentation.fog,
+                        [1.0, 1.0],
                         presentation.diagnostic,
                     ),
                 );
@@ -5489,6 +5600,7 @@ impl TerrainHorizonRenderer {
                             render_view_overrides,
                             presentation.sky_darken,
                             presentation.fog,
+                            [1.0, 1.0],
                             presentation.diagnostic,
                         ),
                     );
@@ -5554,6 +5666,7 @@ impl TerrainHorizonRenderer {
                         render_view_overrides,
                         presentation.sky_darken,
                         presentation.fog,
+                        [1.0, 1.0],
                         presentation.diagnostic,
                     ),
                 );
@@ -5620,6 +5733,7 @@ impl TerrainHorizonRenderer {
                             render_view_overrides,
                             presentation.sky_darken,
                             presentation.fog,
+                            [slot.proxy_reveal, slot.canopy_reveal],
                             presentation.diagnostic,
                         ),
                     );
@@ -5681,6 +5795,7 @@ impl TerrainHorizonRenderer {
                             render_view_overrides,
                             presentation.sky_darken,
                             presentation.fog,
+                            [slot.proxy_reveal, slot.canopy_reveal],
                             presentation.diagnostic,
                         ),
                     );
@@ -5976,6 +6091,27 @@ impl TerrainHorizonRenderer {
             .filter(|level| level.snapshot.sample_spacing <= self.vegetation_max_sample_spacing)
             .flat_map(|level| level.tiles.iter())
             .collect::<Vec<_>>();
+        let revealing_proxy_tiles = vegetation_resources
+            .iter()
+            .filter(|resource| self.slots[resource.resource_slot as usize].proxy_reveal < 1.0)
+            .count()
+            .try_into()
+            .unwrap_or(u32::MAX);
+        let revealing_canopy_tiles = terrain_levels
+            .iter()
+            .filter(|level| {
+                terrain_horizon_level_uses_canopy(
+                    self.profile,
+                    self.content_stage,
+                    level.snapshot.sample_spacing,
+                    self.vegetation_max_sample_spacing,
+                )
+            })
+            .flat_map(|level| level.tiles.iter())
+            .filter(|resource| self.slots[resource.resource_slot as usize].canopy_reveal < 1.0)
+            .count()
+            .try_into()
+            .unwrap_or(u32::MAX);
         let tree_instance_count = vegetation_resources.iter().fold(0_u32, |count, resource| {
             count.saturating_add(self.slots[resource.resource_slot as usize].tree_instance_count)
         });
@@ -6237,6 +6373,8 @@ impl TerrainHorizonRenderer {
             drawn_canopy_vertices,
             drawn_canopy_tiles_by_level,
             drawn_canopy_cells_by_level,
+            revealing_proxy_tiles,
+            revealing_canopy_tiles,
             exact_connector_segments: drawn_exact_connector_segments,
             exact_connector_vertex_count,
             frontier_support_allocated_tiles,
@@ -6288,7 +6426,7 @@ impl TerrainHorizonRenderer {
             finest_sample_spacing: self.clipmap.config().base_sample_spacing,
             coarse_ready: drawn_levels > 0,
             target_ready,
-            needs_redraw: !target_ready,
+            needs_redraw: !target_ready || revealing_proxy_tiles > 0 || revealing_canopy_tiles > 0,
             residency: self.clipmap.diagnostics(),
         })
     }
@@ -6505,6 +6643,10 @@ const fn terrain_horizon_level_uses_canopy(
     ) && matches!(content_stage, TerrainPreviewContentStage::Cover)
 }
 
+const fn terrain_horizon_semantic_tile_key(tile: TerrainClipmapTile) -> (u32, i32, i32, u32) {
+    (tile.level, tile.tile_x, tile.tile_z, tile.sample_spacing)
+}
+
 fn terrain_horizon_samples_per_axis() -> u32 {
     TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS
         .saturating_add(1)
@@ -6548,6 +6690,7 @@ fn terrain_horizon_uniform_bytes(
     render_view_overrides: [Option<mclone_render::chunk::ChunkRenderView>; 2],
     sky_darken: f32,
     fog: mclone_render::fog::RenderFog,
+    forest_reveal: [f32; 2],
     diagnostic: super::TerrainHorizonDiagnostic,
 ) -> Vec<u8> {
     debug_assert_eq!(
@@ -6637,6 +6780,12 @@ fn terrain_horizon_uniform_bytes(
     bytes[MULTIVIEW_OPTIONS_OFFSET + size_of::<u32>()
         ..MULTIVIEW_OPTIONS_OFFSET + 2 * size_of::<u32>()]
         .copy_from_slice(&(diagnostic as u32).to_le_bytes());
+    bytes[MULTIVIEW_OPTIONS_OFFSET + 2 * size_of::<u32>()
+        ..MULTIVIEW_OPTIONS_OFFSET + 3 * size_of::<u32>()]
+        .copy_from_slice(&forest_reveal[0].clamp(0.0, 1.0).to_bits().to_le_bytes());
+    bytes[MULTIVIEW_OPTIONS_OFFSET + 3 * size_of::<u32>()
+        ..MULTIVIEW_OPTIONS_OFFSET + 4 * size_of::<u32>()]
+        .copy_from_slice(&forest_reveal[1].clamp(0.0, 1.0).to_bits().to_le_bytes());
     bytes
 }
 
@@ -7218,7 +7367,18 @@ mod tests {
     fn canopy_is_fixed_budget_and_available_across_v2_levels() {
         assert_eq!(TERRAIN_HORIZON_CANOPY_CELLS_PER_TILE, 256);
         assert_eq!(TERRAIN_HORIZON_CANOPY_VERTICES_PER_TILE, 3_072);
-        assert!(super::super::TERRAIN_PREVIEW_TREE_WGSL.contains("let proxy_opacity = select("));
+        let shader = super::super::TERRAIN_PREVIEW_TREE_WGSL;
+        assert!(shader.contains("let proxy_opacity = select("));
+        assert!(shader.contains("let eye_above_crown = eye.y - input.world_position.y;"));
+        assert!(shader.contains("let aerial_suitability = smoothstep(6.0, 32.0"));
+        assert_eq!(
+            shader
+                .matches("forest_representation_weight(input, blocks_per_pixel)")
+                .count(),
+            2
+        );
+        assert!(shader.contains("horizon_forest_reveal(params.multiview_options.z)"));
+        assert!(shader.contains("horizon_forest_reveal(params.multiview_options.w)"));
         assert!(terrain_horizon_level_uses_canopy(
             TerrainPreviewProfile::McloneOverworldV2,
             TerrainPreviewContentStage::Cover,
@@ -7265,6 +7425,17 @@ mod tests {
             terrain_horizon_overview_minimum_sample_spacing(8_192.0, 1_280, false, 4,),
             4,
         );
+    }
+
+    #[test]
+    fn forest_reveal_is_time_based_and_clamps_long_pauses() {
+        let at_30_hz = (0..18).fold(0.0, |value, _| advance_forest_reveal(value, 1.0 / 30.0));
+        let at_120_hz = (0..72).fold(0.0, |value, _| advance_forest_reveal(value, 1.0 / 120.0));
+        assert!((at_30_hz - at_120_hz).abs() < 0.000_1);
+        assert!(at_30_hz > 0.9 && at_30_hz < 1.0);
+
+        let after_long_pause = advance_forest_reveal(0.0, 20.0);
+        assert!(after_long_pause > 0.15 && after_long_pause < 0.16);
     }
 
     #[test]

@@ -129,6 +129,29 @@ fn family_color(family: u32, trunk: bool) -> vec3<f32> {
     return vec3<f32>(0.16, 0.45, 0.20);
 }
 
+fn forest_representation_weight(input: VertexOutput, blocks_per_pixel: f32) -> f32 {
+    var eye = params.fog_camera_position;
+    if input.view_index != 0u {
+        eye = params.fog_camera_position_right;
+    }
+    // The canopy fan is an aerial forest-mass representation. X/Z screen
+    // derivatives alone diverge at a grazing angle and used to promote that
+    // fan while the eye was below the crowns, exposing long translucent
+    // triangles as a ground-level halo. Require physical altitude above the
+    // represented crown as well as subpixel projected scale. Each XR eye uses
+    // its own camera position through the same rule.
+    let eye_above_crown = eye.y - input.world_position.y;
+    let aerial_suitability = smoothstep(6.0, 32.0, eye_above_crown);
+    let projected_scale_weight = smoothstep(0.45, 2.25, blocks_per_pixel);
+    return projected_scale_weight * aerial_suitability;
+}
+
+fn horizon_forest_reveal(word: u32) -> f32 {
+    // Regular Terrain Explorer previews do not use the horizon reveal receipt.
+    // A zero layer-sample width identifies the procedural-horizon pipelines.
+    return select(1.0, clamp(bitcast<f32>(word), 0.0, 1.0), params.layer_samples_size.x == 0u);
+}
+
 fn canopy_fan_position(vertex_in_cell: u32) -> vec2<f32> {
     let corner = vertex_in_cell / 3u;
     let vertex = vertex_in_cell % 3u;
@@ -424,18 +447,18 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
         discard;
     }
     let environmental_illumination = full_sky_environmental_illumination();
-    // V2 proxy trees converge into the continuous canopy by projected scale,
-    // not by clipmap level. This prevents subpixel opaque crowns from drawing
-    // a camera-centered stippled ring in continental views.
+    // V2 proxy trees converge into the continuous canopy by projected scale
+    // and physical eye altitude, not by clipmap level.
     let world_dx = dpdx(input.world_xz);
     let world_dy = dpdy(input.world_xz);
     let blocks_per_pixel = max(length(world_dx), length(world_dy));
     let v2_forest_representation = (params.content_stage_flags.w & 12u) != 0u;
+    let forest_transition_weight = forest_representation_weight(input, blocks_per_pixel);
     let proxy_opacity = select(
         1.0,
-        1.0 - smoothstep(0.45, 2.25, blocks_per_pixel),
+        1.0 - forest_transition_weight,
         v2_forest_representation,
-    );
+    ) * horizon_forest_reveal(params.multiview_options.z);
     if proxy_opacity < 0.01 {
         discard;
     }
@@ -505,15 +528,19 @@ fn canopy_fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
         discard;
     }
     let environmental_illumination = full_sky_environmental_illumination();
-    // Canopy represents projected forest mass, not a categorical LOD style.
-    // Every V2 level offers the same veil and screen derivatives raise its
-    // contribution continuously as individual crowns become unresolvable.
-    // Adjacent levels therefore agree at their shared projected boundary.
+    // Canopy represents aerial projected forest mass, not a categorical LOD
+    // style. Every V2 level offers the same veil, but ground and grazing views
+    // retain proxies instead of exposing the fan edge-on.
     let world_dx = dpdx(input.world_xz);
     let world_dy = dpdy(input.world_xz);
     let blocks_per_pixel = max(length(world_dx), length(world_dy));
-    let projected_scale_weight = smoothstep(0.45, 2.25, blocks_per_pixel);
-    let canopy_opacity = clamp(input.color.a * projected_scale_weight * 0.78, 0.0, 0.78);
+    let forest_transition_weight = forest_representation_weight(input, blocks_per_pixel);
+    let canopy_reveal = horizon_forest_reveal(params.multiview_options.w);
+    let canopy_opacity = clamp(
+        input.color.a * forest_transition_weight * 0.78 * canopy_reveal,
+        0.0,
+        0.78,
+    );
     if canopy_opacity < 0.01 {
         discard;
     }

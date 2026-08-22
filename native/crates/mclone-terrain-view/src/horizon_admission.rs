@@ -369,13 +369,7 @@ impl TerrainHorizonAdmission {
     pub fn vegetation_presentations(&self) -> Vec<TerrainHorizonLevelPresentation> {
         self.levels
             .iter()
-            .filter_map(|level| {
-                level
-                    .vegetation_committed
-                    .as_ref()
-                    .or(level.terrain_committed.as_ref())
-                    .cloned()
-            })
+            .filter_map(|level| level.vegetation_committed.clone())
             .collect()
     }
 
@@ -531,6 +525,25 @@ mod tests {
         assert_eq!(admission.vegetation_presentations()[0], before[0]);
         admission.commit_ready_vegetation(|_| true);
         assert_eq!(admission.vegetation_presentations()[0], current[0]);
+    }
+
+    #[test]
+    fn cold_vegetation_waits_for_a_complete_product_level() {
+        let mut clipmap = clipmap();
+        let initial = clipmap.update_center(0, 0);
+        let mut admission = TerrainHorizonAdmission::new(3, 16).unwrap();
+        let (_, resources) = admission
+            .begin_transition(&clipmap.levels(), &initial.rebased_levels)
+            .unwrap();
+        ready_all(&mut admission, &resources);
+        assert_eq!(admission.terrain_presentations().len(), 3);
+        assert!(admission.vegetation_presentations().is_empty());
+
+        let missing = resources.last().unwrap().resource_slot;
+        admission.commit_ready_vegetation(|resource| resource.resource_slot != missing);
+        assert_eq!(admission.vegetation_presentations().len(), 2);
+        admission.commit_ready_vegetation(|_| true);
+        assert_eq!(admission.vegetation_presentations().len(), 3);
     }
 
     #[test]

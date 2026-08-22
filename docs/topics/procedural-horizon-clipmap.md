@@ -114,8 +114,13 @@ V2 now consumes those already-resident forest summaries through a fixed
 fan corners, summary coverage,
 family, mean height, variation, and opening influence preserve forest volume
 and authored gaps without allocating canopy instances or resident buffers.
-Individual proxies and canopy mass use complementary projected-scale fades,
-so the representation changes continuously rather than at a clipmap ring.
+Individual proxies and canopy mass use complementary projected-scale and
+physical-eye-altitude fades, so the representation changes continuously
+rather than at a clipmap ring while ground-level grazing views cannot promote
+an aerial canopy sheet. Newly committed proxy and canopy world tiles also own
+a bounded presentation age: cold and entering-strip resources reveal over
+`0.65 s`, retained tiles do not refade, and a long frame contributes at most
+`0.10 s`.
 The same pipeline supports mono, per-eye, and full-frame multiview. It is
 intentionally V2/candidate-only: enabling it for V1 caused an avoidable Quest
 control regression while V1 did not have the same giant-forest collapse.
@@ -164,14 +169,15 @@ physical Quest 3 Low/RD8 V2 repeat after the presentation changes settles 289
 exact columns and 96 horizon slots in `10.002 s`; app-work p95 is `12.783 ms`,
 5.5% above the matched V1 control and inside the existing 10% gate.
 
-Packaged live-game pixels expose one unresolved appearance contract at the
-exact frontier. Mesa exact chunks and their procedural continuation can differ
-enough in albedo to reveal the square exact extent. At the catchment, exact
-translucent water meets opaque procedural water as a straight color boundary.
-Height, water level, source identity, and ready-coverage accounting remain
-shared, but those appearance differences are still visible seams and are
-Human Review E revision candidates. They must be corrected in composition or
-shared appearance semantics rather than hidden with additional terrain noise.
+Packaged live-game pixels exposed a V2 product-identity defect at the exact
+frontier. V2 shared the detached candidate flag, leaving its procedural
+horizon untextured and remapping final V2 biome IDs through the V1 grass
+recipe. V2 now has a distinct render identity, uses active-pack materials and
+final biome tints, fades forest-summary darkening through the exact appearance
+field, and converges spacing-one vertices to the exact block-height convention
+before recovering the smooth surface. At catchments, exact translucent water
+can still meet procedural water as a perceptible color boundary; that narrower
+appearance debt remains a Human Review revision candidate.
 
 ## Regular Clipmap And Presets
 
