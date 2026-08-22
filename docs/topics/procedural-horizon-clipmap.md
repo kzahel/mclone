@@ -169,6 +169,16 @@ physical Quest 3 Low/RD8 V2 repeat after the presentation changes settles 289
 exact columns and 96 horizon slots in `10.002 s`; app-work p95 is `12.783 ms`,
 5.5% above the matched V1 control and inside the existing 10% gate.
 
+Live exact coverage has a separate stabilization identity supplied by the
+scene from the topology-aware requested chunk view. A partially filled or
+moving exact footprint can transiently exceed the fixed spacing-one support
+capacity even when procedural clipmap work is otherwise settled. Such a
+generation suppresses optional procedural composition and remains not-ready;
+it is not a fatal certificate failure. Once exact coverage equals the
+requested view, the ordinary complete-frontier requirement applies unchanged,
+so a settled malformed frontier still fails rather than hiding behind an
+unbounded warming state.
+
 Packaged live-game pixels exposed a V2 product-identity defect at the exact
 frontier. V2 shared the detached candidate flag, leaving its procedural
 horizon untextured and remapping final V2 biome IDs through the V1 grass

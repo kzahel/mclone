@@ -261,6 +261,30 @@ translucent canopy edges or fuzzy sky halo. Elevated pixels retain the fixed
 canopy population and broad forest-summary tint. This changes no canopy cells,
 vertices, buffers, clipmap slots, tree records, or ownership rules.
 
+## Phase 4 Movement Safety Finding
+
+The first physical Quest RD8 acceptance attempt found a separate real crash
+before a performance sample could begin. Exact coverage generation `263`
+contained 263 of the requested 289 chunks. That ragged, still-filling
+footprint temporarily needed more spacing-one frontier support than the fixed
+pool could certify, while all procedural clipmap refills happened to be
+settled. The renderer's old warming test considered only procedural work and
+therefore terminated the session with `no complete frontier certificate`.
+
+The live scene now supplies the missing typed fact: whether the current exact
+coverage equals its complete topology-aware requested chunk view. While exact
+coverage is still stabilizing, an uncertified generation suppresses optional
+procedural composition and remains not-ready instead of becoming fatal. Once
+the requested exact view is complete, an uncertified frontier is still an
+error; this does not weaken settled certificate validation or enlarge the
+support pool.
+
+A native V2 Low/RD8 replay advances safely through generation `265` and all
+289 exact chunks. Its complete topology selects 20 preferred spacing-one
+support tiles within the existing capacity of 32 and prepares them under the
+bounded dispatch budget. The corresponding physical Quest acceptance is
+repeated after rebuilding the release APK below.
+
 ## Human Review H
 
 Stop with one deployed V2 world at a broad flat forest/clearing and provide

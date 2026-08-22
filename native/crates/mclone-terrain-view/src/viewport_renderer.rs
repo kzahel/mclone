@@ -4020,6 +4020,7 @@ pub struct TerrainHorizonRenderer {
     content_stage: TerrainPreviewContentStage,
     dispatched_refills_total: u64,
     exact_coverage_snapshot: Option<ExactPaintedCoverageSnapshot>,
+    exact_coverage_stabilizing: bool,
     exact_topology: HorizontalTopology,
     frontier_plan: Option<TerrainFrontierPlan>,
     frontier_receipt: TerrainFrontierPlanReceipt,
@@ -4057,6 +4058,7 @@ impl TerrainHorizonRenderer {
         }
         self.renderer.exact_coverage.disable();
         self.exact_coverage_snapshot = None;
+        self.exact_coverage_stabilizing = false;
         self.exact_topology = HorizontalTopology::UNBOUNDED;
         self.frontier_plan = None;
         self.frontier_receipt = TerrainFrontierPlanReceipt::default();
@@ -4263,6 +4265,7 @@ impl TerrainHorizonRenderer {
             content_stage: TerrainPreviewContentStage::Cover,
             dispatched_refills_total: 0,
             exact_coverage_snapshot: None,
+            exact_coverage_stabilizing: false,
             exact_topology: HorizontalTopology::UNBOUNDED,
             frontier_plan: None,
             frontier_receipt: TerrainFrontierPlanReceipt::default(),
@@ -4462,9 +4465,14 @@ impl TerrainHorizonRenderer {
         Ok(())
     }
 
+    pub fn set_exact_coverage_stabilizing(&mut self, stabilizing: bool) {
+        self.exact_coverage_stabilizing = stabilizing;
+    }
+
     pub fn clear_exact_painted_coverage(&mut self) {
         self.renderer.exact_coverage.disable();
         self.exact_coverage_snapshot = None;
+        self.exact_coverage_stabilizing = false;
         self.frontier_plan = None;
         self.frontier_receipt = TerrainFrontierPlanReceipt::default();
         self.frontier_topology = None;
@@ -5355,6 +5363,7 @@ impl TerrainHorizonRenderer {
         let frontier_warming = exact_frontier_warming(
             exact_frontier_required,
             exact_frontier_certifiable,
+            self.exact_coverage_stabilizing,
             terrain_levels.is_empty(),
             self.pending_terrain_refills() > 0,
             self.admission.has_staged_levels(),
@@ -6895,13 +6904,14 @@ fn terrain_horizon_tile_visibility_for_views(
 fn exact_frontier_warming(
     exact_frontier_required: bool,
     exact_frontier_certifiable: bool,
+    exact_coverage_stabilizing: bool,
     terrain_levels_empty: bool,
     refills_pending: bool,
     levels_staged: bool,
 ) -> bool {
     exact_frontier_required
         && !exact_frontier_certifiable
-        && (terrain_levels_empty || refills_pending || levels_staged)
+        && (exact_coverage_stabilizing || terrain_levels_empty || refills_pending || levels_staged)
 }
 
 fn terrain_horizon_tile_visibility(
@@ -8077,12 +8087,25 @@ mod tests {
 
     #[test]
     fn incomplete_exact_frontier_is_nonfatal_only_while_work_remains() {
-        assert!(exact_frontier_warming(true, false, true, false, false));
-        assert!(exact_frontier_warming(true, false, false, true, false));
-        assert!(exact_frontier_warming(true, false, false, false, true));
-        assert!(!exact_frontier_warming(true, false, false, false, false));
-        assert!(!exact_frontier_warming(true, true, false, true, true));
-        assert!(!exact_frontier_warming(false, false, true, true, true));
+        assert!(exact_frontier_warming(
+            true, false, true, false, false, false
+        ));
+        assert!(exact_frontier_warming(
+            true, false, false, true, false, false
+        ));
+        assert!(exact_frontier_warming(
+            true, false, false, false, true, false
+        ));
+        assert!(exact_frontier_warming(
+            true, false, false, false, false, true
+        ));
+        assert!(!exact_frontier_warming(
+            true, false, false, false, false, false
+        ));
+        assert!(!exact_frontier_warming(true, true, true, true, true, true));
+        assert!(!exact_frontier_warming(
+            false, false, true, true, true, true
+        ));
     }
 
     #[test]

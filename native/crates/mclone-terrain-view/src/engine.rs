@@ -221,6 +221,12 @@ impl TerrainViewEngine {
         self.replan();
     }
 
+    /// Tell the frontier owner that exact coverage is an incomplete view
+    /// publication rather than a settled malformed certificate.
+    pub fn set_exact_coverage_stabilizing(&mut self, stabilizing: bool) {
+        self.renderer.set_exact_coverage_stabilizing(stabilizing);
+    }
+
     fn replan(&mut self) {
         self.planned = true;
         let source = self

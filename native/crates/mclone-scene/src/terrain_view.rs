@@ -320,6 +320,10 @@ impl SceneTerrainViewState {
         Ok(())
     }
 
+    pub(crate) fn set_exact_coverage_stabilizing(&mut self, stabilizing: bool) {
+        self.engine.set_exact_coverage_stabilizing(stabilizing);
+    }
+
     pub(crate) const fn diagnostics(&self) -> SceneTerrainViewDiagnostics {
         self.diagnostics
     }
@@ -498,6 +502,21 @@ impl McloneSceneHost {
             .traversal_ready_sections
             .ready_columns()
             .clone();
+        let exact_coverage_stabilizing =
+            self.active_world.runtime.as_ref().is_some_and(|runtime| {
+                let stats = runtime.stats();
+                runtime
+                    .client()
+                    .topology()
+                    .chunk_view(stats.interest_center, stats.render_distance)
+                    .map(|view| {
+                        view.into_iter()
+                            .map(|entry| entry.canonical)
+                            .collect::<BTreeSet<_>>()
+                            != ready_columns
+                    })
+                    .unwrap_or(true)
+            });
         let preview_profile = live_preview_profile(profile)?;
         if self.terrain_view.as_ref().is_some_and(|terrain_view| {
             terrain_view
@@ -559,6 +578,10 @@ impl McloneSceneHost {
             .as_mut()
             .expect("composed terrain view was initialized")
             .set_diagnostic(self.terrain_horizon_diagnostic);
+        self.terrain_view
+            .as_mut()
+            .expect("composed terrain view was initialized")
+            .set_exact_coverage_stabilizing(exact_coverage_stabilizing);
         let (admitted_columns, coverage_changed) = self
             .terrain_view
             .as_mut()
