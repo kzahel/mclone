@@ -420,6 +420,21 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let exact_painted = exact_chunk_painted(input.world_xz);
     let horizon_diagnostic = params.multiview_options.y;
     let environmental_illumination = full_sky_environmental_illumination();
+    // V2 proxy trees converge into the continuous canopy by projected scale,
+    // not by clipmap level. This prevents subpixel opaque crowns from drawing
+    // a camera-centered stippled ring in continental views.
+    let world_dx = dpdx(input.world_xz);
+    let world_dy = dpdy(input.world_xz);
+    let blocks_per_pixel = max(length(world_dx), length(world_dy));
+    let v2_forest_representation = (params.content_stage_flags.w & 4u) != 0u;
+    let proxy_opacity = select(
+        1.0,
+        1.0 - smoothstep(0.45, 2.25, blocks_per_pixel),
+        v2_forest_representation,
+    );
+    if proxy_opacity < 0.01 {
+        discard;
+    }
     var color = input.color.rgb * input.color.a * environmental_illumination;
     if horizon_diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_FRONTIER_SUPPORT {
         color = vec3<f32>(0.0);
@@ -456,8 +471,12 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
         );
         color = mix(color, params.fog_color.rgb, fog_factor);
     }
+    let diagnostic_owns_pixels = horizon_diagnostic != TERRAIN_HORIZON_DIAGNOSTIC_NATURAL
+        && horizon_diagnostic != TERRAIN_HORIZON_DIAGNOSTIC_ALBEDO
+        && horizon_diagnostic != TERRAIN_HORIZON_DIAGNOSTIC_GEOMETRY;
+    let output_alpha = select(proxy_opacity, 1.0, diagnostic_owns_pixels);
     return mclone_apply_target_color_transform_rgba(
-        vec4<f32>(color, 1.0),
+        vec4<f32>(color, output_alpha),
         terrain_target_color_transform,
     );
 }

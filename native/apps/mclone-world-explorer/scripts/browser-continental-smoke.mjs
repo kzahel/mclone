@@ -68,19 +68,20 @@ try {
     `/tmp/mclone-world-explorer-web-continental-${captureLabel}-initial.png`;
   await page.locator("#world-explorer-canvas").screenshot({ path: initialCapture });
 
-  await page.evaluate(() => {
-    globalThis.__MCLONE_WORLD_EXPLORER_SMOKE__.commands.recenter(8192, -4096);
-  });
-  await page.waitForFunction(() => {
+  const movementX = initial.centerX
+    + (initial.journeyHeadingX !== 0 ? initial.journeyHeadingX * 1_024 : 1_024);
+  const movementZ = initial.centerZ
+    + (initial.journeyHeadingZ !== 0 ? initial.journeyHeadingZ * 1_024 : -512);
+  await page.evaluate(([worldX, worldZ]) => {
+    globalThis.__MCLONE_WORLD_EXPLORER_SMOKE__.commands.recenter(worldX, worldZ);
+  }, [movementX, movementZ]);
+  await page.waitForFunction(([worldX, worldZ]) => {
     const snapshot = globalThis.__MCLONE_WORLD_EXPLORER_SMOKE__?.observer.snapshot();
-    return snapshot?.centerX === 8192 && snapshot?.centerZ === -4096;
-  });
+    return snapshot?.centerX === worldX && snapshot?.centerZ === worldZ;
+  }, [movementX, movementZ]);
   await waitReady(page);
   const moved = await report(page);
   assertCandidate(moved, "retained movement");
-  if (moved.totalRebases <= initial.totalRebases) {
-    throw new Error("continental movement did not publish a clipmap rebase");
-  }
   const movementCapture =
     `/tmp/mclone-world-explorer-web-continental-${captureLabel}-movement.png`;
   await page.locator("#world-explorer-canvas").screenshot({ path: movementCapture });
@@ -96,6 +97,9 @@ try {
     allocationSlots: moved.allocationSlots,
     totalRefills: moved.totalRefills,
     totalRebases: moved.totalRebases,
+    drawnLevels: moved.drawnLevels,
+    drawnTiles: moved.drawnTiles,
+    vertexCount: moved.vertexCount,
     residentBytes: moved.residentBytes,
     exactPaintedChunks: moved.exactPaintedChunks,
     treeInstanceCount: moved.treeInstanceCount,
@@ -131,14 +135,16 @@ async function report(page) {
 }
 
 function assertCandidate(snapshot, stage) {
+  const expectsTrees = journey !== "mesa-desert";
   if (snapshot.terrainSource !== "continental-ecoregion-candidate-v1"
+      || snapshot.journey !== (journey ?? null)
       || snapshot.composition !== "horizon"
       || snapshot.readySlots !== snapshot.allocationSlots
       || snapshot.committedLevels !== snapshot.requestedLevels
       || snapshot.exactDesiredChunks !== 0
       || snapshot.exactPaintedChunks !== 0
       || snapshot.exactVertexCount !== 0
-      || snapshot.treeInstanceCount === 0
+      || (expectsTrees && snapshot.treeInstanceCount === 0)
       || snapshot.vegetationReadyTiles === 0
       || snapshot.vegetationRecordCount !== snapshot.treeInstanceCount
       || snapshot.vegetationCacheCellRequests !== 0

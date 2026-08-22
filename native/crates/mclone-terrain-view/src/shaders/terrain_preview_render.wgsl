@@ -132,6 +132,7 @@ struct VertexOutput {
     @location(10) @interpolate(flat) view_index: u32,
     @location(11) world_uv: vec2<f32>,
     @location(12) @interpolate(flat) side_surface: u32,
+    @location(13) broad_height: f32,
 };
 
 fn exact_chunk_masked(chunk: vec2<i32>) -> bool {
@@ -915,10 +916,21 @@ fn terrain_vertex(
         1.05,
     );
     let light = smooth_geometric_shade;
-    let vertex_world_x = f32(params.origin_spacing_cells.x
+    var vertex_world_x = f32(params.origin_spacing_cells.x
         + i32(sample_x) * params.origin_spacing_cells.z);
-    let vertex_world_z = f32(params.origin_spacing_cells.y
+    var vertex_world_z = f32(params.origin_spacing_cells.y
         + i32(sample_z) * params.origin_spacing_cells.z);
+    let tile_overlap = f32(params.origin_spacing_cells.z) * 0.5;
+    if sample_x == 0u {
+        vertex_world_x -= tile_overlap;
+    } else if sample_x == cells {
+        vertex_world_x += tile_overlap;
+    }
+    if sample_z == 0u {
+        vertex_world_z -= tile_overlap;
+    } else if sample_z == cells {
+        vertex_world_z += tile_overlap;
+    }
     let vertex_world_y = stitched_height + 1.0;
     let world_uv = vec2<f32>(vertex_world_x, vertex_world_z);
     let vertex_material = terrain_material(sample);
@@ -936,6 +948,7 @@ fn terrain_vertex(
     out.color = sample_color(sample, reference, gpu, light);
     out.world_xz = vec2<f32>(vertex_world_x, vertex_world_z);
     out.light = light;
+    out.broad_height = sample.large_fields.y + 1.0;
     out.material = vertex_material;
     out.textured = select(
         0u,
@@ -1044,6 +1057,7 @@ fn exact_connector_vertex_legacy(
     out.color = sample_color(sample, reference, gpu, light);
     out.world_xz = world_position.xz;
     out.light = light;
+    out.broad_height = world_position.y;
     out.material = material;
     out.textured = select(
         0u,
@@ -1181,6 +1195,7 @@ fn frontier_connector_vertex(
     out.color = sample_color(sample, reference, gpu, light);
     out.world_xz = world_position.xz;
     out.light = light;
+    out.broad_height = world_position.y;
     out.material = material;
     out.textured = select(
         0u,
@@ -1364,12 +1379,13 @@ fn exact_connector_vertex_main(
 @fragment
 fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
     if params.clipmap_inner_bounds.z > params.clipmap_inner_bounds.x
-        && params.clipmap_inner_bounds.w > params.clipmap_inner_bounds.y
-        && input.world_xz.x >= f32(params.clipmap_inner_bounds.x)
-        && input.world_xz.x < f32(params.clipmap_inner_bounds.z)
-        && input.world_xz.y >= f32(params.clipmap_inner_bounds.y)
-        && input.world_xz.y < f32(params.clipmap_inner_bounds.w) {
-        discard;
+        && params.clipmap_inner_bounds.w > params.clipmap_inner_bounds.y {
+        if input.world_xz.x >= f32(params.clipmap_inner_bounds.x)
+            && input.world_xz.x < f32(params.clipmap_inner_bounds.z)
+            && input.world_xz.y >= f32(params.clipmap_inner_bounds.y)
+            && input.world_xz.y < f32(params.clipmap_inner_bounds.w) {
+            discard;
+        }
     }
     let horizon_diagnostic = params.multiview_options.y;
     if u32(params.origin_spacing_cells.z) > 1u
@@ -1392,8 +1408,24 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let physical_channel_edge = max(fwidth(input.river.z), 0.001);
     let albedo_diagnostic = horizon_diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_ALBEDO;
     let environmental_illumination = full_sky_environmental_illumination();
-    var color = input.color;
+    let broad_light_weight = select(
+        0.0,
+        smoothstep(0.75, 4.0, blocks_per_pixel),
+        continental_candidate(),
+    );
+    let broad_world_position = vec3<f32>(input.world_xz.x, input.broad_height, input.world_xz.y);
+    let broad_normal = normalize(cross(
+        dpdx(broad_world_position),
+        dpdy(broad_world_position),
+    ));
+    let broad_light = clamp(
+        dot(broad_normal, normalize(vec3<f32>(-0.45, 0.82, -0.35))) * 0.48 + 0.58,
+        0.34,
+        1.05,
+    );
+    let presentation_light = mix(input.light, broad_light, broad_light_weight);
     var albedo = input.color / max(input.light, 0.001);
+    var color = albedo * presentation_light;
     var diagnostic_river_alpha = 0.0;
     var diagnostic_pool_alpha = 0.0;
     let face_normal = normalize(cross(
@@ -1411,11 +1443,11 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
     if input.textured != 0u && input.material < 256u
         && material_uses_grass_tint(input.material, false) {
         albedo = surface_tint(input, input.material, false);
-        color = albedo * input.light;
+        color = albedo * presentation_light;
     }
     if preview_profile() == 1u && surface_quality() >= 1u
         && steep_mountain_face && grass_family {
-        color = vec3<f32>(0.48, 0.49, 0.47) * input.light;
+        color = vec3<f32>(0.48, 0.49, 0.47) * presentation_light;
         albedo = vec3<f32>(0.48, 0.49, 0.47);
     }
     let side_surface = input.side_surface != 0u;
@@ -1476,7 +1508,7 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
                 near_albedo = mix(far_albedo, exact_water_albedo, water_tint.a);
             } else {
                 near_color = surface_tint(input, display_material, side_surface)
-                    * input.light;
+                    * presentation_light;
                 near_color = apply_material_texture(
                     near_color,
                     display_material,
@@ -1533,7 +1565,7 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
         var river_albedo = albedo;
         if input.material != 2u {
             river_color = apply_material_texture(
-                water_surface_color(input.surface_y, input.light),
+                water_surface_color(input.surface_y, presentation_light),
                 2u,
                 false,
                 input.world_xz,
@@ -1568,7 +1600,7 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
         let water_alpha = max(river_alpha, pool_alpha);
         color = mix(
             color,
-            water_surface_color(input.river.w, input.light),
+            water_surface_color(input.river.w, presentation_light),
             water_alpha * 0.88,
         );
         if albedo_diagnostic {
@@ -1615,7 +1647,7 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
     } else if horizon_diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_ENVIRONMENT {
         color = environmental_illumination;
     } else if horizon_diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_GEOMETRY {
-        color = vec3<f32>(input.light);
+        color = vec3<f32>(presentation_light);
     } else if horizon_diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_OCCLUSION {
         // Procedural terrain currently has no local AO term. White is the
         // identity multiplier and makes that absence explicit at the seam.

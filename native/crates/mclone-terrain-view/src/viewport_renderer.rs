@@ -2481,7 +2481,7 @@ impl TerrainViewportRenderer {
                 entry_point: Some("fragment_main"),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: color_format,
-                    blend: None,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
                 compilation_options: Default::default(),
@@ -2540,7 +2540,7 @@ impl TerrainViewportRenderer {
                     entry_point: Some("fragment_main"),
                     targets: &[Some(wgpu::ColorTargetState {
                         format: color_format,
-                        blend: None,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                         write_mask: wgpu::ColorWrites::ALL,
                     })],
                     compilation_options: Default::default(),
@@ -5376,6 +5376,14 @@ impl TerrainHorizonRenderer {
                 .zip(view)
                 .map(|(distance, view)| (distance, view.camera_position))
         });
+        let minimum_draw_sample_spacing = terrain_horizon_overview_minimum_sample_spacing(
+            presentation.width_blocks,
+            width,
+            self.renderer.exact_coverage.mode != TerrainExactCoverageMode::Disabled,
+            terrain_levels
+                .last()
+                .map_or(1, |level| level.snapshot.sample_spacing),
+        );
         self.visible_terrain_slots.fill(false);
         let mut inner_hole_culled_tiles = 0_u32;
         let mut frustum_culled_tiles = 0_u32;
@@ -5400,7 +5408,14 @@ impl TerrainHorizonRenderer {
             });
         if !frontier_warming {
             for level in &terrain_levels {
-                let inner_hole = finer_level_bounds(&terrain_levels, level.snapshot.level);
+                if level.snapshot.sample_spacing < minimum_draw_sample_spacing {
+                    continue;
+                }
+                let inner_hole = finer_drawn_level_bounds(
+                    &terrain_levels,
+                    level.snapshot.level,
+                    minimum_draw_sample_spacing,
+                );
                 for resource in &level.tiles {
                     match terrain_horizon_tile_visibility_for_views(
                         resource.tile,
@@ -5555,10 +5570,17 @@ impl TerrainHorizonRenderer {
                 if !candidate_proxy_geometry_visible {
                     continue;
                 }
+                if level.snapshot.sample_spacing < minimum_draw_sample_spacing {
+                    continue;
+                }
                 if level.snapshot.sample_spacing > self.vegetation_max_sample_spacing {
                     continue;
                 }
-                let inner_hole = finer_level_bounds(&vegetation_levels, level.snapshot.level);
+                let inner_hole = finer_drawn_level_bounds(
+                    &vegetation_levels,
+                    level.snapshot.level,
+                    minimum_draw_sample_spacing,
+                );
                 for resource in &level.tiles {
                     if terrain_horizon_tile_visibility_for_views(
                         resource.tile,
@@ -5604,6 +5626,9 @@ impl TerrainHorizonRenderer {
                 }
             }
             for level in &terrain_levels {
+                if level.snapshot.sample_spacing < minimum_draw_sample_spacing {
+                    continue;
+                }
                 if !terrain_horizon_level_uses_canopy(
                     self.profile,
                     self.content_stage,
@@ -5612,7 +5637,11 @@ impl TerrainHorizonRenderer {
                 ) {
                     continue;
                 }
-                let inner_hole = finer_level_bounds(&terrain_levels, level.snapshot.level);
+                let inner_hole = finer_drawn_level_bounds(
+                    &terrain_levels,
+                    level.snapshot.level,
+                    minimum_draw_sample_spacing,
+                );
                 for resource in &level.tiles {
                     if terrain_horizon_tile_visibility_for_views(
                         resource.tile,
@@ -5861,6 +5890,9 @@ impl TerrainHorizonRenderer {
             pass.set_pipeline(canopy_pipeline);
             pass.set_bind_group(1, &self.renderer.exact_coverage.bind_group, &[]);
             for level in &terrain_levels {
+                if level.snapshot.sample_spacing < minimum_draw_sample_spacing {
+                    continue;
+                }
                 if !terrain_horizon_level_uses_canopy(
                     self.profile,
                     self.content_stage,
@@ -5896,6 +5928,9 @@ impl TerrainHorizonRenderer {
             pass.set_pipeline(tree_pipeline);
             pass.set_bind_group(1, &self.renderer.exact_coverage.bind_group, &[]);
             for level in &vegetation_levels {
+                if level.snapshot.sample_spacing < minimum_draw_sample_spacing {
+                    continue;
+                }
                 if level.snapshot.sample_spacing > self.vegetation_max_sample_spacing {
                     continue;
                 }
@@ -5990,7 +6025,7 @@ impl TerrainHorizonRenderer {
         let render_cells =
             TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS / self.renderer.horizon_render_cell_stride;
         let terrain_vertex_count = terrain_levels.iter().fold(0_u32, |count, level| {
-            let visible_tiles = level
+            let visible_tiles: u32 = level
                 .tiles
                 .iter()
                 .filter(|resource| self.visible_terrain_slots[resource.resource_slot as usize])
@@ -6423,15 +6458,38 @@ impl TerrainHorizonRenderer {
     }
 }
 
-fn finer_level_bounds(
+fn finer_drawn_level_bounds(
     levels: &[TerrainHorizonLevelPresentation],
     level: u32,
+    minimum_sample_spacing: u32,
 ) -> Option<super::TerrainClipmapBounds> {
-    let finer = level.checked_sub(1)?;
     levels
         .iter()
-        .find(|candidate| candidate.snapshot.level == finer)
+        .filter(|candidate| {
+            candidate.snapshot.level < level
+                && candidate.snapshot.sample_spacing >= minimum_sample_spacing
+        })
+        .max_by_key(|candidate| candidate.snapshot.level)
         .map(|candidate| candidate.snapshot.bounds)
+}
+
+fn terrain_horizon_overview_minimum_sample_spacing(
+    width_blocks: f64,
+    width_pixels: u32,
+    exact_composition_active: bool,
+    coarsest_sample_spacing: u32,
+) -> u32 {
+    if exact_composition_active {
+        return 1;
+    }
+    let blocks_per_pixel = width_blocks / f64::from(width_pixels.max(1));
+    if !blocks_per_pixel.is_finite() || blocks_per_pixel <= 1.0 {
+        return 1;
+    }
+    (blocks_per_pixel.ceil().min(f64::from(u32::MAX)) as u32)
+        .checked_next_power_of_two()
+        .unwrap_or(1 << 31)
+        .min(coarsest_sample_spacing.max(1))
 }
 
 const fn terrain_horizon_level_uses_canopy(
@@ -7160,6 +7218,7 @@ mod tests {
     fn canopy_is_fixed_budget_and_available_across_v2_levels() {
         assert_eq!(TERRAIN_HORIZON_CANOPY_CELLS_PER_TILE, 256);
         assert_eq!(TERRAIN_HORIZON_CANOPY_VERTICES_PER_TILE, 3_072);
+        assert!(super::super::TERRAIN_PREVIEW_TREE_WGSL.contains("let proxy_opacity = select("));
         assert!(terrain_horizon_level_uses_canopy(
             TerrainPreviewProfile::McloneOverworldV2,
             TerrainPreviewContentStage::Cover,
@@ -7190,6 +7249,22 @@ mod tests {
             8,
             4,
         ));
+        assert_eq!(
+            terrain_horizon_overview_minimum_sample_spacing(8_192.0, 1_280, false, 512,),
+            8,
+        );
+        assert_eq!(
+            terrain_horizon_overview_minimum_sample_spacing(512.0, 1_280, false, 512,),
+            1,
+        );
+        assert_eq!(
+            terrain_horizon_overview_minimum_sample_spacing(8_192.0, 1_280, true, 512,),
+            1,
+        );
+        assert_eq!(
+            terrain_horizon_overview_minimum_sample_spacing(8_192.0, 1_280, false, 4,),
+            4,
+        );
     }
 
     #[test]
@@ -7633,6 +7708,11 @@ mod tests {
         assert!(shader.contains("west_or_east && (rendered_z & 1) != 0"));
         assert!(shader.contains("north_or_south && (rendered_x & 1) != 0"));
         assert!(shader.contains("stitched_height + 1.0"));
+        assert!(shader.contains("let tile_overlap = f32(params.origin_spacing_cells.z) * 0.5;"));
+        assert!(shader.contains("vertex_world_x -= tile_overlap;"));
+        assert!(shader.contains("vertex_world_x += tile_overlap;"));
+        assert!(shader.contains("vertex_world_z -= tile_overlap;"));
+        assert!(shader.contains("vertex_world_z += tile_overlap;"));
         assert_eq!(
             shader
                 .matches("let left = terrain_horizon_geometry_height(")
@@ -7666,7 +7746,7 @@ mod tests {
         assert!(shader.contains("let pool_anti_alias = max(fwidth(input.semantics.y), 0.01);"));
         assert!(shader.contains("&& input.material != 2u"));
         assert!(shader.contains("let water_alpha = max(river_alpha, pool_alpha);"));
-        assert!(shader.contains("water_surface_color(input.river.w, input.light)"));
+        assert!(shader.contains("water_surface_color(input.river.w, presentation_light)"));
         assert!(shader.contains("sample.terrain.x,"));
         assert!(!shader.contains("63.0 - input.position.z"));
         assert!(!shader.contains("let dry = vec3<f32>(0.63, 0.54, 0.29);"));

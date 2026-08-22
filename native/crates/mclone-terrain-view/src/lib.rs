@@ -1843,7 +1843,7 @@ mod tests {
         assert!(TERRAIN_PREVIEW_RENDER_WGSL.contains("input.river.w > 0.0"));
         assert!(
             TERRAIN_PREVIEW_RENDER_WGSL
-                .contains("water_surface_color(input.surface_y, input.light)")
+                .contains("water_surface_color(input.surface_y, presentation_light)")
         );
         assert!(!TERRAIN_PREVIEW_RENDER_WGSL.contains("63.0 - input.position.z"));
         assert!(!TERRAIN_PREVIEW_RENDER_WGSL.contains("let river_color = mix("));
