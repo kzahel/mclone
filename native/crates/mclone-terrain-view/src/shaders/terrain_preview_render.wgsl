@@ -47,6 +47,7 @@ const TERRAIN_HORIZON_DIAGNOSTIC_OCCLUSION: u32 = 6u;
 const TERRAIN_HORIZON_DIAGNOSTIC_WATER: u32 = 7u;
 const TERRAIN_HORIZON_DIAGNOSTIC_TEXTURE: u32 = 8u;
 const TERRAIN_HORIZON_DIAGNOSTIC_FRONTIER_SUPPORT: u32 = 9u;
+const TERRAIN_HORIZON_DIAGNOSTIC_APPEARANCE_TRANSITION: u32 = 11u;
 const TERRAIN_FRONTIER_CONNECTOR_FLAG: u32 = 0x00000100u;
 const TERRAIN_FRONTIER_CONNECTOR_WATER_FLAG: u32 = 0x00000200u;
 const TERRAIN_FRONTIER_CONNECTOR_FALLBACK_FLAG: u32 = 0x00000400u;
@@ -1693,6 +1694,8 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
         }
         let footprint = clamp(log2(max(material_blocks_per_pixel, 1.0)) / 6.0, 0.0, 1.0);
         color = vec3<f32>(texture_weight, footprint, input.world_position.w);
+    } else if horizon_diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_APPEARANCE_TRANSITION {
+        color = vec3<f32>(input.world_position.w);
     }
     if exact_coverage.mode_count_generation.x == 2u && exact_painted {
         let checker = (i32(floor(input.world_xz.x / 2.0))

@@ -44,6 +44,7 @@ const TERRAIN_HORIZON_DIAGNOSTIC_OCCLUSION: u32 = 6u;
 const TERRAIN_HORIZON_DIAGNOSTIC_WATER: u32 = 7u;
 const TERRAIN_HORIZON_DIAGNOSTIC_TEXTURE: u32 = 8u;
 const TERRAIN_HORIZON_DIAGNOSTIC_FRONTIER_SUPPORT: u32 = 9u;
+const TERRAIN_HORIZON_DIAGNOSTIC_APPEARANCE_TRANSITION: u32 = 11u;
 
 @group(0) @binding(0)
 var<uniform> params: TerrainPreviewParams;
@@ -419,6 +420,9 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
     }
     let exact_painted = exact_chunk_painted(input.world_xz);
     let horizon_diagnostic = params.multiview_options.y;
+    if horizon_diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_APPEARANCE_TRANSITION {
+        discard;
+    }
     let environmental_illumination = full_sky_environmental_illumination();
     // V2 proxy trees converge into the continuous canopy by projected scale,
     // not by clipmap level. This prevents subpixel opaque crowns from drawing
@@ -497,6 +501,9 @@ fn canopy_fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
         discard;
     }
     let horizon_diagnostic = params.multiview_options.y;
+    if horizon_diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_APPEARANCE_TRANSITION {
+        discard;
+    }
     let environmental_illumination = full_sky_environmental_illumination();
     // Canopy represents projected forest mass, not a categorical LOD style.
     // Every V2 level offers the same veil and screen derivatives raise its

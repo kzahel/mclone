@@ -472,7 +472,8 @@ Usage: mclone-world-explorer [options]
   --exact-anchor MODE         focus (default) or viewer-forward
   --exact-delay-ms N          diagnostic delay before each exact batch
   --horizon-diagnostic NAME  natural, ownership-level, albedo, geometric-shade,
-                             water, texture, or another shared LOD diagnostic
+                             water, texture, appearance-transition, or another
+                             shared LOD diagnostic
   --yaw RADIANS               3D yaw
   --pitch RADIANS             3D pitch
   --width N                   physical width (default {DEFAULT_WIDTH})

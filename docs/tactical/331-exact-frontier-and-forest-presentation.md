@@ -1,7 +1,7 @@
 # Tactical 331: Exact Frontier And Forest Presentation
 
-Status: **active as of 2026-08-22. Baseline diagnosis is complete; pixel and
-motion corrections are in progress.**
+Status: **active as of 2026-08-22. Phase 0 diagnostics are implemented; pixel
+and motion corrections are in progress.**
 
 Topic: `procedural-horizon-clipmap`
 Topic: `v2-forest-continuity-and-performance`
@@ -179,6 +179,29 @@ Produce a live V2 composition in which:
 - Native, WebGPU, flat Android, per-eye XR, and multiview share the corrected
   shader and admission contracts.
 
+## Phase 0 Evidence
+
+A settled native V2 Low/RD2 frame at seed `12345` reports all 25 exact
+columns, all 96 horizon slots, and all 16 vegetation products ready. Every one
+of its 320 exposed exact segments has spacing-one procedural adjacency. Three
+additional preferred support tiles are committed and drawn; no segment uses a
+coarse fallback. The visible square is therefore not an absent finest ring or
+an incomplete frontier certificate.
+
+The new `appearance-transition` diagnostic renders the procedural field as
+grayscale and suppresses proxy/canopy clutter. An inspected elevated capture
+shows the intended 32-block white-to-black procedural halo around the exact
+footprint. The field is uploaded and sampled in the V2 product path; it simply
+does not cover the later forest-summary darkening, exact-side block lighting,
+or the topology change. This replaces the initial suspicion of a dead field
+with a narrower presentation diagnosis.
+
+The matching headed Chrome app reproduction reaches V2 Low/RD2 with six drawn
+levels, 25 exact columns, 16 resident vegetation tiles, 57 visible canopy
+tiles, and 14,592 canopy cells. Its natural frame reproduces both the exact
+rectangle and long grazing canopy-fan edges. No page, frontier, ownership, or
+source-profile error is required to produce either defect.
+
 ## Human Review H
 
 Stop with one deployed V2 world at a broad flat forest/clearing and provide
@@ -186,4 +209,3 @@ two reproducible views: ground-level forward movement and elevated flight
 across the same exact boundary. Ask whether the exact square, mass tree pop,
 or canopy halo remains distracting. Keep V2 experimental and V1 default
 regardless of acceptance.
-
