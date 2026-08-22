@@ -327,6 +327,23 @@ XR replay used the already-staged headset assets because the unrelated legacy
 `mclone-game-1.17.1` asset lock is stale; first-party pack generation and both
 Android code builds succeed.
 
+## Deployed Review Evidence
+
+The public WebGPU build for accepted revision `13219a59` reports asset version
+`13219a593c9b-20260822110154`. A fresh transient V2 Low/RD2 session reaches all
+25 exact columns and 96 horizon slots with both vegetation reveal counts at
+zero, then renders ground and elevated frames without a page, device, source,
+or frontier error.
+
+The inspected ground frame no longer contains the translucent triangulated
+canopy halo. Exact and procedural ground use the same characteristic material
+and color, although the block-to-smooth topology line remains readable and
+middle-distance individual proxies retain intentionally simple rectangular
+crowns. The inspected elevated frame preserves continuous broad forest mass;
+its canopy surface still exposes faceted and crisscross triangulation. Those
+two presentation judgments are left visible for Human Review H rather than
+being hidden by a wider exact radius, fog, or an unbounded tree population.
+
 ## Human Review H
 
 Stop with one deployed V2 world at a broad flat forest/clearing and provide
