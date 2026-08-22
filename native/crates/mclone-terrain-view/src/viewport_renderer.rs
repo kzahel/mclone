@@ -2578,7 +2578,7 @@ impl TerrainViewportRenderer {
                     entry_point: Some("canopy_fragment_main"),
                     targets: &[Some(wgpu::ColorTargetState {
                         format: color_format,
-                        blend: None,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                         write_mask: wgpu::ColorWrites::ALL,
                     })],
                     compilation_options: Default::default(),
@@ -2591,7 +2591,10 @@ impl TerrainViewportRenderer {
                 },
                 depth_stencil: Some(wgpu::DepthStencilState {
                     format: TERRAIN_PREVIEW_DEPTH_FORMAT,
-                    depth_write_enabled: true,
+                    // Canopy is a continuous projected-scale veil over the
+                    // opaque ground. A depth write would make fractional
+                    // canopy occlude later proxy trees like an opaque sheet.
+                    depth_write_enabled: false,
                     depth_compare: wgpu::CompareFunction::GreaterEqual,
                     stencil: Default::default(),
                     bias: Default::default(),
@@ -2618,7 +2621,7 @@ impl TerrainViewportRenderer {
                     entry_point: Some("canopy_fragment_main"),
                     targets: &[Some(wgpu::ColorTargetState {
                         format: color_format,
-                        blend: None,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                         write_mask: wgpu::ColorWrites::ALL,
                     })],
                     compilation_options: Default::default(),
@@ -2631,7 +2634,7 @@ impl TerrainViewportRenderer {
                 },
                 depth_stencil: Some(wgpu::DepthStencilState {
                     format: TERRAIN_PREVIEW_DEPTH_FORMAT,
-                    depth_write_enabled: true,
+                    depth_write_enabled: false,
                     depth_compare: wgpu::CompareFunction::GreaterEqual,
                     stencil: Default::default(),
                     bias: Default::default(),
@@ -6434,15 +6437,14 @@ fn finer_level_bounds(
 const fn terrain_horizon_level_uses_canopy(
     profile: TerrainPreviewProfile,
     content_stage: TerrainPreviewContentStage,
-    sample_spacing: u32,
-    vegetation_max_sample_spacing: u32,
+    _sample_spacing: u32,
+    _vegetation_max_sample_spacing: u32,
 ) -> bool {
     matches!(
         profile,
         TerrainPreviewProfile::ContinentalEcoregionCandidate
             | TerrainPreviewProfile::McloneOverworldV2
     ) && matches!(content_stage, TerrainPreviewContentStage::Cover)
-        && sample_spacing > vegetation_max_sample_spacing
 }
 
 fn terrain_horizon_samples_per_axis() -> u32 {
@@ -7155,10 +7157,10 @@ mod tests {
     }
 
     #[test]
-    fn canopy_is_fixed_budget_and_begins_after_proxy_tree_levels() {
+    fn canopy_is_fixed_budget_and_available_across_v2_levels() {
         assert_eq!(TERRAIN_HORIZON_CANOPY_CELLS_PER_TILE, 256);
         assert_eq!(TERRAIN_HORIZON_CANOPY_VERTICES_PER_TILE, 3_072);
-        assert!(!terrain_horizon_level_uses_canopy(
+        assert!(terrain_horizon_level_uses_canopy(
             TerrainPreviewProfile::McloneOverworldV2,
             TerrainPreviewContentStage::Cover,
             4,

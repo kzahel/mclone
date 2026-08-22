@@ -473,15 +473,24 @@ fn canopy_fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
         && input.world_xz.y < f32(params.clipmap_inner_bounds.w) {
         discard;
     }
-    if input.color.a < 0.14 {
-        discard;
-    }
     let exact_painted = exact_chunk_painted(input.world_xz);
     if exact_coverage.mode_count_generation.x == 1u && exact_painted {
         discard;
     }
     let horizon_diagnostic = params.multiview_options.y;
     let environmental_illumination = full_sky_environmental_illumination();
+    // Canopy represents projected forest mass, not a categorical LOD style.
+    // Every V2 level offers the same veil and screen derivatives raise its
+    // contribution continuously as individual crowns become unresolvable.
+    // Adjacent levels therefore agree at their shared projected boundary.
+    let world_dx = dpdx(input.world_xz);
+    let world_dy = dpdy(input.world_xz);
+    let blocks_per_pixel = max(length(world_dx), length(world_dy));
+    let projected_scale_weight = smoothstep(0.45, 2.25, blocks_per_pixel);
+    let canopy_opacity = clamp(input.color.a * projected_scale_weight * 0.78, 0.0, 0.78);
+    if canopy_opacity < 0.01 {
+        discard;
+    }
     var color = input.color.rgb * environmental_illumination;
     if horizon_diagnostic == TERRAIN_HORIZON_DIAGNOSTIC_FRONTIER_SUPPORT {
         color = vec3<f32>(0.0);
@@ -518,8 +527,12 @@ fn canopy_fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
         );
         color = mix(color, params.fog_color.rgb, fog_factor);
     }
+    let diagnostic_owns_pixels = horizon_diagnostic != TERRAIN_HORIZON_DIAGNOSTIC_NATURAL
+        && horizon_diagnostic != TERRAIN_HORIZON_DIAGNOSTIC_ALBEDO
+        && horizon_diagnostic != TERRAIN_HORIZON_DIAGNOSTIC_GEOMETRY;
+    let output_alpha = select(canopy_opacity, 1.0, diagnostic_owns_pixels);
     return mclone_apply_target_color_transform_rgba(
-        vec4<f32>(color, 1.0),
+        vec4<f32>(color, output_alpha),
         terrain_target_color_transform,
     );
 }
