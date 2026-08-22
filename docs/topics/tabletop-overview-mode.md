@@ -2,10 +2,12 @@
 
 Topic: `tabletop-overview-mode`
 
-Status: **potential feature directions researched through 2026-08-22; no
-implementation or tactical is open.** The recommended product shape is one
-shared active-world overview presentation with direct-control adventure and
-edit purposes across flat, touch, gamepad, tracked-controller, and later
+Status: **accepted product direction as of 2026-08-22; no implementation
+tactical is open.** The first product expression is a per-local-participant
+third-person isometric accessibility view for children and players who are not
+comfortable with first-person camera mechanics. The broader direction remains
+one shared active-world overview presentation with direct-control adventure
+and edit purposes across flat, touch, gamepad, tracked-controller, and later
 hand-tracking interaction. The
 [`isocraft-reference.md`](isocraft-reference.md) study strengthens the
 underground-visibility direction from a ray-only keyhole to a bounded
@@ -18,9 +20,11 @@ Last reconciled: **2026-08-22**.
 
 ## Scope
 
-This topic owns the potential player-facing mode in which the active world is
+This topic owns the player-facing mode in which the active world is
 presented as a manipulable scale model:
 
+- a third-person isometric accessibility camera that follows the ordinary
+  controlled player without changing simulation or authority;
 - a flat-screen orbit or god-view building mode;
 - an XR tabletop or floating-diorama mode;
 - passthrough-backed mixed reality where the XR runtime supports it;
@@ -32,7 +36,10 @@ presented as a manipulable scale model:
 - creative, survival, multiplayer, and remote-authority policy for actions
   performed away from the player's embodied reach; and
 - the bounded implementation and validation path from read-only overview to
-  authoritative editing.
+  authoritative editing; and
+- participant-local camera selection in split-screen play, including one
+  participant optionally viewing the same controlled body through both an
+  ordinary and an isometric pane.
 
 It does **not** own:
 
@@ -46,6 +53,9 @@ It does **not** own:
   [`realm-dimension-runtime.md`](realm-dimension-runtime.md);
 - the general all-device semantic input architecture; that remains in
   [`controller-input.md`](controller-input.md);
+- local participant identity, input assignment, authoritative client grouping,
+  and split-screen layout; those remain in
+  [`local-couch-multiplayer.md`](local-couch-multiplayer.md);
 - the OpenXR frame-loop sequence or platform activity/window ownership; those
   remain in `mclone-xr-host` and the desktop/Android XR adapters;
 - a general creative-mode, permissions, blueprint, or remote-construction
@@ -107,6 +117,14 @@ continue inside the miniature. The presentation is useful for building and
 planning, while Mclone's world depth and cross-device continuity distinguish
 it from a creative block-placement novelty.
 
+The first concrete product is narrower: **third-person isometric adventure is
+an accessibility camera choice alongside first person and conventional third
+person**. It keeps the ordinary player body, collision, inventory, reach,
+survival rules, and multiplayer identity. Its job is to remove dependence on
+mouse-look/FPS literacy while preserving the same game. Tabletop manipulation
+and remote editing build on that camera family later; they are not required to
+make the accessibility view useful.
+
 ## Discovery 2 Reference
 
 The immediate product reference is
@@ -167,6 +185,43 @@ first-person camera skill. It also shows that such a profile needs a complete
 movement, targeting, building, and feedback design; changing the camera alone
 would exchange FPS unfamiliarity for isometric depth and targeting ambiguity.
 
+## Accessibility And Local-Presentation Decision
+
+Camera choice belongs to a local participant, not to the world, server, device,
+or split-screen layout. Two players sharing one surface may therefore choose
+different views at the same time:
+
+```text
+participant A -> first person          -> left pane
+participant B -> third-person iso      -> right pane
+
+participant A -> ordinary primary view -> main pane
+participant A -> third-person iso      -> auxiliary pane
+```
+
+The second arrangement is another presentation of the same canonical player,
+not another participant, replica, command stream, or interest source. The
+first arrangement has two ordinary players and two participant-private camera
+states while retaining shared compatible terrain, actor, asset, compile, and
+upload resources.
+
+The accessibility profile must be complete enough for a child or
+first-person-novice to play rather than merely spectate. Its initial contract
+is:
+
+- a visible full-body local-player figure;
+- camera-relative horizontal movement with ordinary collision and gravity;
+- constrained pitch, bounded zoom, stable follow, and optional snapped yaw;
+- large, stable targeting feedback and body-centric reach/action origins;
+- the topology-aware dollhouse cutaway when terrain hides the player; and
+- an immediate participant-local switch back to first or conventional third
+  person without reconnecting or changing game state.
+
+The setting should be discoverable as a camera/accessibility choice and may be
+stored with a durable local profile. A session guest owns an independent
+session-only choice. It must not be hidden as a developer overview mode or
+forced on every local participant.
+
 ## Relationship To Existing Mclone Work
 
 Mclone has already landed much of the difficult renderer foundation through
@@ -216,6 +271,9 @@ own camera, input, authority, streaming, comfort, and passthrough decisions.
 - **Embodied mode**: ordinary first-person or configured player-camera play.
 - **Overview mode**: the shared active-world scale-model presentation and
   input context.
+- **Third-person iso**: the player-following, direct-control accessibility
+  camera expression of overview. It remains an ordinary participant view and
+  does not imply editing, remote reach, or XR tabletop placement.
 - **Direct-control adventure**: overview purpose in which ordinary character
   movement and body-relative actions continue while the presentation follows
   the canonical player.
@@ -246,6 +304,12 @@ Overview mode should be an explicit shared action available from an appropriate
 menu or binding. Its initial focus is the player's canonical location or a
 selected point of interest. Leaving the mode returns to the same active world
 and body rather than loading or swapping a runtime.
+
+For third-person iso, entering and leaving is the same class of operation as a
+first/third-person camera toggle and is scoped to the requesting local
+participant. It must not change another split-screen participant's camera. A
+single participant may instead retain an isometric auxiliary pane while their
+primary pane remains first or conventional third person.
 
 The player's body remains a canonical server fact while overview is active.
 The mode must explicitly decide whether that body is visible as a miniature,
@@ -454,6 +518,17 @@ activity, or camera-frame types.
 A provisional shared shape is:
 
 ```rust
+enum PlayerCameraViewMode {
+    FirstPerson,
+    ThirdPersonBack,
+    ThirdPersonIso(IsoCameraState),
+}
+
+struct ParticipantPresentationView {
+    subject: LocalParticipantId,
+    camera: PlayerCameraViewMode,
+}
+
 enum WorldPresentationMode {
     Embodied,
     Overview(OverviewState),
@@ -479,9 +554,11 @@ struct OverviewPresentation {
 }
 ```
 
-Exact type placement should follow implementation evidence. This sketch records
-the distinction between canonical focus, visual placement, and authoritative
-interaction policy.
+Exact type placement should follow implementation evidence. The smaller camera
+enum records the first accessibility product and its per-participant ownership;
+the broader world-presentation types retain later tabletop/edit state. The
+sketch also records the distinction between canonical focus, visual placement,
+and authoritative interaction policy.
 
 ## Active-World Rendering And Interest
 
@@ -502,6 +579,21 @@ simulation. The keyhole's DDA probes consume the same canonical terrain
 occupancy used for ordinary block targeting; they should not read rendered
 depth back from the GPU.
 
+In split screen, every isometric view has its own subject participant, camera,
+projection/aspect, follow state, visible/cutaway mask, culling result, effects,
+targeting projection, and HUD policy. Compatible terrain and actor resources
+remain shared and shared frame preparation still runs once. A first-person
+pane must render the real roof even while an isometric pane cuts that roof away
+for its followed player.
+
+That requirement rules out one globally destructive cutaway mesh as the shared
+implementation. The initial effect should use view-local shader/visibility
+parameters over shared canonical geometry. If a clean architectural cut face
+is later required, add a bounded view-local cap/overlay mesh or an explicitly
+budgeted per-view derivative; do not replace the shared base mesh with one
+camera's hidden-block result. Targeting consumes the same participant-view
+mask that produced its pixels.
+
 Initial focus should remain near the embodied player and inside the existing
 resident set. Free panning beyond that set requires a separate bounded
 overview-interest source. `RealmServer` already has player/observer interest
@@ -509,6 +601,22 @@ concepts, but a remote session does not yet have a general independent
 observer subscription stream. Do not move the canonical body merely to make
 distant chunks load, and do not promise unrestricted remote panning before the
 transport and server authority contract exists.
+
+Third-person iso does not add an observer or widen authoritative interest. Its
+exact-terrain request is the intersection of its participant's resident facts
+with a padded camera-ground footprint. Steeper top-down pitch normally needs a
+smaller exact footprint; shallow three-quarter pitch and zoom-out extend the
+far ground edge and must remain within an explicit per-view budget. The shared
+procedural-horizon LOD may provide distant context without asking exact chunks
+to follow the detached lens.
+
+For split screen, drawable residency is the union required by the ordinary
+participants and any admitted observer sources. Each pane independently culls
+that union and selects exact versus horizon detail. Co-located players with
+different camera types should reuse prepared meshes; opposing or separated
+views may increase visible submission or residency respectively. Reduced pane
+pixel area can justify per-view render scale/detail policy, but it does not
+make the second draw free.
 
 The direct embodied path must retain the current structural invariant:
 
@@ -614,42 +722,63 @@ fallback for distant or very small blocks.
 
 ## Proposed Implementation Sequence
 
-No tactical should be opened until the product authority decision and first
-proof boundary are accepted.
+The accessibility product direction is accepted. Open one bounded tactical at
+a time and keep remote editing/tabletop authority out of the initial camera
+work.
 
 ### Slice 0 — Contract and direct-path lock
 
-- Characterize current active-world prepare/draw/input paths.
-- Define overview state, focus, interaction policy, and source bounds without
-  OpenXR types.
-- Add source locks proving ordinary play constructs no overview state or work.
+- Add a participant-local `ThirdPersonIso` value beside the shared existing
+  first-person and third-person-back camera choices.
+- Define constrained pitch, zoom, yaw, follow/dead-zone, and body subject state
+  without OpenXR or platform types.
+- Lock the ordinary first/third-person and one-view paths unchanged when the
+  new value is not selected.
 
-### Slice 1 — Read-only active-world overview
+### Slice 1 — Single-view accessibility camera
 
-- Reuse a bounded set of the active slot's terrain and actor resources.
-- Render it through the existing placed mono/per-eye/multiview paths.
-- Start centred near the player with no distant-interest expansion.
-- Add a flat offscreen view and synthetic-stereo capture.
+- Render the canonical local player as a full-body subject from a constrained
+  narrow-FOV perspective camera.
+- Map camera-relative movement into the ordinary canonical controller while
+  keeping collision, reach, targeting origin, and authority body-centric.
+- Add stable targeting feedback, snapped/continuous yaw policy, and immediate
+  participant-local switching among the three camera choices.
+- Prove desktop, web, flat Android, and offscreen pixels through shared scene
+  and renderer owners without adding camera-driven observer interest.
 
 This is the first drawable review checkpoint.
 
-### Slice 2 — Shared manipulation
+### Slice 2 — View-local underground visibility
+
+- Add the bounded topology-first room/local-cave classifier and camera
+  occluder proof.
+- Feed a view-local cutaway mask to shared canonical terrain rendering and use
+  the same mask for the participant's targeting projection.
+- Start with the intentionally uncapped dithered reveal and bounded
+  outline/local-slice fallback; defer general mesh surgery.
+- Prove camera rotations and transitions without visible blockers or stale
+  cutaway state.
+
+### Slice 3 — Auxiliary and split-screen composition
+
+- Render one participant's ordinary primary and isometric auxiliary views of
+  the same canonical body through one shared preparation.
+- Render two co-located participant envelopes with independent camera choices,
+  follow state, culling, HUD policy, and cutaway masks.
+- Prove that an isometric cutaway does not alter a first-person pane and that
+  layout changes do not change either participant's selection.
+- Measure exact/LOD visible sets, compile/upload reuse, per-pane scale, and GPU
+  frame cost for aligned and opposing views.
+
+### Slice 4 — Shared overview manipulation and editing
 
 - Add a yaw-capable presentation transform and inverse mapping.
-- Add neutral pan/scale/yaw/recenter intents.
-- Implement mouse, touch, gamepad, and tracked-controller mappings through the
-  shared input/session owner.
-- Keep the mode read-only while exact pointing and target highlighting are
-  proven.
+- Add neutral pan/scale/yaw/recenter intents through the shared input owner.
+- Keep it read-only while exact overview pointing is proven, then define a
+  narrow server-validated editing capability.
+- Prove persistence, protected-world denial, and local/remote authorization.
 
-### Slice 3 — Authoritative creative editing
-
-- Define the narrow server-validated overview editing capability.
-- Route exact placed-world block hits through ordinary place/break commands.
-- Prove persistence, protected-world denial, multiplayer denial/allow, and
-  local/remote behavior supported by the actual protocol.
-
-### Slice 4 — Quest mixed reality
+### Slice 5 — Quest mixed reality
 
 - Add the capability-gated passthrough underlay in the shared OpenXR host
   boundary and Android XR adapter.
@@ -657,28 +786,13 @@ This is the first drawable review checkpoint.
 - Validate real Quest lifecycle, stereo/multiview pixels, comfort, and frame
   pacing.
 
-### Slice 5 — Expansion only after evidence
+### Slice 6 — Expansion only after evidence
 
 - Hand tracking.
 - Distant focus and bounded observer interest.
 - Circular/rounded crop and boundary polish.
 - Blueprint or survival-native remote construction.
 - Spatial table discovery or persistent room anchoring.
-
-### Direct-control adventure follow-up
-
-This is a branch after the shared read-only placement proof, not a requirement
-for creative editing:
-
-1. add a flat static/follow camera above ground;
-2. render the local-player miniature and map camera-relative movement into the
-   ordinary canonical controller;
-3. add DDA-triggered, dithered keyhole cutaway in mono capture;
-4. prove the same physical cut volume in synthetic stereo and multiview;
-5. add the anchored/leashed tabletop policy, then capability-gated
-   passthrough; and
-6. consider camera-pointer underground interaction only after visibility and
-   picking can share one tested mask.
 
 ## Validation Requirements
 
@@ -700,6 +814,10 @@ Required contract evidence should include:
 - bounded aperture radius/depth, hysteresis, and deep-underground fallback;
 - one physical keyhole volume producing consistent per-eye and multiview
   results;
+- simultaneous first-person and isometric panes in which only the isometric
+  view applies its participant-local cutaway;
+- one participant shown through ordinary and isometric panes without a second
+  actor, replica, command stream, or interest source;
 - no camera-pointer hit against fragments hidden by the cutaway;
 - active-world mutations visible in the overview and persisted after reopen;
 - no duplicate runtime, replica, draw store, actor cache, or player identity;
@@ -746,6 +864,14 @@ filtering, and an outline/local-slice fallback bound both visual suppression
 and shader cost. The first effect intentionally does not promise generated cap
 faces.
 
+### View-local cutaway versus shared meshes
+
+One globally remeshed hidden-block set cannot represent two simultaneous views
+that disagree about which roof or wall is visible. Keep canonical terrain
+meshes shared and make the initial cut volume participant-view-local. Any later
+cap geometry must be bounded and attributable per view so split screen does not
+silently multiply every resident section mesh.
+
 ### Unbounded residency cost
 
 A freely pannable high-level view can demand large chunk, mesh, actor, and Far
@@ -777,12 +903,22 @@ background capability.
 
 - Treat the idea as a shared active-world overview mode, not a Quest-only
   passthrough feature.
+- Ship the first flat expression as a participant-local third-person
+  isometric accessibility camera for children and players unfamiliar with
+  first-person mechanics.
+- Let each split-screen participant choose first person, conventional third
+  person, or third-person iso independently.
+- Allow one participant to use third-person iso as an auxiliary view of the
+  same canonical body without creating another participant or interest
+  source.
 - Reuse placed-world geometry and actor rendering rather than inventing a
   render-to-texture minimap.
 - Keep canonical simulation scale and coordinates unchanged.
 - Keep the active-world source in the existing slot; do not require a warm
   second runtime.
 - Distinguish overview focus/camera from the embodied player body.
+- Keep cutaway and targeting state per presentation view while sharing the
+  canonical terrain mesh and compatible prepared resources.
 - Treat direct-control adventure and overview edit as purposes of one shared
   presentation, not separate engines or platform modes.
 - Keep direct-control movement and actions body-centric; the overview camera
@@ -811,7 +947,6 @@ background capability.
 - Which game mode or permission first grants distant editing?
 - Does the first view show only the region around the player, a selected build
   site, or a bounded settlement?
-- Should the local player appear as a miniature body?
 - Which follow dead zone, damping, and teleport threshold feel stable on flat
   screens?
 - Should XR direct-control default to leashed recentering or a fully static
@@ -833,26 +968,31 @@ background capability.
 
 ## Recommended Next Direction
 
-Keep this as a researched potential until current product priorities select it.
-When selected, open a bounded tactical for Slices 0–1 only: a read-only,
-active-world, player-centred overview using the landed placed terrain/actor
-paths on flat and synthetic stereo, with the ordinary path locked unchanged.
+Open a bounded tactical for the selected accessibility product before the
+broader editor/tabletop sequence. Add `ThirdPersonIso` beside the existing
+first-person and third-person-back choices in the shared participant camera
+owner. Prove a visible local-player body, constrained perspective camera,
+camera-relative movement, body-centric targeting, stable follow, and the
+unchanged ordinary path on flat and synthetic stereo.
 
-After that proof, direct-control adventure is a bounded early follow-up because
-it can validate the local-player miniature, flat follow, canonical movement,
-and cheap keyhole without first requiring remote editing authority. Keep its
-initial actions body-centric.
+The first multi-view proof should reuse the landed flat presenter in both
+forms: one participant with ordinary primary plus isometric auxiliary, and two
+co-located participant envelopes choosing different camera types. Prepare
+shared world records once, cull each pane independently, and prove that a
+view-local cutaway never changes another pane's roof. Begin with the bounded
+outline/keyhole fallback if the full topology mask would make the first
+tactical too broad, but keep the mask contract view-local from day one.
 
-Implement Slice 2's pan, scale, yaw, focus, and recenter semantics through the
+Implement Slice 4's pan, scale, yaw, focus, and recenter semantics through the
 shared view-control direction in
 [`world-view-navigation.md`](world-view-navigation.md), rather than adding a
 tabletop-only mouse/touch reducer. Tabletop retains scene-owned follow,
 targeting, authority, and keyhole policy.
 
 Do not begin with passthrough, hand tracking, circular clipping, distant
-streaming, or survival remote editing. Those depend on the shared presentation
-proof and each introduces an independent authority, lifecycle, input, or
-performance question.
+streaming, or survival remote editing. Those depend on the accessibility
+camera and shared presentation proof and each introduces an independent
+authority, lifecycle, input, or performance question.
 
 ## Related Documents
 
@@ -866,6 +1006,8 @@ performance question.
   observer authority and interest.
 - [`controller-input.md`](controller-input.md) — shared semantic input,
   gamepad, touch, and tracked-controller boundaries.
+- [`local-couch-multiplayer.md`](local-couch-multiplayer.md) — participant,
+  presentation-view, split-layout, profile, and shared-resource ownership.
 - [`world-view-navigation.md`](world-view-navigation.md) — shared map/orbit,
   touch, focus, zoom, and recenter manipulation consumed by overview mode.
 - [`procedural-horizon-clipmap.md`](procedural-horizon-clipmap.md) — fixed

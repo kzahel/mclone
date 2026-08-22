@@ -44,7 +44,8 @@ Local participation and presentation are separate axes:
 
 - one participant may own one ordinary flat view;
 - one participant may own multiple views, such as a main view plus a minimap,
-  debug camera, or building-plan view;
+  debug camera, building-plan view, or third-person isometric accessibility
+  view of the same controlled body;
 - several participants may share one flat surface through viewport rectangles;
 - one participant may consume an XR stereo/multiview surface while another
   consumes a flat window or television view; and
@@ -56,6 +57,12 @@ can observe an already resident area without adding another player. If it needs
 distant world facts, it must request explicit observer interest or use an
 ordinary participant stream rather than causing a renderer to load or simulate
 world state implicitly.
+
+Camera style is participant-local presentation state. Every local player may
+independently choose first person, conventional third person, or the accepted
+third-person isometric accessibility view. A layout change never changes those
+choices, and one participant selecting isometric view never changes another
+participant's camera or controls.
 
 ## Accepted Concept Model
 
@@ -136,6 +143,13 @@ target.
    separate participant, split-layout, streaming, or helper gameplay policy.
 10. Every enabled world-space feature remains correct in mono, each flat
     viewport, XR per-eye, and full-frame multiview paths where applicable.
+11. Camera mode, follow state, cutaway mask, targeting projection, effects, and
+    HUD policy are presentation-view-local. They are not surface-global merely
+    because several panes share one swapchain image.
+12. A view-dependent dollhouse cutaway may not destructively remesh the one
+    terrain resource shared by panes that disagree about visibility. Prefer
+    per-view clipping over shared canonical geometry, with any cap mesh kept
+    bounded and explicitly view-local.
 
 ## Current Mclone State
 
@@ -192,7 +206,12 @@ presentation:
 - the scene's current camera/interaction/player-model state is contained in a
   cardinality-one participant envelope. The inspected scripted offscreen proof
   drives two participant-local semantic sessions and renders independent
-  cameras through horizontal and vertical layouts with one shared preparation.
+  cameras through horizontal and vertical layouts with one shared preparation;
+  and
+- the current shared camera view enum supports first person and conventional
+  third-person-back. The participant/view ownership seam is ready for a future
+  third-person-isometric value, but that camera, its accessible controls, and
+  its view-local cutaway are not implemented.
 
 The client/presentation side remains singleton in the authoritative places
 couch play must change:
@@ -339,6 +358,8 @@ preparation without granting the auxiliary camera authority. Product work can
 use that seam for one participant requesting multiple flat presentation views.
 Useful panes include:
 
+- a third-person isometric accessibility view following the same canonical
+  player as an ordinary primary pane;
 - an overhead or angled minimap/world camera;
 - a renderer/traversal/streaming debug camera or detailed diagnostic pane;
 - a building elevation, layer, or plan view;
@@ -479,6 +500,11 @@ death/respawn, selected camera, and focus. Device-global overlays include
 join/leave, controller loss, account/profile selection, and any menu that
 deliberately pauses or covers the whole presentation.
 
+Camera/accessibility choice should persist with a durable local profile when
+one exists. A session guest owns an independent session-only choice. Neither a
+global options screen nor the player-one profile may overwrite every active
+participant's selection.
+
 Pause policy depends on host mode. A purely local integrated session may pause
 the realm only through an explicit group/global action; a remote realm and any
 session with non-local peers continue ticking. Inventory or a participant menu
@@ -502,6 +528,13 @@ Performance controls may include:
   and
 - automatic quality selection based on participant count, with visible and
   inspectable effective settings.
+
+Third-person isometric rendering can reduce a pane's submitted exact terrain
+when a steep pitch creates a compact ground footprint. Shallow three-quarter
+angles and zoom-out do the opposite, so the mode needs explicit pitch, zoom,
+exact-footprint, and horizon-LOD budgets rather than assuming that isometric is
+always cheaper. A camera footprint controls per-view drawable selection; it
+does not replace ordinary player/observer residency or simulation interest.
 
 Do not use culling as a synonym for residency. Per-view culling controls what
 is submitted from resident data. Separated players can still grow authoritative
@@ -531,21 +564,27 @@ The sequence is intentionally staged so each milestone is useful on its own:
    Guest 2 presentation envelope and explicit controller claim, while keeping
    it non-authoritative and session-only. Durable profiles and participant HUD
    policy remain unresolved.
-4. **Add a local client group.** Join two distinct ordinary identities to one
+4. **Add the third-person-isometric accessibility consumer.** Extend the
+   participant camera enum and view-local scene state, first for one ordinary
+   player and then for two co-located presentation envelopes choosing different
+   camera types. Reuse shared preparation and prove that cutaway state in one
+   pane cannot affect another pane. This camera work does not require a second
+   authoritative player.
+5. **Add a local client group.** Join two distinct ordinary identities to one
    Tactical 217 now proves 1-4 distinct ordinary identities against one realm
    through independent logical endpoints, including owner-only updates,
    overlapping and separated interest, and independent leave. Extend this
    harness with save/reopen, death, and respawn evidence before rendering two
    authoritative clients as a product.
-5. **Ship two-player flat split screen.** Add device assignment, layout,
+6. **Ship two-player flat split screen.** Add device assignment, layout,
    per-pane HUD/inventory, controller-loss UI, shared render resources, fair
    preparation, and colocated/separated performance evidence on desktop
    SteamOS-shaped hardware.
-6. **Exercise all targets and cardinality four.** Adopt browser and Android
+7. **Exercise all targets and cardinality four.** Adopt browser and Android
    collectors/surfaces, prove 1-4 participant collections and layouts, and
    validate real-device budgets. Console-specific account/suspend adapters
    remain future platform work over the same contracts.
-7. **Add role and mixed-presentation products.** Build helper/builder authority
+8. **Add role and mixed-presentation products.** Build helper/builder authority
    only after its gameplay contract is selected; prove one XR participant plus
    one flat participant/auxiliary view without forking server or scene policy.
 
@@ -566,7 +605,11 @@ Shared contract tests must cover:
 - fair preparation when participant regions overlap and when they are far
   apart; and
 - participant-independent presentation views, including one participant with
-  two views.
+  two views;
+- independent per-participant camera choices in one layout, including mixed
+  first-person and third-person-isometric panes; and
+- disagreement-safe cutaway rendering in which one pane reveals an interior
+  while another pane retains the canonical roof.
 
 Rendered acceptance began with the inspected Tactical 217 single-player
 auxiliary proof. Tactical 219 promoted it to the live shared GPU presenter and

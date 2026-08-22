@@ -321,8 +321,9 @@ series implements the same concern, normally reuse the document slug in its
 - [`local-couch-multiplayer.md`](local-couch-multiplayer.md): accepted 1-4
   local-participant and multi-presentation direction — ordinary realm player
   endpoints, shared unioned residency with per-view culling, single-player
-  auxiliary panes, helper/builder roles, Bedrock study plan, and mixed
-  XR-plus-flat couch play.
+  auxiliary panes, independent participant camera/accessibility choices,
+  disagreement-safe isometric cutaways, helper/builder roles, Bedrock study
+  plan, and mixed XR-plus-flat couch play.
 - [`platform-boundary-convergence.md`](platform-boundary-convergence.md):
   parent record for the shared/platform code-split campaign — the
   sixteen-pass ledger, the 2026-07-21 two-sided measured audit, the
@@ -445,13 +446,14 @@ series implements the same concern, normally reuse the document slug in its
   [`201`](../tactical/201-lobby-content-simplification.md) records the completed
   simplification from managed installed content to a transient authored lobby
   and ordinary persistent destinations.
-- [`tabletop-overview-mode.md`](tabletop-overview-mode.md): researched
-  potential for presenting the active world as one shared manipulable scale
-  model across flat, touch, gamepad, XR, and capability-gated passthrough;
-  records edit and direct-control adventure purposes, same-slot renderer reuse,
-  camera follow and leashed XR recentering, topology-first room/local-cave
-  cutaways, inverse target mapping, authority boundaries, platform-neutral
-  input, current gaps, and a read-only-first implementation sequence.
+- [`tabletop-overview-mode.md`](tabletop-overview-mode.md): accepted
+  participant-local third-person isometric accessibility camera for children
+  and first-person novices, plus the broader active-world scale-model direction
+  across flat, touch, gamepad, XR, and capability-gated passthrough; records
+  split-screen/auxiliary ownership, view-local topology-first cutaways, edit and
+  direct-control purposes, same-slot renderer reuse, inverse targeting,
+  authority boundaries, and the accessibility-camera-first implementation
+  sequence.
 - [`isocraft-reference.md`](isocraft-reference.md): implementation study of
   RuneFist Isocraft's bounded connected-interior masks, room classifier,
   local-cave fallback, camera-side geometry removal, exterior darkening, and

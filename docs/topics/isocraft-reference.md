@@ -256,6 +256,14 @@ presentation targets. The visibility mask is client presentation state over
 ordinary replicated world data; it must not alter canonical blocks or server
 collision.
 
+Isocraft has one active world camera and can express part of its reveal by
+making selected blocks appear as air during shared section remeshing. Mclone's
+accepted split-screen direction cannot use one global hidden-block mesh: one
+participant may need an isometric roof cutaway while another participant's
+first-person pane must retain that roof. Keep the canonical mesh shared and
+make the initial mask/render application participant-view-local. Any later cap
+or derivative mesh must be bounded and explicitly attributable to one view.
+
 Do not copy Isocraft's constants or Minecraft mixin architecture. Mclone owns
 its renderer and can define a cleaner mask/revision contract, reuse chunk
 topology already known to the client, and test the state machine directly. It
@@ -263,8 +271,10 @@ also has an XR requirement Isocraft does not prove: the cut must be one physical
 world-space volume shared by both eyes and supported by per-eye and full-frame
 multiview rendering. Independent screen-space holes are not acceptable.
 
-The first selected slice should still follow the read-only overview foundation
-in [`tabletop-overview-mode.md`](tabletop-overview-mode.md). A bounded flat
-direct-control follow-up can then prove screen-relative movement, local-player
-presentation, room/local-cave classification, render/picking agreement, and
-the ordinary embodied path remaining unchanged.
+The first selected slice is now the flat third-person-isometric accessibility
+camera in [`tabletop-overview-mode.md`](tabletop-overview-mode.md). It should
+prove camera-relative movement, local-player presentation, body-centric
+targeting, and the ordinary embodied path remaining unchanged before adding the
+topology cutaway. The cutaway slice must then prove room/local-cave
+classification, render/picking agreement, and disagreement-safe simultaneous
+first-person/isometric panes.
