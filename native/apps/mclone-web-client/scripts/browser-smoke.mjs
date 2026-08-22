@@ -256,8 +256,10 @@ if (deployedBaseUrl) {
       `--deployed-base-url requires an origin without a path; got ${deployedBaseUrl}`,
     );
   }
-  if (!showcase) {
-    throw new Error("--deployed-base-url is only supported with --showcase");
+  if (!showcase && !catalogUiProbe) {
+    throw new Error(
+      "--deployed-base-url is only supported with --showcase or --catalog-ui-probe",
+    );
   }
 }
 if (showcase && (seed || generationProfile || starterContent || screenshotEye || worldTopology)) {

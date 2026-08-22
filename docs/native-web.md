@@ -190,7 +190,9 @@ pnpm native:web:auxiliary-split-smoke
 pnpm native:web:asset-pack-smoke
 
 # Validate Rust menu-driven world catalog create/open/delete over IndexedDB.
+# The deployed lane also proves the V1-to-V2 in-page handoff and V2 pixels.
 pnpm native:web:catalog-smoke
+pnpm native:web:catalog-deployed-smoke
 
 # Enter the shared protected lobby, wait for its live island preview and
 # authoritative creature/remote-player motion, and validate desktop,
