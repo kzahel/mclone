@@ -6642,7 +6642,7 @@ fn terrain_horizon_overview_minimum_sample_spacing(
 const fn terrain_horizon_level_uses_canopy(
     profile: TerrainPreviewProfile,
     content_stage: TerrainPreviewContentStage,
-    _sample_spacing: u32,
+    sample_spacing: u32,
     _vegetation_max_sample_spacing: u32,
 ) -> bool {
     matches!(
@@ -6650,6 +6650,12 @@ const fn terrain_horizon_level_uses_canopy(
         TerrainPreviewProfile::ContinentalEcoregionCandidate
             | TerrainPreviewProfile::McloneOverworldV2
     ) && matches!(content_stage, TerrainPreviewContentStage::Cover)
+        // Spacing one is the detailed procedural-tree handoff beside exact
+        // terrain. Drawing the aerial canopy there duplicates those proxies,
+        // exposes the fan closest to a ground observer, and adds an entire
+        // 16-tile translucent layer on Quest Low. Coarser rings retain the
+        // continuous forest-mass representation.
+        && sample_spacing > 1
 }
 
 const fn terrain_horizon_semantic_tile_key(tile: TerrainClipmapTile) -> (u32, i32, i32, u32) {
@@ -7389,6 +7395,12 @@ mod tests {
         );
         assert!(shader.contains("horizon_forest_reveal(params.multiview_options.z)"));
         assert!(shader.contains("horizon_forest_reveal(params.multiview_options.w)"));
+        assert!(!terrain_horizon_level_uses_canopy(
+            TerrainPreviewProfile::McloneOverworldV2,
+            TerrainPreviewContentStage::Cover,
+            1,
+            1,
+        ));
         assert!(terrain_horizon_level_uses_canopy(
             TerrainPreviewProfile::McloneOverworldV2,
             TerrainPreviewContentStage::Cover,
