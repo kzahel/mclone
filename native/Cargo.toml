@@ -116,10 +116,18 @@ winit = { version = "0.30", features = ["android-native-activity"] }
 [patch.crates-io]
 wgpu-hal = { path = "vendor/wgpu-hal-25.0.2" }
 
-# Keep native debug runs useful for movement/render/worldgen performance work.
-# This mirrors the Playbox policy in ~/code/playbox/Cargo.toml: optimize dev
-# builds enough that `cargo run` and pnpm native smokes are not dominated by
-# unoptimized physics/render/worldgen hot loops, while preserving debug
-# assertions and incremental rebuild behavior.
+# Keep native debug runs useful for movement/render/worldgen performance work
+# while retaining debug assertions, overflow checks, and file/line backtraces.
+# Avoid full debug and incremental artifacts that rapidly exhaust disk space.
 [profile.dev]
 opt-level = 2
+debug = "line-tables-only"
+incremental = false
+
+# Use this profile for deliberate source-level debugger sessions that need
+# local variables and unoptimized control flow. Its output is isolated under
+# target/debugging and can be cleaned independently.
+[profile.debugging]
+inherits = "dev"
+opt-level = 0
+debug = "full"
