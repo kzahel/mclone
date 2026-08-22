@@ -38,7 +38,10 @@ candidate. Tactical
 native CPU-authored V2 horizon compilation off the render thread, restores
 complete Quest Low/RD8 cold settle to V1-scale timing, and adds a V2-only
 fixed-budget coarse canopy. Browser terrain compilation and transient render
-tails remain performance debts.**
+tails remain performance debts. The ordinary browser New World flow now has
+an explicit V1-to-V2 handoff gate: the persisted V2 descriptor and active seed
+must agree, the entry column must be loaded, and the settled V2 frame must
+contain generated pixels without any render errors.**
 
 This topic owns the current truth and durable decisions for selectable,
 versioned world-generation profiles. Detailed refactoring and implementation
@@ -128,6 +131,16 @@ and locked the untouched default-Mclone-Wild menu flow at the same requested
 and authority-accepted entry center as native. Native SQLite and browser
 IndexedDB reopen preserve the profile; the browser Worker applies stored
 metadata profiles before validating or scheduling the world.
+
+A 2026-08-22 live New World regression exposed a separate presentation
+lifecycle requirement. Creating V2 while a V1 world was active correctly
+replaced exact chunks and the world descriptor, but attempted to reuse the V1
+procedural-horizon renderer. Its source-identity check rejected the V2 exact
+coverage, leaving a black scene. Procedural profile is now a construction-time
+renderer fact: same-profile world and seed changes may reset in place, while a
+V1/V2 profile change rebuilds the shared terrain-view engine before the
+destination coverage is composed. The engine boundary rejects any silent
+cross-profile reuse.
 
 Scheduler and worker requests carry an immutable profile-plus-seed descriptor
 through native messages, WASM codecs, responses, and diagnostics. The closed

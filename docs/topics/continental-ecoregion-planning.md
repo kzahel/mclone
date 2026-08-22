@@ -130,7 +130,12 @@ lighting, and tile-edge raster coverage remove the camera-centered forest,
 shade, and crack patches in inspected 512- and 8,192-block horizon-only views.
 Its final Quest repeat remains within the V1 p95 gate. Human Review G should
 therefore judge any remaining procedural patch separately from the still
-explicit exact/procedural material and water handoff.
+explicit exact/procedural material and water handoff. The subsequent ordinary
+New World V2 black screen was a profile-handoff lifecycle bug, not a V2 terrain
+failure: exact terrain had switched to V2 while the procedural renderer still
+held V1 identity. The shared scene now rebuilds that profile-fixed renderer,
+and a menu-driven browser regression reaches a settled, visibly populated V2
+frame before reopening the V1 control.
 Mclone should combine
 top-down continental and ecoregional planning with bottom-up procedural
 realization so the Overworld contains large, recognizable, causally related

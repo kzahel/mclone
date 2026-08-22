@@ -61,6 +61,17 @@ scene composition path; it does not alias V1. Remote sessions and incompatible
 generation profiles project the effective setting to Off while retaining the
 user's desired preference.
 
+The renderer profile is immutable for one engine lifetime because it selects
+the procedural program and vegetation bounds used by every resident resource.
+World and seed changes within that profile reset the bounded residency in
+place. A live handoff between V1 and V2 rebuilds the terrain-view engine before
+destination exact coverage is admitted; the lower engine also rejects an
+attempted in-place profile change. This contract closes the 2026-08-22 browser
+New World black-screen failure where V2 exact chunks briefly met a retained V1
+horizon. The catalog browser gate now creates V1, creates V2 from the same
+in-page menu session, waits for complete streaming, and requires a loaded
+entry column, non-black V2 pixels, and no source-composition error.
+
 The continental source filters only frequencies below each display lattice;
 regional archetype, formation, water, and typed landform identities remain
 direct world-coordinate facts at every level. Categorical surface materials
