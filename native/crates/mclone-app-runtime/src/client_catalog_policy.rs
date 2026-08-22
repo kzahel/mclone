@@ -842,7 +842,7 @@ mod tests {
         controller.apply_ui_action(GameUiAction::CycleWorldGenerationProfile, context(0));
         assert_eq!(
             controller.new_world_generation_profile(),
-            WorldGenerationProfile::Overworld
+            WorldGenerationProfile::McloneOverworldV2
         );
 
         let request = only_request(
@@ -854,7 +854,7 @@ mod tests {
         assert_eq!(options.seed, -98_765);
         assert_eq!(
             options.world_generation_profile,
-            WorldGenerationProfile::Overworld
+            WorldGenerationProfile::McloneOverworldV2
         );
         assert_eq!(options.starter_content, StarterContentDescriptor::Wild);
     }

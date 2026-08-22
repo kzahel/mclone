@@ -9363,8 +9363,22 @@ async function runCatalogUiProbe(page, canvas, homestead = false) {
     ? await clickWorldCreateStarter(page)
     : await clickWorldCreateProfile(page);
   await clickWorldCreateCreate(page);
-  const secondSession = await waitForSessionWorldId(page, { notWorldId: firstWorldId });
+  let secondSession = await waitForSessionWorldId(page, { notWorldId: firstWorldId });
   const secondWorldId = String(secondSession.sessionWorldId);
+  let secondEntryBlocks = null;
+  let secondEntryPixels = null;
+  let secondEntryScreenshot = null;
+  if (!homestead) {
+    await waitForWebAppStreamingSettled(page, 60_000);
+    secondSession = await waitForSessionWorldId(page, { worldId: secondWorldId });
+    secondEntryBlocks = await browserEntryBlockState(page);
+    secondEntryScreenshot = "/tmp/mclone-native-web-catalog-v2-playable.png";
+    const secondEntryPng = await canvas.screenshot({
+      path: secondEntryScreenshot,
+      timeout: 60_000,
+    });
+    secondEntryPixels = analyzePng(secondEntryPng);
+  }
   const secondRecords = await seedBrowserIndexedDbWorldRecords(page, secondWorldId);
   const afterSecondCreate = await waitForBrowserCatalogWorldIds(page, [
     firstWorldId,
@@ -9431,29 +9445,33 @@ async function runCatalogUiProbe(page, canvas, homestead = false) {
       && afterFirstCreate.some((/** @type {any} */ world) => (
         world.id === firstWorldId
           && world.generationProfile === "mclone-overworld-v1"
+          && world.seedText === firstSession.sessionSeedText
           && world.starterContent === (homestead ? "intro-homestead-v1" : "wild")
       ))
       && afterSecondCreate.some((/** @type {any} */ world) => (
         world.id === secondWorldId
-          && world.generationProfile === (homestead ? "mclone-overworld-v1" : "overworld")
+          && world.generationProfile === (homestead ? "mclone-overworld-v1" : "mclone-overworld-v2")
+          && world.seedText === secondSession.sessionSeedText
           && world.starterContent === "wild"
       ))
       && (homestead || (
-        firstSession.sessionSeedText === "553534047293117028"
-          && Number(firstSession.acceptedCenterX) === -48
-          && Number(firstSession.acceptedCenterZ) === 20
-          && Number(firstSession.centerX) === -48
-          && Number(firstSession.centerZ) === 20
-          && firstSession.renderCompileCapacityDisposition === "normalized"
+        firstSession.renderCompileCapacityDisposition === "normalized"
           && Number(firstSession.renderCompileRequestedWorkerCount) === 1
           && Number(firstSession.renderCompileRequestedMaxPendingJobs) === 4
           && firstSession.renderCompileRequestedWorkerTimingEnabled === true
           && Number(firstSession.renderCompileAppliedWorkerCount) === 1
           && Number(firstSession.renderCompileAppliedMaxPendingJobs) === 1
           && firstSession.renderCompileAppliedWorkerTimingEnabled === false
+          && firstEntryBlocks?.floor?.loaded === true
           && firstEntryBlocks?.floor?.blockStateId !== AIR_BLOCK_STATE_ID
-          && firstEntryBlocks?.feet?.blockStateId === AIR_BLOCK_STATE_ID
+          && firstEntryBlocks?.feet?.loaded === true
           && firstEntryBlocks?.head?.blockStateId === AIR_BLOCK_STATE_ID
+          && secondEntryBlocks?.floor?.loaded === true
+          && secondEntryBlocks?.floor?.blockStateId !== AIR_BLOCK_STATE_ID
+          && secondEntryBlocks?.feet?.loaded === true
+          && secondEntryBlocks?.head?.blockStateId === AIR_BLOCK_STATE_ID
+          && Number(secondEntryPixels?.nonClearInteriorPixelCount) > 128
+          && Number(secondEntryPixels?.distinctInteriorColorCount) > 2
       ))
       && (!homestead || Number(firstRecords.savedData) > 0)
       && (!homestead || Number(firstHomesteadState?.activePersistentPassiveActorCount) === 5)
@@ -9485,6 +9503,9 @@ async function runCatalogUiProbe(page, canvas, homestead = false) {
     firstEdit,
     reopenedEdit,
     secondSession,
+    secondEntryBlocks,
+    secondEntryPixels,
+    secondEntryScreenshot,
     openedFirstSession,
     firstRecords,
     secondRecords,

@@ -147,6 +147,7 @@ impl TerrainViewEngine {
         if next.source == self.config.source {
             return Ok(false);
         }
+        validate_in_place_source_replacement(self.config.source, next.source)?;
         self.config.source = next.source;
         self.renderer.reset_source();
         self.last_stats = None;
@@ -374,6 +375,21 @@ impl TerrainViewEngine {
     }
 }
 
+fn validate_in_place_source_replacement(
+    current: TerrainViewSourceIdentity,
+    next: TerrainViewSourceIdentity,
+) -> Result<(), String> {
+    let current_profile = current.composition_source()?.profile;
+    let next_profile = next.composition_source()?.profile;
+    if current_profile != next_profile {
+        return Err(format!(
+            "terrain-view in-place source replacement cannot change profile from {:?} to {:?}; rebuild the engine",
+            current_profile, next_profile,
+        ));
+    }
+    Ok(())
+}
+
 fn validate_prepared_exact(
     source: TerrainViewSourceIdentity,
     exact: &TerrainPreparedExactFrame,
@@ -496,5 +512,17 @@ mod tests {
             validate_prepared_exact(active, &frame).unwrap_err(),
             "prepared exact frame does not match the active terrain-view engine source"
         );
+    }
+
+    #[test]
+    fn in_place_source_replacement_rejects_a_profile_change() {
+        let current = source_for_profile(TerrainPreviewProfile::McloneOverworldV1, 12_345, 1);
+        let next = source_for_profile(TerrainPreviewProfile::McloneOverworldV2, 12_345, 2);
+
+        assert_eq!(
+            validate_in_place_source_replacement(current, next).unwrap_err(),
+            "terrain-view in-place source replacement cannot change profile from McloneOverworldV1 to McloneOverworldV2; rebuild the engine"
+        );
+        assert!(validate_in_place_source_replacement(current, source(54_321, 2)).is_ok());
     }
 }

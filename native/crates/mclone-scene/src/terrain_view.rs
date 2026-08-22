@@ -496,6 +496,19 @@ impl McloneSceneHost {
             .traversal_ready_sections
             .ready_columns()
             .clone();
+        let preview_profile = live_preview_profile(profile)?;
+        if self.terrain_view.as_ref().is_some_and(|terrain_view| {
+            terrain_view
+                .source
+                .composition_source()
+                .map_or(true, |source| source.profile != preview_profile)
+        }) {
+            // The horizon renderer's profile fixes its procedural program and
+            // vegetation bounds at construction. A world handoff between V1
+            // and V2 therefore needs a new engine before exact coverage for
+            // the destination can be composed with it.
+            self.reset_terrain_view();
+        }
         if self.terrain_view.is_none() {
             let terrain_view = (|| -> Result<SceneTerrainViewState> {
                 let vegetation_executor = self
@@ -809,18 +822,7 @@ fn live_source(
     if world.get() == 0 {
         bail!("live terrain-view world generation must be non-zero");
     }
-    let preview_profile = match profile {
-        mclone_server::WorldGenerationProfile::McloneOverworldV1 => {
-            TerrainPreviewProfile::McloneOverworldV1
-        }
-        mclone_server::WorldGenerationProfile::McloneOverworldV2 => {
-            TerrainPreviewProfile::McloneOverworldV2
-        }
-        _ => bail!(
-            "world profile {} has no live distant-terrain source",
-            profile.label()
-        ),
-    };
+    let preview_profile = live_preview_profile(profile)?;
     TerrainViewSourceIdentity::live(
         TerrainCompositionSourceIdentity::new(preview_profile, seed),
         topology,
@@ -828,6 +830,23 @@ fn live_source(
         1,
     )
     .map_err(anyhow::Error::msg)
+}
+
+fn live_preview_profile(
+    profile: mclone_server::WorldGenerationProfile,
+) -> Result<TerrainPreviewProfile> {
+    match profile {
+        mclone_server::WorldGenerationProfile::McloneOverworldV1 => {
+            Ok(TerrainPreviewProfile::McloneOverworldV1)
+        }
+        mclone_server::WorldGenerationProfile::McloneOverworldV2 => {
+            Ok(TerrainPreviewProfile::McloneOverworldV2)
+        }
+        _ => bail!(
+            "world profile {} has no live distant-terrain source",
+            profile.label()
+        ),
+    }
 }
 
 fn floor_f64_to_i32(value: f64) -> i32 {
