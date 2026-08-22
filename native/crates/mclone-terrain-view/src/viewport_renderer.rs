@@ -238,16 +238,29 @@ fn advance_forest_reveal(current: f32, elapsed_seconds: f32) -> f32 {
 
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone, Copy)]
+enum TerrainHorizonCpuCompileTarget {
+    Resident {
+        source_generation: u64,
+        resource: TerrainHorizonResourceTile,
+    },
+    Frontier {
+        source_generation: u64,
+        exact_generation: u64,
+        presentation: super::TerrainFrontierPresentationIdentity,
+        key: TerrainFrontierFineTileKey,
+    },
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone, Copy)]
 struct TerrainHorizonCpuCompileJob {
-    source_generation: u64,
-    resource: TerrainHorizonResourceTile,
+    target: TerrainHorizonCpuCompileTarget,
     request: TerrainPreviewRequest,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 struct TerrainHorizonCpuCompileResult {
-    source_generation: u64,
-    resource: TerrainHorizonResourceTile,
+    target: TerrainHorizonCpuCompileTarget,
     request: TerrainPreviewRequest,
     compiled: Result<(TerrainPreviewReferenceGrid, Vec<f32>), String>,
     compile_micros: u64,
@@ -290,8 +303,7 @@ impl TerrainHorizonCpuCompiler {
                                 TERRAIN_HORIZON_NORMAL_HALO_RADIUS,
                             );
                         let result = TerrainHorizonCpuCompileResult {
-                            source_generation: job.source_generation,
-                            resource: job.resource,
+                            target: job.target,
                             request: job.request,
                             compiled,
                             compile_micros: u64::try_from(started.elapsed().as_micros())
@@ -715,6 +727,7 @@ impl TerrainFrontierConnectorInstance {
 struct TerrainFrontierSupportGpuTile {
     key: TerrainFrontierFineTileKey,
     tile: TerrainViewportGpuTile,
+    submitted: bool,
     ready: bool,
     outer_edge_flags: u32,
 }
@@ -4005,6 +4018,7 @@ pub struct TerrainHorizonRenderer {
     cpu_compiler: Option<TerrainHorizonCpuCompiler>,
     cpu_source_generation: u64,
     cpu_compile_in_flight: u32,
+    cpu_frontier_compile_in_flight: u32,
     cpu_compile_submitted_total: u64,
     cpu_compile_completed_total: u64,
     cpu_compile_micros_total: u64,
@@ -4250,6 +4264,7 @@ impl TerrainHorizonRenderer {
             cpu_compiler,
             cpu_source_generation: 1,
             cpu_compile_in_flight: 0,
+            cpu_frontier_compile_in_flight: 0,
             cpu_compile_submitted_total: 0,
             cpu_compile_completed_total: 0,
             cpu_compile_micros_total: 0,
@@ -4678,6 +4693,7 @@ impl TerrainHorizonRenderer {
             tiles.push(TerrainFrontierSupportGpuTile {
                 key: *key,
                 tile,
+                submitted: false,
                 ready: false,
                 outer_edge_flags,
             });
@@ -4933,7 +4949,10 @@ impl TerrainHorizonRenderer {
     fn pending_terrain_refills(&self) -> u32 {
         u32::try_from(self.pending.len())
             .unwrap_or(u32::MAX)
-            .saturating_add(self.cpu_compile_in_flight)
+            .saturating_add(
+                self.cpu_compile_in_flight
+                    .saturating_sub(self.cpu_frontier_compile_in_flight),
+            )
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -4953,28 +4972,81 @@ impl TerrainHorizonRenderer {
                 .cpu_compile_micros_total
                 .saturating_add(result.compile_micros);
 
-            let resource = result.resource;
-            let expected_tile =
-                terrain_horizon_tile_id(self.profile, self.seed, self.content_stage, resource.tile);
-            if result.source_generation != self.cpu_source_generation
-                || result.request != expected_tile.preview_request()
-                || self.admission.assignment(resource.resource_slot) != Some(resource.tile)
-                || self.admission.slot_generation(resource.resource_slot)
-                    != Some(resource.slot_generation)
-            {
-                self.cpu_compile_stale_results_total =
-                    self.cpu_compile_stale_results_total.saturating_add(1);
-                continue;
+            match result.target {
+                TerrainHorizonCpuCompileTarget::Resident {
+                    source_generation,
+                    resource,
+                } => {
+                    let expected_tile = terrain_horizon_tile_id(
+                        self.profile,
+                        self.seed,
+                        self.content_stage,
+                        resource.tile,
+                    );
+                    if source_generation != self.cpu_source_generation
+                        || result.request != expected_tile.preview_request()
+                        || self.admission.assignment(resource.resource_slot) != Some(resource.tile)
+                        || self.admission.slot_generation(resource.resource_slot)
+                            != Some(resource.slot_generation)
+                    {
+                        self.cpu_compile_stale_results_total =
+                            self.cpu_compile_stale_results_total.saturating_add(1);
+                        continue;
+                    }
+                    let (reference, height_halo) = result.compiled?;
+                    self.slots[resource.resource_slot as usize].upload_horizon_reference(
+                        queue,
+                        self.renderer.sample_byte_len,
+                        reference,
+                        &height_halo,
+                    )?;
+                    self.admission.mark_ready(resource.resource_slot)?;
+                    admitted = admitted.saturating_add(1);
+                }
+                TerrainHorizonCpuCompileTarget::Frontier {
+                    source_generation,
+                    exact_generation,
+                    presentation,
+                    key,
+                } => {
+                    self.cpu_frontier_compile_in_flight =
+                        self.cpu_frontier_compile_in_flight.saturating_sub(1);
+                    let Some(support) = self.frontier_support_pending.as_mut() else {
+                        self.cpu_compile_stale_results_total =
+                            self.cpu_compile_stale_results_total.saturating_add(1);
+                        continue;
+                    };
+                    if source_generation != self.cpu_source_generation
+                        || support.identity.exact_generation != exact_generation
+                        || support.identity.presentation != presentation
+                    {
+                        self.cpu_compile_stale_results_total =
+                            self.cpu_compile_stale_results_total.saturating_add(1);
+                        continue;
+                    }
+                    let Some(tile) = support.tiles.iter_mut().find(|tile| tile.key == key) else {
+                        self.cpu_compile_stale_results_total =
+                            self.cpu_compile_stale_results_total.saturating_add(1);
+                        continue;
+                    };
+                    if !tile.submitted
+                        || tile.ready
+                        || tile.tile.request.request() != result.request
+                    {
+                        self.cpu_compile_stale_results_total =
+                            self.cpu_compile_stale_results_total.saturating_add(1);
+                        continue;
+                    }
+                    let (reference, height_halo) = result.compiled?;
+                    tile.tile.upload_horizon_reference(
+                        queue,
+                        self.renderer.sample_byte_len,
+                        reference,
+                        &height_halo,
+                    )?;
+                    tile.ready = true;
+                }
             }
-            let (reference, height_halo) = result.compiled?;
-            self.slots[resource.resource_slot as usize].upload_horizon_reference(
-                queue,
-                self.renderer.sample_byte_len,
-                reference,
-                &height_halo,
-            )?;
-            self.admission.mark_ready(resource.resource_slot)?;
-            admitted = admitted.saturating_add(1);
         }
         Ok(admitted)
     }
@@ -4996,8 +5068,10 @@ impl TerrainHorizonRenderer {
                 terrain_horizon_tile_id(self.profile, self.seed, self.content_stage, resource.tile)
                     .preview_request();
             let job = TerrainHorizonCpuCompileJob {
-                source_generation: self.cpu_source_generation,
-                resource,
+                target: TerrainHorizonCpuCompileTarget::Resident {
+                    source_generation: self.cpu_source_generation,
+                    resource,
+                },
                 request,
             };
             let submitted = self
@@ -5408,7 +5482,7 @@ impl TerrainHorizonRenderer {
             for support_tile in support
                 .tiles
                 .iter_mut()
-                .filter(|tile| !tile.ready)
+                .filter(|tile| !tile.ready && !tile.submitted)
                 .take(dispatch_limit)
             {
                 queue.write_buffer(
@@ -5448,20 +5522,52 @@ impl TerrainHorizonRenderer {
                         terrain_horizon_samples_per_axis().div_ceil(TERRAIN_PREVIEW_WORKGROUP_AXIS);
                     pass.dispatch_workgroups(workgroups, workgroups, 1);
                     support_tile.tile.gpu_submitted = true;
+                    support_tile.submitted = true;
+                    support_tile.ready = true;
                 } else {
-                    let (reference, height_halo) =
-                        TerrainPreviewReferenceGrid::compile_continental_with_height_halo(
-                            support_tile.tile.request.request(),
-                            TERRAIN_HORIZON_NORMAL_HALO_RADIUS,
+                    #[cfg(not(target_arch = "wasm32"))]
+                    {
+                        let job = TerrainHorizonCpuCompileJob {
+                            target: TerrainHorizonCpuCompileTarget::Frontier {
+                                source_generation: self.cpu_source_generation,
+                                exact_generation: support.identity.exact_generation,
+                                presentation: support.identity.presentation,
+                                key: support_tile.key,
+                            },
+                            request: support_tile.tile.request.request(),
+                        };
+                        let submitted = self
+                            .cpu_compiler
+                            .as_mut()
+                            .ok_or("continental horizon has no CPU compiler")?
+                            .try_submit(job)?;
+                        if !submitted {
+                            break;
+                        }
+                        support_tile.submitted = true;
+                        self.cpu_compile_in_flight = self.cpu_compile_in_flight.saturating_add(1);
+                        self.cpu_frontier_compile_in_flight =
+                            self.cpu_frontier_compile_in_flight.saturating_add(1);
+                        self.cpu_compile_submitted_total =
+                            self.cpu_compile_submitted_total.saturating_add(1);
+                    }
+                    #[cfg(target_arch = "wasm32")]
+                    {
+                        let (reference, height_halo) =
+                            TerrainPreviewReferenceGrid::compile_continental_with_height_halo(
+                                support_tile.tile.request.request(),
+                                TERRAIN_HORIZON_NORMAL_HALO_RADIUS,
+                            )?;
+                        support_tile.tile.upload_horizon_reference(
+                            queue,
+                            self.renderer.sample_byte_len,
+                            reference,
+                            &height_halo,
                         )?;
-                    support_tile.tile.upload_horizon_reference(
-                        queue,
-                        self.renderer.sample_byte_len,
-                        reference,
-                        &height_halo,
-                    )?;
+                        support_tile.submitted = true;
+                        support_tile.ready = true;
+                    }
                 }
-                support_tile.ready = true;
                 frontier_support_dispatches = frontier_support_dispatches.saturating_add(1);
             }
             support.dispatched_total = support
@@ -7371,8 +7477,10 @@ mod tests {
         assert!(
             compiler
                 .try_submit(TerrainHorizonCpuCompileJob {
-                    source_generation: 7,
-                    resource,
+                    target: TerrainHorizonCpuCompileTarget::Resident {
+                        source_generation: 7,
+                        resource,
+                    },
                     request,
                 })
                 .unwrap()
@@ -7388,13 +7496,74 @@ mod tests {
             );
             std::thread::yield_now();
         };
-        assert_eq!(result.source_generation, 7);
-        assert_eq!(result.resource, resource);
+        match result.target {
+            TerrainHorizonCpuCompileTarget::Resident {
+                source_generation,
+                resource: completed_resource,
+            } => {
+                assert_eq!(source_generation, 7);
+                assert_eq!(completed_resource, resource);
+            }
+            TerrainHorizonCpuCompileTarget::Frontier { .. } => {
+                panic!("resident compile returned a frontier target")
+            }
+        }
         assert_eq!(result.request, request);
         let (grid, halo) = result.compiled.unwrap();
         assert_eq!(grid.samples().len(), 65 * 65);
         assert_eq!(halo.len(), 69 * 69);
         assert!(result.compile_micros > 0);
+
+        let presentation = crate::TerrainFrontierPresentationIdentity {
+            level_count: 6,
+            semantic_hash: 91,
+        };
+        let key = TerrainFrontierFineTileKey {
+            tile_x: 3,
+            tile_z: -4,
+        };
+        assert!(
+            compiler
+                .try_submit(TerrainHorizonCpuCompileJob {
+                    target: TerrainHorizonCpuCompileTarget::Frontier {
+                        source_generation: 8,
+                        exact_generation: 13,
+                        presentation,
+                        key,
+                    },
+                    request,
+                })
+                .unwrap()
+        );
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let result = loop {
+            if let Some(result) = compiler.try_recv().unwrap() {
+                break result;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "continental horizon worker did not complete frontier support"
+            );
+            std::thread::yield_now();
+        };
+        match result.target {
+            TerrainHorizonCpuCompileTarget::Frontier {
+                source_generation,
+                exact_generation,
+                presentation: completed_presentation,
+                key: completed_key,
+            } => {
+                assert_eq!(source_generation, 8);
+                assert_eq!(exact_generation, 13);
+                assert_eq!(completed_presentation, presentation);
+                assert_eq!(completed_key, key);
+            }
+            TerrainHorizonCpuCompileTarget::Resident { .. } => {
+                panic!("frontier compile returned a resident target")
+            }
+        }
+        assert_eq!(result.request, request);
+        assert!(result.compiled.is_ok());
     }
 
     #[test]
