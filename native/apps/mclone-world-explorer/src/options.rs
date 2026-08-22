@@ -3,6 +3,7 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
+use mclone_terrain_view::TerrainHorizonDiagnostic;
 use mclone_view_control::{WorldViewMode, WorldViewProjection, WorldViewState};
 use mclone_world_explorer::{WorldExplorerCompositionMode, WorldExplorerExactAnchor};
 use mclone_worldgen::{
@@ -68,6 +69,7 @@ pub struct ExplorerOptions {
     pub exact_radius: u32,
     pub exact_anchor: WorldExplorerExactAnchor,
     pub exact_delay_ms: u64,
+    pub horizon_diagnostic: TerrainHorizonDiagnostic,
     pub asset_root: PathBuf,
     pub asset_profile: ExplorerAssetProfile,
     pub capture: Option<PathBuf>,
@@ -98,6 +100,7 @@ impl Default for ExplorerOptions {
             exact_radius: DEFAULT_EXACT_RADIUS,
             exact_anchor: WorldExplorerExactAnchor::Focus,
             exact_delay_ms: 0,
+            horizon_diagnostic: TerrainHorizonDiagnostic::Natural,
             asset_root: default_asset_root(),
             asset_profile: ExplorerAssetProfile::Original,
             capture: None,
@@ -226,6 +229,11 @@ impl ExplorerOptions {
                 }
                 "--exact-delay-ms" => {
                     options.exact_delay_ms = parse_value(value(&mut arguments)?, name)?
+                }
+                "--horizon-diagnostic" => {
+                    let label = utf8_value(value(&mut arguments)?, name)?;
+                    options.horizon_diagnostic = TerrainHorizonDiagnostic::parse_label(&label)
+                        .with_context(|| format!("unsupported horizon diagnostic {label:?}"))?;
                 }
                 "--asset-root" => options.asset_root = PathBuf::from(value(&mut arguments)?),
                 "--asset-profile" => {
@@ -463,6 +471,8 @@ Usage: mclone-world-explorer [options]
   --exact-radius N            exact near-field chunk radius (default {DEFAULT_EXACT_RADIUS})
   --exact-anchor MODE         focus (default) or viewer-forward
   --exact-delay-ms N          diagnostic delay before each exact batch
+  --horizon-diagnostic NAME  natural, ownership-level, albedo, geometric-shade,
+                             water, texture, or another shared LOD diagnostic
   --yaw RADIANS               3D yaw
   --pitch RADIANS             3D pitch
   --width N                   physical width (default {DEFAULT_WIDTH})

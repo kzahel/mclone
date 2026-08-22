@@ -3,10 +3,11 @@ use std::time::Duration;
 use crate::{
     BoundedRepresentationOwnershipSnapshot, ExactPaintedCoverageSnapshot, McloneTreeOccurrenceId,
     TerrainClipmapConfig, TerrainCompositionSourceIdentity, TerrainExactCoverageMode,
-    TerrainHorizonFrameStats, TerrainHorizonPresentation, TerrainHorizonRenderTarget,
-    TerrainPreparedExactFrame, TerrainPreviewCamera, TerrainPreviewMaterialAtlas,
-    TerrainPreviewProjectionKind, TerrainPreviewView, TerrainVegetationExecutor, TerrainViewEngine,
-    TerrainViewEngineConfig, TerrainViewSourceIdentity, terrain_preview_focus_y_for_profile,
+    TerrainHorizonDiagnostic, TerrainHorizonFrameStats, TerrainHorizonPresentation,
+    TerrainHorizonRenderTarget, TerrainPreparedExactFrame, TerrainPreviewCamera,
+    TerrainPreviewMaterialAtlas, TerrainPreviewProjectionKind, TerrainPreviewView,
+    TerrainVegetationExecutor, TerrainViewEngine, TerrainViewEngineConfig,
+    TerrainViewSourceIdentity, terrain_preview_focus_y_for_profile,
 };
 use mclone_core::HorizontalTopology;
 use mclone_render_color::{RenderColorProfile, RenderTargetColorTransform};
@@ -115,6 +116,7 @@ pub struct TerrainRuntimeSession {
     held_motion: WorldViewHeldMotion,
     residency_anchor: [i32; 2],
     target_y_override: Option<f32>,
+    diagnostic: TerrainHorizonDiagnostic,
     revision: u64,
     coarse_ready_at: Option<Duration>,
     target_ready_at: Option<Duration>,
@@ -177,6 +179,7 @@ impl TerrainRuntimeSession {
             held_motion: WorldViewHeldMotion::default(),
             residency_anchor,
             target_y_override: None,
+            diagnostic: TerrainHorizonDiagnostic::Natural,
             revision: 0,
             coarse_ready_at: None,
             target_ready_at: None,
@@ -233,6 +236,18 @@ impl TerrainRuntimeSession {
         self.target_color_transform
     }
 
+    pub const fn diagnostic(&self) -> TerrainHorizonDiagnostic {
+        self.diagnostic
+    }
+
+    pub fn set_diagnostic(&mut self, diagnostic: TerrainHorizonDiagnostic) -> bool {
+        if self.diagnostic == diagnostic {
+            return false;
+        }
+        self.diagnostic = diagnostic;
+        true
+    }
+
     pub fn apply_intent(&mut self, intent: WorldViewIntent) -> bool {
         let previous = self.view_state;
         let reduction = self.view_reducer.reduce(previous, intent);
@@ -265,6 +280,20 @@ impl TerrainRuntimeSession {
 
     pub const fn has_held_motion(&self) -> bool {
         self.held_motion.is_active()
+    }
+
+    /// Advance continuous input before a host derives any view-dependent
+    /// companion work for this frame.
+    ///
+    /// Exact terrain hosts use this before preparing their exact footprint so
+    /// the exact request, clipmap presentation, and frontier certificate all
+    /// observe one camera state. Calling it again with the same elapsed time is
+    /// harmless because `WorldViewHeldMotion` consumes only elapsed deltas.
+    pub fn advance_held_motion(&mut self, elapsed: Duration) -> bool {
+        let motion_state = self.view_state;
+        self.held_motion
+            .advance(motion_state, elapsed)
+            .is_some_and(|intent| self.apply_intent(intent))
     }
 
     pub fn cancel_input(&mut self) -> bool {
@@ -348,10 +377,7 @@ impl TerrainRuntimeSession {
         prepared_exact: Option<(&TerrainPreparedExactFrame, TerrainExactCoverageMode)>,
         tree_ownership: Option<&BoundedRepresentationOwnershipSnapshot<McloneTreeOccurrenceId>>,
     ) -> Result<TerrainHorizonFrameStats, String> {
-        let motion_state = self.view_state;
-        if let Some(intent) = self.held_motion.advance(motion_state, elapsed) {
-            self.apply_intent(intent);
-        }
+        self.advance_held_motion(elapsed);
         let view_height_blocks = self.view_state.blocks_across * f64::from(self.config.height)
             / f64::from(self.config.width);
         let presentation = TerrainHorizonPresentation::new(
@@ -375,7 +401,8 @@ impl TerrainRuntimeSession {
         let presentation = match self.target_y_override {
             Some(target_y) => presentation.with_target_y(target_y)?,
             None => presentation,
-        };
+        }
+        .with_diagnostic(self.diagnostic);
         let stats = match target {
             Some(target) => self.engine.encode_to_target(
                 device,

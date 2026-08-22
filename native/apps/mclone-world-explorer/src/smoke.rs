@@ -662,6 +662,7 @@ fn exact_stats_json(stats: ExplorerExactStats) -> Value {
         "coverage_generation": stats.coverage_generation,
         "admitted_chunks_total": stats.admitted_chunks_total,
         "stale_chunks_total": stats.stale_chunks_total,
+        "resident_chunks": stats.resident_chunks,
         "generation_ms": stats.generation_ms,
         "presentation_ms": stats.presentation_ms,
         "mesh_ms": stats.mesh_ms,

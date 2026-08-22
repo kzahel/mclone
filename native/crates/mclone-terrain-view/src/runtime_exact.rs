@@ -183,6 +183,7 @@ pub struct TerrainRuntimeExactStats {
     pub coverage_generation: u64,
     pub admitted_chunks_total: u64,
     pub stale_chunks_total: u64,
+    pub resident_chunks: u32,
     pub generation_ms: f64,
     pub presentation_ms: f64,
     pub mesh_ms: f64,
@@ -556,6 +557,7 @@ impl TerrainRuntimeExactRenderer {
             coverage_generation: self.coverage_generation,
             admitted_chunks_total: self.admitted_chunks_total,
             stale_chunks_total: self.stale_chunks_total,
+            resident_chunks: self.sections_by_chunk.len().try_into().unwrap_or(u32::MAX),
             generation_ms: self.generation_ms,
             presentation_ms: self.presentation_ms,
             mesh_ms: self.mesh_ms,
@@ -625,15 +627,18 @@ impl TerrainRuntimeExactRenderer {
         self.pending.clear();
         self.queued.clear();
 
+        // Residency can outlive painted coverage when rapid motion breaks the
+        // retained exact component and clears `painted`. Evict against the
+        // authoritative desired footprint, not the possibly empty painted
+        // set, or every subsequent rebase leaks old terrain and tree meshes.
         let departed = self
-            .painted
-            .difference(&desired)
+            .sections_by_chunk
+            .keys()
+            .filter(|chunk| !desired.contains(chunk))
             .copied()
             .collect::<Vec<_>>();
         let mut removed = BTreeSet::new();
         for chunk in &departed {
-            self.painted.remove(chunk);
-            self.surface_columns_by_chunk.remove(chunk);
             if let Some(keys) = self.sections_by_chunk.remove(chunk) {
                 removed.extend(keys);
             }
@@ -643,8 +648,11 @@ impl TerrainRuntimeExactRenderer {
                 .apply_section_updates(device, &[], &removed)
                 .context("failed to evict departed runtime exact chunks")?;
         }
+        self.painted.retain(|chunk| desired.contains(chunk));
+        self.surface_columns_by_chunk
+            .retain(|chunk, _| desired.contains(chunk));
         for sections in self.tree_sections.values_mut() {
-            sections.retain(|key, _| !departed.contains(&ChunkPos::new(key.chunk_x, key.chunk_z)));
+            sections.retain(|key, _| desired.contains(&ChunkPos::new(key.chunk_x, key.chunk_z)));
         }
         self.tree_sections
             .retain(|_, sections| !sections.is_empty());

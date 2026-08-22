@@ -10,9 +10,9 @@ use mclone_render::chunk::ChunkTextureAtlas;
 use mclone_render_color::{RenderColorProfile, RenderTargetColorTransform};
 use mclone_terrain_view::{
     BrowserCanonicalExactExecutor, BrowserTerrainVegetationExecutor, TerrainClipmapConfig,
-    TerrainExactCoverageMode, TerrainHorizonFrameStats, TerrainHorizonRenderTarget,
-    TerrainPreviewMaterialAtlas, TerrainPreviewMaterialTable, TerrainVegetationCoordinatorState,
-    TerrainVegetationExecutorKind,
+    TerrainExactCoverageMode, TerrainHorizonDiagnostic, TerrainHorizonFrameStats,
+    TerrainHorizonRenderTarget, TerrainPreviewMaterialAtlas, TerrainPreviewMaterialTable,
+    TerrainVegetationCoordinatorState, TerrainVegetationExecutorKind,
 };
 use mclone_view_control::{
     ContactButton, ContactEvent, ViewPoint, ViewportMetrics, WorldViewHeldDirection,
@@ -62,6 +62,7 @@ struct WebExplorerOptions {
     source_colors: bool,
     exact_radius: u32,
     exact_anchor: WorldExplorerExactAnchor,
+    horizon_diagnostic: TerrainHorizonDiagnostic,
     diagnostic_observer_enabled: bool,
     worker_overflow_probe_enabled: bool,
 }
@@ -88,6 +89,7 @@ impl Default for WebExplorerOptions {
             source_colors: false,
             exact_radius: DEFAULT_EXACT_RADIUS,
             exact_anchor: WorldExplorerExactAnchor::Focus,
+            horizon_diagnostic: TerrainHorizonDiagnostic::Natural,
             diagnostic_observer_enabled: false,
             worker_overflow_probe_enabled: false,
         }
@@ -130,6 +132,12 @@ impl WebExplorerOptions {
         }
         if let Some(value) = parameters.get("composition") {
             options.composition = WorldExplorerCompositionMode::parse_label(&value)?;
+        }
+        if let Some(value) = parameters.get("horizonDiagnostic") {
+            options.horizon_diagnostic =
+                TerrainHorizonDiagnostic::parse_label(&value).ok_or_else(|| {
+                    format!("unsupported World Explorer horizon diagnostic {value:?}")
+                })?;
         }
         options.source_colors = parameters.get("sourceColors").as_deref() == Some("1");
         options.diagnostic_observer_enabled =
@@ -285,6 +293,7 @@ struct WebExplorerReport {
     exact_coverage_generation: u64,
     exact_admitted_chunks_total: u64,
     exact_stale_chunks_total: u64,
+    exact_resident_chunks: u32,
     exact_resident_mesh_bytes: u64,
     exact_vertex_count: u32,
     exact_index_count: u32,
@@ -475,6 +484,11 @@ impl WebWorldExplorer {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("mclone_world_explorer_web_frame"),
             });
+        // Continuous keys must move the shared view before exact work is
+        // derived. Otherwise exact coverage describes the previous camera
+        // while the horizon advances during encoding, invalidating the
+        // frontier certificate under sustained movement.
+        self.session.advance_held_motion(elapsed);
         let exact_active =
             self.composition != WorldExplorerCompositionMode::Horizon && self.exact.is_some();
         let mut stats = if !exact_active {
@@ -849,7 +863,7 @@ impl WebWorldExplorer {
         );
 
         device.push_error_scope(wgpu::ErrorFilter::Validation);
-        let session = WorldExplorerSession::new(
+        let mut session = WorldExplorerSession::new(
             &device,
             &queue,
             format,
@@ -873,6 +887,7 @@ impl WebWorldExplorer {
                 Box::new(executor) as Box<dyn mclone_terrain_view::TerrainVegetationExecutor>
             }),
         )?;
+        session.set_diagnostic(options.horizon_diagnostic);
         let exact = if options.composition == WorldExplorerCompositionMode::Horizon {
             None
         } else {
@@ -1076,6 +1091,7 @@ fn explorer_report(
         exact_coverage_generation: exact.coverage_generation,
         exact_admitted_chunks_total: exact.admitted_chunks_total,
         exact_stale_chunks_total: exact.stale_chunks_total,
+        exact_resident_chunks: exact.resident_chunks,
         exact_resident_mesh_bytes: exact.resident_mesh_bytes,
         exact_vertex_count: exact.vertex_count,
         exact_index_count: exact.index_count,

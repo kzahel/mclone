@@ -79,3 +79,14 @@ fn ordinary_browser_explorer_defaults_to_composed_terrain() {
         "self.composition != WorldExplorerCompositionMode::Horizon && self.exact.is_some()"
     ));
 }
+
+#[test]
+fn held_motion_advances_before_browser_exact_composition() {
+    let advance = WEB_RUST_HOST
+        .find("self.session.advance_held_motion(elapsed);")
+        .expect("browser frame advances continuous input");
+    let exact = WEB_RUST_HOST
+        .find("let exact_active =")
+        .expect("browser frame derives exact-composition activity");
+    assert!(advance < exact);
+}

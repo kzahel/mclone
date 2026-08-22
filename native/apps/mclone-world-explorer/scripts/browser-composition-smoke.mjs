@@ -26,6 +26,7 @@ const centerX = argumentValue("--center-x");
 const centerZ = argumentValue("--center-z");
 const blocksAcross = Number.parseInt(argumentValue("--blocks-across") ?? "96", 10);
 const exactRadius = Number.parseInt(argumentValue("--exact-radius") ?? "2", 10);
+const heldMotionMs = Number.parseInt(argumentValue("--held-motion-ms") ?? "0", 10);
 const yaw = argumentValue("--yaw") ?? "3.1415927";
 const pitch = argumentValue("--pitch") ?? "0.12";
 if (!["composed", "coverage", "exact"].includes(composition)) {
@@ -123,6 +124,45 @@ try {
   if (capture) {
     await page.locator("#world-explorer-canvas").screenshot({ path: capture });
   }
+  let movedReport = null;
+  let movementCapture = null;
+  if (heldMotionMs > 0) {
+    const initialCenter = [report.centerX, report.centerZ];
+    const firstLeg = Math.max(1, Math.floor(heldMotionMs / 2));
+    await page.keyboard.down("KeyW");
+    await page.waitForTimeout(firstLeg);
+    assertBrowserHealthy();
+    await page.keyboard.down("KeyD");
+    await page.waitForTimeout(Math.max(1, heldMotionMs - firstLeg));
+    await page.keyboard.up("KeyW");
+    await page.waitForTimeout(Math.max(250, Math.floor(heldMotionMs / 4)));
+    await page.keyboard.up("KeyD");
+    assertBrowserHealthy();
+    await waitForCompleteFrame(page);
+    movedReport = await page.evaluate(
+      () => globalThis.__MCLONE_WORLD_EXPLORER_SMOKE__.observer.snapshot(),
+    );
+    assertCompositionReport(movedReport);
+    const movedResidentLimit = Math.max(
+      64 * 1024 * 1024,
+      report.exactResidentMeshBytes * 8,
+    );
+    if (movedReport.exactResidentMeshBytes > movedResidentLimit) {
+      throw new Error(
+        `browser exact residency grew without bound after movement: `
+          + `${movedReport.exactResidentMeshBytes} > ${movedResidentLimit}`,
+      );
+    }
+    if (Math.hypot(
+      movedReport.centerX - initialCenter[0],
+      movedReport.centerZ - initialCenter[1],
+    ) < 16) {
+      throw new Error("held-motion composition probe did not cross one chunk");
+    }
+    movementCapture =
+      `/tmp/mclone-world-explorer-web-${label}-${captureLabel}-movement.png`;
+    await page.locator("#world-explorer-canvas").screenshot({ path: movementCapture });
+  }
   if (pageErrors.length > 0) {
     throw new Error(`browser errors:\n${pageErrors.join("\n")}`);
   }
@@ -136,12 +176,14 @@ try {
       )).size,
     },
     capture,
+    movementCapture,
     launch: {
       headed: launch.headed,
       useWayland: launch.useWayland,
       waylandDisplay: launch.waylandDisplay,
     },
     report,
+    movedReport,
     target: label,
     url: target.href,
   };
@@ -169,6 +211,23 @@ try {
   await new Promise((resolve) => server?.close(resolve) ?? resolve());
 }
 
+function assertBrowserHealthy() {
+  if (pageErrors.length > 0) {
+    throw new Error(`browser errors:\n${pageErrors.join("\n")}`);
+  }
+}
+
+async function waitForCompleteFrame(targetPage) {
+  await targetPage.waitForFunction(() => {
+    const report =
+      globalThis.__MCLONE_WORLD_EXPLORER_SMOKE__?.observer.snapshot();
+    return report?.targetReady === true
+      && report?.exactComplete === true
+      && report?.pendingRefills === 0
+      && report?.readySlots === report?.allocationSlots;
+  }, null, { timeout: 240_000 });
+}
+
 function assertCompositionReport(report) {
   const expectedChunks = (exactRadius * 2 + 1) ** 2;
   const expectedCoverageMode = composition === "coverage"
@@ -186,8 +245,8 @@ function assertCompositionReport(report) {
       || report.exactRadius !== exactRadius
       || report.exactAnchor !== exactAnchor
       || (exactAnchor === "focus"
-        && (report.exactAnchorX !== report.centerX
-          || report.exactAnchorZ !== report.centerZ))
+        && (report.exactAnchorX !== Math.floor(report.focusX)
+          || report.exactAnchorZ !== Math.floor(report.focusZ)))
       || (exactAnchor === "viewer-forward"
         && Math.hypot(
           report.exactAnchorX - report.centerX,
@@ -195,6 +254,7 @@ function assertCompositionReport(report) {
         ) < 64)
       || report.exactDesiredChunks !== expectedChunks
       || report.exactPaintedChunks !== expectedChunks
+      || report.exactResidentChunks !== expectedChunks
       || report.exactQueuedChunks !== 0
       || report.exactPendingAdmissions !== 0
       || report.exactInFlight

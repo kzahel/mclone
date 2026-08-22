@@ -53,7 +53,7 @@ impl ExplorerTerrain {
             TerrainPreviewProfile::McloneOverworldV1
                 | TerrainPreviewProfile::ContinentalEcoregionCandidate
         );
-        let session = WorldExplorerSession::new(
+        let mut session = WorldExplorerSession::new(
             device,
             queue,
             color_format,
@@ -79,6 +79,7 @@ impl ExplorerTerrain {
             }),
         )
         .map_err(anyhow::Error::msg)?;
+        session.set_diagnostic(options.horizon_diagnostic);
         let exact = ExplorerExactTerrain::new_for_profile(
             device,
             queue,
@@ -182,6 +183,8 @@ impl ExplorerTerrain {
         encoder: &mut wgpu::CommandEncoder,
         color_view: &wgpu::TextureView,
     ) -> Result<TerrainHorizonFrameStats> {
+        let elapsed = self.started.elapsed();
+        self.session.advance_held_motion(elapsed);
         let exact_view = (self.composition != WorldExplorerCompositionMode::Horizon)
             .then(|| {
                 self.session
@@ -236,7 +239,7 @@ impl ExplorerTerrain {
                     depth_load: wgpu::LoadOp::Clear(0.0),
                     depth_store: wgpu::StoreOp::Store,
                 },
-                self.started.elapsed(),
+                elapsed,
                 coverage_mode,
                 tree_ownership,
             )

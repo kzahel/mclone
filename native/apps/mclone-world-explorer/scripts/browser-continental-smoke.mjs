@@ -13,6 +13,9 @@ const nativeRoot = path.resolve(appRoot, "../..");
 const repositoryRoot = path.resolve(nativeRoot, "..");
 const webRoot = path.join(nativeRoot, "target", "mclone-world-explorer-www");
 const skipBuild = process.argv.includes("--skip-build");
+const blocksAcross = argumentValue("--blocks-across") ?? "8192";
+const horizonDiagnostic = argumentValue("--horizon-diagnostic") ?? "natural";
+const journey = argumentValue("--journey");
 const externalBaseUrl = process.env.WORLD_EXPLORER_SMOKE_BASE_URL;
 const port = Number.parseInt(process.env.WORLD_EXPLORER_SMOKE_PORT ?? "4193", 10);
 const pageErrors = [];
@@ -47,7 +50,9 @@ try {
   const target = new URL(externalBaseUrl ?? `http://127.0.0.1:${port}/`);
   target.searchParams.set("source", "continental");
   target.searchParams.set("composition", "horizon");
-  target.searchParams.set("blocksAcross", "8192");
+  target.searchParams.set("blocksAcross", blocksAcross);
+  target.searchParams.set("horizonDiagnostic", horizonDiagnostic);
+  if (journey) target.searchParams.set("journey", journey);
   target.searchParams.set("view", "3d");
   target.searchParams.set("smokeObserver", "1");
   await page.goto(target.href, { waitUntil: "networkidle" });
@@ -58,7 +63,9 @@ try {
   await waitReady(page);
   const initial = await report(page);
   assertCandidate(initial, "initial");
-  const initialCapture = "/tmp/mclone-world-explorer-web-continental-initial.png";
+  const captureLabel = [journey, blocksAcross, horizonDiagnostic].filter(Boolean).join("-");
+  const initialCapture =
+    `/tmp/mclone-world-explorer-web-continental-${captureLabel}-initial.png`;
   await page.locator("#world-explorer-canvas").screenshot({ path: initialCapture });
 
   await page.evaluate(() => {
@@ -74,7 +81,8 @@ try {
   if (moved.totalRebases <= initial.totalRebases) {
     throw new Error("continental movement did not publish a clipmap rebase");
   }
-  const movementCapture = "/tmp/mclone-world-explorer-web-continental-movement.png";
+  const movementCapture =
+    `/tmp/mclone-world-explorer-web-continental-${captureLabel}-movement.png`;
   await page.locator("#world-explorer-canvas").screenshot({ path: movementCapture });
   if (pageErrors.length > 0) {
     throw new Error(`continental browser console errors:\n${pageErrors.join("\n")}`);
@@ -98,6 +106,13 @@ try {
 } finally {
   await browser?.close();
   await new Promise((resolve) => server?.close(resolve) ?? resolve());
+}
+
+function argumentValue(name) {
+  const inline = process.argv.find((argument) => argument.startsWith(`${name}=`));
+  if (inline) return inline.slice(name.length + 1);
+  const index = process.argv.indexOf(name);
+  return index >= 0 ? process.argv[index + 1] : undefined;
 }
 
 async function waitReady(page) {
