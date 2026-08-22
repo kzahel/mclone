@@ -2,7 +2,7 @@
 
 Topic: `procedural-horizon-clipmap`
 
-Status: current shared product architecture as of 2026-08-21. The regular
+Status: current shared product architecture as of 2026-08-22. The regular
 geometry clipmap, focus-connected exact composition, and bounded hybrid
 frontier run through `mclone-terrain-view` on native, WebGPU, flat Android,
 and XR. Tactical
@@ -99,10 +99,12 @@ instances from `42,637` to `10,889` and vegetation compilation from
 during pixel review.
 
 V2 now consumes those already-resident forest summaries through a fixed
-`16 x 16` world-oriented canopy lattice per eligible tile after individual
-proxy-tree levels stop. Shared-coordinate fan corners, summary coverage,
+`16 x 16` world-oriented canopy lattice per eligible tile. Shared-coordinate
+fan corners, summary coverage,
 family, mean height, variation, and opening influence preserve forest volume
 and authored gaps without allocating canopy instances or resident buffers.
+Individual proxies and canopy mass use complementary projected-scale fades,
+so the representation changes continuously rather than at a clipmap ring.
 The same pipeline supports mono, per-eye, and full-frame multiview. It is
 intentionally V2/candidate-only: enabling it for V1 caused an avoidable Quest
 control regression while V1 did not have the same giant-forest collapse.
@@ -127,6 +129,29 @@ lanes started at 289 columns and reported zero exact-center-unavailable
 frames. One process-local roughly 9.5-second render stall still occurs in
 both profiles, and the final moving horizon target can be transiently unready;
 those are explicit remaining presentation-tail debts.
+
+Tactical
+[`330`](../tactical/330-procedural-lod-continuity-and-movement-safety.md)
+separates procedural self-continuity from the exact frontier and makes
+`composition=horizon` World Explorer pixels the governing proof. Exact-free
+overview rendering selects the finest useful power-of-two spacing from
+projected blocks per pixel; a 512-block view still draws all ten High levels,
+while an 8,192-block view skips only subpixel spacings and draws seven. V2
+proxy trees and canopy use complementary projected-scale opacity, and coarse
+continental lighting derives from the broad-height field rather than
+unrepresentable local relief. Adjacent tile edge vertices cover half a sample
+beyond their nominal footprint, closing precision raster gaps without added
+draw calls, vertices, or resident resources. Inspected mesa and jungle
+natural, albedo, geometric-shade, and local-occlusion captures show no
+camera-centered procedural patch before or after a 1,024-block pan.
+
+The same tactical moves World Explorer held-motion advancement before both
+exact-view derivation and horizon pumping. Exact mesh eviction tracks the
+desired footprint, so a long browser movement run reaches generation 1105
+without an incomplete-frontier failure or cumulative exact residency. A
+physical Quest 3 Low/RD8 V2 repeat after the presentation changes settles 289
+exact columns and 96 horizon slots in `10.002 s`; app-work p95 is `12.783 ms`,
+5.5% above the matched V1 control and inside the existing 10% gate.
 
 Packaged live-game pixels expose one unresolved appearance contract at the
 exact frontier. Mesa exact chunks and their procedural continuation can differ

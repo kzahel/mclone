@@ -122,7 +122,15 @@ in `10.004 s`, versus the prior invalid `133.748 s`, without reducing
 continental coverage. The remaining human questions are the visual
 proxy-to-canopy handoff, the existing exact/procedural material and water
 seams, and transient movement/render-tail behavior—not whether V2 is a real
-live-game world.
+live-game world. Tactical
+[`330`](../tactical/330-procedural-lod-continuity-and-movement-safety.md) now
+resolves the procedural self-LOD portion independently of exact terrain:
+screen-matched ring selection, projected proxy/canopy fades, broad-scale
+lighting, and tile-edge raster coverage remove the camera-centered forest,
+shade, and crack patches in inspected 512- and 8,192-block horizon-only views.
+Its final Quest repeat remains within the V1 p95 gate. Human Review G should
+therefore judge any remaining procedural patch separately from the still
+explicit exact/procedural material and water handoff.
 Mclone should combine
 top-down continental and ecoregional planning with bottom-up procedural
 realization so the Overworld contains large, recognizable, causally related

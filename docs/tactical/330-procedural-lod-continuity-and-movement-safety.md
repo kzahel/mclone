@@ -1,8 +1,7 @@
 # Tactical 330: Procedural LOD Continuity And Movement Safety
 
-Status: **active 2026-08-22; procedural-only V2 WebGPU pixels reproduce a
-large characteristic-color square between clipmap levels, and retained
-composed movement can terminate on an incomplete frontier certificate.**
+Status: **implemented through physical Quest acceptance on 2026-08-22;
+horizon-only and composed WebGPU pixels are ready for Human Review G.**
 
 Topic: `procedural-horizon-clipmap`
 Topic: `continental-ecoregion-planning`
@@ -162,6 +161,60 @@ These are two defects with one review context, not one seam:
   transition and appearance contract.
 - V1 remains the normal new-world default and V2 remains selectable and
   experimental.
+
+## Implementation And Evidence
+
+Held movement now advances through `TerrainRuntimeSession` before World
+Explorer derives either exact coverage or the procedural presentation. The
+native and browser hosts therefore submit one view identity per frame. Exact
+mesh eviction follows the desired footprint instead of accumulating every
+visited chunk. A long browser held-motion run reached generation 1105 with no
+page error, missing proxy ownership, or unbounded exact residency; the settled
+footprint remained 25 chunks and about 10.36 MB of exact GPU mesh data.
+
+The procedural presentation correction has four cooperating parts:
+
+- horizon-only overview rendering selects the finest useful sample spacing
+  from projected blocks per pixel, while composed rendering retains
+  spacing-one coverage for its exact frontier;
+- V2 tree proxies and the fixed world-oriented canopy cross-fade from one
+  continuous projected-scale measure instead of switching at a clipmap level;
+- continental natural and geometric-shade presentation converges from local
+  relief normals to the existing broad-height field at coarse projected
+  scales; and
+- terrain tile edges expand by half a sample in the vertex path, covering
+  floating-point raster gaps without another draw, resident resource, or
+  geometry allocation.
+
+Fresh `composition=horizon` browser captures at seed `12345` own zero desired,
+painted, or rendered exact chunks. The mesa-desert and humid-jungle journeys
+were inspected before and after a relative 1,024-block pan at 512 and 8,192
+blocks across. The 512-block views draw all ten levels (132-134 terrain tiles),
+which checks the adjacent procedural transitions without overview-level
+suppression. The 8,192-block views draw the seven screen-relevant levels
+(96-98 tiles). Natural, albedo, geometric-shade, and identity-white local
+occlusion pixels no longer expose the former camera-centered square, forest
+stipple ring, or long inter-tile cracks. A world-anchored mesa color oval
+appears in albedo as well as natural color and moves with the terrain; it is
+authored surface variation rather than an LOD footprint.
+
+The corresponding composed humid-jungle check reaches all 25 exact chunks,
+ten procedural levels, and 80 vegetation products before and after 1.5
+seconds of held movement. Exact mesh residency remains 25 chunks, proxy
+ownership reports zero missing records, and no page or console error occurs.
+`mclone-terrain-view` passes 153 tests with one adapter test ignored;
+`mclone-world-explorer` passes its host and ownership locks. WGSL validation is
+included in the terrain-view suite.
+
+The release Android XR boundary builds and a physical Quest 3 Low/RD8 V2 run
+passes at 72 Hz, 1680x1760 per eye, foveation Off, and the humid-jungle center.
+It settles all 289 exact columns and all 96 horizon slots in `10.002 s`, with
+zero exact-center-unready frames. The 20-second stationary sample reports
+`9.226 / 12.783 ms` app-work p50/p95, 2.0% of frames over the `13.889 ms`
+period, and `6.980 ms` Meta app GPU. The p95 is 5.5% above Tactical 329's
+matched V1 control (`12.119 ms`) and remains inside the 10% gate. The known
+single roughly 9.6-second process/driver stall still distorts aggregate
+throughput and remains separate performance-tail debt.
 
 ## Human Review G
 

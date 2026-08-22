@@ -3,7 +3,7 @@
 Topic: `lod`
 
 Status: canonical current terminology and document-routing entry point as of
-2026-08-21. Detailed implementation status remains in
+2026-08-22. Detailed implementation status remains in
 [`procedural-horizon-clipmap.md`](procedural-horizon-clipmap.md); this page does
 not duplicate its execution ledger.
 
@@ -112,15 +112,26 @@ without making the clipmap or camera scale an input to geography.
 
 Tactical
 [`329`](../tactical/329-v2-quest-performance-and-forest-continuity.md) adds the
-current V2-only coarse forest band and native CPU compilation policy. Forest
+current V2-only forest band and native CPU compilation policy. Forest
 summaries drive at most 256 world-oriented canopy cells per eligible resident
-tile after individual proxy-tree levels stop; no area-proportional tree
-records or buffers are introduced. Native V2 terrain compilation uses a
-bounded worker pool and generation-safe admission, while Web currently uses
-the same contract with a one-tile inline fallback. The corrected physical
-Quest Low/RD8 gate requires all 289 exact columns and now settles V2 in about
-the same ten seconds as V1. V1 remains the default and does not draw the new
-canopy.
+tile; no area-proportional tree records or buffers are introduced. Native V2
+terrain compilation uses a bounded worker pool and generation-safe admission,
+while Web currently uses the same contract with a one-tile inline fallback.
+The corrected physical Quest Low/RD8 gate requires all 289 exact columns and
+now settles V2 in about the same ten seconds as V1. V1 remains the default and
+does not draw the new canopy.
+
+Tactical
+[`330`](../tactical/330-procedural-lod-continuity-and-movement-safety.md)
+makes non-composed World Explorer the primary procedural-continuity proof.
+At overview scales the horizon omits sample spacings finer than one screen
+pixel; closer and composed views retain the full relevant ring set. Proxy
+trees and canopy mass cross-fade by projected scale, broad terrain lighting
+filters out subpixel relief, and half-sample tile-edge coverage closes raster
+gaps without new geometry or residency. Fresh 512-block horizon-only captures
+draw all ten levels with zero exact chunks and no level-aligned natural-color,
+albedo, geometric-shade, or forest patch. The same slice keeps exact and
+procedural World Explorer movement on one advanced view identity.
 
 ## Historical Routes
 
