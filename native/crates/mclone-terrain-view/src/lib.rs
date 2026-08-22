@@ -1581,12 +1581,7 @@ fn viewport_uniform_bytes_for_request_with_presentation(
         source.content_stage as u32,
         projection.kind as u32,
         options.split_layout as u32,
-        match source.profile {
-            mclone_worldgen::terrain_preview::TerrainPreviewProfile::McloneOverworldV1 => 0,
-            mclone_worldgen::terrain_preview::TerrainPreviewProfile::VanillaOverworld => 1,
-            mclone_worldgen::terrain_preview::TerrainPreviewProfile::ContinentalEcoregionCandidate => 4,
-            mclone_worldgen::terrain_preview::TerrainPreviewProfile::McloneOverworldV2 => 4,
-        } | ((source.surface_quality as u32) << 1),
+        terrain_preview_profile_flags(source.profile, source.surface_quality),
     ] {
         bytes.extend_from_slice(&word.to_le_bytes());
     }
@@ -1644,6 +1639,19 @@ fn viewport_uniform_bytes_for_request_with_presentation(
     }
     debug_assert_eq!(bytes.len(), TERRAIN_PREVIEW_UNIFORM_BYTES as usize);
     bytes
+}
+
+fn terrain_preview_profile_flags(
+    profile: mclone_worldgen::terrain_preview::TerrainPreviewProfile,
+    surface_quality: mclone_worldgen::terrain_preview::TerrainPreviewSurfaceQuality,
+) -> u32 {
+    let profile_flag = match profile {
+        mclone_worldgen::terrain_preview::TerrainPreviewProfile::McloneOverworldV1 => 0,
+        mclone_worldgen::terrain_preview::TerrainPreviewProfile::VanillaOverworld => 1,
+        mclone_worldgen::terrain_preview::TerrainPreviewProfile::ContinentalEcoregionCandidate => 4,
+        mclone_worldgen::terrain_preview::TerrainPreviewProfile::McloneOverworldV2 => 8,
+    };
+    profile_flag | ((surface_quality as u32) << 1)
 }
 
 fn terrain_relative_view_projection(
@@ -2262,6 +2270,24 @@ mod tests {
     }
 
     #[test]
+    fn v2_uniforms_distinguish_the_product_from_the_detached_candidate() {
+        use mclone_worldgen::terrain_preview::{
+            TerrainPreviewProfile, TerrainPreviewSurfaceQuality,
+        };
+
+        let quality = TerrainPreviewSurfaceQuality::Inferred;
+        let candidate = terrain_preview_profile_flags(
+            TerrainPreviewProfile::ContinentalEcoregionCandidate,
+            quality,
+        );
+        let v2 = terrain_preview_profile_flags(TerrainPreviewProfile::McloneOverworldV2, quality);
+        assert_ne!(candidate, v2);
+        assert_eq!(candidate & 12, 4);
+        assert_eq!(v2 & 12, 8);
+        assert_eq!(candidate & 2, v2 & 2);
+    }
+
+    #[test]
     fn continuous_presentation_splits_large_centers_from_fractional_motion() {
         let presentation = TerrainPreviewUniformPresentation::continuous(
             1_000_000.25,
@@ -2401,7 +2427,7 @@ mod tests {
         assert!(TERRAIN_PREVIEW_TREE_WGSL.contains("params.view_projection_right"));
         assert!(!TERRAIN_PREVIEW_RENDER_WGSL.contains("clip_z = 1.0 - clamp"));
         assert!(!TERRAIN_PREVIEW_TREE_WGSL.contains("clip_z = 1.0 - clamp"));
-        assert!(TERRAIN_PREVIEW_RENDER_WGSL.contains("stitched_height + 1.0"));
+        assert!(TERRAIN_PREVIEW_RENDER_WGSL.contains("let vertex_world_y = mix("));
         assert!(
             TERRAIN_PREVIEW_RENDER_WGSL
                 .contains("let stacked_compare = compare && params.content_stage_flags.z == 1u")

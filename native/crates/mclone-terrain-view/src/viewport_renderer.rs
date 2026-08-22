@@ -7658,7 +7658,7 @@ mod tests {
         assert!(shader.contains("let smooth_geometric_shade = clamp("));
         assert!(shader.contains("let light = smooth_geometric_shade;"));
         assert!(!shader.contains("voxel_smooth_transition_weight"));
-        assert!(!shader.contains("mix(stitched_height"));
+        assert!(!shader.contains("TERRAIN_HORIZON_VOXEL"));
     }
 
     #[test]
@@ -7667,6 +7667,13 @@ mod tests {
         assert!(shader.contains("fn material_uses_grass_tint("));
         assert!(shader.contains("albedo = surface_tint(input, input.material, false);"));
         assert!(shader.contains("let resolved_exact_weight = clamp(exact_weight"));
+        assert!(shader.contains("let exact_aligned_height = floor(stitched_height);"));
+        assert!(shader.contains("let summary_presentation_weight = 1.0 - input.world_position.w;"));
+        assert!(shader.matches("production_mclone_profile(),").count() >= 2);
+        assert!(
+            !shader.contains("mclone_grass_biome(input.biome),\n        preview_profile() == 0u,")
+        );
+        assert_eq!(shader.matches("textured_mclone_profile(),").count(), 3);
         assert_eq!(shader.matches("input.world_position.w,").count(), 3);
         // The ordinary exact connector and isolated frontier-proof connector
         // each produce a typed vertical side surface.
@@ -7707,7 +7714,7 @@ mod tests {
         assert!(shader.contains("let rendered_z = sample_z / cell_stride;"));
         assert!(shader.contains("west_or_east && (rendered_z & 1) != 0"));
         assert!(shader.contains("north_or_south && (rendered_x & 1) != 0"));
-        assert!(shader.contains("stitched_height + 1.0"));
+        assert!(shader.contains("let vertex_world_y = mix("));
         assert!(shader.contains("let tile_overlap = f32(params.origin_spacing_cells.z) * 0.5;"));
         assert!(shader.contains("vertex_world_x -= tile_overlap;"));
         assert!(shader.contains("vertex_world_x += tile_overlap;"));

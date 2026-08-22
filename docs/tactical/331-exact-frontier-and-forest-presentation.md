@@ -202,6 +202,32 @@ tiles, and 14,592 canopy cells. Its natural frame reproduces both the exact
 rectangle and long grazing canopy-fan edges. No page, frontier, ownership, or
 source-profile error is required to produce either defect.
 
+## Phase 1 Evidence
+
+The V2 product and the detached continental-planning candidate had both been
+packed into preview flag `4`. That correctly selected their common
+continental height evaluator, but it also made the renderer treat live V2 as
+an untextured planning surface. Its final biome IDs were then passed through
+the V1 grass-biome remap. Exact V2 chunks consequently used the active
+material pack and final biome tint while their spacing-one continuation used
+a flat planning color, producing the most conspicuous square in the report.
+
+V2 now has a distinct product flag while retaining the shared continental
+evaluator. The product path enables the active material pack and consumes its
+final biome IDs directly. The existing 32-block appearance field also fades
+coarse forest-summary darkening away at the exact edge, and spacing-one
+vertices converge to the same downward block-height convention before
+recovering the continuous surface through that field. This remains one smooth
+procedural owner; it does not restore the retired voxel shell.
+
+The inspected native V2 Low/RD2 correction has the same 25 exact columns, 320
+spacing-one edge segments, three preferred support tiles, and bounded vertex
+and residency counts as the diagnostic baseline. Exact and procedural land
+now share texture frequency and characteristic green instead of forming a
+bright rectangle inside a flat olive mesh. The remaining transition is the
+intentional block-to-smooth topology change and ordinary tree representation,
+which Phases 2 and 3 address independently.
+
 ## Human Review H
 
 Stop with one deployed V2 world at a broad flat forest/clearing and provide

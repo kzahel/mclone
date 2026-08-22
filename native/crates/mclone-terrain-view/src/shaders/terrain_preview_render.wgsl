@@ -280,11 +280,19 @@ fn preview_profile() -> u32 {
 }
 
 fn continental_candidate() -> bool {
-    return (params.content_stage_flags.w & 4u) != 0u;
+    return (params.content_stage_flags.w & 12u) != 0u;
+}
+
+fn mclone_overworld_v2_profile() -> bool {
+    return (params.content_stage_flags.w & 8u) != 0u;
 }
 
 fn production_mclone_profile() -> bool {
     return preview_profile() == 0u && !continental_candidate();
+}
+
+fn textured_mclone_profile() -> bool {
+    return production_mclone_profile() || mclone_overworld_v2_profile();
 }
 
 fn surface_quality() -> u32 {
@@ -932,13 +940,23 @@ fn terrain_vertex(
     } else if sample_z == cells {
         vertex_world_z += tile_overlap;
     }
-    let vertex_world_y = stitched_height + 1.0;
     let world_uv = vec2<f32>(vertex_world_x, vertex_world_z);
     let vertex_material = terrain_material(sample);
     let appearance_transition_weight = exact_transition_weight(vec2<f32>(
         vertex_world_x,
         vertex_world_z,
     ));
+    // Exact V2 columns quantize the shared analytic surface downward to the
+    // owning block. Converge spacing-one support to those same vertex heights
+    // at the frontier, then recover the continuous procedural surface through
+    // the existing world-space appearance band. This does not add a voxel
+    // shell or a second horizontal owner.
+    let exact_aligned_height = floor(stitched_height);
+    let vertex_world_y = mix(
+        stitched_height,
+        exact_aligned_height,
+        appearance_transition_weight,
+    ) + 1.0;
 
     var out: VertexOutput;
     out.position = terrain_clip_position(
@@ -954,7 +972,7 @@ fn terrain_vertex(
     out.textured = select(
         0u,
         1u,
-        params.layer_samples_size.x == 0u && production_mclone_profile(),
+        params.layer_samples_size.x == 0u && textured_mclone_profile(),
     );
     out.river = vec4<f32>(
         sample.hydrology.x,
@@ -1063,7 +1081,7 @@ fn exact_connector_vertex_legacy(
     out.textured = select(
         0u,
         1u,
-        params.layer_samples_size.x == 0u && production_mclone_profile(),
+        params.layer_samples_size.x == 0u && textured_mclone_profile(),
     );
     out.river = vec4<f32>(
         sample.hydrology.x,
@@ -1201,7 +1219,7 @@ fn frontier_connector_vertex(
     out.textured = select(
         0u,
         1u,
-        params.layer_samples_size.x == 0u && production_mclone_profile(),
+        params.layer_samples_size.x == 0u && textured_mclone_profile(),
     );
     out.river = vec4<f32>(
         sample.hydrology.x,
@@ -1336,7 +1354,7 @@ fn surface_tint(input: VertexOutput, material: u32, side_surface: bool) -> vec3<
     let biome = select(
         input.biome,
         mclone_grass_biome(input.biome),
-        preview_profile() == 0u,
+        production_mclone_profile(),
     );
     return material_table.grass_tints[min(biome, 255u)].rgb;
 }
@@ -1345,7 +1363,7 @@ fn surface_water_tint(input: VertexOutput) -> vec4<f32> {
     let biome = select(
         input.biome,
         mclone_grass_biome(input.biome),
-        preview_profile() == 0u,
+        production_mclone_profile(),
     );
     return material_table.water_tints[min(biome, 255u)];
 }
@@ -1613,12 +1631,18 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
         }
         if params.content_stage_flags.x >= 4u {
             let cover = clamp(input.semantics.w, 0.0, 1.0);
-            color = mix(color, color * vec3<f32>(0.57, 0.82, 0.58), cover * 0.36);
+            // Coarse forest-summary darkening is useful once exact trees are
+            // no longer legible. At the exact frontier it otherwise applies a
+            // dark forest carpet on only the procedural side of the ownership
+            // line. Hand it in over the same stable appearance field.
+            let summary_presentation_weight = 1.0 - input.world_position.w;
+            let cover_weight = cover * 0.36 * summary_presentation_weight;
+            color = mix(color, color * vec3<f32>(0.57, 0.82, 0.58), cover_weight);
             if albedo_diagnostic {
                 albedo = mix(
                     albedo,
                     albedo * vec3<f32>(0.57, 0.82, 0.58),
-                    cover * 0.36,
+                    cover_weight,
                 );
             }
         }

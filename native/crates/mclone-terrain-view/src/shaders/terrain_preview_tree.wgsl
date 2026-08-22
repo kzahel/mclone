@@ -430,7 +430,7 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let world_dx = dpdx(input.world_xz);
     let world_dy = dpdy(input.world_xz);
     let blocks_per_pixel = max(length(world_dx), length(world_dy));
-    let v2_forest_representation = (params.content_stage_flags.w & 4u) != 0u;
+    let v2_forest_representation = (params.content_stage_flags.w & 12u) != 0u;
     let proxy_opacity = select(
         1.0,
         1.0 - smoothstep(0.45, 2.25, blocks_per_pixel),
