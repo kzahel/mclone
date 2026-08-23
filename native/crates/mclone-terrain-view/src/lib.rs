@@ -711,6 +711,13 @@ pub fn terrain_preview_focus_y_for_profile(
             .display_surface_y
                 + 1.0;
         }
+        mclone_worldgen::terrain_preview::TerrainPreviewProfile::McloneOverworldV3 => {
+            return mclone_worldgen::mclone_overworld_v3::McloneOverworldV3TerrainPlan::new(seed)
+                .query_point(world_x, world_z)
+                .sample
+                .display_surface_y
+                + 1.0;
+        }
         mclone_worldgen::terrain_preview::TerrainPreviewProfile::McloneOverworldV1 => {}
     }
     let terrain = McloneOverworldSampler::new(seed).sample(world_x, world_z);
@@ -1650,6 +1657,7 @@ fn terrain_preview_profile_flags(
         mclone_worldgen::terrain_preview::TerrainPreviewProfile::VanillaOverworld => 1,
         mclone_worldgen::terrain_preview::TerrainPreviewProfile::ContinentalEcoregionCandidate => 4,
         mclone_worldgen::terrain_preview::TerrainPreviewProfile::McloneOverworldV2 => 8,
+        mclone_worldgen::terrain_preview::TerrainPreviewProfile::McloneOverworldV3 => 16,
     };
     profile_flag | ((surface_quality as u32) << 1)
 }
@@ -2270,7 +2278,7 @@ mod tests {
     }
 
     #[test]
-    fn v2_uniforms_distinguish_the_product_from_the_detached_candidate() {
+    fn cpu_authored_profile_uniforms_have_distinct_source_bits() {
         use mclone_worldgen::terrain_preview::{
             TerrainPreviewProfile, TerrainPreviewSurfaceQuality,
         };
@@ -2281,10 +2289,14 @@ mod tests {
             quality,
         );
         let v2 = terrain_preview_profile_flags(TerrainPreviewProfile::McloneOverworldV2, quality);
+        let v3 = terrain_preview_profile_flags(TerrainPreviewProfile::McloneOverworldV3, quality);
         assert_ne!(candidate, v2);
+        assert_ne!(v2, v3);
         assert_eq!(candidate & 12, 4);
         assert_eq!(v2 & 12, 8);
+        assert_eq!(v3 & 16, 16);
         assert_eq!(candidate & 2, v2 & 2);
+        assert_eq!(v2 & 2, v3 & 2);
     }
 
     #[test]

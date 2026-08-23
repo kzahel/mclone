@@ -280,11 +280,15 @@ fn preview_profile() -> u32 {
 }
 
 fn continental_candidate() -> bool {
-    return (params.content_stage_flags.w & 12u) != 0u;
+    return (params.content_stage_flags.w & 28u) != 0u;
 }
 
 fn mclone_overworld_v2_profile() -> bool {
     return (params.content_stage_flags.w & 8u) != 0u;
+}
+
+fn mclone_overworld_v3_profile() -> bool {
+    return (params.content_stage_flags.w & 16u) != 0u;
 }
 
 fn production_mclone_profile() -> bool {
@@ -292,7 +296,9 @@ fn production_mclone_profile() -> bool {
 }
 
 fn textured_mclone_profile() -> bool {
-    return production_mclone_profile() || mclone_overworld_v2_profile();
+    return production_mclone_profile()
+        || mclone_overworld_v2_profile()
+        || mclone_overworld_v3_profile();
 }
 
 fn surface_quality() -> u32 {

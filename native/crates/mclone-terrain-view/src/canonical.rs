@@ -3,9 +3,9 @@ use mclone_worldgen::block::{AIR, RawBlockId, WATER};
 use mclone_worldgen::levelgen::{
     ContinentalCandidateFeatureDependencyCache, ContinentalCandidateFeatureDependencyCacheReport,
     GeneratedChunk, McloneOverworldFeatureDependencyCache,
-    McloneOverworldFeatureDependencyCacheReport, OverworldFeatureDependencyCache,
-    OverworldFeatureDependencyCacheReport, generate_mclone_overworld_surface_chunk,
-    generate_overworld_surface_chunk,
+    McloneOverworldFeatureDependencyCacheReport, McloneOverworldV3ExactGenerator,
+    OverworldFeatureDependencyCache, OverworldFeatureDependencyCacheReport,
+    generate_mclone_overworld_surface_chunk, generate_overworld_surface_chunk,
 };
 use mclone_worldgen::terrain_preview::TerrainPreviewProfile;
 
@@ -146,6 +146,7 @@ pub struct CanonicalTerrainCompiler {
 enum CanonicalTerrainFeatureDependencies {
     Continental(ContinentalCandidateFeatureDependencyCache),
     Mclone(McloneOverworldFeatureDependencyCache),
+    McloneV3(McloneOverworldV3ExactGenerator),
     Vanilla(OverworldFeatureDependencyCache),
 }
 
@@ -180,6 +181,11 @@ impl CanonicalTerrainCompiler {
                         ContinentalCandidateFeatureDependencyCache::new(seed),
                     )
                 }
+                TerrainPreviewProfile::McloneOverworldV3 => {
+                    CanonicalTerrainFeatureDependencies::McloneV3(
+                        McloneOverworldV3ExactGenerator::new(seed),
+                    )
+                }
             },
         }
     }
@@ -200,6 +206,7 @@ impl CanonicalTerrainCompiler {
         match &self.feature_dependencies {
             CanonicalTerrainFeatureDependencies::Continental(_) => 0,
             CanonicalTerrainFeatureDependencies::Mclone(cache) => cache.retained_chunk_count(),
+            CanonicalTerrainFeatureDependencies::McloneV3(_) => 0,
             CanonicalTerrainFeatureDependencies::Vanilla(cache) => cache.retained_chunk_count(),
         }
     }
@@ -208,6 +215,7 @@ impl CanonicalTerrainCompiler {
         match &mut self.feature_dependencies {
             CanonicalTerrainFeatureDependencies::Continental(_) => {}
             CanonicalTerrainFeatureDependencies::Mclone(cache) => cache.clear(),
+            CanonicalTerrainFeatureDependencies::McloneV3(_) => {}
             CanonicalTerrainFeatureDependencies::Vanilla(cache) => cache.clear(),
         }
     }
@@ -236,6 +244,12 @@ impl CanonicalTerrainCompiler {
                             _ => unreachable!("candidate exact compiler retains its generator"),
                         }
                     }
+                    TerrainPreviewProfile::McloneOverworldV3 => match &self.feature_dependencies {
+                        CanonicalTerrainFeatureDependencies::McloneV3(generator) => {
+                            generator.generate_surface_chunk(chunk_x, chunk_z)
+                        }
+                        _ => unreachable!("V3 exact compiler retains its generator"),
+                    },
                 },
                 CanonicalTerrainDependencyCacheReport::default(),
             ),
@@ -256,6 +270,10 @@ impl CanonicalTerrainCompiler {
                             batch.cache_report.into(),
                         )
                     }
+                    CanonicalTerrainFeatureDependencies::McloneV3(generator) => (
+                        generator.generate_surface_chunk(chunk_x, chunk_z),
+                        CanonicalTerrainDependencyCacheReport::default(),
+                    ),
                     CanonicalTerrainFeatureDependencies::Vanilla(cache) => {
                         let mut batch = cache.generate_features_chunks(self.seed, [position]);
                         (
@@ -348,7 +366,7 @@ mod tests {
     use mclone_worldgen::block::{OAK_LEAVES, OAK_LOG, SEAGRASS, STONE};
     use mclone_worldgen::levelgen::{
         generate_continental_candidate_chunk, generate_continental_candidate_surface_chunk,
-        generate_mclone_overworld_chunk,
+        generate_mclone_overworld_chunk, generate_mclone_overworld_v3_chunk,
     };
 
     #[test]
@@ -452,6 +470,29 @@ mod tests {
                     assert_eq!(result.dependency_cache.retained_dependency_chunks, 9);
                 }
             }
+        }
+    }
+
+    #[test]
+    fn v3_surface_and_final_stages_use_target_only_exact_lowering() {
+        let seed = 12_345;
+        let direct = generate_mclone_overworld_v3_chunk(seed, -3_296, 4_266);
+        for stage in [
+            CanonicalTerrainStage::Surface,
+            CanonicalTerrainStage::FinalFeatures,
+        ] {
+            let mut compiler = CanonicalTerrainCompiler::new_with_profile(
+                TerrainPreviewProfile::McloneOverworldV3,
+                seed,
+                stage,
+            );
+            let result = compiler.compile(-3_296, 4_266);
+            assert_eq!(result.profile, TerrainPreviewProfile::McloneOverworldV3);
+            assert_eq!(result.blocks, direct.blocks());
+            assert_eq!(result.biomes, direct.biomes());
+            assert_eq!(result.fingerprint, canonical_terrain_fingerprint(&direct));
+            assert_eq!(result.dependency_cache, Default::default());
+            assert_eq!(compiler.retained_dependency_chunks(), 0);
         }
     }
 

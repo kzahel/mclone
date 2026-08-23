@@ -1,9 +1,10 @@
 # Tactical 333: Mclone Overworld V3 Terrain Reset
 
-Status: **implementation active 2026-08-23. Phase 1's independent shared V3
-source and Phase 2's target-only exact lowering are complete. First pixels,
-procedural composition, profile integration, compiler-session cache review,
-platform validation, and human review remain.**
+Status: **implementation active 2026-08-23. The independent source,
+target-only exact lowering, and direct shared procedural compiler integration
+are complete. First pixels have failed visual acceptance. Profile integration,
+terrain/presentation revision, compiler-session cache review, platform
+validation, and human review remain.**
 
 Topic: `mclone-overworld-v3-terrain-reset`
 Topic: `world-generation-profiles`
@@ -417,6 +418,43 @@ needs a bounded source/chunk cache before Human Review V3-A.
 Exact rendered pixels remain the next Phase 2 milestone; this lowering commit
 does not claim visual acceptance. With the exact tests included, the complete
 `mclone-worldgen` library suite passes: 491 passed, one ignored.
+
+### Phase 3: Direct Procedural Source And Failed Pixel Gate
+
+`TerrainPreviewProfile::McloneOverworldV3` now carries the V3 schema identity
+through the shared preview carrier, CPU clipmap compiler, terrain source
+identity, canonical exact compiler, native/Wasm vegetation codec boundary,
+profile uniforms, and World Explorer native/browser source parser. Each
+procedural tile makes one spacing-aware V3 window query including the existing
+stitched-normal halo. Spacing one has exact source, water, material, and biome
+agreement tests. V3 publishes forest-opportunity mass but requests no proxy
+tree records until an ordinary exact producer exists.
+
+The first release World Explorer captures were produced and inspected under
+`/tmp`. They are failure evidence, not review artifacts:
+
+- the ordinary origin horizon renders, but reads as broad green facets with
+  large black or uncovered-looking regions rather than a resolved landform;
+- the selected mountain center does not produce meaningful horizon depth in
+  the horizon-only capture at either one- or eight-kiloblock framing;
+- a 17-by-17 exact composition at the selected center renders a finite exposed
+  volume with a broad snowy/stone interior, but reads as a cutaway box rather
+  than a mountain; and
+- closer composed views show visible exact/procedural rectangular ownership,
+  a straight gray connector or boundary strip, and black gaps.
+
+The selected source still passes numeric relief and coarse-identity gates, so
+these pixels demonstrate that those gates are insufficient. Do not mark Phase
+2's first-pixel milestone or Phase 3's composition milestone accepted. The
+next live-profile slice must distinguish review-host presentation defects from
+source defects, then revise the terrain grammar or composition contract based
+on inspected live pixels. No ecology or regional-breadth work is authorized by
+these frames.
+
+After this integration the complete `mclone-worldgen` suite passes 493 tests
+with one ignored, the complete `mclone-terrain-view` suite passes 158 with one
+ignored, and `cargo check --workspace` passes (pre-existing dead-code warnings
+remain in the dedicated server and Terrain Lab).
 
 ## Related
 

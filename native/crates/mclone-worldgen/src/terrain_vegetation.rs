@@ -982,6 +982,7 @@ const fn vegetation_revision(profile: TerrainPreviewProfile) -> &'static str {
         TerrainPreviewProfile::McloneOverworldV1 => MCLONE_OVERWORLD_VEGETATION_REVISION,
         TerrainPreviewProfile::ContinentalEcoregionCandidate
         | TerrainPreviewProfile::McloneOverworldV2 => CONTINENTAL_PROXY_VEGETATION_SOURCE_REVISION,
+        TerrainPreviewProfile::McloneOverworldV3 => "no-v3-terrain-preview-vegetation",
         TerrainPreviewProfile::VanillaOverworld => "no-terrain-preview-vegetation",
     }
 }
@@ -1044,6 +1045,7 @@ const fn profile_tag(profile: TerrainPreviewProfile) -> u8 {
         TerrainPreviewProfile::VanillaOverworld => 2,
         TerrainPreviewProfile::ContinentalEcoregionCandidate => 3,
         TerrainPreviewProfile::McloneOverworldV2 => 4,
+        TerrainPreviewProfile::McloneOverworldV3 => 5,
     }
 }
 
@@ -1053,6 +1055,7 @@ fn profile_from_tag(tag: u8) -> Result<TerrainPreviewProfile, String> {
         2 => Ok(TerrainPreviewProfile::VanillaOverworld),
         3 => Ok(TerrainPreviewProfile::ContinentalEcoregionCandidate),
         4 => Ok(TerrainPreviewProfile::McloneOverworldV2),
+        5 => Ok(TerrainPreviewProfile::McloneOverworldV3),
         other => Err(format!("MCHV terrain profile tag {other} is invalid")),
     }
 }

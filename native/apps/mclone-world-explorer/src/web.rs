@@ -1307,8 +1307,11 @@ fn parse_terrain_source(value: &str) -> Result<TerrainPreviewProfile, String> {
         "continental" | "candidate" | "continental-ecoregion-candidate-v1" => {
             Ok(TerrainPreviewProfile::ContinentalEcoregionCandidate)
         }
+        "mclone-overworld-v2" | "mclone-v2" | "v2" => Ok(TerrainPreviewProfile::McloneOverworldV2),
+        "mclone-overworld-v3" | "mclone-v3" | "v3" => Ok(TerrainPreviewProfile::McloneOverworldV3),
         other => Err(format!(
-            "unsupported World Explorer terrain source {other:?}; expected production or continental"
+            "unsupported World Explorer terrain source {other:?}; expected production, \
+             continental, mclone-overworld-v2, or mclone-overworld-v3"
         )),
     }
 }

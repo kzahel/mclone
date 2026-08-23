@@ -418,8 +418,11 @@ fn parse_terrain_source(value: &str) -> Result<TerrainPreviewProfile> {
         "continental" | "candidate" | "continental-ecoregion-candidate-v1" => {
             Ok(TerrainPreviewProfile::ContinentalEcoregionCandidate)
         }
+        "mclone-overworld-v2" | "mclone-v2" | "v2" => Ok(TerrainPreviewProfile::McloneOverworldV2),
+        "mclone-overworld-v3" | "mclone-v3" | "v3" => Ok(TerrainPreviewProfile::McloneOverworldV3),
         other => bail!(
-            "unsupported World Explorer terrain source {other:?}; expected production or continental"
+            "unsupported World Explorer terrain source {other:?}; expected production, \
+             continental, mclone-overworld-v2, or mclone-overworld-v3"
         ),
     }
 }
@@ -458,7 +461,7 @@ Mclone World Explorer
 Usage: mclone-world-explorer [options]
 
   --seed N                    terrain seed (default {DEFAULT_SEED})
-  --source SOURCE             production (default) or continental
+  --source SOURCE             production (default), continental, mclone-overworld-v2, or mclone-overworld-v3
   --journey NAME              select a shared continental review journey
   --catchment-site NAME       select one realized catchment review site
   --center-x N                view center X (default 0)
@@ -506,6 +509,10 @@ mod tests {
         assert_eq!(
             parse_terrain_source("continental").unwrap(),
             TerrainPreviewProfile::ContinentalEcoregionCandidate
+        );
+        assert_eq!(
+            parse_terrain_source("v3").unwrap(),
+            TerrainPreviewProfile::McloneOverworldV3
         );
     }
 }

@@ -7402,7 +7402,8 @@ fn source_needs_gpu(options: TerrainPreviewDrawOptions, profile: TerrainPreviewP
             ) || options.layer == TerrainPreviewLayer::Error
         }
         TerrainPreviewProfile::ContinentalEcoregionCandidate
-        | TerrainPreviewProfile::McloneOverworldV2 => false,
+        | TerrainPreviewProfile::McloneOverworldV2
+        | TerrainPreviewProfile::McloneOverworldV3 => false,
     }
 }
 
