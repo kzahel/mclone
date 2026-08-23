@@ -410,6 +410,7 @@ impl McloneSceneHost {
             self.active_world.scene.world_generation_profile,
             mclone_server::WorldGenerationProfile::McloneOverworldV1
                 | mclone_server::WorldGenerationProfile::McloneOverworldV2
+                | mclone_server::WorldGenerationProfile::McloneOverworldV3
         ) && self.active_world.runtime.as_ref().map_or_else(
             || self.active_world.scene.startup.remote_addr.is_none(),
             |runtime| runtime.host_mode() == SingleViewHostMode::LocalIntegrated,
@@ -869,6 +870,9 @@ fn live_preview_profile(
         mclone_server::WorldGenerationProfile::McloneOverworldV2 => {
             Ok(TerrainPreviewProfile::McloneOverworldV2)
         }
+        mclone_server::WorldGenerationProfile::McloneOverworldV3 => {
+            Ok(TerrainPreviewProfile::McloneOverworldV3)
+        }
         _ => bail!(
             "world profile {} has no live distant-terrain source",
             profile.label()
@@ -1013,6 +1017,22 @@ mod tests {
         assert_eq!(
             source.composition_source().unwrap().profile,
             TerrainPreviewProfile::McloneOverworldV2
+        );
+    }
+
+    #[test]
+    fn live_v3_source_uses_the_v3_preview_profile() {
+        let source = live_source(
+            WorldInstanceId::new(23),
+            mclone_server::WorldGenerationProfile::McloneOverworldV3,
+            12_345,
+            HorizontalTopology::UNBOUNDED,
+        )
+        .unwrap();
+        assert_eq!(source.generation(), 23);
+        assert_eq!(
+            source.composition_source().unwrap().profile,
+            TerrainPreviewProfile::McloneOverworldV3
         );
     }
 

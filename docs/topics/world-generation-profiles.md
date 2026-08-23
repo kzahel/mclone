@@ -41,7 +41,13 @@ fixed-budget coarse canopy. Browser terrain compilation and transient render
 tails remain performance debts. The ordinary browser New World flow now has
 an explicit V1-to-V2 handoff gate: the persisted V2 descriptor and active seed
 must agree, the entry column must be loaded, and the settled V2 frame must
-contain generated pixels without any render errors.**
+contain generated pixels without any render errors. Tactical
+[`333`](../tactical/333-mclone-overworld-v3-terrain-reset.md) now allocates
+selectable internal-unshipped `mclone-overworld-v3` with binary tag 10. V3
+uses an independent target-only exact/procedural terrain source and a bounded
+quality-aware spawn query; V1 remains the product default and V2 remains
+selectable as a control. Live pixel, reopen, platform, and human-review
+closeout are still pending.**
 
 This topic owns the current truth and durable decisions for selectable,
 versioned world-generation profiles. Detailed refactoring and implementation
@@ -82,7 +88,7 @@ The first alternate generators are intentionally smaller:
 
 ## Current Truth
 
-The stored server-owned `WorldGenerationProfile` has nine values:
+The stored server-owned `WorldGenerationProfile` has ten values:
 
 - `Overworld`: legacy procedural Java-1.17-shaped generation, retained as an
   internal development/reference selection rather than the product default;
@@ -99,6 +105,10 @@ The stored server-owned `WorldGenerationProfile` has nine values:
   retained temperate catchment plus mesa-desert and humid-jungle regional
   archetypes, generated from one exact/procedural surface source while V1
   remains available and default;
+- `McloneOverworldV3`: an experimental unbounded, independent landform-first
+  profile with target-only exact lowering, direct spacing-aware procedural
+  sampling, and a quality-aware bounded spawn search; V1 remains available and
+  default;
 - `TopologyProbeV1`: a hidden adversarial plane/cylinder/torus conformance
   generator that guarantees terrain, water, bounded geometry, material,
   lighting, and persistence canaries at canonical seams;
@@ -113,9 +123,9 @@ The profile already crosses world catalogs, realm/dimension metadata,
 integrated and dedicated startup, native and browser hosts, and persistence.
 It is fixed before chunk scheduling starts.
 
-Product world creation defaults to Mclone Overworld V1 and cycles eight
-procedural selections—V1, experimental V2, legacy Overworld, Flat Grass,
-Small Island, Alpha temperate, Alpha winter, and Beta—through shared catalog
+Product world creation defaults to Mclone Overworld V1 and cycles nine
+procedural selections—V1, experimental V2, experimental V3, legacy Overworld,
+Flat Grass, Small Island, Alpha temperate, Alpha winter, and Beta—through shared catalog
 policy and generator-agnostic UI text. Mclone
 Overworld is the product creation default across catalog, startup, dedicated,
 and integrated-runner entry points. Catalog records require an explicit
@@ -145,7 +155,7 @@ cross-profile reuse.
 Scheduler and worker requests carry an immutable profile-plus-seed descriptor
 through native messages, WASM codecs, responses, and diagnostics. The closed
 shared-Rust executor selects the legacy Overworld cache, flat grass, the
-Small Island, Mclone Overworld, Alpha, or Beta cache, and resident state resets
+Small Island, Mclone Overworld V1/V2/V3, Alpha, or Beta implementation, and resident state resets
 when either descriptor fact changes.
 
 Transient native scene startup now builds its `SessionStartRequest` with the
@@ -278,6 +288,7 @@ Dispositions mean:
 | `authored-only` missing-void behavior | `internal-mutable` | Missing-chunk semantics and identity may change after auditing authored scenarios | No shipped consumer exists, although lobby/preview fixtures rely on the current void contract | Update persistence, embedded-world, catalog, and no-worldgen scenario coverage together |
 | `mclone-overworld-v1` | `internal-mutable` | Identity, tag, fields, seed domains, world-scale facts, supported topology periods, terrain, biome/surface/decoration rules, spawn, ecology inputs, dependency plan, fixtures, and implementation may change in place | It is live only in internal builds; no shipped or named retained world requires current output | Update fingerprints, field/ecoregion maps, cards, tests, docs, and discard or explicitly migrate affected internal worlds |
 | `mclone-overworld-v2` | `internal-mutable` | Identity, binary tag 9, continental rules, regional archetypes, topology support, performance policy, fixtures, and output may change in place | It is a selectable experimental sibling so V1's current charm and cost remain available while the continental generator matures; no shipped or named retained world requires current V2 output | Update shared native/Web codecs, exact/LOD witnesses, spawn and SQLite/IndexedDB reopen tests, captures, docs, and discard or explicitly migrate affected internal V2 worlds; keep V1 selectable and default unless a later review decides otherwise |
+| `mclone-overworld-v3` | `internal-mutable` | Identity, binary tag 10, terrain schema, landform grammar and distribution, topology support, spawn policy, performance policy, fixtures, and output may change in place | It is a selectable experimental terrain reset with no shipped or named retained world; V1 and V2 remain available controls | Update shared native/Web codecs, exact/LOD and distribution witnesses, spawn and SQLite/IndexedDB reopen tests, captures, docs, and discard or explicitly migrate affected internal V3 worlds; keep V1 selectable and default unless a later review decides otherwise |
 | `intro-homestead-v1` starter overlay | `internal-mutable` | Starter descriptor, scout revision, fit thresholds, score ordering, plan schema, promoted content, and materialization may change before a release freeze | It is an explicit identity orthogonal to the base profile. The seed-`0` compact composition is internally accepted and Tactical 291 intentionally replaces its decorative garden with working promoted content, but no shipped consumer requires the prior checksum | Keep pure-base fingerprints unchanged; update scout/plan witnesses, promoted-content and clipped-placement tests, review maps, starter/plan codecs, and discard or explicitly migrate affected internal overlay worlds |
 | `topology-probe-v1` | `internal-mutable` | Identity, binary tag 8, minimum period, diagnostic terrain, plan geometry, materials, and fixtures may change in place | It is a hidden executable conformance instrument with no shipped or named retained world | Update exact conformance fixtures, worker/persistence tests, tactical evidence, and discard affected internal probe worlds |
 | `alpha-v1` | `internal-mutable` | Profile shape, winter option, feature subset, planning shape, fixtures, and output may change while preserving or explicitly revising the documented Alpha flavor/parity boundary | It is live only in internal builds; no shipped or named retained world requires current output. Alpha v1.1.2_01 stage receipts constrain the close-parity core but do not make the whole profile a historical compatibility promise | Re-run the Alpha oracle hashes, mapping/order tests, scheduler/worker/persistence tests, temperate and winter captures, workspace tests, and web build; update fixtures/docs and discard or explicitly migrate affected internal worlds |

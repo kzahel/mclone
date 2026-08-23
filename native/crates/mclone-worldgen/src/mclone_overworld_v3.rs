@@ -14,7 +14,7 @@ use crate::{
     noise::{GradientNoise2d, SeedDomain},
 };
 
-pub const MCLONE_OVERWORLD_V3_SCHEMA_REVISION: &str = "mclone-overworld-v3-terrain-v1";
+pub const MCLONE_OVERWORLD_V3_SCHEMA_REVISION: &str = "mclone-overworld-v3-terrain-v2";
 pub const MCLONE_OVERWORLD_V3_SEA_LEVEL: f32 = 63.0;
 pub const MCLONE_OVERWORLD_V3_MAX_WINDOW_SAMPLES: usize = 262_144;
 
@@ -419,6 +419,7 @@ impl McloneOverworldV3TerrainPlan {
                 composition.include(feature.sample(x, z));
             }
         }
+        composition.include_implicit_plain();
 
         let rolling_detail = lod_detail_weight(detail_spacing, 96.0, 768.0);
         let local_detail = lod_detail_weight(detail_spacing, 24.0, 256.0);
@@ -787,6 +788,14 @@ impl LandformComposition {
         self.valley = self.valley.max(sample.valley);
         self.rolling = self.rolling.max(sample.rolling);
         self.plain = self.plain.max(sample.plain);
+    }
+
+    fn include_implicit_plain(&mut self) {
+        // The space between authored landform primitives is itself a useful
+        // plain, not an absence of terrain semantics. Preserve the explicit
+        // feature score for identity while giving uncovered ground the same
+        // openness/quieting behavior as a broad plain primitive.
+        self.plain = self.plain.max((1.0 - self.dominant_score).clamp(0.0, 1.0));
     }
 
     fn weights(self) -> [f64; 5] {

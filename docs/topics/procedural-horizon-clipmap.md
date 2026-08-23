@@ -53,18 +53,19 @@ boundary facts, and consumes one frame summary. Apps choose platform defaults,
 create surfaces or swapchains, translate input, and present; they do not own
 LOD geometry or seam policy.
 
-Supported product sources are reconstructible local `mclone-overworld-v1`
-and experimental `mclone-overworld-v2` worlds with matching profile, seed,
-topology, exact generation, and procedural source identity. V2 promotes the
-former detached continental candidate through the same terrain-view and
-scene composition path; it does not alias V1. Remote sessions and incompatible
+Supported product sources are reconstructible local `mclone-overworld-v1`,
+experimental `mclone-overworld-v2`, and experimental `mclone-overworld-v3`
+worlds with matching profile, seed, topology, exact generation, and procedural
+source identity. V2 promotes the former detached continental candidate; V3
+uses its independent spacing-aware landform source through the same
+terrain-view and scene composition path. Neither aliases V1. Remote sessions and incompatible
 generation profiles project the effective setting to Off while retaining the
 user's desired preference.
 
 The renderer profile is immutable for one engine lifetime because it selects
 the procedural program and vegetation bounds used by every resident resource.
 World and seed changes within that profile reset the bounded residency in
-place. A live handoff between V1 and V2 rebuilds the terrain-view engine before
+place. A live handoff among V1, V2, and V3 rebuilds the terrain-view engine before
 destination exact coverage is admitted; the lower engine also rejects an
 attempted in-place profile change. This contract closes the 2026-08-22 browser
 New World black-screen failure where V2 exact chunks briefly met a retained V1

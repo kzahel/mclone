@@ -34,6 +34,14 @@ spawn, SQLite reopen, terrain-view, scene, native, and Web startup contracts.
 Its shared display label remains experimental, its topology is currently the
 unbounded plane, and its exact output is the same continental source used by
 the procedural horizon. V1 remains the unchanged new-world default.
+Tactical [`333`](../tactical/333-mclone-overworld-v3-terrain-reset.md) now
+adds a separate selectable experimental `mclone-overworld-v3`. V3 does not
+call V2's continental surface evaluator: it owns an independent compact
+landform-first point/window source, target-only exact lowering, direct
+spacing-aware procedural LOD, and a bounded quality-aware spawn query. Its
+first inspected procedural/composed pixels failed visual acceptance, so V3 is
+not a default candidate yet; terrain/presentation revision and platform/reopen
+closeout remain active.
 V2's first additional regional archetype is a mesa desert with formation-owned
 tables, stepped escarpments, washes, fans, red-sand basins, exact terracotta
 strata, and ecology-facing habitat facts. Its broad identities remain stable

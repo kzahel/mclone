@@ -4345,7 +4345,9 @@ impl RealmServer {
         let definition = &self.active_dimension.definition;
         if matches!(
             definition.generation_profile,
-            WorldGenerationProfile::McloneOverworldV1 | WorldGenerationProfile::McloneOverworldV2
+            WorldGenerationProfile::McloneOverworldV1
+                | WorldGenerationProfile::McloneOverworldV2
+                | WorldGenerationProfile::McloneOverworldV3
         ) {
             return find_safe_surface_spawn_for_loaded_descriptor(
                 definition.seed,

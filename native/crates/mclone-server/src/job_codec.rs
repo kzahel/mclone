@@ -15,11 +15,11 @@ use mclone_worldgen::levelgen::{
     BetaFeatureDependencyCacheReport, ContinentalCandidateFeatureDependencyCache,
     ContinentalCandidateFeatureDependencyCacheReport, GeneratedChunk,
     McloneOverworldFeatureDependencyCache, McloneOverworldFeatureDependencyCacheReport,
-    McloneOverworldSamplingTopology, MutableChunkBlockBuffer, OverworldDependencyGenerationTiming,
-    OverworldFeatureBatchTiming, OverworldFeatureDependencyCache,
-    OverworldFeatureDependencyCacheReport, ScheduledTick, SmallIslandFeatureDependencyCache,
-    SmallIslandFeatureDependencyCacheReport, SurfaceFillTiming, TopologyProbeSource,
-    generate_flat_grass_chunk,
+    McloneOverworldSamplingTopology, McloneOverworldV3ExactGenerator, MutableChunkBlockBuffer,
+    OverworldDependencyGenerationTiming, OverworldFeatureBatchTiming,
+    OverworldFeatureDependencyCache, OverworldFeatureDependencyCacheReport, ScheduledTick,
+    SmallIslandFeatureDependencyCache, SmallIslandFeatureDependencyCacheReport, SurfaceFillTiming,
+    TopologyProbeSource, generate_flat_grass_chunk,
 };
 
 use crate::level_light_bridge::LevelLightComputationTiming;
@@ -279,6 +279,7 @@ pub(crate) struct WorldGenerationExecutor {
     small_island_cache: SmallIslandFeatureDependencyCache,
     mclone_overworld_cache: McloneOverworldFeatureDependencyCache,
     mclone_overworld_v2_cache: Option<ContinentalCandidateFeatureDependencyCache>,
+    mclone_overworld_v3_generator: Option<McloneOverworldV3ExactGenerator>,
     alpha_cache: AlphaFeatureDependencyCache,
     beta_cache: BetaFeatureDependencyCache,
 }
@@ -289,6 +290,7 @@ impl WorldGenerationExecutor {
         self.small_island_cache.clear();
         self.mclone_overworld_cache.clear();
         self.mclone_overworld_v2_cache = None;
+        self.mclone_overworld_v3_generator = None;
         self.alpha_cache.clear();
         self.beta_cache.clear();
     }
@@ -301,6 +303,7 @@ impl WorldGenerationExecutor {
                 self.mclone_overworld_cache.resident_positions()
             }
             WorldGenerationProfile::McloneOverworldV2 => BTreeSet::new(),
+            WorldGenerationProfile::McloneOverworldV3 => BTreeSet::new(),
             WorldGenerationProfile::AlphaV1 { .. } => self.alpha_cache.resident_positions(),
             WorldGenerationProfile::BetaV1 => self.beta_cache.resident_positions(),
             WorldGenerationProfile::FlatGrassV1
@@ -322,6 +325,7 @@ impl WorldGenerationExecutor {
                     ContinentalCandidateFeatureDependencyCache::retained_chunk_count,
                 )
             }
+            WorldGenerationProfile::McloneOverworldV3 => 0,
             WorldGenerationProfile::AlphaV1 { .. } => self.alpha_cache.retained_chunk_count(),
             WorldGenerationProfile::BetaV1 => self.beta_cache.retained_chunk_count(),
             WorldGenerationProfile::FlatGrassV1
@@ -483,6 +487,36 @@ impl WorldGenerationExecutor {
                         cache_report,
                         overworld_timing: None,
                     }),
+                })
+            }
+            WorldGenerationProfile::McloneOverworldV3 => {
+                if !dependencies.is_empty() {
+                    return Err(format!(
+                        "mclone-overworld-v3 is target-only but received {} dependency chunks",
+                        dependencies.len()
+                    ));
+                }
+                if self
+                    .mclone_overworld_v3_generator
+                    .as_ref()
+                    .is_none_or(|generator| generator.seed() != descriptor.seed)
+                {
+                    self.mclone_overworld_v3_generator =
+                        Some(McloneOverworldV3ExactGenerator::new(descriptor.seed));
+                }
+                let generator = self
+                    .mclone_overworld_v3_generator
+                    .as_ref()
+                    .expect("V3 exact generator initialized above");
+                let chunks = targets
+                    .iter()
+                    .copied()
+                    .map(|pos| (pos, generator.generate_surface_chunk(pos.x, pos.z)))
+                    .collect();
+                Ok(WorldGenerationBatchResult {
+                    chunks,
+                    retained_dependencies: BTreeMap::new(),
+                    diagnostics: None,
                 })
             }
             WorldGenerationProfile::AlphaV1 { winter } => {
@@ -2007,6 +2041,32 @@ mod tests {
         let diagnostics = decoded.diagnostics.expect("V2 cache diagnostics");
         assert!(diagnostics.cache_report.generated_dependency_chunks > 0);
         assert!(diagnostics.cache_report.retained_dependency_chunks > 0);
+    }
+
+    #[test]
+    fn mclone_overworld_v3_frame_generates_shared_exact_chunks() {
+        let target = ChunkPos::new(17, -23);
+        let descriptor =
+            WorldGenerationDescriptor::new(WorldGenerationProfile::McloneOverworldV3, 12_345);
+        let request = full_worldgen_frame(ChunkJobId(20), descriptor, &[target]).unwrap();
+        let decoded =
+            decode_worldgen_response(&compute_worldgen_job_frame(&request).unwrap()).unwrap();
+        let actual = decoded
+            .generated_chunks
+            .get(&target)
+            .expect("V3 response contains its requested target");
+        let expected = mclone_worldgen::levelgen::generate_mclone_overworld_v3_chunk(
+            descriptor.seed,
+            target.x,
+            target.z,
+        );
+
+        assert_eq!(decoded.descriptor, descriptor);
+        assert_eq!(actual.blocks(), expected.blocks());
+        assert_eq!(actual.biomes(), expected.biomes());
+        assert!(decoded.diagnostics.is_none());
+        assert!(decoded.retained_dependencies.is_empty());
+        assert!(decoded.retained_dependency_positions.is_empty());
     }
 
     #[test]

@@ -1,10 +1,10 @@
 # Tactical 333: Mclone Overworld V3 Terrain Reset
 
 Status: **implementation active 2026-08-23. The independent source,
-target-only exact lowering, and direct shared procedural compiler integration
-are complete. First pixels have failed visual acceptance. Profile integration,
-terrain/presentation revision, compiler-session cache review, platform
-validation, and human review remain.**
+target-only exact lowering, direct shared procedural compiler integration, and
+real selectable-profile integration are complete. First pixels have failed
+visual acceptance. Terrain/presentation revision, compiler-session cache
+review, platform validation, and human review remain.**
 
 Topic: `mclone-overworld-v3-terrain-reset`
 Topic: `world-generation-profiles`
@@ -362,7 +362,7 @@ This tactical does not:
 
 The first independent source is
 `mclone-worldgen::mclone_overworld_v3`, schema
-`mclone-overworld-v3-terrain-v1`. It does not call
+`mclone-overworld-v3-terrain-v2`. It does not call
 `ContinentalSurfacePlan`. Eight stable gradient fields provide broad context
 and subordinate detail while each point examines a fixed 3-by-3 neighborhood
 of 8,192-block analytic landform owners. Range, plateau, basin, rolling, and
@@ -455,6 +455,31 @@ After this integration the complete `mclone-worldgen` suite passes 493 tests
 with one ignored, the complete `mclone-terrain-view` suite passes 158 with one
 ignored, and `cargo check --workspace` passes (pre-existing dead-code warnings
 remain in the dedicated server and Terrain Lab).
+
+### Phase 4: Selectable Profile And Quality-Aware Spawn
+
+`WorldGenerationProfile::McloneOverworldV3` now crosses the shared catalog,
+server plan and worker, native/Web startup codecs, persistence codec, scene
+source identity, offscreen client, and CLI. It is selectable after V2 with
+stable internal binary tag `10`; V1 remains the default. V3 worker sessions
+retain one seeded exact generator and accept target-only requests with no
+seeded dependency chunks or manufactured cache diagnostics.
+
+Spawn selection now makes one bounded 65-by-65 coarse source query over a
+16,384-block review square. It scores dry open candidates with low local slope
+against relief and strong landform facts one to two kiloblocks away, then uses
+the ordinary loaded-chunk safe-surface gate. Tests cover three signed seeds,
+deterministic selection, source quality, exact generation, and safe loaded
+admission.
+
+That gate exposed and corrected a shared terrain semantic defect: uncovered
+space normalized to a `Plain` weight but retained zero internal plain and
+openness strength. V3 schema revision 2 now treats space between explicit
+features as intentional quiet plain country. This is an intentional
+internal-mutable source change, not a relaxation of the spawn criteria. The
+complete worldgen suite remains at 493 passed and one ignored; focused server,
+catalog, scene, Web codec, and persistence tests pass. Live-world pixels and
+stored SQLite/IndexedDB reopen evidence remain open before Phase 4 is accepted.
 
 ## Related
 

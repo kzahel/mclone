@@ -9,6 +9,7 @@ use mclone_worldgen::levelgen::{
     McloneOverworldSamplingTopology, TopologyProbeSource, beta_biome_id,
     mclone_overworld_biome_id_with_topology, mclone_overworld_spawn_chunk_with_topology,
 };
+use mclone_worldgen::mclone_overworld_v3::{McloneOverworldV3TerrainPlan, V3TerrainWindowRequest};
 use mclone_worldgen::surface::overworld_surface_top_material;
 
 use crate::WorldGenerationProfile;
@@ -41,6 +42,7 @@ pub fn initial_spawn_center_for_descriptor(
                 .expect("Mclone spawn topology must pass profile admission"),
         ),
         WorldGenerationProfile::McloneOverworldV2 => continental_overworld_spawn_chunk(seed),
+        WorldGenerationProfile::McloneOverworldV3 => mclone_overworld_v3_spawn_chunk(seed),
         WorldGenerationProfile::TopologyProbeV1 => TopologyProbeSource::new(seed, topology)
             .expect("topology probe spawn topology must pass profile admission")
             .origin_chunk(),
@@ -87,6 +89,7 @@ pub fn find_safe_surface_spawn_for_loaded_descriptor(
             | WorldGenerationProfile::SmallIslandV1
             | WorldGenerationProfile::McloneOverworldV1
             | WorldGenerationProfile::McloneOverworldV2
+            | WorldGenerationProfile::McloneOverworldV3
             | WorldGenerationProfile::TopologyProbeV1
             | WorldGenerationProfile::AlphaV1 { .. }
             | WorldGenerationProfile::BetaV1
@@ -120,6 +123,17 @@ pub fn find_safe_surface_spawn_for_loaded_descriptor(
             is_valid_continental_spawn_surface_block,
         );
     }
+    if profile == WorldGenerationProfile::McloneOverworldV3 {
+        let terrain = McloneOverworldV3TerrainPlan::new(seed);
+        return find_safe_surface_spawn_with_top_material(
+            center,
+            block_at,
+            |x, z| terrain.query_point(x, z).sample.visible_material(),
+            chunk_ready,
+            SpawnColumnOrder::CenterFirst,
+            is_valid_continental_spawn_surface_block,
+        );
+    }
     let biome_source = OverworldBiomeSource::new(seed, false, false);
     find_safe_surface_spawn_with_column_order(
         center,
@@ -139,6 +153,9 @@ pub fn find_safe_surface_spawn_for_loaded_descriptor(
             }
             WorldGenerationProfile::McloneOverworldV2 => {
                 unreachable!("V2 spawn uses its exact substrate above")
+            }
+            WorldGenerationProfile::McloneOverworldV3 => {
+                unreachable!("V3 spawn uses its exact substrate above")
             }
             WorldGenerationProfile::BetaV1 => get_layered_biome_by_id(beta_biome_id(seed, x, z)),
             WorldGenerationProfile::Overworld | WorldGenerationProfile::AuthoredOnly { .. } => {
@@ -189,6 +206,117 @@ fn continental_overworld_spawn_chunk(seed: i64) -> ChunkPos {
         }
     }
     ChunkPos::new(0, 0)
+}
+
+/// Select a deterministic lived-scale V3 start: locally walkable and open,
+/// while keeping a strong landform or meaningful elevation change within a
+/// short journey. The bounded 16-kiloblock review window is sampled once and
+/// does not generate chunks or populate any dependency cache.
+fn mclone_overworld_v3_spawn_chunk(seed: i64) -> ChunkPos {
+    const RADIUS_BLOCKS: i32 = 8_192;
+    const STEP_BLOCKS: i32 = 256;
+    const WIDTH: usize = (RADIUS_BLOCKS as usize * 2 / STEP_BLOCKS as usize) + 1;
+    const LANDMARK_OFFSETS: [usize; 2] = [4, 8];
+
+    let terrain = McloneOverworldV3TerrainPlan::new(seed);
+    let window = terrain
+        .query_lod_window(V3TerrainWindowRequest::new(
+            -RADIUS_BLOCKS,
+            -RADIUS_BLOCKS,
+            WIDTH as u32,
+            WIDTH as u32,
+            STEP_BLOCKS as u32,
+        ))
+        .expect("the fixed V3 spawn review window is valid");
+    let at = |sample_x: usize, sample_z: usize| window.samples[sample_z * WIDTH + sample_x];
+    let mut best: Option<(f32, i64, i32, i32)> = None;
+
+    for sample_z in 8..(WIDTH - 8) {
+        for sample_x in 8..(WIDTH - 8) {
+            let sample = at(sample_x, sample_z);
+            if sample.is_water()
+                || sample.land_weight < 0.62
+                || !(66.0..=120.0).contains(&sample.solid_surface_y)
+                || sample.openness < 0.40
+                || sample.high_axis > 0.36
+                || sample.escarpment > 0.35
+            {
+                continue;
+            }
+
+            let local_max_delta = [(-8, 0), (8, 0), (0, -8), (0, 8)]
+                .into_iter()
+                .map(|(dx, dz)| {
+                    (terrain
+                        .query_point(sample.world_x + dx, sample.world_z + dz)
+                        .sample
+                        .solid_surface_y
+                        - sample.solid_surface_y)
+                        .abs()
+                })
+                .fold(0.0_f32, f32::max);
+            if local_max_delta > 3.5 {
+                continue;
+            }
+
+            let mut nearby_relief = 0.0_f32;
+            let mut nearby_landmark = 0.0_f32;
+            for offset in LANDMARK_OFFSETS {
+                for neighbor in [
+                    at(sample_x - offset, sample_z),
+                    at(sample_x + offset, sample_z),
+                    at(sample_x, sample_z - offset),
+                    at(sample_x, sample_z + offset),
+                ] {
+                    nearby_relief = nearby_relief
+                        .max((neighbor.solid_surface_y - sample.solid_surface_y).abs());
+                    nearby_landmark = nearby_landmark.max(
+                        neighbor
+                            .range_strength
+                            .max(neighbor.high_axis)
+                            .max(neighbor.plateau * 0.82)
+                            .max(neighbor.escarpment * 0.75),
+                    );
+                }
+            }
+            if nearby_relief < 16.0 && nearby_landmark < 0.38 {
+                continue;
+            }
+
+            let distance_squared =
+                i64::from(sample.world_x).pow(2) + i64::from(sample.world_z).pow(2);
+            let distance_penalty = (distance_squared as f32).sqrt() / RADIUS_BLOCKS as f32;
+            let score = sample.openness * 3.2 + sample.clearing * 1.5
+                - sample.forest_opportunity * 0.8
+                - local_max_delta * 0.12
+                + (nearby_relief / 36.0).min(2.5)
+                + nearby_landmark * 3.0
+                - distance_penalty * 0.9;
+            let candidate = (score, distance_squared, sample.world_x, sample.world_z);
+            if best.is_none_or(|current| {
+                candidate.0.total_cmp(&current.0).is_gt()
+                    || (candidate.0 == current.0
+                        && (candidate.1, candidate.3, candidate.2)
+                            < (current.1, current.3, current.2))
+            }) {
+                best = Some(candidate);
+            }
+        }
+    }
+
+    let (_, _, world_x, world_z) = best.unwrap_or_else(|| {
+        let fallback = window
+            .samples
+            .iter()
+            .copied()
+            .filter(|sample| !sample.is_water() && sample.solid_surface_y >= 64.0)
+            .min_by_key(|sample| {
+                i64::from(sample.world_x).pow(2) + i64::from(sample.world_z).pow(2)
+            })
+            .unwrap_or_else(|| terrain.query_point(0, 0).sample);
+        (0.0, 0, fallback.world_x, fallback.world_z)
+    });
+    ChunkPos::new(world_x.div_euclid(16), world_z.div_euclid(16))
 }
 
 #[cfg(test)]
@@ -433,7 +561,7 @@ mod tests {
     use mclone_worldgen::levelgen::{generate_alpha_chunk, generate_beta_chunk};
     use mclone_worldgen::levelgen::{
         generate_continental_candidate_chunk, generate_mclone_overworld_chunk,
-        generate_mclone_overworld_chunk_with_topology,
+        generate_mclone_overworld_chunk_with_topology, generate_mclone_overworld_v3_chunk,
     };
 
     use super::*;
@@ -568,6 +696,53 @@ mod tests {
                     .0,
                 GRASS_BLOCK | PODZOL
             ));
+        }
+    }
+
+    #[test]
+    fn mclone_overworld_v3_selects_a_stable_loaded_quality_spawn() {
+        for seed in [12_345, -98_765, 8_675_309] {
+            let profile = WorldGenerationProfile::McloneOverworldV3;
+            let center = initial_spawn_center_for_profile(seed, profile);
+            assert_eq!(center, initial_spawn_center_for_profile(seed, profile));
+            assert!(center.x.abs() <= 512 && center.z.abs() <= 512, "{center:?}");
+
+            let terrain = McloneOverworldV3TerrainPlan::new(seed);
+            let selected = terrain
+                .query_point(center.min_block_x(), center.min_block_z())
+                .sample;
+            assert!(!selected.is_water(), "seed {seed} selected water");
+            assert!(selected.land_weight >= 0.62, "seed {seed}: {selected:?}");
+            assert!(selected.openness >= 0.40, "seed {seed}: {selected:?}");
+
+            let chunk = generate_mclone_overworld_v3_chunk(seed, center.x, center.z);
+            let spawn = find_safe_surface_spawn_for_loaded_profile(
+                seed,
+                profile,
+                center,
+                |pos| {
+                    (pos.chunk_pos() == center).then(|| {
+                        chunk
+                            .block_at_y(
+                                pos.x - center.min_block_x(),
+                                pos.y,
+                                pos.z - center.min_block_z(),
+                            )
+                            .0
+                    })
+                },
+                |pos| pos == center,
+            )
+            .unwrap_or_else(|| panic!("seed {seed} had no safe V3 spawn in {center:?}"));
+            assert_eq!(
+                BlockPos::new(
+                    spawn.x.floor() as i32,
+                    spawn.y.floor() as i32 - 1,
+                    spawn.z.floor() as i32,
+                )
+                .chunk_pos(),
+                center
+            );
         }
     }
 

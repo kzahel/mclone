@@ -2179,8 +2179,9 @@ pub(crate) fn seasonal_appearance_receipt_json(
         "profile": profile.label(),
         "supported": matches!(
             profile,
-            mclone_server::WorldGenerationProfile::McloneOverworldV1
+                mclone_server::WorldGenerationProfile::McloneOverworldV1
                 | mclone_server::WorldGenerationProfile::McloneOverworldV2
+                | mclone_server::WorldGenerationProfile::McloneOverworldV3
         ),
         "enabled": settings.evaluation_enabled(),
         "solarEnabled": settings.enabled,

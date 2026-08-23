@@ -8685,6 +8685,7 @@ mod tests {
             (WorldGenerationProfile::BetaV1, 7),
             (WorldGenerationProfile::TopologyProbeV1, 8),
             (WorldGenerationProfile::McloneOverworldV2, 9),
+            (WorldGenerationProfile::McloneOverworldV3, 10),
         ] {
             let mut encoded = Vec::new();
             write_world_generation_profile(&mut encoded, profile).unwrap();
@@ -8695,10 +8696,10 @@ mod tests {
             );
         }
         assert!(
-            read_world_generation_profile(&mut [10].as_slice())
+            read_world_generation_profile(&mut [11].as_slice())
                 .unwrap_err()
                 .to_string()
-                .contains("unknown world generation profile tag 10")
+                .contains("unknown world generation profile tag 11")
         );
     }
 
