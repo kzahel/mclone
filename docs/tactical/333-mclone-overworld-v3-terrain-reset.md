@@ -1,10 +1,11 @@
 # Tactical 333: Mclone Overworld V3 Terrain Reset
 
 Status: **implementation active 2026-08-23. The independent source,
-target-only exact lowering, direct shared procedural compiler integration, and
-real selectable-profile integration are complete. First pixels have failed
-visual acceptance. Terrain/presentation revision, compiler-session cache
-review, platform validation, and human review remain.**
+target-only exact lowering, direct shared procedural compiler integration,
+real selectable-profile integration, and first landform-density correction
+are complete. Live composed pixels now prove quiet spawn country beside a
+snow-capped massif. Ordinary V3 vegetation, compiler-session cache review,
+platform validation, and human review remain.**
 
 Topic: `mclone-overworld-v3-terrain-reset`
 Topic: `world-generation-profiles`
@@ -361,11 +362,11 @@ This tactical does not:
 ### Phase 1: Shared V3 Landform Source
 
 The first independent source is
-`mclone-worldgen::mclone_overworld_v3`, schema
-`mclone-overworld-v3-terrain-v2`. It does not call
+`mclone-worldgen::mclone_overworld_v3`, currently at internal-mutable schema
+`mclone-overworld-v3-terrain-v5`. It does not call
 `ContinentalSurfacePlan`. Eight stable gradient fields provide broad context
 and subordinate detail while each point examines a fixed 3-by-3 neighborhood
-of 8,192-block analytic landform owners. Range, plateau, basin, rolling, and
+of 3,072-block analytic landform owners. Range, plateau, basin, rolling, and
 plain recipes publish stable identities plus explicit high-axis, saddle,
 escarpment, valley, clearing, openness, substrate, and forest-opportunity
 facts.
@@ -378,10 +379,11 @@ terrain. Point/window equivalence, query order, cache-free repeat, negative
 coordinates, invalid bounds, coarse identity, and refinement tests pass.
 
 The coordinate-independent review selector scans the fixed owner corpus and
-chooses an ordinary generated range. At seed `12345` it selects
-`(-52721, 68256)` with `199.7` blocks of sampled relief (`Y31.9..231.6`),
+chooses an ordinary generated range. At seed `12345` it currently selects
+`(5179, 2074)` with `218.4` blocks of sampled relief (`Y29.6..248.0`),
 alongside nonzero high-axis, saddle, valley, and openness facts. The receipt is
-written outside the repository by `mclone_overworld_v3_review`.
+written outside the repository by `mclone_overworld_v3_review`; the accepted
+tuning receipt is `/tmp/mclone-overworld-v3-review-v5.json`.
 
 The complete `mclone-worldgen` library suite passes: 487 passed, one ignored.
 
@@ -467,10 +469,11 @@ seeded dependency chunks or manufactured cache diagnostics.
 
 Spawn selection now makes one bounded 65-by-65 coarse source query over a
 16,384-block review square. It scores dry open candidates with low local slope
-against relief and strong landform facts one to two kiloblocks away, then uses
-the ordinary loaded-chunk safe-surface gate. Tests cover three signed seeds,
-deterministic selection, source quality, exact generation, and safe loaded
-admission.
+against uphill relief and strong landform facts 256-512 blocks away, then uses
+the ordinary loaded-chunk safe-surface gate. A candidate must remain below
+Y100, outside the range/plateau/escarpment body, and have at least 120 blocks
+of nearby uphill relief. Tests cover three signed seeds, deterministic
+selection, source quality, exact generation, and safe loaded admission.
 
 That gate exposed and corrected a shared terrain semantic defect: uncovered
 space normalized to a `Plain` weight but retained zero internal plain and
@@ -497,13 +500,48 @@ executor for such profiles. The repaired live capture reaches all 160 logical
 High slots with no pending CPU or vegetation work, no composition errors, and
 a complete spacing-one exact frontier.
 
-The repaired pixels still fail product review. At seed `12345`, both origin and
-the quality-selected spawn `(-160, 32)` are overwhelmingly flat, the nearby
-strong form is only a small horizon sliver, and the procedural surface has
-visible sky breaks at the near/far composition. This separates the original
-missing-horizon host defect from the remaining source scale/distribution and
-presentation defects. Phase 4 profile/reopen wiring is implemented, but the
-live visual milestone remains unaccepted.
+Those repaired pixels still failed product review. At seed `12345`, both
+origin and the then-selected spawn `(-160, 32)` were overwhelmingly flat, the
+nearby strong form was only a small horizon sliver, and the procedural surface
+had visible sky breaks at the near/far composition. This separated the
+original missing-horizon host defect from the remaining source
+scale/distribution and presentation defects.
+
+### Phase 5: Lived-Scale Density Correction
+
+The first source scale used 8,192-block ownership cells and landforms several
+kiloblocks long. It could satisfy numeric relief tests while presenting only a
+thin skyline from ordinary ground. Schema revision 5 contracts ownership to
+3,072 blocks, keeps the same fixed nine owner evaluations per sample, and
+uses compact ranges 1,100-2,200 blocks long and 300-650 blocks wide with
+140-220 blocks of lift. Plateaus, basins, connectors, and explicit plains were
+contracted in parallel. The existing quieting fields still create broad
+walking-scale negative space rather than roughening every column.
+
+The seed `12345` quality spawn is now chunk `(-96, -128)`, centered on open
+ground near Y80. Its southeast coarse witness rises to Y242 within 512 blocks.
+Inspected live composed captures show:
+
+- `/tmp/mclone-v3-live-spawn-v5.png`: broad rolling spawn country with the
+  persistent range on the horizon;
+- `/tmp/mclone-v3-v5-peak-framed.png`: the same range centered from spawn; and
+- `/tmp/mclone-v3-v5-peak-near.png`: an ordinary closer view with a substantial
+  brown foothill face, snow-capped summit ridge, multiple peaks, and no
+  exact/procedural gap.
+
+All 160 High-preset procedural slots were ready in the live captures, with no
+pending CPU work, stale results, vegetation work, or source failure. Total V3
+CPU compile work was about 0.60 seconds for the complete 192-job initial fill.
+The matched seven-iteration release exact receipt at this spawn records V3
+surface/cold/repeated totals of 71.5/70.9/71.4 ms. V1 records
+94.7/357.3/35.3 ms and V2 records 122.8/320.3/82.8 ms in the same run. The
+fixed V3 work counts are unchanged because density does not expand the owner
+neighborhood.
+
+This accepts the first mountain/quiet-country live pixel milestone. The world
+is still intentionally barren because V3 has no ordinary decoration producer;
+forest versus clearing presentation must be implemented from the published
+forest-opportunity facts before Human Review V3-A.
 
 ## Related
 

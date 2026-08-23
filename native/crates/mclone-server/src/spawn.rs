@@ -216,7 +216,7 @@ fn mclone_overworld_v3_spawn_chunk(seed: i64) -> ChunkPos {
     const RADIUS_BLOCKS: i32 = 8_192;
     const STEP_BLOCKS: i32 = 256;
     const WIDTH: usize = (RADIUS_BLOCKS as usize * 2 / STEP_BLOCKS as usize) + 1;
-    const LANDMARK_OFFSETS: [usize; 2] = [4, 8];
+    const LANDMARK_OFFSETS: [usize; 2] = [1, 2];
 
     let terrain = McloneOverworldV3TerrainPlan::new(seed);
     let window = terrain
@@ -236,8 +236,10 @@ fn mclone_overworld_v3_spawn_chunk(seed: i64) -> ChunkPos {
             let sample = at(sample_x, sample_z);
             if sample.is_water()
                 || sample.land_weight < 0.62
-                || !(66.0..=120.0).contains(&sample.solid_surface_y)
+                || !(66.0..=100.0).contains(&sample.solid_surface_y)
                 || sample.openness < 0.40
+                || sample.range_strength > 0.28
+                || sample.plateau > 0.35
                 || sample.high_axis > 0.36
                 || sample.escarpment > 0.35
             {
@@ -259,17 +261,25 @@ fn mclone_overworld_v3_spawn_chunk(seed: i64) -> ChunkPos {
                 continue;
             }
 
-            let mut nearby_relief = 0.0_f32;
+            let mut nearby_uphill_relief = 0.0_f32;
             let mut nearby_landmark = 0.0_f32;
             for offset in LANDMARK_OFFSETS {
-                for neighbor in [
-                    at(sample_x - offset, sample_z),
-                    at(sample_x + offset, sample_z),
-                    at(sample_x, sample_z - offset),
-                    at(sample_x, sample_z + offset),
+                for (offset_x, offset_z) in [
+                    (-(offset as isize), 0),
+                    (offset as isize, 0),
+                    (0, -(offset as isize)),
+                    (0, offset as isize),
+                    (-(offset as isize), -(offset as isize)),
+                    (offset as isize, -(offset as isize)),
+                    (-(offset as isize), offset as isize),
+                    (offset as isize, offset as isize),
                 ] {
-                    nearby_relief = nearby_relief
-                        .max((neighbor.solid_surface_y - sample.solid_surface_y).abs());
+                    let neighbor = at(
+                        sample_x.saturating_add_signed(offset_x),
+                        sample_z.saturating_add_signed(offset_z),
+                    );
+                    nearby_uphill_relief =
+                        nearby_uphill_relief.max(neighbor.solid_surface_y - sample.solid_surface_y);
                     nearby_landmark = nearby_landmark.max(
                         neighbor
                             .range_strength
@@ -279,7 +289,7 @@ fn mclone_overworld_v3_spawn_chunk(seed: i64) -> ChunkPos {
                     );
                 }
             }
-            if nearby_relief < 16.0 && nearby_landmark < 0.38 {
+            if nearby_uphill_relief < 120.0 || nearby_landmark < 0.42 {
                 continue;
             }
 
@@ -288,8 +298,9 @@ fn mclone_overworld_v3_spawn_chunk(seed: i64) -> ChunkPos {
             let distance_penalty = (distance_squared as f32).sqrt() / RADIUS_BLOCKS as f32;
             let score = sample.openness * 3.2 + sample.clearing * 1.5
                 - sample.forest_opportunity * 0.8
+                - (sample.solid_surface_y - 76.0).abs() * 0.08
                 - local_max_delta * 0.12
-                + (nearby_relief / 36.0).min(2.5)
+                + (nearby_uphill_relief / 64.0).min(3.0)
                 + nearby_landmark * 3.0
                 - distance_penalty * 0.9;
             let candidate = (score, distance_squared, sample.world_x, sample.world_z);
@@ -702,9 +713,9 @@ mod tests {
     #[test]
     fn mclone_overworld_v3_selects_a_stable_loaded_quality_spawn() {
         for (seed, expected_center) in [
-            (12_345, ChunkPos::new(-160, 32)),
-            (-98_765, ChunkPos::new(160, 16)),
-            (8_675_309, ChunkPos::new(-96, -144)),
+            (12_345, ChunkPos::new(-96, -128)),
+            (-98_765, ChunkPos::new(128, 32)),
+            (8_675_309, ChunkPos::new(240, 112)),
         ] {
             let profile = WorldGenerationProfile::McloneOverworldV3;
             let center = initial_spawn_center_for_profile(seed, profile);

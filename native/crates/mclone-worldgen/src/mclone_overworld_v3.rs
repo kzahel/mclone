@@ -14,11 +14,11 @@ use crate::{
     noise::{GradientNoise2d, SeedDomain},
 };
 
-pub const MCLONE_OVERWORLD_V3_SCHEMA_REVISION: &str = "mclone-overworld-v3-terrain-v2";
+pub const MCLONE_OVERWORLD_V3_SCHEMA_REVISION: &str = "mclone-overworld-v3-terrain-v5";
 pub const MCLONE_OVERWORLD_V3_SEA_LEVEL: f32 = 63.0;
 pub const MCLONE_OVERWORLD_V3_MAX_WINDOW_SAMPLES: usize = 262_144;
 
-const LANDFORM_CELL_BLOCKS: i32 = 8_192;
+const LANDFORM_CELL_BLOCKS: i32 = 3_072;
 const LANDFORM_OWNER_RADIUS: i32 = 1;
 
 const CONTINENT_DOMAIN: SeedDomain = SeedDomain::new(0x7633_636f_6e74_3031);
@@ -509,7 +509,7 @@ impl McloneOverworldV3TerrainPlan {
             * (1.0 - composition.escarpment * 0.72))
             .clamp(0.0, 1.0);
         let substrate = select_substrate(
-            solid_surface_y,
+            sea_level + continental_height + landform_height,
             land_weight,
             water_kind,
             composition,
@@ -823,32 +823,32 @@ fn landform_feature(seed: i64, owner_x: i32, owner_z: i32) -> LandformFeature {
         owner_x
             .saturating_mul(LANDFORM_CELL_BLOCKS)
             .saturating_add(LANDFORM_CELL_BLOCKS / 2),
-    ) + signed_hash_unit(hash, 11) * 1_450.0;
+    ) + signed_hash_unit(hash, 11) * 600.0;
     let center_z = f64::from(
         owner_z
             .saturating_mul(LANDFORM_CELL_BLOCKS)
             .saturating_add(LANDFORM_CELL_BLOCKS / 2),
-    ) + signed_hash_unit(hash, 27) * 1_450.0;
+    ) + signed_hash_unit(hash, 27) * 600.0;
     let direction = DIRECTIONS[((hash >> 38) & 15) as usize];
     let (length, width, amplitude) = match kind {
         V3LandformKind::Range => (
-            3_700.0 + hash_unit(hash, 5) * 1_700.0,
-            620.0 + hash_unit(hash, 19) * 520.0,
-            92.0 + hash_unit(hash, 33) * 54.0,
+            1_100.0 + hash_unit(hash, 5) * 1_100.0,
+            300.0 + hash_unit(hash, 19) * 350.0,
+            140.0 + hash_unit(hash, 33) * 80.0,
         ),
         V3LandformKind::Plateau => (
-            2_100.0 + hash_unit(hash, 5) * 1_350.0,
-            1_450.0 + hash_unit(hash, 19) * 950.0,
-            46.0 + hash_unit(hash, 33) * 38.0,
+            900.0 + hash_unit(hash, 5) * 800.0,
+            700.0 + hash_unit(hash, 19) * 600.0,
+            46.0 + hash_unit(hash, 33) * 54.0,
         ),
         V3LandformKind::Basin => (
-            2_500.0 + hash_unit(hash, 5) * 1_500.0,
-            1_800.0 + hash_unit(hash, 19) * 1_100.0,
-            11.0 + hash_unit(hash, 33) * 15.0,
+            1_000.0 + hash_unit(hash, 5) * 900.0,
+            800.0 + hash_unit(hash, 19) * 700.0,
+            10.0 + hash_unit(hash, 33) * 16.0,
         ),
         V3LandformKind::RollingConnector | V3LandformKind::Plain => (
-            2_800.0 + hash_unit(hash, 5) * 1_250.0,
-            2_100.0 + hash_unit(hash, 19) * 1_050.0,
+            1_100.0 + hash_unit(hash, 5) * 900.0,
+            900.0 + hash_unit(hash, 19) * 700.0,
             0.0,
         ),
     };
@@ -870,7 +870,7 @@ fn landform_feature(seed: i64, owner_x: i32, owner_z: i32) -> LandformFeature {
 }
 
 fn select_substrate(
-    surface_y: f64,
+    major_surface_y: f64,
     land_weight: f64,
     water_kind: V3WaterKind,
     composition: LandformComposition,
@@ -880,7 +880,7 @@ fn select_substrate(
         V3SurfaceSubstrate::Sand
     } else if water_kind == V3WaterKind::BasinLake {
         V3SurfaceSubstrate::Gravel
-    } else if surface_y > 174.0 && composition.range_strength > 0.46 {
+    } else if major_surface_y > 174.0 && composition.range_strength > 0.46 {
         V3SurfaceSubstrate::Snow
     } else if composition.high_axis > 0.52 || composition.escarpment > 0.48 {
         V3SurfaceSubstrate::Stone
