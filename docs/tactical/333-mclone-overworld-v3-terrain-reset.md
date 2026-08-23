@@ -477,9 +477,33 @@ space normalized to a `Plain` weight but retained zero internal plain and
 openness strength. V3 schema revision 2 now treats space between explicit
 features as intentional quiet plain country. This is an intentional
 internal-mutable source change, not a relaxation of the spawn criteria. The
-complete worldgen suite remains at 493 passed and one ignored; focused server,
+complete worldgen suite reaches 494 passed and one ignored; focused server,
 catalog, scene, Web codec, and persistence tests pass. Live-world pixels and
-stored SQLite/IndexedDB reopen evidence remain open before Phase 4 is accepted.
+stored reopen evidence remained open at that checkpoint.
+
+The ordinary SQLite lane now generates both experimental profiles at their
+selected spawns, shuts down, reopens, republishes byte-identical chunks with
+`LoadedFromStore` residency, and retains the requested profile. The Web catalog
+descriptor independently round-trips V3's persisted label; a real IndexedDB
+browser reopen remains for platform closeout.
+
+The first native live V3 capture exposed a separate LOD-admission defect. V3
+correctly requests no proxy-tree records yet had constrained the shared
+vegetation spacing bound to one, causing High's spacing-four coordinator
+configuration to reject the entire terrain-view engine. V3 now retains the
+ordinary preset bound while its profile-specific predicate continues to
+request no record jobs; scene construction omits the unused vegetation
+executor for such profiles. The repaired live capture reaches all 160 logical
+High slots with no pending CPU or vegetation work, no composition errors, and
+a complete spacing-one exact frontier.
+
+The repaired pixels still fail product review. At seed `12345`, both origin and
+the quality-selected spawn `(-160, 32)` are overwhelmingly flat, the nearby
+strong form is only a small horizon sliver, and the procedural surface has
+visible sky breaks at the near/far composition. This separates the original
+missing-horizon host defect from the remaining source scale/distribution and
+presentation defects. Phase 4 profile/reopen wiring is implemented, but the
+live visual milestone remains unaccepted.
 
 ## Related
 

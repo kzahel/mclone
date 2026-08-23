@@ -18,7 +18,10 @@ use mclone_terrain_view::{
     TerrainViewSourceIdentity, terrain_exact_exposed_boundary_blocks,
     terrain_exact_player_connected_chunks,
 };
-use mclone_worldgen::terrain_preview::{TerrainPreviewContentStage, TerrainPreviewProfile};
+use mclone_worldgen::terrain_preview::{
+    TerrainPreviewContentStage, TerrainPreviewProfile,
+    terrain_preview_requests_tree_records_for_profile,
+};
 
 use crate::{McloneSceneHost, WorldInstanceId, engine_terrain_lod_preset};
 
@@ -526,20 +529,24 @@ impl McloneSceneHost {
                 .map_or(true, |source| source.profile != preview_profile)
         }) {
             // The horizon renderer's profile fixes its procedural program and
-            // vegetation bounds at construction. A world handoff between V1
-            // and V2 therefore needs a new engine before exact coverage for
+            // vegetation bounds at construction. A world handoff among V1,
+            // V2, and V3 therefore needs a new engine before exact coverage for
             // the destination can be composed with it.
             self.reset_terrain_view();
         }
         if self.terrain_view.is_none() {
             let terrain_view = (|| -> Result<SceneTerrainViewState> {
-                let vegetation_executor = self
-                    .terrain_vegetation_executor_factory
-                    .as_ref()
-                    .map(|factory| factory())
-                    .transpose()
-                    .map_err(anyhow::Error::msg)
-                    .context("construct scene terrain vegetation executor")?;
+                let vegetation_executor =
+                    if terrain_preview_requests_tree_records_for_profile(preview_profile, 1) {
+                        self.terrain_vegetation_executor_factory
+                            .as_ref()
+                            .map(|factory| factory())
+                            .transpose()
+                            .map_err(anyhow::Error::msg)
+                            .context("construct scene terrain vegetation executor")?
+                    } else {
+                        None
+                    };
                 SceneTerrainViewState::new(
                     device,
                     queue,

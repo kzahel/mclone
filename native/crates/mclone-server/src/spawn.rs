@@ -701,9 +701,14 @@ mod tests {
 
     #[test]
     fn mclone_overworld_v3_selects_a_stable_loaded_quality_spawn() {
-        for seed in [12_345, -98_765, 8_675_309] {
+        for (seed, expected_center) in [
+            (12_345, ChunkPos::new(-160, 32)),
+            (-98_765, ChunkPos::new(160, 16)),
+            (8_675_309, ChunkPos::new(-96, -144)),
+        ] {
             let profile = WorldGenerationProfile::McloneOverworldV3;
             let center = initial_spawn_center_for_profile(seed, profile);
+            assert_eq!(center, expected_center);
             assert_eq!(center, initial_spawn_center_for_profile(seed, profile));
             assert!(center.x.abs() <= 512 && center.z.abs() <= 512, "{center:?}");
 

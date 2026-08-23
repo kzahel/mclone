@@ -2117,9 +2117,9 @@ pub const fn terrain_preview_max_tree_record_sample_spacing(profile: TerrainPrev
             CONTINENTAL_PROXY_MAX_TREE_RECORD_SAMPLE_SPACING
         }
         // V3 publishes a forest-opportunity summary but has no exact tree
-        // record producer yet. Keep the coordinator's spacing bound valid;
-        // the request predicate below disables record jobs explicitly.
-        TerrainPreviewProfile::McloneOverworldV3 => 1,
+        // record producer yet. Preserve every LOD preset's valid coordinator
+        // bound; the request predicate below disables record jobs explicitly.
+        TerrainPreviewProfile::McloneOverworldV3 => TERRAIN_PREVIEW_MAX_TREE_RECORD_SAMPLE_SPACING,
         TerrainPreviewProfile::McloneOverworldV1 | TerrainPreviewProfile::VanillaOverworld => {
             TERRAIN_PREVIEW_MAX_TREE_RECORD_SAMPLE_SPACING
         }
@@ -3159,6 +3159,22 @@ mod tests {
             ),
             4
         );
+    }
+
+    #[test]
+    fn v3_keeps_lod_spacing_valid_without_requesting_tree_records() {
+        assert_eq!(
+            terrain_preview_max_tree_record_sample_spacing(
+                TerrainPreviewProfile::McloneOverworldV3,
+            ),
+            TERRAIN_PREVIEW_MAX_TREE_RECORD_SAMPLE_SPACING
+        );
+        for sample_spacing in [1, 2, 4] {
+            assert!(!terrain_preview_requests_tree_records_for_profile(
+                TerrainPreviewProfile::McloneOverworldV3,
+                sample_spacing,
+            ));
+        }
     }
 
     #[test]

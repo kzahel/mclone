@@ -261,6 +261,13 @@ mod tests {
     }
 
     #[test]
+    fn descriptor_round_trips_mclone_overworld_v3() {
+        let mut summary = summary();
+        summary.world_generation_profile = WorldGenerationProfile::McloneOverworldV3;
+        assert_eq!(decode(&encode(&summary).unwrap()).unwrap(), summary);
+    }
+
+    #[test]
     fn version_one_descriptor_defaults_to_wild_start() {
         let mut expected = summary();
         expected.starter_content = StarterContentDescriptor::Wild;
