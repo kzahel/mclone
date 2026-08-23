@@ -8,6 +8,10 @@ Append a topic when its first commit is created. Do not reconstruct historical
 topics unless doing so is useful. Keep each string exact across its commit
 series so `git log --grep "Topic: ..."` finds the whole chain.
 
+- `mclone-overworld-v3-terrain-reset` — new shared lived-scale landform
+  source combining strong terrain silhouettes, meaningful quiet country,
+  exact/procedural identity, and V1-class regeneration/refill targets without
+  copying the V2 surface evaluator
 - `unified-native-scene-host` — tactical 168 shared host/driver convergence
 - `asset-pack-profiles` — tactical 169 runtime selection and provenance
 - `multiplayer-networking` — vanilla-shaped push protocol, session layer,
