@@ -293,3 +293,6 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
 - `isocraft-reference` — pinned Isocraft reveal implementation study,
   topology-first room/local-cave masks, geometry cutaway, and lessons for an
   optional Mclone adventure-view control profile
+- `ecstatic-lod-reference` — exact Ecstatic 1.3.0 implementation study and
+  source-level comparison with Mclone's geometry clipmap, Distant Horizons'
+  multi-span columns, and Voxy's volumetric GPU hierarchy

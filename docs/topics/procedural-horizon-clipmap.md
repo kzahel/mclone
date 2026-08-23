@@ -1693,6 +1693,10 @@ and
 ## Related Documents
 
 - [`lod.md`](lod.md) — canonical LOD terminology, ownership, and routing.
+- [`ecstatic-lod-reference.md`](ecstatic-lod-reference.md) — source-level
+  comparison with Ecstatic, Distant Horizons, and Voxy, including the direct
+  procedural-sampling similarity and the different region/quadtree/volumetric
+  residency models.
 - [`universe-product-shell.md`](universe-product-shell.md) — detached-preview
   product role, authority transitions, and preview-truth requirements.
 - [`gpu-procedural-terrain.md`](gpu-procedural-terrain.md) — terrain

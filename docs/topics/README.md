@@ -89,6 +89,11 @@ series implements the same concern, normally reuse the document slug in its
   its Lithosphere terrain dependency, and Tectonic's regional landform router,
   with bounded 3D-geology and ecology lessons for the original mclone
   Overworld.
+- [`ecstatic-lod-reference.md`](ecstatic-lod-reference.md): exact Ecstatic
+  1.3.0 artifact and source study, compared with the current Mclone geometry
+  clipmap, Distant Horizons' multi-span column quadtree, and Voxy's volumetric
+  GPU hierarchy; preserves direct-sampling lessons without reopening the
+  retired chunk-based LOD.
 - [`multiplayer-networking.md`](multiplayer-networking.md): wire protocol,
   transports, session lifecycle, server tick/publication cadence, accepted
   carrier-neutral reliable/ephemeral direction, dependency-free native UDP

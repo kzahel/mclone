@@ -3,7 +3,7 @@
 Topic: `lod`
 
 Status: canonical current terminology and document-routing entry point as of
-2026-08-22. Detailed implementation status remains in
+2026-08-23. Detailed implementation status remains in
 [`procedural-horizon-clipmap.md`](procedural-horizon-clipmap.md); this page does
 not duplicate its execution ledger.
 
@@ -146,6 +146,13 @@ occurs. Human review still owns the perceptual acceptance, especially the
 remaining extreme-aerial canopy faceting.
 
 ## Historical Routes
+
+Comparative implementation research lives in
+[`ecstatic-lod-reference.md`](ecstatic-lod-reference.md). It distinguishes
+Ecstatic's direct-generator persistent region cache, Distant Horizons'
+multi-span column/quadtree system, and Voxy's volumetric GPU hierarchy from the
+current Mclone geometry clipmap. It is evidence and a lesson ledger, not an
+alternate owner or a route back to the retired chunk-based system.
 
 - [`far-lod.md`](far-lod.md) is the retirement record for the removed
   chunk-based runtime.
