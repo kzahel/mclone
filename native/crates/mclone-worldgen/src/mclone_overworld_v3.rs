@@ -14,7 +14,7 @@ use crate::{
     noise::{GradientNoise2d, SeedDomain},
 };
 
-pub const MCLONE_OVERWORLD_V3_SCHEMA_REVISION: &str = "mclone-overworld-v3-terrain-v5";
+pub const MCLONE_OVERWORLD_V3_SCHEMA_REVISION: &str = "mclone-overworld-v3-terrain-v6";
 pub const MCLONE_OVERWORLD_V3_SEA_LEVEL: f32 = 63.0;
 pub const MCLONE_OVERWORLD_V3_MAX_WINDOW_SAMPLES: usize = 262_144;
 
@@ -503,10 +503,13 @@ impl McloneOverworldV3TerrainPlan {
             .max(composition.plain * 0.78)
             .max(composition.basin * 0.42)
             .clamp(0.0, 1.0);
+        let alpine_exposure = smoothstep(132.0, 182.0, solid_surface_y);
         let forest_opportunity = (moisture
             * (1.0 - openness * 0.84)
             * (1.0 - composition.high_axis * 0.55)
-            * (1.0 - composition.escarpment * 0.72))
+            * (1.0 - composition.escarpment * 0.72)
+            * (1.0 - composition.range_strength * 0.52)
+            * (1.0 - alpine_exposure * 0.88))
             .clamp(0.0, 1.0);
         let substrate = select_substrate(
             sea_level + continental_height + landform_height,

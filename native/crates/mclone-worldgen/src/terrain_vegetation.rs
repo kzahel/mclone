@@ -2,10 +2,10 @@ use std::error::Error;
 use std::fmt;
 
 use crate::levelgen::{
-    MCLONE_OVERWORLD_VEGETATION_REVISION, McloneOverworldSamplingTopology,
-    McloneOverworldVegetationPlanCache, McloneTreeArchetype, McloneTreeBounds, McloneTreeFamily,
-    McloneTreeId, McloneTreeOccurrence, McloneTreeRecord, McloneVegetationPlanCacheReport,
-    McloneVegetationSource,
+    MCLONE_OVERWORLD_V3_VEGETATION_SOURCE_REVISION, MCLONE_OVERWORLD_VEGETATION_REVISION,
+    McloneOverworldSamplingTopology, McloneOverworldVegetationPlanCache, McloneTreeArchetype,
+    McloneTreeBounds, McloneTreeFamily, McloneTreeId, McloneTreeOccurrence, McloneTreeRecord,
+    McloneVegetationPlanCacheReport, McloneVegetationSource,
 };
 use crate::placement::BlockPos;
 #[cfg(test)]
@@ -17,7 +17,7 @@ use crate::terrain_preview::{
 };
 
 pub const TERRAIN_VEGETATION_COMPILER_SOURCE_REVISION: &str =
-    "mclone-terrain-vegetation-compiler-v3";
+    "mclone-terrain-vegetation-compiler-v4";
 pub const TERRAIN_VEGETATION_PRODUCT_REVISION: u32 = 1;
 pub const MCHV_WIRE_VERSION: u16 = 2;
 pub const MCHV_OCCURRENCE_BYTES: usize = 80;
@@ -172,7 +172,9 @@ impl TerrainVegetationCompilerSession {
         if self.source != Some(source) {
             self.install_source(source, self.source.is_some());
         }
-        let product = if uses_continental_proxy_vegetation(source.profile) {
+        let product = if uses_continental_proxy_vegetation(source.profile)
+            || source.profile == TerrainPreviewProfile::McloneOverworldV3
+        {
             TerrainPreviewVegetationProduct::compile(request)
         } else {
             let cache = self
@@ -982,7 +984,7 @@ const fn vegetation_revision(profile: TerrainPreviewProfile) -> &'static str {
         TerrainPreviewProfile::McloneOverworldV1 => MCLONE_OVERWORLD_VEGETATION_REVISION,
         TerrainPreviewProfile::ContinentalEcoregionCandidate
         | TerrainPreviewProfile::McloneOverworldV2 => CONTINENTAL_PROXY_VEGETATION_SOURCE_REVISION,
-        TerrainPreviewProfile::McloneOverworldV3 => "no-v3-terrain-preview-vegetation",
+        TerrainPreviewProfile::McloneOverworldV3 => MCLONE_OVERWORLD_V3_VEGETATION_SOURCE_REVISION,
         TerrainPreviewProfile::VanillaOverworld => "no-terrain-preview-vegetation",
     }
 }
@@ -1282,6 +1284,53 @@ mod tests {
                 frame
             );
         }
+    }
+
+    #[test]
+    fn v3_compiler_session_uses_direct_records_without_a_v1_cache() {
+        let bounds = crate::levelgen::McloneVegetationBounds::new(-512, -512, 511, 511).unwrap();
+        let occurrence =
+            crate::levelgen::mclone_overworld_v3_tree_records_intersecting(12_345, bounds)
+                .unwrap()
+                .into_iter()
+                .next()
+                .expect("the V3 vegetation review region contains a tree");
+        let base = occurrence.working_base().unwrap();
+        let request = TerrainPreviewRequest {
+            profile: TerrainPreviewProfile::McloneOverworldV3,
+            seed: 12_345,
+            center_x: base.x,
+            center_z: base.z,
+            sample_spacing: 1,
+            cells_per_axis: 128,
+            topology: McloneOverworldSamplingTopology::Unbounded,
+            content_stage: TerrainPreviewContentStage::Cover,
+            surface_quality: TerrainPreviewSurfaceQuality::Inferred,
+        };
+        let source = TerrainVegetationSourceIdentity::for_request(request).unwrap();
+        let mut session = TerrainVegetationCompilerSession::new(source);
+        let product = session.compile(source, request).unwrap();
+
+        assert!(
+            product
+                .occurrences()
+                .iter()
+                .any(|candidate| candidate.record.id == occurrence.record.id)
+        );
+        assert!(session.cache.is_none());
+        assert_eq!(session.report().cell_requests, 0);
+
+        let (_, job) = identities();
+        let frame = MchvFrame::Completed {
+            job,
+            source,
+            product,
+            compile_micros: 23,
+        };
+        assert_eq!(
+            decode_mchv_frame(&encode_mchv_frame(&frame).unwrap()).unwrap(),
+            frame
+        );
     }
 
     #[test]

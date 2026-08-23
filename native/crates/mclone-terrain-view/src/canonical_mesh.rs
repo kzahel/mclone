@@ -15,6 +15,7 @@ use mclone_worldgen::block::{
 use mclone_worldgen::levelgen::{
     McloneOverworldSamplingTopology, McloneOverworldVegetationPlanCache, McloneTreeFamily,
     McloneTreeOccurrence, McloneVegetationBounds, McloneVegetationSource,
+    mclone_overworld_v3_tree_records_intersecting,
 };
 use mclone_worldgen::terrain_preview::{
     TerrainPreviewProfile, continental_candidate_tree_records_intersecting,
@@ -563,9 +564,10 @@ impl CanonicalMeshSession {
             | TerrainPreviewProfile::McloneOverworldV2 => {
                 continental_candidate_tree_records_intersecting(self.seed, bounds)
             }
-            TerrainPreviewProfile::VanillaOverworld | TerrainPreviewProfile::McloneOverworldV3 => {
-                Ok(Vec::new())
+            TerrainPreviewProfile::McloneOverworldV3 => {
+                mclone_overworld_v3_tree_records_intersecting(self.seed, bounds)
             }
+            TerrainPreviewProfile::VanillaOverworld => Ok(Vec::new()),
         }
     }
 

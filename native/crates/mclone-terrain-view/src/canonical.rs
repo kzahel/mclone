@@ -271,7 +271,7 @@ impl CanonicalTerrainCompiler {
                         )
                     }
                     CanonicalTerrainFeatureDependencies::McloneV3(generator) => (
-                        generator.generate_surface_chunk(chunk_x, chunk_z),
+                        generator.generate_chunk(chunk_x, chunk_z),
                         CanonicalTerrainDependencyCacheReport::default(),
                     ),
                     CanonicalTerrainFeatureDependencies::Vanilla(cache) => {

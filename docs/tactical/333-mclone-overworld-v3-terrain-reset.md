@@ -2,10 +2,10 @@
 
 Status: **implementation active 2026-08-23. The independent source,
 target-only exact lowering, direct shared procedural compiler integration,
-real selectable-profile integration, and first landform-density correction
-are complete. Live composed pixels now prove quiet spawn country beside a
-snow-capped massif. Ordinary V3 vegetation, compiler-session cache review,
-platform validation, and human review remain.**
+real selectable-profile integration, first landform-density correction, and
+ordinary exact/LOD forest language are complete. Live composed pixels now
+prove quiet spawn country, grounded forest margins, and a mostly bare
+snow-capped massif. Platform validation and Human Review V3-A remain.**
 
 Topic: `mclone-overworld-v3-terrain-reset`
 Topic: `world-generation-profiles`
@@ -363,7 +363,7 @@ This tactical does not:
 
 The first independent source is
 `mclone-worldgen::mclone_overworld_v3`, currently at internal-mutable schema
-`mclone-overworld-v3-terrain-v5`. It does not call
+`mclone-overworld-v3-terrain-v6`. It does not call
 `ContinentalSurfacePlan`. Eight stable gradient fields provide broad context
 and subordinate detail while each point examines a fixed 3-by-3 neighborhood
 of 3,072-block analytic landform owners. Range, plateau, basin, rolling, and
@@ -392,10 +392,11 @@ The complete `mclone-worldgen` library suite passes: 487 passed, one ignored.
 `McloneOverworldV3ExactGenerator` retains one shared terrain plan and requests
 one contiguous 16-by-16 spacing-one window for each target chunk. It lowers
 those 256 samples directly into bedrock, stone and surface strata, water,
-heightmaps, and canonical biome payloads. V3 does not yet have a decoration
-stage, so full generation has no feature halo: its work receipt records 256
-samples, 2,304 fixed landform-owner evaluations, 2,048 field evaluations, and
-one exact target.
+heightmaps, and canonical biome payloads. At this checkpoint V3 had no
+decoration stage, so full generation had no feature halo: its work receipt
+recorded 256 samples, 2,304 fixed landform-owner evaluations, 2,048 field
+evaluations, and one exact target. Phase 6 adds target-clipped vegetation
+without changing those terrain-source work counts.
 
 Focused tests prove source/block/water/biome agreement at ordinary and selected
 mountain coordinates, direct adjacent-boundary lowering, and request-order
@@ -539,9 +540,60 @@ fixed V3 work counts are unchanged because density does not expand the owner
 neighborhood.
 
 This accepts the first mountain/quiet-country live pixel milestone. The world
-is still intentionally barren because V3 has no ordinary decoration producer;
-forest versus clearing presentation must be implemented from the published
-forest-opportunity facts before Human Review V3-A.
+was still intentionally barren at that checkpoint; Phase 6 implements forest
+versus clearing presentation from the published forest-opportunity facts.
+
+### Phase 6: Ordinary Forests, Clearings, And Grounded LOD
+
+V3 exact revision 2 and vegetation revision 1 now derive complete stable tree
+records from a global 12-block lattice. Each lattice cell makes one bounded
+terrain query, admits broadleaf or conifer trees from V3 forest opportunity,
+and publishes one coordinate-stable ID, silhouette, and complete bounds.
+Exact chunks request records whose full bounds intersect the target and
+realize only the intersecting blocks through a radius-zero feature region.
+Tests prove signed-coordinate partition stability, forest/clearing response,
+and exact realization without introducing a dependency halo.
+
+The shared procedural vegetation compiler is revision 4. V3 requests the same
+complete records directly at spacings one, two, and four instead of borrowing
+V1's vegetation cache. Native threads and browser Workers carry the same
+source identity and codec. The natural exact-mesh query consumes the same V3
+records, so exact and procedural ownership select one complete tree by stable
+ID.
+
+Initial live review correctly rejected two visual defects: mountain forest
+opportunity produced a nearly continuous tree cover over the main massif, and
+coarse procedural proxies could float above the rendered terrain. Schema
+revision 6 attenuates forest opportunity by range strength and altitude
+exposure, retaining wooded lower slopes while creating a sparse upper tree
+line. The shared tree shader now removes an outer proxy as one complete
+instance when its base enters a finer clipmap ring, and procedural proxies
+anchor their trunks to a bilinear sample of the actual resident terrain tile.
+
+The accepted native captures are:
+
+- `/tmp/mclone-v3-live-vegetation-v5.png`: an open, traversable foreground,
+  sparse grounded exact trees, and a wooded ridge without floating proxies;
+- `/tmp/mclone-v3-vegetation-peak-v5.png`: a mostly bare brown massif with a
+  snow-capped summit and sparse conifers limited to its lower shoulder.
+
+The accepted spawn frame draws 43 procedural tree instances from four ready
+spacing-two tiles. All 160 terrain slots are ready and the frame contains no
+source failure or floating proxy. The matched seven-iteration release receipt
+over 25 spawn chunks, including exact vegetation, records:
+
+| profile | surface | cold exact | repeated-target exact |
+| --- | ---: | ---: | ---: |
+| V1 | 124.3 ms | 346.4 ms | 33.1 ms |
+| V2 | 119.6 ms | 308.4 ms | 78.6 ms |
+| V3 | 66.8 ms | 67.7 ms | 70.3 ms |
+
+The receipt is `/tmp/mclone-overworld-v3-vegetation-perf-v1.json`. Exact V3
+vegetation therefore does not regress the target-only cost envelope and
+remains far below both controls for cold regeneration. Focused V3 worldgen,
+terrain-vegetation, server generation/spawn/persistence, and the complete
+terrain-view library suite pass. Platform package and browser reopen closeout
+remain before Human Review V3-A.
 
 ## Related
 

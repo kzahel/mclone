@@ -91,6 +91,15 @@ instance path. Coarse levels continue to use forest summaries and do not
 enumerate continent-scale trees. The semantic vegetation compiler is v3,
 `MCHV` transport is v2, and canonical terrain batches are v4.
 
+V3 advances the semantic vegetation compiler to v4. Its exact chunks,
+natural exact-mesh query, native compiler, and browser Worker compiler all
+consume one direct source of complete stable records rather than aliasing the
+V1 cache. Records remain detailed through spacing four. Whole procedural
+instances are culled when their base enters a finer clipmap ring, and their
+trunks anchor to a bilinear sample of the resident terrain tile instead of a
+separately evaluated height. The latter is presentation grounding only; exact
+and procedural ownership still use the canonical record ID and bounds.
+
 The first V1/V2 live performance comparison isolated a material source-path
 gap before Tactical
 [`329`](../tactical/329-v2-quest-performance-and-forest-continuity.md).

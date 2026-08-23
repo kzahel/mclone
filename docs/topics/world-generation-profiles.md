@@ -46,8 +46,8 @@ contain generated pixels without any render errors. Tactical
 selectable internal-unshipped `mclone-overworld-v3` with binary tag 10. V3
 uses an independent target-only exact/procedural terrain source and a bounded
 quality-aware spawn query; V1 remains the product default and V2 remains
-selectable as a control. Live pixel, reopen, platform, and human-review
-closeout are still pending.**
+selectable as a control. Native live terrain/vegetation pixels and SQLite
+reopen now pass. Platform/browser and human-review closeout remain.**
 
 This topic owns the current truth and durable decisions for selectable,
 versioned world-generation profiles. Detailed refactoring and implementation
@@ -107,8 +107,9 @@ The stored server-owned `WorldGenerationProfile` has ten values:
   remains available and default;
 - `McloneOverworldV3`: an experimental unbounded, independent landform-first
   profile with target-only exact lowering, direct spacing-aware procedural
-  sampling, and a quality-aware bounded spawn search; V1 remains available and
-  default;
+  sampling, a quality-aware bounded spawn search, and stable forest records
+  shared by exact realization and procedural vegetation; V1 remains available
+  and default;
 - `TopologyProbeV1`: a hidden adversarial plane/cylinder/torus conformance
   generator that guarantees terrain, water, bounded geometry, material,
   lighting, and persistence canaries at canonical seams;

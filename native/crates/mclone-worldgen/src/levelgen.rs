@@ -98,9 +98,10 @@ pub use mclone_overworld::{
     mclone_overworld_surface_recipe, stream_placement, tree_records_intersecting,
 };
 pub use mclone_overworld_v3::{
-    MCLONE_OVERWORLD_V3_EXACT_REVISION, McloneOverworldV3ExactGenerator,
+    MCLONE_OVERWORLD_V3_EXACT_REVISION, MCLONE_OVERWORLD_V3_VEGETATION_REVISION,
+    MCLONE_OVERWORLD_V3_VEGETATION_SOURCE_REVISION, McloneOverworldV3ExactGenerator,
     generate_mclone_overworld_v3_chunk, generate_mclone_overworld_v3_surface_chunk,
-    mclone_overworld_v3_biome_id,
+    mclone_overworld_v3_biome_id, mclone_overworld_v3_tree_records_intersecting,
 };
 pub use planning::{ChunkGenerationPlan, ChunkStatusRequirement};
 pub use profile::{

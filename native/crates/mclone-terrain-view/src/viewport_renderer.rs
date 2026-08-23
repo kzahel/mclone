@@ -8018,6 +8018,15 @@ mod tests {
     }
 
     #[test]
+    fn outer_tree_instances_follow_base_owned_clipmap_rings() {
+        let trees = super::super::TERRAIN_PREVIEW_TREE_WGSL;
+        assert!(trees.contains("input.base_height.x >= f32(params.clipmap_inner_bounds.x)"));
+        assert!(trees.contains("input.base_height.z >= f32(params.clipmap_inner_bounds.y)"));
+        assert!(trees.contains("fn procedural_tree_ground_height("));
+        assert!(trees.contains("let tree_base_y = procedural_tree_ground_height("));
+    }
+
+    #[test]
     fn horizon_environment_is_topology_independent_for_terrain_water_and_trees() {
         let terrain = super::super::TERRAIN_PREVIEW_RENDER_WGSL;
         let trees = super::super::TERRAIN_PREVIEW_TREE_WGSL;

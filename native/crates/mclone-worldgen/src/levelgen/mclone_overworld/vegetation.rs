@@ -1472,7 +1472,10 @@ fn candidate_supports_landform(
     landform.slope <= maximum_slope
 }
 
-fn resolve_silhouette(family: McloneTreeFamily, hash: u64) -> (McloneTreeArchetype, u16, u16, u16) {
+pub(crate) fn resolve_silhouette(
+    family: McloneTreeFamily,
+    hash: u64,
+) -> (McloneTreeArchetype, u16, u16, u16) {
     match family {
         McloneTreeFamily::TemperateBroadleaf => (
             McloneTreeArchetype::RoundedBroadleaf,
@@ -1504,7 +1507,7 @@ fn resolve_silhouette(family: McloneTreeFamily, hash: u64) -> (McloneTreeArchety
     }
 }
 
-fn tree_bounds(
+pub(crate) fn tree_bounds(
     base: BlockPos,
     family: McloneTreeFamily,
     trunk_height: u16,

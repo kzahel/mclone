@@ -39,9 +39,14 @@ adds a separate selectable experimental `mclone-overworld-v3`. V3 does not
 call V2's continental surface evaluator: it owns an independent compact
 landform-first point/window source, target-only exact lowering, direct
 spacing-aware procedural LOD, and a bounded quality-aware spawn query. Its
-first inspected procedural/composed pixels failed visual acceptance, so V3 is
-not a default candidate yet; terrain/presentation revision and platform/reopen
-closeout remain active.
+first inspected procedural/composed pixels failed visual acceptance. A
+lived-scale density correction now presents open rolling spawn country beside
+a persistent snow-capped massif, while ordinary stable tree records create
+real forest margins and clearings across exact chunks and LOD. Mountain
+exposure produces a sparse upper tree line, and procedural tree bases are
+grounded against their resident terrain tile. Native live pixels and SQLite
+reopen pass; V3 is still experimental, with platform/browser closeout and
+Human Review V3-A pending.
 V2's first additional regional archetype is a mesa desert with formation-owned
 tables, stepped escarpments, washes, fans, red-sand basins, exact terracotta
 strata, and ecology-facing habitat facts. Its broad identities remain stable

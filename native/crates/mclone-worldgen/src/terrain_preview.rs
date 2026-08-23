@@ -10,7 +10,7 @@ use crate::levelgen::{
     McloneVegetationPlanCacheReport, McloneVegetationSource, mclone_overworld_biome_recipe,
     mclone_overworld_landform_kind, mclone_overworld_macro_surface_top_material,
     mclone_overworld_preview_visible_material, mclone_overworld_surface_recipe,
-    mclone_overworld_v3_biome_id,
+    mclone_overworld_v3_biome_id, mclone_overworld_v3_tree_records_intersecting,
 };
 use crate::levelgen::{
     VANILLA_OVERWORLD_LOD_REVISION, VanillaOverworldLodSample, VanillaOverworldLodSampler,
@@ -1518,6 +1518,45 @@ impl TerrainPreviewVegetationProduct {
             });
         }
 
+        if source.profile == TerrainPreviewProfile::McloneOverworldV3 {
+            let footprint = i32::try_from(request.footprint_blocks())
+                .map_err(|_| "V3 vegetation footprint exceeds i32")?;
+            let max_x = request
+                .min_x()
+                .checked_add(footprint - 1)
+                .ok_or("V3 vegetation maximum X overflow")?;
+            let max_z = request
+                .min_z()
+                .checked_add(footprint - 1)
+                .ok_or("V3 vegetation maximum Z overflow")?;
+            let bounds =
+                McloneVegetationBounds::new(request.min_x(), request.min_z(), max_x, max_z)
+                    .map_err(|error| error.to_string())?;
+            let mut occurrences =
+                mclone_overworld_v3_tree_records_intersecting(source.seed, bounds)?;
+            occurrences.retain(|occurrence| {
+                let Ok(base) = occurrence.working_base() else {
+                    return false;
+                };
+                base.x >= request.min_x()
+                    && base.x < request.min_x() + footprint
+                    && base.z >= request.min_z()
+                    && base.z < request.min_z() + footprint
+                    && terrain_preview_tree_record_admitted(
+                        source.sample_spacing,
+                        occurrence.record.landmark_rank,
+                    )
+            });
+            return Ok(Self {
+                request,
+                summary_available,
+                records_requested: true,
+                records_aggregated: false,
+                occurrences,
+                cache_report: McloneVegetationPlanCacheReport::default(),
+            });
+        }
+
         let vegetation_source = McloneVegetationSource::new(source.seed, source.topology);
         if !cache.matches(vegetation_source) {
             *cache = McloneOverworldVegetationPlanCache::new(vegetation_source);
@@ -2116,9 +2155,6 @@ pub const fn terrain_preview_max_tree_record_sample_spacing(profile: TerrainPrev
         | TerrainPreviewProfile::McloneOverworldV2 => {
             CONTINENTAL_PROXY_MAX_TREE_RECORD_SAMPLE_SPACING
         }
-        // V3 publishes a forest-opportunity summary but has no exact tree
-        // record producer yet. Preserve every LOD preset's valid coordinator
-        // bound; the request predicate below disables record jobs explicitly.
         TerrainPreviewProfile::McloneOverworldV3 => TERRAIN_PREVIEW_MAX_TREE_RECORD_SAMPLE_SPACING,
         TerrainPreviewProfile::McloneOverworldV1 | TerrainPreviewProfile::VanillaOverworld => {
             TERRAIN_PREVIEW_MAX_TREE_RECORD_SAMPLE_SPACING
@@ -2130,9 +2166,6 @@ pub const fn terrain_preview_requests_tree_records_for_profile(
     profile: TerrainPreviewProfile,
     sample_spacing: u32,
 ) -> bool {
-    if matches!(profile, TerrainPreviewProfile::McloneOverworldV3) {
-        return false;
-    }
     sample_spacing <= terrain_preview_max_tree_record_sample_spacing(profile)
 }
 
@@ -2155,8 +2188,9 @@ pub const fn terrain_preview_tree_record_admitted_for_profile(
         | TerrainPreviewProfile::McloneOverworldV2 => {
             continental_proxy_tree_record_admitted(sample_spacing, landmark_rank)
         }
-        TerrainPreviewProfile::McloneOverworldV3 => false,
-        TerrainPreviewProfile::McloneOverworldV1 | TerrainPreviewProfile::VanillaOverworld => {
+        TerrainPreviewProfile::McloneOverworldV1
+        | TerrainPreviewProfile::McloneOverworldV3
+        | TerrainPreviewProfile::VanillaOverworld => {
             terrain_preview_tree_record_admitted(sample_spacing, landmark_rank)
         }
     }
@@ -3162,7 +3196,7 @@ mod tests {
     }
 
     #[test]
-    fn v3_keeps_lod_spacing_valid_without_requesting_tree_records() {
+    fn v3_requests_stable_tree_records_at_supported_lod_spacings() {
         assert_eq!(
             terrain_preview_max_tree_record_sample_spacing(
                 TerrainPreviewProfile::McloneOverworldV3,
@@ -3170,11 +3204,43 @@ mod tests {
             TERRAIN_PREVIEW_MAX_TREE_RECORD_SAMPLE_SPACING
         );
         for sample_spacing in [1, 2, 4] {
-            assert!(!terrain_preview_requests_tree_records_for_profile(
+            assert!(terrain_preview_requests_tree_records_for_profile(
                 TerrainPreviewProfile::McloneOverworldV3,
                 sample_spacing,
             ));
         }
+        assert!(!terrain_preview_requests_tree_records_for_profile(
+            TerrainPreviewProfile::McloneOverworldV3,
+            8,
+        ));
+
+        let search_bounds = McloneVegetationBounds::new(-512, -512, 511, 511).unwrap();
+        let expected = mclone_overworld_v3_tree_records_intersecting(12_345, search_bounds)
+            .unwrap()
+            .into_iter()
+            .next()
+            .expect("the V3 vegetation review region contains a tree");
+        let base = expected.working_base().unwrap();
+        let request = TerrainPreviewRequest {
+            profile: TerrainPreviewProfile::McloneOverworldV3,
+            seed: 12_345,
+            center_x: base.x,
+            center_z: base.z,
+            sample_spacing: 1,
+            cells_per_axis: 128,
+            topology: McloneOverworldSamplingTopology::Unbounded,
+            content_stage: TerrainPreviewContentStage::Cover,
+            surface_quality: TerrainPreviewSurfaceQuality::Inferred,
+        };
+        let product = TerrainPreviewVegetationProduct::compile(request).unwrap();
+        assert!(product.records_requested());
+        assert!(!product.records_aggregated());
+        assert!(
+            product
+                .occurrences()
+                .iter()
+                .any(|occurrence| occurrence.record.id == expected.record.id)
+        );
     }
 
     #[test]

@@ -511,7 +511,7 @@ impl WorldGenerationExecutor {
                 let chunks = targets
                     .iter()
                     .copied()
-                    .map(|pos| (pos, generator.generate_surface_chunk(pos.x, pos.z)))
+                    .map(|pos| (pos, generator.generate_chunk(pos.x, pos.z)))
                     .collect();
                 Ok(WorldGenerationBatchResult {
                     chunks,

@@ -186,7 +186,7 @@ fn run_v3_surface(config: Config, positions: &[ChunkPos]) -> PhaseReceipt {
     let mut receipt = PhaseReceipt::default();
     for _ in 0..config.iterations {
         let generator = McloneOverworldV3ExactGenerator::new(config.seed);
-        run_v3_iteration(&generator, positions, &mut receipt);
+        run_v3_surface_iteration(&generator, positions, &mut receipt);
     }
     receipt.elapsed_ms = elapsed_ms(start.elapsed());
     receipt
@@ -310,6 +310,18 @@ fn run_v3_exact(config: Config, positions: &[ChunkPos], mode: CacheMode) -> Phas
 }
 
 fn run_v3_iteration(
+    generator: &McloneOverworldV3ExactGenerator,
+    positions: &[ChunkPos],
+    receipt: &mut PhaseReceipt,
+) {
+    for position in positions {
+        let chunk = generator.generate_chunk(position.x, position.z);
+        receipt.generated_target_chunks += 1;
+        receipt.non_air_blocks += chunk.non_air_block_count();
+    }
+}
+
+fn run_v3_surface_iteration(
     generator: &McloneOverworldV3ExactGenerator,
     positions: &[ChunkPos],
     receipt: &mut PhaseReceipt,

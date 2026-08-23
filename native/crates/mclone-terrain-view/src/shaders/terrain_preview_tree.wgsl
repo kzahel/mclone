@@ -177,6 +177,30 @@ fn canopy_height_hash(world_x: i32, world_z: i32) -> f32 {
     return f32(value & 1023u) / 1023.0;
 }
 
+fn procedural_tree_ground_height(base_xz: vec2<f32>, canonical_base_y: f32) -> f32 {
+    if params.layer_samples_size.x != 0u || params.layer_samples_size.y < 2u {
+        return canonical_base_y;
+    }
+    let spacing = max(f32(params.origin_spacing_cells.z), 1.0);
+    let cells = max(params.origin_spacing_cells.w, 1);
+    let local = clamp(
+        (base_xz - vec2<f32>(params.origin_spacing_cells.xy)) / spacing,
+        vec2<f32>(0.0),
+        vec2<f32>(f32(cells)),
+    );
+    let lower = vec2<u32>(floor(local));
+    let upper = min(lower + vec2<u32>(1u), vec2<u32>(u32(cells)));
+    let blend = fract(local);
+    let row_stride = params.layer_samples_size.y;
+    let north_west = terrain_samples[lower.y * row_stride + lower.x].terrain.y;
+    let north_east = terrain_samples[lower.y * row_stride + upper.x].terrain.y;
+    let south_west = terrain_samples[upper.y * row_stride + lower.x].terrain.y;
+    let south_east = terrain_samples[upper.y * row_stride + upper.x].terrain.y;
+    let north = mix(north_west, north_east, blend.x);
+    let south = mix(south_west, south_east, blend.x);
+    return floor(mix(north, south, blend.y)) + 1.0;
+}
+
 fn canopy_vertex(vertex_index: u32, view_index: u32) -> VertexOutput {
     let canopy_cells_per_axis = 16u;
     let tile_cells = u32(params.origin_spacing_cells.w);
@@ -305,9 +329,10 @@ fn tree_vertex(
     let trunk_height = input.base_height.w;
     let crown_radius = input.crown_family.x;
     let crown_depth = input.crown_family.y;
+    let tree_base_y = procedural_tree_ground_height(input.base_height.xz, input.base_height.y);
     var center = vec3<f32>(
         input.base_height.x,
-        input.base_height.y + trunk_height * 0.5,
+        tree_base_y + trunk_height * 0.5,
         input.base_height.z,
     );
     var half_extent = vec3<f32>(0.34, trunk_height * 0.5, 0.34);
@@ -315,7 +340,7 @@ fn tree_vertex(
 
     if box_index > 0u {
         trunk = false;
-        center.y = input.base_height.y + trunk_height - crown_depth * 0.32;
+        center.y = tree_base_y + trunk_height - crown_depth * 0.32;
         half_extent = vec3<f32>(crown_radius, max(crown_depth * 0.38, 0.5), crown_radius);
         if family == 2u {
             if box_index == 2u {
@@ -389,6 +414,19 @@ fn tree_vertex(
         1.0,
     );
     if (params.multiview_options.x & (1u << view_index)) == 0u {
+        clip_position = vec4<f32>(2.0, 2.0, 2.0, 1.0);
+    }
+    // Clipmap levels overlap at their inner ring. Ownership follows the tree
+    // base, so an outer-level crown must not survive by extending beyond the
+    // per-fragment inner-bound discard after its base moved to the finer
+    // level. Culling the complete outer instance avoids detached crowns while
+    // preserving whole-tree identity at the inner owner.
+    if params.clipmap_inner_bounds.z > params.clipmap_inner_bounds.x
+        && params.clipmap_inner_bounds.w > params.clipmap_inner_bounds.y
+        && input.base_height.x >= f32(params.clipmap_inner_bounds.x)
+        && input.base_height.x < f32(params.clipmap_inner_bounds.z)
+        && input.base_height.z >= f32(params.clipmap_inner_bounds.y)
+        && input.base_height.z < f32(params.clipmap_inner_bounds.w) {
         clip_position = vec4<f32>(2.0, 2.0, 2.0, 1.0);
     }
 
