@@ -1,9 +1,9 @@
 # Tactical 333: Mclone Overworld V3 Terrain Reset
 
 Status: **implementation active 2026-08-23. Phase 1's independent shared V3
-source, fixed-corpus distribution witness, and mountain review selector are
-complete. Exact lowering, procedural composition, profile integration,
-performance recovery, and human review remain.**
+source and Phase 2's target-only exact lowering are complete. First pixels,
+procedural composition, profile integration, compiler-session cache review,
+platform validation, and human review remain.**
 
 Topic: `mclone-overworld-v3-terrain-reset`
 Topic: `world-generation-profiles`
@@ -383,6 +383,40 @@ alongside nonzero high-axis, saddle, valley, and openness facts. The receipt is
 written outside the repository by `mclone_overworld_v3_review`.
 
 The complete `mclone-worldgen` library suite passes: 487 passed, one ignored.
+
+### Phase 2: Target-Only Exact Lowering
+
+`McloneOverworldV3ExactGenerator` retains one shared terrain plan and requests
+one contiguous 16-by-16 spacing-one window for each target chunk. It lowers
+those 256 samples directly into bedrock, stone and surface strata, water,
+heightmaps, and canonical biome payloads. V3 does not yet have a decoration
+stage, so full generation has no feature halo: its work receipt records 256
+samples, 2,304 fixed landform-owner evaluations, 2,048 field evaluations, and
+one exact target.
+
+Focused tests prove source/block/water/biome agreement at ordinary and selected
+mountain coordinates, direct adjacent-boundary lowering, and request-order
+independence. The shared profile performance receipt now compares V1, V2, and
+V3. On the development M4 Pro, seven release iterations over 25 origin chunks
+produced these elapsed totals:
+
+| profile | surface | cold exact | repeated-target exact |
+| --- | ---: | ---: | ---: |
+| V1 | 129.8 ms | 308.9 ms | 35.3 ms |
+| V2 | 120.6 ms | 301.8 ms | 80.8 ms |
+| V3 | 68.8 ms | 67.7 ms | 68.0 ms |
+
+At the selected V3 mountain center the corresponding V3 totals are 59.8,
+57.9, and 60.0 ms. V3's cold target-only path is already substantially below
+both controls. The repeated-target comparison remains open: V1 and V2 reuse
+cached input surfaces in that lane, while V3 currently recomputes target
+columns. The later server/compiler-session integration must establish whether
+ordinary persistence caching makes that difference irrelevant or whether V3
+needs a bounded source/chunk cache before Human Review V3-A.
+
+Exact rendered pixels remain the next Phase 2 milestone; this lowering commit
+does not claim visual acceptance. With the exact tests included, the complete
+`mclone-worldgen` library suite passes: 491 passed, one ignored.
 
 ## Related
 

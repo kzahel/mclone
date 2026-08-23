@@ -5,6 +5,7 @@ mod continental_candidate;
 mod feature_batch;
 mod generator;
 mod mclone_overworld;
+mod mclone_overworld_v3;
 mod planning;
 mod profile;
 mod sampler;
@@ -95,6 +96,11 @@ pub use mclone_overworld::{
     mclone_overworld_spawn_chunk, mclone_overworld_spawn_chunk_with_topology,
     mclone_overworld_steppe_band, mclone_overworld_steppe_suitability,
     mclone_overworld_surface_recipe, stream_placement, tree_records_intersecting,
+};
+pub use mclone_overworld_v3::{
+    MCLONE_OVERWORLD_V3_EXACT_REVISION, McloneOverworldV3ExactGenerator,
+    generate_mclone_overworld_v3_chunk, generate_mclone_overworld_v3_surface_chunk,
+    mclone_overworld_v3_biome_id,
 };
 pub use planning::{ChunkGenerationPlan, ChunkStatusRequirement};
 pub use profile::{

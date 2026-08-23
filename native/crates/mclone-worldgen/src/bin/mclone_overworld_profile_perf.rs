@@ -4,7 +4,7 @@ use mclone_core::ChunkPos;
 use mclone_worldgen::levelgen::{
     ContinentalCandidateExactGenerator, ContinentalCandidateFeatureDependencyCache,
     McloneOverworldFeatureDependencyCache, McloneOverworldSamplingTopology,
-    generate_mclone_overworld_surface_chunks_with_topology,
+    McloneOverworldV3ExactGenerator, generate_mclone_overworld_surface_chunks_with_topology,
 };
 use serde::Serialize;
 
@@ -25,7 +25,7 @@ fn run() -> Result<(), String> {
     let config = Config::parse(std::env::args().skip(1))?;
     let positions = square_positions(config.center_x, config.center_z, config.radius);
     let receipt = ProfileComparisonReceipt {
-        schema_revision: "mclone-overworld-profile-performance-v1",
+        schema_revision: "mclone-overworld-profile-performance-v2",
         seed: config.seed,
         center_chunk_x: config.center_x,
         center_chunk_z: config.center_z,
@@ -43,6 +43,12 @@ fn run() -> Result<(), String> {
             surface: run_v2_surface(config, &positions),
             exact_cold: run_v2_exact(config, &positions, CacheMode::Cold),
             exact_warm: run_v2_exact(config, &positions, CacheMode::Warm),
+        },
+        v3: ProfileReceipt {
+            profile: "mclone-overworld-v3",
+            surface: run_v3_surface(config, &positions),
+            exact_cold: run_v3_exact(config, &positions, CacheMode::Cold),
+            exact_warm: run_v3_exact(config, &positions, CacheMode::Warm),
         },
     };
     println!(
@@ -117,6 +123,7 @@ struct ProfileComparisonReceipt {
     iterations: usize,
     v1: ProfileReceipt,
     v2: ProfileReceipt,
+    v3: ProfileReceipt,
 }
 
 #[derive(Serialize)]
@@ -169,6 +176,17 @@ fn run_v2_surface(config: Config, positions: &[ChunkPos]) -> PhaseReceipt {
             receipt.generated_target_chunks += 1;
             receipt.non_air_blocks += chunk.non_air_block_count();
         }
+    }
+    receipt.elapsed_ms = elapsed_ms(start.elapsed());
+    receipt
+}
+
+fn run_v3_surface(config: Config, positions: &[ChunkPos]) -> PhaseReceipt {
+    let start = Instant::now();
+    let mut receipt = PhaseReceipt::default();
+    for _ in 0..config.iterations {
+        let generator = McloneOverworldV3ExactGenerator::new(config.seed);
+        run_v3_iteration(&generator, positions, &mut receipt);
     }
     receipt.elapsed_ms = elapsed_ms(start.elapsed());
     receipt
@@ -264,6 +282,43 @@ fn run_v2_exact(config: Config, positions: &[ChunkPos], mode: CacheMode) -> Phas
     }
     receipt.elapsed_ms = elapsed_ms(start.elapsed());
     receipt
+}
+
+fn run_v3_exact(config: Config, positions: &[ChunkPos], mode: CacheMode) -> PhaseReceipt {
+    let start;
+    let mut receipt = PhaseReceipt::default();
+    match mode {
+        CacheMode::Cold => {
+            start = Instant::now();
+            for _ in 0..config.iterations {
+                let generator = McloneOverworldV3ExactGenerator::new(config.seed);
+                run_v3_iteration(&generator, positions, &mut receipt);
+            }
+        }
+        CacheMode::Warm => {
+            let generator = McloneOverworldV3ExactGenerator::new(config.seed);
+            let mut warmup = PhaseReceipt::default();
+            run_v3_iteration(&generator, positions, &mut warmup);
+            start = Instant::now();
+            for _ in 0..config.iterations {
+                run_v3_iteration(&generator, positions, &mut receipt);
+            }
+        }
+    }
+    receipt.elapsed_ms = elapsed_ms(start.elapsed());
+    receipt
+}
+
+fn run_v3_iteration(
+    generator: &McloneOverworldV3ExactGenerator,
+    positions: &[ChunkPos],
+    receipt: &mut PhaseReceipt,
+) {
+    for position in positions {
+        let chunk = generator.generate_surface_chunk(position.x, position.z);
+        receipt.generated_target_chunks += 1;
+        receipt.non_air_blocks += chunk.non_air_block_count();
+    }
 }
 
 fn run_v2_exact_iteration(
