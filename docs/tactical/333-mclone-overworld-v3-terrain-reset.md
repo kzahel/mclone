@@ -1,9 +1,9 @@
 # Tactical 333: Mclone Overworld V3 Terrain Reset
 
-Status: **planned 2026-08-23; implementation authorized. Create and commit
-the tactical first, then land the shared source, exact/LOD vertical slice,
-profile integration, performance evidence, and human review in independently
-useful commits.**
+Status: **implementation active 2026-08-23. Phase 1's independent shared V3
+source, fixed-corpus distribution witness, and mountain review selector are
+complete. Exact lowering, procedural composition, profile integration,
+performance recovery, and human review remain.**
 
 Topic: `mclone-overworld-v3-terrain-reset`
 Topic: `world-generation-profiles`
@@ -354,6 +354,35 @@ This tactical does not:
 - make the renderer choose canonical geography;
 - increase exact render distance or hide transitions with fog; or
 - accept a beautiful hand-picked mountain while ordinary starts remain flat.
+
+## Execution Record
+
+### Phase 1: Shared V3 Landform Source
+
+The first independent source is
+`mclone-worldgen::mclone_overworld_v3`, schema
+`mclone-overworld-v3-terrain-v1`. It does not call
+`ContinentalSurfacePlan`. Eight stable gradient fields provide broad context
+and subordinate detail while each point examines a fixed 3-by-3 neighborhood
+of 8,192-block analytic landform owners. Range, plateau, basin, rolling, and
+plain recipes publish stable identities plus explicit high-axis, saddle,
+escarpment, valley, clearing, openness, substrate, and forest-opportunity
+facts.
+
+The exact point and spacing-aware window contracts are implemented. Coarse
+queries retain feature, water, and substrate identity while progressively
+removing rolling, local, walking, and micro frequencies. A 131-kiloblock
+distribution test requires nontrivial strong and quiet land coverage and high
+terrain. Point/window equivalence, query order, cache-free repeat, negative
+coordinates, invalid bounds, coarse identity, and refinement tests pass.
+
+The coordinate-independent review selector scans the fixed owner corpus and
+chooses an ordinary generated range. At seed `12345` it selects
+`(-52721, 68256)` with `199.7` blocks of sampled relief (`Y31.9..231.6`),
+alongside nonzero high-axis, saddle, valley, and openness facts. The receipt is
+written outside the repository by `mclone_overworld_v3_review`.
+
+The complete `mclone-worldgen` library suite passes: 487 passed, one ignored.
 
 ## Related
 
