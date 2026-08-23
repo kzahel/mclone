@@ -5,6 +5,7 @@
 //! named exception until Slice 4.
 
 const SESSION: &str = include_str!("../../../crates/mclone-terrain-view/src/runtime_session.rs");
+const EXPLORER_LIB: &str = include_str!("../src/lib.rs");
 const NATIVE_TERRAIN: &str = include_str!("../src/terrain.rs");
 const WEB_HOST: &str = include_str!("../src/web.rs");
 const WEB_APP: &str = include_str!("../www/world-explorer-app.js");
@@ -182,14 +183,26 @@ fn native_and_browser_cutovers_remove_horizon_sync_compilation() {
         0,
         "the Horizon renderer regained synchronous vegetation compilation"
     );
+    for profile in [
+        "TerrainPreviewProfile::McloneOverworldV1",
+        "TerrainPreviewProfile::ContinentalEcoregionCandidate",
+        "TerrainPreviewProfile::McloneOverworldV2",
+        "TerrainPreviewProfile::McloneOverworldV3",
+    ] {
+        assert!(
+            EXPLORER_LIB.contains(profile),
+            "Explorer vegetation predicate must explicitly qualify source {profile}"
+        );
+    }
     for (label, source) in [("native", NATIVE_TERRAIN), ("browser", WEB_HOST)] {
         assert!(
-            source.contains("TerrainPreviewProfile::McloneOverworldV1")
-                && source.contains("TerrainPreviewProfile::ContinentalEcoregionCandidate"),
-            "{label} vegetation must be explicitly qualified to both compatible sources"
+            source.contains("world_explorer_vegetation_enabled(options.terrain_profile)"),
+            "{label} vegetation must use the shared Explorer source predicate"
         );
         assert_eq!(
-            source.matches("vegetation_enabled,").count(),
+            source
+                .matches("\n                vegetation_enabled,")
+                .count(),
             1,
             "{label} must pass one named vegetation enablement into the shared session"
         );

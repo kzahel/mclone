@@ -20,6 +20,7 @@ const sourceColors = process.argv.includes("--source-colors");
 const composition = argumentValue("--composition") ?? "composed";
 const exactAnchor = argumentValue("--exact-anchor") ?? "focus";
 const terrainSource = argumentValue("--source") ?? "production";
+const expectedTerrainSource = expectedTerrainSourceLabel(terrainSource);
 const journey = argumentValue("--journey");
 const catchmentSite = argumentValue("--catchment-site");
 const centerX = argumentValue("--center-x");
@@ -236,9 +237,7 @@ function assertCompositionReport(report) {
       ? "discard-painted"
       : "disabled";
   if (report.composition !== composition
-      || report.terrainSource !== (terrainSource === "continental"
-        ? "continental-ecoregion-candidate-v1"
-        : "mclone-overworld-v1")
+      || report.terrainSource !== expectedTerrainSource
       || report.journey !== (journey ?? null)
       || report.catchmentSite !== (catchmentSite ?? null)
       || report.sourceColors !== sourceColors
@@ -277,6 +276,28 @@ function assertCompositionReport(report) {
       `browser exact composition did not reach a coherent frame:\n`
         + `${JSON.stringify(report, null, 2)}`,
     );
+  }
+}
+
+function expectedTerrainSourceLabel(source) {
+  switch (source) {
+    case "production":
+    case "mclone-overworld-v1":
+    case "mclone-v1":
+    case "v1":
+      return "mclone-overworld-v1";
+    case "continental":
+      return "continental-ecoregion-candidate-v1";
+    case "mclone-overworld-v2":
+    case "mclone-v2":
+    case "v2":
+      return "mclone-overworld-v2";
+    case "mclone-overworld-v3":
+    case "mclone-v3":
+    case "v3":
+      return "mclone-overworld-v3";
+    default:
+      throw new Error(`unsupported browser composition terrain source ${source}`);
   }
 }
 

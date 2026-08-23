@@ -1,11 +1,13 @@
 # Tactical 333: Mclone Overworld V3 Terrain Reset
 
-Status: **implementation active 2026-08-23. The independent source,
+Status: **awaiting Human Review V3-A as of 2026-08-23. The independent source,
 target-only exact lowering, direct shared procedural compiler integration,
 real selectable-profile integration, first landform-density correction, and
 ordinary exact/LOD forest language are complete. Live composed pixels now
 prove quiet spawn country, grounded forest margins, and a mostly bare
-snow-capped massif. Platform validation and Human Review V3-A remain.**
+snow-capped massif. Native, WebGPU, Wasm, flat Android, Quest package and real
+stereo-frame, persistence, synthetic-stereo, and retained-movement boundaries
+pass. The aerial exact/procedural albedo rectangle remains a review candidate.**
 
 Topic: `mclone-overworld-v3-terrain-reset`
 Topic: `world-generation-profiles`
@@ -593,7 +595,64 @@ vegetation therefore does not regress the target-only cost envelope and
 remains far below both controls for cold regeneration. Focused V3 worldgen,
 terrain-vegetation, server generation/spawn/persistence, and the complete
 terrain-view library suite pass. Platform package and browser reopen closeout
-remain before Human Review V3-A.
+remained at that checkpoint before Human Review V3-A.
+
+### Phase 7: Retained Movement And Platform Closeout
+
+The retained World Explorer gate exposed two stale host assumptions rather
+than a terrain-source failure. Native and browser World Explorer constructed
+vegetation executors only for V1 and the detached continental candidate, and
+the browser composition assertion interpreted every non-continental source
+as V1. One shared Explorer predicate now enables vegetation for V1, the
+candidate, V2, and V3; the browser assertion preserves each source identity.
+The live-game browser runner likewise admits V3 as an explicit profile.
+
+Matched native offscreen retained smokes at seed `12345`, center
+`(-1528, -2040)`, High, 512 blocks across, and exact radius four record:
+
+| profile | first coarse | first target | settle p95 | motion p95 |
+| --- | ---: | ---: | ---: | ---: |
+| V1 | 41.25 ms | 145.50 ms | 6.69 ms | 13.49 ms |
+| V2 | 128.83 ms | 602.61 ms | 4.32 ms | 4.55 ms |
+| V3 | 54.09 ms | 173.12 ms | 3.09 ms | 2.99 ms |
+
+V3 reaches the first complete target within 19.0% of V1 and far below V2.
+All profiles begin with 160 terrain refills. The fixed 164-by-20-block V3
+movement adds 44 terrain refills and 32 vegetation products, then returns to
+160/160 terrain slots and 48/48 vegetation tiles with no pending or failed
+work. V3 vegetation compilation grows from 4.64 to 6.46 ms across the entire
+run, compared with 57.69 to 64.43 ms for V1 and 65.67 to 82.42 ms for V2.
+The receipts live under `/tmp/mclone-v{1,2,3}-retained-smoke-v3/`.
+
+The following platform boundaries pass:
+
+- `cargo check --workspace` and the thin-adapter/Worker-ownership audit;
+- `mclone-web-client` and World Explorer `wasm32-unknown-unknown` builds;
+- real WebGPU IndexedDB generation/reopen as V3, preserving 121 stored chunks,
+  49 loaded exact columns, the quality spawn, and Worker compilation before
+  and after reload;
+- WebGPU live Off/Medium/High/Low LOD transitions and reload, with all targets
+  ready, 48 completed V3 vegetation jobs, and inspected non-black pixels in
+  `/tmp/mclone-native-web-terrain-horizon-toggle-canvas.png`;
+- WebGPU World Explorer retained movement with 160/160 terrain slots, 48/48
+  vegetation tiles, no ownership/Worker failures, and inspected initial and
+  moved frames under `/tmp/mclone-world-explorer-web-desktop-mclone-overworld-v3-composed-*.png`;
+- flat Android and Quest release package builds;
+- a V3 flat-Android AVD launch and inspected frame at
+  `/tmp/mclone-android-avd-chunk.png`;
+- a synthetic-stereo V3 render with distinct per-eye pixels; and
+- a transactional physical Quest 3 launch that logged
+  `MCLONE_ANDROID_XR_READY` only after submitting its first stereo V3 terrain
+  frame, then restored the headset's prior sleep state.
+
+The WebGPU live-game view and ground-level horizon frame are accepted. The
+aerial World Explorer frames clearly show the range, multiple snowy summits,
+open lowland, sparse tree line, and stable retained movement, but they also
+show a rectangular albedo/texture difference around the exact footprint. The
+source, coverage generation, tree ownership, and terrain readiness all agree;
+this is the existing exact-versus-procedural appearance boundary, not a V3
+geography discontinuity. It remains explicit evidence for Human Review V3-A,
+not a hidden claim of seamless aerial composition.
 
 ## Related
 

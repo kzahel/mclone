@@ -142,6 +142,15 @@ entering-strip refills and returns all 160 logical slots to ready. V1 reaches
 the target in about `4.5 s`; the V2 jungle takes about `13.1 s`. This proves
 bounded retained topology, not equivalent compilation cost.
 
+V3's matched retained gate uses 160 terrain plus 48 detailed-vegetation
+products at the initial target. The same 164-by-20-block move adds 44 terrain
+refills and 32 vegetation products, then returns to 160/160 terrain and 48/48
+vegetation with no pending or failed work. On the M4 Pro offscreen control,
+first-complete-target latency is `173.12 ms`, within 19.0% of V1's
+`145.50 ms` and far below V2's `602.61 ms`; accumulated V3 vegetation compile
+time is `6.46 ms`. Native and browser World Explorer now construct the shared
+vegetation executor for V2 and V3 as well as V1 and the detached candidate.
+
 Tactical 329 moves native CPU continental tile compilation into a bounded
 one-to-four-worker pool, rejects stale source/request/slot completions,
 coalesces preferred-frontier generations, and removes the speculative

@@ -47,7 +47,8 @@ selectable internal-unshipped `mclone-overworld-v3` with binary tag 10. V3
 uses an independent target-only exact/procedural terrain source and a bounded
 quality-aware spawn query; V1 remains the product default and V2 remains
 selectable as a control. Native live terrain/vegetation pixels and SQLite
-reopen now pass. Platform/browser and human-review closeout remain.**
+reopen now pass. WebGPU generation/reopen, flat Android, Quest packaging, and
+a real Quest stereo-frame launch pass. Human Review V3-A remains.**
 
 This topic owns the current truth and durable decisions for selectable,
 versioned world-generation profiles. Detailed refactoring and implementation

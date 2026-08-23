@@ -1,6 +1,7 @@
 use std::path::Path;
 use std::time::{Duration, Instant};
 
+use crate::options::{ExplorerAssetProfile, ExplorerOptions};
 use anyhow::{Context, Result};
 use mclone_assets::{
     AUTHORED_FIRST_PARTY_PACK_ID, AssetPackId, AssetPackOrigin, AssetSourceChain,
@@ -20,11 +21,8 @@ use mclone_view_control::{WorldViewHeldDirection, WorldViewIntent, WorldViewStat
 use mclone_world_explorer::{
     ExplorerExactStats, ExplorerExactTerrain, NativeTerrainVegetationExecutor,
     WORLD_EXPLORER_TERRAIN_FRONTIER, WorldExplorerCompositionMode, WorldExplorerConfig,
-    WorldExplorerSession,
+    WorldExplorerSession, world_explorer_vegetation_enabled,
 };
-use mclone_worldgen::terrain_preview::TerrainPreviewProfile;
-
-use crate::options::{ExplorerAssetProfile, ExplorerOptions};
 
 pub struct ExplorerTerrain {
     session: WorldExplorerSession,
@@ -48,11 +46,7 @@ impl ExplorerTerrain {
         let material_table = TerrainPreviewMaterialTable::from_catalog(&assets.catalog);
         let target_color_transform =
             RenderColorProfile::Vanilla.target_color_transform(color_format);
-        let vegetation_enabled = matches!(
-            options.terrain_profile,
-            TerrainPreviewProfile::McloneOverworldV1
-                | TerrainPreviewProfile::ContinentalEcoregionCandidate
-        );
+        let vegetation_enabled = world_explorer_vegetation_enabled(options.terrain_profile);
         let mut session = WorldExplorerSession::new(
             device,
             queue,

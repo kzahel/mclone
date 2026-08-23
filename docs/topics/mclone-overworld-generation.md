@@ -45,8 +45,11 @@ a persistent snow-capped massif, while ordinary stable tree records create
 real forest margins and clearings across exact chunks and LOD. Mountain
 exposure produces a sparse upper tree line, and procedural tree bases are
 grounded against their resident terrain tile. Native live pixels and SQLite
-reopen pass; V3 is still experimental, with platform/browser closeout and
-Human Review V3-A pending.
+reopen pass. Wasm, WebGPU live generation/reopen and retained movement, flat
+Android, synthetic stereo, Quest packaging, and a real Quest stereo-frame
+launch also pass. V3 is still experimental and now awaits Human Review V3-A;
+the aerial exact/procedural albedo rectangle remains an explicit revision
+candidate.
 V2's first additional regional archetype is a mesa desert with formation-owned
 tables, stepped escarpments, washes, fans, red-sand basins, exact terracotta
 strata, and ecology-facing habitat facts. Its broad identities remain stable

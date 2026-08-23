@@ -48,12 +48,13 @@ if (
     "small-island-v1",
     "mclone-overworld-v1",
     "mclone-overworld-v2",
+    "mclone-overworld-v3",
     "topology-probe-v1",
     "beta-v1",
   ].includes(generationProfile)
 ) {
   throw new Error(
-    `--generation-profile requires overworld, flat-grass-v1, small-island-v1, mclone-overworld-v1, mclone-overworld-v2, topology-probe-v1, or beta-v1; got ${generationProfile}`,
+    `--generation-profile requires overworld, flat-grass-v1, small-island-v1, mclone-overworld-v1, mclone-overworld-v2, mclone-overworld-v3, topology-probe-v1, or beta-v1; got ${generationProfile}`,
   );
 }
 const renderDistanceArgIndex = process.argv.indexOf("--render-distance");

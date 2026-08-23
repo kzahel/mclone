@@ -782,11 +782,7 @@ impl WebWorldExplorer {
         exact_worker_transport_factory: JsValue,
     ) -> Result<Self, String> {
         let options = WebExplorerOptions::parse(&search)?;
-        let vegetation_enabled = matches!(
-            options.terrain_profile,
-            TerrainPreviewProfile::McloneOverworldV1
-                | TerrainPreviewProfile::ContinentalEcoregionCandidate
-        );
+        let vegetation_enabled = crate::world_explorer_vegetation_enabled(options.terrain_profile);
         let vegetation_executor = if vegetation_enabled {
             Some(if options.worker_overflow_probe_enabled {
                 BrowserTerrainVegetationExecutor::with_initial_capacity(
