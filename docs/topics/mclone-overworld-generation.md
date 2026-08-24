@@ -49,7 +49,10 @@ reopen pass. Wasm, WebGPU live generation/reopen and retained movement, flat
 Android, synthetic stereo, Quest packaging, and a real Quest stereo-frame
 launch also pass. V3 is still experimental and now awaits Human Review V3-A;
 the aerial exact/procedural albedo rectangle remains an explicit revision
-candidate.
+candidate. Terrain Lab's one global terrain-profile selector now exposes V1,
+V2, and V3 as mutually exclusive choices. V2 and V3 use their own composed
+runtime, exact chunks, CPU LOD, and vegetation there; V1-only research panes
+and the V1 GPU-native diagnostic remain unavailable for those selections.
 V2's first additional regional archetype is a mesa desert with formation-owned
 tables, stepped escarpments, washes, fans, red-sand basins, exact terracotta
 strata, and ecology-facing habitat facts. Its broad identities remain stable

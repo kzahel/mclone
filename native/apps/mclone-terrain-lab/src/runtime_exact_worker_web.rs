@@ -47,6 +47,8 @@ impl TerrainRuntimeExactWorkerActor {
                 let seed = seed_text
                     .parse::<i64>()
                     .map_err(|error| format!("invalid exact Worker seed {seed_text:?}: {error}"))?;
+                let profile =
+                    TerrainPreviewProfile::parse_label(&string_property(frame, "profile")?)?;
                 let assets = load_terrain_lab_visual_assets(
                     bytes_property(frame, "authoredBytes")?,
                     bytes_property(frame, "referenceBytes")?,
@@ -56,7 +58,7 @@ impl TerrainRuntimeExactWorkerActor {
                     &string_property(frame, "texturePresentation")?,
                 )?;
                 let mut session = CanonicalMeshSession::new(
-                    TerrainPreviewProfile::McloneOverworldV1,
+                    profile,
                     seed,
                     CanonicalTerrainStage::FinalFeatures,
                     assets.terrain.catalog,

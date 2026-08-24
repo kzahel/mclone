@@ -9,6 +9,7 @@ use mclone_terrain_view::{
     TerrainRuntimeExactRenderer, TerrainRuntimeExactStats, TerrainRuntimeSession,
 };
 use mclone_view_control::{WorldViewMode, WorldViewProjection, WorldViewState};
+use mclone_worldgen::terrain_preview::TerrainPreviewProfile;
 use serde::Serialize;
 use wasm_bindgen::{JsValue, prelude::wasm_bindgen};
 use web_sys::HtmlCanvasElement;
@@ -222,6 +223,7 @@ impl TerrainRuntimeCompositionLab {
         diagnostic_bytes: js_sys::Uint8Array,
         visual_profile: String,
         texture_presentation: String,
+        profile: TerrainPreviewProfile,
         seed: i64,
         exact_radius: u32,
         initial_view: WorldViewState,
@@ -319,7 +321,7 @@ impl TerrainRuntimeCompositionLab {
                 width,
                 height,
                 seed,
-                profile: mclone_worldgen::terrain_preview::TerrainPreviewProfile::McloneOverworldV1,
+                profile,
                 initial_view,
                 clipmap: TerrainClipmapConfig::default(),
                 vegetation_enabled: true,
@@ -339,8 +341,9 @@ impl TerrainRuntimeCompositionLab {
             ));
         }
         let session = session?;
-        let exact_executor = BrowserCanonicalExactExecutor::new_with_visual_assets(
+        let exact_executor = BrowserCanonicalExactExecutor::new_with_visual_assets_for_profile(
             exact_worker_transport_factory,
+            profile,
             seed,
             authored,
             reference,
@@ -350,12 +353,13 @@ impl TerrainRuntimeCompositionLab {
             &texture_presentation,
         )?;
         device.push_error_scope(wgpu::ErrorFilter::Validation);
-        let exact = TerrainRuntimeExactRenderer::new_with_executor(
+        let exact = TerrainRuntimeExactRenderer::new_with_executor_for_profile(
             &device,
             &queue,
             format,
             width,
             height,
+            profile,
             seed,
             exact_radius,
             Box::new(exact_executor),
@@ -401,6 +405,7 @@ pub fn mclone_terrain_lab_create_runtime_composition(
     diagnostic_bytes: js_sys::Uint8Array,
     visual_profile: String,
     texture_presentation: String,
+    profile: String,
     seed: String,
     exact_radius: u32,
     center_x: i32,
@@ -414,6 +419,12 @@ pub fn mclone_terrain_lab_create_runtime_composition(
     exact_worker_transport_factory: JsValue,
 ) -> js_sys::Promise {
     wasm_bindgen_futures::future_to_promise(async move {
+        let profile = TerrainPreviewProfile::parse_label(&profile).map_err(js_error)?;
+        if profile == TerrainPreviewProfile::VanillaOverworld {
+            return Err(js_error(
+                "Terrain Lab runtime composition requires a Mclone Overworld profile",
+            ));
+        }
         let seed = seed
             .trim()
             .parse::<i64>()
@@ -436,6 +447,7 @@ pub fn mclone_terrain_lab_create_runtime_composition(
             diagnostic_bytes,
             visual_profile,
             texture_presentation,
+            profile,
             seed,
             exact_radius,
             initial_view,

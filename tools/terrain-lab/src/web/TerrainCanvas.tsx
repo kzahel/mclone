@@ -351,7 +351,7 @@ export function TerrainCanvas({
       };
     },
     onTap: (clientX, clientY) => {
-      if (state.profile === "overworld") {
+      if (state.profile !== "mclone-overworld-v1") {
         return;
       }
       const stage = stageRef.current;

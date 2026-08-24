@@ -10,6 +10,7 @@ import {
   parseTerrainLabReviewCamera,
   proceduralSourceForPanes,
   switchTerrainLabProfile,
+  terrainLabProfileSupportsPane,
   terrainLabPlayHref,
   terrainLabSearch,
   toggleTerrainLabPane,
@@ -517,8 +518,12 @@ export function App(): React.JSX.Element {
           ? "loading"
           : minecraftReferenceAvailable ? "true" : "false"
       }
-      data-inspected-x={state.profile === "overworld" ? "" : pointReceipt?.worldX ?? ""}
-      data-inspected-z={state.profile === "overworld" ? "" : pointReceipt?.worldZ ?? ""}
+      data-inspected-x={
+        state.profile === "mclone-overworld-v1" ? pointReceipt?.worldX ?? "" : ""
+      }
+      data-inspected-z={
+        state.profile === "mclone-overworld-v1" ? pointReceipt?.worldZ ?? "" : ""
+      }
       data-continentalness-error={comparison?.meanAbsoluteContinentalnessError ?? ""}
       data-compare-layout={compareLayout}
       data-vertex-count={renderReport?.vertexCount ?? 0}
@@ -1056,7 +1061,13 @@ export function App(): React.JSX.Element {
                   ))
                 }
               >
-                <option value="mclone-overworld-v1">Mclone overworld</option>
+                <option value="mclone-overworld-v1">Mclone Overworld V1</option>
+                <option value="mclone-overworld-v2">
+                  Mclone Overworld V2 (Experimental)
+                </option>
+                <option value="mclone-overworld-v3">
+                  Mclone Overworld V3 (Experimental)
+                </option>
                 <option value="overworld">Minecraft Java 1.17.1 overworld</option>
               </select>
             </label>
@@ -1569,7 +1580,9 @@ export function App(): React.JSX.Element {
                 <p className="controlNote">
                   {state.profile === "overworld"
                     ? "Vanilla LOD samples density, ocean fill, biome, and an approximate surface material directly in a worker. It does not materialize chunks."
-                    : "Checkpoints are ordered preview content, not gameplay switches. Planned streams are reconstructed only through 1:4; coarser views say unavailable instead of inventing them."}
+                    : state.profile === "mclone-overworld-v1"
+                      ? "Checkpoints are ordered preview content, not gameplay switches. Planned streams are reconstructed only through 1:4; coarser views say unavailable instead of inventing them."
+                      : "Checkpoints are ordered preview content, not gameplay switches. The selected experimental profile supplies its own terrain, water, materials, and vegetation facts."}
                 </p>
                 <label className="fieldLabel">
                   <span>LOD diagnostic layer</span>
@@ -1764,7 +1777,7 @@ export function App(): React.JSX.Element {
               </button>
               <button
                 type="button"
-                disabled={state.profile === "overworld"}
+                disabled={state.profile !== "mclone-overworld-v1"}
                 onClick={() => {
                   setComparison(undefined);
                   setCacheEnabled(false);
@@ -1791,7 +1804,9 @@ export function App(): React.JSX.Element {
             <p className="controlNote">
               {state.profile === "overworld"
                 ? "Use Sampled exact and Fast macro together for the vanilla comparison race."
-                : "Stress uses the fixed review seed/site, a cold 2 km Compare map at requested 1:2, and independent CPU/GPU publication."}
+                : state.profile === "mclone-overworld-v1"
+                  ? "Stress uses the fixed review seed/site, a cold 2 km Compare map at requested 1:2, and independent CPU/GPU publication."
+                  : "The GPU-native comparison race is currently a V1-only diagnostic."}
             </p>
               </>
             ) : null}
@@ -2375,6 +2390,17 @@ function PointReceipt({
       </div>
     );
   }
+  if (profile === "mclone-overworld-v2" || profile === "mclone-overworld-v3") {
+    return (
+      <div className="pointReceipt empty" data-testid="point-receipt">
+        <strong>Point receipts are not defined for this profile yet</strong>
+        <span>
+          The composed, exact, and CPU LOD terrain all use the selected profile;
+          the V1-specific hydrology receipt stays unavailable.
+        </span>
+      </div>
+    );
+  }
   if (!receipt) {
     return (
       <div className="pointReceipt empty" data-testid="point-receipt">
@@ -2481,15 +2507,7 @@ function PaneToggles({
       <legend>Visible panes</legend>
       <div className="segmentedControl">
         {PANE_OPTIONS.filter((option) =>
-          profile === "overworld"
-            ? option.value !== "gpu"
-              && option.value !== "runtime"
-              && option.value !== "ecoregion"
-              && option.value !== "plan"
-              && option.value !== "wildlife"
-              && option.value !== "atlas"
-              && option.value !== "semantic"
-            : option.value !== "macro"
+          terrainLabProfileSupportsPane(profile, option.value)
         ).map((option) => {
           const visible = panes.includes(option.value);
           const label = profile === "overworld" && option.value === "cpu"
@@ -2601,6 +2619,16 @@ function SourceFootnote({
         estimate and nine vertical density probes per column. Both run in
         independent workers and approximate surface material without generating
         chunks, features, or vegetation.
+      </>
+    );
+  }
+  if (profile === "mclone-overworld-v2" || profile === "mclone-overworld-v3") {
+    return (
+      <>
+        Runtime composed, Real terrain, and CPU LOD all use the selected
+        experimental profile. Exact blocks and the procedural horizon share
+        its profile and seed; V1-only research diagnostics and GPU-native LOD
+        stay outside this workspace selection.
       </>
     );
   }

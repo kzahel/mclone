@@ -8,7 +8,11 @@ export const TERRAIN_LAB_CANONICAL_RADII = [0, 1, 2, 3, 4, 5, 7, 10, 15] as cons
 export type TerrainLabSpacing = (typeof TERRAIN_LAB_SPACINGS)[number];
 export type TerrainLabDetail = "auto" | TerrainLabSpacing;
 export type TerrainLabSurfaceQuality = "basic" | "inferred";
-export type TerrainLabProfile = "mclone-overworld-v1" | "overworld";
+export type TerrainLabProfile =
+  | "mclone-overworld-v1"
+  | "mclone-overworld-v2"
+  | "mclone-overworld-v3"
+  | "overworld";
 export type TerrainLabVisualProfile =
   | "mclone-original"
   | "minecraft-reference"
@@ -209,7 +213,12 @@ const I64_MIN = -(1n << 63n);
 const I64_MAX = (1n << 63n) - 1n;
 const I32_MIN = -2_147_483_648;
 const I32_MAX = 2_147_483_647;
-const PROFILES = new Set<TerrainLabProfile>(["mclone-overworld-v1", "overworld"]);
+const PROFILES = new Set<TerrainLabProfile>([
+  "mclone-overworld-v1",
+  "mclone-overworld-v2",
+  "mclone-overworld-v3",
+  "overworld",
+]);
 const VISUAL_PROFILES = new Set<TerrainLabVisualProfile>([
   "mclone-original",
   "minecraft-reference",
@@ -502,7 +511,7 @@ export function terrainLabPlayHref(
   params.set("movementMode", "fly");
   params.set(
     "terrainPresentation",
-    state.profile === "mclone-overworld-v1" ? "composed" : "exact-only",
+    state.profile === "overworld" ? "exact-only" : "composed",
   );
   return `/play/?${params.toString()}`;
 }
@@ -534,16 +543,7 @@ export function toggleTerrainLabPane(
   state: TerrainLabState,
   pane: TerrainLabPane,
 ): TerrainLabState {
-  if (
-    (state.profile === "overworld" && pane === "gpu")
-    || (state.profile === "overworld" && pane === "runtime")
-    || (state.profile === "overworld" && pane === "ecoregion")
-    || (state.profile === "overworld" && pane === "plan")
-    || (state.profile === "overworld" && pane === "wildlife")
-    || (state.profile === "overworld" && pane === "atlas")
-    || (state.profile === "overworld" && pane === "semantic")
-    || (state.profile !== "overworld" && pane === "macro")
-  ) {
+  if (!terrainLabProfileSupportsPane(state.profile, pane)) {
     return state;
   }
   const visible = state.panes.includes(pane);
@@ -566,24 +566,16 @@ export function switchTerrainLabProfile(
   profile: TerrainLabProfile,
 ): TerrainLabState {
   const panes = state.panes.map((pane) => {
-    if (
-      profile === "overworld"
-      && (
-        pane === "gpu"
-        || pane === "runtime"
-        || pane === "ecoregion"
-        || pane === "plan"
-        || pane === "wildlife"
-        || pane === "atlas"
-        || pane === "semantic"
-      )
-    ) {
+    if (terrainLabProfileSupportsPane(profile, pane)) {
+      return pane;
+    }
+    if (profile === "overworld") {
       return "macro";
     }
-    if (profile !== "overworld" && pane === "macro") {
+    if (profile === "mclone-overworld-v1") {
       return "gpu";
     }
-    return pane;
+    return pane === "gpu" || pane === "macro" ? "cpu" : "runtime";
   });
   return normalizeTerrainLabProfileState({
     ...state,
@@ -596,18 +588,16 @@ export function normalizeTerrainLabProfileState(
   state: TerrainLabState,
 ): TerrainLabState {
   const panes = state.panes.filter((pane) =>
-    state.profile === "overworld"
-      ? pane !== "gpu"
-        && pane !== "runtime"
-        && pane !== "ecoregion"
-        && pane !== "plan"
-        && pane !== "wildlife"
-        && pane !== "atlas"
-        && pane !== "semantic"
-      : pane !== "macro"
+    terrainLabProfileSupportsPane(state.profile, pane)
   );
   if (panes.length === 0) {
-    panes.push(state.profile === "overworld" ? "macro" : "gpu");
+    panes.push(
+      state.profile === "overworld"
+        ? "macro"
+        : state.profile === "mclone-overworld-v1"
+          ? "gpu"
+          : "runtime",
+    );
   }
   if (state.profile !== "overworld") {
     return {
@@ -630,6 +620,19 @@ export function normalizeTerrainLabProfileState(
     contentStage: "surface",
     layer,
   };
+}
+
+export function terrainLabProfileSupportsPane(
+  profile: TerrainLabProfile,
+  pane: TerrainLabPane,
+): boolean {
+  if (profile === "overworld") {
+    return pane === "canonical" || pane === "cpu" || pane === "macro";
+  }
+  if (profile === "mclone-overworld-v1") {
+    return pane !== "macro";
+  }
+  return pane === "runtime" || pane === "canonical" || pane === "cpu";
 }
 
 export function footprintBlocks(state: Pick<TerrainLabState, "blocksAcross">): number {

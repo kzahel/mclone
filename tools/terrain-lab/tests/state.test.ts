@@ -10,6 +10,7 @@ import {
   parseTerrainLabState,
   parseTerrainLabReviewCamera,
   switchTerrainLabProfile,
+  terrainLabProfileSupportsPane,
   terrainLabPlayHref,
   terrainLabSearch,
   validSeed,
@@ -155,6 +156,42 @@ test("links the current seed and focus to composed fly-mode play", () => {
     }),
     /terrainPresentation=exact-only$/u,
   );
+  assert.match(
+    terrainLabPlayHref({
+      ...DEFAULT_TERRAIN_LAB_STATE,
+      profile: "mclone-overworld-v3",
+    }),
+    /generationProfile=mclone-overworld-v3.*terrainPresentation=composed$/u,
+  );
+});
+
+test("accepts V2 and V3 as mutually exclusive global terrain profiles", () => {
+  for (const profile of ["mclone-overworld-v2", "mclone-overworld-v3"] as const) {
+    const parsed = parseTerrainLabState(
+      `?profile=${profile}&panes=runtime&seed=12345&x=-1528&z=-2040`,
+    );
+    assert.equal(parsed.profile, profile);
+    assert.deepEqual(parsed.panes, ["runtime"]);
+    assert.match(terrainLabSearch(parsed), new RegExp(`profile=${profile}`, "u"));
+  }
+});
+
+test("experimental profiles retain only profile-aware terrain panes", () => {
+  const v3 = switchTerrainLabProfile(
+    {
+      ...DEFAULT_TERRAIN_LAB_STATE,
+      panes: ["canonical", "plan", "gpu"],
+    },
+    "mclone-overworld-v3",
+  );
+  assert.equal(v3.profile, "mclone-overworld-v3");
+  assert.deepEqual(v3.panes, ["runtime", "canonical", "cpu"]);
+  assert.equal(v3.source, "reference");
+  assert.equal(terrainLabProfileSupportsPane(v3.profile, "runtime"), true);
+  assert.equal(terrainLabProfileSupportsPane(v3.profile, "canonical"), true);
+  assert.equal(terrainLabProfileSupportsPane(v3.profile, "cpu"), true);
+  assert.equal(toggleTerrainLabPane(v3, "gpu"), v3);
+  assert.equal(toggleTerrainLabPane(v3, "plan"), v3);
 });
 
 test("maps legacy source links and keeps at least one pane visible", () => {

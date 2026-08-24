@@ -75,6 +75,7 @@ export function RuntimeCompositionCanvas({
   const currentViewRef = useRef({ state, camera });
   currentViewRef.current = { state, camera };
   const [initialized, setInitialized] = useState(false);
+  const [activeProfile, setActiveProfile] = useState<string>();
   const [canvasSize, setCanvasSize] = useState({ width: 900, height: 700 });
   const [latestReport, setLatestReport] = useState<RuntimeCompositionReport>();
   const navigation = useWorldViewNavigation({
@@ -139,6 +140,7 @@ export function RuntimeCompositionCanvas({
       return;
     }
     setInitialized(false);
+    setActiveProfile(undefined);
     setLatestReport(undefined);
     void Promise.all([
       initializeTerrainLab(),
@@ -156,6 +158,7 @@ export function RuntimeCompositionCanvas({
         assets.diagnostic,
         visualProfile,
         texturePresentation,
+        initial.state.profile,
         initial.state.seed,
         initial.state.canonicalRadius,
         initial.state.centerX,
@@ -186,7 +189,9 @@ export function RuntimeCompositionCanvas({
         return;
       }
       labRef.current = lab;
+      setActiveProfile(initial.state.profile);
       setInitialized(true);
+      scheduleRenderRef.current();
     }).catch((error: unknown) => {
       if (!cancelled) {
         onError(errorMessage(error));
@@ -196,6 +201,7 @@ export function RuntimeCompositionCanvas({
       cancelled = true;
       if (renderFrameRef.current !== undefined) {
         cancelAnimationFrame(renderFrameRef.current);
+        renderFrameRef.current = undefined;
       }
       try {
         labRef.current?.shutdown();
@@ -207,6 +213,7 @@ export function RuntimeCompositionCanvas({
   }, [
     onError,
     state.canonicalRadius,
+    state.profile,
     state.seed,
     texturePresentation,
     visualProfile,
@@ -264,6 +271,8 @@ export function RuntimeCompositionCanvas({
       className="terrainStage runtimeCompositionStage"
       tabIndex={0}
       data-testid="runtime-composition-stage"
+      data-runtime-profile={state.profile}
+      data-runtime-active-profile={activeProfile ?? ""}
       data-runtime-target-ready={latestReport?.targetReady ? "true" : "false"}
       data-runtime-exact-complete={latestReport?.exactComplete ? "true" : "false"}
       data-runtime-exact-painted={latestReport?.exactPaintedChunks ?? 0}

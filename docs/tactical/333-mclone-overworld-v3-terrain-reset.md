@@ -654,6 +654,16 @@ this is the existing exact-versus-procedural appearance boundary, not a V3
 geography discontinuity. It remains explicit evidence for Human Review V3-A,
 not a hidden claim of seamless aerial composition.
 
+### Terrain Lab Global Profile Follow-up
+
+Human review exposed that Terrain Lab's top-level selector still admitted only
+V1 and the legacy reference profile even though its shared preview and exact
+compilers already understood V2 and V3. The selector now admits V1, V2, and V3
+as mutually exclusive workspace choices. Runtime composed, Real terrain, CPU
+LOD, the exact Worker, vegetation, URL state, and Play this seed all retain the
+selected profile. V1-only research panes and GPU-native LOD are excluded for
+V2/V3 rather than showing unrelated V1 facts under an experimental label.
+
 ## Related
 
 - [`328-mclone-overworld-v2-regional-breadth.md`](328-mclone-overworld-v2-regional-breadth.md)

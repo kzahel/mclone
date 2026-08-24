@@ -551,6 +551,68 @@ test("switches the whole lab to worker-backed vanilla terrain", async ({
   expect(pageErrors).toEqual([]);
 });
 
+test("selects V2 and V3 through the one global terrain selector", async ({
+  page,
+}, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-chrome", "one desktop profile-switch gate");
+  test.setTimeout(180_000);
+  const pageErrors: string[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  page.on("console", (message) => {
+    if (message.type() === "error") {
+      pageErrors.push(message.text());
+    }
+  });
+  await page.goto(
+    "/terrain/?profile=mclone-overworld-v1&seed=12345&x=-1528&z=-2040"
+      + "&blocks=256&panes=runtime&radius=1&stage=cover&view=3d"
+      + "&projection=perspective&layer=terrain",
+  );
+  const shell = page.locator(".appShell");
+  const selector = page.getByLabel("Terrain profile");
+  const stage = page.getByTestId("runtime-composition-stage");
+  const canvas = page.locator(
+    "canvas[aria-label='Runtime composed exact and procedural terrain']",
+  );
+  await expect(selector.locator("option")).toHaveCount(4);
+
+  await selector.selectOption("mclone-overworld-v2");
+  await expect(shell).toHaveAttribute("data-profile", "mclone-overworld-v2");
+  await expect(shell).toHaveAttribute("data-panes", "runtime");
+  await expect(stage).toHaveAttribute("data-runtime-profile", "mclone-overworld-v2");
+  await expect(stage).toHaveAttribute(
+    "data-runtime-active-profile",
+    "mclone-overworld-v2",
+    { timeout: 120_000 },
+  );
+  await expect(stage).toHaveAttribute("data-runtime-target-ready", "true", {
+    timeout: 120_000,
+  });
+  await expect(stage).toHaveAttribute("data-runtime-exact-complete", "true");
+  await expect(page.getByRole("button", { name: "GPU LOD" })).toHaveCount(0);
+  const v2Pixels = await canvas.screenshot({
+    path: "/tmp/mclone-terrain-lab-v2-selector.png",
+  });
+
+  await selector.selectOption("mclone-overworld-v3");
+  await expect(shell).toHaveAttribute("data-profile", "mclone-overworld-v3");
+  await expect(stage).toHaveAttribute("data-runtime-profile", "mclone-overworld-v3");
+  await expect(stage).toHaveAttribute(
+    "data-runtime-active-profile",
+    "mclone-overworld-v3",
+    { timeout: 120_000 },
+  );
+  await expect(stage).toHaveAttribute("data-runtime-target-ready", "true", {
+    timeout: 120_000,
+  });
+  await expect(stage).toHaveAttribute("data-runtime-exact-complete", "true");
+  const v3Pixels = await canvas.screenshot({
+    path: "/tmp/mclone-terrain-lab-v3-selector.png",
+  });
+  expect(v3Pixels.equals(v2Pixels)).toBe(false);
+  expect(pageErrors).toEqual([]);
+});
+
 test("touch gutters scroll and two-finger gestures navigate both terrains", async ({
   page,
 }, testInfo) => {

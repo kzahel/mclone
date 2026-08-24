@@ -16,6 +16,7 @@ const RUNTIME_CANVAS: &str =
     include_str!("../../../../tools/terrain-lab/src/web/RuntimeCompositionCanvas.tsx");
 const RUNTIME_EXACT_WORKER: &str =
     include_str!("../../../../tools/terrain-lab/src/web/runtime-exact-worker.ts");
+const RUNTIME_EXACT_WORKER_RUST: &str = include_str!("../src/runtime_exact_worker_web.rs");
 const RUNTIME_VEGETATION_WORKER: &str =
     include_str!("../../../../tools/terrain-lab/src/web/runtime-vegetation-worker.ts");
 const RUNTIME_WEB: &str = include_str!("../src/runtime_web.rs");
@@ -191,6 +192,8 @@ fn runtime_composition_consumes_shared_rust_owners() {
         "encode_prepared_to_target",
         "TerrainExactCoverageMode::DiscardPainted",
         "TerrainRuntimeExactAnchor::Focus",
+        "new_with_executor_for_profile",
+        "new_with_visual_assets_for_profile",
     ] {
         assert!(
             RUNTIME_WEB.contains(required),
@@ -209,6 +212,13 @@ fn runtime_composition_consumes_shared_rust_owners() {
         );
     }
     assert_eq!(RUNTIME_CANVAS.matches("new Worker(").count(), 2);
+    assert!(RUNTIME_WEB.contains("TerrainPreviewProfile::parse_label(&profile)"));
+    assert!(
+        RUNTIME_EXACT_WORKER_RUST
+            .contains("TerrainPreviewProfile::parse_label(&string_property(frame, \"profile\")?)")
+    );
+    assert!(!RUNTIME_WEB.contains("profile: TerrainPreviewProfile::McloneOverworldV1"));
+    assert!(!RUNTIME_EXACT_WORKER_RUST.contains("TerrainPreviewProfile::McloneOverworldV1"));
     assert!(RUNTIME_EXACT_WORKER.contains("actor.handleMessage(frame)"));
     assert!(RUNTIME_VEGETATION_WORKER.contains("actor.handleMessage(frame)"));
     for worker in [RUNTIME_EXACT_WORKER, RUNTIME_VEGETATION_WORKER] {

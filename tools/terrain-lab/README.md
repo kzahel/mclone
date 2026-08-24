@@ -14,6 +14,10 @@ because the procedural horizon is not defined for that profile.
 - `mclone-overworld-v1` (the default) provides exact Mclone terrain, a
   research landform plan, the production wildlife-population diagnostic, the
   streamed planner atlas, Mclone CPU LOD, and optional Mclone GPU LOD.
+- `mclone-overworld-v2` and `mclone-overworld-v3` are mutually exclusive
+  experimental top-level selections. Each provides Runtime composed, Real
+  terrain, and CPU LOD from that selected profile. V1-only research panes and
+  the V1 GPU-native evaluator are hidden for these selections.
 - `overworld` provides exact Minecraft Java 1.17.1 terrain and a direct
   Worker-backed vanilla CPU LOD. It has no GPU LOD.
 
@@ -91,7 +95,8 @@ camera. The landform plan stays two-dimensional.
 The URL owns the review state:
 
 - `seed`: signed 64-bit world seed
-- `profile`: `mclone-overworld-v1` or `overworld`
+- `profile`: `mclone-overworld-v1`, `mclone-overworld-v2`,
+  `mclone-overworld-v3`, or `overworld`
 - `x` and `z`: preview center in blocks
 - `blocks`: continuous viewport width from 1 through 131,072 blocks
 - `detail`: `auto` or a power-of-two sample spacing from 1 through 1,024
