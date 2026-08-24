@@ -45,7 +45,8 @@ Tactical
 then replaces permanent warren ownership with rabbit-owned bounded refuge
 knowledge, current derived occupancy, needs-driven reuse before excavation,
 and deterministic bounded ecology work. The reusable state model remains
-server-internal until deer or fox supplies a contrasting second consumer.
+server-internal while squirrel, the selected frog brood/chorus chapter, and
+later fox behavior supply contrasting consumers.
 Tactical
 [`298`](../tactical/298-deterministic-initial-wildlife-population.md) now owns
 the population-geography correction: one coordinate-pure initial population
@@ -89,6 +90,15 @@ and no Quest was attached for the 2026-08-17 review. The refuge now uses a
 closed-canopy exterior route to a leaf-supported top perch. Squirrels do not
 clip through leaves, carve fixture openings, or mutate trees; future durable
 dreys/cavities remain separate ecology work.
+
+Proposed Tactical
+[`332`](../tactical/332-frog-chorus-and-metamorphosis-ecology.md) selects frogs
+as the sixth original creature-life chapter after Tactical 315 closes. It
+reuses existing wetland, hop, shallow-water, aquatic-invertebrate, calendar,
+and lifecycle contracts while adding a real-entity dusk chorus and one bounded
+material spawn-to-tadpole-to-froglet brood. Frogs remain a compact amphibious
+chapter before the larger fish/beaver water-system candidates and before fox
+introduces predator pressure.
 
 ## Scope
 
@@ -673,8 +683,10 @@ notes, and zero browser-world records. The temporary play link is
   condition, suppression, birth, and mortality curves are more legible.
 - Close Tactical 319 Review Gate D with one physical-XR or exact full-frame
   multiview squirrel capture. Then continue Tactical 315 through carried mast,
-  bounded durable caches, cache knowledge, and compressed seasonal lifecycle.
-  Retain fish as the later bounded-water candidate and beaver as the later
+  bounded durable caches, cache knowledge, compressed seasonal lifecycle, and
+  final cross-platform acceptance. Then execute proposed Tactical 332's frog
+  wetland chorus and bounded material brood. Retain fish as the later
+  water-volume candidate and beaver as the later
   family-construction/terrain-mutation candidate; do not implement all three
   merely to populate a food-web list.
 - Decide which concrete consumer actually needs the shared habitat-fitness or

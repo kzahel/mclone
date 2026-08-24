@@ -10,8 +10,9 @@ and urgent safety proof completed under Tactical
 consume server-internal bounded place knowledge, explicit availability
 outcomes, stable decision schedules, deterministic work admission, spatially
 bounded refuge/neighbor queries, and fair budgeted open-ground escape.
-Squirrels and later fox remain the intended contrasting consumers before this
-becomes a public generalized ecology API. Tactical
+Squirrels now supply the first contrasting consumer; proposed frog
+brood/chorus work and later fox prey/den behavior remain further pressure tests
+before this becomes a public generalized ecology API. Tactical
 [`298`](../tactical/298-deterministic-initial-wildlife-population.md) has now
 landed a separate seed-authored initial-population geography, shared with
 Terrain Lab;
@@ -101,6 +102,16 @@ climbs beside the trunk, crosses under the crown, rounds the outer leaf face,
 and steps onto supported leaves. It neither clips through nor edits the canopy.
 A constructed drey or cavity remains later ecology vocabulary rather than a
 hidden side effect of this movement state.
+
+Proposed Tactical
+[`332`](../tactical/332-frog-chorus-and-metamorphosis-ecology.md) selects frogs
+as the next compact non-predator pressure test after Tactical 315 closes. A
+frog remains one durable individual across ground and shallow water; nearby
+eligible adults form a derived bounded dusk chorus without permanent group
+ownership; and one material brood persists spawn/tadpole/readiness state
+before idempotently releasing durable froglets. The proposal deliberately
+does not create independently ticking tadpole swarms, deep-water navigation,
+rain authority, or unloaded progression.
 
 ## Scope
 
@@ -506,7 +517,8 @@ contains only machinery rabbits use today:
 
 This is a common persistence/execution vocabulary, not a generic behavior
 tree, public mod API, or universal home trait. The next extraction decision
-must be based on deer replaceable bedding or fox prey/den behavior.
+must be based on deer replaceable bedding, frog chorus/brood behavior, or fox
+prey/den behavior.
 
 ## Species As Model Pressure Tests
 
@@ -520,6 +532,7 @@ food, prey, shelter, or disturbance to make the behavior legible.
 | fish | bounded water-volume availability, schooling, spawning grounds without terrestrial paths | depth, flow, cover, aquatic food and angling |
 | beaver | family memory, lodge/refuge use, persistent construction intent | woody food, banks, water connectivity and bounded dam terrain mutation |
 | squirrel | distributed caches, cavities and arboreal escape knowledge | mature trees, connected canopy, nuts and forgotten caches |
+| frog | temporary chorus association and one persistent aggregate aquatic brood | shallow water, reachable banks, cover, aquatic invertebrates and warm-season dusk |
 | fox | prey memory, stalking, temporary den use, dispersal | rabbit pressure, cover, field edges |
 | wild pig | loose sounder knowledge, rooting, crop raids | rootable soil, woodland mast, marsh and garden pressure |
 | crow | shared observations, scavenging, mobbing, mixed flight/ground use | perches, carrion, fields and forest edges |
@@ -531,9 +544,10 @@ food, prey, shelter, or disturbance to make the behavior legible.
 | bobcat | solitary cover-dependent territory and prey caching | brush, rocks, wetlands and fallen timber |
 | horse | herd cohesion, grazing travel, water memory and panic cascades | broad grassland, trails and watering places |
 
-The current bounded sequence has migrated mallards and selected squirrel under
-Tactical 315 as the next non-predator pressure test. Fish and beaver remain
-later candidates rather than parallel implementation commitments.
+The current bounded sequence has migrated mallards, selected squirrel under
+Tactical 315, and selected frog under proposed Tactical 332 as the next compact
+non-predator chapter. Fish and beaver remain later candidates rather than
+parallel implementation commitments.
 After bottom-up support and prey surplus are legible, fox remains the first
 predator candidate, followed by whichever of wild pig, crow, coyote, bear,
 owl, mountain lion, or eagle adds the most useful missing relationship.
@@ -559,10 +573,13 @@ scavengers consequential rather than decorative.
    cavities/tree refuge. Close its capable-device multiview gate, then execute
    Tactical 315's carried stock, bounded durable caches, and seasonal
    reproductive opportunity; retain fish and beaver for later evidence.
-5. Add fox pressure later through prey observations, interruptible pursuit,
+5. Execute Tactical 332's frog land/shallow-water movement, physically reached
+   aquatic feeding, derived local chorus, and one material bounded brood whose
+   idempotent release creates durable froglets without unloaded progression.
+6. Add fox pressure later through prey observations, interruptible pursuit,
    and life-stage-relevant den use rather than a universal permanent-home
    pointer.
-6. Extract a shared public ecology owner only from concrete cross-crate need.
+7. Extract a shared public ecology owner only from concrete cross-crate need.
    Do not begin with a general actor platform or an unconstrained fact
    database.
 

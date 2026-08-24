@@ -130,7 +130,13 @@ D is therefore unblocked.
 No terrain or biome season generation, active weather event, migration
 producer, seasonal hydrology, wildlife tagging, or managed-habitat
 infrastructure is implemented. Squirrel habitat, refuge, cache, and lifecycle
-ecology remain the next bounded phases.
+ecology remain the next bounded phases. Proposed Tactical
+[`332`](../tactical/332-frog-chorus-and-metamorphosis-ecology.md) follows that
+work with a broad locally warm reproductive opportunity and dusk calling for
+frogs. Its material brood advances only during ordinary loaded ticks; sleep or
+date changes do not perform skipped courtship, development, release, feeding,
+or maturation, and rain remains a later modifier rather than a hidden
+prerequisite.
 The selected direction is that unloaded terrain and entities receive no ticks
 or elapsed-time catch-up. Climate and ambient seasonal opportunities may be
 derived when an active region asks for them, while durable animals freeze.
