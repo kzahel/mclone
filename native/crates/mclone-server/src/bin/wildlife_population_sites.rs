@@ -351,17 +351,17 @@ mod tests {
     fn known_real_seed_search_finds_radius_eight_three_species_window() {
         let planner =
             McloneOverworldWildlifePlanner::new(12_345, McloneOverworldSamplingTopology::Unbounded);
-        let plans = (8..=16)
+        let plans = (-10..=-4)
             .flat_map(|z| {
                 let planner = &planner;
-                (3..=11).map(move |x| {
+                (0..=6).map(move |x| {
                     planner
                         .plan_cell(McloneWildlifePopulationCell { x, z })
                         .unwrap()
                 })
             })
             .collect::<Vec<_>>();
-        let site = candidate_for_window(12_345, 30, 50, 8, &plans);
+        let site = candidate_for_window(12_345, 14, -26, 8, &plans);
         assert!(site.rabbits > 0);
         assert!(site.deer > 0);
         assert!(site.mallards > 0);
@@ -385,9 +385,6 @@ mod tests {
         assert!(site.rabbits > 0);
         assert!(site.deer > 0);
         assert_eq!(site.mallards, 0);
-        assert_eq!(
-            site.habitat_labels,
-            ["TemperateMeadow", "TemperateWoodland"]
-        );
+        assert_eq!(site.habitat_labels, ["open-land", "woodland"]);
     }
 }
