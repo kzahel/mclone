@@ -14,6 +14,7 @@ mod surface_dependency_cache;
 mod timing;
 mod topology_probe;
 mod vanilla_overworld_lod;
+mod wildlife;
 
 pub use crate::biome::{ConstantBiomeSource, NoiseBiome, NoiseBiomeSource};
 pub use chunk::{GeneratedChunk, MutableChunkBlockBuffer, ScheduledTick};
@@ -57,8 +58,6 @@ pub use mclone_overworld::{
     MCLONE_OVERWORLD_VEGETATION_REVISION, MCLONE_OVERWORLD_WOODED_MAX_EXPOSURE,
     MCLONE_OVERWORLD_WOODED_MAX_SLOPE, MCLONE_OVERWORLD_WOODED_UPLAND_MIN_Y,
     MCLONE_VEGETATION_CANDIDATES_PER_CELL, MCLONE_VEGETATION_PLANNING_CELL_BLOCKS,
-    MCLONE_WILDLIFE_CANDIDATES_PER_CELL, MCLONE_WILDLIFE_POPULATION_CELL_BLOCKS,
-    MCLONE_WILDLIFE_POPULATION_CELL_CHUNKS, MCLONE_WILDLIFE_POPULATION_REVISION,
     McloneForestDirection, McloneForestEdgeIntentSample, McloneForestIntentSample,
     McloneOverworldBathymetrySample, McloneOverworldBiomeDecision, McloneOverworldBiomeRecipe,
     McloneOverworldBiomeSelectionReason, McloneOverworldClimateSample, McloneOverworldCoastFamily,
@@ -75,13 +74,10 @@ pub use mclone_overworld::{
     McloneOverworldStreamPlanMetrics, McloneOverworldStreamPlanner, McloneOverworldStreamRejection,
     McloneOverworldStreamTerrainIntent, McloneOverworldSurfaceRecipe, McloneOverworldSurveySampler,
     McloneOverworldTerrainSample, McloneOverworldVegetationPlanCache,
-    McloneOverworldVegetationPlanner, McloneOverworldWatercourseSample,
-    McloneOverworldWildlifePlanner, McloneTreeArchetype, McloneTreeBounds, McloneTreeFamily,
-    McloneTreeId, McloneTreeOccurrence, McloneTreeRecord, McloneVegetationBounds,
-    McloneVegetationError, McloneVegetationPlanCacheReport, McloneVegetationSource,
-    McloneWildlifeCellPlan, McloneWildlifeEncounter, McloneWildlifeHabitatSample,
-    McloneWildlifePlanError, McloneWildlifePopulationCell, McloneWildlifeSpecies,
-    McloneWildlifeSuitability, analyze_mclone_overworld_hydraulic_closure,
+    McloneOverworldVegetationPlanner, McloneOverworldWatercourseSample, McloneTreeArchetype,
+    McloneTreeBounds, McloneTreeFamily, McloneTreeId, McloneTreeOccurrence, McloneTreeRecord,
+    McloneVegetationBounds, McloneVegetationError, McloneVegetationPlanCacheReport,
+    McloneVegetationSource, analyze_mclone_overworld_hydraulic_closure,
     generate_mclone_overworld_chunk, generate_mclone_overworld_chunk_with_topology,
     generate_mclone_overworld_surface_chunk,
     generate_mclone_overworld_surface_chunk_with_stream_cache,
@@ -131,6 +127,13 @@ pub use vanilla_overworld_lod::{
     VANILLA_OVERWORLD_LOD_MAX_RETAINED_DENSITY_COLUMNS, VANILLA_OVERWORLD_LOD_REVISION,
     VANILLA_OVERWORLD_MACRO_LOD_REVISION, VANILLA_OVERWORLD_MACRO_VERTICAL_CELL_STEP,
     VanillaOverworldLodSample, VanillaOverworldLodSampler, VanillaOverworldMacroSampler,
+};
+pub use wildlife::{
+    MCLONE_WILDLIFE_CANDIDATES_PER_CELL, MCLONE_WILDLIFE_POPULATION_CELL_BLOCKS,
+    MCLONE_WILDLIFE_POPULATION_CELL_CHUNKS, MCLONE_WILDLIFE_POPULATION_REVISION,
+    McloneOverworldWildlifePlanner, McloneWildlifeCellPlan, McloneWildlifeEncounter,
+    McloneWildlifeHabitatSample, McloneWildlifePlanError, McloneWildlifePopulationCell,
+    McloneWildlifeSpecies, McloneWildlifeSuitability,
 };
 
 #[cfg(test)]

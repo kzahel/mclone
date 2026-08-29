@@ -9,7 +9,6 @@ mod streams;
 mod surface;
 mod terrain;
 mod vegetation;
-mod wildlife;
 
 pub use biomes::{
     MCLONE_OVERWORLD_ALPINE_MAX_TEMPERATURE, MCLONE_OVERWORLD_ALPINE_MIN_Y,
@@ -93,10 +92,3 @@ pub use vegetation::{
     McloneVegetationPlanCacheReport, McloneVegetationSource, tree_records_intersecting,
 };
 pub(crate) use vegetation::{realize_mclone_tree_occurrences, resolve_silhouette, tree_bounds};
-pub use wildlife::{
-    MCLONE_WILDLIFE_CANDIDATES_PER_CELL, MCLONE_WILDLIFE_POPULATION_CELL_BLOCKS,
-    MCLONE_WILDLIFE_POPULATION_CELL_CHUNKS, MCLONE_WILDLIFE_POPULATION_REVISION,
-    McloneOverworldWildlifePlanner, McloneWildlifeCellPlan, McloneWildlifeEncounter,
-    McloneWildlifeHabitatSample, McloneWildlifePlanError, McloneWildlifePopulationCell,
-    McloneWildlifeSpecies, McloneWildlifeSuitability,
-};

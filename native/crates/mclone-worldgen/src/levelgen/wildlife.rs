@@ -2,7 +2,7 @@ use std::{error::Error, fmt};
 
 use mclone_core::{CHUNK_WIDTH, ChunkPos};
 
-use super::{
+use super::mclone_overworld::{
     MCLONE_OVERWORLD_PERIOD_BLOCKS, MCLONE_OVERWORLD_SEA_LEVEL, McloneOverworldBiomeRecipe,
     McloneOverworldLandformKind, McloneOverworldSampler, McloneOverworldSamplingTopology,
     McloneOverworldVegetationPlanner, McloneVegetationSource, mclone_overworld_biome_recipe,
