@@ -836,8 +836,8 @@ mod tests {
     fn real_seed_woodland_materializes_squirrel_founders() {
         let simulation = WildlifeSimulationSession::open(WildlifeSimulationConfig {
             seed: -98_765,
-            center_chunk_x: -45,
-            center_chunk_z: -43,
+            center_chunk_x: -262,
+            center_chunk_z: 106,
             ticking_radius_chunks: 2,
         })
         .unwrap();
@@ -851,8 +851,8 @@ mod tests {
         assert!(squirrels.iter().all(|subject| {
             subject.life_stage == WildlifeSimulationLifeStage::Adult
                 && subject.energy > 0
-                && subject.chunk_x == -45
-                && subject.chunk_z == -43
+                && subject.chunk_x == -264
+                && subject.chunk_z == 108
         }));
     }
 

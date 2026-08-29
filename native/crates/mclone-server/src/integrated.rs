@@ -5912,7 +5912,7 @@ impl RealmServer {
                     && (-1..=1).any(|dx| {
                         (-1..=1).any(|dz| {
                             self.scheduler
-                                .client_visible_snapshot(ChunkPos::new(
+                                .published_snapshot(ChunkPos::new(
                                     pos.x.saturating_add(dx),
                                     pos.z.saturating_add(dz),
                                 ))
