@@ -71,6 +71,63 @@ fn mclone_time_updates_publish_the_profile_selected_calendar() {
 }
 
 #[test]
+fn wildlife_habitat_routing_is_exhaustive_across_generation_profiles() {
+    for (profile, expected) in [
+        (
+            WorldGenerationProfile::McloneOverworldV1,
+            WildlifeHabitatSource::McloneOverworldV1,
+        ),
+        (
+            WorldGenerationProfile::McloneOverworldV2,
+            WildlifeHabitatSource::McloneOverworldV2,
+        ),
+        (
+            WorldGenerationProfile::McloneOverworldV3,
+            WildlifeHabitatSource::McloneOverworldV3,
+        ),
+        (
+            WorldGenerationProfile::Overworld,
+            WildlifeHabitatSource::PublishedBlocks,
+        ),
+        (
+            WorldGenerationProfile::FlatGrassV1,
+            WildlifeHabitatSource::PublishedBlocks,
+        ),
+        (
+            WorldGenerationProfile::SmallIslandV1,
+            WildlifeHabitatSource::PublishedBlocks,
+        ),
+        (
+            WorldGenerationProfile::TopologyProbeV1,
+            WildlifeHabitatSource::PublishedBlocks,
+        ),
+        (
+            WorldGenerationProfile::alpha_v1(false),
+            WildlifeHabitatSource::PublishedBlocks,
+        ),
+        (
+            WorldGenerationProfile::alpha_v1(true),
+            WildlifeHabitatSource::PublishedBlocks,
+        ),
+        (
+            WorldGenerationProfile::BetaV1,
+            WildlifeHabitatSource::PublishedBlocks,
+        ),
+        (
+            WorldGenerationProfile::authored_only(),
+            WildlifeHabitatSource::PublishedBlocks,
+        ),
+    ] {
+        assert_eq!(
+            wildlife_habitat_source(profile),
+            expected,
+            "{}",
+            profile.label()
+        );
+    }
+}
+
+#[test]
 fn time_corrections_follow_the_configured_gameplay_rate() {
     let mut server = LocalRealmSession::new(0);
     server.try_drain_updates().unwrap();

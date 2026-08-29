@@ -54,6 +54,7 @@ mod timing;
 mod types;
 #[cfg(target_arch = "wasm32")]
 mod wasm_job_worker;
+mod wildlife_habitat;
 mod wildlife_population_policy;
 mod wildlife_resources;
 mod wildlife_simulation;

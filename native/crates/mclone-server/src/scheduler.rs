@@ -1749,6 +1749,12 @@ impl ChunkScheduler {
         if !holder.client_visible {
             return None;
         }
+        self.published_snapshot(pos)
+    }
+
+    pub(crate) fn published_snapshot(&self, pos: ChunkPos) -> Option<ChunkSnapshot> {
+        let pos = self.topology.canonicalize_chunk(pos)?;
+        let holder = self.holders.get(&pos)?;
         let snapshot = holder.published_snapshot.as_ref()?;
         self.snapshot_is_client_ready(snapshot)
             .then(|| snapshot.clone())

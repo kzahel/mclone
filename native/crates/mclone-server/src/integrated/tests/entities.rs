@@ -914,6 +914,8 @@ fn persistent_initial_wildlife_survives_reload_without_seed_resurrection() {
             | EntityKind::Bee
             | EntityKind::BeeNest
             | EntityKind::Squirrel
+            | EntityKind::Cow
+            | EntityKind::Chicken
     )));
     let spawning = server.natural_spawning_diagnostics(server.simulation_tick(), &[]);
     assert_eq!(
@@ -1027,6 +1029,51 @@ fn transient_initial_wildlife_realizes_each_chunk_once_per_session() {
         server.entities.states().is_empty(),
         "the same transient session must not repeatedly seed-populate revisited chunks"
     );
+}
+
+#[test]
+fn habitat_founders_realize_in_v2_v3_and_block_derived_worlds() {
+    let seed = 12_345;
+    for profile in [
+        WorldGenerationProfile::McloneOverworldV2,
+        WorldGenerationProfile::McloneOverworldV3,
+        WorldGenerationProfile::FlatGrassV1,
+    ] {
+        let definition = crate::DimensionDefinition::overworld(seed, profile);
+        let mut server = LocalRealmSession::local_integrated_with_dimension_definition(definition);
+        server.set_debug_passive_showcase_enabled(false);
+        server.set_lighting_enabled(false);
+        let player = server.add_player();
+        let center = crate::initial_spawn_center_for_profile(seed, profile);
+        set_dedicated_chunk_view_and_poll(&mut server, player, center, 8);
+        let states = server.entities.states();
+        assert!(
+            !states.is_empty(),
+            "{} should realize founders",
+            profile.label()
+        );
+        assert!(
+            states.iter().all(|entity| matches!(
+                entity.kind,
+                EntityKind::Rabbit
+                    | EntityKind::Deer
+                    | EntityKind::Mallard
+                    | EntityKind::Bee
+                    | EntityKind::BeeNest
+                    | EntityKind::Squirrel
+                    | EntityKind::Cow
+                    | EntityKind::Chicken
+            )),
+            "{} produced a non-roster entity",
+            profile.label()
+        );
+        let diagnostics = server.natural_spawning_diagnostics(server.simulation_tick(), &[]);
+        assert_eq!(
+            diagnostics.wildlife_population_policy,
+            crate::WildlifePopulationPolicy::HabitatDrivenV1
+        );
+        assert!(!diagnostics.live_attempts_enabled);
+    }
 }
 
 #[test]

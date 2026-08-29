@@ -37,7 +37,8 @@ use mclone_worldgen::block::{
     generated_block_state_id, material_blocks_motion,
 };
 use mclone_worldgen::levelgen::{
-    McloneOverworldSamplingTopology, McloneOverworldWildlifePlanner, McloneWildlifeSpecies,
+    McloneWildlifeSpecies, WildlifeCellPlan, WildlifeHabitatSource, WildlifePopulationCell,
+    WildlifePopulationPlanner,
 };
 use mclone_worldgen::prng::SimpleRandomSource;
 use rustc_hash::FxHashMap;
@@ -5790,12 +5791,6 @@ impl RealmServer {
             && self.active_dimension.key == DimensionKey::overworld()
             && self.active_dimension.definition.wildlife_population_policy
                 == crate::WildlifePopulationPolicy::HabitatDrivenV1
-            // The next implementation slice removes this temporary adapter
-            // readiness gate when every ordinary profile has a truthful
-            // habitat source. It prevents a non-V1 world from consulting the
-            // still-V1-owned planner between the policy and planner commits.
-            && self.scheduler.world_generation_profile()
-                == WorldGenerationProfile::McloneOverworldV1
     }
 
     fn realize_pending_initial_wildlife(&mut self) -> ChunkStoreResult<Vec<ServerEntityState>> {
@@ -5809,12 +5804,14 @@ impl RealmServer {
         if ready_chunks.is_empty() {
             return Ok(Vec::new());
         }
-        let topology = McloneOverworldSamplingTopology::from_horizontal_topology(
-            self.active_dimension.definition.topology,
+        let topology = self.active_dimension.definition.topology;
+        let source = wildlife_habitat_source(self.scheduler.world_generation_profile());
+        let planner = WildlifePopulationPlanner::for_habitat(
+            self.active_dimension.definition.seed,
+            topology,
+            source,
         )
-        .map_err(ChunkStoreError::InvalidData)?;
-        let planner =
-            McloneOverworldWildlifePlanner::new(self.active_dimension.definition.seed, topology);
+        .map_err(|error| ChunkStoreError::InvalidData(error.to_string()))?;
         let persistent = self.scheduler.entity_chunks_supported();
         let simulation_tick = self.simulation_tick;
         let calendar = self
@@ -5828,10 +5825,47 @@ impl RealmServer {
             );
         let player_positions = self.natural_spawn_player_positions();
         let mut realized = Vec::new();
+        let mut cell_plans = BTreeMap::<WildlifePopulationCell, Option<WildlifeCellPlan>>::new();
         for pos in ready_chunks {
-            let plan = planner
-                .plan_for_chunk(pos)
-                .map_err(|error| ChunkStoreError::InvalidData(error.to_string()))?;
+            let cell = WildlifePopulationCell::from_chunk(pos);
+            let plan = if let Some(plan) = cell_plans.get(&cell) {
+                *plan
+            } else {
+                let plan = if source == WildlifeHabitatSource::PublishedBlocks {
+                    let required =
+                        crate::wildlife_habitat::required_snapshot_chunks(&planner, cell, topology)
+                            .map_err(|error| ChunkStoreError::InvalidData(error.to_string()))?;
+                    let snapshots = required
+                        .into_iter()
+                        .map(|required_pos| {
+                            self.scheduler
+                                .published_snapshot(required_pos)
+                                .map(|snapshot| (required_pos, snapshot))
+                        })
+                        .collect::<Option<BTreeMap<_, _>>>();
+                    snapshots
+                        .as_ref()
+                        .map(|snapshots| {
+                            crate::wildlife_habitat::plan_from_published_snapshots(
+                                &planner, cell, topology, snapshots,
+                            )
+                        })
+                        .transpose()
+                        .map_err(|error| ChunkStoreError::InvalidData(error.to_string()))?
+                        .flatten()
+                } else {
+                    Some(
+                        planner
+                            .plan_cell(cell)
+                            .map_err(|error| ChunkStoreError::InvalidData(error.to_string()))?,
+                    )
+                };
+                cell_plans.insert(cell, plan);
+                plan
+            };
+            let Some(plan) = plan else {
+                continue;
+            };
             if plan.encounter_for_chunk(pos).is_some_and(|encounter| {
                 encounter.species == McloneWildlifeSpecies::Squirrel
                     && (-1..=1).any(|dx| {
@@ -8329,6 +8363,21 @@ fn unknown_observer_error(observer_id: ObserverId) -> ChunkStoreError {
 
 fn raw_block_id_from_block_state(block_state: BlockStateId) -> Option<RawBlockId> {
     RawBlockId::try_from(block_state.0).ok()
+}
+
+const fn wildlife_habitat_source(profile: WorldGenerationProfile) -> WildlifeHabitatSource {
+    match profile {
+        WorldGenerationProfile::McloneOverworldV1 => WildlifeHabitatSource::McloneOverworldV1,
+        WorldGenerationProfile::McloneOverworldV2 => WildlifeHabitatSource::McloneOverworldV2,
+        WorldGenerationProfile::McloneOverworldV3 => WildlifeHabitatSource::McloneOverworldV3,
+        WorldGenerationProfile::Overworld
+        | WorldGenerationProfile::FlatGrassV1
+        | WorldGenerationProfile::SmallIslandV1
+        | WorldGenerationProfile::TopologyProbeV1
+        | WorldGenerationProfile::AlphaV1 { .. }
+        | WorldGenerationProfile::BetaV1
+        | WorldGenerationProfile::AuthoredOnly { .. } => WildlifeHabitatSource::PublishedBlocks,
+    }
 }
 
 fn player_record_key(profile_id: PlayerProfileId) -> PlayerRecordKey {

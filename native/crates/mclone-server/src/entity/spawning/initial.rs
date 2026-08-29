@@ -3,7 +3,10 @@ use std::collections::BTreeSet;
 use mclone_core::{BlockPos, ChunkPos, Vec3d};
 use mclone_protocol::EntityKind;
 use mclone_worldgen::{
-    block::RawBlockId,
+    block::{
+        COARSE_DIRT, DANDELION, DIRT, FERN, GRASS, GRASS_BLOCK, POPPY, RawBlockId, SAND,
+        TALL_GRASS_LOWER, TALL_GRASS_UPPER, is_water,
+    },
     levelgen::{McloneWildlifeEncounter, McloneWildlifeSpecies},
 };
 
@@ -48,7 +51,7 @@ where
         let preferred_x = encounter.anchor_x.saturating_add(offset.0);
         let preferred_z = encounter.anchor_z.saturating_add(offset.1);
         let feet = find_safe_position_in_chunk(
-            kind,
+            encounter.species,
             encounter.owner_chunk,
             preferred_x,
             preferred_z,
@@ -181,13 +184,14 @@ fn species_entity_kind(species: McloneWildlifeSpecies) -> EntityKind {
 }
 
 fn find_safe_position_in_chunk(
-    kind: EntityKind,
+    species: McloneWildlifeSpecies,
     chunk: ChunkPos,
     preferred_x: i32,
     preferred_z: i32,
     occupied: &BTreeSet<(i32, i32)>,
     block_at: &mut impl FnMut(BlockPos) -> Option<RawBlockId>,
 ) -> Option<BlockPos> {
+    let kind = species_entity_kind(species);
     let min_x = chunk.min_block_x() + 1;
     let min_z = chunk.min_block_z() + 1;
     let max_x = chunk.min_block_x() + 14;
@@ -212,13 +216,69 @@ fn find_safe_position_in_chunk(
                     continue;
                 };
                 let feet = BlockPos::new(x, feet_y, z);
-                if check_debug_actor_placement(kind, feet, &mut *block_at).is_ok() {
+                if check_debug_actor_placement(kind, feet, &mut *block_at).is_ok()
+                    && exact_habitat_suitable(species, feet, &mut *block_at)
+                {
                     return Some(feet);
                 }
             }
         }
     }
     None
+}
+
+fn exact_habitat_suitable(
+    species: McloneWildlifeSpecies,
+    feet: BlockPos,
+    block_at: &mut impl FnMut(BlockPos) -> Option<RawBlockId>,
+) -> bool {
+    let supported_ground = block_at(BlockPos::new(feet.x, feet.y - 1, feet.z))
+        .is_some_and(|block| matches!(block, GRASS_BLOCK | DIRT | COARSE_DIRT | SAND));
+    match species {
+        McloneWildlifeSpecies::Rabbit | McloneWildlifeSpecies::Deer => supported_ground,
+        McloneWildlifeSpecies::Cow => block_at(BlockPos::new(feet.x, feet.y - 1, feet.z))
+            .is_some_and(|block| matches!(block, GRASS_BLOCK | DIRT | COARSE_DIRT)),
+        McloneWildlifeSpecies::Chicken => {
+            supported_ground && has_block_in_radius(feet, 4, -1..=2, block_at, is_seed_cover)
+        }
+        McloneWildlifeSpecies::Mallard => has_block_in_radius(feet, 4, -3..=1, block_at, is_water),
+        McloneWildlifeSpecies::Bee => {
+            supported_ground && has_block_in_radius(feet, 6, -1..=3, block_at, is_flower)
+        }
+        McloneWildlifeSpecies::Squirrel => true,
+    }
+}
+
+fn has_block_in_radius(
+    center: BlockPos,
+    radius: i32,
+    y_offsets: std::ops::RangeInclusive<i32>,
+    block_at: &mut impl FnMut(BlockPos) -> Option<RawBlockId>,
+    predicate: impl Fn(RawBlockId) -> bool,
+) -> bool {
+    for dz in -radius..=radius {
+        for dx in -radius..=radius {
+            for dy in y_offsets.clone() {
+                if block_at(BlockPos::new(center.x + dx, center.y + dy, center.z + dz))
+                    .is_some_and(&predicate)
+                {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+const fn is_flower(block: RawBlockId) -> bool {
+    matches!(block, DANDELION | POPPY)
+}
+
+const fn is_seed_cover(block: RawBlockId) -> bool {
+    matches!(
+        block,
+        GRASS | FERN | TALL_GRASS_LOWER | TALL_GRASS_UPPER | DANDELION | POPPY
+    )
 }
 
 #[cfg(test)]
@@ -228,7 +288,13 @@ mod tests {
     use super::*;
 
     fn grass_world(pos: BlockPos) -> Option<RawBlockId> {
-        Some(if pos.y == 63 { GRASS_BLOCK } else { AIR })
+        Some(if pos.y == 63 {
+            GRASS_BLOCK
+        } else if pos == BlockPos::new(9, 64, 8) {
+            DANDELION
+        } else {
+            AIR
+        })
     }
 
     #[test]
@@ -279,6 +345,55 @@ mod tests {
         };
         assert_eq!(position, Vec3d::new(8.5, 64.0, 8.5));
         assert_eq!(bee_positions.len(), 3);
+    }
+
+    #[test]
+    fn specialist_founders_require_matching_final_blocks() {
+        let encounter = |species| McloneWildlifeEncounter {
+            species,
+            group_size: 2,
+            anchor_x: 8,
+            anchor_z: 8,
+            owner_chunk: ChunkPos::new(0, 0),
+        };
+        let bare_grass = |pos: BlockPos| Some(if pos.y == 63 { GRASS_BLOCK } else { AIR });
+        assert!(
+            plan_initial_wildlife_placement(encounter(McloneWildlifeSpecies::Bee), bare_grass,)
+                .is_none()
+        );
+        assert!(
+            plan_initial_wildlife_placement(encounter(McloneWildlifeSpecies::Chicken), bare_grass,)
+                .is_none()
+        );
+        assert!(
+            plan_initial_wildlife_placement(encounter(McloneWildlifeSpecies::Mallard), bare_grass,)
+                .is_none()
+        );
+
+        let pond = |pos: BlockPos| {
+            Some(if pos.y == 63 {
+                GRASS_BLOCK
+            } else if pos.y == 64 && pos.x == 9 && pos.z == 8 {
+                mclone_worldgen::block::WATER
+            } else {
+                AIR
+            })
+        };
+        assert!(
+            plan_initial_wildlife_placement(encounter(McloneWildlifeSpecies::Mallard), pond,)
+                .is_some()
+        );
+        assert!(
+            plan_initial_wildlife_placement(encounter(McloneWildlifeSpecies::Bee), grass_world,)
+                .is_some()
+        );
+        assert!(
+            plan_initial_wildlife_placement(
+                encounter(McloneWildlifeSpecies::Chicken),
+                grass_world,
+            )
+            .is_some()
+        );
     }
 
     fn squirrel_edge(pos: BlockPos) -> Option<RawBlockId> {
