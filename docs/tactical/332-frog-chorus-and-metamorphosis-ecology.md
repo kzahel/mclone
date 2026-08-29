@@ -2,7 +2,8 @@
 
 Status: **proposed 2026-08-23; selected as the next original creature chapter
 after Tactical 315 closes its squirrel cache, seasonal lifecycle, and
-cross-platform acceptance gates.**
+cross-platform acceptance gates and Tactical 334 lands cross-profile wildlife
+routing.**
 
 Topics:
 
@@ -15,10 +16,11 @@ Topics:
 
 ## Instruction Synthesis
 
-Add frogs next. Promote the accepted Asset Lab frog into ordinary Mclone
-Overworld gameplay through a complete, bounded ecology chapter rather than a
-generic passive spawn. Frogs should make wetland edges legible through real
-movement, feeding, calls, reproduction, persistence, and player discovery.
+Add frogs next. Promote the accepted Asset Lab frog into ordinary
+habitat-driven gameplay across opted-in terrain profiles through a complete,
+bounded ecology chapter rather than a generic passive spawn. Frogs should make
+wetland edges legible through real movement, feeding, calls, reproduction,
+persistence, and player discovery.
 Reuse the authoritative calendar, seasonal resource opportunity, habitat
 fitness, durable wildlife lifecycle, spatial sound, figure animation, and
 showcase paths already established by mallards, rabbits, bees, deer, and
@@ -41,9 +43,10 @@ clients?
 
 ## Decision
 
-Select frogs as the sixth original creature-life chapter and the immediate
-follow-up to Tactical
-[`315`](315-authoritative-seasonal-calendar-and-squirrel-ecology.md).
+Select frogs as the sixth original creature-life chapter after Tactical
+[`315`](315-authoritative-seasonal-calendar-and-squirrel-ecology.md) and the
+cross-profile founding prerequisite in Tactical
+[`334`](334-cross-profile-wildlife-habitat-routing.md).
 Fox remains the first intended predator after bottom-up resource and prey
 surplus are measured. Fish and beaver remain larger later water-system
 pressure tests.
@@ -107,6 +110,10 @@ unloaded catch-up simulation.
   seasonal reproduction, and full acceptance. Frog implementation begins
   after those gates close so population evidence and platform review do not
   overlap two unfinished creature chapters.
+- Tactical 334 must first make habitat-driven founding independent of terrain
+  profile, remove the accidental V1/non-V1 producer split, and produce a
+  V1/V2/V3 frog-readiness receipt. Frog implementation adds a shared species
+  rule to that planner rather than extending the V1-owned planner.
 
 ## Binding Decisions
 
@@ -220,15 +227,25 @@ loaded blocks and measures at least:
 - current disturbance and nearby frog/brood occupancy; and
 - local seasonal thermal opportunity.
 
-The coordinate-pure initial wildlife planner may select a small frog founder
-group only from broad wetland and cover evidence, then first realization must
-validate live blocks. A dry campaign control produces exactly zero frogs and
-zero broods. Each opted-in original Mclone profile must consume its own
-published terrain facts; do not hard-code V1 biome identities into V2 or alter
-retained Java-shaped profiles. If ordinary Mclone wetlands lack readable
-cover, improve the shared wetland/shore recipe through the world generator
-rather than consult a hidden frog-only noise field or patch showcase terrain
-into production logic.
+The profile-neutral coordinate-pure wildlife planner may select a small frog
+founder group only from broad wetland and cover evidence, then first
+realization must validate live blocks. A dry campaign control produces exactly
+zero frogs and zero broods. Every opted-in profile consumes its own semantic or
+bounded block-derived evidence; do not hard-code V1 biome identities into V2,
+V3, historical, simple, or authored terrain. If ordinary Mclone wetlands lack
+readable cover, improve the shared wetland/shore recipe through the world
+generator rather than consult a hidden frog-only noise field or patch showcase
+terrain into production logic.
+
+After Human Review V3-A, use the frog chapter to add the smallest reusable V3
+water-edge improvement proven necessary by the readiness receipt. Prefer a
+shallow living margin around existing basin lakes with reachable low banks,
+variable shallows, wet cover, and truthful aquatic-resource opportunity. It
+must serve mallards, insects, shore vegetation, and later aquatic creatures as
+well as frogs, and it must consume V3's accepted basin/landform structure
+rather than reshaping terrain for a species quota. V2 receives the same
+diagnostic review; change its terrain only if published wetland facts fail to
+become usable final blocks.
 
 ### The player loop is observation and stewardship
 
@@ -353,9 +370,11 @@ again after behavior is complete.
 ### Phase 0: contract and baselines
 
 1. Record this tactical and update the living ecology state.
-2. Pin the accepted Frog source, semantic JSON, animation sheets, and catalogue
+2. Confirm Tactical 334's single-producer routing and V1/V2/V3 frog-readiness
+   receipt; do not begin from a V1-only population fork.
+3. Pin the accepted Frog source, semantic JSON, animation sheets, and catalogue
    classification as the pre-promotion baseline.
-3. Record current wet/dry resource and frog-candidate geography across the
+4. Record current wet/dry resource and frog-candidate geography across the
    existing deterministic population windows without changing their accepted
    squirrel-era revisions.
 
@@ -369,11 +388,14 @@ individual tadpole actors.
 2. Add shared protocol/entity/life-stage/behavior state, first-party asset
    loading, client replication, named clip selection, and ordinary prepared
    rendering.
-3. Add coordinate-pure frog geography, live habitat validation, durable
-   founder realization, and Terrain Lab wildlife diagnostics.
-4. Implement bounded ground/shore hopping, shallow-water occupancy, forage
+3. Add the shared frog species rule, live habitat validation, durable founder
+   realization, and profile-aware Terrain Lab wildlife diagnostics.
+4. If the accepted V3 facts cannot realize a viable amphibious edge, add the
+   reusable basin-lake living margin described above and prove semantic/block
+   agreement before depending on it.
+5. Implement bounded ground/shore hopping, shallow-water occupancy, forage
    travel/intake, and player-triggered water escape.
-5. Prove persistence, dry rejection, order independence, habitat edits,
+6. Prove persistence, dry rejection, order independence, habitat edits,
    collision, bounded work, and native/Wasm shared ownership.
 
 **Review Gate B:** inspect Asset Lab, native flat, headed WebGPU, and synthetic
@@ -446,6 +468,8 @@ At minimum, cover:
   FrogBrood snapshots and incremental updates;
 - deterministic initial population plans across order, partition, negative
   coordinates, supported topology lifts, and dry controls;
+- profile-neutral founding and truthful V1/V2/V3 habitat adapters, including
+  matched wet/dry readiness receipts and no species-blind fallback;
 - block-derived habitat qualification, live revalidation, land/shore paths,
   shallow-water occupancy, player avoidance, and failed-route recovery;
 - real-entity call origin, spatial range, sequence, cooldown, local response
@@ -484,17 +508,20 @@ outcomes; a first-frame screenshot alone is insufficient.
   cooking, drops, or a frog-specific collectible;
 - permanent mates, colonies, pond ownership, universal animal homes, or a
   public generic ecology/behavior API;
-- a frog-only renderer, navigator, audio mixer, app-local gameplay branch,
-  scripted showcase behavior, or changes to retained Java-shaped profiles.
+- a frog-only renderer, navigator, audio mixer, app-local gameplay branch, or
+  scripted showcase behavior.
 
 ## Completion Checklist
 
 - [ ] Tactical 315 squirrel cache and acceptance gates are closed before frog
       implementation begins.
+- [ ] Tactical 334 cross-profile routing and the V1/V2/V3 frog-readiness gate
+      are complete before frog population work begins.
 - [ ] The reviewed Frog and brood assets are promoted through the shared
       first-party semantic pipeline.
-- [ ] Ordinary Mclone habitat produces durable frogs through coordinate-pure
-      planning plus live block validation, while dry controls remain empty.
+- [ ] Ordinary habitat in every opted-in profile is eligible through
+      coordinate-pure planning plus live block validation, while dry or
+      otherwise unsuitable controls remain empty.
 - [ ] Frogs visibly hop, forage, swim in supported shallows, escape threats,
       call, and participate in a bounded chorus through authoritative state.
 - [ ] One material brood progresses while loaded and releases non-duplicated
@@ -560,4 +587,4 @@ outcomes; a first-frame screenshot alone is insufficient.
 ## Execution Record
 
 No implementation has started. Phase 0 records the selected proposal and its
-place after Tactical 315.
+place after Tacticals 315 and 334.

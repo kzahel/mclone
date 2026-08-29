@@ -50,6 +50,15 @@ selectable as a control. Native live terrain/vegetation pixels and SQLite
 reopen now pass. WebGPU generation/reopen, flat Android, Quest packaging, and
 a real Quest stereo-frame launch pass. Human Review V3-A remains.**
 
+Proposed Tactical
+[`334`](../tactical/334-cross-profile-wildlife-habitat-routing.md) separates
+natural wildlife policy from this generator identity. All ordinary procedural
+profiles should be capable of the same habitat-driven promoted roster, while
+each profile supplies its own semantic or bounded block-derived evidence and
+final blocks remain authoritative. The current V1-only Mclone population gate
+and complementary non-V1 Java-shaped live route are implementation accidents,
+not profile contracts.
+
 This topic owns the current truth and durable decisions for selectable,
 versioned world-generation profiles. Detailed refactoring and implementation
 order lives in
@@ -350,6 +359,9 @@ fingerprint.
    recorded as compatibility consumers in the safety ledger.
 10. Remote clients consume authoritative chunks and do not need the server's
     generator implementation.
+11. Natural wildlife policy is a separately persisted dimension fact. A
+    profile may supply habitat evidence, but it must not implicitly select a
+    creature roster or automatic population producer.
 
 ## First Generator Proofs
 

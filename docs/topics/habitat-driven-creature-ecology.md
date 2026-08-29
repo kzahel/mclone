@@ -93,12 +93,24 @@ dreys/cavities remain separate ecology work.
 
 Proposed Tactical
 [`332`](../tactical/332-frog-chorus-and-metamorphosis-ecology.md) selects frogs
-as the sixth original creature-life chapter after Tactical 315 closes. It
+as the sixth original creature-life chapter after Tactical 315 closes and
+Tactical 334 lands cross-profile founding. It
 reuses existing wetland, hop, shallow-water, aquatic-invertebrate, calendar,
 and lifecycle contracts while adding a real-entity dusk chorus and one bounded
 material spawn-to-tadpole-to-froglet brood. Frogs remain a compact amphibious
 chapter before the larger fish/beaver water-system candidates and before fox
 introduces predator pressure.
+
+Proposed Tactical
+[`334`](../tactical/334-cross-profile-wildlife-habitat-routing.md) now precedes
+frog implementation. It removes V1 as the hidden owner of Mclone wildlife,
+persists habitat-driven population policy separately from terrain generation,
+and gives every ordinary profile a truthful habitat adapter plus final
+live-block validation. “Available in any world” means no profile-level
+creature exclusion, not guaranteed occupancy: randomness chooses among viable
+sites and an unsupported habitat remains honestly empty. Shared extraction may
+begin before V3 is complete; after Human Review V3-A, frogs should drive a
+reusable shallow basin-lake margin useful to mallards and later aquatic life.
 
 ## Scope
 

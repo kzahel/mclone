@@ -105,13 +105,24 @@ hidden side effect of this movement state.
 
 Proposed Tactical
 [`332`](../tactical/332-frog-chorus-and-metamorphosis-ecology.md) selects frogs
-as the next compact non-predator pressure test after Tactical 315 closes. A
-frog remains one durable individual across ground and shallow water; nearby
+as the next compact non-predator pressure test after Tactical 315 closes and
+Tactical 334 lands cross-profile founding. A frog remains one durable
+individual across ground and shallow water; nearby
 eligible adults form a derived bounded dusk chorus without permanent group
 ownership; and one material brood persists spawn/tadpole/readiness state
 before idempotently releasing durable froglets. The proposal deliberately
 does not create independently ticking tadpole swarms, deep-water navigation,
 rain authority, or unloaded progression.
+
+Proposed Tactical
+[`334`](../tactical/334-cross-profile-wildlife-habitat-routing.md) is now the
+founding prerequisite for that chapter. It separates persisted wildlife policy
+from generator identity, extracts coordinate-pure population geography from
+the V1 terrain sampler, admits profile-specific semantic or bounded
+block-derived evidence through one neutral habitat value, and keeps one
+automatic producer per dimension. This changes where durable individuals may
+be founded; it does not add refill, immigration, unloaded progression, or
+population targeting.
 
 ## Scope
 
