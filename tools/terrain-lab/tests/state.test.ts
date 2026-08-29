@@ -212,7 +212,7 @@ test("maps legacy source links and keeps at least one pane visible", () => {
   );
 });
 
-test("the vanilla profile replaces GPU with fast macro and excludes Mclone-only layers", () => {
+test("the vanilla profile keeps profile-neutral wildlife beside fast macro", () => {
   const vanilla = switchTerrainLabProfile(
     {
       ...DEFAULT_TERRAIN_LAB_STATE,
@@ -232,7 +232,10 @@ test("the vanilla profile replaces GPU with fast macro and excludes Mclone-only 
   assert.equal(toggleTerrainLabPane(vanilla, "runtime"), vanilla);
   assert.equal(toggleTerrainLabPane(vanilla, "plan"), vanilla);
   assert.equal(toggleTerrainLabPane(vanilla, "ecoregion"), vanilla);
-  assert.equal(toggleTerrainLabPane(vanilla, "wildlife"), vanilla);
+  assert.deepEqual(
+    toggleTerrainLabPane(vanilla, "wildlife").panes,
+    ["canonical", "wildlife", "cpu", "macro"],
+  );
   assert.equal(toggleTerrainLabPane(vanilla, "atlas"), vanilla);
   assert.equal(toggleTerrainLabPane(vanilla, "semantic"), vanilla);
   assert.deepEqual(

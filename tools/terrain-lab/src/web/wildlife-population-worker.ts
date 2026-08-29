@@ -21,7 +21,7 @@ self.onmessage = (event: MessageEvent<WildlifePopulationWorkerRequest>): void =>
         return;
       }
       const started = performance.now();
-      const compiler = new WildlifePopulationCompiler(request.seed);
+      const compiler = new WildlifePopulationCompiler(request.seed, request.profile);
       try {
         const summary = JSON.parse(compiler.compile(
           request.centerX,

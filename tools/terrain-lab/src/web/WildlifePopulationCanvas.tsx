@@ -20,6 +20,9 @@ interface CanvasSize {
 
 export interface WildlifePopulationReport {
   seed: string;
+  profile: string;
+  adapter: string;
+  adapterStatus: "available" | "requires-published-blocks";
   schema: string;
   revision: number;
   buildMs: number;
@@ -27,7 +30,7 @@ export interface WildlifePopulationReport {
   cellCount: number;
   occupiedCells: number;
   animalCount: number;
-  speciesCounts: [number, number, number, number];
+  speciesCounts: [number, number, number, number, number, number, number];
 }
 
 interface WildlifePopulationCanvasProps {
@@ -40,16 +43,22 @@ interface WildlifePopulationCanvasProps {
   onError: (error: string | undefined) => void;
 }
 
-const SPECIES: WildlifeSpecies[] = ["rabbit", "deer", "mallard", "bee"];
+const SPECIES: WildlifeSpecies[] = [
+  "rabbit",
+  "deer",
+  "mallard",
+  "bee",
+  "squirrel",
+  "cow",
+  "chicken",
+];
 const HABITATS = [
-  ["ocean", "Ocean"],
-  ["river", "River"],
-  ["shore", "Shore"],
-  ["snowyAlpine", "Alpine"],
-  ["coolWetConifer", "Conifer"],
-  ["warmDrySteppe", "Steppe"],
-  ["temperateWoodland", "Woodland"],
-  ["temperateMeadow", "Meadow"],
+  ["inland-water", "Inland water"],
+  ["wetland-margin", "Wetland margin"],
+  ["woodland", "Woodland"],
+  ["open-land", "Open land"],
+  ["mixed-or-marginal", "Mixed / marginal"],
+  ["unavailable", "Evidence unavailable"],
 ] as const;
 
 export function WildlifePopulationCanvas({
@@ -203,6 +212,7 @@ export function WildlifePopulationCanvas({
       type: "build",
       epoch: epochRef.current,
       seed: state.seed,
+      profile: state.profile,
       centerX: state.centerX,
       centerZ: state.centerZ,
       blocksAcross: state.blocksAcross,
@@ -217,12 +227,20 @@ export function WildlifePopulationCanvas({
     state.centerX,
     state.centerZ,
     state.seed,
+    state.profile,
   ]);
 
   useEffect(() => {
     setSelected(undefined);
     onInspect(undefined);
-  }, [onInspect, state.blocksAcross, state.centerX, state.centerZ, state.seed]);
+  }, [
+    onInspect,
+    state.blocksAcross,
+    state.centerX,
+    state.centerZ,
+    state.profile,
+    state.seed,
+  ]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -247,6 +265,9 @@ export function WildlifePopulationCanvas({
         data-checksum={summary?.checksum ?? ""}
         data-occupied-cells={summary?.occupiedCells ?? 0}
         data-animal-count={summary?.animalCount ?? 0}
+        data-profile={summary?.profile ?? state.profile}
+        data-adapter={summary?.adapter ?? ""}
+        data-adapter-status={summary?.adapterStatus ?? ""}
         tabIndex={0}
         aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight"
         onPointerDown={navigation.onPointerDown}
@@ -265,9 +286,15 @@ export function WildlifePopulationCanvas({
         />
         <div className="canvasTopline" aria-hidden="true">
           <span className="canvasBadge primary">
-            {summary ? `${summary.occupiedCells} encounters` : "planning wildlife"}
+            {summary?.adapterStatus === "requires-published-blocks"
+              ? "published blocks required"
+              : summary
+              ? `${summary.occupiedCells} encounters`
+              : "planning wildlife"}
           </span>
-          <span className="canvasBadge">production · revision {summary?.revision ?? "—"}</span>
+          <span className="canvasBadge">
+            {summary?.profile ?? state.profile} · revision {summary?.revision ?? "—"}
+          </span>
           <span className="canvasBadge">
             {summary ? `${summary.animalCount} animals · ${buildMs.toFixed(1)} ms` : "64 m cells"}
           </span>
@@ -296,11 +323,11 @@ function WildlifeLegend({
       <section className="wildlifeLegendSection habitatLegend">
         <strong>Cell habitat</strong>
         <div>
-          {HABITATS.map(([biome, label]) => (
-            <span key={biome}>
+          {HABITATS.map(([habitat, label]) => (
+            <span key={habitat}>
               <i
                 className="habitatSwatch"
-                style={{ background: biomeColor(biome, 650) }}
+                style={{ background: habitatColor(habitat, 650) }}
                 aria-hidden="true"
               />
               {label}
@@ -343,6 +370,9 @@ function WildlifeInspector({
     ["deer", receipt.deerWeight],
     ["mallard", receipt.mallardWeight],
     ["bee", receipt.beeWeight],
+    ["squirrel", receipt.squirrelWeight],
+    ["cow", receipt.cowWeight],
+    ["chicken", receipt.chickenWeight],
   ];
   return (
     <div className="wildlifeInspector" data-testid="wildlife-cell-inspector">
@@ -354,12 +384,16 @@ function WildlifeInspector({
             : receipt.desiredDensity === 0 ? "unsuitable" : "empty this seed"}
         </strong>
       </div>
-      <p>{receipt.biome} · {receipt.landform} · surface Y {receipt.surfaceY}</p>
+      <p>
+        {receipt.habitat} · {receipt.evidenceSource} · {receipt.evidenceStatus}
+        {receipt.supported ? ` · surface Y ${receipt.surfaceY}` : ""}
+      </p>
       <dl>
         <div><dt>Density / roll</dt><dd>{receipt.desiredDensity} / {receipt.occupancyRoll}</dd></div>
         <div><dt>Productivity</dt><dd>{receipt.productivity}</dd></div>
-        <div><dt>Open / cover</dt><dd>{receipt.openness} / {receipt.forestCover}</dd></div>
-        <div><dt>Wetland / water</dt><dd>{receipt.wetland} / {receipt.water}</dd></div>
+        <div><dt>Open / low cover</dt><dd>{receipt.openness} / {receipt.lowCover}</dd></div>
+        <div><dt>Forest / trees</dt><dd>{receipt.forestCover} / {receipt.matureTrees}</dd></div>
+        <div><dt>Wet / inland</dt><dd>{receipt.wetland} / {receipt.inlandWater}</dd></div>
       </dl>
       <div className="wildlifeWeights">
         {weights.map(([species, value]) => (
@@ -370,7 +404,7 @@ function WildlifeInspector({
         ))}
       </div>
       <small>
-        Selected {receipt.selectedX}, {receipt.selectedZ}
+        {receipt.availableEvidence.length} / 14 facts · selected {receipt.selectedX}, {receipt.selectedZ}
         {receipt.ownerChunkX === null
           ? " · no owning chunk"
           : ` · owner chunk ${receipt.ownerChunkX}, ${receipt.ownerChunkZ}`}
@@ -407,7 +441,7 @@ function drawWildlifePopulation(
       worldX + summary.cellBlocks,
       worldZ + summary.cellBlocks,
     );
-    context.fillStyle = biomeColor(cell.biome, cell.productivity);
+    context.fillStyle = habitatColor(cell.habitat, cell.productivity);
     context.fillRect(
       Math.floor(x),
       Math.floor(y),
@@ -469,18 +503,16 @@ function drawWildlifePopulation(
   }
 }
 
-function biomeColor(biome: string, productivity: number): string {
+function habitatColor(habitat: string, productivity: number): string {
   const colors: Record<string, [number, number, number]> = {
-    ocean: [25, 61, 89],
-    shore: [145, 131, 82],
-    river: [38, 102, 118],
-    snowyAlpine: [161, 177, 174],
-    coolWetConifer: [43, 82, 69],
-    warmDrySteppe: [125, 119, 67],
-    temperateWoodland: [46, 93, 65],
-    temperateMeadow: [83, 116, 67],
+    "inland-water": [38, 102, 118],
+    "wetland-margin": [71, 111, 87],
+    woodland: [46, 93, 65],
+    "open-land": [112, 126, 73],
+    "mixed-or-marginal": [87, 91, 72],
+    unavailable: [53, 58, 61],
   };
-  const color = colors[biome] ?? [71, 86, 76];
+  const color = colors[habitat] ?? [71, 86, 76];
   const lift = productivity / 1_000 * 0.18 + 0.82;
   return `rgb(${Math.round(color[0] * lift)} ${Math.round(color[1] * lift)} ${Math.round(color[2] * lift)})`;
 }
@@ -491,6 +523,9 @@ function speciesColor(species: WildlifeSpecies): string {
     case "deer": return "#d59458";
     case "mallard": return "#63b9a4";
     case "bee": return "#f2cb4d";
+    case "squirrel": return "#c98a62";
+    case "cow": return "#d8b59c";
+    case "chicken": return "#f2eee0";
   }
 }
 
@@ -500,6 +535,9 @@ function speciesGlyph(species: WildlifeSpecies): string {
     case "deer": return "D";
     case "mallard": return "M";
     case "bee": return "B";
+    case "squirrel": return "S";
+    case "cow": return "C";
+    case "chicken": return "H";
   }
 }
 
@@ -546,6 +584,9 @@ function reportFromSummary(
 ): WildlifePopulationReport {
   return {
     seed: summary.seed,
+    profile: summary.profile,
+    adapter: summary.adapter,
+    adapterStatus: summary.adapterStatus,
     schema: summary.schema,
     revision: summary.revision,
     buildMs,

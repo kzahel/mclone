@@ -1981,14 +1981,18 @@ function WildlifePopulationEvidence({
         <dl className="pointReceiptGrid">
           <div><dt>Outcome</dt><dd>{receipt.species ?? "empty"}</dd></div>
           <div><dt>Group size</dt><dd>{receipt.groupSize || "—"}</dd></div>
-          <div><dt>Biome</dt><dd>{receipt.biome}</dd></div>
-          <div><dt>Landform</dt><dd>{receipt.landform}</dd></div>
+          <div><dt>Habitat</dt><dd>{receipt.habitat}</dd></div>
+          <div><dt>Evidence</dt><dd>{receipt.evidenceSource} · {receipt.evidenceStatus}</dd></div>
           <div><dt>Density / roll</dt><dd>{receipt.desiredDensity} / {receipt.occupancyRoll}</dd></div>
           <div><dt>Rabbit / deer</dt><dd>{receipt.rabbitWeight} / {receipt.deerWeight}</dd></div>
           <div><dt>Mallard / bee</dt><dd>{receipt.mallardWeight} / {receipt.beeWeight}</dd></div>
+          <div><dt>Squirrel / cow</dt><dd>{receipt.squirrelWeight} / {receipt.cowWeight}</dd></div>
+          <div><dt>Chicken</dt><dd>{receipt.chickenWeight}</dd></div>
           <div><dt>Productivity</dt><dd>{receipt.productivity}</dd></div>
-          <div><dt>Open / cover</dt><dd>{receipt.openness} / {receipt.forestCover}</dd></div>
-          <div><dt>Wetland / water</dt><dd>{receipt.wetland} / {receipt.water}</dd></div>
+          <div><dt>Open / low cover</dt><dd>{receipt.openness} / {receipt.lowCover}</dd></div>
+          <div><dt>Forest / trees</dt><dd>{receipt.forestCover} / {receipt.matureTrees}</dd></div>
+          <div><dt>Wet / inland</dt><dd>{receipt.wetland} / {receipt.inlandWater}</dd></div>
+          <div><dt>Flowers / mast</dt><dd>{receipt.flowering} / {receipt.seedsAndSoftMast}</dd></div>
         </dl>
       ) : (
         <span className="pointReceiptPrompt">
@@ -2005,6 +2009,9 @@ function WildlifePopulationEvidence({
           <div><dt>Animals</dt><dd>{formatInteger(report.animalCount)}</dd></div>
           <div><dt>Rabbit / deer</dt><dd>{report.speciesCounts[0]} / {report.speciesCounts[1]}</dd></div>
           <div><dt>Mallard / bee</dt><dd>{report.speciesCounts[2]} / {report.speciesCounts[3]}</dd></div>
+          <div><dt>Squirrel / cow</dt><dd>{report.speciesCounts[4]} / {report.speciesCounts[5]}</dd></div>
+          <div><dt>Chicken</dt><dd>{report.speciesCounts[6]}</dd></div>
+          <div><dt>Adapter</dt><dd>{report.adapter} · {report.adapterStatus}</dd></div>
           <div><dt>Schema</dt><dd>{report.schema}</dd></div>
           <div><dt>Checksum</dt><dd>{report.checksum}</dd></div>
         </dl>

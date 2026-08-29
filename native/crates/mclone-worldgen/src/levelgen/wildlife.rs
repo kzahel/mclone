@@ -191,6 +191,22 @@ impl WildlifeEvidenceSet {
     pub const SEEDS_AND_SOFT_MAST: Self = Self(1 << 12);
     pub const MATURE_TREES: Self = Self(1 << 13);
     pub const ALL: Self = Self((1 << 14) - 1);
+    pub const FACTS: [(Self, &'static str); 14] = [
+        (Self::LAND, "land"),
+        (Self::PRODUCTIVITY, "productivity"),
+        (Self::OPENNESS, "openness"),
+        (Self::LOW_COVER, "low-cover"),
+        (Self::FOREST_COVER, "forest-cover"),
+        (Self::FOREST_EDGE, "forest-edge"),
+        (Self::WETLAND, "wetland"),
+        (Self::WATER, "water"),
+        (Self::INLAND_WATER, "inland-water"),
+        (Self::SHORE, "shore"),
+        (Self::BANK, "bank"),
+        (Self::FLOWERING, "flowering"),
+        (Self::SEEDS_AND_SOFT_MAST, "seeds-and-soft-mast"),
+        (Self::MATURE_TREES, "mature-trees"),
+    ];
 
     pub const fn union(self, other: Self) -> Self {
         Self(self.0 | other.0)
@@ -198,6 +214,12 @@ impl WildlifeEvidenceSet {
 
     pub const fn contains(self, required: Self) -> bool {
         self.0 & required.0 == required.0
+    }
+
+    pub fn labels(self) -> impl Iterator<Item = &'static str> {
+        Self::FACTS
+            .into_iter()
+            .filter_map(move |(fact, label)| self.contains(fact).then_some(label))
     }
 }
 

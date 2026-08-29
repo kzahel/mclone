@@ -24,7 +24,9 @@ test("wildlife population is deterministic, inspectable, and responsive", async 
   const legend = page.getByTestId("wildlife-map-legend");
   await expect(legend).toBeVisible();
   await expect(legend).toContainText("Cell habitat");
-  await expect(legend).toContainText("Alpine");
+  await expect(legend).toContainText("Wetland margin");
+  await expect(legend).toContainText("squirrel");
+  await expect(legend).toContainText("chicken");
   await expect(legend).toContainText("Desired density tint");
   await expect(legend).toContainText("Encounter result");
   expect(Number(await shell.getAttribute("data-wildlife-cells"))).toBeGreaterThan(100);
@@ -65,4 +67,47 @@ test("wildlife population is deterministic, inspectable, and responsive", async 
   await expect(shell).toHaveAttribute("data-wildlife-ready", "true");
   await expect(shell).toHaveAttribute("data-wildlife-checksum", checksum ?? "");
   expect(pageErrors).toEqual([]);
+});
+
+test("wildlife adapters follow the selected terrain profile", async ({ page }, testInfo) => {
+  const checksums = new Set<string>();
+  for (const profile of [
+    "mclone-overworld-v1",
+    "mclone-overworld-v2",
+    "mclone-overworld-v3",
+  ]) {
+    await page.goto(
+      `/terrain/?profile=${profile}&seed=-98765&x=0&z=-2048`
+        + "&blocks=1024&panes=wildlife&view=map",
+      { waitUntil: "networkidle" },
+    );
+    const stage = page.getByTestId("wildlife-population-stage");
+    await expect(stage).toHaveAttribute("data-render-ready", "true");
+    await expect(stage).toHaveAttribute("data-profile", profile);
+    await expect(stage).toHaveAttribute("data-adapter", profile);
+    await expect(stage).toHaveAttribute("data-adapter-status", "available");
+    checksums.add((await stage.getAttribute("data-checksum")) ?? "");
+    await stage.screenshot({
+      path: `/tmp/mclone-terrain-lab-${testInfo.project.name}-wildlife-${profile}.png`,
+    });
+  }
+  expect(checksums.size).toBe(3);
+
+  await page.goto(
+    "/terrain/?profile=overworld&seed=-98765&x=0&z=-2048"
+      + "&blocks=1024&panes=wildlife&view=map",
+    { waitUntil: "networkidle" },
+  );
+  const stage = page.getByTestId("wildlife-population-stage");
+  await expect(stage).toHaveAttribute("data-render-ready", "true");
+  await expect(stage).toHaveAttribute(
+    "data-adapter-status",
+    "requires-published-blocks",
+  );
+  await expect(stage).toHaveAttribute("data-occupied-cells", "0");
+  await expect(page.getByTestId("wildlife-map-legend"))
+    .toContainText("Evidence unavailable");
+  await stage.screenshot({
+    path: `/tmp/mclone-terrain-lab-${testInfo.project.name}-wildlife-overworld.png`,
+  });
 });

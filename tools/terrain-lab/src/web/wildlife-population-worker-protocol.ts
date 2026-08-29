@@ -1,4 +1,13 @@
-export type WildlifeSpecies = "rabbit" | "deer" | "mallard" | "bee";
+import type { TerrainLabProfile } from "../state";
+
+export type WildlifeSpecies =
+  | "rabbit"
+  | "deer"
+  | "mallard"
+  | "bee"
+  | "squirrel"
+  | "cow"
+  | "chicken";
 
 export interface WildlifePopulationCellReceipt {
   cellX: number;
@@ -6,18 +15,32 @@ export interface WildlifePopulationCellReceipt {
   centerX: number;
   centerZ: number;
   surfaceY: number;
-  biome: string;
-  landform: string;
+  habitat: string;
+  evidenceSource: string;
+  evidenceStatus: "complete" | "partial" | "unavailable";
+  availableEvidence: string[];
+  supported: boolean;
   land: number;
   productivity: number;
   openness: number;
+  lowCover: number;
   forestCover: number;
+  forestEdge: number;
   wetland: number;
   water: number;
+  inlandWater: number;
+  shore: number;
+  bank: number;
+  flowering: number;
+  seedsAndSoftMast: number;
+  matureTrees: number;
   rabbitWeight: number;
   deerWeight: number;
   mallardWeight: number;
   beeWeight: number;
+  squirrelWeight: number;
+  cowWeight: number;
+  chickenWeight: number;
   desiredDensity: number;
   occupancyRoll: number;
   speciesRoll: number;
@@ -32,6 +55,9 @@ export interface WildlifePopulationCellReceipt {
 export interface WildlifePopulationSummary {
   schema: string;
   seed: string;
+  profile: TerrainLabProfile;
+  adapter: string;
+  adapterStatus: "available" | "requires-published-blocks";
   revision: number;
   cellBlocks: number;
   minCellX: number;
@@ -40,7 +66,7 @@ export interface WildlifePopulationSummary {
   depthCells: number;
   occupiedCells: number;
   animalCount: number;
-  speciesCounts: [number, number, number, number];
+  speciesCounts: [number, number, number, number, number, number, number];
   checksum: string;
   cells: WildlifePopulationCellReceipt[];
 }
@@ -49,6 +75,7 @@ export interface WildlifePopulationWorkerBuild {
   type: "build";
   epoch: number;
   seed: string;
+  profile: TerrainLabProfile;
   centerX: number;
   centerZ: number;
   blocksAcross: number;

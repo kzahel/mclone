@@ -626,6 +626,9 @@ export function terrainLabProfileSupportsPane(
   profile: TerrainLabProfile,
   pane: TerrainLabPane,
 ): boolean {
+  if (pane === "wildlife") {
+    return true;
+  }
   if (profile === "overworld") {
     return pane === "canonical" || pane === "cpu" || pane === "macro";
   }
