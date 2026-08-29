@@ -133,7 +133,11 @@ pub use wildlife::{
     MCLONE_WILDLIFE_POPULATION_CELL_CHUNKS, MCLONE_WILDLIFE_POPULATION_REVISION,
     McloneOverworldWildlifePlanner, McloneWildlifeCellPlan, McloneWildlifeEncounter,
     McloneWildlifeHabitatSample, McloneWildlifePlanError, McloneWildlifePopulationCell,
-    McloneWildlifeSpecies, McloneWildlifeSuitability,
+    McloneWildlifeSpecies, McloneWildlifeSuitability, WILDLIFE_CANDIDATES_PER_CELL,
+    WILDLIFE_POPULATION_CELL_BLOCKS, WILDLIFE_POPULATION_CELL_CHUNKS, WILDLIFE_POPULATION_REVISION,
+    WildlifeCandidateSite, WildlifeCellPlan, WildlifeEncounter, WildlifeEvidenceSet,
+    WildlifeHabitatSample, WildlifeHabitatSource, WildlifePlanError, WildlifePopulationCell,
+    WildlifePopulationPlanner, WildlifeSpecies, WildlifeSuitability,
 };
 
 #[cfg(test)]

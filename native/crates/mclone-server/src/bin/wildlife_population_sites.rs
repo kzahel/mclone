@@ -38,6 +38,8 @@ struct SiteCandidate {
     mallards: u32,
     bees: u32,
     squirrels: u32,
+    cows: u32,
+    chickens: u32,
     habitat_labels: Vec<String>,
     mean_desired_density: u32,
     encounters: Vec<SiteEncounter>,
@@ -54,8 +56,8 @@ struct SiteEncounter {
     group_size: u8,
     owner_chunk_x: i32,
     owner_chunk_z: i32,
-    habitat: String,
-    landform: String,
+    habitat: &'static str,
+    evidence_source: &'static str,
     productivity: u16,
     openness: u16,
     forest_cover: u16,
@@ -156,6 +158,8 @@ fn candidate_for_window(
     let mut mallards = 0;
     let mut bees = 0;
     let mut squirrels = 0;
+    let mut cows = 0;
+    let mut chickens = 0;
     let mut density_sum = 0_u32;
     let mut habitat_labels = BTreeSet::new();
     for plan in plans {
@@ -180,9 +184,11 @@ fn candidate_for_window(
             }
             McloneWildlifeSpecies::Bee => bees += u32::from(encounter.group_size),
             McloneWildlifeSpecies::Squirrel => squirrels += u32::from(encounter.group_size),
+            McloneWildlifeSpecies::Cow => cows += u32::from(encounter.group_size),
+            McloneWildlifeSpecies::Chicken => chickens += u32::from(encounter.group_size),
         }
-        let habitat = format!("{:?}", plan.selected_habitat.biome);
-        habitat_labels.insert(habitat.clone());
+        let habitat = habitat_label(plan.selected_habitat);
+        habitat_labels.insert(habitat.to_owned());
         density_sum += u32::from(plan.desired_density);
         encounters.push(SiteEncounter {
             cell_x: plan.cell.x,
@@ -192,7 +198,7 @@ fn candidate_for_window(
             owner_chunk_x: encounter.owner_chunk.x,
             owner_chunk_z: encounter.owner_chunk.z,
             habitat,
-            landform: format!("{:?}", plan.selected_habitat.landform),
+            evidence_source: plan.selected_habitat.source.label(),
             productivity: plan.selected_habitat.productivity,
             openness: plan.selected_habitat.openness,
             forest_cover: plan.selected_habitat.forest_cover,
@@ -221,6 +227,8 @@ fn candidate_for_window(
         mallards,
         bees,
         squirrels,
+        cows,
+        chickens,
         habitat_labels: habitat_labels.into_iter().collect(),
         mean_desired_density,
         encounters,
@@ -232,6 +240,20 @@ fn candidate_for_window(
             center_chunk_x * 16,
             center_chunk_z * 16,
         ),
+    }
+}
+
+fn habitat_label(sample: mclone_worldgen::levelgen::WildlifeHabitatSample) -> &'static str {
+    if sample.inland_water >= 500 {
+        "inland-water"
+    } else if sample.wetland >= 350 || sample.bank >= 350 {
+        "wetland-margin"
+    } else if sample.mature_trees >= 350 || sample.forest_cover >= 500 {
+        "woodland"
+    } else if sample.land >= 500 && sample.openness >= 500 {
+        "open-land"
+    } else {
+        "mixed-or-marginal"
     }
 }
 

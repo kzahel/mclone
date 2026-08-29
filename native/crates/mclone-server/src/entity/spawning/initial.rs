@@ -175,6 +175,8 @@ fn species_entity_kind(species: McloneWildlifeSpecies) -> EntityKind {
         McloneWildlifeSpecies::Mallard => EntityKind::Mallard,
         McloneWildlifeSpecies::Bee => EntityKind::BeeNest,
         McloneWildlifeSpecies::Squirrel => EntityKind::Squirrel,
+        McloneWildlifeSpecies::Cow => EntityKind::Cow,
+        McloneWildlifeSpecies::Chicken => EntityKind::Chicken,
     }
 }
 
