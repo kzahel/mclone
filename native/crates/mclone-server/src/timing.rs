@@ -49,6 +49,16 @@ pub struct ChunkSchedulerPublicationDiagnostics {
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct NaturalSpawningDiagnostics {
     pub wildlife_population_policy: crate::WildlifePopulationPolicy,
+    pub founder_habitat_source: Option<mclone_worldgen::levelgen::WildlifeHabitatSource>,
+    pub founder_population_enabled: bool,
+    pub founder_pending_chunks: usize,
+    pub founder_plan_attempts: u64,
+    pub founder_evidence_deferrals: u64,
+    pub founder_unsuitable_plans: u64,
+    pub founder_empty_rolls: u64,
+    pub founder_exact_rejections: u64,
+    pub founder_groups_realized: u64,
+    pub founder_entities_realized: u64,
     pub live_attempts_enabled: bool,
     pub live_spawns_are_volatile: bool,
     pub ready_for_live_attempts: bool,

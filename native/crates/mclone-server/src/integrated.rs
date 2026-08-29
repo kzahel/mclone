@@ -209,6 +209,7 @@ pub struct DimensionRuntime {
     pending_intro_homestead_resident_chunks: BTreeSet<ChunkPos>,
     initial_wildlife_chunks_seen: BTreeSet<ChunkPos>,
     pending_initial_wildlife_chunks: BTreeSet<ChunkPos>,
+    wildlife_founder_counters: WildlifeFounderCounters,
     #[cfg(feature = "physics-engine")]
     physics: ServerPhysicsRuntime,
     #[cfg(feature = "physics-engine")]
@@ -257,6 +258,7 @@ impl DimensionRuntime {
             pending_intro_homestead_resident_chunks: BTreeSet::new(),
             initial_wildlife_chunks_seen: BTreeSet::new(),
             pending_initial_wildlife_chunks: BTreeSet::new(),
+            wildlife_founder_counters: WildlifeFounderCounters::default(),
             #[cfg(feature = "physics-engine")]
             physics: ServerPhysicsRuntime::new(),
             #[cfg(feature = "physics-engine")]
@@ -280,6 +282,17 @@ impl DimensionRuntime {
     pub fn scheduler(&self) -> &ChunkScheduler {
         &self.scheduler
     }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct WildlifeFounderCounters {
+    plan_attempts: u64,
+    evidence_deferrals: u64,
+    unsuitable_plans: u64,
+    empty_rolls: u64,
+    exact_rejections: u64,
+    groups_realized: u64,
+    entities_realized: u64,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -3784,8 +3797,21 @@ impl RealmServer {
         evaluation: &NaturalSpawningEvaluation,
         live: CreatureSpawnDiagnostics,
     ) -> NaturalSpawningDiagnostics {
+        let founder_population_enabled = self.initial_wildlife_population_enabled();
+        let founder = self.active_dimension.wildlife_founder_counters;
         NaturalSpawningDiagnostics {
             wildlife_population_policy: self.active_dimension.definition.wildlife_population_policy,
+            founder_habitat_source: founder_population_enabled
+                .then(|| wildlife_habitat_source(self.scheduler.world_generation_profile())),
+            founder_population_enabled,
+            founder_pending_chunks: self.active_dimension.pending_initial_wildlife_chunks.len(),
+            founder_plan_attempts: founder.plan_attempts,
+            founder_evidence_deferrals: founder.evidence_deferrals,
+            founder_unsuitable_plans: founder.unsuitable_plans,
+            founder_empty_rolls: founder.empty_rolls,
+            founder_exact_rejections: founder.exact_rejections,
+            founder_groups_realized: founder.groups_realized,
+            founder_entities_realized: founder.entities_realized,
             live_attempts_enabled: self.natural_spawning_runtime_enabled(),
             live_spawns_are_volatile: self.natural_spawning_runtime_enabled()
                 && !self.scheduler.entity_chunks_supported(),
@@ -5860,13 +5886,28 @@ impl RealmServer {
                             .map_err(|error| ChunkStoreError::InvalidData(error.to_string()))?,
                     )
                 };
+                let counters = &mut self.active_dimension.wildlife_founder_counters;
+                counters.plan_attempts = counters.plan_attempts.saturating_add(1);
+                match plan {
+                    None => {
+                        counters.evidence_deferrals = counters.evidence_deferrals.saturating_add(1);
+                    }
+                    Some(plan) if plan.encounter.is_none() && plan.desired_density == 0 => {
+                        counters.unsuitable_plans = counters.unsuitable_plans.saturating_add(1);
+                    }
+                    Some(plan) if plan.encounter.is_none() => {
+                        counters.empty_rolls = counters.empty_rolls.saturating_add(1);
+                    }
+                    Some(_) => {}
+                }
                 cell_plans.insert(cell, plan);
                 plan
             };
             let Some(plan) = plan else {
                 continue;
             };
-            if plan.encounter_for_chunk(pos).is_some_and(|encounter| {
+            let planned_encounter = plan.encounter_for_chunk(pos);
+            if planned_encounter.is_some_and(|encounter| {
                 encounter.species == McloneWildlifeSpecies::Squirrel
                     && (-1..=1).any(|dx| {
                         (-1..=1).any(|dz| {
@@ -5881,6 +5922,7 @@ impl RealmServer {
             }) {
                 continue;
             }
+            let realized_before = realized.len();
             if let Some(encounter) = plan.encounter_for_chunk(pos)
                 && let Some(placement) = if encounter.species == McloneWildlifeSpecies::Squirrel {
                     let recently_disturbed = player_positions.iter().any(|player| {
@@ -5974,6 +6016,18 @@ impl RealmServer {
                         };
                         realized.extend(spawned.unwrap_or_default());
                     }
+                }
+            }
+            if planned_encounter.is_some() {
+                let realized_count = realized.len().saturating_sub(realized_before);
+                let counters = &mut self.active_dimension.wildlife_founder_counters;
+                if realized_count == 0 {
+                    counters.exact_rejections = counters.exact_rejections.saturating_add(1);
+                } else {
+                    counters.groups_realized = counters.groups_realized.saturating_add(1);
+                    counters.entities_realized = counters
+                        .entities_realized
+                        .saturating_add(realized_count as u64);
                 }
             }
             if persistent {

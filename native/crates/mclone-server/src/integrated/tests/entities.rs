@@ -1072,6 +1072,17 @@ fn habitat_founders_realize_in_v2_v3_and_block_derived_worlds() {
             diagnostics.wildlife_population_policy,
             crate::WildlifePopulationPolicy::HabitatDrivenV1
         );
+        let expected_source = match profile {
+            WorldGenerationProfile::McloneOverworldV2 => WildlifeHabitatSource::McloneOverworldV2,
+            WorldGenerationProfile::McloneOverworldV3 => WildlifeHabitatSource::McloneOverworldV3,
+            WorldGenerationProfile::FlatGrassV1 => WildlifeHabitatSource::PublishedBlocks,
+            _ => unreachable!(),
+        };
+        assert_eq!(diagnostics.founder_habitat_source, Some(expected_source));
+        assert!(diagnostics.founder_population_enabled);
+        assert!(diagnostics.founder_plan_attempts > 0);
+        assert!(diagnostics.founder_groups_realized > 0);
+        assert!(diagnostics.founder_entities_realized > 0);
         assert!(!diagnostics.live_attempts_enabled);
     }
 }
