@@ -54,6 +54,7 @@ mod timing;
 mod types;
 #[cfg(target_arch = "wasm32")]
 mod wasm_job_worker;
+mod wildlife_population_policy;
 mod wildlife_resources;
 mod wildlife_simulation;
 mod world_behavior_profile;
@@ -202,6 +203,7 @@ pub use types::{
     LightStatusMailboxKind, MAX_CHUNK_DISTANCE, PLAYER_TICKET_LEVEL, ServerMode,
     UNLOADED_CHUNK_LEVEL, WorldBlockPos, WorldgenMailboxKind,
 };
+pub use wildlife_population_policy::WildlifePopulationPolicy;
 pub use wildlife_resources::{
     SeasonalWildlifeResourceSample, WILDLIFE_RESOURCE_CELL_WIDTH_BLOCKS,
     WILDLIFE_RESOURCE_KIND_COUNT, WILDLIFE_RESOURCE_RULE_REVISION, WildlifeForageCellPos,

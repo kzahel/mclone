@@ -787,6 +787,9 @@ fn debug_passive_showcase_entity_updates_tick_count_on_simulation_tick() {
 #[test]
 fn natural_spawning_diagnostics_use_live_players_chunks_and_creature_counts() {
     let mut server = LocalRealmSession::new(12_345);
+    server
+        .set_wildlife_population_policy(crate::WildlifePopulationPolicy::ReferencePassiveV1)
+        .unwrap();
     server.set_lighting_enabled(false);
     let player = server.add_player();
     set_dedicated_chunk_view_and_poll(&mut server, player, ChunkPos::new(0, 0), 2);
@@ -796,6 +799,10 @@ fn natural_spawning_diagnostics_use_live_players_chunks_and_creature_counts() {
         .expect("tick dedicated player");
     let spawning = report.natural_spawning;
 
+    assert_eq!(
+        spawning.wildlife_population_policy,
+        crate::WildlifePopulationPolicy::ReferencePassiveV1
+    );
     assert!(spawning.live_attempts_enabled);
     assert!(spawning.live_spawns_are_volatile);
     assert!(!spawning.ready_for_live_attempts);
@@ -824,6 +831,9 @@ fn natural_spawning_diagnostics_use_live_players_chunks_and_creature_counts() {
 fn transient_natural_spawning_creates_volatile_entities_from_generated_habitats() {
     let seed = 12_345;
     let mut server = LocalRealmSession::new(seed);
+    server
+        .set_wildlife_population_policy(crate::WildlifePopulationPolicy::ReferencePassiveV1)
+        .unwrap();
     server.set_debug_passive_showcase_enabled(false);
     server.set_lighting_enabled(true);
     let player = server.add_player();
@@ -906,6 +916,10 @@ fn persistent_initial_wildlife_survives_reload_without_seed_resurrection() {
             | EntityKind::Squirrel
     )));
     let spawning = server.natural_spawning_diagnostics(server.simulation_tick(), &[]);
+    assert_eq!(
+        spawning.wildlife_population_policy,
+        crate::WildlifePopulationPolicy::HabitatDrivenV1
+    );
     assert!(!spawning.live_attempts_enabled);
     assert_eq!(spawning.live_attempts, 0);
     let runtime_ids = spawned
@@ -1185,12 +1199,44 @@ fn natural_spawning_can_be_disabled() {
 
     let spawning = server.natural_spawning_diagnostics(400, &[]);
 
+    assert_eq!(
+        spawning.wildlife_population_policy,
+        crate::WildlifePopulationPolicy::HabitatDrivenV1
+    );
     assert!(!spawning.live_attempts_enabled);
     assert!(!spawning.live_spawns_are_volatile);
     assert!(!spawning.ready_for_live_attempts);
     assert_eq!(spawning.blocker_count, 1);
     assert_eq!(spawning.live_attempts, 0);
     assert_eq!(spawning.live_spawned, 0);
+}
+
+#[test]
+fn wildlife_population_policy_is_independent_after_explicit_selection() {
+    let mut server = LocalRealmSession::new(12_345);
+    assert_eq!(
+        server.wildlife_population_policy(),
+        crate::WildlifePopulationPolicy::HabitatDrivenV1
+    );
+
+    server
+        .set_world_generation_profile(WorldGenerationProfile::authored_only())
+        .unwrap();
+    assert_eq!(
+        server.wildlife_population_policy(),
+        crate::WildlifePopulationPolicy::Disabled
+    );
+
+    server
+        .set_wildlife_population_policy(crate::WildlifePopulationPolicy::ReferencePassiveV1)
+        .unwrap();
+    server
+        .set_world_generation_profile(WorldGenerationProfile::McloneOverworldV2)
+        .unwrap();
+    assert_eq!(
+        server.wildlife_population_policy(),
+        crate::WildlifePopulationPolicy::ReferencePassiveV1
+    );
 }
 
 #[test]

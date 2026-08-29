@@ -48,6 +48,7 @@ pub struct ChunkSchedulerPublicationDiagnostics {
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct NaturalSpawningDiagnostics {
+    pub wildlife_population_policy: crate::WildlifePopulationPolicy,
     pub live_attempts_enabled: bool,
     pub live_spawns_are_volatile: bool,
     pub ready_for_live_attempts: bool,

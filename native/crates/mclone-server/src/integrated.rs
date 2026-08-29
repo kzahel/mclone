@@ -3774,8 +3774,8 @@ impl RealmServer {
     fn natural_spawning_runtime_enabled(&self) -> bool {
         self.natural_spawning_enabled
             && self.active_dimension.definition.topology.is_unbounded()
-            && self.scheduler.world_generation_profile()
-                != WorldGenerationProfile::McloneOverworldV1
+            && self.active_dimension.definition.wildlife_population_policy
+                == crate::WildlifePopulationPolicy::ReferencePassiveV1
     }
 
     fn natural_spawning_diagnostics_from_evaluation(
@@ -3784,6 +3784,7 @@ impl RealmServer {
         live: CreatureSpawnDiagnostics,
     ) -> NaturalSpawningDiagnostics {
         NaturalSpawningDiagnostics {
+            wildlife_population_policy: self.active_dimension.definition.wildlife_population_policy,
             live_attempts_enabled: self.natural_spawning_runtime_enabled(),
             live_spawns_are_volatile: self.natural_spawning_runtime_enabled()
                 && !self.scheduler.entity_chunks_supported(),
@@ -3851,8 +3852,15 @@ impl RealmServer {
         profile: WorldGenerationProfile,
     ) -> ChunkStoreResult<()> {
         self.activate_dimension(&DimensionKey::overworld())?;
+        let old_profile = self.active_dimension.definition.generation_profile;
+        let inherited_default = self.active_dimension.definition.wildlife_population_policy
+            == crate::WildlifePopulationPolicy::default_for_profile(old_profile);
         self.scheduler.set_world_generation_profile(profile)?;
         self.active_dimension.definition.generation_profile = profile;
+        if inherited_default {
+            self.active_dimension.definition.wildlife_population_policy =
+                crate::WildlifePopulationPolicy::default_for_profile(profile);
+        }
         self.active_dimension.seasonal_resource_sampler =
             crate::wildlife_resources::SeasonalWildlifeResourceSampler::new(
                 &self.active_dimension.definition,
@@ -3862,6 +3870,30 @@ impl RealmServer {
             .pending_initial_wildlife_chunks
             .clear();
         self.dimensions.set_overworld_generation_profile(profile);
+        if inherited_default {
+            self.dimensions.set_overworld_wildlife_population_policy(
+                self.active_dimension.definition.wildlife_population_policy,
+            );
+        }
+        Ok(())
+    }
+
+    pub const fn wildlife_population_policy(&self) -> crate::WildlifePopulationPolicy {
+        self.active_dimension.definition.wildlife_population_policy
+    }
+
+    pub fn set_wildlife_population_policy(
+        &mut self,
+        policy: crate::WildlifePopulationPolicy,
+    ) -> ChunkStoreResult<()> {
+        self.activate_dimension(&DimensionKey::overworld())?;
+        self.active_dimension.definition.wildlife_population_policy = policy;
+        self.active_dimension.initial_wildlife_chunks_seen.clear();
+        self.active_dimension
+            .pending_initial_wildlife_chunks
+            .clear();
+        self.dimensions
+            .set_overworld_wildlife_population_policy(policy);
         Ok(())
     }
 
@@ -5756,6 +5788,12 @@ impl RealmServer {
     fn initial_wildlife_population_enabled(&self) -> bool {
         self.natural_spawning_enabled
             && self.active_dimension.key == DimensionKey::overworld()
+            && self.active_dimension.definition.wildlife_population_policy
+                == crate::WildlifePopulationPolicy::HabitatDrivenV1
+            // The next implementation slice removes this temporary adapter
+            // readiness gate when every ordinary profile has a truthful
+            // habitat source. It prevents a non-V1 world from consulting the
+            // still-V1-owned planner between the policy and planner commits.
             && self.scheduler.world_generation_profile()
                 == WorldGenerationProfile::McloneOverworldV1
     }

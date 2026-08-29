@@ -97,7 +97,7 @@ const DEER_FIELD_GUIDE_PLAYER_RECORD_VERSION: u32 = 5;
 const BEE_FIELD_GUIDE_PLAYER_RECORD_VERSION: u32 = 6;
 const RABBIT_FIELD_GUIDE_PLAYER_RECORD_VERSION: u32 = 7;
 pub const PLAYER_RECORD_VERSION: u32 = 7;
-pub const DIMENSION_RECORD_VERSION: u32 = 2;
+pub const DIMENSION_RECORD_VERSION: u32 = 3;
 pub const WORLD_METADATA_VERSION: u32 = 4;
 pub const WORLD_METADATA_TARGET_MINECRAFT_VERSION: &str = "1.17.1";
 
@@ -784,6 +784,7 @@ impl PlayerRecord {
 pub struct DimensionDefinition {
     pub seed: i64,
     pub generation_profile: WorldGenerationProfile,
+    pub wildlife_population_policy: crate::WildlifePopulationPolicy,
     pub topology: HorizontalTopology,
     pub min_y: i32,
     pub height: i32,
@@ -798,6 +799,9 @@ impl DimensionDefinition {
         Self {
             seed,
             generation_profile,
+            wildlife_population_policy: crate::WildlifePopulationPolicy::default_for_profile(
+                generation_profile,
+            ),
             topology: HorizontalTopology::UNBOUNDED,
             min_y: 0,
             height: 256,
@@ -6000,6 +6004,7 @@ fn write_dimension_record(
     write_u64(writer, record.revision)?;
     write_i64(writer, definition.seed)?;
     write_world_generation_profile(writer, definition.generation_profile)?;
+    write_wildlife_population_policy(writer, definition.wildlife_population_policy)?;
     write_horizontal_topology(writer, definition.topology)?;
     write_i32(writer, definition.min_y)?;
     write_i32(writer, definition.height)?;
@@ -6035,6 +6040,11 @@ fn read_dimension_record(reader: &mut impl Read) -> ChunkStoreResult<DimensionRe
     let revision = read_u64(reader)?;
     let seed = read_i64(reader)?;
     let generation_profile = read_world_generation_profile(reader)?;
+    let wildlife_population_policy = if codec_version >= 3 {
+        read_wildlife_population_policy(reader)?
+    } else {
+        crate::WildlifePopulationPolicy::default_for_profile(generation_profile)
+    };
     let topology = if codec_version >= 2 {
         read_horizontal_topology(reader)?
     } else {
@@ -6043,6 +6053,7 @@ fn read_dimension_record(reader: &mut impl Read) -> ChunkStoreResult<DimensionRe
     let definition = DimensionDefinition {
         seed,
         generation_profile,
+        wildlife_population_policy,
         topology,
         min_y: read_i32(reader)?,
         height: read_i32(reader)?,
@@ -6276,6 +6287,22 @@ fn read_world_generation_profile(
     let tag = read_u8(reader)?;
     WorldGenerationProfile::from_codec_tag(tag).ok_or_else(|| {
         ChunkStoreError::InvalidData(format!("unknown world generation profile tag {tag}"))
+    })
+}
+
+fn write_wildlife_population_policy(
+    writer: &mut impl Write,
+    policy: crate::WildlifePopulationPolicy,
+) -> ChunkStoreResult<()> {
+    write_u8(writer, policy.codec_tag())
+}
+
+fn read_wildlife_population_policy(
+    reader: &mut impl Read,
+) -> ChunkStoreResult<crate::WildlifePopulationPolicy> {
+    let tag = read_u8(reader)?;
+    crate::WildlifePopulationPolicy::from_codec_tag(tag).ok_or_else(|| {
+        ChunkStoreError::InvalidData(format!("unknown wildlife population policy tag {tag}"))
     })
 }
 
@@ -8709,6 +8736,8 @@ mod tests {
         record.key = DimensionKey::parse("mclone:moon").unwrap();
         record.definition.coordinate_scale = 0.125;
         record.definition.has_sky_light = false;
+        record.definition.wildlife_population_policy =
+            crate::WildlifePopulationPolicy::ReferencePassiveV1;
         record.definition.topology = HorizontalTopology::cylinder_x(0, 32);
 
         let bytes = encode_dimension_record(&record).unwrap();
@@ -8741,6 +8770,53 @@ mod tests {
 
         assert_eq!(decoded.codec_version, DIMENSION_RECORD_VERSION);
         assert_eq!(decoded.definition.topology, HorizontalTopology::UNBOUNDED);
+        assert_eq!(
+            decoded.definition.wildlife_population_policy,
+            crate::WildlifePopulationPolicy::HabitatDrivenV1
+        );
+    }
+
+    #[test]
+    fn binary_dimension_record_v2_derives_profile_wildlife_policy() {
+        let mut legacy = Vec::new();
+        legacy.extend_from_slice(DIMENSION_RECORD_MAGIC);
+        write_u32(&mut legacy, 2).unwrap();
+        write_string(
+            &mut legacy,
+            DimensionKey::overworld().as_str(),
+            "dimension key",
+        )
+        .unwrap();
+        write_u64(&mut legacy, 8).unwrap();
+        write_i64(&mut legacy, 45).unwrap();
+        write_world_generation_profile(&mut legacy, WorldGenerationProfile::authored_only())
+            .unwrap();
+        write_horizontal_topology(&mut legacy, HorizontalTopology::UNBOUNDED).unwrap();
+        write_i32(&mut legacy, 0).unwrap();
+        write_i32(&mut legacy, 256).unwrap();
+        write_f64(&mut legacy, 1.0).unwrap();
+        write_bool(&mut legacy, true).unwrap();
+        write_bool(&mut legacy, false).unwrap();
+        write_bool(&mut legacy, false).unwrap();
+
+        let decoded = decode_dimension_record(&legacy).unwrap();
+
+        assert_eq!(decoded.codec_version, DIMENSION_RECORD_VERSION);
+        assert_eq!(
+            decoded.definition.wildlife_population_policy,
+            crate::WildlifePopulationPolicy::Disabled
+        );
+    }
+
+    #[test]
+    fn binary_wildlife_population_policy_rejects_unknown_tag() {
+        let error = read_wildlife_population_policy(&mut [3].as_slice()).unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("unknown wildlife population policy tag 3")
+        );
     }
 
     #[test]

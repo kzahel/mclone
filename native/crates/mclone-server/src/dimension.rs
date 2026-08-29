@@ -69,6 +69,16 @@ impl DimensionRegistry {
             .expect("single-dimension realm must retain its Overworld definition")
             .generation_profile = generation_profile;
     }
+
+    pub(crate) fn set_overworld_wildlife_population_policy(
+        &mut self,
+        policy: crate::WildlifePopulationPolicy,
+    ) {
+        self.definitions
+            .get_mut(&DimensionKey::overworld())
+            .expect("single-dimension realm must retain its Overworld definition")
+            .wildlife_population_policy = policy;
+    }
 }
 
 #[cfg(test)]
