@@ -114,6 +114,10 @@ const SCENE_HOST_FIELDS: &[&str] = &[
     "graphics_preference_storage",
     "graphics_preference_error",
     "terrain_lod_preset_preference",
+    "terrain_lod_applied_preset",
+    "terrain_lod_persisted_preference",
+    "terrain_lod_pending_persistence",
+    "terrain_lod_apply_error",
     "fog_settings",
     "pending_leaf_detail",
     "pending_restored_asset_pack_selection",
@@ -169,6 +173,7 @@ const SCENE_HOST_FIELDS: &[&str] = &[
     "render_completed_result_accept_budget",
     "per_view_uniform_frame",
     "last_locomotion_update",
+    "client_clock",
     "player_pose_sync",
     "menu_toggle_down",
     "game_ui_toggle_down",
@@ -195,7 +200,7 @@ fn host_has_one_active_and_one_optional_concrete_drawable_slot() {
     assert_eq!(slot_fields, DRAWABLE_WORLD_SLOT_FIELDS);
     assert_eq!(slot_fields.len(), 25);
     assert_eq!(host_fields, SCENE_HOST_FIELDS);
-    assert_eq!(host_fields.len(), 101);
+    assert_eq!(host_fields.len(), 104);
     assert_eq!(host.matches("active_world: DrawableWorldSlot").count(), 1);
     assert_eq!(
         host.matches("standby_world: Option<DrawableWorldSlot>")
