@@ -1,6 +1,15 @@
 use super::*;
 use crate::cli::XrRenderModeOption;
+use mclone_app_runtime::graphics_preferences::ClientGraphicsPlatformProfile;
 use mclone_app_runtime::startup_args::StartupSceneOptions;
+
+fn desktop_xr_scene_options() -> SceneOptions {
+    SceneOptions {
+        startup: StartupSceneOptions::default()
+            .with_graphics_platform_profile(ClientGraphicsPlatformProfile::DesktopOpenXr),
+        ..SceneOptions::default()
+    }
+}
 
 #[test]
 fn cli_parses_xr_clear_smoke_options() {
@@ -58,7 +67,7 @@ fn cli_parses_xr_mclone_smoke_options() {
                         render_distance: 3,
                         day_time_override: Some(6000),
                         freeze_time: true,
-                        ..Default::default()
+                        ..desktop_xr_scene_options().startup
                     },
                     ..SceneOptions::default()
                 },
@@ -92,7 +101,7 @@ fn cli_parses_xr_view_pose_default() {
         cli,
         Cli::XrMcloneSmoke {
             options: XrMcloneSmokeOptions {
-                scene: SceneOptions::default(),
+                scene: desktop_xr_scene_options(),
                 render_options: TexturedSectionRenderOptions::default(),
                 frame_limit: Some(120),
                 view_pose: None,
@@ -118,7 +127,7 @@ fn cli_parses_xr_underwater_mode() {
         cli,
         Cli::XrMcloneSmoke {
             options: XrMcloneSmokeOptions {
-                scene: SceneOptions::default(),
+                scene: desktop_xr_scene_options(),
                 render_options: TexturedSectionRenderOptions::default(),
                 frame_limit: Some(120),
                 view_pose: None,
@@ -144,7 +153,7 @@ fn cli_parses_xr_debug_ui_screen() {
         cli,
         Cli::XrMcloneSmoke {
             options: XrMcloneSmokeOptions {
-                scene: SceneOptions::default(),
+                scene: desktop_xr_scene_options(),
                 render_options: TexturedSectionRenderOptions::default(),
                 frame_limit: Some(120),
                 view_pose: None,
@@ -230,7 +239,7 @@ fn cli_parses_xr_forever_smoke_options() {
         cli,
         Cli::XrMcloneSmoke {
             options: XrMcloneSmokeOptions {
-                scene: SceneOptions::default(),
+                scene: desktop_xr_scene_options(),
                 render_options: TexturedSectionRenderOptions::default(),
                 frame_limit: None,
                 view_pose: Some(XrViewPose {
@@ -344,7 +353,7 @@ fn cli_parses_desktop_xr_persistent_with_window_by_default() {
         cli,
         Cli::DesktopXr {
             options: XrMcloneSmokeOptions {
-                scene: SceneOptions::default(),
+                scene: desktop_xr_scene_options(),
                 render_options: TexturedSectionRenderOptions::default(),
                 frame_limit: None,
                 view_pose: None,

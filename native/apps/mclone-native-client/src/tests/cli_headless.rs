@@ -325,7 +325,12 @@ fn cli_parses_xr_emulation_screenshot_and_keyboard_input() {
                 path: PathBuf::from("/tmp/mclone-xr-emulation.png"),
                 eye_width: 800,
                 eye_height: 700,
-                scene: SceneOptions::default(),
+                scene: SceneOptions {
+                    startup: StartupSceneOptions::default().with_graphics_platform_profile(
+                        mclone_app_runtime::graphics_preferences::ClientGraphicsPlatformProfile::DesktopOpenXr,
+                    ),
+                    ..SceneOptions::default()
+                },
                 render_options: TexturedSectionRenderOptions::default(),
                 held_keys: vec![
                     mclone_input::KeyboardKey::KeyW,
