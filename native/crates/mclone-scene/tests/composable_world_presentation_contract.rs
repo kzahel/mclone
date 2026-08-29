@@ -238,7 +238,7 @@ fn actor_composition_is_opt_in_shared_and_portable() {
     let web_proof = braced_item(&web, "fn render_actor_composition_proof(");
     let smoke_export = braced_item(&web, "pub fn render_actor_composition_proof(");
     assert!(fixture.contains("pub struct ActorCompositionFixture"));
-    assert!(fixture.contains("cow_figure_id()"));
+    assert!(fixture.contains("red_squirrel_figure_id()"));
     assert!(fixture.contains(".with_id(ActorInstanceId::Entity(9))"));
     assert!(fixture.contains("chicken_figure_id()"));
     assert!(fixture.contains("ActorInstance::item_egg"));
