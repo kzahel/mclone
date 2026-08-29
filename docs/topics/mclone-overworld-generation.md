@@ -51,16 +51,19 @@ launch also pass. V3 is still experimental and now awaits Human Review V3-A;
 the aerial exact/procedural albedo rectangle remains an explicit revision
 candidate. Terrain Lab's one global terrain-profile selector now exposes V1,
 V2, and V3 as mutually exclusive choices. V2 and V3 use their own composed
-runtime, exact chunks, CPU LOD, and vegetation there; V1-only research panes
-and the V1 GPU-native diagnostic remain unavailable for those selections.
-Tactical
+runtime, exact chunks, CPU LOD, and vegetation there; other V1-only research
+panes and the V1 GPU-native diagnostic remain unavailable for those
+selections. The Wildlife pane is now profile-aware.
+Completed Tactical
 [`334`](../tactical/334-cross-profile-wildlife-habitat-routing.md) now owns the
 separate cross-profile ecology route. V1, V2, and V3 publish their own terrain
 evidence into one neutral wildlife planner; no profile identity selects a
-roster. V2 begins with adaptation of its existing rich ecology facts. V3
-begins conservatively from accepted landform, water, openness, moisture, and
-tree facts, then Tactical 332 may add a reusable shallow basin-lake living
-margin after Human Review V3-A rather than a frog-only terrain exception.
+roster. V2 adapts its existing rich ecology facts. V3 remains conservative:
+its current adapter has basin water, coarse shore, openness, moisture, and
+tree facts but not truthful wetland, bank, shallow-refuge, or
+aquatic-resource facts. Tactical 332 may add the recorded reusable shallow
+basin-lake living margin after Human Review V3-A rather than a frog-only
+terrain exception.
 V2's first additional regional archetype is a mesa desert with formation-owned
 tables, stepped escarpments, washes, fans, red-sand basins, exact terracotta
 strata, and ecology-facing habitat facts. Its broad identities remain stable

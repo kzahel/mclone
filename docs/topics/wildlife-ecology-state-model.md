@@ -3,7 +3,7 @@
 Topic: `wildlife-ecology-state-model`
 
 Status: **active architecture with its first concrete foundation landed under
-Tactical
+Proposed Tactical
 [`295`](../tactical/295-rabbit-refuge-memory-and-ecology-agent-foundation.md)
 and urgent safety proof completed under Tactical
 [`296`](../tactical/296-rabbit-player-avoidance.md) on 2026-08-14. Rabbits now
@@ -103,26 +103,26 @@ and steps onto supported leaves. It neither clips through nor edits the canopy.
 A constructed drey or cavity remains later ecology vocabulary rather than a
 hidden side effect of this movement state.
 
-Proposed Tactical
+Tactical
 [`332`](../tactical/332-frog-chorus-and-metamorphosis-ecology.md) selects frogs
 as the next compact non-predator pressure test after Tactical 315 closes and
-Tactical 334 lands cross-profile founding. A frog remains one durable
-individual across ground and shallow water; nearby
+the completed Tactical 334 cross-profile prerequisite. A frog remains one
+durable individual across ground and shallow water; nearby
 eligible adults form a derived bounded dusk chorus without permanent group
 ownership; and one material brood persists spawn/tadpole/readiness state
 before idempotently releasing durable froglets. The proposal deliberately
 does not create independently ticking tadpole swarms, deep-water navigation,
 rain authority, or unloaded progression.
 
-Proposed Tactical
-[`334`](../tactical/334-cross-profile-wildlife-habitat-routing.md) is now the
+Completed Tactical
+[`334`](../tactical/334-cross-profile-wildlife-habitat-routing.md) is the
 founding prerequisite for that chapter. It separates persisted wildlife policy
 from generator identity, extracts coordinate-pure population geography from
 the V1 terrain sampler, admits profile-specific semantic or bounded
 block-derived evidence through one neutral habitat value, and keeps one
-automatic producer per dimension. This changes where durable individuals may
-be founded; it does not add refill, immigration, unloaded progression, or
-population targeting.
+automatic producer per dimension. Seven promoted species now share that
+producer. This changes where durable individuals may be founded; it does not
+add refill, immigration, unloaded progression, or population targeting.
 
 ## Scope
 

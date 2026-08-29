@@ -24,7 +24,7 @@ interactive Web review. The continuing showcase contract lives separately in
 Tactical [`282`](../tactical/282-mallard-behavioral-showcase.md) turns the
 first rejected static review into shared retained habitat intent, stable
 movement-derived orientation, a roomier wetland, and time-window evidence.
-Tactical
+Proposed Tactical
 [`284`](../tactical/284-deer-forest-edge-ecology-and-semantic-props.md)
 completes deer as the contrasting second original chapter: generated
 forest-edge intent, live habitat fitness, authored multi-state behavior,
@@ -91,25 +91,26 @@ closed-canopy exterior route to a leaf-supported top perch. Squirrels do not
 clip through leaves, carve fixture openings, or mutate trees; future durable
 dreys/cavities remain separate ecology work.
 
-Proposed Tactical
+Tactical
 [`332`](../tactical/332-frog-chorus-and-metamorphosis-ecology.md) selects frogs
 as the sixth original creature-life chapter after Tactical 315 closes and
-Tactical 334 lands cross-profile founding. It
+the completed Tactical 334 cross-profile founding prerequisite. It
 reuses existing wetland, hop, shallow-water, aquatic-invertebrate, calendar,
 and lifecycle contracts while adding a real-entity dusk chorus and one bounded
 material spawn-to-tadpole-to-froglet brood. Frogs remain a compact amphibious
 chapter before the larger fish/beaver water-system candidates and before fox
 introduces predator pressure.
 
-Proposed Tactical
-[`334`](../tactical/334-cross-profile-wildlife-habitat-routing.md) now precedes
-frog implementation. It removes V1 as the hidden owner of Mclone wildlife,
-persists habitat-driven population policy separately from terrain generation,
-and gives every ordinary profile a truthful habitat adapter plus final
-live-block validation. “Available in any world” means no profile-level
-creature exclusion, not guaranteed occupancy: randomness chooses among viable
-sites and an unsupported habitat remains honestly empty. Shared extraction may
-begin before V3 is complete; after Human Review V3-A, frogs should drive a
+Completed Tactical
+[`334`](../tactical/334-cross-profile-wildlife-habitat-routing.md) removes V1
+as the hidden owner of Mclone wildlife, persists habitat-driven population
+policy separately from terrain generation, and gives every ordinary profile a
+truthful direct or published-block adapter plus final live-block validation.
+Cow, chicken, rabbit, deer, mallard, bee, and squirrel now share one founding
+roster. “Available in any world” means no profile-level creature exclusion,
+not guaranteed occupancy: randomness chooses among viable sites and an
+unsupported habitat remains honestly empty. Its frog-readiness receipt leaves
+V3 conservative; after Human Review V3-A, frogs should drive the recorded
 reusable shallow basin-lake margin useful to mallards and later aquatic life.
 
 ## Scope
@@ -696,8 +697,9 @@ notes, and zero browser-world records. The temporary play link is
 - Close Tactical 319 Review Gate D with one physical-XR or exact full-frame
   multiview squirrel capture. Then continue Tactical 315 through carried mast,
   bounded durable caches, cache knowledge, compressed seasonal lifecycle, and
-  final cross-platform acceptance. Then execute proposed Tactical 332's frog
-  wetland chorus and bounded material brood. Retain fish as the later
+  final cross-platform acceptance. Tactical 334's cross-profile routing and
+  frog-readiness receipt are complete; after V3-A, execute proposed Tactical
+  332's frog wetland chorus and bounded material brood. Retain fish as the later
   water-volume candidate and beaver as the later
   family-construction/terrain-mutation candidate; do not implement all three
   merely to populate a food-web list.

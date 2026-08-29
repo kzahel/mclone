@@ -50,14 +50,14 @@ selectable as a control. Native live terrain/vegetation pixels and SQLite
 reopen now pass. WebGPU generation/reopen, flat Android, Quest packaging, and
 a real Quest stereo-frame launch pass. Human Review V3-A remains.**
 
-Proposed Tactical
+Completed Tactical
 [`334`](../tactical/334-cross-profile-wildlife-habitat-routing.md) separates
 natural wildlife policy from this generator identity. All ordinary procedural
-profiles should be capable of the same habitat-driven promoted roster, while
-each profile supplies its own semantic or bounded block-derived evidence and
-final blocks remain authoritative. The current V1-only Mclone population gate
-and complementary non-V1 Java-shaped live route are implementation accidents,
-not profile contracts.
+profiles now select the same habitat-driven seven-species roster while each
+profile supplies its own semantic or bounded block-derived evidence and final
+blocks remain authoritative. The former V1-only Mclone population gate and
+complementary non-V1 Java-shaped live route were implementation accidents, not
+profile contracts.
 
 This topic owns the current truth and durable decisions for selectable,
 versioned world-generation profiles. Detailed refactoring and implementation
@@ -262,6 +262,14 @@ world.
   disposable development worlds regenerate them from current terrain. Entity
   saved data advances to revision 15 for mallard lifecycle and nest intent,
   with focused legacy mallard hydration and round-trip coverage.
+- **Reviewed for Tactical 334:** 2026-08-29; generated blocks, terrain
+  fingerprints, and generator identities are unchanged. The dimension record
+  advances to revision 3 to persist wildlife population policy separately
+  from generation profile. Never-realized entity chunks now use revision-3
+  seven-species founder geography through direct or published-block evidence;
+  existing entity records, including empty records, remain authoritative.
+  Internal worlds without the field receive the deterministic documented
+  default and persist it on their next metadata write.
 - **Reviewed for default creation and inland spawn, 2026-08-15:** Mclone
   Overworld is now the product new-world default; obsolete catalog records
   without a profile are rejected rather than migrated. Mclone spawn selection

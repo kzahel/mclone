@@ -1,9 +1,11 @@
 # Tactical 334: Cross-Profile Wildlife Habitat Routing
 
-Status: **proposed 2026-08-29; selected as the ecology-routing prerequisite
-for Tactical 332. The profile-neutral policy and planner extraction may begin
-before Mclone Overworld V3 is complete, but V3 ecology enablement or terrain
-changes remain gated on Human Review V3-A.**
+Status: **complete 2026-08-29. The profile-neutral wildlife policy, shared
+seven-species planner, direct V1/V2/V3 evidence adapters, bounded
+published-block adapter, live placement checks, diagnostics, and Terrain Lab
+review surface are landed. The frog-readiness receipt is recorded below;
+frog behavior and V3 terrain changes remain gated on Tactical 332 and Human
+Review V3-A.**
 
 Topics:
 
@@ -69,22 +71,22 @@ model. Materialized animals remain durable individuals. Empty saved entity
 records remain authoritative. There is no periodic refill, desired population
 floor, hidden immigration, or unloaded catch-up.
 
-## Current Failure
+## Starting Failure
 
-The implementation currently has two complementary profile checks rather than
-one explicit policy:
+At the start of this tactical, the implementation had two complementary
+profile checks rather than one explicit policy:
 
-- `initial_wildlife_population_enabled` admits the deterministic Mclone
-  population only when the active profile is exactly
+- `initial_wildlife_population_enabled` admitted the deterministic Mclone
+  population only when the active profile was exactly
   `McloneOverworldV1`;
-- `McloneOverworldWildlifePlanner` directly owns the V1 terrain sampler and V1
-  vegetation planner;
-- the existing population mix is rabbit, deer, mallard, bee, and squirrel;
-- the older cadence-driven live passive path is enabled for an unbounded
-  profile whenever that profile is *not* V1, so ordinary V2 and V3 worlds can
-  fall into the Java-shaped cow/chicken route despite being original Mclone
-  profiles; and
-- Terrain Lab's exact production wildlife pane is V1-only.
+- `McloneOverworldWildlifePlanner` directly owned the V1 terrain sampler and
+  V1 vegetation planner;
+- the existing population mix was rabbit, deer, mallard, bee, and squirrel;
+- the older cadence-driven live passive path was enabled for an unbounded
+  profile whenever that profile was *not* V1, so ordinary V2 and V3 worlds
+  could fall into the Java-shaped cow/chicken route despite being original
+  Mclone profiles; and
+- Terrain Lab's exact production wildlife pane was V1-only.
 
 This is a routing accident, not a defensible ecology boundary. V2 already
 publishes rich forest, clearing, wetland, climate, drainage, water, and refuge
@@ -464,23 +466,23 @@ proves material creatures. Neither substitutes for the other.
 
 ## Completion Checklist
 
-- [ ] Wildlife population policy is stored separately from terrain profile.
-- [ ] New ordinary procedural worlds select `HabitatDrivenV1`; authored/probe
+- [x] Wildlife population policy is stored separately from terrain profile.
+- [x] New ordinary procedural worlds select `HabitatDrivenV1`; authored/probe
       worlds default disabled and may opt in explicitly.
-- [ ] No server gate uses V1 identity as a synonym for Mclone ecology or uses
+- [x] No server gate uses V1 identity as a synonym for Mclone ecology or uses
       `!= V1` as a synonym for the Java-shaped passive path.
-- [ ] Cow, chicken, rabbit, deer, mallard, bee, and squirrel share one
+- [x] Cow, chicken, rabbit, deer, mallard, bee, and squirrel share one
       deterministic founder producer.
-- [ ] All ordinary procedural profiles have a truthful adapter and final
+- [x] All ordinary procedural profiles have a truthful adapter and final
       live-block validation; missing habitat produces absence, not randomness.
-- [ ] Existing and empty entity records remain authoritative across migration,
+- [x] Existing and empty entity records remain authoritative across migration,
       unload/reload, and reopen.
-- [ ] Terrain Lab explains the exact cross-profile production decision and
+- [x] Terrain Lab explains the exact cross-profile production decision and
       evidence provenance on desktop and phone.
-- [ ] Native, Web, dedicated, flat Android, and XR boundaries pass from shared
+- [x] Native, Web, dedicated, flat Android, and XR boundaries pass from shared
       policy and entity state.
-- [ ] Tactical 332 has a V1/V2/V3 readiness receipt and a reusable V3
-      shallow-margin brief after Human Review V3-A.
+- [x] Tactical 332 has a V1/V2/V3 readiness receipt and a reusable post-V3-A
+      shallow-margin brief; terrain realization remains its own gate.
 
 ## Explicit Deferrals
 
@@ -502,16 +504,18 @@ proves material creatures. Neither substitutes for the other.
 
 ## Code And Documentation Map
 
-- `native/crates/mclone-server/src/integrated.rs`: current complementary
-  producer gates, first-realization admission, and exact placement.
-- `native/crates/mclone-server/src/entity/spawning/live.rs`: current explicit
-  reference-shaped cow/chicken live path.
+- `native/crates/mclone-server/src/integrated.rs`: single-producer routing,
+  first-realization admission, and exact placement.
+- `native/crates/mclone-server/src/wildlife_habitat.rs`: bounded immutable
+  published-block census and availability handling.
+- `native/crates/mclone-server/src/entity/spawning/live.rs`: explicitly
+  selected reference-shaped cow/chicken path.
 - `native/crates/mclone-server/src/world_generation_profile.rs`: generator
   identity that must remain separate from wildlife policy.
 - `native/crates/mclone-server/src/persistence.rs`: dimension definition,
   durable record, metadata migration, and storage codecs for the policy.
-- `native/crates/mclone-worldgen/src/levelgen/mclone_overworld/wildlife.rs`:
-  current V1-owned planner to extract.
+- `native/crates/mclone-worldgen/src/levelgen/wildlife.rs`: profile-neutral
+  planner, habitat evidence, species scoring, and direct profile adapters.
 - `native/crates/mclone-worldgen/src/continental_surface.rs`: V2 semantic
   evidence source.
 - `native/crates/mclone-worldgen/src/mclone_overworld_v3.rs`: V3 accepted
@@ -532,4 +536,90 @@ proves material creatures. Neither substitutes for the other.
 
 ## Execution Record
 
-Not started.
+Completed 2026-08-29.
+
+### Landed result
+
+- `WildlifePopulationPolicy` is a versioned persisted dimension fact with
+  `Disabled`, `HabitatDrivenV1`, and explicit `ReferencePassiveV1` choices.
+  New procedural worlds select habitat-driven founding independently of their
+  generator profile; authored-only and topology-probe worlds remain disabled
+  unless explicitly opted in.
+- One revision-3, 64-block-cell planner now owns candidate geography,
+  occupancy, seven-species weighting, encounter ownership, and group intent.
+  V1 was first extracted without behavior drift, then cow and chicken joined
+  rabbit, deer, mallard, bee, and squirrel in the deliberate revision bump.
+- V1, V2, and V3 use direct adapters over their own canonical terrain facts.
+  Legacy Overworld, Alpha, Beta, Small Island, Flat Grass, and explicitly
+  opted-in authored/probe worlds use a fixed 9-by-9 census over immutable
+  published chunk snapshots. Missing required snapshots defer the decision;
+  they are never treated as empty terrain and never force a chunk load.
+- Every encounter passes a bounded exact-block check before durable entities
+  are created. Unsupported ground, missing seed or cover, absent water,
+  flowers, mast, refuge, or other species requirements reject the placement;
+  there is no species-blind or profile-level random fallback.
+- Squirrel founder qualification now reads published snapshots independently
+  of client visibility. Natural population outcomes therefore no longer
+  depend on whether a client happened to request the neighboring chunks.
+- Runtime diagnostics report the selected habitat source, plan attempts,
+  evidence deferrals, unsuitable plans, empty rolls, exact rejections, and
+  realized groups/entities. Terrain Lab exposes the same direct V1/V2/V3
+  production decisions for all seven species. Its legacy-Overworld view
+  honestly reports that live published blocks are required instead of
+  pretending V1 facts are available inside the offline tool.
+
+The pinned direct-adapter survey receipt is a 16-by-16 population-cell window:
+
+| adapter | occupied | entities | species counts in planner order | weight checksum |
+| --- | ---: | ---: | --- | ---: |
+| V1 | 54 | 155 | `18, 6, 2, 5, 0, 10, 13` | 60,684 |
+| V2 | 103 | 295 | `31, 20, 0, 10, 20, 8, 14` | 99,636 |
+| V3 | 117 | 350 | `63, 30, 0, 0, 3, 21, 0` | 109,907 |
+
+Counts are rabbit, deer, mallard, bee, squirrel, cow, and chicken. V3's zero
+mallard, bee, and chicken counts in this bounded receipt are valid habitat
+outcomes, not routing exclusions or quota failures.
+
+### Frog-readiness handoff
+
+| evidence route | current readiness for Tactical 332 |
+| --- | --- |
+| V1 direct | Broad routing is ready: land/support, productivity, inland water, wetland, shore, bank, low cover, flowers, seed/mast, and mature-tree facts are available. Tactical 332 must still add the frog species rule and exact shallow-water/resource checks. |
+| V2 direct | Broad routing is ready and semantically strongest: lake, river, wetland-pool, floodplain, riparian, shore, cover, and productivity intent feed the neutral vocabulary. Tactical 332 must prove that exact generated blocks agree at frog sites. |
+| V3 direct | Routing is ready, with basin/inland water, coarse shore, land, moisture, openness, and forest opportunity. Habitat is not frog-ready: wetland and bank evidence are unavailable, and there is no truthful shallow-depth, reachable low-bank, wet-cover, or aquatic-resource opportunity yet. A conservative frog weight must remain zero until those facts land. |
+| Published blocks | Explicitly opted-in historical, simple, or authored worlds can qualify from their actual published blocks. The bounded census already distinguishes shallow water, water-touching banks, low cover, flowers, and mature trees; unavailable snapshots defer. |
+
+After Human Review V3-A, Tactical 332 should extend existing basin lakes with
+the smallest reusable shallow living margin rather than add frog-only noise or
+a frog-only biome. The terrain slice should provide variable one-to-two-block
+shallows, low supported and reachable landing banks, wet/low cover, and
+truthful shallow-refuge, bank-accessibility, wetland-strength, and
+aquatic-resource facts. Exact generated blocks must agree with those facts.
+The result should also serve mallards, insects, shore flora, and later fish or
+beaver work. This tactical did not implement or pre-approve that terrain
+change.
+
+### Commits and validation
+
+The implementation series is:
+
+- `bd639452` through `a9acc8de`: durable policy, neutral planner extraction,
+  seven-species revision, profile adapters, server routing, diagnostics,
+  Terrain Lab, startup semantics, visibility independence, and canaries;
+- `84f2ac5d`, `1a322e47`, and `94f639e9`: standalone repairs to unrelated
+  stale XR CLI, actor-composition, and scene-host inventory expectations found
+  by broad validation.
+
+Focused worldgen, persistence, integrated/dedicated server, exact-placement,
+Terrain Lab Rust/TypeScript, and desktop/phone browser tests pass. The shared
+Web/Wasm build, desktop offscreen smoke, native XR check, flat Android APK,
+Quest APK, and thin-adapter purity checks pass. Inspected Terrain Lab captures
+cover V1, V3, legacy published-block unavailability, and phone layout; the
+inspected desktop game capture shows ordinary V1 terrain and a realized cow.
+
+A final serial native-workspace run passes the wildlife/server surface and
+stops only at the pre-existing Web boundary-debt fixpoint: `WebSceneHost`
+exports 40 mechanical methods against an intentional non-increasing ceiling
+of 38. The guard explicitly requires moving browser smoke exports rather than
+raising the ceiling, so this unrelated architecture debt was not weakened as
+part of the ecology series.

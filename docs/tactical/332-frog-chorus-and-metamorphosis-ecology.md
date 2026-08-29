@@ -2,8 +2,8 @@
 
 Status: **proposed 2026-08-23; selected as the next original creature chapter
 after Tactical 315 closes its squirrel cache, seasonal lifecycle, and
-cross-platform acceptance gates and Tactical 334 lands cross-profile wildlife
-routing.**
+cross-platform acceptance gates. Tactical 334 completed cross-profile
+wildlife routing and its frog-readiness handoff on 2026-08-29.**
 
 Topics:
 
@@ -110,10 +110,42 @@ unloaded catch-up simulation.
   seasonal reproduction, and full acceptance. Frog implementation begins
   after those gates close so population evidence and platform review do not
   overlap two unfinished creature chapters.
-- Tactical 334 must first make habitat-driven founding independent of terrain
-  profile, remove the accidental V1/non-V1 producer split, and produce a
-  V1/V2/V3 frog-readiness receipt. Frog implementation adds a shared species
-  rule to that planner rather than extending the V1-owned planner.
+- Tactical 334 has made habitat-driven founding independent of terrain
+  profile, removed the accidental V1/non-V1 producer split, and produced the
+  V1/V2/V3 frog-readiness receipt below. Frog implementation adds a shared
+  species rule to that planner rather than extending a profile-owned planner.
+
+## Cross-Profile Readiness Receipt (Tactical 334)
+
+Tactical 334 completed the routing prerequisite without implementing frogs or
+changing V3 terrain:
+
+| evidence route | frog-chapter starting point |
+| --- | --- |
+| V1 direct | Broad land/support, productivity, inland-water, wetland, shore, bank, cover, flower, seed/mast, and mature-tree evidence is available. Add the shared frog rule and exact shallow-water, landing, cover, and aquatic-resource checks. |
+| V2 direct | Lake, river, wetland-pool, floodplain, riparian, shore, cover, and productivity intent already map into the neutral evidence. Treat V2 as the strongest semantic candidate, but prove semantic-to-block agreement at every exact founder and brood site. |
+| V3 direct | Basin/inland water and coarse shore plus land, moisture, openness, and forest opportunity are available. Wetland and bank evidence are unavailable, and shallow depth, a reachable low bank, wet cover, and aquatic-resource opportunity are not yet truthful facts. Keep frog viability conservative until the terrain slice below lands. |
+| Published blocks | Opted-in historical, simple, and authored worlds can qualify from a bounded immutable-block census that sees shallow water, a water-touching bank, low cover, flowers, and mature trees. Missing snapshots defer instead of proving dry habitat. |
+
+### Post-V3-A shallow-margin brief
+
+After Human Review V3-A, extend V3's existing basin lakes rather than adding a
+frog-only biome, noise field, or quota-driven pond. The smallest reusable
+terrain slice should:
+
+- form variable one-to-two-block-deep shallow shelves or graded margins;
+- provide low, supported, reachable bank/landing cells and truthful wet or low
+  cover;
+- publish shallow-refuge, bank-accessibility, wetland-strength, and
+  aquatic-resource-opportunity facts that agree with exact generated blocks;
+- retain V3's accepted basin and landform structure rather than reshaping
+  mountains or filling valleys for frog counts; and
+- benefit mallards, aquatic insects, shore flora, and later fish or beaver
+  work as well as frogs.
+
+This brief is a readiness result, not terrain acceptance. Tactical 315 and
+Human Review V3-A remain external gates before frog implementation and V3
+terrain realization.
 
 ## Binding Decisions
 
@@ -515,7 +547,7 @@ outcomes; a first-frame screenshot alone is insufficient.
 
 - [ ] Tactical 315 squirrel cache and acceptance gates are closed before frog
       implementation begins.
-- [ ] Tactical 334 cross-profile routing and the V1/V2/V3 frog-readiness gate
+- [x] Tactical 334 cross-profile routing and the V1/V2/V3 frog-readiness gate
       are complete before frog population work begins.
 - [ ] The reviewed Frog and brood assets are promoted through the shared
       first-party semantic pipeline.
@@ -586,5 +618,11 @@ outcomes; a first-frame screenshot alone is insufficient.
 
 ## Execution Record
 
-No implementation has started. Phase 0 records the selected proposal and its
-place after Tacticals 315 and 334.
+Tactical 334 completed the profile-neutral founding prerequisite and recorded
+the V1/V2/V3 readiness evidence on 2026-08-29. V1 and V2 can feed a future
+shared frog rule from current direct evidence; V3 remains deliberately
+conservative until the post-V3-A shallow-margin slice supplies truthful
+wetland, bank, shallow-refuge, wet-cover, and aquatic-resource facts.
+
+No frog implementation has started. Tactical 315 and Human Review V3-A remain
+open gates.
