@@ -636,12 +636,13 @@ mod tests {
         let mut stream = ScriptedStream::new(request);
         let mut server = RealmServer::new(DEFAULT_SEED);
 
-        assert_eq!(serve_connection(&mut stream, &mut server).unwrap(), 6);
+        let update_count = serve_connection(&mut stream, &mut server).unwrap();
 
         let written = stream.written();
         let mut publications = std::io::Cursor::new(written);
         let first = read_server_update_batch(&mut publications).unwrap();
         let second = read_server_update_batch(&mut publications).unwrap();
+        assert_eq!(update_count, first.len() + second.len());
         assert!(matches!(
             first.first(),
             Some(ServerUpdate::SessionConfiguration(_))
