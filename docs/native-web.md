@@ -41,7 +41,13 @@ the scene. See
 live-instantiation, and anti-sprawl contract.
 
 The procedural-horizon game integration is the shared Distant Terrain quality
-setting. For a local `mclone-overworld-v1` session, use
+setting in **Options → Graphics**. Select Off, Low, Medium, or High, then
+press **Apply**; moving the slider alone does not change the active renderer.
+In the two-column layout, the selector sits at the bottom left and Apply at
+the top right. Narrow layouts may require scrolling. This control is present
+in WASM as well as desktop and Android builds.
+
+For a local `mclone-overworld-v1` session, a URL can also use
 `terrainLodQuality=off|low|medium|high`; Web defaults to Medium only when no
 explicit preference or launch override exists. The legacy
 `terrainPresentation` query remains an Off/High compatibility alias. Current

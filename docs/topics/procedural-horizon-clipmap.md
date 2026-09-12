@@ -275,6 +275,14 @@ stops. Moving the selector changes only reducer-owned staged state. Apply emits
 one typed request; Cancel discards the staged choice. No engine allocation,
 reconfiguration, teardown, or preference write occurs merely while selecting.
 
+The player-facing route is **Options → Graphics → Distant Terrain**. The
+current two-column layout puts the selector at the bottom left and Apply at
+the top right. The public Web build was checked on 2026-09-12 with
+`pnpm native:web:terrain-horizon-smoke --deployed-base-url https://mclone.kzahel.com --app-loop --skip-threading`:
+Off → Low → Medium → High → Low applied through the rendered controls, and
+Low restored after reload with 15 drawn clipmap tiles. The selector and Apply
+are present in WASM; their separation makes the control easy to overlook.
+
 The scene tracks requested and applied presets independently. Enabled targets
 become applied and durable only after renderer diagnostics report a complete
 drawable presentation for that exact target. Off can tear down and persist

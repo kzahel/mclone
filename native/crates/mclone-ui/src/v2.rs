@@ -1298,7 +1298,7 @@ impl UiSurface {
         );
         self.font.draw_centered_atlas(
             draw,
-            "NATIVE RUST CLIENT",
+            "WORK IN PROGRESS",
             self.scale.width * 0.5,
             48.0,
             Color::rgba(185, 212, 198, 255),
@@ -1307,13 +1307,6 @@ impl UiSurface {
         for widget in self.layout.widgets() {
             self.render_widget(draw, widget, interaction);
         }
-        self.font.draw_shadow_atlas(
-            draw,
-            "MINECRAFT 1.17.1 TARGET",
-            4.0,
-            self.scale.height - 12.0,
-            Color::rgba(160, 176, 170, 255),
-        );
     }
 
     fn render_preparing_lobby(&self, draw: &mut GuiDrawList) {

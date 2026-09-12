@@ -476,8 +476,8 @@ pub fn validate_local_world_compatible(summary: &LocalWorldSummary) -> WorldCata
     Err(WorldCatalogError::new(
         WorldCatalogErrorKind::IncompatibleSchema,
         format!(
-            "local world `{}` is not compatible with catalog schema {} and Minecraft target {}",
-            summary.id, LOCAL_WORLD_CATALOG_SCHEMA_VERSION, LOCAL_WORLD_TARGET_MINECRAFT_VERSION
+            "local world `{}` is not compatible with this build (catalog schema {})",
+            summary.id, LOCAL_WORLD_CATALOG_SCHEMA_VERSION
         ),
     ))
 }
