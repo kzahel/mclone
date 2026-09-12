@@ -380,3 +380,21 @@ in-progress work is not a claim that the release gates already pass.
 - Desktop archive generation includes dependency notices. Android distribution
   signing/version inputs and stage reuse are prepared; hosted package builds
   and signing/install validation remain pending.
+
+### Slice 2 — public workflows and nightly packaging
+
+- Repository visibility changed to public after Slice 1, before any hosted
+  Actions validation. Anonymous repository HTTP access returned 200.
+- Deployed Slice 1 revision `8e654fc2`; the public reference ZIP now returns
+  404. The deployed browser app smoke passed and its pixels were inspected.
+- Added pinned-action workflows for shared correctness, architecture guards,
+  full-history redacted secret scanning, one reusable first-party asset stage,
+  and Linux x64/ARM64, Windows x64, macOS ARM64, web, Android, and Quest
+  packages. Linux ARM64 also provides a native package for the fresh VM.
+- Added dated nightly prereleases, checksums, seven-day CI artifact retention,
+  and fourteen-day nightly retention after successful replacement publication.
+- Provisioned the stable Android nightly signer as repository secrets; a
+  private local backup exists outside the repository. Release version codes
+  follow the monotonically increasing workflow run number.
+- Workflow syntax and architecture guards pass locally. Hosted validation is
+  next; these workflows and packages are not yet claimed CI-green.

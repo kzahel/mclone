@@ -64,3 +64,6 @@ android-xr/.gradle/
 android-xr/app/build/
 android-xr/build/
 android-xr/jniLibs/**/*.so
+
+# Release packaging outputs
+dist-release/

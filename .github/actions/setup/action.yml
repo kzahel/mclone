@@ -1,0 +1,18 @@
+name: Set up Mclone
+description: Pinned Node, pnpm, Rust and host libraries for public builds
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      with:
+        node-version-file: .node-version
+    - shell: bash
+      run: |
+        npm install --global pnpm@9.15.1
+        pnpm install --frozen-lockfile
+        rustup show
+    - if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential pkg-config libasound2-dev libudev-dev libvulkan1 mesa-vulkan-drivers

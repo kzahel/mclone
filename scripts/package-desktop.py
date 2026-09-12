@@ -38,8 +38,6 @@ if args.platform.startswith("macos"):
 binary_root.mkdir(parents=True, exist_ok=True)
 shutil.copy2(ROOT / "native/target" / args.profile / executable, binary_root / executable)
 shutil.copytree(ROOT / "generated-assets/first-party-stage/first-party-packs", resources / "assets/packs")
-subprocess.run([sys.executable, str(ROOT / "scripts/check-public-assets.py"), str(destination),
-                "--report", str(destination / "public-files.json")], check=True)
 revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
 (destination / "BUILD.json").write_text(json.dumps({"revision": revision, "platform": args.platform,
     "profile": args.profile, "experimental": True, "project_license": "TBD"}, indent=2) + "\n")
@@ -69,6 +67,10 @@ for package in metadata["packages"]:
             output.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(entry, output)
 (notices / "rust-dependencies.json").write_text(json.dumps(dependencies, indent=2) + "\n")
+if args.platform.startswith("macos"):
+    subprocess.run(["codesign", "--force", "--deep", "--sign", "-", str(destination / "Mclone.app")], check=True)
+subprocess.run([sys.executable, str(ROOT / "scripts/check-public-assets.py"), str(destination),
+                "--report", str(destination / "public-files.json")], check=True)
 archive = args.output / (name + ".zip")
 with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED, strict_timestamps=False) as bundle:
     for path in sorted(destination.rglob("*")):
