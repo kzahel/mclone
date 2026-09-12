@@ -21,7 +21,25 @@ env:
   CARGO_TERM_COLOR: always
   CARGO_BUILD_JOBS: '3'
 jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      should_run: ${{ steps.decision.outputs.should_run }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check whether this revision needs a nightly
+        id: decision
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 scripts/test-nightly-preflight.py
+          python3 scripts/check-nightly-needed.py
   checks-and-assets:
+    needs: plan
+    if: needs.plan.outputs.should_run == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:

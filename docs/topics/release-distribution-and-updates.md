@@ -44,8 +44,11 @@ backup stays outside the repository and CI consumes protected secrets.
 
 Scheduled publication runs daily at 03:17 UTC, with manual dispatch available.
 Only a complete matching-revision matrix can publish: upload to a draft,
-verify remote sizes/digests, then expose the prerelease. Unchanged scheduled
-revisions retain existing downloads. Artifacts expire after seven days;
+verify remote sizes/digests, then expose the prerelease. A lightweight planning
+job skips all scheduled checks, asset generation, and packages when that exact
+revision already has a published nightly. Draft/failed releases do not count;
+manual dispatch bypasses the skip. The publisher also retains its final
+duplicate guard. Artifacts expire after seven days;
 successful publication prunes generated nightlies older than fourteen days,
 except releases marked `<!-- keep-nightly -->`. A failed run keeps the previous
 successful nightly. Licensing TBD, unsigned/notarized desktop posture, and

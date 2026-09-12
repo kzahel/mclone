@@ -120,8 +120,10 @@ Package artifacts expire after seven
 days; successful publication prunes nightlies older than fourteen days.
 A failed nightly keeps the prior successful downloads.
 Maintainers can retain a specific nightly by adding `<!-- keep-nightly -->`
-to its release notes. Scheduled unchanged revisions keep existing downloads;
-manual publication can force another build.
+to its release notes. Before toolchain setup or builds, a small planning job
+checks whether the scheduled revision already has a published nightly. If so,
+it skips checks, asset generation, packages, and publication. A failed or draft
+release does not suppress retries. Manual runs always allow another build.
 
 Web deployment remains a separate local post-push hook, using the maintainer's
 Wrangler login and build cache; GitHub Actions does not deploy the website.
