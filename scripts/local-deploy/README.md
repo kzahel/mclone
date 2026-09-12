@@ -2,16 +2,18 @@
 
 This folder contains local, CI-like deploy paths for the native web/WASM app
 and the paired Steam Deck. They are intentionally local automation rather than
-GitHub-hosted workflows because they use machine-local credentials, ignored
-reference assets, build caches, and physical hardware.
+GitHub-hosted workflows because they use machine-local credentials, build
+caches, and physical hardware. GitHub Actions runs checks on pushes; full
+distribution packages are reserved for nightly and manual runs.
 
 ## Why This Exists
 
 The project already deploys with `pnpm run deploy`, which builds the Rust/WASM web
 bundle, uploads its manifest diff with Workers Static Assets, and deploys the
 Cloudflare Worker. That command depends on this machine's Rust/pnpm setup,
-existing Wrangler authentication, ignored Minecraft reference assets, and
-incremental build cache.
+existing Wrangler authentication, and incremental build cache. Public web
+bundles build original assets from tracked inputs without Minecraft reference
+files.
 
 The usual wrapper, `git push && pnpm run deploy`, does not work well when another
 tool performs the push. Git also has no normal client-side `post-push` hook.

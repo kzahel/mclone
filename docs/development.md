@@ -107,17 +107,25 @@ python3 scripts/test-public-assets.py
 python3 scripts/check-public-assets.py dist-native-web
 ```
 
-[Development builds](https://github.com/kzahel/mclone/actions/workflows/development.yml)
-run shared correctness, architecture guards, asset provenance, secret scans,
-and platform packaging. Every package in a run consumes the same first-party
-asset artifact. PRs do not receive Android signing credentials. Pushes build
-packages; the daily 03:17 UTC schedule and manual publication produce dated
-prereleases after the complete build succeeds. CI artifacts expire after seven
+[Development checks and nightlies](https://github.com/kzahel/mclone/actions/workflows/development.yml)
+run shared correctness, architecture guards, asset provenance, and secret scans
+on main pushes and PRs. These checks compile test code and validate original
+assets, but do not build distribution packages or upload artifacts.
+
+The daily 03:17 UTC schedule and manual workflow runs build the complete
+desktop, web, Android, and Quest package matrix from one first-party asset
+artifact. Scheduled runs publish dated prereleases; manual runs publish only
+when `publish` is selected. Normal pushes cannot cancel a running nightly.
+Package artifacts expire after seven
 days; successful publication prunes nightlies older than fourteen days.
 A failed nightly keeps the prior successful downloads.
 Maintainers can retain a specific nightly by adding `<!-- keep-nightly -->`
 to its release notes. Scheduled unchanged revisions keep existing downloads;
 manual publication can force another build.
+
+Web deployment remains a separate local post-push hook, using the maintainer's
+Wrangler login and build cache; GitHub Actions does not deploy the website.
+See [local web deployment](native-web.md#local-post-push-deploy-hook).
 
 If publication fails after all build jobs pass, maintainers can run
 `gh workflow run publish-existing.yml -f run_id=<development-run-id>`.

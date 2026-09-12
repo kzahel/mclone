@@ -1,4 +1,4 @@
-name: Development builds
+name: Development checks and nightlies
 on:
   push:
     branches: [main]
@@ -14,8 +14,8 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: development-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name != 'schedule' }}
+  group: development-${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && 'packages' || 'checks' }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'push' || github.event_name == 'pull_request' }}
 env:
   CARGO_INCREMENTAL: '0'
   CARGO_TERM_COLOR: always
@@ -64,18 +64,21 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: bash scripts/check-secrets.sh
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         with:
           name: first-party-packs
           path: generated-assets/first-party-stage/
           if-no-files-found: error
           retention-days: 7
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         with:
           name: first-party-provenance
           path: /tmp/first-party-provenance.json
           if-no-files-found: error
           retention-days: 7
   packages:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     needs: checks-and-assets
     uses: ./.github/workflows/packages.yml
     secrets: inherit

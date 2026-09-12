@@ -29,8 +29,14 @@ desktop, web, Android, and Quest/OpenXR, and its website field links the hub.
 Project licensing remains TBD; no project license was added.
 Visibility changed before hosted CI validation, as explicitly requested.
 
-The development workflow builds one approved first-party stage and shares its
-exact bytes across all package jobs. Desktop ZIPs cover Linux x64/ARM64,
+Main pushes and PRs run checks without distribution packaging or artifact
+uploads. Full packages run only on the nightly schedule or manual dispatch;
+manual publication is optional. Separate concurrency groups prevent ordinary
+pushes from cancelling nightly builds. Web-on-push deployment remains local
+through the existing hook and Wrangler login.
+
+The nightly/manual workflow builds one approved first-party stage and shares
+its exact bytes across all package jobs. Desktop ZIPs cover Linux x64/ARM64,
 Windows x64, and macOS ARM64; they include the client with optional OpenXR and
 the dedicated server. Web downloads contain the full static hub. Flat Android
 and Quest downloads are ARM64 APKs signed by a stable nightly identity; its
