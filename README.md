@@ -4,25 +4,46 @@ A WIP voxel game and shared Rust engine experiment, with several terrain
 generators and experimental level-of-detail systems. There is some exploration,
 building, wildlife, and early gameplay, but not much of a game yet.
 
-**[Try it in your browser](https://mclone.kzahel.com/play/)** ·
+**[World Explorer — quick demo](https://mclone.kzahel.com/explore/)** ·
+[Play the game](https://mclone.kzahel.com/play/) ·
+[Project hub](https://mclone.kzahel.com/) ·
 [Development builds](https://github.com/kzahel/mclone/releases) ·
 [Build from source](docs/development.md)
 
-![Mclone Overworld with original assets and experimental distant terrain](https://github.com/kzahel/mclone/releases/download/project-media/mclone-overworld.png?v=8e654fc2)
+World Explorer is a quick way to try the terrain and LOD experiments: open it
+in a WebGPU-capable browser, orbit the landscape, and zoom between scales.
 
-*An in-game view of Mclone Overworld. Terrain, vegetation, art, performance,
-and save formats are all still changing.*
+[![World Explorer showing mountains, rivers, and coastlines](https://github.com/kzahel/mclone/releases/download/project-media/mclone-world-explorer-readme.png)](https://mclone.kzahel.com/explore/)
+
+*World Explorer, captured from the browser build. Terrain and LOD are still
+experimental; visible seams and provisional vegetation remain.*
+
+## Browser labs
+
+The [project hub](https://mclone.kzahel.com/) links the game and every lab.
+These are interactive previews and development tools; catalogue entries are
+not all part of the game yet.
+
+| Lab | Explore |
+| --- | --- |
+| [Asset Lab](https://mclone.kzahel.com/animals/) | Browse creatures and props, orbit their models, and play animations. |
+| [Terrain Lab](https://mclone.kzahel.com/terrain/) | Inspect seeds and compare experimental terrain generators. |
+| [Texture Lab](https://mclone.kzahel.com/textures/) | Browse the original texture catalogue. |
+| [Structure Lab](https://mclone.kzahel.com/structures/) | Preview structures and their building blocks. |
+
+[![Asset Lab showing the red squirrel model and animation controls](https://github.com/kzahel/mclone/releases/download/project-media/mclone-asset-lab-readme.png)](https://mclone.kzahel.com/animals/)
 
 ## What is here
 
 Mclone Overworld is the default world generator. Other profiles explore
-different terrain ideas, and World Explorer and Terrain Lab provide places
-to inspect them. The current terrain LOD uses a shared procedural-horizon
+different terrain ideas. The current terrain LOD uses a shared procedural-horizon
 clipmap; it is still experimental and visible seams are possible.
 
 The engine runs across desktop, browser, Android, and OpenXR. Gameplay,
 world generation, rendering, persistence, and asset handling live in shared
 Rust crates under [`native/`](native/). Platform apps supply their host glue.
+For a ground-level view, [play the game](https://mclone.kzahel.com/play/) or
+see an [in-game screenshot](https://github.com/kzahel/mclone/releases/download/project-media/mclone-overworld.png?v=8e654fc2).
 
 ## Trying a build
 

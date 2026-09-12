@@ -21,8 +21,12 @@ desktop, web, Android, and Quest builds are available from CI and dated GitHub
 prereleases. This is a WIP side-project release with limited gameplay. Tactical
 [`335`](../tactical/335-public-development-release.md) records implementation,
 fresh contributor/player VM acceptance, and exact build/device evidence. The
-shorter README links the web game first and includes an inspected in-game
-screenshot. Project licensing remains TBD; no project license was added.
+shorter README prominently links World Explorer as a quick browser demo,
+the game, the project hub, and all four labs. Inspected World Explorer and
+Asset Lab captures are hosted in the durable `project-media` release; the
+original in-game screenshot remains linked. The GitHub description names
+desktop, web, Android, and Quest/OpenXR, and its website field links the hub.
+Project licensing remains TBD; no project license was added.
 Visibility changed before hosted CI validation, as explicitly requested.
 
 The development workflow builds one approved first-party stage and shares its
