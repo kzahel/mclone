@@ -11,6 +11,7 @@ android {
         applicationId = "com.kzahel.mclone.xr"
         minSdk = 28
         targetSdk = 32
+        ndk { abiFilters += "arm64-v8a" }
         versionCode = System.getenv("MCLONE_ANDROID_VERSION_CODE")?.toInt() ?: 1
         versionName = System.getenv("MCLONE_ANDROID_VERSION_NAME") ?: "0.1.0-dev"
     }

@@ -40,3 +40,13 @@ notice = next((sdk / 'ndk' / ndk_version / 'NOTICE' for sdk in sdk_roots if (sdk
 if notice is None:
     raise SystemExit('Set ANDROID_HOME to the SDK used by the build scripts so the bundled libc++ notice can be copied')
 shutil.copy2(notice, output / 'ANDROID-NDK-NOTICE.txt')
+
+# Gradle does not retain the loader AAR's META-INF/LICENSE in the APK.
+loader_version = re.search(r'openxr_loader_for_android:([^"\)]+)', (root / 'android-xr/app/build.gradle.kts').read_text()).group(1)
+gradle_home = Path(os.environ.get('GRADLE_USER_HOME', Path.home() / '.gradle'))
+loader_cache = gradle_home / 'caches/modules-2/files-2.1/org.khronos.openxr/openxr_loader_for_android' / loader_version
+archives = list(loader_cache.rglob('*.aar'))
+if len(archives) != 1:
+    raise SystemExit('Expected the resolved OpenXR loader AAR from the Quest build')
+with zipfile.ZipFile(archives[0]) as loader:
+    (output / 'OPENXR-LOADER-LICENSE.txt').write_bytes(loader.read('META-INF/LICENSE'))

@@ -449,3 +449,50 @@ builds passed through the project scripts; full APK inventory checks passed
 (14 and 18 files respectively). These local APKs use the development signer;
 stable nightly signing and physical installation still require their own
 receipts.
+
+### Fresh contributor and player acceptance
+
+The anonymous Ubuntu ARM64 contributor probe completed after the lab browser
+fix at `86fd84ae`: strict asset preparation, desktop build, full web hub bundle,
+and web typechecking all passed without a reference tree. The working tree and
+lockfiles remained clean. Final sizes: 3.6 GiB Rust outputs, 250 MiB generated
+assets, and 78 MiB hosted bundle. The disposable source workspace was discarded
+and its claim released.
+
+A separate clean Ubuntu ARM64 workspace received only the CI-produced Linux
+ARM64 package and checksum from run `34678473657`. A new player account used
+`/usr/bin:/bin` with no Cargo available and no source checkout. Package checksum
+verification, first-party runtime provenance, a scripted ordinary input action,
+SQLite world creation, and world reopen all passed. SQLite integrity returned
+`ok`. Both captures were inspected; the reopened world visibly renders terrain,
+sky, and an actor. The adapter was Mesa llvmpipe (software Vulkan), so this is
+package/install/persistence evidence, not hardware-GPU performance acceptance.
+The workspace is retained temporarily for an upgrade check with the next
+CI-produced package.
+
+The hosted shared suite passed 2,092 tests with one explicitly ignored legacy
+parity gauntlet and no failures. The original macOS/browser GPU captures remain
+the hardware-render evidence; Quest hardware acceptance is still pending.
+
+### First complete nightly and upgrade verification
+
+Run [`34679517652`](https://github.com/kzahel/mclone/actions/runs/34679517652)
+passed every shared check, all desktop/web/Android/Quest packages, and nightly
+publication. It published
+[`nightly-20260912-3`](https://github.com/kzahel/mclone/releases/tag/nightly-20260912-3)
+from `383f5bf8`.
+
+Both downloaded APK checksums and signatures verified against the stable
+nightly signing certificate. Both retain their existing application IDs and
+use `versionCode=3`, `versionName=nightly-3`. Inspection found extra loader-only
+ABIs in the Quest AAR, so its packaging is now explicitly ARM64-only. The
+loader AAR's license is copied beside downloads because Gradle does not retain
+that notice in the APK. Local rebuilding and inventory inspection passed with
+only `arm64-v8a` in the Quest package.
+
+The clean player VM upgraded from the `df1372a5` CI package to the `383f5bf8`
+package, reopened the same saved world, rendered successfully, and retained a
+healthy nonempty SQLite chunk store. Its upgraded capture was inspected.
+Final package instructions now use the actual `--desktop-xr` command, and the
+nightly publisher includes the strict first-party provenance receipt alongside
+the downloads. A final hosted publication verifies these packaging corrections.

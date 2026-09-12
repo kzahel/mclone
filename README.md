@@ -30,7 +30,7 @@ Rust crates under [`native/`](native/). Platform apps supply their host glue.
 | --- | --- |
 | Browser | [Play](https://mclone.kzahel.com/play/) in a WebGPU-capable browser. This is the easiest way to try it. |
 | Linux, Windows, macOS | Extract the matching [development package](https://github.com/kzahel/mclone/releases) and run the application. Keep its resource folder intact. |
-| Desktop OpenXR | Use the desktop build with `--xr` and an installed OpenXR runtime. |
+| Desktop OpenXR | Use the desktop build with `--desktop-xr` and an installed OpenXR runtime. |
 | Android / Quest | Sideload the matching APK; see [installation notes](docs/development.md#desktop-and-headset-builds). |
 
 Nightlies are experimental CI builds, not a promise that every device has

@@ -44,7 +44,7 @@ revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=
 (destination / "START-HERE.txt").write_text(
     "Mclone is a WIP voxel game experiment. Worlds and formats may change.\n"
     "Run Mclone.app on macOS or mclone-native-client on Linux/Windows.\n"
-    "Keep the complete extracted folder together. --xr uses an installed OpenXR runtime.\n"
+    "Keep the complete extracted folder together. --desktop-xr uses an installed OpenXR runtime.\n"
     "Desktop packages are not publisher-signed or notarized.\n"
     "Project licensing is TBD. Third-party components retain their own licenses.\n"
     "https://github.com/kzahel/mclone\n")

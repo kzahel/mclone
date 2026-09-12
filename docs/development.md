@@ -69,7 +69,7 @@ Use `linux-arm64`, `windows-x64`, or `macos-arm64` for a matching native host.
 The packager does not cross-compile. It writes ZIPs and SHA-256 checksums to
 `dist-release/`, with packs beside the executable or in macOS app resources.
 Run the complete extracted folder from any working directory. Desktop
-packages include `--xr` support; supply an installed OpenXR runtime for your
+packages include `--desktop-xr` support; supply an installed OpenXR runtime for your
 headset. Desktop builds are not publisher-signed or notarized.
 
 For Android/Quest, install JDK 17, Android SDK platform/build-tools 35,
