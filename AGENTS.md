@@ -293,7 +293,8 @@ Before deciding that generator output must be preserved, read the compatibility
 safety ledger in
 [`docs/topics/world-generation-profiles.md`](docs/topics/world-generation-profiles.md#compatibility-safety-ledger).
 A `v1` name, persisted tag, or checked-in fingerprint is not by itself a
-release compatibility promise. The current project is internal and unshipped:
+release compatibility promise. The project is a public experiment without a save/generator compatibility
+freeze:
 all current generation profiles, including legacy `overworld`, may be changed
 intentionally in place when their fixtures, docs, and disposable internal
 worlds are updated. No profile is reference-locked or release-frozen today.

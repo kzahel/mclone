@@ -264,11 +264,11 @@ The deploy path packages:
 - the dedicated Terrain Lab Rust/WASM workbench under `/terrain/`
 - the sanitized, read-only Texture Lab catalog under `/textures/`
 - World Explorer under `/explore/`
-- `reference/minecraft-1.17.1/extracted.zip`
-- deterministic authored/fallback packs and sidecars under
+- deterministic authored, provisional, and diagnostic packs and sidecars under
   `/first-party-packs/`
 
-The bundle command regenerates the two first-party packs before staging them.
+The bundle command regenerates the three first-party packs before staging them.
+CI sets `MCLONE_USE_STAGED_ASSETS=1` to reuse the exact approved asset artifact.
 The browser fetches all three payloads, while shared Rust owns selection order,
 fallback policy, preparation, and the transactional asset epoch.
 
@@ -279,10 +279,15 @@ resident compiler to restore at the same epoch with zero resolved
 Minecraft/unknown provenance. Runtime reports also expose reload timing and
 estimated peak retained payload bytes.
 
-The current browser still fetches the reference archive for epoch-0 bootstrap
-even when a persisted first-party selection is restored immediately afterward.
-“Proprietary-free” describes the active resolution ledger, not an assertion
-that reference bytes were absent from the deploy or network bootstrap.
+Public bootstrap and the render worker load only first-party packs and select
+Mclone Original. Local reference archives are optional research inputs and are
+neither fetched nor included in the hosted output. Saved reference-only
+preferences recover to Original when reference content is unavailable. The
+bundler's final `scripts/check-public-assets.py` check inventories every file,
+compares pack hashes to the approved stage, and rejects reference archives and
+unapproved media. The previous reference ZIP and sidecar returned 404 after
+deploying `8e654fc2` on 2026-09-12; the deployed app smoke reported zero
+reference/unknown resolutions and its capture was inspected.
 
 Wrangler publishes the aggregate directory through Workers Static Assets. It
 hashes the files, uploads only missing content in batches, and activates the new

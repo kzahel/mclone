@@ -19,7 +19,7 @@ publication, lighting, and persistence. Flat Grass now also supports finite
 bounds and the first X-periodic cylinder; its generation plans retain coherent
 target-relative work lifts while deduplicating canonical seam identities. The
 alternate profiles remain
-internal and unshipped, so their current names, tags, and fixtures are
+experimental and mutable, so their current names, tags, and fixtures are
 regression guards rather than release compatibility promises. Tactical 188
 completed two terrain reviews, one relief tune, one flower-density tune, two
 reuse/refactor checkpoints, and host plus persistence closeout. Tactical 192
@@ -285,8 +285,14 @@ world.
   profiles as mutable rather than reference-locked. Existing oracle and
   regression fixtures remain useful evidence only when a task explicitly
   places that legacy surface in scope.
-- **Project release state:** `internal-unshipped`
-- **Known external world/save consumers:** none
+- **Reviewed for public development release, 2026-09-12:** the source and
+  experimental builds are now public. This does not freeze generator output,
+  tags, or save formats; the README and download notes explicitly describe
+  them as changeable. The historical `internal-mutable` disposition below
+  remains the mutable development policy, including for nightly users.
+- **Project release state:** `public-experimental`, no compatibility freeze
+- **Named worlds with an accepted preservation requirement:** none; public
+  users may create disposable experimental worlds
 - **Default fixture meaning:** refactor and determinism regression guard, not a
   release compatibility promise
 - **Default internal-world policy:** disposable or explicitly migrated when an

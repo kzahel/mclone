@@ -102,17 +102,19 @@ Linux native/offscreen bring-up was validated on headless Ubuntu 24.04 on
 2026-07-12. The native client builds and the full-frame offscreen smoke renders
 without X11, Wayland, or a window manager, using either Mesa llvmpipe or a real
 Vulkan render node. See [`linux-setup.md`](linux-setup.md) for the reproducible
-package, Rust, vanilla-reference, GPU-permission, and smoke sequence.
+historical Linux bring-up sequence; use [development.md](development.md)
+for the current reference-free public bootstrap.
 
 Asset-pack selection is now a shared cross-platform contract. Desktop,
 offscreen, flat Android, desktop/Android XR, and web discover or fetch platform
 bytes but use one shared catalog, UI, preference reconciliation, provenance,
 and frame-boundary replacement policy. Native platforms persist logical ids in
 `preferences/asset-packs.v1.json` beside their client-global world root; web
-uses localStorage `mclone.assetPacks.v1`. Current clients still bootstrap epoch
-0 from the local reference payload before restoring a first-party preference,
-so active proprietary-free provenance does not imply the reference payload was
-never installed or fetched.
+uses localStorage `mclone.assetPacks.v1`. Public startup now prepares Mclone
+Original from the three staged first-party packs, including browser workers.
+The public bundler excludes reference payloads and verifies the complete
+shipped inventory. Local reference catalogs and explicit research modes remain
+optional; saved reference selections recover to Original when unavailable.
 
 The retired TypeScript/browser engine is gone from the live tree. Use Git
 history only when old behavior context is explicitly needed; retained oracle

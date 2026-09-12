@@ -398,3 +398,25 @@ in-progress work is not a claim that the release gates already pass.
   follow the monotonically increasing workflow run number.
 - Workflow syntax and architecture guards pass locally. Hosted validation is
   next; these workflows and packages are not yet claimed CI-green.
+
+### Slice 3 — public introduction and contributor setup
+
+- Replaced the long front page with a 54-line WIP introduction, web play link,
+  development downloads, a real terrain/LOD screenshot, platform entry points,
+  and focused development links. Added fresh setup and contribution guides.
+- Published the inspected screenshot under the durable `project-media`
+  release. Its downloaded SHA-256 matches the original capture:
+  `5e245bec166f7f50b1d49402f0240ebc2fcbf31e75db1b74a6e940375285d406`.
+  The release notes record seed, profile, camera, resolution, and source.
+- Updated platform/web docs and the compatibility ledger: public development
+  builds do not establish a generator or save-format freeze. Licensing stays
+  TBD; no project license was added.
+- The first hosted run exposed missing ripgrep on Ubuntu. Commit `df1372a5`
+  provisions it; its rerun passed asset construction and strict provenance and
+  has advanced to shared correctness tests.
+- A second disposable Machine Control workspace cloned `df1372a5` anonymously
+  from public GitHub, built all three packs without reference hydration, and
+  is continuing its cold desktop/web installation probe.
+- Quest doctor currently reports no attached authorized headset. Physical
+  acceptance remains pending; the maintainer has been asked to connect it or
+  explicitly retain CI-build-only status.
