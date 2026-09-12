@@ -79,6 +79,7 @@ jobs:
         run: |
           pnpm native:web:bundle
           pnpm exec tsc --noEmit -p native/apps/mclone-web-client/tsconfig.json
+          git diff --exit-code -- native/Cargo.lock pnpm-lock.yaml tools/*/pnpm-lock.yaml
           mkdir -p dist-release
           cd dist-native-web
           zip -qr ../dist-release/mclone-web.zip .

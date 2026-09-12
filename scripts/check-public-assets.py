@@ -56,7 +56,9 @@ def check(directory, stage=STAGE):
                 raise ValueError(f"unapproved or altered asset pack: {relative}")
         elif data.startswith(b"PK\x03\x04") or path.suffix.lower() in {".zip", ".jar", ".mcpack", ".ttf", ".otf"}:
             raise ValueError(f"unapproved archive/font in public output: {relative}")
-        elif path.suffix.lower() in {".png", ".ogg", ".jpg", ".jpeg", ".webp", ".svg"}:
+        elif (path.suffix.lower() in {".png", ".ogg", ".jpg", ".jpeg", ".webp", ".svg"}
+              or data.startswith((b"\x89PNG\r\n", b"OggS", b"\xff\xd8\xff"))
+              or (data.startswith(b"RIFF") and data[8:12] == b"WEBP")):
             if sha not in media:
                 raise ValueError(f"media has no approved first-party input: {relative}")
         inventory.append({"path": relative, "bytes": len(data), "sha256": sha})

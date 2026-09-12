@@ -24,6 +24,15 @@ class PublicBoundaryTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "local reference"):
                 boundary.check(root)
 
+    def test_renaming_media_does_not_bypass_provenance(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for name in boundary.PACKS:
+                shutil.copy2(boundary.STAGE / name, root / name)
+            (root / "unused.json").write_bytes(b"\x89PNG\r\n\x1a\n" + b"unapproved pixels")
+            with self.assertRaisesRegex(ValueError, "no approved first-party input"):
+                boundary.check(root)
+
     def test_renamed_or_modified_pack_is_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

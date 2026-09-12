@@ -433,3 +433,19 @@ in-progress work is not a claim that the release gates already pass.
 - Added dependency-supplied notices to web/Android packages, NDK notices beside
   APKs, a web build revision receipt, and checksum verification before nightly
   publication. No project license is assigned by these notices.
+
+### First public CI package evidence
+
+Run [`34678473657`](https://github.com/kzahel/mclone/actions/runs/34678473657)
+completed: all shared checks and all four desktop package jobs passed. Android
+SDK provisioning and web thumbnail browser provisioning failed at the already
+identified setup boundaries; corrected in `86fd84ae` for the next run.
+
+The downloaded macOS CI ZIP passed SHA-256 and strict bundle signature
+verification, then rendered from `/tmp` with zero reference/unknown provenance.
+Its screenshot was inspected. Linux CI asset bytes match independently built
+macOS asset bytes for all three packs. Local flat Android and Quest release
+builds passed through the project scripts; full APK inventory checks passed
+(14 and 18 files respectively). These local APKs use the development signer;
+stable nightly signing and physical installation still require their own
+receipts.
