@@ -62,6 +62,7 @@ Deployment is a separate maintainer operation (`pnpm native:web:deploy`).
 
 ```sh
 cargo build --locked --release --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-native-client --features xr
+cargo build --locked --release --manifest-path native/Cargo.toml -p mclone-dedicated-server
 python3 scripts/package-desktop.py --platform linux-x64
 ```
 
@@ -71,6 +72,11 @@ The packager does not cross-compile. It writes ZIPs and SHA-256 checksums to
 Run the complete extracted folder from any working directory. Desktop
 packages include `--desktop-xr` support; supply an installed OpenXR runtime for your
 headset. Desktop builds are not publisher-signed or notarized.
+
+Each desktop archive also includes `mclone-dedicated-server`. Use `--help` for
+hosting options and `--world-dir` with a path outside the installation for
+persistent server worlds. CI checks server startup, initial protocol data,
+clean shutdown, and world database integrity.
 
 For Android/Quest, install JDK 17, Android SDK platform/build-tools 35,
 NDK **27.0.12077973**, `cargo-ndk` **4.1.2**, and the Rust
@@ -106,6 +112,9 @@ packages; the daily 03:17 UTC schedule and manual publication produce dated
 prereleases after the complete build succeeds. CI artifacts expire after seven
 days; successful publication prunes nightlies older than fourteen days.
 A failed nightly keeps the prior successful downloads.
+Maintainers can retain a specific nightly by adding `<!-- keep-nightly -->`
+to its release notes. Scheduled unchanged revisions keep existing downloads;
+manual publication can force another build.
 
 CI compilation is not GPU, headset, or gameplay acceptance. Current validation
 receipts and limitations live in [Tactical 335](tactical/335-public-development-release.md).

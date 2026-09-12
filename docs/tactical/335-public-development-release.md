@@ -496,3 +496,33 @@ healthy nonempty SQLite chunk store. Its upgraded capture was inspected.
 Final package instructions now use the actual `--desktop-xr` command, and the
 nightly publisher includes the strict first-party provenance receipt alongside
 the downloads. A final hosted publication verifies these packaging corrections.
+
+### Completion review refinements
+
+Desktop ZIPs now also include the dedicated server, rather than duplicating
+the same dependency notices across separate server archives. Packaging runs
+the client's CLI startup and a bounded server startup/protocol/persistence smoke
+from an unrelated directory containing spaces. The four desktop target jobs
+validate this same boundary. Linux ARM64 downloads were promoted from the
+optional matrix because they enable direct package acceptance on the test VM.
+
+Added a shared-library Clippy baseline with existing warnings reported but not
+fatal; the local run passed. Incremental compilation is disabled on CI. The
+initial cache retains the target tree to bound repeated side-project builds;
+path filtering, finer cache selection, and warm-time tuning can follow measured
+hosted costs. The single development workflow and reusable packaging workflow
+replace the proposed three-workflow split while keeping one exact asset stage.
+
+Nightly publication now checks embedded revision receipts, creates a draft,
+checks every uploaded file against GitHub's reported size and SHA-256, and
+only then publishes. Scheduled unchanged revisions retain their existing
+nightly; manual publication can force another. Six focused publication tests
+pass, covering missing platforms, altered package bytes, mixed revisions,
+corrupt remote uploads, complete publication, and pinned/unrelated release
+retention. The existing multi-client gameplay smoke requires legacy
+`overworld` and fails its dirt-placement delta assertion on this baseline.
+That gameplay investigation is separate from package acceptance: the package
+smoke launches the normal Mclone Overworld server on an ephemeral loopback
+port, receives initial protocol data, closes cleanly, and checks SQLite
+integrity. It does not claim multi-client gameplay acceptance. These refinements require
+one final full hosted run before closeout.

@@ -4,6 +4,7 @@ on:
 permissions:
   contents: read
 env:
+  CARGO_INCREMENTAL: '0'
   MCLONE_USE_STAGED_ASSETS: '1'
   CARGO_BUILD_JOBS: '3'
 jobs:
@@ -40,7 +41,9 @@ jobs:
           key: desktop-${{ matrix.platform }}-${{ hashFiles('native/Cargo.lock', 'rust-toolchain.toml') }}-v1
       - name: Build desktop with OpenXR
         shell: bash
-        run: cargo build --locked --release --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-native-client --features xr
+        run: |
+          cargo build --locked --release --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-native-client --features xr
+          cargo build --locked --release --manifest-path native/Cargo.toml -p mclone-dedicated-server
       - name: Bundle executable, resources and notices
         shell: bash
         run: python scripts/package-desktop.py --platform '${{ matrix.platform }}'

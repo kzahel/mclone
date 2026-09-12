@@ -17,6 +17,7 @@ concurrency:
   group: development-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name != 'schedule' }}
 env:
+  CARGO_INCREMENTAL: '0'
   CARGO_TERM_COLOR: always
   CARGO_BUILD_JOBS: '3'
 jobs:
@@ -50,11 +51,14 @@ jobs:
           pnpm assets:pack:first-party
           pnpm --silent assets:validate:first-party > /tmp/first-party-provenance.json
           python3 scripts/test-public-assets.py
+          python3 scripts/test-nightly-publication.py
           python3 scripts/check-public-assets.py generated-assets/first-party-stage
           git diff --exit-code -- native/Cargo.lock pnpm-lock.yaml tools/*/pnpm-lock.yaml
       - name: Shared correctness tests
         run: |
           cargo test --locked --manifest-path native/Cargo.toml --lib -p mclone-assets -p mclone-app-runtime -p mclone-client -p mclone-server -p mclone-worldgen -p mclone-input -p mclone-ui -p mclone-net -p mclone-protocol -p mclone-xr-host
+      - name: Clippy baseline (existing warnings are not fatal)
+        run: cargo clippy --locked --manifest-path native/Cargo.toml --lib -p mclone-app-runtime -p mclone-server -p mclone-worldgen -- --cap-lints warn
       - name: Scan history for secrets
         env:
           GH_TOKEN: ${{ github.token }}

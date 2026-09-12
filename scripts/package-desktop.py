@@ -8,6 +8,7 @@ import plistlib
 import shutil
 import subprocess
 import sys
+import tempfile
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -37,14 +38,25 @@ if args.platform.startswith("macos"):
     }))
 binary_root.mkdir(parents=True, exist_ok=True)
 shutil.copy2(ROOT / "native/target" / args.profile / executable, binary_root / executable)
+server = "mclone-dedicated-server" + (".exe" if args.platform.startswith("windows") else "")
+shutil.copy2(ROOT / "native/target" / args.profile / server, destination / server)
+with tempfile.TemporaryDirectory(prefix="mclone package smoke ") as smoke:
+    subprocess.run([str((binary_root / executable).resolve()), "--help"], cwd=smoke,
+                   stdout=subprocess.DEVNULL, check=True, timeout=30)
+    subprocess.run([sys.executable, str(ROOT / "scripts/smoke-server-package.py"),
+                    str((destination / server).resolve())], cwd=smoke, check=True, timeout=150)
 shutil.copytree(ROOT / "generated-assets/first-party-stage/first-party-packs", resources / "assets/packs")
 revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
 (destination / "BUILD.json").write_text(json.dumps({"revision": revision, "platform": args.platform,
-    "profile": args.profile, "experimental": True, "project_license": "TBD"}, indent=2) + "\n")
+    "profile": args.profile, "features": ["xr"],
+    "rustc": subprocess.check_output(["rustc", "--version"], text=True).strip(),
+    "experimental": True, "project_license": "TBD"}, indent=2) + "\n")
 (destination / "START-HERE.txt").write_text(
     "Mclone is a WIP voxel game experiment. Worlds and formats may change.\n"
     "Run Mclone.app on macOS or mclone-native-client on Linux/Windows.\n"
     "Keep the complete extracted folder together. --desktop-xr uses an installed OpenXR runtime.\n"
+    "The included mclone-dedicated-server provides multiplayer hosting; use --help.\n"
+    "Use --world-dir with a path outside this installation to retain server worlds.\n"
     "Desktop packages are not publisher-signed or notarized.\n"
     "Project licensing is TBD. Third-party components retain their own licenses.\n"
     "https://github.com/kzahel/mclone\n")
@@ -69,6 +81,7 @@ for package in metadata["packages"]:
 (notices / "rust-dependencies.json").write_text(json.dumps(dependencies, indent=2) + "\n")
 if args.platform.startswith("macos"):
     subprocess.run(["codesign", "--force", "--deep", "--sign", "-", str(destination / "Mclone.app")], check=True)
+    subprocess.run(["codesign", "--force", "--sign", "-", str(destination / server)], check=True)
 subprocess.run([sys.executable, str(ROOT / "scripts/check-public-assets.py"), str(destination),
                 "--report", str(destination / "public-files.json")], check=True)
 archive = args.output / (name + ".zip")
