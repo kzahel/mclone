@@ -534,3 +534,54 @@ the cancellation checks without retries or sleeps. Public source archives also
 record an explicit `source-archive` build identity instead of requiring `.git`
 at the final web/desktop packaging step; official nightlies still require the
 exact Git commit in every receipt.
+
+### Final client, server, and deployment acceptance
+
+Run [`34681184576`](https://github.com/kzahel/mclone/actions/runs/34681184576)
+at `0e3d6e8d` passed all 2,092 shared tests (one explicitly ignored legacy
+parity gauntlet), Clippy, full-history secret scanning, and six publication
+tests. Linux x64/ARM64, macOS, web, Android, and Quest packages passed. Windows
+compiled both binaries and passed the server handshake/quit/database checks,
+then exposed a Python validation-script cleanup bug: SQLite's context manager
+ends a transaction but does not close the connection. Explicit `closing(...)`
+fixes the Windows file lock; no game or asset code changes in that correction.
+The local package smoke passes with the explicit close.
+
+The clean player VM upgraded to the `0e3d6e8d` CI package under a path containing
+spaces, reopened the existing saved world, rendered, and retained healthy
+SQLite chunk records. Its capture was inspected. The bundled server passed
+the handshake, typed quit, clean exit, and database-integrity smoke on the same
+guest, with no source checkout or Cargo. Machine Control confirmed that this
+second execution workspace was discarded and its claim released. Both source
+and player validation overlays have now been cleaned up.
+
+The exact CI web ZIP from this run was checksum-verified and deployed through
+the existing Worker owner. The deployed build receipt identifies `0e3d6e8d`;
+the normal Mclone Overworld app-loop smoke passed and its screenshot was
+inspected. The old reference ZIP and both manifest URL variants still return
+actual 404 responses. Final publication follows the Windows cleanup rerun.
+
+The deployed app-loop runner also passed with a preseeded reference-only
+`mclone.assetPacks.v1` preference. A temporary harness initialization hook
+provided the ordinary stored JSON; the application recovered through its normal
+shared preference path. The report retained the requested reference ID while
+activating authored content, with reference inactive, zero reference/unknown
+resolutions, no reference network requests, and no preference error. The stored
+intent remained unchanged and the resulting screenshot was inspected.
+
+### Publication API correction and exact-artifact recovery
+
+Run [`34682122594`](https://github.com/kzahel/mclone/actions/runs/34682122594)
+at `baebbb46` passed every shared check and every platform package, including
+Windows cleanup. Its publisher uploaded all 22 files to a draft, then GitHub's
+published-tag endpoint returned 404 for that draft. The publisher now looks
+up drafts through authenticated release listing and can resume a matching
+complete draft after rechecking every uploaded digest. Eight focused
+publication tests pass, including safe draft resume and corrupt-draft refusal.
+
+A small `publish-existing.yml` recovery workflow validates that the source is
+a completed trusted main development run with all seven correctness/package
+jobs green, then downloads and publishes those exact artifacts. It uses the
+source revision and Android run counter instead of rebuilding unchanged game
+code under the publisher correction's commit. The positive source-run check
+was validated against the real completed run; hosted recovery follows.

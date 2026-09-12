@@ -1,0 +1,52 @@
+name: Publish validated development build
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Completed development run with every check and package job green
+        required: true
+        type: string
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: publish-existing-${{ inputs.run_id }}
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Verify source run and publication guards
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN_ID: ${{ inputs.run_id }}
+        run: |
+          python3 scripts/test-nightly-publication.py
+          python3 scripts/validate-release-run.py "$SOURCE_RUN_ID"
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ github.token }}
+          pattern: package-*
+          path: release-downloads
+          merge-multiple: true
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ github.token }}
+          name: first-party-provenance
+          path: release-downloads
+      - name: Publish verified source artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MCLONE_RELEASE_REVISION: ${{ steps.source.outputs.revision }}
+          MCLONE_RELEASE_RUN_NUMBER: ${{ steps.source.outputs.run_number }}
+        run: python3 scripts/publish-nightly.py release-downloads

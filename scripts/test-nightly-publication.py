@@ -9,6 +9,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 import zipfile
+from datetime import datetime, timezone
 
 SCRIPT = Path(__file__).with_name('publish-nightly.py')
 REVISION = 'a' * 40
@@ -35,16 +36,21 @@ class PublicationTests(unittest.TestCase):
         artifact.with_name(artifact.name + '.sha256').write_text(
             hashlib.sha256(artifact.read_bytes()).hexdigest() + '  ' + artifact.name + '\n')
 
-    def publish(self, *, bad_upload=False, releases=None):
+    def publish(self, *, bad_upload=False, releases=None, resume=False):
         assets = [{'name': p.name, 'size': p.stat().st_size,
                    'digest': 'sha256:' + hashlib.sha256(p.read_bytes()).hexdigest()}
                   for p in self.root.iterdir()]
         if bad_upload:
             assets[0]['digest'] = 'sha256:' + '0' * 64
+        tag = f'nightly-{datetime.now(timezone.utc):%Y%m%d}-1'
+        uploaded = {'tag_name': tag, 'assets': assets, 'draft': True,
+                    'prerelease': True, 'target_commitish': REVISION, 'published_at': None}
+        if resume:
+            releases = [uploaded]
         with patch.dict(os.environ, {'GITHUB_SHA': REVISION, 'GITHUB_REPOSITORY': 'fixture/repo',
                                     'GITHUB_RUN_NUMBER': '1', 'GITHUB_EVENT_NAME': 'workflow_dispatch'}), \
              patch('sys.argv', [str(SCRIPT), str(self.root)]), \
-             patch('subprocess.check_output', side_effect=[json.dumps([releases or []]).encode(), json.dumps({'assets': assets}).encode()]), \
+             patch('subprocess.check_output', side_effect=[json.dumps([releases or []]).encode(), json.dumps([[uploaded]]).encode()]), \
              patch('subprocess.run') as calls:
             self.calls = calls
             runpy.run_path(str(SCRIPT), run_name='__main__')
@@ -80,6 +86,16 @@ class PublicationTests(unittest.TestCase):
         self.publish()
         self.assertIn('--draft', self.calls.call_args_list[0].args[0])
         self.assertEqual(self.calls.call_args_list[1].args[0][-1], '--draft=false')
+
+    def test_complete_draft_can_resume_without_reupload(self):
+        self.publish(resume=True)
+        self.assertEqual(len(self.calls.call_args_list), 1)
+        self.assertEqual(self.calls.call_args.args[0][-1], '--draft=false')
+
+    def test_corrupt_existing_draft_stays_hidden(self):
+        with self.assertRaisesRegex(SystemExit, 'uploaded bytes differ'):
+            self.publish(resume=True, bad_upload=True)
+        self.calls.assert_not_called()
 
     def test_retention_preserves_pinned_and_unrelated_releases(self):
         base = {'prerelease': True, 'draft': False, 'published_at': '2020-01-01T00:00:00Z'}

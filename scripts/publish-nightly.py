@@ -12,7 +12,7 @@ import tempfile
 import zipfile
 
 root = Path(sys.argv[1])
-revision = os.environ['GITHUB_SHA']
+revision = os.environ.get('MCLONE_RELEASE_REVISION', os.environ['GITHUB_SHA'])
 repository = os.environ['GITHUB_REPOSITORY']
 required = ['mclone-' + platform + suffix for platform, suffix in [
     ('linux-x64', '.zip'), ('linux-arm64', '.zip'), ('windows-x64', '.zip'),
@@ -42,7 +42,11 @@ if os.environ.get('GITHUB_EVENT_NAME') == 'schedule' and any(
     print('This revision already has a published nightly; keeping the existing downloads.')
     raise SystemExit(0)
 now = datetime.now(timezone.utc)
-tag = f'nightly-{now:%Y%m%d}-{os.environ["GITHUB_RUN_NUMBER"]}'
+run_number = os.environ.get('MCLONE_RELEASE_RUN_NUMBER', os.environ['GITHUB_RUN_NUMBER'])
+tag = f'nightly-{now:%Y%m%d}-{run_number}'
+existing = next((release for release in releases if release['tag_name'] == tag), None)
+if existing and (existing['target_commitish'] != revision or not existing['prerelease']):
+    raise SystemExit('Refusing to replace a different release at ' + tag)
 with tempfile.NamedTemporaryFile(mode='w', suffix='.md') as notes:
     notes.write(f'''Experimental Mclone build from `{revision}`.
 
@@ -57,12 +61,16 @@ Checksums are supplied beside each download. Keep complete desktop folders
 intact. Extract the web ZIP and serve it with cross-origin isolation headers.
 ''')
     notes.flush()
-    subprocess.run(['gh', 'release', 'create', tag, '--target', revision, '--draft', '--prerelease',
-                    '--title', f'Nightly {now:%Y-%m-%d} ({revision[:8]})', '--notes-file', notes.name,
-                    *[str(p) for p in sorted(root.iterdir()) if p.is_file()]], check=True)
+    if not existing:
+        subprocess.run(['gh', 'release', 'create', tag, '--target', revision, '--draft', '--prerelease',
+                        '--title', f'Nightly {now:%Y-%m-%d} ({revision[:8]})', '--notes-file', notes.name,
+                        *[str(p) for p in sorted(root.iterdir()) if p.is_file()]], check=True)
 # Keep partial uploads hidden. Verify GitHub's uploaded asset inventory before
 # exposing this release; the previous complete nightly stays available on error.
-uploaded = json.loads(subprocess.check_output(['gh', 'api', f'repos/{repository}/releases/tags/{tag}']))
+# The tag endpoint excludes drafts. Authenticated release listing includes them.
+pages = json.loads(subprocess.check_output(['gh', 'api', '--paginate',
+    f'repos/{repository}/releases', '--slurp']))
+uploaded = next(r for page in pages for r in page if r['tag_name'] == tag)
 expected_assets = {p.name: p for p in root.iterdir() if p.is_file()}
 if {asset['name'] for asset in uploaded['assets']} != set(expected_assets):
     raise SystemExit('Nightly draft retained: uploaded asset inventory differs')
@@ -71,7 +79,8 @@ for asset in uploaded['assets']:
     expected_digest = 'sha256:' + hashlib.sha256(source.read_bytes()).hexdigest()
     if asset['size'] != source.stat().st_size or asset.get('digest') != expected_digest:
         raise SystemExit('Nightly draft retained: uploaded bytes differ for ' + asset['name'])
-subprocess.run(['gh', 'release', 'edit', tag, '--draft=false'], check=True)
+if uploaded['draft']:
+    subprocess.run(['gh', 'release', 'edit', tag, '--draft=false'], check=True)
 # Retention only touches our dated prereleases after a replacement succeeded.
 for release in releases:
     old_tag = release['tag_name']

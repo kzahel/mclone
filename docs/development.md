@@ -93,6 +93,9 @@ local builds use the development signer unless nightly signing is configured.
 A development-signed installation cannot be updated in place by the nightly
 signer. Preserve any worlds before replacing that installation. Install or
 update a matching nightly with `adb install -r path/to.apk`.
+The version code comes from the development workflow's run counter. Before
+renaming or replacing that workflow, preserve a version-code floor above the
+last published APK; a new workflow counter alone may start too low.
 
 ## Checks and CI
 
@@ -115,6 +118,14 @@ A failed nightly keeps the prior successful downloads.
 Maintainers can retain a specific nightly by adding `<!-- keep-nightly -->`
 to its release notes. Scheduled unchanged revisions keep existing downloads;
 manual publication can force another build.
+
+If publication fails after all build jobs pass, maintainers can run
+`gh workflow run publish-existing.yml -f run_id=<development-run-id>`.
+It accepts only completed main development runs with every check and package
+job green, downloads that run's artifacts, checks their embedded source
+revision and hashes, and resumes a matching complete draft. It does not rebuild
+the game or substitute newer artifacts. A partial or corrupted draft remains
+hidden for inspection; remove that failed draft before retrying fresh uploads.
 
 CI compilation is not GPU, headset, or gameplay acceptance. Current validation
 receipts and limitations live in [Tactical 335](tactical/335-public-development-release.md).
