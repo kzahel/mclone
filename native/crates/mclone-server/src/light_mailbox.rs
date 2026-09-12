@@ -821,6 +821,9 @@ mod tests {
         }
 
         assert!(observed_cancelled);
+        // Completion delivery precedes the worker's aggregate metrics update.
+        // Synchronize with the end of that request before reading its counters.
+        assert!(mailbox.wait_for_light_idle(Duration::from_secs(5)));
         assert_eq!(mailbox.mailbox_metrics().cancelled_statuses, 1);
     }
 

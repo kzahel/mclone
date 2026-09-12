@@ -164,12 +164,14 @@ mkdir -p "$DEPLOY_DIR/explore"
 cp -R "$WORLD_EXPLORER_WEB_ROOT"/. "$DEPLOY_DIR/explore"/
 cp "$STATIC_ASSET_HEADERS" "$DEPLOY_DIR/_headers"
 
-node - "$DEPLOY_DIR" <<'JS'
+node - "$DEPLOY_DIR" "$PROJECT_DIR" <<'JS'
 const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 fs.writeFileSync(path.join(process.argv[2], 'BUILD.json'), JSON.stringify({
-  revision: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
+  revision: fs.existsSync(path.join(process.argv[3], '.git'))
+    ? execFileSync('git', ['-C', process.argv[3], 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
+    : 'source-archive',
   platform: 'web', experimental: true, project_license: 'TBD',
 }, null, 2) + '\n');
 JS

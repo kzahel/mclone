@@ -46,7 +46,8 @@ with tempfile.TemporaryDirectory(prefix="mclone package smoke ") as smoke:
     subprocess.run([sys.executable, str(ROOT / "scripts/smoke-server-package.py"),
                     str((destination / server).resolve())], cwd=smoke, check=True, timeout=150)
 shutil.copytree(ROOT / "generated-assets/first-party-stage/first-party-packs", resources / "assets/packs")
-revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+revision = (subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+            if (ROOT / '.git').exists() else 'source-archive')
 (destination / "BUILD.json").write_text(json.dumps({"revision": revision, "platform": args.platform,
     "profile": args.profile, "features": ["xr"],
     "rustc": subprocess.check_output(["rustc", "--version"], text=True).strip(),

@@ -9,6 +9,12 @@ Tactical [`279`](../tactical/279-chunk-lighting-admission-and-backpressure.md)
 records the original execution, the post-closeout Quest frame-time
 attribution, and the remaining presentation-tail exception.
 
+CI validation correction (2026-09-12, Tactical 335): the native cancelled-token
+test now waits for `wait_for_light_idle` before asserting aggregate worker
+counters. Individual completion delivery precedes that metrics update; draining
+all results alone is not a metrics synchronization barrier. Runtime scheduling
+and cancellation behavior are unchanged.
+
 ## Scope
 
 This topic owns the exact-world scheduling and memory contract between player

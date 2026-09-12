@@ -526,3 +526,11 @@ smoke launches the normal Mclone Overworld server on an ephemeral loopback
 port, receives initial protocol data, closes cleanly, and checks SQLite
 integrity. It does not claim multi-client gameplay acceptance. These refinements require
 one final full hosted run before closeout.
+
+Run `34680591316` exposed a race in the existing cancelled-light-token test:
+it drained the completion before the worker updated its aggregate cancellation
+counter. The assertion now waits for the existing worker-idle barrier, preserving
+the cancellation checks without retries or sleeps. Public source archives also
+record an explicit `source-archive` build identity instead of requiring `.git`
+at the final web/desktop packaging step; official nightlies still require the
+exact Git commit in every receipt.
