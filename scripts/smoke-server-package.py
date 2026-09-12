@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Launch a packaged server, receive its first protocol frame, and retain a world."""
 from pathlib import Path
+from contextlib import closing
 import re
 import socket
 import sqlite3
@@ -60,7 +61,7 @@ with tempfile.TemporaryDirectory(prefix='mclone server smoke ') as temporary:
                         raise RuntimeError('Server did not acknowledge client quit')
             if process.wait(timeout=60) != 0:
                 raise RuntimeError('Server did not close cleanly: ' + log.read_text())
-            with sqlite3.connect(root / 'world/world.sqlite3') as database:
+            with closing(sqlite3.connect(root / 'world/world.sqlite3')) as database:
                 assert database.execute('pragma integrity_check').fetchone() == ('ok',)
                 assert database.execute("select count(*) from sqlite_master where type='table'").fetchone()[0] > 0
             print('Packaged server startup, first protocol data, shutdown and SQLite integrity passed.')
