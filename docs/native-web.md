@@ -289,6 +289,13 @@ unapproved media. The previous reference ZIP and sidecar returned 404 after
 deploying `8e654fc2` on 2026-09-12; the deployed app smoke reported zero
 reference/unknown resolutions and its capture was inspected.
 
+Public release acceptance on 2026-09-12 subsequently deployed the exact web ZIP
+from CI run `34682122594`, source `baebbb46`, without rebuilding it locally.
+The deployed build receipt and app-loop smoke passed, pixels were inspected,
+and all three former reference URLs remained 404. A saved reference-only
+preference also recovered to Original with no reference requests while keeping
+the stored intent. Tactical 335 records the release and VM evidence.
+
 Wrangler publishes the aggregate directory through Workers Static Assets. It
 hashes the files, uploads only missing content in batches, and activates the new
 manifest with the Worker deployment instead of issuing one R2 command per file.

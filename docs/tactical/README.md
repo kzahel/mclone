@@ -2,10 +2,11 @@
 
 Bounded implementation plans and execution records live here.
 
-Public development release planning:
+Public development release:
 [`335-public-development-release.md`](335-public-development-release.md)
-— proposed 2026-09-12; preserve history, close the public asset boundary,
-validate clean installation, add CI packages/nightlies, and simplify the README.
+— completed 2026-09-12; preserved history, reference-free packages, verified
+public nightlies and VM installation, and a shorter README. Device-test and
+older multiplayer-smoke limitations are recorded explicitly.
 
 Use zero-padded numeric prefixes for new tactical docs: `000-topic.md`,
 `001-next-topic.md`, and so on. Keep one active implementation slice per doc.

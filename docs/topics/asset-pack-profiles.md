@@ -12,9 +12,16 @@ Explicit `MCLONE_ASSET_MODE` research overrides remain local-only. The public
 bundle no longer builds/copies the reference ZIP. Its shipped-file check
 compares pack hashes against the approved stage, inventories all files, and
 rejects reference archives and unapproved media. The original-first browser
-smoke reports zero reference/unknown resolutions, and a packaged macOS
-screenshot was inspected after launch outside the repository. Deployment
-cleanup and hosted CI validation remain in progress.
+smoke reports zero reference/unknown resolutions, and packaged macOS and
+clean-VM Linux captures were inspected after launch outside the repository.
+Full hosted CI produced the first complete public nightly on 2026-09-12;
+the former public reference ZIP and both manifest URL variants return 404.
+An anonymous fresh VM built the packs, desktop client, and complete web hub
+without reference hydration. Tactical 335 records exact revisions and final
+deployment/package acceptance, separately from Quest hardware testing.
+The deployed browser also passed with a saved reference-only preference:
+authored content became active, the stored reference intent survived, and
+there were no reference network requests or reference/unknown resolutions.
 
 Status: implementation complete 2026-07-11. Tactical
 [`169`](../tactical/169-runtime-asset-pack-selection.md) Slices 0-6 and Tactical

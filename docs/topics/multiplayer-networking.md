@@ -56,6 +56,16 @@ implementation sequence.
 
 ## Current state (verified 2026-07-23)
 
+Public package validation (2026-09-12, Tactical 335): desktop archives include
+the dedicated server. The package smoke exercises normal Mclone Overworld
+startup, the current native reliable handshake, typed client quit, clean
+server exit, and SQLite integrity from outside the checkout. This is package
+and transport-startup evidence. The older `--multi-client-smoke` requires
+`--generation-profile overworld` and currently fails its expected dirt-placement
+delta assertion; diagnose that harness/authority interaction before claiming
+renewed multi-client gameplay acceptance. The public release does not suppress
+that failure or describe its package smoke as equivalent coverage.
+
 Tactical 182's core proof is live. Each installation/browser origin owns one
 unauthenticated local UUID profile. Integrated, native TCP, direct WebSocket,
 and browser-worker joins carry that identity; a dedicated world rejects a

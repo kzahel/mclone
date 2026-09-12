@@ -1,8 +1,9 @@
 # Tactical 335: Public Development Release
 
-Status: **in progress, authorized 2026-09-12. Preserve history, leave the
-project license TBD, and make the repository public before validating GitHub
-Actions. Commit at substantial implementation and CI verification slices.**
+Status: **public development release complete 2026-09-12. History preserved;
+project licensing remains TBD. The repository became public before hosted CI
+validation. Quest downloads are CI-built; physical headset acceptance remains
+an explicitly unclaimed follow-up.**
 
 Topics: `release-distribution-and-updates`, `asset-pack-profiles`
 
@@ -585,3 +586,36 @@ jobs green, then downloads and publishes those exact artifacts. It uses the
 source revision and Android run counter instead of rebuilding unchanged game
 code under the publisher correction's commit. The positive source-run check
 was validated against the real completed run; hosted recovery follows.
+
+### Published result and closeout
+
+[`nightly-20260912-8`](https://github.com/kzahel/mclone/releases/tag/nightly-20260912-8)
+is public with all 22 assets from source `baebbb46`. Every source check and
+platform build passed in run `34682122594`; the corrected publisher passed in
+[`34683253453`](https://github.com/kzahel/mclone/actions/runs/34683253453).
+The latter used the verified source run, not new game binaries. This separates
+the publication-script correction from the exact already-tested build.
+
+Downloaded all seven packages from the published release. Every package SHA-256,
+every inventoried file's size/hash, embedded source revision, and all three
+pack hashes matched. Both APK signatures match the stable nightly certificate
+and use version code 8; Quest contains only ARM64 native libraries, and its
+loader notice accompanies the download. The strict first-party provenance
+receipt is included. Anonymous download of a release checksum succeeded.
+
+The final Linux client and dedicated server are byte-identical to the binaries
+already exercised in the clean player VM. Final web deployment used the exact
+CI ZIP at `baebbb46`; its deployed app-loop smoke passed, pixels were inspected,
+the build receipt matched, and all three former reference URLs returned 404.
+No project license, history rewrite, launcher, or save-format freeze was added.
+
+Remaining follow-ups are explicit rather than release claims:
+
+- Connect an authorized Quest for physical launch, controller, render, and
+  in-place APK upgrade acceptance. No headset was available in this session;
+  a stable signature and increasing version code do not substitute for that test.
+- Investigate the older dedicated multi-client smoke's dirt-placement failure
+  before renewing its gameplay acceptance. Package/handshake/persistence checks
+  pass, and the failure is also recorded in the multiplayer topic.
+- Tune CI path filtering/cache costs from observed runs. The initial complete
+  platform matrix is intentionally broader than a minimal PR check.

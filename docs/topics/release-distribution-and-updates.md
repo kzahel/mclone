@@ -11,21 +11,47 @@ installation mutation. The first direct updater should install complete signed
 artifacts transactionally. Asset-level or binary delta work remains
 measurement-gated.
 
-Last reconciled: **2026-09-12** (public development-release proposal;
+Last reconciled: **2026-09-12** (public development releases implemented;
 managed-distribution architecture retained).
 
-## Public development release proposal (2026-09-12)
+## Public development releases (2026-09-12)
 
-The maintainer now wants to publish the existing repository with its history
-and make experimental desktop, web, Android, and Quest builds available from
-CI. This is a WIP side-project release with limited gameplay, not the managed
-commercial distribution milestone described below. Tactical
-[`335`](../tactical/335-public-development-release.md) proposes simple GitHub
-nightly prereleases, fresh-installation acceptance, and a shorter README with
-the web game as the easiest entry point. Implementation is authorized; project licensing remains TBD. The repository
-will become public before hosted CI validation. A launcher,
-automatic updates, storefronts, and final branding are not prerequisites for
-that bounded milestone; the architecture below remains longer-term guidance.
+The existing repository is public with its history preserved. Experimental
+desktop, web, Android, and Quest builds are available from CI and dated GitHub
+prereleases. This is a WIP side-project release with limited gameplay. Tactical
+[`335`](../tactical/335-public-development-release.md) records implementation,
+fresh contributor/player VM acceptance, and exact build/device evidence. The
+shorter README links the web game first and includes an inspected in-game
+screenshot. Project licensing remains TBD; no project license was added.
+Visibility changed before hosted CI validation, as explicitly requested.
+
+The development workflow builds one approved first-party stage and shares its
+exact bytes across all package jobs. Desktop ZIPs cover Linux x64/ARM64,
+Windows x64, and macOS ARM64; they include the client with optional OpenXR and
+the dedicated server. Web downloads contain the full static hub. Flat Android
+and Quest downloads are ARM64 APKs signed by a stable nightly identity; its
+backup stays outside the repository and CI consumes protected secrets.
+
+Scheduled publication runs daily at 03:17 UTC, with manual dispatch available.
+Only a complete matching-revision matrix can publish: upload to a draft,
+verify remote sizes/digests, then expose the prerelease. Unchanged scheduled
+revisions retain existing downloads. Artifacts expire after seven days;
+successful publication prunes generated nightlies older than fourteen days,
+except releases marked `<!-- keep-nightly -->`. A failed run keeps the previous
+successful nightly. Licensing TBD, unsigned/notarized desktop posture, and
+CI-built versus device-tested status are explicit in the public guide.
+
+The first complete refined release is
+[`nightly-20260912-8`](https://github.com/kzahel/mclone/releases/tag/nightly-20260912-8)
+from `baebbb46`. CI recovery through `publish-existing.yml` accepts only a
+completed main development run with every correctness/package job green and
+rechecks its exact artifacts. It can resume a complete matching draft after
+a publication-only correction; partial or corrupt uploads remain hidden.
+Fresh VM installation/save-upgrade evidence and final web deployment passed;
+physical Quest acceptance remains pending rather than implied by its APK.
+
+A launcher, automatic updates, storefronts, and final branding are not part of
+this bounded milestone; the architecture below remains longer-term guidance.
 
 ## Scope
 
@@ -404,7 +430,7 @@ or build metadata should establish the install owner explicitly.
 
 ## Future Managed-Distribution Delivery Sequence
 
-The simpler public development release is proposed in Tactical 335 above.
+The simpler public development release is implemented in Tactical 335 above.
 For later managed distribution, use bounded slices rather than attempting
 launcher, CDN, signing, delta updates, and every store simultaneously.
 
