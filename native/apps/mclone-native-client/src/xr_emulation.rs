@@ -88,13 +88,11 @@ pub(crate) fn run_lobby_scenario_stereo_smoke(
                 &asset_source,
             )?;
             if let Some(registry) =
-                mclone_app_runtime::prepared_assets::AssetPackSourceRegistry::discover_native_with_reference(
-                    asset_source.clone(),
-                )?
+                mclone_app_runtime::prepared_assets::AssetPackSourceRegistry::discover_native()?
             {
                 driver.host_mut().configure_asset_pack_sources(
                     registry,
-                    mclone_app_runtime::prepared_assets::reference_asset_pack_selection(),
+                    mclone_app_runtime::render_assets::native_startup_asset_selection(),
                 )?;
             }
             let mut views = synthetic_stereo_views(driver.host().camera_snapshot(), size);
@@ -274,12 +272,18 @@ pub(crate) fn run_xr_emulation_screenshot(
             driver
                 .host_mut()
                 .set_celestial_debug_settings(celestial_debug);
-            if let Some(registry) = mclone_app_runtime::prepared_assets::AssetPackSourceRegistry::discover_native_with_reference(asset_source.clone())? {
+            if let Some(registry) =
+                mclone_app_runtime::prepared_assets::AssetPackSourceRegistry::discover_native()?
+            {
                 driver.host_mut().configure_asset_pack_sources(
                     registry,
-                    mclone_app_runtime::prepared_assets::reference_asset_pack_selection(),
+                    mclone_app_runtime::render_assets::native_startup_asset_selection(),
                 )?;
-                if let Some(path) = mclone_app_runtime::asset_pack_preferences::native_asset_pack_preference_path(scene.world_root.as_deref()) {
+                if let Some(path) =
+                    mclone_app_runtime::asset_pack_preferences::native_asset_pack_preference_path(
+                        scene.world_root.as_deref(),
+                    )
+                {
                     driver.host_mut().configure_asset_pack_preference_storage(Box::new(
                         mclone_app_runtime::asset_pack_preferences::FileAssetPackPreferenceStorage::new(path),
                     ))?;

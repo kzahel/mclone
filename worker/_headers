@@ -24,8 +24,5 @@
 /pkg/*
   Cache-Control: public, max-age=31536000, immutable
 
-/reference/minecraft-1.17.1/extracted.zip
-  Cache-Control: public, max-age=31536000, immutable
-
 /first-party-packs/*
   Cache-Control: public, max-age=31536000, immutable

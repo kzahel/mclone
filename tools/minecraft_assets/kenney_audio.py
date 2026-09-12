@@ -535,7 +535,7 @@ def main(argv: list[str] | None = None) -> int:
         )
     else:
         validate_repo()
-        print("[OK] verified 121 first-party CC0 OGG files")
+        print(f"[OK] verified {len(provenance_payload()['files'])} first-party CC0 OGG files")
     return 0
 
 

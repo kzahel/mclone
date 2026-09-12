@@ -24,7 +24,7 @@ use mclone_app_runtime::input_preferences::{
 use mclone_app_runtime::platform_operation::{PlatformOperationCompletion, PlatformOperationToken};
 use mclone_app_runtime::prepared_assets::{
     AUTHORED_FIRST_PARTY_PACK_ID, MINECRAFT_REFERENCE_PACK_ID, PreparedSceneAssets,
-    reference_asset_pack_selection,
+    original_asset_pack_selection,
 };
 use mclone_app_runtime::scene_session_runtime::RuntimeRenderPriority;
 #[cfg(all(test, target_arch = "wasm32"))]
@@ -2569,15 +2569,18 @@ async fn create_scene_host(
                 (ClientInputPreferences::default(), Some(message))
             }
         };
-    let asset_pack_file_count =
-        PackedAssetSource::from_bytes(initial_asset_packs.reference.clone())
-            .map_err(|error| JsValue::from_str(&format!("invalid browser asset pack: {error}")))?
-            .file_count();
+    let asset_pack_file_count = [&initial_asset_packs.authored, &initial_asset_packs.fallback]
+        .into_iter()
+        .map(|bytes| PackedAssetSource::from_bytes(bytes.clone()).map(|pack| pack.file_count()))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| JsValue::from_str(&format!("invalid browser asset pack: {error}")))?
+        .into_iter()
+        .sum();
     let render_worker = WebRenderWorkerCoordinator::new(
         render_worker_transport_factory,
         bindgen_js_url,
         bindgen_wasm_url,
-        initial_asset_packs.reference.clone(),
+        &initial_asset_packs,
     )
     .map_err(|error| JsValue::from_str(&error))?;
     let catalog = web_asset_pack_catalog(
@@ -2593,7 +2596,7 @@ async fn create_scene_host(
         initial_asset_packs.reference.clone(),
         initial_asset_packs.fallback.clone(),
         initial_asset_packs.diagnostic.clone(),
-        reference_asset_pack_selection(),
+        original_asset_pack_selection(),
         TexturePresentation::Textured,
     )
     .map_err(JsValue::from)?;
@@ -2626,7 +2629,7 @@ async fn create_scene_host(
     host.set_mono_debug_diagnostics_visible(capabilities.initial_debug_overlay_visible());
     host.configure_external_asset_pack_catalog(
         catalog,
-        mclone_app_runtime::prepared_assets::reference_asset_pack_selection(),
+        mclone_app_runtime::prepared_assets::original_asset_pack_selection(),
     )
     .map_err(js_error)?;
     host.configure_asset_pack_preference_storage(Box::new(WebAssetPackPreferenceStorage))

@@ -257,9 +257,9 @@ if (deployedBaseUrl) {
       `--deployed-base-url requires an origin without a path; got ${deployedBaseUrl}`,
     );
   }
-  if (!showcase && !catalogUiProbe) {
+  if (!showcase && !catalogUiProbe && !process.argv.includes("--app-loop")) {
     throw new Error(
-      "--deployed-base-url is only supported with --showcase or --catalog-ui-probe",
+      "--deployed-base-url requires --showcase, --catalog-ui-probe, or --app-loop",
     );
   }
 }
@@ -603,7 +603,7 @@ async function run() {
     browser = externalCdpEndpoint
       ? await chromium.connectOverCDP(externalCdpEndpoint)
       : await chromium.launch({
-          channel: process.env.PLAYWRIGHT_CHROME_CHANNEL ?? "chrome",
+          channel: process.env.PLAYWRIGHT_CHROME_CHANNEL ?? "chromium",
           headless: browserLaunch.headless,
           args: [
             "--enable-unsafe-webgpu",
@@ -11868,11 +11868,13 @@ async function runTerrainHorizonRegressionProbe(
   }
   const storedPreset = await readStoredTerrainLodPreset(page);
   const liveTransitions = [];
-  for (const transition of [
+  /** @type {{ target: "low" | "medium" | "high", sliderX: number }[]} */
+  const transitions = [
     { target: "medium", sliderX: 0.341 },
     { target: "high", sliderX: 0.467 },
     { target: "low", sliderX: 0.215 },
-  ]) {
+  ];
+  for (const transition of transitions) {
     liveTransitions.push(await applyTerrainLodStop(
       page,
       canvas,

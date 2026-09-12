@@ -3,16 +3,11 @@ use std::collections::HashMap;
 use wasm_bindgen::JsValue;
 use wasm_bindgen::prelude::wasm_bindgen;
 
-const REFERENCE_PACK_REQUEST_ID: u32 = 1;
 const AUTHORED_PACK_REQUEST_ID: u32 = 2;
 const FALLBACK_PACK_REQUEST_ID: u32 = 3;
 const DIAGNOSTIC_PACK_REQUEST_ID: u32 = 4;
 
-const RESOURCE_REQUESTS: [(u32, &str); 4] = [
-    (
-        REFERENCE_PACK_REQUEST_ID,
-        "/reference/minecraft-1.17.1/extracted.zip",
-    ),
+const RESOURCE_REQUESTS: [(u32, &str); 3] = [
     (
         AUTHORED_PACK_REQUEST_ID,
         "/first-party-packs/mclone-authored.pbp",
@@ -116,7 +111,8 @@ impl WebBootstrapResources {
             })
         };
         Ok(InitialAssetPacks {
-            reference: take(REFERENCE_PACK_REQUEST_ID, "reference asset pack")?,
+            // Empty bytes represent an absent optional pack at the browser ABI.
+            reference: Vec::new(),
             authored: take(AUTHORED_PACK_REQUEST_ID, "authored asset pack")?,
             fallback: take(FALLBACK_PACK_REQUEST_ID, "fallback asset pack")?,
             diagnostic: take(DIAGNOSTIC_PACK_REQUEST_ID, "diagnostic asset pack")?,
@@ -158,6 +154,15 @@ mod tests {
             RESOURCE_REQUESTS
                 .iter()
                 .all(|(_, url)| url.starts_with('/'))
+        );
+    }
+
+    #[test]
+    fn public_bootstrap_requests_only_first_party_packs() {
+        assert!(
+            RESOURCE_REQUESTS
+                .iter()
+                .all(|(_, url)| url.starts_with("/first-party-packs/"))
         );
     }
 }

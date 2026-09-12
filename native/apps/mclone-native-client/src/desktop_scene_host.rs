@@ -7,9 +7,7 @@ use std::fs;
 use anyhow::{Context, Result};
 use mclone_app_runtime::client_experience::desktop_native_client_experience_profile;
 use mclone_app_runtime::native_service_assembly::NativeSessionServices;
-use mclone_app_runtime::prepared_assets::{
-    AssetPackSourceRegistry, original_asset_pack_selection, reference_asset_pack_selection,
-};
+use mclone_app_runtime::prepared_assets::{AssetPackSourceRegistry, original_asset_pack_selection};
 use mclone_app_runtime::scenario::BuiltInScenarioId;
 use mclone_app_runtime::session::{RemoteSessionEndpoint, SessionStartRequest};
 use mclone_app_runtime::startup_args::StartupSceneOptions;
@@ -22,7 +20,6 @@ use mclone_scene::{
 use mclone_server::{AuthoredWorldFixtureManifest, authored_world_fixture_marker_path};
 
 use crate::cli::{AssetPackLaunchProfile, SceneOptions};
-use crate::render_cache::load_asset_source;
 use crate::scene_runtime::{WindowSceneAssets, native_window_scene_runtime_with_mesh_assets};
 
 pub(crate) type DesktopSceneHost = McloneSceneHost;
@@ -197,10 +194,7 @@ pub(crate) fn configure_desktop_asset_pack_sources(
             ),
         ))?;
     }
-    let reference = mclone_assets::SharedAssetSource::new(
-        load_asset_source().context("reload native reference source for asset-pack discovery")?,
-    );
-    let Some(registry) = AssetPackSourceRegistry::discover_native_with_reference(reference)? else {
+    let Some(registry) = AssetPackSourceRegistry::discover_native()? else {
         if launch_profile == AssetPackLaunchProfile::Original {
             anyhow::bail!(
                 "the Original asset-pack launch requires staged first-party packs; run `pnpm assets:pack:first-party` from the repository root"
@@ -213,11 +207,17 @@ pub(crate) fn configure_desktop_asset_pack_sources(
         registry
             .prepare(1, selection.clone())
             .context("validate the forced Original asset-pack selection")?;
-        host.configure_asset_pack_sources(registry, reference_asset_pack_selection())?;
+        host.configure_asset_pack_sources(
+            registry,
+            mclone_app_runtime::render_assets::native_startup_asset_selection(),
+        )?;
         host.begin_asset_pack_selection(selection)?;
         return Ok(());
     }
-    host.configure_asset_pack_sources(registry, reference_asset_pack_selection())?;
+    host.configure_asset_pack_sources(
+        registry,
+        mclone_app_runtime::render_assets::native_startup_asset_selection(),
+    )?;
     if let Some(path) =
         mclone_app_runtime::asset_pack_preferences::native_asset_pack_preference_path(world_root)
     {

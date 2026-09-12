@@ -10,9 +10,13 @@ mclone_build_warn() {
 }
 
 mclone_prepare_first_party_asset_packs() {
+    if [[ "${MCLONE_USE_STAGED_ASSETS:-0}" == "1" ]]; then
+        python3 "$REPO_ROOT/scripts/check-public-assets.py" "$REPO_ROOT/generated-assets/first-party-stage"
+        return
+    fi
     command -v pnpm >/dev/null 2>&1 || mclone_build_die "pnpm is required to build bundled first-party asset packs"
     echo "Building deterministic first-party asset packs for Android packaging..."
-    (cd "$REPO_ROOT" && pnpm --silent assets:pack:first-party)
+    (cd "$REPO_ROOT" && pnpm --dir tools/texture-lab install --frozen-lockfile && pnpm --silent assets:pack:first-party)
 }
 
 mclone_windows_local_android_sdk() {

@@ -316,7 +316,7 @@ impl McloneSceneHost {
             load_screen_effect_texture_assets(asset_source)
                 .context("prepare title scene screen-effect assets")?,
             PreparedAudioAssets::load(asset_source).context("prepare title scene audio assets")?,
-        );
+        )?;
         let catalog_operations = scene
             .world_root
             .clone()
@@ -361,7 +361,7 @@ impl McloneSceneHost {
                 .context("prepare initial scene screen-effect assets")?,
             PreparedAudioAssets::load(asset_source)
                 .context("prepare initial scene audio assets")?,
-        );
+        )?;
         let request = transient_local_session_start_request(&scene);
         let descriptor = request.active_descriptor();
         let catalog_operations = scene
@@ -619,7 +619,7 @@ impl McloneSceneHost {
                 .context("prepare initial scene screen-effect assets")?,
             PreparedAudioAssets::load(asset_source)
                 .context("prepare initial scene audio assets")?,
-        );
+        )?;
         let mut world_gui_renderer = WorldGuiRenderer::new(device, color_format);
         world_gui_renderer
             .upload_texture_atlas(device, queue, mesh_assets.atlas.as_upload())

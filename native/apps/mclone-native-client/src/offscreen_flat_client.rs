@@ -1658,10 +1658,12 @@ pub(crate) fn run_offscreen_flat_client_screenshot(
                 .set_celestial_debug_settings(celestial_debug);
             if scene.asset_pack == crate::cli::AssetPackLaunchProfile::Saved {
                 let mut asset_packs_configured = false;
-                if let Some(registry) = mclone_app_runtime::prepared_assets::AssetPackSourceRegistry::discover_native_with_reference(asset_source.clone())? {
+                if let Some(registry) =
+                    mclone_app_runtime::prepared_assets::AssetPackSourceRegistry::discover_native()?
+                {
                     host.driver.host_mut().configure_asset_pack_sources(
                         registry,
-                        mclone_app_runtime::prepared_assets::reference_asset_pack_selection(),
+                        mclone_app_runtime::render_assets::native_startup_asset_selection(),
                     )?;
                     asset_packs_configured = true;
                 }
@@ -1674,7 +1676,7 @@ pub(crate) fn run_offscreen_flat_client_screenshot(
                     )?;
                     host.driver.host_mut().configure_asset_pack_sources(
                         registry,
-                        mclone_app_runtime::prepared_assets::reference_asset_pack_selection(),
+                        mclone_app_runtime::render_assets::native_startup_asset_selection(),
                     )?;
                     asset_packs_configured = true;
                 }

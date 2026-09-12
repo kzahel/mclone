@@ -695,7 +695,30 @@ pub fn legacy_sound_overlay_root() -> PathBuf {
     ))
 }
 
+/// Product startup uses only staged original packs. Legacy environment modes
+/// remain an explicit local research override.
 pub fn load_asset_source() -> Result<AssetSourceChain> {
+    if env::var_os("MCLONE_ASSET_MODE").is_none() {
+        let registry = crate::prepared_assets::AssetPackSourceRegistry::discover_native_packs(None)?
+            .context("missing Mclone packs; run `pnpm assets:pack:first-party` or reinstall the complete application bundle")?;
+        return registry.source(&crate::prepared_assets::original_asset_pack_selection());
+    }
+    load_legacy_asset_source()
+}
+
+pub fn load_optional_reference_source() -> Result<Option<mclone_assets::SharedAssetSource>> {
+    Ok(load_pack_asset_source(false)?.map(mclone_assets::SharedAssetSource::new))
+}
+
+pub fn native_startup_asset_selection() -> mclone_assets::AssetPackSelection {
+    if env::var_os("MCLONE_ASSET_MODE").is_some() {
+        crate::prepared_assets::reference_asset_pack_selection()
+    } else {
+        crate::prepared_assets::original_asset_pack_selection()
+    }
+}
+
+fn load_legacy_asset_source() -> Result<AssetSourceChain> {
     let mode = AssetMode::from_env()?;
     let mut source = AssetSourceChain::new();
 
@@ -1007,7 +1030,23 @@ fn platform_asset_roots() -> Vec<PathBuf> {
 
 #[cfg(not(target_os = "android"))]
 fn platform_asset_roots() -> Vec<PathBuf> {
-    Vec::new()
+    env::current_exe()
+        .ok()
+        .map_or_else(Vec::new, |exe| executable_asset_roots(&exe))
+}
+
+fn executable_asset_roots(executable: &Path) -> Vec<PathBuf> {
+    let Some(directory) = executable.parent() else {
+        return Vec::new();
+    };
+    let mut roots = vec![directory.to_path_buf()];
+    // macOS bundles keep data in Contents/Resources beside Contents/MacOS.
+    if directory.file_name().is_some_and(|name| name == "MacOS") {
+        if let Some(contents) = directory.parent() {
+            roots.insert(0, contents.join("Resources"));
+        }
+    }
+    roots
 }
 
 fn env_path(name: &str) -> Option<PathBuf> {
@@ -1039,6 +1078,21 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
+
+    #[test]
+    fn packaged_assets_do_not_depend_on_working_directory() {
+        assert_eq!(
+            executable_asset_roots(Path::new("/opt/mclone/mclone")),
+            vec![PathBuf::from("/opt/mclone")]
+        );
+        assert_eq!(
+            executable_asset_roots(Path::new("/Applications/Mclone.app/Contents/MacOS/mclone")),
+            vec![
+                PathBuf::from("/Applications/Mclone.app/Contents/Resources"),
+                PathBuf::from("/Applications/Mclone.app/Contents/MacOS")
+            ]
+        );
+    }
 
     fn empty_compile_request() -> RenderSectionCompileRequest {
         RenderSectionCompileRequest {

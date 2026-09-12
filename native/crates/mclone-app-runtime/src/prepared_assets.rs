@@ -91,13 +91,18 @@ pub struct PreparedSceneAssets {
 }
 
 impl PreparedSceneAssets {
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn startup(
         epoch: u64,
         mesh: TexturedMeshAssets,
         actors: ActorTextureAssets,
         screen_effects: ScreenEffectTextureAssets,
         audio: PreparedAudioAssets,
-    ) -> Self {
+    ) -> Result<Self> {
+        if std::env::var_os("MCLONE_ASSET_MODE").is_none() {
+            let registry = Self::native_registry_for_startup()?;
+            return registry.prepare(epoch, original_asset_pack_selection());
+        }
         let selection = reference_asset_pack_selection();
         let mut provenance = AssetProvenanceReport::new(epoch, selection.clone());
         provenance.record(AssetProvenanceEntry {
@@ -108,7 +113,7 @@ impl PreparedSceneAssets {
             ),
             outcome: AssetResolutionOutcome::Resolved,
         });
-        Self {
+        Ok(Self {
             epoch,
             selection: selection.clone(),
             presentation: TexturePresentation::Textured,
@@ -121,7 +126,13 @@ impl PreparedSceneAssets {
             },
             provenance,
             coverage: None,
-        }
+        })
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn native_registry_for_startup() -> Result<AssetPackSourceRegistry> {
+        AssetPackSourceRegistry::discover_native_packs(None)?
+            .context("original startup requires staged Mclone asset packs")
     }
 }
 
@@ -207,6 +218,16 @@ impl AssetPackSourceRegistry {
         diagnostic: Option<PackedAssetSource>,
         reference: SharedAssetSource,
     ) -> Result<Self> {
+        Self::from_packed(authored, provisional, diagnostic, Some(reference))
+    }
+
+    /// Compose installed packs without inventing an available reference source.
+    pub fn from_packed(
+        authored: Option<PackedAssetSource>,
+        provisional: PackedAssetSource,
+        diagnostic: Option<PackedAssetSource>,
+        reference: Option<SharedAssetSource>,
+    ) -> Result<Self> {
         let authored_descriptor = match authored.as_ref() {
             Some(authored) => first_party_descriptor(
                 authored,
@@ -228,6 +249,11 @@ impl AssetPackSourceRegistry {
             AssetPackOrigin::MinecraftReference,
             20,
         )?;
+        let reference_descriptor = if reference.is_some() {
+            reference_descriptor
+        } else {
+            reference_descriptor.unavailable("Local reference assets are not installed")
+        };
         let provisional_descriptor = first_party_descriptor(
             &provisional,
             GENERATED_FALLBACK_PACK_ID,
@@ -253,10 +279,10 @@ impl AssetPackSourceRegistry {
         let reference_id = reference_descriptor.id.clone();
         let provisional_id = provisional_descriptor.id.clone();
         let diagnostic_id = diagnostic_descriptor.id.clone();
-        let mut sources = vec![
-            (reference_id, reference),
-            (provisional_id, SharedAssetSource::new(provisional)),
-        ];
+        let mut sources = vec![(provisional_id, SharedAssetSource::new(provisional))];
+        if let Some(reference) = reference {
+            sources.push((reference_id, reference));
+        }
         if let Some(authored) = authored {
             sources.push((authored_id, SharedAssetSource::new(authored)));
         }
@@ -276,6 +302,16 @@ impl AssetPackSourceRegistry {
 
     #[cfg(not(target_arch = "wasm32"))]
     pub fn discover_native_with_reference(reference: SharedAssetSource) -> Result<Option<Self>> {
+        Self::discover_native_packs(Some(reference))
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn discover_native() -> Result<Option<Self>> {
+        Self::discover_native_packs(crate::render_assets::load_optional_reference_source()?)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn discover_native_packs(reference: Option<SharedAssetSource>) -> Result<Option<Self>> {
         let authored = discover_native_first_party_pack(
             "MCLONE_ASSET_AUTHORED_PACK",
             crate::render_assets::DEFAULT_AUTHORED_FIRST_PARTY_PACK_FILE,
@@ -294,7 +330,17 @@ impl AssetPackSourceRegistry {
             crate::render_assets::DEFAULT_DIAGNOSTIC_MISSING_PACK_FILE,
             false,
         )?;
-        Self::from_packed_with_reference(authored, generated, diagnostic, reference).map(Some)
+        Self::from_packed(authored, generated, diagnostic, reference).map(Some)
+    }
+
+    pub fn source(&self, selection: &AssetPackSelection) -> Result<AssetSourceChain> {
+        Ok(AssetSourceChain::from_selection(
+            &self.catalog,
+            selection,
+            self.sources
+                .iter()
+                .map(|(id, source)| (id.clone(), Box::new(source.clone()) as Box<dyn AssetSource>)),
+        )?)
     }
 
     pub fn catalog(&self) -> &AssetPackCatalog {

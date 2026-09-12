@@ -19,6 +19,7 @@ Usage: android/build-apk.sh [options]
 Build the flat Android APK.
 
 Options:
+  --release       Build the distribution APK (nightly signing when configured).
   --abi ABI       Build for one Android ABI. May be repeated.
                   Supported: arm64-v8a, x86_64.
   --abis LIST     Build for comma- or space-separated ABIs.
@@ -26,9 +27,16 @@ Options:
 USAGE
 }
 
+GRADLE_TASK=assembleDebug
+APK_VARIANT=debug
 EXPLICIT_ABIS=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        --release)
+            GRADLE_TASK=assembleRelease
+            APK_VARIANT=release
+            shift
+            ;;
         --abi)
             EXPLICIT_ABIS+=("$2")
             shift 2
@@ -74,7 +82,7 @@ cd "$REPO_ROOT/native"
 while IFS= read -r abi; do
     [[ -n "$abi" ]] || continue
     echo "Building Mclone Android shared library for $abi (API $CARGO_NDK_PLATFORM)..."
-    cargo ndk -t "$abi" --platform "$CARGO_NDK_PLATFORM" -o ../android/jniLibs build --release --package mclone-android-client --lib
+    cargo ndk -t "$abi" --platform "$CARGO_NDK_PLATFORM" -o ../android/jniLibs build --locked --release --package mclone-android-client --lib
 
     echo "Bundling libc++_shared.so for $abi..."
     libcxx_dir="$(mclone_android_libcxx_target_dir_for_abi "$abi")"
@@ -95,6 +103,6 @@ else
 fi
 
 echo "Building APK..."
-"$GRADLE" assembleDebug
+"$GRADLE" "$GRADLE_TASK"
 
-echo "APK: android/app/build/outputs/apk/debug/app-debug.apk"
+echo "APK: android/app/build/outputs/apk/$APK_VARIANT/app-$APK_VARIANT.apk"

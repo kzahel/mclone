@@ -2,6 +2,20 @@
 
 Topic: asset-pack-profiles
 
+Public packaging implementation (2026-09-12, Tactical
+[`335`](../tactical/335-public-development-release.md)): browser bootstrap and
+its render worker now load only the three staged first-party packs. Missing
+reference preferences recover to Original while retaining the saved local
+reference intent. Native default startup prepares Original in the shared
+runtime; executable/app-resource roots support extracted desktop packages.
+Explicit `MCLONE_ASSET_MODE` research overrides remain local-only. The public
+bundle no longer builds/copies the reference ZIP. Its shipped-file check
+compares pack hashes against the approved stage, inventories all files, and
+rejects reference archives and unapproved media. The original-first browser
+smoke reports zero reference/unknown resolutions, and a packaged macOS
+screenshot was inspected after launch outside the repository. Deployment
+cleanup and hosted CI validation remain in progress.
+
 Status: implementation complete 2026-07-11. Tactical
 [`169`](../tactical/169-runtime-asset-pack-selection.md) Slices 0-6 and Tactical
 [`170`](../tactical/170-web-scene-host-adoption.md) Slices 0-6 landed. Selection,

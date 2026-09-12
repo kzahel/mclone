@@ -65,6 +65,30 @@ impl AssetPackPreference {
                 None => undiscovered.push(id.clone()),
             }
         }
+        // An old reference-only preference must remain usable when moving to
+        // an installation that supplies only the original packs. Preserve the
+        // stored IDs for local reference installations, but use original art.
+        let reference_id = AssetPackId::new(mclone_assets::MINECRAFT_REFERENCE_PACK_ID);
+        if self.enabled_ids.contains(&reference_id)
+            && !applicable.contains(&reference_id)
+            && let Some(authored) = catalog.get(&AssetPackId::new(
+                mclone_assets::AUTHORED_FIRST_PARTY_PACK_ID,
+            ))
+            && authored.availability.is_available()
+        {
+            for id in mclone_assets::TextureVisualProfile::McloneOriginal
+                .selection()
+                .enabled_ids()
+            {
+                if catalog
+                    .get(id)
+                    .is_some_and(|pack| pack.availability.is_available())
+                    && !applicable.contains(id)
+                {
+                    applicable.push(id.clone());
+                }
+            }
+        }
         AssetPackPreferenceResolution {
             selection: AssetPackSelection::new(applicable),
             presentation: self.presentation,
@@ -256,6 +280,20 @@ mod tests {
         let json = preference.to_json().unwrap();
         assert!(json.find("a-pack").unwrap() < json.find("z-pack").unwrap());
         assert_eq!(AssetPackPreference::from_json(&json).unwrap(), preference);
+    }
+
+    #[test]
+    fn missing_reference_preference_recovers_to_original_without_losing_intent() {
+        let reference = AssetPackId::new(mclone_assets::MINECRAFT_REFERENCE_PACK_ID);
+        let preference = AssetPackPreference::new([reference.clone()]);
+        let resolution = preference.reconcile(&catalog(true));
+        assert!(
+            resolution
+                .selection
+                .is_enabled(&AssetPackId::new("mclone-authored"))
+        );
+        assert!(!resolution.selection.is_enabled(&reference));
+        assert_eq!(preference.enabled_ids().collect::<Vec<_>>(), [&reference]);
     }
 
     #[test]

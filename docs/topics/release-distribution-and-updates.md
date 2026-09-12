@@ -2,15 +2,30 @@
 
 Topic: `release-distribution-and-updates`
 
-Status: **accepted distribution architecture recorded 2026-07-22; not yet
-implemented and no tactical is reserved.** Direct desktop distribution should
-use a separate first-party launcher, store installations should retain their
+Status: **accepted managed-distribution architecture recorded 2026-07-22;
+not yet implemented and no launcher tactical is reserved.** Managed direct
+desktop distribution should use a separate first-party launcher, store
+installations should retain their
 store's update ownership, and the game engine should remain unaware of
 installation mutation. The first direct updater should install complete signed
 artifacts transactionally. Asset-level or binary delta work remains
 measurement-gated.
 
-Last reconciled: **2026-07-22**.
+Last reconciled: **2026-09-12** (public development-release proposal;
+managed-distribution architecture retained).
+
+## Public development release proposal (2026-09-12)
+
+The maintainer now wants to publish the existing repository with its history
+and make experimental desktop, web, Android, and Quest builds available from
+CI. This is a WIP side-project release with limited gameplay, not the managed
+commercial distribution milestone described below. Tactical
+[`335`](../tactical/335-public-development-release.md) proposes simple GitHub
+nightly prereleases, fresh-installation acceptance, and a shorter README with
+the web game as the easiest entry point. Implementation is authorized; project licensing remains TBD. The repository
+will become public before hosted CI validation. A launcher,
+automatic updates, storefronts, and final branding are not prerequisites for
+that bounded milestone; the architecture below remains longer-term guidance.
 
 ## Scope
 
@@ -387,11 +402,11 @@ selection semantics, or a better/worse update compatibility policy. Store
 flavor detection must never be inferred from an arbitrary path alone; package
 or build metadata should establish the install owner explicitly.
 
-## Recommended Delivery Sequence
+## Future Managed-Distribution Delivery Sequence
 
-No implementation tactical is open yet. When release work becomes timely, use
-bounded slices rather than attempting launcher, CDN, signing, delta updates,
-and every store simultaneously.
+The simpler public development release is proposed in Tactical 335 above.
+For later managed distribution, use bounded slices rather than attempting
+launcher, CDN, signing, delta updates, and every store simultaneously.
 
 1. **Release contract and artifact audit**
    - assign canonical release/flavor/build facts;

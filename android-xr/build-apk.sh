@@ -98,7 +98,7 @@ fi
 
 echo "Building Mclone Android XR shared library ($BUILD_TYPE, API $CARGO_NDK_PLATFORM, features=${CARGO_FEATURES:-default})..."
 cd "$REPO_ROOT/native"
-cargo ndk -t arm64-v8a --platform "$CARGO_NDK_PLATFORM" -o ../android-xr/jniLibs build "${CARGO_PROFILE_ARGS[@]}" "${CARGO_FEATURE_ARGS[@]}" --package mclone-android-xr-client --lib
+cargo ndk -t arm64-v8a --platform "$CARGO_NDK_PLATFORM" -o ../android-xr/jniLibs build --locked "${CARGO_PROFILE_ARGS[@]}" "${CARGO_FEATURE_ARGS[@]}" --package mclone-android-xr-client --lib
 
 echo "Bundling libc++_shared.so..."
 NDK_PREBUILT="$(find "$NDK_HOME/toolchains/llvm/prebuilt" -maxdepth 1 -mindepth 1 -type d | head -1)"

@@ -1,11 +1,10 @@
+use crate::render_cache::load_asset_source;
 use std::path::PathBuf;
 use std::process::Command;
 
 use anyhow::{Context, Result, bail};
 use glam::Vec3;
-use mclone_app_runtime::prepared_assets::{
-    AssetPackSourceRegistry, reference_asset_pack_selection,
-};
+use mclone_app_runtime::prepared_assets::AssetPackSourceRegistry;
 use mclone_core::ChunkPos;
 use mclone_render::chunk::ChunkCamera;
 use mclone_render::headless::{HeadlessFrameLoopOptions, run_headless_capture_loop, save_rgba_png};
@@ -15,7 +14,6 @@ use crate::camera::{SPECTATOR_BASE_SPEED, SpectatorCamera};
 use crate::cli::{SceneOptions, WorldgenShowcaseOptions};
 use crate::offscreen_flat_client::OffscreenFlatClientHost;
 use crate::offscreen_scene_host::OffscreenWarmupReport;
-use crate::render_cache::load_asset_source;
 use crate::scene_runtime::{WindowSceneAssets, chunk_tracking_radius_for_render_distance};
 
 const SHOWCASE_VIEW_COUNT: usize = 3;
@@ -130,11 +128,11 @@ pub(crate) fn run_worldgen_showcase(
                 &asset_source,
                 initial_camera,
             )?;
-            if let Some(registry) =
-                AssetPackSourceRegistry::discover_native_with_reference(asset_source.clone())?
-            {
-                host.scene_host_mut()
-                    .configure_asset_pack_sources(registry, reference_asset_pack_selection())?;
+            if let Some(registry) = AssetPackSourceRegistry::discover_native()? {
+                host.scene_host_mut().configure_asset_pack_sources(
+                    registry,
+                    mclone_app_runtime::render_assets::native_startup_asset_selection(),
+                )?;
             }
             let warmup = host.drive_until_view_settled(device, queue)?;
             host.scene_host_mut().set_mono_ui_screen(None);

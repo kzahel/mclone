@@ -24,7 +24,6 @@ const MAX_RETAINED_COMPILE_TIMINGS: usize = 16;
 
 #[derive(Clone)]
 enum WorkerAssetPayload {
-    Reference(Vec<u8>),
     Selection {
         authored: Vec<u8>,
         reference: Vec<u8>,
@@ -39,7 +38,6 @@ enum WorkerAssetPayload {
 impl WorkerAssetPayload {
     fn byte_length(&self) -> usize {
         match self {
-            Self::Reference(bytes) => bytes.len(),
             Self::Selection {
                 authored,
                 reference,
@@ -194,13 +192,21 @@ impl WebRenderWorkerCoordinator {
         factory: Function,
         bindgen_js_url: String,
         bindgen_wasm_url: String,
-        reference_pack: Vec<u8>,
+        packs: &crate::web_bootstrap::InitialAssetPacks,
     ) -> Result<Self, String> {
         let identity = RenderWorkerGeneration {
             asset_epoch: 0,
             worker_generation: 1,
         };
-        let payload = WorkerAssetPayload::Reference(reference_pack);
+        let payload = WorkerAssetPayload::Selection {
+            authored: packs.authored.clone(),
+            reference: packs.reference.clone(),
+            fallback: packs.fallback.clone(),
+            diagnostic: packs.diagnostic.clone(),
+            profile: mclone_assets::TextureVisualProfile::McloneOriginal,
+            presentation: mclone_assets::TexturePresentation::Textured,
+            epoch: 0,
+        };
         let runtime = WorkerRuntime::new(
             identity,
             &factory,
@@ -996,9 +1002,6 @@ fn init_message(
     set_string(&message, "bindgenJsUrl", bindgen_js_url)?;
     set_string(&message, "bindgenWasmUrl", bindgen_wasm_url)?;
     match payload {
-        WorkerAssetPayload::Reference(bytes) => {
-            attach_bytes(&message, &transfer, "assetPack", bytes)?;
-        }
         WorkerAssetPayload::Selection {
             authored,
             reference,

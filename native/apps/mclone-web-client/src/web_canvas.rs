@@ -2606,19 +2606,21 @@ pub fn prepare_web_scene_assets_from_selection(
 ) -> Result<PreparedSceneAssets, String> {
     let authored = PackedAssetSource::from_bytes(authored_bytes)
         .map_err(|error| format!("failed to parse authored browser pack: {error}"))?;
-    let reference = PackedAssetSource::from_bytes(reference_bytes)
-        .map_err(|error| format!("failed to parse reference browser pack: {error}"))?;
+    let reference = if reference_bytes.is_empty() {
+        None
+    } else {
+        Some(SharedAssetSource::new(
+            PackedAssetSource::from_bytes(reference_bytes)
+                .map_err(|error| format!("failed to parse reference browser pack: {error}"))?,
+        ))
+    };
     let fallback = PackedAssetSource::from_bytes(fallback_bytes)
         .map_err(|error| format!("failed to parse generated browser pack: {error}"))?;
     let diagnostic = PackedAssetSource::from_bytes(diagnostic_bytes)
         .map_err(|error| format!("failed to parse diagnostic browser pack: {error}"))?;
-    let registry = AssetPackSourceRegistry::from_packed_with_reference(
-        Some(authored),
-        fallback,
-        Some(diagnostic),
-        SharedAssetSource::new(reference),
-    )
-    .map_err(|error| format!("failed to compose browser asset catalog: {error:#}"))?;
+    let registry =
+        AssetPackSourceRegistry::from_packed(Some(authored), fallback, Some(diagnostic), reference)
+            .map_err(|error| format!("failed to compose browser asset catalog: {error:#}"))?;
     registry
         .prepare_with_presentation(epoch, selection, presentation)
         .map_err(|error| format!("failed to prepare browser asset selection: {error:#}"))
@@ -2632,20 +2634,21 @@ pub fn web_asset_pack_catalog(
 ) -> Result<mclone_assets::AssetPackCatalog, String> {
     let authored = PackedAssetSource::from_bytes(authored_bytes)
         .map_err(|error| format!("failed to parse authored browser pack: {error}"))?;
-    let reference = PackedAssetSource::from_bytes(reference_bytes)
-        .map_err(|error| format!("failed to parse reference browser pack: {error}"))?;
+    let reference = if reference_bytes.is_empty() {
+        None
+    } else {
+        Some(SharedAssetSource::new(
+            PackedAssetSource::from_bytes(reference_bytes)
+                .map_err(|error| format!("failed to parse reference browser pack: {error}"))?,
+        ))
+    };
     let fallback = PackedAssetSource::from_bytes(fallback_bytes)
         .map_err(|error| format!("failed to parse generated browser pack: {error}"))?;
     let diagnostic = PackedAssetSource::from_bytes(diagnostic_bytes)
         .map_err(|error| format!("failed to parse diagnostic browser pack: {error}"))?;
-    AssetPackSourceRegistry::from_packed_with_reference(
-        Some(authored),
-        fallback,
-        Some(diagnostic),
-        SharedAssetSource::new(reference),
-    )
-    .map(|registry| registry.catalog().clone())
-    .map_err(|error| format!("failed to compose browser asset catalog: {error:#}"))
+    AssetPackSourceRegistry::from_packed(Some(authored), fallback, Some(diagnostic), reference)
+        .map(|registry| registry.catalog().clone())
+        .map_err(|error| format!("failed to compose browser asset catalog: {error:#}"))
 }
 
 fn load_selected_web_mesh_assets(

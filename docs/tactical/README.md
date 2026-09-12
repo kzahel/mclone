@@ -2,6 +2,11 @@
 
 Bounded implementation plans and execution records live here.
 
+Public development release planning:
+[`335-public-development-release.md`](335-public-development-release.md)
+— proposed 2026-09-12; preserve history, close the public asset boundary,
+validate clean installation, add CI packages/nightlies, and simplify the README.
+
 Use zero-padded numeric prefixes for new tactical docs: `000-topic.md`,
 `001-next-topic.md`, and so on. Keep one active implementation slice per doc.
 Parent sequencing checklists are allowed when they keep a related series

@@ -21,7 +21,6 @@ SUMMARY_FILE="$STATE_DIR/summary.tsv"
 LOCK_DIR="$STATE_DIR/worker.lock"
 LOG_FILE="$STATE_DIR/deploy.log"
 DEPLOY_WORKTREE="${MCLONE_DEPLOY_AFTER_PUSH_WORKTREE:-$PROJECT_PARENT/$PROJECT_NAME-deploy-worktree}"
-REFERENCE_SOURCE="$PROJECT_DIR/reference/minecraft-1.17.1"
 NODE_MODULES_SOURCE="$PROJECT_DIR/node_modules"
 
 DEFAULT_BRANCH="${MCLONE_DEPLOY_AFTER_PUSH_BRANCH:-main}"
@@ -160,31 +159,6 @@ ensure_deploy_worktree() {
   git -C "$DEPLOY_WORKTREE" checkout --detach "$sha" || return 1
   git -C "$DEPLOY_WORKTREE" reset --hard "$sha" || return 1
   git -C "$DEPLOY_WORKTREE" clean -fd || return 1
-}
-
-ensure_reference_assets_link() {
-  local target_parent="$DEPLOY_WORKTREE/reference"
-  local target="$target_parent/minecraft-1.17.1"
-
-  if [ ! -d "$REFERENCE_SOURCE" ]; then
-    echo "$REFERENCE_SOURCE not found. Run ./scripts/decompile-mc.sh in the primary checkout first." >&2
-    return 1
-  fi
-
-  mkdir -p "$target_parent" || return 1
-  if [ -L "$target" ]; then
-    local current
-    current="$(readlink "$target")"
-    if [ "$current" != "$REFERENCE_SOURCE" ]; then
-      rm "$target" || return 1
-      ln -s "$REFERENCE_SOURCE" "$target" || return 1
-    fi
-  elif [ -e "$target" ]; then
-    echo "$target exists and is not the expected symlink to $REFERENCE_SOURCE" >&2
-    return 1
-  else
-    ln -s "$REFERENCE_SOURCE" "$target" || return 1
-  fi
 }
 
 ensure_node_modules_link() {
@@ -335,13 +309,6 @@ run_worker() {
       local detail="failed to prepare deploy worktree at $DEPLOY_WORKTREE"
       log "$detail"
       record_failure "$sha" "$remote" "$branch" "worktree-failed" "$detail" "$(elapsed_since_desired)"
-      exit 1
-    fi
-
-    if ! ensure_reference_assets_link; then
-      local detail="failed to link local reference assets into deploy worktree"
-      log "$detail"
-      record_failure "$sha" "$remote" "$branch" "reference-assets-failed" "$detail" "$(elapsed_since_desired)"
       exit 1
     fi
 

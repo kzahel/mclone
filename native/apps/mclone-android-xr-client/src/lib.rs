@@ -2420,18 +2420,18 @@ mod android {
         .context("initialize Android XR session-free scene host")?;
         terrain.set_celestial_debug_settings(celestial_debug);
         terrain.set_terrain_horizon_diagnostic(terrain_horizon_diagnostic);
-        if let Some(registry) = mclone_app_runtime::prepared_assets::AssetPackSourceRegistry::discover_native_with_reference(
-            mclone_assets::SharedAssetSource::new(
-                load_asset_source().context("reload Android XR reference source for asset-pack discovery")?,
-            ),
-        )? {
+        if let Some(registry) =
+            mclone_app_runtime::prepared_assets::AssetPackSourceRegistry::discover_native()?
+        {
             terrain.configure_asset_pack_sources(
                 registry,
-                mclone_app_runtime::prepared_assets::reference_asset_pack_selection(),
+                mclone_app_runtime::render_assets::native_startup_asset_selection(),
             )?;
             if let Some(path) = asset_pack_preference_path {
                 terrain.configure_asset_pack_preference_storage(Box::new(
-                    mclone_app_runtime::asset_pack_preferences::FileAssetPackPreferenceStorage::new(path),
+                    mclone_app_runtime::asset_pack_preferences::FileAssetPackPreferenceStorage::new(
+                        path,
+                    ),
                 ))?;
             }
         }

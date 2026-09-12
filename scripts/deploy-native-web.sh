@@ -14,9 +14,6 @@ TERRAIN_LAB_WEB_ROOT="$PROJECT_DIR/tools/terrain-lab/dist/web"
 TEXTURE_LAB_WEB_ROOT="$PROJECT_DIR/tools/texture-lab/dist/web"
 WORLD_EXPLORER_WEB_ROOT="$NATIVE_ROOT/target/mclone-world-explorer-www"
 WORLD_EXPLORER_BUILD_SCRIPT="$PROJECT_DIR/native/apps/mclone-world-explorer/scripts/build-web.mjs"
-REFERENCE_DIR="$PROJECT_DIR/reference/minecraft-1.17.1"
-ASSET_PACK_ZIP="$REFERENCE_DIR/extracted.zip"
-ASSET_PACK_MANIFEST="$REFERENCE_DIR/extracted.zip.json"
 WASM_PATH="$NATIVE_ROOT/target/wasm32-unknown-unknown/debug/mclone_web_client.wasm"
 WASM_BINDGEN_VERSION="0.2.125"
 WASM_BINDGEN_ROOT="$NATIVE_ROOT/target/wasm-bindgen-cli-$WASM_BINDGEN_VERSION"
@@ -108,9 +105,11 @@ ensure_texture_lab_dependencies() {
 
 echo "==> Building native web assets"
 cd "$PROJECT_DIR"
-pnpm assets:pack
-pnpm assets:pack:first-party
-cargo build --manifest-path native/Cargo.toml -p mclone-web-client --target wasm32-unknown-unknown
+pnpm --dir tools/texture-lab install --frozen-lockfile
+if [[ "${MCLONE_USE_STAGED_ASSETS:-0}" != "1" ]]; then
+  pnpm assets:pack:first-party
+fi
+cargo build --locked --manifest-path native/Cargo.toml -p mclone-web-client --target wasm32-unknown-unknown
 ensure_wasm_bindgen
 # --typescript emits mclone_web_client.d.ts alongside the JS glue (070 Stage 2). It does not
 # change what ships — deploy copies only mclone_web_client.js and _bg.wasm out of the bindgen
@@ -161,10 +160,9 @@ mkdir -p "$DEPLOY_DIR/textures"
 cp -R "$TEXTURE_LAB_WEB_ROOT"/. "$DEPLOY_DIR/textures"/
 mkdir -p "$DEPLOY_DIR/explore"
 cp -R "$WORLD_EXPLORER_WEB_ROOT"/. "$DEPLOY_DIR/explore"/
-mkdir -p "$DEPLOY_DIR/reference/minecraft-1.17.1"
-cp "$ASSET_PACK_ZIP" "$DEPLOY_DIR/reference/minecraft-1.17.1/extracted.zip"
-cp "$ASSET_PACK_MANIFEST" "$DEPLOY_DIR/reference/minecraft-1.17.1/extracted.zip.json"
 cp "$STATIC_ASSET_HEADERS" "$DEPLOY_DIR/_headers"
+
+node "$PROJECT_DIR/scripts/run-python.mjs" "$PROJECT_DIR/scripts/check-public-assets.py" "$DEPLOY_DIR" --report "$DEPLOY_DIR/public-files.json"
 
 echo "==> Native web bundle ready: $DEPLOY_DIR"
 echo "  asset version: $DEPLOY_VERSION"

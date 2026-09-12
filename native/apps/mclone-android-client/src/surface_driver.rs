@@ -539,14 +539,22 @@ impl AndroidGpuState {
             actor_assets.figures,
             &asset_source,
         )?;
-        if let Some(registry) = mclone_app_runtime::prepared_assets::AssetPackSourceRegistry::discover_native_with_reference(asset_source.clone())? {
+        if let Some(registry) =
+            mclone_app_runtime::prepared_assets::AssetPackSourceRegistry::discover_native()?
+        {
             host.configure_asset_pack_sources(
                 registry,
-                mclone_app_runtime::prepared_assets::reference_asset_pack_selection(),
+                mclone_app_runtime::render_assets::native_startup_asset_selection(),
             )?;
-            if let Some(path) = mclone_app_runtime::asset_pack_preferences::native_asset_pack_preference_path(startup.scene.world_root.as_deref()) {
+            if let Some(path) =
+                mclone_app_runtime::asset_pack_preferences::native_asset_pack_preference_path(
+                    startup.scene.world_root.as_deref(),
+                )
+            {
                 host.configure_asset_pack_preference_storage(Box::new(
-                    mclone_app_runtime::asset_pack_preferences::FileAssetPackPreferenceStorage::new(path),
+                    mclone_app_runtime::asset_pack_preferences::FileAssetPackPreferenceStorage::new(
+                        path,
+                    ),
                 ))?;
             }
         }
