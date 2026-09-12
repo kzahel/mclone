@@ -125,8 +125,10 @@ ensure_wasm_bindgen
 echo "==> Bundling native web app"
 node "$WEB_GLUE_BUILD_SCRIPT"
 ensure_asset_lab_dependencies
+pnpm --dir "$PROJECT_DIR/tools/asset-lab" exec playwright install chromium
 pnpm asset-lab:web:build
 ensure_structure_lab_dependencies
+pnpm --dir "$PROJECT_DIR/tools/structure-lab" exec playwright install chromium
 pnpm structure-lab:web:build
 ensure_terrain_lab_dependencies
 pnpm terrain-lab:web:build
@@ -162,6 +164,16 @@ mkdir -p "$DEPLOY_DIR/explore"
 cp -R "$WORLD_EXPLORER_WEB_ROOT"/. "$DEPLOY_DIR/explore"/
 cp "$STATIC_ASSET_HEADERS" "$DEPLOY_DIR/_headers"
 
+node - "$DEPLOY_DIR" <<'JS'
+const fs = require('node:fs');
+const path = require('node:path');
+const { execFileSync } = require('node:child_process');
+fs.writeFileSync(path.join(process.argv[2], 'BUILD.json'), JSON.stringify({
+  revision: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
+  platform: 'web', experimental: true, project_license: 'TBD',
+}, null, 2) + '\n');
+JS
+node "$PROJECT_DIR/scripts/run-python.mjs" "$PROJECT_DIR/scripts/third_party_notices.py" "$DEPLOY_DIR" --target wasm32-unknown-unknown --node
 node "$PROJECT_DIR/scripts/run-python.mjs" "$PROJECT_DIR/scripts/check-public-assets.py" "$DEPLOY_DIR" --report "$DEPLOY_DIR/public-files.json"
 
 echo "==> Native web bundle ready: $DEPLOY_DIR"

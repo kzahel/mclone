@@ -1,5 +1,8 @@
 # Linux Development Setup
 
+For a fresh public installation, start with [development.md](development.md).
+Minecraft reference/oracle setup below is optional research tooling.
+
 This guide covers Rust development and no-window offscreen validation
 on Linux. It was first validated on Ubuntu 24.04.4 LTS on 2026-07-12, using an
 AMD Radeon 890M through Mesa RADV. The full-frame screenshot path does not need
@@ -23,6 +26,7 @@ sudo apt-get install -y \
   git \
   jq \
   libasound2-dev \
+  libudev-dev \
   libvulkan1 \
   mesa-vulkan-drivers \
   openjdk-17-jdk \
@@ -117,7 +121,7 @@ only `llvmpipe`, the process cannot open the hardware render node. The
 offscreen smoke can still work through llvmpipe, but it will use CPU rendering
 and should not be used for performance conclusions.
 
-## Minecraft 1.17.1 Reference And Assets
+## Optional Minecraft 1.17.1 Reference And Assets
 
 Hydrate the gitignored vanilla client source tree and renderer assets from the
 repository root:
@@ -141,10 +145,12 @@ extraction, server-jar, and Java oracle setup.
 
 ## Initial Build And No-Window Smoke
 
-Build the native flat client:
+Build the original packs and native flat client:
 
 ```bash
-cargo build \
+pnpm --dir tools/texture-lab install --frozen-lockfile
+pnpm assets:pack:first-party
+cargo build --locked \
   --manifest-path native/Cargo.toml \
   -p mclone-native-client \
   --bin mclone-native-client

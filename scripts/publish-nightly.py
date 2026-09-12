@@ -2,6 +2,7 @@
 """Publish only a complete exact-revision build; prune old nightlies afterward."""
 from datetime import datetime, timezone, timedelta
 import json
+import hashlib
 import os
 from pathlib import Path
 import subprocess
@@ -15,6 +16,9 @@ required = ['mclone-' + platform + suffix for platform, suffix in [
 for name in required:
     if not (root / name).is_file() or not (root / (name + '.sha256')).is_file():
         raise SystemExit('Refusing incomplete nightly: missing ' + name)
+    expected = (root / (name + '.sha256')).read_text().split()[0]
+    if hashlib.sha256((root / name).read_bytes()).hexdigest() != expected:
+        raise SystemExit('Refusing nightly with a checksum mismatch: ' + name)
 revision = os.environ['GITHUB_SHA']
 now = datetime.now(timezone.utc)
 tag = f'nightly-{now:%Y%m%d}-{os.environ["GITHUB_RUN_NUMBER"]}'

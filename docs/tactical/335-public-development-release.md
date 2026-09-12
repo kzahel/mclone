@@ -420,3 +420,16 @@ in-progress work is not a claim that the release gates already pass.
 - Quest doctor currently reports no attached authorized headset. Physical
   acceptance remains pending; the maintainer has been asked to connect it or
   explicitly retain CI-build-only status.
+
+### CI and fresh-install corrections in progress
+
+- Hosted shared correctness, architecture guards, asset construction/provenance,
+  and secret scanning passed in run `34678473657`. Platform jobs started.
+- Android provisioning exposed absent `sdkmanager` on the runner; added a
+  pinned SDK setup action. Refreshed action pins to current Node 24 releases.
+- The anonymous VM desktop build passed. Full web assembly reached Asset Lab
+  thumbnail generation, then exposed a different locked Playwright version
+  from the root package. The bundler now installs each lab's matching browser.
+- Added dependency-supplied notices to web/Android packages, NDK notices beside
+  APKs, a web build revision receipt, and checksum verification before nightly
+  publication. No project license is assigned by these notices.

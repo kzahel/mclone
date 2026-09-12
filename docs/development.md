@@ -49,7 +49,8 @@ pnpm native:web:bundle
 This builds `dist-native-web/`: the game, project hub, labs, and World Explorer.
 Playwright Chromium generates lab thumbnails; Linux may also need
 `pnpm exec playwright install --with-deps chromium`. The bundler installs
-locked lab dependencies and the pinned wasm-bindgen CLI as needed.
+locked lab dependencies, each thumbnail tool's matching Playwright browser,
+and the pinned wasm-bindgen CLI as needed.
 `pnpm native:web:build` only compiles Wasm; it does not produce a hosted bundle.
 
 For local interactive development, run `pnpm native:web:serve` after building

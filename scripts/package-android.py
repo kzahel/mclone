@@ -2,12 +2,15 @@
 """Inspect each complete APK, then publish it with checksums and build facts."""
 import hashlib
 import json
+import os
+import re
 from pathlib import Path
 import shutil
 import subprocess
 import sys
 import tempfile
 import zipfile
+from third_party_notices import write_notices
 
 root = Path(__file__).resolve().parents[1]
 output = root / 'dist-release'
@@ -27,3 +30,13 @@ for project, name in [('android', 'mclone-android-arm64'), ('android-xr', 'mclon
     'experimental': True, 'project_license': 'TBD',
     'device_tested': False, 'install': 'adb install -r <apk>',
 }, indent=2) + '\n')
+
+write_notices(output, "aarch64-linux-android")
+
+ndk_version = re.search(r'ndkVersion\s*=\s*"([^"]+)"', (root / 'android/app/build.gradle.kts').read_text()).group(1)
+sdk_roots = [Path(value) for value in (os.environ.get('ANDROID_HOME'), os.environ.get('ANDROID_SDK_ROOT')) if value]
+sdk_roots += [Path.home() / 'Android/Sdk', Path.home() / 'Library/Android/sdk']
+notice = next((sdk / 'ndk' / ndk_version / 'NOTICE' for sdk in sdk_roots if (sdk / 'ndk' / ndk_version / 'NOTICE').is_file()), None)
+if notice is None:
+    raise SystemExit('Set ANDROID_HOME to the SDK used by the build scripts so the bundled libc++ notice can be copied')
+shutil.copy2(notice, output / 'ANDROID-NDK-NOTICE.txt')
